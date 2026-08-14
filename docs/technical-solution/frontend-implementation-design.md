@@ -85,12 +85,35 @@ Blank Chat、Bound Thread 与 Canvas Chat 共用唯一 `ThreadComposer`：
 
 - 草稿是 ordered `TEXT/ATTACHMENT` parts；`contenteditable=false` pill 在 DOM 仅保存
   `data-part-id`、`data-upload-id`、`data-filename`，展示为 `[name](upload)`；
-- 左侧 `+` 仅在空草稿中注入 `/` 并聚焦 editor，随后完全复用 slash palette 状态机；
+- 左侧 `+` 直接打开命令表，不向草稿写入 `/`；slash 输入仍复用同一命令过滤与执行状态机；
   `/upload` 由 Composer 本地消费并点击 `display:none` 的原生 file input；
 - editor 收到含文件的 paste 时从 `clipboardData.files` 或 `items[].getAsFile()` 取文件并走同一上传链路；
   纯文本 paste 仍只插入 `text/plain`；
 - 上传状态只用紧凑 Markdown 引用显示，不创建独立媒体 tile；发送前必须全部 READY，
   payload 中 attachment 的客户端 localId 才解析为服务端 uploadId。
+
+### Composer interaction slot
+
+每个 Pane 的输入区只有一个可交互槽位：
+
+```text
+Composer(active)
+  -- open selector/operation -->
+ThreadInteractionPanel(active) + Composer(hidden but mounted)
+  -- Escape/select/cancel -->
+Composer(active, focus + caret restored)
+```
+
+- Agent、Environment、Chat-scoped Thread 使用统一 `SelectionPanel`；面板挂在 transcript 与
+  footer 之间，不创建 backdrop，不使用 modal。
+- 面板打开后搜索框立即获得焦点；普通字符直接过滤，`↑/↓` 移动高亮项，`Enter` 确认，
+  `Esc` 返回 Composer。Thread picker 的控制行提供“最近更新/创建时间”，`Tab` 可循环切换。
+- `/tree` 使用同一 `ThreadInteractionPanel` shell，保留记录过滤、搜索、树列表和确认区；
+  搜索框自动聚焦，方向键移动分支，Enter 重定位，Esc 返回。
+- Composer 与 interaction panel 在视觉、焦点和键盘事件上互斥；Composer 仅设置
+  `hidden` 而不卸载，因此本地 draft、附件上传注册表与失败恢复身份不会丢失。
+- interaction panel 打开时仅保留全局 Working 状态；queued 输入与 Task widgets 暂时隐藏，
+  footer 继续展示。破坏性丢弃确认仍使用 alertdialog，取消后返回原 interaction panel。
 
 ## 5. Ambiguous exact replay 与 409 rebuild
 

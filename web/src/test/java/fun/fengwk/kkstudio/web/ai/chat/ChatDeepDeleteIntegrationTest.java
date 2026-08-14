@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -34,6 +35,8 @@ import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -153,6 +156,38 @@ class ChatDeepDeleteIntegrationTest extends WebPostgresTestSupport {
     String chatId = createChat("plain-delete");
     chatService.deleteChat(chatId, "0");
     assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
+  }
+
+  @Test
+  void deleteChatLocksMultipleThreadsByAscendingHarnessUuidOrder() {
+    String chatId = createChat("multi-thread-delete");
+    UUID firstThreadId = createThread(chatId, "first").thread().id();
+    UUID secondThreadId = createThread(chatId, "second").thread().id();
+    UUID lowerThreadId =
+        UuidOrder.compare(firstThreadId, secondThreadId) < 0 ? firstThreadId : secondThreadId;
+    UUID higherThreadId = lowerThreadId.equals(firstThreadId) ? secondThreadId : firstThreadId;
+
+    // Chat 列表仍按最近关联排序；这里确定性构造与 Harness 锁顺序相反的返回顺序。
+    jdbc.update(
+        "update chat_thread set created_at = ? where thread_id = ?",
+        Timestamp.from(Instant.parse("2026-08-14T10:01:00Z")),
+        higherThreadId);
+    jdbc.update(
+        "update chat_thread set created_at = ? where thread_id = ?",
+        Timestamp.from(Instant.parse("2026-08-14T10:00:00Z")),
+        lowerThreadId);
+
+    chatService.deleteChat(chatId, "0");
+
+    assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
+    assertEquals(0, jdbc.queryForObject("select count(*) from chat_thread", Integer.class));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from harness_thread where id in (?, ?)",
+            Integer.class,
+            firstThreadId,
+            secondThreadId));
   }
 
   private String createChat(String title) {

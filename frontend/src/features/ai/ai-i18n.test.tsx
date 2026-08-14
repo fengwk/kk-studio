@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
-import { AgentSelectionModal } from '@/features/ai/chat/SelectionListModal'
+import { AgentSelectionPanel } from '@/features/ai/chat/SelectionPanel'
 import { CreateChatModal } from '@/features/ai/chat/CreateChatModal'
 import { EnvironmentsPage } from '@/features/ai/environment/EnvironmentsPage'
 import { ResourceEditorModal } from '@/features/ai/catalog/AiConsoleResourceEditorModal'
@@ -169,13 +169,11 @@ describe('AI i18n live-switch contracts', () => {
     expect(screen.getByRole('button', { name: '确认创建' })).toBeInTheDocument()
   })
 
-  it('switches the Agent selection modal labels live', () => {
+  it('switches the Agent selection panel labels live', () => {
     act(() => setLocale('en-US'))
     render(
-      <AgentSelectionModal
-        open
+      <AgentSelectionPanel
         agents={[agent]}
-        loading={false}
         onSelect={() => undefined}
         onClose={() => undefined}
       />,

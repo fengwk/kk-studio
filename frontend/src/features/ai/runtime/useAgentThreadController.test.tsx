@@ -260,7 +260,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -305,7 +305,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -382,7 +382,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, base),
           new Map(),
@@ -445,7 +445,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, base),
           new Map(),
@@ -545,7 +545,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -589,7 +589,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -644,7 +644,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatch,
           new Map(),
@@ -683,7 +683,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -720,7 +720,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -746,7 +746,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -1148,7 +1148,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
 
     const { result } = renderHook(
-      () => useAgentThreadController(currentThread.threadId, '', undefined, null, environments),
+      () => useAgentThreadController(currentThread.threadId, [], undefined, null, environments),
       { wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1176,7 +1176,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, base),
           new Map(),

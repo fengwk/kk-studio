@@ -11,8 +11,8 @@ node scripts/e2e/run-matrix.mjs --list
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
-model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke
-由 `scripts/e2e.sh --ui` 另行附加，默认注册 15 个免费 UI case，不计入这 69 个 Node API case。
+model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI E2E
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 25 个免费 UI case，不计入这 69 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -25,7 +25,7 @@ model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或
 ./scripts/e2e.sh --with-canvas-storage   # Canvas Resource 直读预签名 / 全局 Blob 存储边界（需 S3 配置）
 ./scripts/e2e.sh --with-canvas-function  # 免费 fake Function（隐含 storage + rebuild）
 ./scripts/e2e.sh --real --with-tools     # L4 真实 Tool turn
-./scripts/e2e.sh --ui                    # Playwright UI smoke
+./scripts/e2e.sh --ui                    # Playwright UI E2E
 ./scripts/e2e.sh --list
 ./scripts/e2e.sh --docs
 
@@ -34,6 +34,12 @@ npm --prefix frontend run e2e:ui
 npm --prefix frontend run e2e:matrix
 npm --prefix frontend run e2e:list
 npm --prefix frontend run e2e:docs
+
+node scripts/e2e/ui-smoke.mjs \
+  --base-url http://127.0.0.1:5173 \
+  --backend-url http://127.0.0.1:18081 \
+  --report-dir reports/e2e/ui-standalone \
+  --only ui.chat.composer.history_order_boundaries
 ```
 
 `--with-branch` 自动启用 `--real`。Node runner 还支持：
@@ -81,7 +87,7 @@ env \
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 ```
 
-该命令选择 62 个免费 API case 和 15 个免费 UI case，不启用真实 Provider、Tool 或
+该命令选择 62 个免费 API case 和 25 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
 rebuild；不得为这条回归追加 `--real`。
 
@@ -247,9 +253,9 @@ tool.read_turn
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/sizeBytes 与 fixture 字节一致 |
 
-### L5 UI（默认 15，`--real` 追加 1）
+### L5 UI（默认 25，`--real` 追加 1）
 
-`scripts/e2e.sh --ui` 的免费 UI smoke 包含：
+`scripts/e2e.sh --ui` 的免费 UI E2E 矩阵包含：
 
 ```text
 ui.i18n.language_switch
@@ -267,6 +273,16 @@ ui.agent.create_edit_delete_flow
 ui.model.validation_empty_name
 ui.provider.create_edit_delete_flow
 ui.chat.blank_workspace_shell
+ui.chat.composer.history_order_boundaries
+ui.chat.composer.duplicate_entries
+ui.chat.composer.multiline_scroll
+ui.chat.composer.multiline_caret_boundaries
+ui.chat.composer.edit_recalled
+ui.chat.composer.draft_persistence_boundaries
+ui.chat.composer.palette_precedence
+ui.chat.selection_panel.keyboard_mode
+ui.chat.composer.escape_refocus
+ui.chat.composer.submit_clears_draft
 ```
 
 其中 `ui.canvas.page_loads` 验证 `/canvas` library 保留全局顶栏，点击或创建后进入
@@ -275,11 +291,38 @@ composer，点击 header「Chat / 对话」toggle 展开/收起；默认面板�
 保持不变；add launcher（左侧中部功能轨）仍可打开菜单，V/H 按钮不展示，缩放控制位于左下；首屏 fit
 产生的动态缩放值位于合法区间，Chat 面板展开/收起不改变该缩放值，点击缩放值可重置为 `100%`
 且刷新后恢复该持久化视口，浏览器 back 返回 library、forward 再进入编辑器；
-Function 生成的付费路径不进入默认 UI smoke，前端组件测试使用 fake Function runtime
+Function 生成的付费路径不进入默认 UI E2E，前端组件测试使用 fake Function runtime
 隔离。
 `--real` 额外执行 `ui.chat.blank_first_send_real`。Headless 模式只对 Chromium 子进程移除
 宿主 `DISPLAY` 与 `WAYLAND_DISPLAY`，避免混合桌面环境导致 compositor 停帧；`--headed`
 保留宿主显示环境。
+
+Composer 矩阵的维度与边界如下：
+
+| Case | 数据/状态 | 关键边界 |
+| --- | --- | --- |
+| `ui.chat.composer.history_order_boundaries` | durable + 真实 active invocation 下的 queued + localStorage 草稿 | `ArrowUp/Down` 顺序、最老/最新端不循环、浏览历史不覆盖草稿 |
+| `ui.chat.composer.duplicate_entries` | durable 与 queued 文本完全相同 | DOM 文本不变时游标仍独立前进，返回草稿需要精确步数 |
+| `ui.chat.composer.multiline_scroll` | 24 行 durable 历史 | editor 必须真实 overflow，召回后 collapsed Selection 位于末尾且 `scrollTop + clientHeight >= scrollHeight` |
+| `ui.chat.composer.multiline_caret_boundaries` | 三行当前草稿 + durable 历史 | 行内上下键保留浏览器原生移动；仅首行上边界召回历史 |
+| `ui.chat.composer.edit_recalled` | durable 历史 + 当前草稿 | 编辑召回内容后提升为新草稿，二次导航与刷新恢复一致 |
+| `ui.chat.composer.draft_persistence_boundaries` | 空 Pane | 精确空白/换行持久化、刷新恢复、纯空白清理、无历史时上键 no-op |
+| `ui.chat.composer.palette_precedence` | durable 历史 + plus/slash palette | palette 打开时方向键只移动命令，不召回消息；菜单模式保留草稿，slash Escape 清理；命令表不重复渲染 Composer 查询行 |
+| `ui.chat.selection_panel.keyboard_mode` | Chat-scoped Thread picker + `/tree` history panel + 两条真实 Thread | 无 modal backdrop；Composer 与 interaction panel 互斥；搜索自动聚焦；Tab 切换排序；方向键移动；丢弃确认优先于 picker 且取消后恢复搜索；Esc 返回 Composer 并保留草稿 |
+| `ui.chat.composer.escape_refocus` | transcript 文字选区 + 当前 Pane 草稿 | 全局 Escape 恢复当前 Pane Composer 的焦点与末尾 caret，草稿/localStorage 不变 |
+| `ui.chat.composer.submit_clears_draft` | durable Thread + 新提交 | 提交后 composer/localStorage 立即清空，用户消息进入 timeline |
+
+durable fixture 使用不存在的 Agent，使 USER_MESSAGE 在 Provider 调用前确定性物化；queued
+fixture 使用 case 内本地 hold-provider 保持真实 Model invocation 活跃，再通过真实命令 API
+写入 queued USER_MESSAGE。两类 fixture 都免费、不依赖竞态、不调用真实 Provider，并在
+finally 中停止 Thread、清理 Chat/Catalog 与浏览器 localStorage。每个 case 独立出报告 ID；
+runner 支持重复 `--only CASE_ID` 筛选，失败自动保存 `failure.png`、
+`failure-state.json`、pageerror 与 console error。
+
+附件草稿的历史导航保护需要浏览器 `File`、上传注册表与 READY upload，不在默认免费 UI
+fixture 中伪造：组件边界由 `ThreadComposer.pill.test.tsx` 与
+`ThreadComposer.more.test.tsx` 覆盖，真实 reserve/PUT/complete/消费契约由显式
+`--with-canvas-storage` 的 `chat.attachment_upload_contract` 覆盖。
 
 ## 4. API 契约与验证方式
 
@@ -491,12 +534,13 @@ HTTP routes 覆盖 multipart、history、streaming、恢复与 materialize。
 
 | 路径 | 职责 |
 | --- | --- |
-| `scripts/e2e.sh` | 环境启停、凭证同步、矩阵与 UI smoke 编排 |
+| `scripts/e2e.sh` | 环境启停、凭证同步、矩阵与 UI E2E 编排 |
 | `scripts/e2e/run-matrix.mjs` | Node case 注册、筛选、执行和报告 |
 | `scripts/e2e/lib/registry.mjs` | case 注册表 |
 | `scripts/e2e/lib/harness.mjs` | Chat-scoped Thread、命令 batch、head/stop CAS、approval、快照轮询、SSE 等共享步骤 |
 | `scripts/e2e/cases/*.mjs` | API case |
-| `scripts/e2e/ui-smoke.mjs` | Playwright UI smoke |
+| `scripts/e2e/ui-smoke.mjs` | Playwright UI E2E 编排、筛选、报告与失败留证 |
+| `scripts/e2e/ui/composer-matrix.mjs` | Composer durable/queued/draft 浏览器矩阵与免费 deterministic fixture |
 
 报告目录：
 

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChatPanel,
@@ -19,10 +27,10 @@ import {
 import { useThreadUiPreferences } from '@/features/ai/runtime/thread-ui-preferences'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import {
-  AgentSelectionModal,
-  EnvironmentSelectionModal,
-  SelectionListModal,
-} from '@/features/ai/chat/SelectionListModal'
+  AgentSelectionPanel,
+  EnvironmentSelectionPanel,
+  ThreadSelectionPanel,
+} from '@/features/ai/chat/SelectionPanel'
 import { TaskStatusWidget } from '@/features/ai/runtime/thread-panel/TaskStatusWidget'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { BOUND_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
@@ -42,6 +50,7 @@ import {
 import {
   createTextPart,
   hasMessageContent,
+  slashQueryOf,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
 import { branchTarget } from '@/features/ai/chat/session-entry-tree'
@@ -57,6 +66,12 @@ import { isConflictError, isNotFoundError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
+import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
+
+const ConfirmActionModal = lazy(async () => {
+  const module = await import('@/shared/ui/console/ConfirmActionModal')
+  return { default: module.ConfirmActionModal }
+})
 
 /** 409 = 过期 revision 或非 quiescent 的 Thread；绝不能悄悄吞掉。 */
 function rebindErrorMessage(error: unknown): string {
@@ -122,11 +137,11 @@ export function BoundThreadPane({
     draft: BranchDraft
     initialized: boolean
   } | null>(null)
-  const [threadModalOpen, setThreadModalOpen] = useState(false)
-  const [agentModalOpen, setAgentModalOpen] = useState(false)
-  const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
+  const [interaction, setInteraction] = useState<
+    'thread' | 'agent' | 'environment' | 'history' | null
+  >(null)
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
+  const [discardConfirm, setDiscardConfirm] = useState<ConfirmModalState | null>(null)
   const queryClient = useQueryClient()
   const boundThreadIdRef = useRef<string | null>(null)
   const threadUiPreferences = useThreadUiPreferences()
@@ -151,11 +166,9 @@ export function BoundThreadPane({
     }
     boundThreadIdRef.current = threadId
     setBranchState(null)
-    setHistoryOpen(false)
-    setAgentModalOpen(false)
-    setEnvironmentModalOpen(false)
-    setThreadModalOpen(false)
+    setInteraction(null)
     setRebindBlockedReason(null)
+    setDiscardConfirm(null)
   }, [threadId])
 
   const effectiveBase = useMemo(() => {
@@ -240,7 +253,7 @@ export function BoundThreadPane({
       })
     },
     onSuccess: async (updatedThread: HarnessThreadDTO, entry: HarnessSessionEntryDTO) => {
-      setHistoryOpen(false)
+      setInteraction(null)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
@@ -270,7 +283,7 @@ export function BoundThreadPane({
     || controller.approvalPending
     || controller.replayPending
 
-  const threadPicker = useChatThreadPicker(chatId, threadModalOpen, threadSort)
+  const threadPicker = useChatThreadPicker(chatId, interaction === 'thread', threadSort)
   const threadItems = threadPicker.items.map((item) => toThreadSelectionItem(item, threadSort))
 
   function editDraft(patch: Partial<BranchDraft>) {
@@ -292,13 +305,13 @@ export function BoundThreadPane({
     // Draft-local edit：采用新的 agent name + 它的 active tool 集合；冻结的
     // model/environment/yolo 选中值保持不变。
     editDraft({ agentName: selectedAgentName, activeTools: activeToolsFromAgent(agent) })
-    setAgentModalOpen(false)
+    setInteraction(null)
   }
 
   function selectEnvironment(environmentName: string | null) {
     setRebindBlockedReason(null)
     editDraft({ environmentName })
-    setEnvironmentModalOpen(false)
+    setInteraction(null)
   }
 
   function toggleYolo() {
@@ -337,19 +350,20 @@ export function BoundThreadPane({
   }
 
   function selectThread(selectedThreadId: string) {
-    setThreadModalOpen(false)
     if (selectedThreadId === threadId) {
       // 选中当前已绑定的 Thread 不需要确认，也不会产生任何变化。
+      setInteraction(null)
       return
     }
     if (panePending) {
       setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
       return
     }
-    if (paneDirty && !window.confirm(t('ai.chat.history.confirmDiscardDraft'))) {
-      return
-    }
-    onThreadChange(selectedThreadId)
+    confirmDiscardIfNeeded(() => {
+      setInteraction(null)
+      controller.setDraft([])
+      onThreadChange(selectedThreadId)
+    })
   }
 
   /** 仅逻辑上 quiescent 的 Thread 才接受 head rebind（与服务端分类器一致）。 */
@@ -367,7 +381,7 @@ export function BoundThreadPane({
       return
     }
     setRebindBlockedReason(null)
-    setHistoryOpen(true)
+    setInteraction('history')
   }
 
   function rebindTo(entry: HarnessSessionEntryDTO) {
@@ -375,10 +389,24 @@ export function BoundThreadPane({
       setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
       return
     }
-    if (paneDirty && !window.confirm(t('ai.chat.history.confirmDiscardDraft'))) {
+    confirmDiscardIfNeeded(() => rebindMutation.mutate(entry))
+  }
+
+  function confirmDiscardIfNeeded(action: () => void, confirmationRequired = paneDirty) {
+    if (!confirmationRequired) {
+      action()
       return
     }
-    rebindMutation.mutate(entry)
+    setDiscardConfirm({
+      title: t('ai.chat.history.discardDraftTitle'),
+      description: t('ai.chat.history.confirmDiscardDraft'),
+      confirmLabel: t('ai.chat.history.discardDraftConfirm'),
+      tone: 'danger',
+      onConfirm: () => {
+        setDiscardConfirm(null)
+        action()
+      },
+    })
   }
 
   function handleCommand(command: ThreadCommand) {
@@ -395,13 +423,13 @@ export function BoundThreadPane({
           setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
           return
         }
-        setThreadModalOpen(true)
+        setInteraction('thread')
         return
       case 'agent':
-        setAgentModalOpen(true)
+        setInteraction('agent')
         return
       case 'environment':
-        setEnvironmentModalOpen(true)
+        setInteraction('environment')
         return
       case 'yolo':
         toggleYolo()
@@ -414,11 +442,20 @@ export function BoundThreadPane({
           setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
           return
         }
-        if (paneDirty && !window.confirm(t('ai.chat.history.confirmDiscardDraft'))) {
-          return
+        {
+          // ThreadComposer 已消费纯 slash 命令，但 React 仍可能在本次事件中暴露旧 parts。
+          // 只有命令之外仍有附件/正文，或 branch 设置已修改时，才需要丢弃确认。
+          const commandInputOnly =
+            slashQueryOf(controller.draft) != null
+            && controller.draft.every((part) => part.type === 'text')
+          confirmDiscardIfNeeded(
+            () => {
+              controller.setDraft([])
+              onThreadChange(null)
+            },
+            dirty || (hasMessageContent(controller.draft) && !commandInputOnly),
+          )
         }
-        controller.setDraft([])
-        onThreadChange(null)
         return
       default:
         controller.runCommand(command)
@@ -470,6 +507,49 @@ export function BoundThreadPane({
       }
     },
   }
+  const interactionPanel =
+    interaction === 'thread' ? (
+      <ThreadSelectionPanel
+        items={threadItems}
+        selectedThreadId={threadId}
+        sort={threadSort}
+        loading={threadPicker.isLoading}
+        onSortChange={onThreadSortChange}
+        onClose={() => setInteraction(null)}
+        onSelect={selectThread}
+      />
+    ) : interaction === 'agent' ? (
+      <AgentSelectionPanel
+        agents={agents.map((agent) => ({
+          name: agent.name,
+          description: agent.description,
+        }))}
+        selectedAgentName={branchState?.draft.agentName}
+        onClose={() => setInteraction(null)}
+        onSelect={selectAgent}
+      />
+    ) : interaction === 'environment' ? (
+      <EnvironmentSelectionPanel
+        environments={environments}
+        selectedEnvironmentName={branchState?.draft.environmentName ?? null}
+        onClose={() => setInteraction(null)}
+        onSelect={selectEnvironment}
+      />
+    ) : interaction === 'history' ? (
+      <HistoryBranchPanel
+        entries={controller.entries}
+        currentHeadEntryId={controller.thread?.headEntryId}
+        loading={controller.messagesLoading}
+        queryError={controller.messagesError}
+        pending={rebindMutation.isPending}
+        rebindError={rebindMutation.error ? rebindErrorMessage(rebindMutation.error) : null}
+        onClose={() => {
+          setInteraction(null)
+          rebindMutation.reset()
+        }}
+        onRebind={rebindTo}
+      />
+    ) : null
   const composer: ChatPanelComposerInput = {
     parts: controller.draft,
     // Pending 覆盖 in-flight HTTP 请求（同时禁用发送：canSend 已检查 disabled），
@@ -483,23 +563,26 @@ export function BoundThreadPane({
       || branchState == null
       || effectiveBase == null,
     onPartsChange: controller.setDraft,
+    onHistoryPartsChange: (parts) => controller.setDraft(parts, 'history'),
     onSubmit: (payload, localDraft) => {
       void controller.submitMessage(payload, localDraft)
     },
     onCommand: handleCommand,
     commands: BOUND_PANE_COMMANDS,
+    focusOnEscape: focused,
+    interactionPanel,
   }
   const footer: ChatPanelFooterInput = {
     yoloEnabled: branchState?.draft.yoloEnabled ?? controller.thread?.yoloEnabled,
     onAgentClick: () => {
       onFocus()
-      setAgentModalOpen(true)
+      setInteraction('agent')
     },
     onModelClick: undefined,
     onVariantClick: undefined,
     onEnvironmentClick: () => {
       onFocus()
-      setEnvironmentModalOpen(true)
+      setInteraction('environment')
     },
     taskStatusEnabled: threadUiPreferences.taskStatusEnabled,
     notificationsEnabled: threadUiPreferences.notificationsEnabled,
@@ -547,51 +630,15 @@ export function BoundThreadPane({
         footer={footer}
         activity={activity}
       />
-      {historyOpen ? (
-        <HistoryBranchPanel
-          entries={controller.entries}
-          currentHeadEntryId={controller.thread?.headEntryId}
-          loading={controller.messagesLoading}
-          queryError={controller.messagesError}
-          pending={rebindMutation.isPending}
-          rebindError={rebindMutation.error ? rebindErrorMessage(rebindMutation.error) : null}
-          onClose={() => {
-            setHistoryOpen(false)
-            rebindMutation.reset()
-          }}
-          onRebind={rebindTo}
-        />
+      {discardConfirm ? (
+        <Suspense fallback={null}>
+          <ConfirmActionModal
+            modal={discardConfirm}
+            pending={false}
+            onClose={() => setDiscardConfirm(null)}
+          />
+        </Suspense>
       ) : null}
-      {/* /thread 切换该面板展示哪个 Chat 作用域 Thread；不会修改任何 Thread。 */}
-      <SelectionListModal
-        open={threadModalOpen}
-        title={t('ai.chat.selectThread')}
-        items={threadItems}
-        sort={threadSort}
-        onSortChange={onThreadSortChange}
-        loading={threadPicker.isLoading}
-        emptyText={t('ai.chat.noThreads')}
-        onClose={() => setThreadModalOpen(false)}
-        onSelect={selectThread}
-      />
-      <AgentSelectionModal
-        open={agentModalOpen}
-        agents={agents.map((agent) => ({
-          name: agent.name,
-          description: agent.description,
-        }))}
-        onClose={() => setAgentModalOpen(false)}
-        onSelect={selectAgent}
-      />
-      <EnvironmentSelectionModal
-        open={environmentModalOpen}
-        environments={environments}
-        selectedEnvironmentName={branchState?.draft.environmentName ?? null}
-        onClose={() => setEnvironmentModalOpen(false)}
-        onSelect={(environmentName) => {
-          selectEnvironment(environmentName)
-        }}
-      />
     </section>
   )
 }

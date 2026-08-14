@@ -97,6 +97,7 @@ export function ChatWorkspacePane({
       chat={chat}
       agents={agents}
       environments={environments}
+      paneId={pane.id}
       focused={focused}
       threadSort={threadSort}
       onFocus={onFocus}

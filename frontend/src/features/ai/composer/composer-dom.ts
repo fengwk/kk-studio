@@ -279,7 +279,7 @@ export function insertPillsAtCaret(root: HTMLElement, parts: ComposerPart[]): vo
   selection.addRange(nextRange)
 }
 
-/** 把光标放到编辑器末尾（外部重建 DOM 后恢复焦点用）。 */
+/** 把光标放到编辑器末尾，并确保外部重建后的末尾内容可见。 */
 export function placeCaretAtEnd(root: HTMLElement): void {
   const selection = root.ownerDocument.getSelection()
   if (!selection) {
@@ -290,6 +290,7 @@ export function placeCaretAtEnd(root: HTMLElement): void {
   range.collapse(false)
   selection.removeAllRanges()
   selection.addRange(range)
+  root.scrollTop = root.scrollHeight
 }
 
 /**

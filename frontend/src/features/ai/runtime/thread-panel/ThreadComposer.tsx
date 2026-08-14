@@ -32,7 +32,6 @@ import {
   renderPartsToEditor,
 } from '@/features/ai/composer/composer-dom'
 import {
-  createTextPart,
   mergeTextParts,
   partsKey,
   removePartsByIds,
@@ -50,7 +49,10 @@ import {
   type HashFile,
   type StorageService,
 } from '@/features/ai/composer'
+import { useComposerMessageHistory } from '@/features/ai/runtime/thread-panel/useComposerMessageHistory'
 import { useI18n } from '@/shared/i18n'
+
+const EMPTY_USER_MESSAGES: readonly string[] = []
 
 /**
  * 共享的 Attachment Pill Composer（OpenCode 风格）。
@@ -68,16 +70,22 @@ export function ThreadComposer({
   pending,
   disabled,
   onPartsChange,
+  onHistoryPartsChange = onPartsChange,
   onSubmit,
   onCommand,
   commands = THREAD_COMMANDS,
+  historicalUserMessages = EMPTY_USER_MESSAGES,
+  queuedUserMessages = EMPTY_USER_MESSAGES,
   storageService,
   hashFile,
+  focusOnEscape = false,
+  active = true,
 }: {
   parts: ComposerPart[]
   pending: boolean
   disabled: boolean
   onPartsChange: (parts: ComposerPart[]) => void
+  onHistoryPartsChange?: (parts: ComposerPart[]) => void
   /**
    * 提交载荷（payload, localDraft）：
    * - payload：attachment parts 的 uploadId 已解析为服务端 upload 句柄，
@@ -88,13 +96,20 @@ export function ThreadComposer({
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
+  historicalUserMessages?: readonly string[]
+  queuedUserMessages?: readonly string[]
   storageService?: StorageService
   hashFile?: HashFile
+  /** 当前交互作用域是否允许全局 Escape 把焦点恢复到此 Composer。 */
+  focusOnEscape?: boolean
+  /** false 时由同一 Composer 区域的 interaction panel 接管；组件保持挂载以保留上传状态。 */
+  active?: boolean
 }) {
   const { t } = useI18n()
   const editorRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const focusTimerRef = useRef<number | null>(null)
+  const restoreFocusRef = useRef(false)
   const wasPendingRef = useRef(false)
   // 提交时的本地草稿快照（客户端 localId parts，trim 后）：发送失败恢复
   // （相同 partsKey）时重新挂载上传条目；其余任何 parts 变化都视为上一轮
@@ -110,12 +125,28 @@ export function ThreadComposer({
     releaseUpload,
     markDetached,
   } = useAttachmentUploads({ storageService, hashFile })
+  const {
+    changeDraft,
+    navigate: navigateMessageHistory,
+  } = useComposerMessageHistory({
+    parts,
+    historicalUserMessages,
+    queuedUserMessages,
+    onPartsChange,
+    onHistoryPartsChange,
+  })
 
   const slashQuery = slashQueryOf(parts)
   const slashMode = slashQuery != null
-  const query = slashQuery ?? ''
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const paletteMode = plusMenuOpen ? 'menu' : slashMode ? 'slash' : null
+  const paletteOpen = paletteMode != null
+  const query = paletteMode === 'slash' ? slashQuery ?? '' : ''
   const filteredCommands = useFilteredThreadCommands(query, commands)
   const [activeIndex, setActiveIndex] = useState(0)
+  const draftIsEmpty = parts.every(
+    (part) => part.type === 'text' && part.text.trim() === '',
+  )
 
   // 进行中的 HTTP 变更不能阻塞连续提交；附件未全部 ready 时也不能发送。
   const canSend = useMemo(
@@ -131,7 +162,7 @@ export function ThreadComposer({
     focusTimerRef.current = null
   }, [])
 
-  const focusComposer = useCallback(() => {
+  const focusComposer = useCallback((forceCaretAtEnd = false) => {
     clearFocusTimer()
     const scheduleFocus = (attempt: number, delay: number) => {
       focusTimerRef.current = window.setTimeout(() => {
@@ -150,6 +181,18 @@ export function ThreadComposer({
       if (document.activeElement !== el) {
         el.focus({ preventScroll: true })
       }
+      const selection = el.ownerDocument.getSelection()
+      if (
+        document.activeElement === el
+        && (
+          forceCaretAtEnd
+          || !selection
+          || selection.rangeCount === 0
+          || !el.contains(selection.getRangeAt(0).commonAncestorContainer)
+        )
+      ) {
+        placeCaretAtEnd(el)
+      }
       if (attempt < 5 && document.activeElement !== el) {
         scheduleFocus(attempt + 1, 16)
       }
@@ -157,12 +200,63 @@ export function ThreadComposer({
     scheduleFocus(0, 0)
   }, [clearFocusTimer])
 
+  const closeCommandPalette = useCallback((forceCaretAtEnd = false) => {
+    setPlusMenuOpen(false)
+    if (paletteMode === 'slash') {
+      changeDraft([])
+    }
+    focusComposer(forceCaretAtEnd)
+  }, [changeDraft, focusComposer, paletteMode])
+
   useEffect(() => {
-    if (!slashMode) {
+    if (!active) {
+      restoreFocusRef.current = true
+      clearFocusTimer()
+      return
+    }
+    if (restoreFocusRef.current && !disabled) {
+      restoreFocusRef.current = false
+      focusComposer(true)
+    }
+  }, [active, clearFocusTimer, disabled, focusComposer])
+
+  useEffect(() => {
+    if (!focusOnEscape || !active) {
+      return
+    }
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.key !== 'Escape'
+        || event.defaultPrevented
+        || event.isComposing
+        || event.keyCode === 229
+      ) {
+        return
+      }
+      // Overlay 保留自己的 Escape 语义；关闭后再次按 Escape 才回到 Composer。
+      if (document.querySelector('.modal-backdrop, [aria-modal="true"], [role="alertdialog"]')) {
+        return
+      }
+      if (editorRef.current?.getAttribute('contenteditable') !== 'true') {
+        return
+      }
+      event.preventDefault()
+      if (paletteOpen) {
+        closeCommandPalette(true)
+        return
+      }
+      focusComposer(true)
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [active, closeCommandPalette, focusComposer, focusOnEscape, paletteOpen])
+
+  useEffect(() => {
+    if (!paletteOpen) {
       return
     }
     setActiveIndex(firstEnabledCommandIndex(filteredCommands))
-  }, [slashMode, query, filteredCommands])
+  }, [paletteOpen, query, filteredCommands])
 
   // 发送完成后（pending true -> false），继续在 composer 中键入。
   useEffect(() => {
@@ -269,10 +363,13 @@ export function ThreadComposer({
     if (!el) {
       return
     }
+    if (plusMenuOpen) {
+      setPlusMenuOpen(false)
+    }
     normalizeEditorDom(el)
     const next = mergeTextParts(extractPartsFromEditor(el))
     if (partsKey(next) !== partsKey(parts)) {
-      onPartsChange(next)
+      changeDraft(next)
     }
   }
 
@@ -287,7 +384,7 @@ export function ThreadComposer({
     }
     const el = editorRef.current
     if (!el) {
-      onPartsChange([...parts, ...pillParts])
+      changeDraft([...parts, ...pillParts])
       return
     }
     // 文件插入发生在当前光标处（粘贴/拖放/选择），而不是追加到末尾；
@@ -314,6 +411,7 @@ export function ThreadComposer({
     if (!canSend) {
       return
     }
+    setPlusMenuOpen(false)
     // 上一轮已 settle 的 detached 残留在此释放（它们的消息已确定不再回滚）。
     for (const upload of uploads) {
       if (upload.detached) {
@@ -330,16 +428,15 @@ export function ThreadComposer({
     onSubmit(resolved, localDraft)
   }
 
-  function closeSlashMode() {
-    onPartsChange([])
-    focusComposer()
-  }
-
   function handleSelect(command: ThreadCommand) {
     if (command.disabled) {
       return
     }
-    onPartsChange([])
+    const consumeSlashCommand = paletteMode === 'slash'
+    setPlusMenuOpen(false)
+    if (consumeSlashCommand) {
+      changeDraft([])
+    }
     if (command.id === 'upload') {
       fileInputRef.current?.click()
       return
@@ -364,7 +461,7 @@ export function ThreadComposer({
         if (partId) {
           const next = mergeTextParts(removePartsByIds(parts, new Set([partId])))
           if (partsKey(next) !== partsKey(parts)) {
-            onPartsChange(next)
+            changeDraft(next)
             return
           }
         }
@@ -372,21 +469,41 @@ export function ThreadComposer({
         return
       }
     }
-    if (event.key === 'Escape' && slashMode) {
+    if (event.key === 'Escape' && paletteOpen) {
       event.preventDefault()
       event.stopPropagation()
-      closeSlashMode()
+      closeCommandPalette()
       return
     }
-    if (slashMode && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+    if (paletteOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       event.preventDefault()
       event.stopPropagation()
       const delta = event.key === 'ArrowDown' ? 1 : -1
       setActiveIndex((current) => stepEnabledCommandIndex(filteredCommands, current, delta))
       return
     }
+    if (
+      !paletteOpen
+      && (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+      && !event.shiftKey
+      && !event.ctrlKey
+      && !event.metaKey
+      && !event.altKey
+    ) {
+      const el = editorRef.current
+      const direction = event.key === 'ArrowUp' ? 'previous' : 'next'
+      if (
+        el
+        && canNavigateMessageHistoryFromCaret(el, direction)
+        && navigateMessageHistory(direction)
+      ) {
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
-      if (slashMode) {
+      if (paletteOpen) {
         event.preventDefault()
         const command = filteredCommands[activeIndex]
         if (command && !command.disabled) {
@@ -464,15 +581,15 @@ export function ThreadComposer({
     }
     const next = removePartsForUpload(upload, parts)
     if (next.length !== parts.length) {
-      onPartsChange(next)
+      changeDraft(next)
     }
     releaseUpload(upload.localId)
   }
 
   return (
-    <div className="thread-composer">
+    <div className="thread-composer" hidden={!active} aria-hidden={!active}>
       <ThreadCommandPalette
-        open={slashMode}
+        open={paletteOpen}
         query={query}
         commands={commands}
         activeIndex={activeIndex}
@@ -491,15 +608,18 @@ export function ThreadComposer({
           type="button"
           className="thread-dock-add"
           aria-label={t('ai.runtime.composer.openCommands')}
-          aria-expanded={slashMode}
+          aria-expanded={paletteOpen}
           disabled={disabled}
+          onMouseDown={(event) => {
+            // 鼠标打开菜单时保留 editor 的 focus、caret 与 selection。
+            event.preventDefault()
+          }}
           onClick={() => {
-            const draftIsEmpty = parts.every(
-              (part) => part.type === 'text' && part.text.trim() === '',
-            )
-            if (draftIsEmpty && !slashMode) {
-              onPartsChange([createTextPart('/')])
+            if (paletteOpen) {
+              closeCommandPalette()
+              return
             }
+            setPlusMenuOpen(true)
             focusComposer()
           }}
         >
@@ -514,6 +634,7 @@ export function ThreadComposer({
           aria-label={t('ai.runtime.composer.ariaLabel')}
           aria-disabled={disabled}
           data-placeholder={t('ai.runtime.composer.placeholder')}
+          data-placeholder-visible={draftIsEmpty}
           onInput={syncFromDom}
           onKeyDown={handleKeyDown}
           onBeforeInput={handleBeforeInput}
@@ -559,4 +680,29 @@ function clipboardFiles(clipboard: DataTransfer | null): File[] {
     .filter((item) => item.kind === 'file')
     .map((item) => item.getAsFile())
     .filter((file): file is File => file != null)
+}
+
+function canNavigateMessageHistoryFromCaret(
+  root: HTMLElement,
+  direction: 'previous' | 'next',
+): boolean {
+  const selection = root.ownerDocument.getSelection()
+  if (!selection || selection.rangeCount === 0) {
+    return false
+  }
+  const caret = selection.getRangeAt(0)
+  if (
+    !caret.collapsed
+    || !root.contains(caret.commonAncestorContainer)
+  ) {
+    return false
+  }
+  const range = root.ownerDocument.createRange()
+  range.selectNodeContents(root)
+  if (direction === 'previous') {
+    range.setEnd(caret.startContainer, caret.startOffset)
+  } else {
+    range.setStart(caret.endContainer, caret.endOffset)
+  }
+  return !range.toString().includes('\n')
 }

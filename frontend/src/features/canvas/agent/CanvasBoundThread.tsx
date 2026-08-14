@@ -100,6 +100,7 @@ export function CanvasBoundThread({
     },
     onCommand: controller.runCommand,
     commands: CANVAS_BOUND_COMMANDS,
+    focusOnEscape: true,
   }
   const footer: ChatPanelFooterInput = {
     yoloEnabled: controller.thread?.yoloEnabled,

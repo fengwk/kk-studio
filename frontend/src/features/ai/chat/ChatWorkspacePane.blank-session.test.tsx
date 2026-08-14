@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import { BLANK_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
+import { composerDraftStorageKey } from '@/features/ai/composer/composer-draft'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { chatService } from '@/shared/api/chat-service'
@@ -270,6 +271,20 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'new')?.disabled).toBe(true)
   })
 
+  it('restores the pane-scoped browser draft before the first Thread exists', async () => {
+    localStorage.setItem(
+      composerDraftStorageKey('chat:chat-1:pane:pane-1'),
+      'restored blank draft',
+    )
+
+    // 空面板没有历史消息，仍必须把本地草稿作为队列末位恢复到 composer。
+    renderBlankPane()
+
+    expect(await screen.findByLabelText('给 AI 发送消息')).toHaveTextContent(
+      'restored blank draft',
+    )
+  })
+
   it('keeps Environment selection as a local blank-pane draft', async () => {
     const user = userEvent.setup()
     renderBlankPane()
@@ -278,16 +293,16 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(composer)
     await user.keyboard('/environment{Enter}')
     const envModal = await screen.findByLabelText('选择 Environment')
-    expect(within(envModal).getByRole('button', { name: /^local/ })).toBeInTheDocument()
-    expect(within(envModal).queryByRole('button', { name: /connecting/ })).not.toBeInTheDocument()
-    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    expect(within(envModal).getByRole('option', { name: /^local/ })).toBeInTheDocument()
+    expect(within(envModal).queryByRole('option', { name: /connecting/ })).not.toBeInTheDocument()
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
 
     // 空面板 footer 立即反映 draft。
     expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /env:local/ }))
     const envModalAgain = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModalAgain).getByRole('button', { name: /\uff08\u65e0\uff09/ }))
+    await user.click(within(envModalAgain).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
     expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
   })
 
@@ -318,13 +333,13 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     // 发送前可清空：显式选择（无）=> env:none。
     await user.click(screen.getByRole('button', { name: /env:local/ }))
     let envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /\uff08\u65e0\uff09/ }))
+    await user.click(within(envModal).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
     expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
 
     // 发送前可重新更改：选回 local 后首次发送携带 environmentName。
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     const createdThread = thread({ threadId: 't-created', environmentName: 'local' })
     vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
     await user.click(composer)
@@ -342,14 +357,14 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     let envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
     expect(onEnvironmentChange).toHaveBeenCalledWith('local')
 
     // 显式清空：null 同步为 Chat 默认（清空语义，绝不能被当作缺省忽略）。
     await user.click(screen.getByRole('button', { name: /env:local/ }))
     envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /\uff08\u65e0\uff09/ }))
+    await user.click(within(envModal).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
     expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
     expect(onEnvironmentChange).toHaveBeenCalledWith(null)
     expect(chatService.createChatThread).not.toHaveBeenCalled()
@@ -365,7 +380,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     const envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
     // 更新失败仅提示（错误 banner）；不阻塞发送。
     expect(await screen.findByText('update failed')).toBeInTheDocument()
@@ -427,6 +442,34 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     // 面板绑定到已创建的 Thread 后，空面板正文随即消失。
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: /新对话/ })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('clears the stored draft when first send starts and restores it on failure', async () => {
+    const user = userEvent.setup()
+    let rejectCreate: (reason?: unknown) => void = () => undefined
+    vi.mocked(chatService.createChatThread).mockImplementation(
+      () => new Promise<HarnessThreadSnapshotDTO>((_resolve, reject) => {
+        rejectCreate = reject
+      }),
+    )
+    renderBlankPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    const storageKey = composerDraftStorageKey('chat:chat-1:pane:pane-1')
+
+    await user.click(composer)
+    await user.type(composer, 'pending first send')
+    expect(localStorage.getItem(storageKey)).toBe('pending first send')
+
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalled())
+    expect(localStorage.getItem(storageKey)).toBeNull()
+
+    await act(async () => {
+      rejectCreate(new Error('create failed'))
+    })
+    await waitFor(() =>
+      expect(localStorage.getItem(storageKey)).toBe('pending first send'),
     )
   })
 
@@ -559,11 +602,11 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
     await waitFor(() => expect(chatService.listChatThreads).toHaveBeenCalledWith('chat-1'))
 
-    const items = await screen.findAllByRole('button', { name: /^t-/ })
+    const items = await screen.findAllByRole('option', { name: /^t-/ })
     // recent 模式下较新的 IDLE Thread 排在前面。
     expect(items[0]).toHaveTextContent('t-idle')
 
-    await user.click(screen.getByRole('button', { name: /t-running/ }))
+    await user.click(screen.getByRole('option', { name: /t-running/ }))
     expect(onThreadChange).toHaveBeenCalledWith('t-running')
     // chat-scoped picker 上没有 association API。
     expect(chatService.associateThread).not.toHaveBeenCalled()
@@ -623,7 +666,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(composer)
     await user.type(composer, 'hi')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
-    await user.click(await screen.findByRole('button', { name: /assistant/ }))
+    await user.click(await screen.findByRole('option', { name: /assistant/ }))
 
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     const payload = vi.mocked(chatService.createChatThread).mock.calls[0]![1]
@@ -657,7 +700,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
     // 选中 Agent 后，draft 被完整 materialize（name + activeTools + model），
     // 挂起消息立即发送。
-    await user.click(screen.getByRole('button', { name: /assistant/ }))
+    await user.click(screen.getByRole('option', { name: /assistant/ }))
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     const payload = vi.mocked(chatService.createChatThread).mock.calls[0]![1]
     expect(payload.branchSettings).toEqual({
@@ -676,7 +719,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
   it('establishes the pane-local baseline on first picker materialization so later edits are dirty', async () => {
     const user = userEvent.setup()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     vi.mocked(chatService.listChatThreads).mockResolvedValue([
       thread({ threadId: 't-idle' }),
       thread({ threadId: 't-other' }),
@@ -696,29 +738,30 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     // 后续编辑从未被判定为 dirty）。
     await user.click(composer)
     await user.keyboard('/agent{Enter}')
-    await user.click(await screen.findByRole('button', { name: /assistant/ }))
+    await user.click(await screen.findByRole('option', { name: /assistant/ }))
 
     // 之后的面板本地编辑（environment）相对于该基线必须被判定为 dirty。
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/environment{Enter}')
     const envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/thread{Enter}')
     const picker = await screen.findByLabelText('选择 Thread')
-    const items = await within(picker).findAllByRole('button', { name: /^t-/ })
+    const items = await within(picker).findAllByRole('option', { name: /^t-/ })
     const otherItem = items.find((item) => item.textContent?.includes('t-other'))
     expect(otherItem).toBeDefined()
     await user.click(otherItem!)
 
-    expect(confirmSpy).toHaveBeenCalled()
+    expect(
+      await screen.findByRole('alertdialog', { name: '丢弃未发送的修改？' }),
+    ).toBeInTheDocument()
     expect(onThreadChange).not.toHaveBeenCalled()
   })
 
   it('confirms discarding a modified pane-local frozen draft before switching Threads from /thread', async () => {
     const user = userEvent.setup()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     vi.mocked(chatService.listChatThreads).mockResolvedValue([
       thread({ threadId: 't-idle' }),
       thread({ threadId: 't-other' }),
@@ -732,35 +775,42 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(composer)
     await user.keyboard('/environment{Enter}')
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
-    await user.click(within(screen.getByLabelText('选择 Environment')).getByRole('button', { name: /^local/ }))
+    await user.click(within(screen.getByLabelText('选择 Environment')).getByRole('option', { name: /^local/ }))
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/thread{Enter}')
     const picker = await screen.findByLabelText('选择 Thread')
-    const items = await within(picker).findAllByRole('button', { name: /^t-/ })
+    const items = await within(picker).findAllByRole('option', { name: /^t-/ })
     const otherItem = items.find((item) => item.textContent?.includes('t-other'))
     expect(otherItem).toBeDefined()
     await user.click(otherItem!)
 
-    expect(confirmSpy).toHaveBeenCalled()
+    const discardDialog = await screen.findByRole(
+      'alertdialog',
+      { name: '丢弃未发送的修改？' },
+    )
+    await waitFor(() =>
+      expect(within(discardDialog).getByRole('button', { name: '取消' })).toHaveFocus(),
+    )
+    await user.keyboard('{Escape}')
     expect(onThreadChange).not.toHaveBeenCalled()
 
-    confirmSpy.mockReturnValue(true)
-    // 重新打开 picker（第一次拒绝把它关掉了）并再次选择。
-    await user.click(screen.getByLabelText('给 AI 发送消息'))
-    await user.keyboard('/thread{Enter}')
-    const pickerAgain = await screen.findByLabelText('选择 Thread')
-    const itemsAgain = await within(pickerAgain).findAllByRole('button', { name: /^t-/ })
+    // 取消丢弃后仍停留在 picker，不需要重新输入命令。
+    const pickerAgain = screen.getByLabelText('选择 Thread')
+    await waitFor(() =>
+      expect(within(pickerAgain).getByRole('searchbox', { name: '搜索' })).toHaveFocus(),
+    )
+    const itemsAgain = await within(pickerAgain).findAllByRole('option', { name: /^t-/ })
     const otherAgain = itemsAgain.find((item) => item.textContent?.includes('t-other'))
     expect(otherAgain).toBeDefined()
     await user.click(otherAgain!)
+    await user.click(await screen.findByRole('button', { name: '丢弃修改' }))
     await waitFor(() => expect(onThreadChange).toHaveBeenCalledWith('t-other'))
     expect(chatService.createChatThread).not.toHaveBeenCalled()
   })
 
   it('keeps an unmodified blank pane draft confirmation-free for /thread', async () => {
     const user = userEvent.setup()
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     vi.mocked(chatService.listChatThreads).mockResolvedValue([
       thread({ threadId: 't-idle' }),
       thread({ threadId: 't-other' }),
@@ -773,9 +823,9 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
     expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /t-other/ }))
+    await user.click(screen.getByRole('option', { name: /t-other/ }))
 
-    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(onThreadChange).toHaveBeenCalledWith('t-other')
   })
 
@@ -800,7 +850,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.type(composer, 'hello need agent')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByText('选择 Agent')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /assistant/ }))
+    await user.click(screen.getByRole('option', { name: /assistant/ }))
 
     await waitFor(() => expect(onAgentChange).toHaveBeenCalledWith('assistant'))
     // 等待 microtask 清空，以便观察到任何 unhandled rejection。

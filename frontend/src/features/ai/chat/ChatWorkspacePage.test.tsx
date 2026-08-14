@@ -327,7 +327,7 @@ describe('ChatWorkspacePage', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'hello world')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
-    expect(await screen.findByRole('button', { name: /^assistant$/ })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: /^assistant$/ })).toBeInTheDocument()
   })
 
   it('blank-pane Environment selection syncs the Chat default with version serialization', async () => {
@@ -351,7 +351,7 @@ describe('ChatWorkspacePage', () => {
     await screen.findByLabelText('给 AI 发送消息')
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     const envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     expect(
       screen.getByRole('button', { name: /env:local/ }),
     ).toBeInTheDocument()
@@ -365,7 +365,7 @@ describe('ChatWorkspacePage', () => {
     // 显式清空（无）同步为 Chat 默认 null。
     await user.click(screen.getByRole('button', { name: /env:local/ }))
     const envModalAgain = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModalAgain).getByRole('button', { name: /\uff08\u65e0\uff09/ }))
+    await user.click(within(envModalAgain).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
     expect(
       screen.getByRole('button', { name: /env:none/ }),
     ).toBeInTheDocument()
@@ -428,7 +428,7 @@ describe('ChatWorkspacePage', () => {
     const agentButtons = screen.getAllByRole('button', { name: 'agent:assistant' })
     await user.click(agentButtons[0])
     await user.click(agentButtons[1])
-    const selectionButtons = await screen.findAllByRole('button', { name: 'coder' })
+    const selectionButtons = await screen.findAllByRole('option', { name: 'coder' })
     await user.click(selectionButtons[0])
     await user.click(selectionButtons[1])
 
@@ -485,7 +485,7 @@ describe('ChatWorkspacePage', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'hello after Agent deletion')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
-    await user.click(await screen.findByRole('button', { name: /^assistant$/ }))
+    await user.click(await screen.findByRole('option', { name: /^assistant$/ }))
 
     // react-query 的 mutateAsync 会把 mutationFn 推迟到 microtask，因此空白面板的
     // 首次发送路径（create-thread）会在延迟的 updateChat mutation 触发前运行。
@@ -522,7 +522,7 @@ describe('ChatWorkspacePage', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     const envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     expect(
       screen.getByRole('button', { name: /env:local/ }),
     ).toBeInTheDocument()

@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from 'react'
+import { useMemo, type ReactNode, type RefObject } from 'react'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import { ThreadErrorPanel } from '@/features/ai/runtime/thread-panel/ThreadErrorPanel'
 import { ThreadTranscript } from '@/features/ai/runtime/thread-panel/ThreadTranscript'
@@ -36,10 +36,15 @@ export interface ThreadPanelComposerInput {
   pending: boolean
   disabled: boolean
   onPartsChange: (parts: ComposerPart[]) => void
+  onHistoryPartsChange?: (parts: ComposerPart[]) => void
   /** 提交载荷：payload（server uploadId）与 localDraft（客户端 localId 快照）分开传递。 */
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
+  /** 当前交互作用域是否允许 Escape 把焦点恢复到此 Composer。 */
+  focusOnEscape?: boolean
+  /** 与 Composer 互斥的轻量选择/操作面板；Composer 保持挂载以保留草稿上传状态。 */
+  interactionPanel?: ReactNode
 }
 
 /**
@@ -74,6 +79,19 @@ interface ThreadPanelProps {
  * 持久/实时对话 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
  */
 export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPanelProps) {
+  const interactionOpen = composer.interactionPanel != null
+  const historicalUserMessages = useMemo(
+    () => transcript.messages.flatMap((message) =>
+      message.role === 'user' && message.text.length > 0 ? [message.text] : [],
+    ),
+    [transcript.messages],
+  )
+  const queuedUserMessages = useMemo(
+    () => transcript.queuedMessages.flatMap((message) =>
+      message.role === 'user' && message.text.length > 0 ? [message.text] : [],
+    ),
+    [transcript.queuedMessages],
+  )
   return (
     <section className="chat-shell thread-panel">
       {slots?.sidebar}
@@ -88,9 +106,9 @@ export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPan
         />
         <ThreadWidgetStack
           working={activity.working || composer.pending}
-          queuedMessages={transcript.queuedMessages}
+          queuedMessages={interactionOpen ? [] : transcript.queuedMessages}
         >
-          {activity.widgets}
+          {interactionOpen ? null : activity.widgets}
         </ThreadWidgetStack>
         {activity.actionError ? (
           <ThreadErrorPanel message={activity.actionError} onDismiss={activity.onDismissActionError} />
@@ -100,10 +118,16 @@ export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPan
           pending={composer.pending}
           disabled={composer.disabled}
           onPartsChange={composer.onPartsChange}
+          onHistoryPartsChange={composer.onHistoryPartsChange}
           onSubmit={composer.onSubmit}
           onCommand={composer.onCommand}
           commands={composer.commands}
+          focusOnEscape={composer.focusOnEscape && !interactionOpen}
+          active={!interactionOpen}
+          historicalUserMessages={historicalUserMessages}
+          queuedUserMessages={queuedUserMessages}
         />
+        {composer.interactionPanel}
         {slots?.footer}
       </main>
     </section>
