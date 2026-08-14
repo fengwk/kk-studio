@@ -3,6 +3,8 @@ import type {
   EntryType,
   HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { RealtimeModelStream, RealtimeToolStream } from '@/features/ai/runtime/thread-realtime-state'
@@ -67,6 +69,281 @@ describe('thread timeline', () => {
       { role: 'assistant', text: '正在输出', thinking: '已完成思考', status: 'done' },
     ])
     expect(durable.messages).toHaveLength(1)
+  })
+
+  it('projects active failed attempts before the current realtime attempt', () => {
+    const stream: RealtimeModelStream = {
+      threadId: 'thread-1',
+      invocationId: 'model-1',
+      attempt: 2,
+      sequence: 1,
+      text: 'current output',
+      thinking: 'current plan',
+      createdAt: '2026-07-28T10:00:03Z',
+      status: 'streaming',
+    }
+    const timeline = buildThreadTimeline(
+      [entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '请求' }]))],
+      [],
+      [],
+      stream,
+      null,
+      [modelAttemptFailure()],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      {
+        role: 'user',
+        text: '请求',
+      },
+      {
+        role: 'model_attempt_failure',
+        attempt: 1,
+        sequence: '3',
+        text: 'partial answer',
+        thinking: 'partial thinking',
+        errorCode: 'TRANSIENT',
+        errorMessage: 'try later',
+        retryAt: '2026-07-28T10:00:05Z',
+        nextAttempt: 2,
+      },
+      {
+        role: 'assistant',
+        text: 'current output',
+        thinking: 'current plan',
+      },
+    ])
+    expect(timeline.messages.map((message) => message.role)).toEqual([
+      'user',
+      'model_attempt_failure',
+      'assistant',
+    ])
+  })
+
+  it('suppresses the stale realtime overlay once the same attempt is durably failed', () => {
+    const stale: RealtimeModelStream = {
+      threadId: 'thread-1',
+      invocationId: 'model-1',
+      attempt: 1,
+      sequence: 3,
+      text: 'partial answer',
+      thinking: 'partial thinking',
+      createdAt: '2026-07-28T10:00:00Z',
+      status: 'streaming',
+    }
+
+    const timeline = buildThreadTimeline(
+      [],
+      [],
+      [],
+      stale,
+      null,
+      [modelAttemptFailure()],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      {
+        role: 'model_attempt_failure',
+        attempt: 1,
+        text: 'partial answer',
+        thinking: 'partial thinking',
+      },
+    ])
+    expect(timeline.messages).toHaveLength(1)
+  })
+
+  it('does not let a malformed snapshot failure hide the current realtime overlay', () => {
+    const current: RealtimeModelStream = {
+      threadId: 'thread-1',
+      invocationId: 'model-1',
+      attempt: 1,
+      sequence: 3,
+      text: 'current output',
+      thinking: '',
+      createdAt: '2026-07-28T10:00:00Z',
+      status: 'streaming',
+    }
+    const malformed = modelAttemptFailure({
+      sequence: 3 as unknown as ModelAttemptFailureDTO['sequence'],
+    })
+
+    const timeline = buildThreadTimeline([], [], [], current, null, [malformed])
+
+    expect(timeline.messages).toMatchObject([
+      {
+        role: 'assistant',
+        text: 'current output',
+      },
+    ])
+    expect(timeline.messages).toHaveLength(1)
+  })
+
+  it('only marks a failure as live while its next Provider attempt is still pending', () => {
+    const failure = modelAttemptFailure()
+    const pending = buildThreadTimeline(
+      [],
+      [],
+      [],
+      null,
+      null,
+      [failure],
+      modelInvocation('READY', 1),
+    )
+    const running = buildThreadTimeline(
+      [],
+      [],
+      [],
+      null,
+      null,
+      [failure],
+      modelInvocation('RUNNING', 2),
+    )
+
+    expect(pending.messages[0]).toMatchObject({
+      role: 'model_attempt_failure',
+      modelInvocationId: 'model-1',
+      nextAttempt: 2,
+    })
+    expect(running.messages[0]).toMatchObject({
+      role: 'model_attempt_failure',
+      nextAttempt: 2,
+    })
+    expect(running.messages[0]).not.toHaveProperty('modelInvocationId')
+  })
+
+  it('projects a terminal pending attempt as partial content plus a separate error', () => {
+    const terminal: RealtimeModelStream = {
+      threadId: 'thread-1',
+      invocationId: 'model-1',
+      attempt: 2,
+      sequence: 7,
+      text: 'terminal partial',
+      thinking: 'terminal thinking',
+      createdAt: '2026-07-28T10:00:00Z',
+      status: 'error',
+      errorCode: 'INVALID_REQUEST',
+      errorText: 'terminal failure',
+    }
+
+    const timeline = buildThreadTimeline(
+      [],
+      [],
+      [],
+      terminal,
+      null,
+      [],
+      modelInvocation('FAILED', 2),
+    )
+
+    expect(timeline.messages).toMatchObject([
+      {
+        role: 'model_attempt_failure',
+        attempt: 2,
+        sequence: '7',
+        text: 'terminal partial',
+        thinking: 'terminal thinking',
+        errorCode: 'INVALID_REQUEST',
+        errorMessage: 'terminal failure',
+        retryAt: null,
+        nextAttempt: null,
+      },
+    ])
+  })
+
+  it('keeps the terminal barrier visible when its attempt was already recorded as failed', () => {
+    const terminal: RealtimeModelStream = {
+      threadId: 'thread-1',
+      invocationId: 'model-1',
+      attempt: 1,
+      sequence: 0,
+      text: '',
+      thinking: '',
+      createdAt: '2026-07-28T10:00:06Z',
+      status: 'error',
+      errorCode: 'INVALID_REQUEST',
+      errorText: 'retry budget exhausted',
+    }
+
+    const timeline = buildThreadTimeline(
+      [],
+      [],
+      [],
+      terminal,
+      null,
+      [modelAttemptFailure()],
+      modelInvocation('FAILED', 1),
+    )
+
+    expect(timeline.messages.map((message) => message.role)).toEqual([
+      'model_attempt_failure',
+      'assistant',
+    ])
+    expect(timeline.messages[1]).toMatchObject({
+      role: 'assistant',
+      text: 'retry budget exhausted',
+      status: 'error',
+    })
+  })
+
+  it('projects a pending cancellation checkpoint like the durable aborted Entry', () => {
+    const cancelled: RealtimeModelStream = {
+      threadId: 'thread-1',
+      invocationId: 'model-1',
+      attempt: 1,
+      sequence: 4,
+      text: 'stopped partial',
+      thinking: 'stopped thinking',
+      createdAt: '2026-07-28T10:00:00Z',
+      status: 'error',
+      errorCode: 'CANCELLED',
+      errorText: 'stopped by user',
+    }
+
+    const timeline = buildThreadTimeline(
+      [],
+      [],
+      [],
+      cancelled,
+      null,
+      [],
+      modelInvocation('CANCELLED', 1),
+    )
+
+    expect(timeline.messages).toMatchObject([
+      {
+        role: 'assistant',
+        text: 'stopped partial',
+        thinking: 'stopped thinking',
+        status: 'done',
+        aborted: true,
+      },
+    ])
+  })
+
+  it('keeps multiple active failed attempts ordered and separate', () => {
+    const failures = [
+      modelAttemptFailure({
+        attempt: 2,
+        sequence: '4',
+        text: 'second partial',
+        thinking: 'second thinking',
+        errorMessage: 'second error',
+      }),
+      modelAttemptFailure(),
+      modelAttemptFailure(),
+    ]
+
+    const timeline = buildThreadTimeline([], [], [], null, null, failures)
+    const projected = timeline.messages.filter(
+      (message) => message.role === 'model_attempt_failure',
+    )
+
+    expect(projected.map((message) => message.attempt)).toEqual([1, 2])
+    expect(projected.map((message) => message.text)).toEqual([
+      'partial answer',
+      'second partial',
+    ])
+    expect(projected[0]).not.toBe(projected[1])
   })
 
   it('keeps non-canonical Entry types visible as an unknown durable event', () => {
@@ -606,5 +883,41 @@ function command(
 function messagePayload(role: string, contents: Array<Record<string, unknown>>) {
   return {
     message: { role, contents },
+  }
+}
+
+function modelAttemptFailure(
+  overrides: Partial<ModelAttemptFailureDTO> = {},
+): ModelAttemptFailureDTO {
+  return {
+    modelInvocationId: 'model-1',
+    turnStartEntryId: 'turn-1',
+    basisHeadEntryId: 'head-1',
+    attempt: 1,
+    sequence: '3',
+    text: 'partial answer',
+    thinking: 'partial thinking',
+    errorCode: 'TRANSIENT',
+    errorMessage: 'try later',
+    failedAt: '2026-07-28T10:00:00Z',
+    retryAt: '2026-07-28T10:00:05Z',
+    ...overrides,
+  }
+}
+
+function modelInvocation(status: string, attempt: number): ModelInvocationDTO {
+  return {
+    id: 'model-1',
+    threadId: 'thread-1',
+    turnStartEntryId: 'turn-1',
+    basisHeadEntryId: 'head-1',
+    status,
+    attempt,
+    streamCheckpointJson: null,
+    resultJson: null,
+    errorJson: null,
+    resultEntryId: null,
+    createTime: '2026-07-28T10:00:00Z',
+    updateTime: '2026-07-28T10:00:00Z',
   }
 }

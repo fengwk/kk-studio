@@ -393,6 +393,7 @@ function sameModelStream(left: RealtimeModelStream, right: RealtimeModelStream):
     && left.thinking === right.thinking
     && left.sequence === right.sequence
     && left.status === right.status
+    && left.errorCode === right.errorCode
     && left.errorText === right.errorText
 }
 

@@ -5,6 +5,7 @@ import {
   contentText,
   toResourceAttachment,
 } from '@/features/ai/runtime/thread-timeline/content-utils'
+import { createModelAttemptFailureMessage } from '@/features/ai/runtime/thread-timeline/model-attempt-failure'
 import {
   projectEmptyMessageEntry,
   projectRootEntry,
@@ -29,8 +30,33 @@ export function projectDurableEntry(
     // 控制边界：不显示成 unknown entry，也不进入对话时间线。
     return
   }
+  if (entryType === 'MODEL_ATTEMPT_FAILURE') {
+    const failure = parseModelAttemptFailure(entry, payload)
+    messages.push(failure ?? projectUnknownEntry(entry))
+    return
+  }
   if (entryType === 'ASSISTANT_ERROR') {
     const error = asRecord(payload.error)
+    const attempt = parseAttemptSnapshot(payload.attempt)
+    if (attempt != null) {
+      messages.push(
+        createModelAttemptFailureMessage({
+          id: entry.entryId,
+          subjectEntryId: entry.entryId,
+          createdAt: entry.createTime,
+          attempt: attempt.attempt,
+          sequence: attempt.sequence,
+          text: attempt.text,
+          thinking: attempt.thinking,
+          errorCode: getString(error.code),
+          errorMessage: getString(error.message) || translate('ai.runtime.message.assistantFailed'),
+          failedAt: entry.createTime,
+          retryAt: null,
+          nextAttempt: null,
+        }),
+      )
+      return
+    }
     messages.push({
       id: entry.entryId,
       role: 'assistant',
@@ -147,6 +173,70 @@ export function projectDurableEntry(
     return
   }
   messages.push(projectUnsupportedMessageEntry(entry, role))
+}
+
+function parseModelAttemptFailure(
+  entry: HarnessSessionEntryDTO,
+  payload: Record<string, unknown>,
+) {
+  const attempt = parseAttemptSnapshot(payload.attempt)
+  const error = asRecord(payload.error)
+  const retryAt = timestampValue(payload.retryAt)
+  if (attempt == null || retryAt == null) {
+    return null
+  }
+  return createModelAttemptFailureMessage({
+    id: entry.entryId,
+    subjectEntryId: entry.entryId,
+    createdAt: entry.createTime,
+    attempt: attempt.attempt,
+    sequence: attempt.sequence,
+    text: attempt.text,
+    thinking: attempt.thinking,
+    errorCode: getString(error.code),
+    errorMessage: getString(error.message) || translate('ai.runtime.message.assistantFailed'),
+    failedAt: entry.createTime,
+    retryAt,
+    nextAttempt: attempt.attempt + 1,
+  })
+}
+
+function parseAttemptSnapshot(value: unknown): {
+  attempt: number
+  sequence: string
+  text: string
+  thinking: string
+} | null {
+  const snapshot = asRecord(value)
+  const attempt = integerValue(snapshot.attempt)
+  const sequence = integerValue(snapshot.sequence)
+  const text = snapshot.text
+  const thinking = snapshot.thinking
+  if (
+    attempt == null
+    || attempt <= 0
+    || sequence == null
+    || sequence < 0
+    || typeof text !== 'string'
+    || typeof thinking !== 'string'
+  ) {
+    return null
+  }
+  return { attempt, sequence: String(sequence), text, thinking }
+}
+
+function integerValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null
+}
+
+function timestampValue(value: unknown): string | number | readonly number[] | null {
+  if (typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) {
+    return value
+  }
+  return Array.isArray(value)
+    && value.every((part) => typeof part === 'number' && Number.isFinite(part))
+    ? value
+    : null
 }
 
 function projectToolCall(

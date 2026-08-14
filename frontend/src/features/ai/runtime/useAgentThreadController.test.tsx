@@ -126,6 +126,7 @@ function snapshotOf(
     queuedCommands: [],
     modelInvocation: null,
     toolInvocations: [],
+    modelAttemptFailures: [],
     ...extras,
   }
 }

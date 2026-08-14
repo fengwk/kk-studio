@@ -132,7 +132,7 @@ export function useThreadNotifications({
       return
     }
     const finality = latestAssistantFinality(messages)
-    if (finality === 'aborted') {
+    if (finality === 'aborted' || finality === 'pending') {
       return
     }
     if (finality === 'error') {
@@ -185,9 +185,12 @@ function collectParentPermission(
 
 function latestAssistantFinality(
   messages: readonly DialogueMessage[],
-): 'completed' | 'error' | 'aborted' {
+): 'completed' | 'error' | 'aborted' | 'pending' {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
+    if (message?.role === 'model_attempt_failure') {
+      return message.nextAttempt == null ? 'error' : 'pending'
+    }
     if (message?.role !== 'assistant') {
       continue
     }

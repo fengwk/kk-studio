@@ -49,16 +49,18 @@ describe('thread realtime state', () => {
     expect(complete).toMatchObject({ sequence: 3, text: 'one', thinking: 'plan' })
   })
 
-  it('mirrors the Java checkpoint codec: nullable string-only text/thinking with one non-blank', () => {
+  it('mirrors the Java checkpoint codec: nullable string-only text/thinking with one non-empty', () => {
     expect(
       parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":null,"thinking":"x"}'),
     ).toEqual({ attempt: 1, sequence: 0, text: '', thinking: 'x' })
     expect(
       parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":"y","thinking":null}'),
     ).toEqual({ attempt: 1, sequence: 0, text: 'y', thinking: '' })
-    // 与 Java record 构造函数一致：两侧均为空（null 或空白）将被拒绝。
+    // 与 Java record 构造函数一致：只有两侧均为空才拒绝，纯空白合法且不裁剪。
     expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":null,"thinking":null}')).toBeNull()
-    expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":"  ","thinking":""}')).toBeNull()
+    expect(
+      parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":"  ","thinking":""}'),
+    ).toEqual({ attempt: 1, sequence: 0, text: '  ', thinking: '' })
     // 非字符串类型视为格式错误（nullableText 拒绝数字/对象），不会取默认值。
     expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":5,"thinking":"x"}')).toBeNull()
     expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":null,"thinking":{"a":1}}')).toBeNull()
@@ -290,6 +292,21 @@ describe('thread realtime state', () => {
       sequence: 2,
       text: 'new',
       status: 'done',
+    })
+    expect(
+      snapshotModelStream('7', {
+        ...invocation,
+        resultJson: null,
+        errorJson: '{"kind":"INVALID_REQUEST","message":"terminal failure"}',
+      }),
+    ).toMatchObject({
+      attempt: 1,
+      sequence: 2,
+      text: 'new',
+      thinking: '',
+      status: 'error',
+      errorCode: 'INVALID_REQUEST',
+      errorText: 'terminal failure',
     })
     // 设置 resultEntryId 后：持久 Entry 才是 transcript 的真实来源。
     expect(

@@ -16,10 +16,10 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
 }) {
   const { t } = useI18n()
   const thinking = message.thinking ?? ''
-  const text = message.text.trim()
+  const text = message.text
   const streaming = message.status === 'streaming'
   const hasText = text.length > 0
-  const hasThinking = thinking.trim().length > 0
+  const hasThinking = thinking.length > 0
   const aborted = message.aborted === true
 
   return (

@@ -162,6 +162,7 @@ function snapshot(
     queuedCommands: [] as HarnessThreadCommandDTO[],
     modelInvocation: null,
     toolInvocations: [],
+    modelAttemptFailures: [],
     ...extras,
   }
 }

@@ -1,6 +1,7 @@
 import { AssistantMessageBlock } from '@/features/ai/runtime/thread-panel/messages/AssistantMessageBlock'
 import { EntryMessageBlock } from '@/features/ai/runtime/thread-panel/messages/EntryMessageBlock'
 import { MetaMessageBlock } from '@/features/ai/runtime/thread-panel/messages/MetaMessageBlock'
+import { ModelAttemptFailureMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ModelAttemptFailureMessageBlock'
 import { SystemMessageBlock } from '@/features/ai/runtime/thread-panel/messages/SystemMessageBlock'
 import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
 import { UserMessageBlock } from '@/features/ai/runtime/thread-panel/messages/UserMessageBlock'
@@ -30,6 +31,8 @@ export function MessageList({
             return <UserMessageBlock key={message.id} message={message} />
           case 'assistant':
             return <AssistantMessageBlock key={message.id} message={message} />
+          case 'model_attempt_failure':
+            return <ModelAttemptFailureMessageBlock key={message.id} message={message} />
           case 'system':
             return <SystemMessageBlock key={message.id} message={message} />
           case 'tool': {

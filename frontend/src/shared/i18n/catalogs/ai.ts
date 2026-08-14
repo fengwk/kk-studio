@@ -1198,6 +1198,22 @@ export const aiCatalog = {
     'en-US': 'Assistant response failed',
     'zh-CN': '助手回复失败',
   },
+  'ai.runtime.message.attemptFailed': {
+    'en-US': 'Attempt {{attempt}} failed',
+    'zh-CN': '第 {{attempt}} 次尝试失败',
+  },
+  'ai.runtime.message.retryScheduled': {
+    'en-US': 'Retry {{nextAttempt}} scheduled in {{seconds}}s',
+    'zh-CN': '已安排第 {{nextAttempt}} 次重试，还剩 {{seconds}} 秒',
+  },
+  'ai.runtime.message.retryScheduledHistory': {
+    'en-US': 'Retry {{nextAttempt}} was scheduled',
+    'zh-CN': '已安排第 {{nextAttempt}} 次重试',
+  },
+  'ai.runtime.message.retryingNow': {
+    'en-US': 'Retrying now as attempt {{nextAttempt}}',
+    'zh-CN': '正在进行第 {{nextAttempt}} 次重试',
+  },
   'ai.runtime.message.noArguments': {
     'en-US': '(no arguments)',
     'zh-CN': '（无参数）',

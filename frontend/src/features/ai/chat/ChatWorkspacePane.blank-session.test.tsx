@@ -105,6 +105,7 @@ function snapshotOf(currentThread: HarnessThreadDTO): HarnessThreadSnapshotDTO {
     queuedCommands: [],
     modelInvocation: null,
     toolInvocations: [],
+    modelAttemptFailures: [],
   }
 }
 

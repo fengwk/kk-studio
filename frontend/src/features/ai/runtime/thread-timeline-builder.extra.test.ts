@@ -82,6 +82,95 @@ describe('thread timeline edge branches', () => {
     expect(timeline.queuedMessages).toEqual([])
   })
 
+  it('restores a durable MODEL_ATTEMPT_FAILURE after refresh', () => {
+    const timeline = buildThreadTimeline(
+      [
+        entry('failure-1', 'MODEL_ATTEMPT_FAILURE', {
+          attempt: {
+            attempt: 1,
+            sequence: 2,
+            text: 'durable partial',
+            thinking: 'durable thinking',
+          },
+          error: { code: 'TRANSIENT', message: 'provider down' },
+          retryAt: '2026-01-01T00:00:05Z',
+        }),
+      ],
+      [],
+      [],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      {
+        id: 'failure-1',
+        role: 'model_attempt_failure',
+        sequence: '2',
+        text: 'durable partial',
+        thinking: 'durable thinking',
+        errorCode: 'TRANSIENT',
+        errorMessage: 'provider down',
+        retryAt: '2026-01-01T00:00:05Z',
+        nextAttempt: 2,
+      },
+    ])
+  })
+
+  it('projects terminal attempt partial and error separately without retry copy', () => {
+    const timeline = buildThreadTimeline(
+      [
+        entry('terminal-error', 'ASSISTANT_ERROR', {
+          error: { code: 'INVALID_REQUEST', message: 'terminal failure' },
+          attempt: {
+            attempt: 2,
+            sequence: 7,
+            text: 'terminal partial',
+            thinking: 'terminal thinking',
+          },
+        }),
+      ],
+      [],
+      [],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      {
+        id: 'terminal-error',
+        role: 'model_attempt_failure',
+        attempt: 2,
+        sequence: '7',
+        text: 'terminal partial',
+        thinking: 'terminal thinking',
+        errorCode: 'INVALID_REQUEST',
+        errorMessage: 'terminal failure',
+        retryAt: null,
+        nextAttempt: null,
+      },
+    ])
+  })
+
+  it('keeps ASSISTANT_ERROR without an attempt as the ordinary assistant error', () => {
+    const timeline = buildThreadTimeline(
+      [
+        entry('planning-error', 'ASSISTANT_ERROR', {
+          error: { code: 'PLANNING_FAILED', message: 'planning failure' },
+          attempt: null,
+        }),
+      ],
+      [],
+      [],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      {
+        id: 'planning-error',
+        role: 'assistant',
+        text: 'planning failure',
+        status: 'error',
+      },
+    ])
+    expect(timeline.messages[0]?.role).toBe('assistant')
+  })
+
   it('keeps pending input after applied marker is absent and ignores blank input text', () => {
     const timeline = buildThreadTimeline(
       [],
@@ -222,6 +311,40 @@ describe('thread timeline edge branches', () => {
     expect(timeline.messages).toEqual([])
     expect(timeline.queuedMessages).toEqual([])
     expect(timeline.hasPendingInputs).toBe(false)
+  })
+
+  it('does not show snapshot failures for a compaction turn', () => {
+    const timeline = buildThreadTimeline(
+      [
+        entry('compaction-start', 'TURN_START', { reason: 'COMPACTION', settings: {} }),
+        entry('compaction-end', 'TURN_END', {
+          turnStartEntryId: 'compaction-start',
+          outcome: 'COMPLETED',
+          continueModel: false,
+        }),
+      ],
+      [],
+      [],
+      null,
+      null,
+      [
+        {
+          modelInvocationId: 'model-1',
+          turnStartEntryId: 'compaction-start',
+          basisHeadEntryId: 'head-1',
+          attempt: 1,
+          sequence: '1',
+          text: 'hidden',
+          thinking: 'hidden',
+          errorCode: 'ERROR',
+          errorMessage: 'hidden',
+          failedAt: '2026-01-01T00:00:00Z',
+          retryAt: '2026-01-01T00:00:01Z',
+        },
+      ],
+    )
+
+    expect(timeline.messages).toEqual([])
   })
 })
 
