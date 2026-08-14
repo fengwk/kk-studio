@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   extractContextWindow,
@@ -193,13 +193,17 @@ export function useAgentThreadController(
     modelInvocation,
   )
   // Event 投影独立于 DialogueMessage：durable Entry 全类型 + 活跃 model/tool overlay。
-  const events = buildThreadEvents(
-    entries,
-    modelInvocation,
-    toolInvocations,
-    modelAttemptFailures,
-    realtime.modelStream,
-    realtime.toolStreams,
+  // useMemo 保证快照未变化时 events 引用稳定（Pane 的 detail-by-id 刷新 effect 依赖它）。
+  const events = useMemo(
+    () => buildThreadEvents(
+      entries,
+      modelInvocation,
+      toolInvocations,
+      modelAttemptFailures,
+      realtime.modelStream,
+      realtime.toolStreams,
+    ),
+    [entries, modelAttemptFailures, modelInvocation, realtime.modelStream, realtime.toolStreams, toolInvocations],
   )
   const working = isThreadWorking(thread, timeline)
   const runtimeLabels = resolveRuntimeLabels(thread, agents, models, environmentReadyByName)
@@ -208,6 +212,9 @@ export function useAgentThreadController(
     bodyRef,
     timeline.messages.length,
     entries.length + queuedCommands.length,
+    null,
+    // Thread 重绑：新线程首次进入重新贴底（不沿用旧线程的 stick 状态）。
+    threadId,
   )
 
   useEffect(() => {

@@ -1090,6 +1090,10 @@ export const aiCatalog = {
     'en-US': 'Select or create a Thread first',
     'zh-CN': '选择或创建 Thread 后可用',
   },
+  'ai.runtime.command.activeView': {
+    'en-US': 'This view is already active',
+    'zh-CN': '当前已激活该视图',
+  },
   'ai.runtime.command.upload': {
     'en-US': 'Upload files and insert ordered attachment references',
     'zh-CN': '上传文件并插入有序附件引用',
@@ -1209,6 +1213,70 @@ export const aiCatalog = {
   'ai.runtime.shortcuts.commandEdges': {
     'en-US': 'Jump to the first / last command',
     'zh-CN': '跳到第一个/最后一个命令',
+  },
+  'ai.runtime.shortcuts.group.application': {
+    'en-US': 'Application',
+    'zh-CN': '应用',
+  },
+  'ai.runtime.shortcuts.group.thread': {
+    'en-US': 'Thread',
+    'zh-CN': '对话',
+  },
+  'ai.runtime.shortcuts.group.events': {
+    'en-US': 'Events',
+    'zh-CN': '事件',
+  },
+  'ai.runtime.shortcuts.group.canvas': {
+    'en-US': 'Canvas',
+    'zh-CN': '画布',
+  },
+  'ai.runtime.shortcuts.eventsNav': {
+    'en-US': 'Move the active event',
+    'zh-CN': '移动选中事件',
+  },
+  'ai.runtime.shortcuts.eventsPage': {
+    'en-US': 'Page through the event list',
+    'zh-CN': '事件列表翻页',
+  },
+  'ai.runtime.shortcuts.eventsEdges': {
+    'en-US': 'Jump to the first / last event',
+    'zh-CN': '跳到第一个/最后一个事件',
+  },
+  'ai.runtime.shortcuts.eventsOpen': {
+    'en-US': 'Open the event detail',
+    'zh-CN': '打开事件详情',
+  },
+  'ai.runtime.shortcuts.eventsEscape': {
+    'en-US': 'Close the event detail',
+    'zh-CN': '关闭事件详情',
+  },
+  'ai.runtime.shortcuts.canvasEscape': {
+    'en-US': 'Clear the selection and focus the stage',
+    'zh-CN': '清空选择并聚焦画布',
+  },
+  'ai.runtime.shortcuts.canvasThread': {
+    'en-US': 'Focus the bound conversation',
+    'zh-CN': '聚焦绑定对话',
+  },
+  'ai.runtime.shortcuts.canvasFit': {
+    'en-US': 'Fit the canvas view',
+    'zh-CN': '缩放适应画布',
+  },
+  'ai.runtime.shortcuts.canvasZoom': {
+    'en-US': 'Reset the zoom to 100%',
+    'zh-CN': '缩放重置为 100%',
+  },
+  'ai.runtime.shortcuts.canvasFocus': {
+    'en-US': 'Focus the selected node',
+    'zh-CN': '聚焦选中节点',
+  },
+  'ai.runtime.shortcuts.canvasText': {
+    'en-US': 'Create a text node',
+    'zh-CN': '新建文本节点',
+  },
+  'ai.runtime.shortcuts.canvasDelete': {
+    'en-US': 'Delete the selected link',
+    'zh-CN': '删除选中的连线',
   },
   'ai.runtime.thread.loading': {
     'en-US': 'Loading conversation…',

@@ -4,6 +4,7 @@ import {
   ThreadEventDetail,
   ThreadEventView,
   ThreadShortcutsPanel,
+  useMainViewScrollRestore,
   type ChatPanelActivityInput,
   type ChatPanelComposerInput,
   type ChatPanelFooterInput,
@@ -13,7 +14,10 @@ import {
   type ThreadPanelMainView,
   useAgentThreadController,
 } from '@/features/ai/runtime'
-import { threadCommandsForScene } from '@/features/ai/runtime/thread-panel/thread-commands'
+import {
+  threadCommandsForActiveView,
+  threadCommandsForScene,
+} from '@/features/ai/runtime/thread-panel/thread-commands'
 import type { ThreadEventItem } from '@/features/ai/runtime/thread-events'
 import {
   buildMessageBatchPlan,
@@ -29,8 +33,12 @@ import type { UUIDString } from '@/shared/api/contracts/studio'
  * buildBatch 只发送 USER_MESSAGE（branch settings 已在 Thread 创建时烘焙）；
  * footer 展示持久化 label，agent/environment/yolo 的选择只属于 blank 流程。
  * 不携带任何隐式 Canvas 上下文 —— 绑定只来自 document.threadId。
+ *
+ * 命令能力（canvas-bound）：controller 只支持 stop（upload 由 ThreadComposer 处理
+ * 文件选择），因此 agent/environment/yolo/tree/new/thread 全部禁用，
+ * 只启用 stop/upload/events/conversation/shortcuts。
  */
-const CANVAS_BOUND_COMMANDS: ThreadCommand[] = threadCommandsForScene('bound')
+const CANVAS_BOUND_COMMANDS: ThreadCommand[] = threadCommandsForScene('canvas-bound')
 
 export function CanvasBoundThread({
   threadId,
@@ -43,22 +51,8 @@ export function CanvasBoundThread({
     () => new Map(environments.map((environment) => [environment.name, environment.ready])),
     [environments],
   )
-  // 互斥主视图与 Event detail：threadId 改变（document 重新绑定）时重置回 conversation。
-  const [mainView, setMainView] = useState<'conversation' | 'events'>('conversation')
-  const [eventDetail, setEventDetail] = useState<ThreadEventItem | null>(null)
-  const [interaction, setInteraction] = useState<'shortcuts' | null>(null)
-  const boundThreadIdRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (boundThreadIdRef.current === threadId) {
-      return
-    }
-    boundThreadIdRef.current = threadId
-    setMainView('conversation')
-    setEventDetail(null)
-    setInteraction(null)
-  }, [threadId])
-  // buildBatch 依赖 controller 的 snapshot thread；controller 在下方创建，
-  // 稳定的回调通过 ref 转发，并在每次渲染中、use 之前赋值。
+  // 互斥主视图与 Event detail：threadId 改变（document 重新绑定）时重置回 conversation，
+  // 同时清零两个主视图的 scrollTop。
   const buildBatchRef = useRef<((parts: ComposerPart[]) => CommandBatchPlan | null) | null>(null)
   const controller = useAgentThreadController(
     threadId,
@@ -67,6 +61,25 @@ export function CanvasBoundThread({
     (parts) => buildBatchRef.current?.(parts) ?? null,
     environmentReadyByName,
   )
+  const {
+    mainView,
+    switchMainView,
+    reset: resetMainViewScroll,
+    eventsBodyRef,
+    initialEventsScrollTop,
+  } = useMainViewScrollRestore(controller.bodyRef)
+  const [eventDetail, setEventDetail] = useState<ThreadEventItem | null>(null)
+  const [interaction, setInteraction] = useState<'shortcuts' | null>(null)
+  const boundThreadIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (boundThreadIdRef.current === threadId) {
+      return
+    }
+    boundThreadIdRef.current = threadId
+    resetMainViewScroll()
+    setEventDetail(null)
+    setInteraction(null)
+  }, [resetMainViewScroll, threadId])
 
   const buildBatch = useCallback(
     (parts: ComposerPart[]): CommandBatchPlan | null => {
@@ -110,15 +123,19 @@ export function CanvasBoundThread({
     }
     switch (command.id) {
       case 'events':
-        setMainView('events')
+        switchMainView('events')
         return
       case 'conversation':
-        setMainView('conversation')
+        // 切回 conversation 同时关闭 event detail（只读 widget 随之卸载）。
+        setEventDetail(null)
+        switchMainView('conversation')
         return
       case 'shortcuts':
         setInteraction('shortcuts')
         return
       default:
+        // canvas-bound 只投影 stop/upload/events/conversation/shortcuts；
+        // upload 由 ThreadComposer 拦截，到达这里的只有 stop。
         controller.runCommand(command)
     }
   }
@@ -128,12 +145,29 @@ export function CanvasBoundThread({
       mainView === 'events' ? (
         <ThreadEventView
           events={controller.events}
+          bodyRef={eventsBodyRef}
+          initialScrollTop={initialEventsScrollTop}
           detailOpen={eventDetail != null}
           onActivate={(event) => setEventDetail(event)}
           onCloseDetail={() => setEventDetail(null)}
         />
       ) : undefined,
   }
+  // events 变化时按 id 刷新已选中的 detail（内容更新跟随新快照）；id 消失则清空。
+  useEffect(() => {
+    setEventDetail((current) => {
+      if (current == null) {
+        return current
+      }
+      const next = controller.events.find((event) => event.id === current.id)
+      return next ?? null
+    })
+  }, [controller.events])
+  // 当前已激活的主视图命令保持可见但禁用（events 激活时 /events 禁用）。
+  const commands = useMemo(
+    () => threadCommandsForActiveView(CANVAS_BOUND_COMMANDS, mainView),
+    [mainView],
+  )
   const composer: ChatPanelComposerInput = {
     parts: controller.draft,
     pending: controller.pending,
@@ -143,7 +177,7 @@ export function CanvasBoundThread({
       void controller.submitMessage(payload, localDraft)
     },
     onCommand: handleCommand,
-    commands: CANVAS_BOUND_COMMANDS,
+    commands,
     focusOnEscape: true,
     interactionPanel:
       interaction === 'shortcuts' ? (

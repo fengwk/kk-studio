@@ -93,13 +93,88 @@ describe('ThreadEventView', () => {
     expect(onActivate).toHaveBeenCalledWith(expect.objectContaining({ id: events[2]!.id }))
   })
 
-  it('opens the detail on click without changing the active option', async () => {
+  it('opens the detail on click and makes the clicked row active', async () => {
     const { onActivate } = renderView()
-    // fireEvent.click 只派发 click（不模拟指针移动）：点击不改变 active。
+    // fireEvent.click 只派发 click（不模拟指针移动）：点击打开详情并同时设为 active。
     fireEvent.click(screen.getByRole('option', { name: /Event e1/ }))
     expect(onActivate).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1' }))
-    // 鼠标 click 不改变 active：active 仍是最新事件。
+    expect(selectedId()).toBe('thread-event-e1')
+  })
+
+  it('returns the active option to the newest event when its id disappears', () => {
+    const first = renderView({ events: [eventItem('e1'), eventItem('e2'), eventItem('e3')] })
+    fireEvent.mouseMove(screen.getByRole('option', { name: /Event e1/ }))
+    expect(selectedId()).toBe('thread-event-e1')
+    first.unmount()
+
+    // 列表收缩且 active id（e1）已消失：active 回到最新事件。
+    renderView({ events: [eventItem('e2'), eventItem('e3')] })
     expect(selectedId()).toBe('thread-event-e3')
+  })
+
+  it('restores a saved scroll position on re-entry and sticks to bottom on first entry', () => {
+    const events = Array.from({ length: 20 }, (_, index) => eventItem(`e${index + 1}`))
+    // 真实 DOM 属性：jsdom 不计算布局，用 getter spy 提供 scrollHeight/clientHeight。
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    try {
+      scrollHeightSpy.mockReturnValue(600)
+      clientHeightSpy.mockReturnValue(200)
+
+      // 首次进入（无保存位置）：贴底。
+      const first = render(
+        <ThreadEventView events={events} onActivate={vi.fn()} onCloseDetail={vi.fn()} />,
+      )
+      expect(listbox().scrollTop).toBe(600)
+      first.unmount()
+
+      // 重新进入（保存位置 120）：恢复，而不是贴底。
+      const second = render(
+        <ThreadEventView
+          events={events}
+          initialScrollTop={120}
+          onActivate={vi.fn()}
+          onCloseDetail={vi.fn()}
+        />,
+      )
+      expect(listbox().scrollTop).toBe(120)
+      // 恢复后 scrollTop 保持稳定（不因内容计数 effect 被拉回底部）。
+      expect(listbox().scrollTop).toBe(120)
+      second.unmount()
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+  it('accepts an external bodyRef and restores its saved scroll position', () => {
+    const events = Array.from({ length: 20 }, (_, index) => eventItem(`e${index + 1}`))
+    const externalRef = { current: null as HTMLDivElement | null }
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    // test-setup 把 clientHeight 定义为 800：恢复位置 77 距底部 523px（>210 阈值），
+    // stick 必须为 false，内容计数 effect 才不会把恢复位置拉回底部。
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    try {
+      scrollHeightSpy.mockReturnValue(600)
+      clientHeightSpy.mockReturnValue(200)
+      const view = render(
+        <ThreadEventView
+          events={events}
+          bodyRef={externalRef}
+          initialScrollTop={77}
+          onActivate={vi.fn()}
+          onCloseDetail={vi.fn()}
+        />,
+      )
+      expect(externalRef.current).toBe(listbox())
+      expect(listbox().scrollTop).toBe(77)
+      view.unmount()
+      // 卸载后外部 ref 被 React 清空。
+      expect(externalRef.current).toBeNull()
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
   })
 
   it('changes active only on mousemove and a resting mouse never steals it', async () => {

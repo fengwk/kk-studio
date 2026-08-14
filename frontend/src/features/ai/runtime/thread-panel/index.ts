@@ -11,3 +11,4 @@ export type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-co
 export { ThreadEventView } from '@/features/ai/runtime/thread-panel/ThreadEventView'
 export { ThreadEventDetail } from '@/features/ai/runtime/thread-panel/ThreadEventDetail'
 export { ThreadShortcutsPanel } from '@/features/ai/runtime/thread-panel/ThreadShortcutsPanel'
+export { useMainViewScrollRestore } from '@/features/ai/runtime/thread-panel/useMainViewScrollRestore'

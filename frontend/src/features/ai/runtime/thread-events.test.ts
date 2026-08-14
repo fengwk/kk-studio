@@ -290,6 +290,68 @@ describe('buildThreadEvents', () => {
       'entry:end-1',
     ])
   })
+
+  it('reads numeric attempt values in durable failure summaries', () => {
+    // durable payload 的 attempt.attempt / attempt.sequence 是 JSON number。
+    const entries = [
+      entry('fail-1', 'MODEL_ATTEMPT_FAILURE', {
+        attempt: { attempt: 3, sequence: 9, text: 'p', thinking: '' },
+        error: { code: 'TRANSIENT', message: 'boom' },
+        retryAt: '2026-07-28T10:00:05Z',
+      }),
+    ]
+    const events = buildThreadEvents(entries, null, [], [])
+    expect(events[0]!.text).toBe('attempt 3 · TRANSIENT')
+  })
+
+  it('skips active failure overlays already materialized as durable entries', () => {
+    // ModelTerminalPending 窗口内 durable Entry 与活跃 overlay 同时存在；
+    // 相同 (attempt, sequence) identity 只保留 durable 权威记录。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('fail-1', 'MODEL_ATTEMPT_FAILURE', {
+        attempt: { attempt: 1, sequence: 3, text: 'p', thinking: '' },
+        error: { code: 'TRANSIENT', message: 'boom' },
+        retryAt: '2026-07-28T10:00:05Z',
+      }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
+    ]
+    const materialized = attemptFailure({ attempt: 1, sequence: '3' })
+    const pending = attemptFailure({ attempt: 2, sequence: '7' })
+    const events = buildThreadEvents(
+      entries,
+      modelInvocation('RUNNING', 3),
+      [],
+      [materialized, pending],
+    )
+    expect(events.map((event) => event.id)).toEqual([
+      'entry:turn-1',
+      'active:attempt-failure:model-1:2',
+      'active:model:model-1',
+      'entry:fail-1',
+      'entry:assistant-1',
+    ])
+  })
+
+  it('skips active tool overlays already materialized as durable tool entries', () => {
+    // ToolTerminalPending 窗口内 durable TOOL Entry 与活跃 toolInvocations 同时存在；
+    // 相同 toolCallId 只保留 durable 权威记录。
+    const entries = [
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [
+        { type: 'text', text: 'run' },
+        { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{}' },
+      ])),
+      entry('tool-1', 'MESSAGE', messagePayload('TOOL', [
+        { type: 'tool_result', toolCallId: 'call-1', contents: [{ type: 'text', text: 'ok' }] },
+      ])),
+    ]
+    const invocation = toolInvocation({ toolCallId: 'call-1' })
+    const events = buildThreadEvents(entries, null, [invocation], [])
+    expect(events.map((event) => event.id)).toEqual([
+      'entry:assistant-1',
+      'entry:tool-1',
+    ])
+  })
 })
 
 describe('eventStatusText', () => {

@@ -754,6 +754,94 @@ export async function runComposerMatrix(ui) {
       )
     },
   )
+
+  await run(
+    'ui.chat.events.scroll_restore',
+    'Conversation/Event 主视图各自恢复 scrollTop（重绑清零由单元测试覆盖）',
+    async (caseArt) => {
+      const messages = Array.from({ length: 15 }, (_, index) => `scroll msg ${index} ${stamp}`)
+      await withUiFixture(
+        page,
+        () => createDurableHistoryFixture(apiCtx, {
+          title: `e2e-ui-events-scroll-${stamp}`,
+          messages,
+        }),
+        async (fixture) => {
+          const composer = await bindThreadComposer(page, goto, fixture)
+
+          const openMenuOption = async (id) => {
+            await page.getByRole('button', { name: '打开命令表' }).click()
+            await page.getByRole('option', { name: new RegExp(`^${id}`) }).click()
+          }
+          const scrollTopOf = (selector) =>
+            page.locator(selector).evaluate((element) => element.scrollTop)
+          const overflow = (selector) =>
+            page.locator(selector).evaluate((element) => ({
+              scrollHeight: element.scrollHeight,
+              clientHeight: element.clientHeight,
+            }))
+          // headless Chromium 的 mouse.wheel 是 no-op：用真实 DOM 属性向上滚动
+          // 600px，并派发原生 scroll 事件让自动贴底的 stick 状态跟随。
+          const scrollUp = (selector) =>
+            page.locator(selector).evaluate((element) => {
+              element.scrollTop = Math.min(
+                element.scrollHeight - element.clientHeight,
+                element.scrollTop + 600,
+              )
+              element.dispatchEvent(new Event('scroll', { bubbles: false }))
+              return element.scrollTop
+            })
+
+          // /events：真实溢出后向上滚动到非底部位置。
+          await composer.pressSequentially('/events')
+          await composer.press('Enter')
+          const listbox = page.getByRole('listbox', { name: '事件' })
+          await listbox.waitFor({ state: 'visible', timeout: 15_000 })
+          const eventsMetrics = await overflow('.thread-events')
+          assert(
+            eventsMetrics.scrollHeight > eventsMetrics.clientHeight,
+            `events list does not overflow: ${JSON.stringify(eventsMetrics)}`,
+          )
+          const eventsScrollTop = await scrollUp('.thread-events')
+          assert(eventsScrollTop > 0, `events scroll did not move: ${eventsScrollTop}`)
+
+          // 切到 conversation：真实溢出后向上滚动。
+          await openMenuOption('conversation')
+          await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
+          const dialogueMetrics = await overflow('.thread-dialogue')
+          assert(
+            dialogueMetrics.scrollHeight > dialogueMetrics.clientHeight,
+            `transcript does not overflow: ${JSON.stringify(dialogueMetrics)}`,
+          )
+          const dialogueScrollTop = await scrollUp('.thread-dialogue')
+          assert(dialogueScrollTop > 0, `transcript scroll did not move: ${dialogueScrollTop}`)
+
+          // 再进 events：恢复上次的 scrollTop（不是贴底）。
+          await openMenuOption('events')
+          await listbox.waitFor({ state: 'visible', timeout: 10_000 })
+          await page.waitForTimeout(200)
+          const restoredEvents = await scrollTopOf('.thread-events')
+          assert(
+            Math.abs(restoredEvents - eventsScrollTop) <= 2,
+            `events scrollTop not restored: ${restoredEvents} != ${eventsScrollTop}`,
+          )
+
+          // 切回 conversation：恢复 transcript 的 scrollTop。
+          await openMenuOption('conversation')
+          await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
+          await page.waitForTimeout(200)
+          const restoredDialogue = await scrollTopOf('.thread-dialogue')
+          assert(
+            Math.abs(restoredDialogue - dialogueScrollTop) <= 2,
+            `transcript scrollTop not restored: ${restoredDialogue} != ${dialogueScrollTop}`,
+          )
+
+          await shot(caseArt, 'events-scroll-restore')
+          expectNoFatal(pageErrors, consoleErrors)
+        },
+      )
+    },
+  )
 }
 
 async function createBlankChatFixture(apiCtx, { title }) {

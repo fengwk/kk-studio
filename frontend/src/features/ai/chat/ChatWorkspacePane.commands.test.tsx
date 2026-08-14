@@ -1180,4 +1180,150 @@ describe('ChatWorkspacePane commands', () => {
     // draft 已被恢复，用户无需重新输入即可重试。
     await waitFor(() => expect(composer).toHaveTextContent('will collide'))
   })
+
+  it('disables the already-active main-view command and enables the other', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), { entries: sessionEntries() }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // conversation 激活时：/conversation 禁用、/events 可用。
+    await user.click(composer)
+    await user.keyboard('/')
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /^conversation/ })).toBeInTheDocument()
+    })
+    expect(screen.getByRole('option', { name: /^conversation/ })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('option', { name: /^events/ })).toHaveAttribute('aria-disabled', 'false')
+    await user.keyboard('{Escape}')
+
+    // 切到 events 后：/events 禁用、/conversation 可用。
+    await user.keyboard('/events{Enter}')
+    await screen.findByRole('listbox', { name: '事件' })
+    await user.click(composer)
+    await user.keyboard('/')
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /^events/ })).toBeInTheDocument()
+    })
+    expect(screen.getByRole('option', { name: /^events/ })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('option', { name: /^conversation/ })).toHaveAttribute('aria-disabled', 'false')
+  })
+
+  it('closes the event detail when switching back to conversation', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), { entries: sessionEntries() }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    const list = await screen.findByRole('listbox', { name: '事件' })
+    await user.click(within(list).getByRole('option', { name: /s1 prompt/ }))
+    await screen.findByLabelText('事件详情', { exact: true })
+
+    await user.click(composer)
+    await user.keyboard('/conversation{Enter}')
+    await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
+    expect(screen.queryByLabelText('事件详情', { exact: true })).not.toBeInTheDocument()
+  })
+
+  it('refreshes the selected detail by id and clears it when the id disappears', async () => {
+    const user = userEvent.setup()
+    let current = snapshot(thread({}), { entries: sessionEntries() })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async () => current)
+    const { queryClient } = renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    const list = await screen.findByRole('listbox', { name: '事件' })
+    await user.click(within(list).getByRole('option', { name: /s1 prompt/ }))
+    await screen.findByLabelText('事件详情', { exact: true })
+    const payloadBefore = document.querySelector<HTMLElement>('.thread-event-detail-payload')
+    expect(payloadBefore?.textContent).toContain('s1 prompt')
+
+    // 新 snapshot：同 id 的 USER 条目内容更新（events 数组引用变化、id 仍在）。
+    current = snapshot(thread({}), {
+      entries: [
+        sessionEntries()[0]!,
+        { ...sessionEntries()[1]!, payloadJson: JSON.stringify({
+          message: { role: 'USER', contents: [{ type: 'text', text: 's1 prompt v2' }] },
+        }) },
+        sessionEntries()[2]!,
+      ],
+    })
+    await act(async () => {
+      queryClient.invalidateQueries({ queryKey: ['threads', 'snapshot', 't1'] })
+    })
+    await waitFor(() => {
+      const payload = document.querySelector<HTMLElement>('.thread-event-detail-payload')
+      expect(payload?.textContent).toContain('s1 prompt v2')
+    })
+
+    // 新 snapshot：选中 id 消失（USER 条目被移除）→ detail 清空。
+    current = snapshot(thread({}), {
+      entries: [sessionEntries()[0]!, sessionEntries()[2]!],
+    })
+    await act(async () => {
+      queryClient.invalidateQueries({ queryKey: ['threads', 'snapshot', 't1'] })
+    })
+    await waitFor(() =>
+      expect(screen.queryByLabelText('事件详情', { exact: true })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('restores independent scroll positions per main view and clears them on Thread rebind', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), { entries: sessionEntries() }),
+    )
+    // 真实 DOM 属性：jsdom 不计算布局，用 getter spy 提供可滚动的容器尺寸。
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    scrollHeightSpy.mockReturnValue(600)
+    clientHeightSpy.mockReturnValue(200)
+    try {
+      const view = renderBoundPane()
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      const dialogue = () => document.querySelector<HTMLElement>('.thread-dialogue')!
+      const eventsList = () => document.querySelector<HTMLElement>('.thread-events')!
+
+      // conversation 首次进入贴底（600）；用户上滑到 100。
+      await waitFor(() => expect(dialogue().scrollTop).toBe(600))
+      dialogue().scrollTop = 100
+
+      // 切到 events（首次进入贴底 600）；用户上滑到 120。
+      await user.click(composer)
+      await user.keyboard('/events{Enter}')
+      await screen.findByRole('listbox', { name: '事件' })
+      await waitFor(() => expect(eventsList().scrollTop).toBe(600))
+      eventsList().scrollTop = 120
+
+      // 切回 conversation：恢复 100（不是贴底）。
+      await user.click(composer)
+      await user.keyboard('/conversation{Enter}')
+      await waitFor(() => expect(dialogue().scrollTop).toBe(100))
+
+      // 再进 events：恢复 120（不是贴底）。
+      await user.click(composer)
+      await user.keyboard('/events{Enter}')
+      await screen.findByRole('listbox', { name: '事件' })
+      await waitFor(() => expect(eventsList().scrollTop).toBe(120))
+
+      // Thread 重绑：两个位置清零；再进 events 恢复为首次进入贴底。
+      view.rerender('t2')
+      await waitFor(() => expect(dialogue().scrollTop).toBe(600))
+      await user.click(composer)
+      await user.keyboard('/events{Enter}')
+      await screen.findByRole('listbox', { name: '事件' })
+      await waitFor(() => expect(eventsList().scrollTop).toBe(600))
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
 })

@@ -11,6 +11,7 @@ import {
 } from '@/features/ai/composer/composer-parts'
 import {
   filterThreadCommands,
+  threadCommandsForActiveView,
   threadCommandsForScene,
   THREAD_COMMANDS,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
@@ -47,7 +48,7 @@ describe('ThreadComposer and commands', () => {
     ])
     // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
     expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
-    const blank = threadCommandsForScene('blank')
+    const blank = threadCommandsForScene('chat-blank')
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/events`/`/conversation`
     // 不可用，而 `/thread`（仅切换面板）与 `/shortcuts` 保持可用。
@@ -63,7 +64,7 @@ describe('ThreadComposer and commands', () => {
     expect(blank.find((c) => c.id === 'tree')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'events')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'conversation')?.disabled).toBe(true)
-    expect(threadCommandsForScene('bound').every((c) => !c.disabled)).toBe(true)
+    expect(threadCommandsForScene('chat-bound').every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
     expect(filterThreadCommands('tree')[0]?.id).toBe('tree')
@@ -73,6 +74,43 @@ describe('ThreadComposer and commands', () => {
     expect(filterThreadCommands('', blank).map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     expect(firstEnabledCommandIndex(blank)).toBe(0)
     expect(filterThreadCommands('missing')).toEqual([])
+  })
+
+  it('projects canvas-bound to only the capabilities the controller supports', () => {
+    // Canvas Bound 的 controller 只支持 stop；upload 由 ThreadComposer 处理文件选择。
+    // agent/environment/yolo/tree/new/thread 绝不投影为可用，避免传给只支持 stop 的 controller。
+    const canvasBound = threadCommandsForScene('canvas-bound')
+    expect(canvasBound.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
+      'stop',
+      'upload',
+      'events',
+      'conversation',
+      'shortcuts',
+    ])
+    for (const id of ['thread', 'agent', 'environment', 'yolo', 'tree', 'new']) {
+      expect(canvasBound.find((c) => c.id === id)?.disabled).toBe(true)
+    }
+    // canvas-blank 仍支持 agent/environment/yolo/upload/shortcuts，但没有 /thread。
+    const canvasBlank = threadCommandsForScene('canvas-blank')
+    expect(canvasBlank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
+      'agent',
+      'environment',
+      'yolo',
+      'upload',
+      'shortcuts',
+    ])
+  })
+
+  it('disables the already-active main-view command while keeping it visible', () => {
+    const bound = threadCommandsForScene('chat-bound')
+    const withEvents = threadCommandsForActiveView(bound, 'events')
+    expect(withEvents.find((c) => c.id === 'events')?.disabled).toBe(true)
+    expect(withEvents.find((c) => c.id === 'events')?.disabledReasonKey).toBe('ai.runtime.command.activeView')
+    expect(withEvents.find((c) => c.id === 'conversation')?.disabled).toBe(false)
+    expect(withEvents.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
+    const withConversation = threadCommandsForActiveView(bound, 'conversation')
+    expect(withConversation.find((c) => c.id === 'conversation')?.disabled).toBe(true)
+    expect(withConversation.find((c) => c.id === 'events')?.disabled).toBe(false)
   })
 
   it('uses slash as a text-only shortcut without consuming attachments', () => {

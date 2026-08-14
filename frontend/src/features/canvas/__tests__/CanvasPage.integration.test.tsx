@@ -1365,6 +1365,98 @@ describe('CanvasPage real list/create/load integration', () => {
     })
   })
 
+  it('defers every canvas global shortcut to a blocking overlay', async () => {
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [{
+          id: RESOURCE_ID,
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_A,
+          resourceIndex: 0,
+          blobId: '00000000-0000-4000-8000-0000000000bb',
+          name: 'image.png',
+          textContent: null,
+          kind: 'IMAGE',
+          mediaType: 'image/png',
+          sizeBytes: '3',
+          width: null,
+          height: null,
+          durationMs: null,
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }, {
+        id: NODE_B,
+        canvasId: CANVAS_ID,
+        name: 'Generator',
+        transform: { x: 400, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: {
+          modelKey: 'fake-image',
+          configJson: JSON.stringify({
+            prompt: { segments: [{ type: 'TEXT', text: 'generate' }] },
+            parameters: { ratio: 'AUTO' },
+          }),
+        },
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+    const flow = flowHarness.current as {
+      onConnect: (connection: { source: string; target: string }) => void
+    }
+    act(() => flow.onConnect({ source: NODE_A, target: NODE_B }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'CREATE_LINK'
+    ))).toBe(true))
+    act(() => flow.onSelectionChange({
+      nodes: [],
+      edges: [{ source: NODE_A, target: NODE_B }],
+    }))
+
+    const overlay = document.createElement('div')
+    overlay.className = 'modal-backdrop'
+    document.body.appendChild(overlay)
+    try {
+      const before = commandBodies.filter((body) => (
+        body.commands[0]?.type === 'DELETE_LINK'
+      )).length
+      // blocking overlay 存在时所有全局快捷键让路：Delete、T、Escape 全部不生效。
+      fireEvent.keyDown(window, { key: 'Delete' })
+      fireEvent.keyDown(window, { key: 't' })
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(commandBodies.filter((body) => (
+        body.commands[0]?.type === 'DELETE_LINK'
+      ))).toHaveLength(before)
+      expect(commandBodies.some((body) => (
+        body.commands[0]?.type === 'CREATE_RESOURCE_NODE'
+      ))).toBe(false)
+      // Escape 被让路：link 选择未被清空（overlay 移除后 Delete 仍能删除该 link）。
+      expect(commandBodies.filter((body) => (
+        body.commands[0]?.type === 'DELETE_LINK'
+      ))).toHaveLength(before)
+    } finally {
+      overlay.remove()
+    }
+    fireEvent.keyDown(window, { key: 'Delete' })
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'DELETE_LINK'
+    ))).toBe(true))
+  })
+
   it('renames, ungroups, and deletes a group from its right-click menu', async () => {
     const { commandBodies, snapshots } = installBackend()
     const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
