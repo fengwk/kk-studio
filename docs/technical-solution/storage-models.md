@@ -47,7 +47,7 @@ Chat 设置不复制到 Thread。Thread 的完整 BranchSettings 来自 ROOT/TUR
 | `harness_entry` | `id uuid`、session/parent、entry_type、payload、时间；每 Session 唯一 ROOT |
 | `harness_thread` | `id uuid`、非空 head、YOLO、next sequence、revision、时间 |
 | `harness_thread_command` | PK `(thread_id, sequence)`；`client_command_id uuid`、`request_hash`、payload 与消费/取消事实 |
-| `harness_model_invocation` | `id uuid`、冻结 request、status、attempt、checkpoint、terminal result/error |
+| `harness_model_invocation` | `id uuid`、冻结 request、status、attempt、checkpoint、append-only `failed_attempts`、terminal result/error |
 | `harness_tool_invocation` | `id uuid`、ordinal、冻结 request、approval、result/effects/error |
 | `harness_work` | PK `(target_type, target_id uuid)`；available_at、wake_version、lease |
 
@@ -57,9 +57,11 @@ Chat 设置不复制到 Thread。Thread 的完整 BranchSettings 来自 ROOT/TUR
 Harness EntryType：
 
 ```text
-ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR,
-ASSISTANT_ABORTED, COMPACTION, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, MODEL_ATTEMPT_FAILURE, CUSTOM_MESSAGE,
+ASSISTANT_ERROR, ASSISTANT_ABORTED, COMPACTION, TURN_END
 ```
+
+普通 Model 的自动 retry 只把 `TRANSIENT` 失败按连续 attempt 前缀写入 `harness_model_invocation.failed_attempts`；active snapshot 从该列投影。终态/Stop 时这些事实按序物化为 `MODEL_ATTEMPT_FAILURE` Entry，并在结果 Entry attach 时从 Invocation 清空；失败 attempt Entry 不参与 Provider context，compaction 不物化该审计。
 
 ThreadCommandType：
 

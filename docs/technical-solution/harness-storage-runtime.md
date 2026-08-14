@@ -14,7 +14,7 @@ Redis Streams
 
 PostgreSQL 是唯一 durable truth。Redis 重启或清空只会造成流式 overlay 缺口；客户端重新读取 Thread snapshot 即可恢复权威状态。
 
-权威 DDL 有两份 byte-identical 的副本：`core` 的 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)（含七张表）与 `harness-runtime-spring` 的 [`harness-runtime-schema.sql`](../../harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql)；`CoreHarnessArchitectureTest` 逐字节校验两者一致。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable 实体 id 由注入的 `Supplier<UUID>` 生成（生产：`UUID::randomUUID`），API 中编码为 canonical UUID string；`sequence`/`revision` 仍是 bigint，编码为十进制字符串。
+权威 DDL 有两份 byte-identical 的副本：`core` 的 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)（含七张表）与 `harness-runtime-spring` 的 [`harness-runtime-schema.sql`](../../harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql)；`CoreHarnessArchitectureTest` 逐字节校验两者一致。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable 实体 id 由注入的 `Supplier<UUID>` 生成（生产：`UUID::randomUUID`），API 中编码为 canonical UUID string；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal string，数据库仍保留 bigint。
 
 ## 2. `harness_session` / `harness_entry`
 
@@ -26,8 +26,8 @@ PostgreSQL 是唯一 durable truth。Redis 重启或清空只会造成流式 ove
 - 允许的 `entry_type`（check 约束）：
 
 ```text
-ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED,
-COMPACTION, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, MODEL_ATTEMPT_FAILURE, CUSTOM_MESSAGE,
+ASSISTANT_ERROR, ASSISTANT_ABORTED, COMPACTION, TURN_END
 ```
 
 - payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码；root-to-head path 由 recursive CTE 读取。
@@ -72,8 +72,11 @@ fresh enqueue 事务：锁 Thread → 双 CAS（head/sequence）→ 可选 SET_E
 | `request` | 完整冻结 `ModelInvocationRequest` JSON（route/provider/tools/skills/subagentBindings/YOLO/contextWindow/可空 compaction metadata；Provider/Model 只按名称引用） |
 | `status` | READY/DISPATCHING/RUNNING/SUCCEEDED/FAILED/CANCELLED/UNKNOWN |
 | `attempt` | `>= 0` |
-| `stream_checkpoint` | attempt-local 单调 checkpoint；新 attempt 清空，防止跨 attempt partial 混入 |
+| `stream_checkpoint` | 当前 attempt 的单调安全 checkpoint；text/thinking 归一化为非 null，至少一侧非空且纯空白合法；retry 时归档后清空，防止跨 attempt partial 混入 |
+| `failed_attempts` | `NOT NULL` JSON array（可为空数组）；由 retry policy 驱动的 append-only `TRANSIENT` 失败前缀，无条数上限 |
 | `result` / `error` / `result_entry_id` | `result` 与 `error` 互斥；`result_entry_id` 在**本表内**唯一（partial unique index），terminal 且已挂 Entry 不再 apply |
+
+`failed_attempts` 的每项固定为 `{attempt,sequence,text,thinking,error,failedAt,retryAt}`：attempt 必须连续 `1..N`、不超过 invocation attempt，时间不得倒退，`retryAt >= failedAt`。`RUNNING -> READY` 每次只追加当前 attempt 一项并清除 checkpoint；active snapshot 直接投影该数组。最终 apply/Stop 在同一 EntryPath 上先按序写 `MODEL_ATTEMPT_FAILURE`（`Entry.createdAt=failedAt`），再写唯一 Assistant 结果；挂 `result_entry_id` 时 invocation 同步清空已物化的 checkpoint/failed_attempts。Compaction invocation 不物化这类 UI 审计 Entry。
 
 ### `harness_tool_invocation`
 
@@ -145,6 +148,7 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 
 - 每个 `HarnessRuntime` 方法恰好一个事务；snapshot 单事务一致读取。
 - Tool success 的 `result + effects + SUCCEEDED` 由同一次 `updateToolInvocations` 原子提交；effects 校验必须早于 Resource externalize 与该 durable update。
+- Model terminal attach 的 `updateModelInvocation` 必须通过 `ModelAttemptMaterialization`：结果 path 精确包含全部且仅包含该 invocation 的失败 attempt，payload/error/createdAt/retryAt 与 stored `failed_attempts` 逐项一致；terminal `ASSISTANT_ERROR.attempt` 或 direct Stop barrier 必须与 stored terminal/checkpoint 精确一致。InMemory 与 PostgreSQL Store 共用同一校验器。
 - Tool terminal apply 只经 `ToolOutcomeAppender`：按 effects 顺序追加 CUSTOM，再追加 Tool Result、推进 head 并把 `result_entry_id` 指向 Tool Result；正常 apply 与 Stop 共用该实现。
 - Stop 与未决 Approval 决策把 mutation 时间戳 clamp 到最新锁定 durable fact，容忍本地时钟回拨与节点间 skew；对应 Work
   request/lease 仍使用未抬升的本地调度时钟。
@@ -158,7 +162,9 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 | Redis Stream 丢失 | 客户端重新获取 snapshot |
 | Runtime 进程退出 | 已提交 Entry/Command/Invocation/Work 保留；lease 到期后重新 claim |
 | Provider/Tool 结果不确定 | Invocation 收敛 `UNKNOWN`，不重放不确定副作用 |
+| Provider `TRANSIENT` 且 retry budget 允许 | 原子追加当前 attempt partial/error 到 `failed_attempts`，清 checkpoint，转 READY 并按 `retry_at` reschedule；不改 frozen Provider request |
 | Provider context overflow | 写 FAILED turn；最多启动一次 durable OVERFLOW compaction + immediate CONTINUATION，retry 再 overflow 时停止 |
+| terminal/Stop 物化失败 attempt 不一致 | Store 拒绝整个 attach 事务；不得清空 invocation audit 或推进 head |
 | terminal callback 重复 | invocation token/attempt/terminal CAS；terminal result/effects 不可变 |
 | 插件 sibling stale snapshot | materialize 时按 `(pluginId, customType)` 的 frozen READ/WRITE 声明机械写入 `SIBLING_STATE_CONFLICT` FAILED，不 dispatch |
 | Stop/head 与 terminal 并发 | revision CAS 与 claim ownership fencing |

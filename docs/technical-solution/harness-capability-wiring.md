@@ -59,7 +59,7 @@ public interface ProviderFactory {
 
 `ProviderFactories` 按 ProviderType 建立不可变索引，重复注册在构造阶段失败。Provider 资源就是当前 `agent_provider` 行：每次 Model attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前行，以当前 providerType/baseUrl/credential/config 选择 `ProviderFactory` 并构造短生命周期 attempt-local adapter；Provider 更新后下一 attempt 立即使用新值，当前行缺失时确定性 not found，同名重建后解析到新行。credential 只在写入 DTO 反序列化与 attempt 时 adapter 构造使用，不进入 response 或 invocation JSON。
 
-`CoreModelGateway` 是 `ModelGateway` 端口适配：admission 两阶段激活（`start` → Processor `markRunning` 后 `activate`），回调桥是 serialized FIFO 单 drainer 状态机，terminal-once；`Busy` 重试、`Rejected` 确定性终结、`Indeterminate` 收敛 `UNKNOWN`。
+`CoreModelGateway` 是 `ModelGateway` 端口适配：admission 两阶段激活（`start` → Processor `markRunning` 后 `activate`），回调桥是 serialized FIFO 单 drainer 状态机，terminal-once；`Busy` 重试、`Rejected` 确定性终结、`Indeterminate` 收敛 `UNKNOWN`。已启动 attempt 的 retryable `TRANSIENT` 失败由 Runtime 保存完整 partial/error/retryAt 后重放冻结 request，不由 Gateway 拼接历史输出。
 
 ## 3. ToolCatalog
 
@@ -115,8 +115,9 @@ candidate path 最近 TURN_START 的 BranchSettings
   -> CurrentEnvironmentContext（单一 instant；capabilities metadata 或服务端 Clock zone）
   -> skills（Agent config；最新选中 Environment 精确提供 + 显式 load_skill）
   -> subagents（Agent config allowlist；activeTools 含 task + depth < maxDepth 才绑定）
-  -> 插件 ContextProjector(candidate BranchView)
   -> AgentPromptComposer（Agent 正文 -> 始终存在的 current_environment -> available_skills -> available_subagents）
+  -> 插件 ContextProjector(candidate BranchView)
+  -> compaction-aware 白名单历史投影（MESSAGE / CUSTOM_MESSAGE / ASSISTANT_ABORTED；失败 attempt/error 不投影）
   -> ProviderFactory（按当前行 providerType 派生 cache policy）
   -> 冻结 ModelInvocationRequest（Agent/Model 修改下一 turn 生效；含 subagentBindings）
 ```
@@ -149,7 +150,7 @@ Compaction resolver 不读取 Agent prompt、plugin projector、Environment live
 - `SubagentBinding(name, description)`：canonical 短名 + 可空描述（≤512 字符）的 allowlist 快照；`task` 的 ToolBinding 冻结在 `toolBindings`，allowlist 冻结在 `subagentBindings`，二者在同一个 request 中配对；
 - `contextWindow` 是冻结正 int；`compaction` 非 null 时 provider tools、tool bindings、skill bindings、subagent bindings 必须全空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix；
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 类型与 cache capability 由 attempt 时当前 `ProviderFactory` 解析；
-- retry 重放同一 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择；
+- retry 重放同一 request；当前失败 attempt 的 partial/thinking/error 不修改冻结 request，后续 turn 的白名单历史投影同样排除 `MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR`；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择；
 - attempt 时 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造短生命周期 Provider，并把持久 cache control 按当前 factory capability 规范化：不兼容能力降级为 `none()`，兼容时按当前 capability 重求形态与断点。
 
 ## 6. Interceptor chain

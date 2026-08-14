@@ -37,7 +37,7 @@ export type EntryType =
   | 'COMPACTION'
   | 'TURN_END'
 
-/** Session Entry 查询投影；id 均为严格的正十进制数字字符串。 */
+/** Session Entry 查询投影；id 均为 canonical UUID string。 */
 export interface HarnessSessionEntryDTO {
   entryId: string
   sessionId: string
@@ -48,7 +48,7 @@ export interface HarnessSessionEntryDTO {
 }
 
 /**
- * HarnessThread 查询投影；id 均为严格的正十进制数字字符串，revision 是持久快照游标。
+ * HarnessThread 查询投影；id 均为 canonical UUID string，revision 是持久快照游标。
  *
  * status/processing 是派生的展示字段（只有 IDLE 时 processing 才为 false）；
  * branchSettings 是 head Entry branch 的完整 settings 快照。
@@ -169,7 +169,7 @@ export interface HarnessToolApprovalDTO {
 }
 
 /**
- * ModelInvocation 查询投影；id 均为严格的正十进制数字字符串。
+ * ModelInvocation 查询投影；id 均为 canonical UUID string。
  * streamCheckpointJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段
  * 非 null；resultEntryId 是应用 TURN_END 后的结果 Entry。
  */
@@ -189,7 +189,7 @@ export interface ModelInvocationDTO {
 }
 
 /**
- * ToolInvocation 查询投影；id 均为严格的正十进制数字字符串。
+ * ToolInvocation 查询投影；id 均为 canonical UUID string。
  * approvalJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段
  * 非 null；environmentName 是可空的规范小写路由名称。
  */
@@ -234,7 +234,8 @@ export interface ModelAttemptFailureDTO {
 /**
  * 一致的 Thread 快照投影；所有字段都来自同一个数据库快照。
  * modelInvocation 是当前 Turn 的活动 model invocation（无则为 null）；
- * toolInvocations 是它的 tool 兄弟调用。
+ * toolInvocations 是它的 tool 兄弟调用；modelAttemptFailures 只包含当前 Model context
+ * 尚未物化的失败 attempt。
  */
 export interface HarnessThreadSnapshotDTO {
   revision: string

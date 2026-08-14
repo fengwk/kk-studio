@@ -116,6 +116,7 @@ Compaction summarizer 走独立最小请求路径，不调用 `AgentPromptCompos
 `harness_model_invocation.request` 保存 exact 冻结请求。`ModelProcessor` 两阶段激活后（每次 attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造 attempt-local Provider，见 [harness-capability-wiring.md](harness-capability-wiring.md)）：
 
 - `MODEL_DELTA` 节流持久化 `stream_checkpoint`（attempt-local），**commit 后**才 best-effort 发布 Redis realtime delta；
+- retryable `TRANSIENT` 失败把当前 accumulator 的 text/thinking、最后已提交 sequence、error 与 `failedAt/retryAt` 追加到 Invocation `failedAttempts`，清除 checkpoint 并按 retryAt reschedule；立即 retry 继续使用完全相同的 frozen request；
 - terminal `resultJson` 是 canonical `ProviderResponse`：
 
 ```text
@@ -123,6 +124,7 @@ Compaction summarizer 走独立最小请求路径，不调用 `AgentPromptCompos
 ```
 
 - `usage`（`ModelUsage` 七项 token 分类）与 `cost`（`ModelCost` 七项金额）在 terminal 冻结进 `resultJson`，apply 时由 `HistoryPayloadMapper` 快照进 ASSISTANT Message Entry 的 `AssistantMessageMetadata`（stopReason + usage + cost）；
+- 最终 apply/Stop 先按 attempt 顺序把 `failedAttempts` 物化为 `MODEL_ATTEMPT_FAILURE`，再写 Assistant/AssistantError/AssistantAborted 与 TURN_END；terminal `ASSISTANT_ERROR` 把 error 与当前 attempt partial 分离。两类失败审计都不投影给 Provider；
 - 无 ToolCall 时追加 COMPLETED TURN_END；Provider 返回冻结 request 中不可见的 Tool 时终结为可恢复错误（`ASSISTANT_ERROR` 含请求名称与可用 Tool 名称），不物化 ToolInvocation。
 
 **无 usage ledger**：usage/cost 只冻结在 Invocation result 与 Assistant Entry metadata 中，不存在 usage 表、聚合表或查询 API。
@@ -173,10 +175,11 @@ sha256      # 可选，64 位小写 hex
 
 ## 6. 前端呈现与恢复
 
-前端先读取 Thread snapshot（entries + queuedCommands + 活跃 Invocation），再叠加：
+前端先读取 Thread snapshot（entries + queuedCommands + 活跃 Invocation + 尚未物化的 modelAttemptFailures），再叠加：
 
 ```text
 path Entries
+  + snapshot modelAttemptFailures（durable active retry audit）
   + Redis realtime text/thinking/tool partial overlay（非 durable）
   + durable terminal projection（resultJson/errorJson 无条件压过 overlay）
 ```

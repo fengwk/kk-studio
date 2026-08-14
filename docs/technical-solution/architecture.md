@@ -103,10 +103,10 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 | Chat | 保存 `agentName`、可空默认 `environmentName`、`yoloEnabled` 三个可见发送设置，以及标题、版本和时间 |
 | Pane | 浏览器 `localStorage` 中的八个固定槽位、布局、焦点和每个槽位的 `threadId` |
 | Session | 一棵 append-only Entry Tree 的边界；由 Chat-scoped Thread 创建事务产生 |
-| Entry | 对话与运行审计事实，只允许九种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
+| Entry | 对话与运行审计事实，只允许十种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，只允许七类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)） |
-| ModelInvocation | 一次冻结的 `ModelInvocationRequest`（route/provider/tools/skills/subagentBindings/YOLO/contextWindow/可空 compaction metadata）及其状态、attempt 与 terminal 事实 |
+| ModelInvocation | 一次冻结的 `ModelInvocationRequest`（route/provider/tools/skills/subagentBindings/YOLO/contextWindow/可空 compaction metadata）及其状态、attempt-local checkpoint、连续 `failedAttempts` 与 terminal 事实 |
 | ToolInvocation | 一次 ToolCall 的冻结 binding、approval、状态、结果与 `effects`；插件 provenance/access 随 binding 冻结，非空 effects 只允许出现在 `SUCCEEDED` 且 terminal immutable |
 | SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；task id/session_id 即子 ThreadId（canonical UUID） |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
@@ -133,11 +133,11 @@ Blank first send:
   -> TurnPlanBuilder 追加 TURN_START(INPUT) + Message Entries
   -> TurnResolver 读取最新 Catalog/Environment 并冻结 ModelInvocationRequest（fail closed；Agent/Model 修改下一 turn 生效）
   -> ModelProcessor / Provider（每次 attempt 按 providerName 重读当前 agent_provider 行，见 harness-capability-wiring）
-  -> Assistant Entry + 可选 ToolInvocation -> ToolProcessor -> Tool Result Entry
+  -> 失败 attempt 审计 Entry（0..N）+ Assistant Entry + 可选 ToolInvocation -> ToolProcessor -> Tool Result Entry
   -> TURN_END(COMPLETED, continueModel=true) -> continuation，直到 Model 无 ToolCall
 ```
 
-`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 create/move/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread revision、维护 Work，并发布 realtime overlay；插件 Tool terminal success 先由 `CoreToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
+`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 create/move/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread revision、维护 Work，并发布 realtime overlay。Model terminal apply 与 Stop 会先把普通 invocation 的 `failedAttempts` 物化为透明 `MODEL_ATTEMPT_FAILURE` Entry，再写唯一 Assistant 结果。插件 Tool terminal success 先由 `CoreToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
 
 ## 6. Canvas
 
