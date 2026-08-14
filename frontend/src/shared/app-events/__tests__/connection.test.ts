@@ -273,28 +273,45 @@ describe('ApplicationEventConnection', () => {
     expect(connection.getStatus()).toBe('connecting')
   })
 
-  it('never lets a synchronous socket.close() throw escape (onerror/send/disconnect)', () => {
+  it('recovers when socket.close() throws synchronously: runtime failures reconnect, disconnect stays closed', () => {
     vi.useFakeTimers()
     const { connection, harness } = openConnection()
     connection.connect()
     const socket = harness.openLatest()
-
-    // onerror 路径：close 抛错被吞掉，事件处理不逃逸。
     socket.closeThrows = true
+
+    // onerror 路径：close 同步抛错不逃逸；fence 掉当前 socket 进入 backoff 并重连。
     expect(() => socket.onerror?.()).not.toThrow()
+    expect(socket.closed).toBe(false)
+    expect(connection.getStatus()).toBe('backoff')
+    expect(vi.getTimerCount()).toBe(1)
+    vi.advanceTimersByTime(250)
+    expect(harness.sockets).toHaveLength(2)
+    const second = harness.openLatest()
 
-    // send 失败路径：send 与 close 都同步抛错，异常绝不逃逸。
-    socket.sendThrows = true
-    expect(() =>
-      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
-    ).not.toThrow()
-    expect(
-      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
-    ).toBe(false)
+    // send 失败路径：send 与 close 都同步抛错；同样进入 backoff 并重连。
+    second.sendThrows = true
+    second.closeThrows = true
+    let sent: boolean | undefined
+    expect(() => {
+      sent = connection.send({
+        version: 1,
+        type: 'subscribe',
+        resource: { kind: 'thread', id: THREAD_ID },
+      })
+    }).not.toThrow()
+    expect(sent).toBe(false)
+    expect(connection.getStatus()).toBe('backoff')
+    vi.advanceTimersByTime(250)
+    expect(harness.sockets).toHaveLength(3)
+    const third = harness.openLatest()
 
-    // disconnect 路径：close 抛错不逃逸，状态仍 closed。
+    // disconnect 路径：close 抛错不逃逸、不重连，状态直接 closed。
+    third.closeThrows = true
     expect(() => connection.disconnect()).not.toThrow()
     expect(connection.getStatus()).toBe('closed')
+    vi.advanceTimersByTime(60_000)
+    expect(harness.sockets).toHaveLength(3)
   })
 
   it('never lets stale generation callbacks affect the current connection', () => {

@@ -23,6 +23,7 @@ function resource(threadId: string) {
 interface RealtimeProps {
   threadId?: string
   revision?: string
+  enabled?: boolean
   invocation?: ModelInvocationDTO | null
   invocations?: ToolInvocationDTO[]
 }
@@ -33,7 +34,7 @@ function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
     (props: RealtimeProps) =>
       useHarnessThreadRealtime(
         props.threadId ?? THREAD_ID,
-        true,
+        props.enabled ?? true,
         props.revision ?? '42',
         props.invocation ?? modelInvocation(),
         props.invocations ?? [],
@@ -704,6 +705,61 @@ describe('useHarnessThreadRealtime', () => {
         error: true,
         errorText: 'boom',
       }),
+    )
+  })
+
+  it('keeps the snapshot-seeded terminal tool overlay across the disabled -> ready transition', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    // 稳定引用：过渡 render 期间 reconcile effect 依赖不变，不会重新播种。
+    const invocation = modelInvocation()
+    const noInvocations: ToolInvocationDTO[] = []
+    const terminal: ToolInvocationDTO = {
+      id: 'inv-tool-1',
+      modelInvocationId: 'inv-1',
+      assistantEntryId: 'entry-2',
+      ordinal: 0,
+      status: 'RUNNING',
+      attempt: 1,
+      toolCallId: 'call-1',
+      toolName: 'web-search',
+      toolVersion: null,
+      rendererKey: 'web-search',
+      toolType: 'PLATFORM',
+      environmentName: null,
+      argumentsJson: '{}',
+      approvalJson: null,
+      resultJson: JSON.stringify({
+        toolCallId: 'call-1',
+        contents: [{ type: 'text', text: 'terminal answer' }],
+        error: false,
+        details: null,
+      }),
+      errorJson: null,
+      resultEntryId: null,
+      createTime: '2026-01-01T00:00:00Z',
+      updateTime: '2026-01-01T00:00:00Z',
+    }
+
+    // disabled 期不订阅；首次 snapshot（终态 resultJson、resultEntryId null）与
+    // ready 同批到达：reconcile effect 播种终态 tool overlay，随后订阅 state 尚为
+    // null 的过渡 render 不得清空它（下一 render 依赖不变不会重新播种）。
+    const { result, rerender, sockets } = renderRealtime(client, {
+      enabled: false,
+      invocation,
+      invocations: noInvocations,
+    })
+    sockets.openLatest()
+    expect(sockets.latest?.sentMessages() ?? []).toHaveLength(0)
+
+    rerender({ enabled: true, invocation, invocations: [terminal] })
+    // 订阅初始化完成（wire 上出现 subscribe）后，snapshot-seeded overlay 仍在。
+    await waitFor(() =>
+      expect(sockets.latest?.sentMessages()).toEqual([
+        { version: 1, type: 'subscribe', resource: threadResource },
+      ]),
+    )
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('terminal answer'),
     )
   })
 })
