@@ -20,7 +20,7 @@ describe('isVisibleDialogueMessage', () => {
     expect(isVisibleDialogueMessage(message)).toBe(true)
   })
 
-  it('hides empty completed assistant rows', () => {
+  it('keeps whitespace-only completed assistant rows visible', () => {
     const message: DialogueMessage = {
       id: 'a2',
       role: 'assistant',
@@ -29,12 +29,12 @@ describe('isVisibleDialogueMessage', () => {
       createdAt: '2026-07-18T00:00:00',
       status: 'done',
     }
-    expect(isVisibleDialogueMessage(message)).toBe(false)
+    expect(isVisibleDialogueMessage(message)).toBe(true)
   })
 })
 
 describe('AssistantMessageBlock', () => {
-  it('removes provider boundary whitespace while preserving internal paragraphs', () => {
+  it('renders internal Markdown paragraphs', () => {
     render(
       <AssistantMessageBlock
         message={{
@@ -48,9 +48,27 @@ describe('AssistantMessageBlock', () => {
       />,
     )
 
-    // Markdown 将空行拆成段落；外层 trim 去掉边界空白，段内内容仍在
+    // Markdown 将空行拆成独立段落。
     expect(screen.getByText('第一段')).toBeInTheDocument()
     expect(screen.getByText('第二段')).toBeInTheDocument()
+  })
+
+  it('keeps whitespace-only provider text in the copyable assistant shell', () => {
+    const { container } = render(
+      <AssistantMessageBlock
+        message={{
+          id: 'a2',
+          role: 'assistant',
+          subjectEntryId: '2',
+          text: '  ',
+          createdAt: '2026-07-18T00:00:00',
+          status: 'done',
+        }}
+      />,
+    )
+
+    expect(container.querySelector('.thread-assistant-shell')).toBeInTheDocument()
+    expect(container.querySelector('.thread-assistant-copy')).toBeInTheDocument()
   })
 })
 

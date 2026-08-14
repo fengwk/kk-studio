@@ -13,8 +13,8 @@ export function isVisibleDialogueMessage(message: DialogueMessage): boolean {
   if (message.status === 'error' || message.status === 'streaming') {
     return true
   }
-  if (message.text.trim().length > 0) {
+  if (message.text.length > 0) {
     return true
   }
-  return Boolean(message.thinking?.trim())
+  return Boolean(message.thinking && message.thinking.length > 0)
 }
