@@ -6,7 +6,11 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
 import java.util.Objects;
 import java.util.Set;
 
-/** Platform 与 Daemon 间每个 JSON 消息的版本化 envelope。 */
+/**
+ * Platform 与 Daemon 间每个 JSON 消息的版本化
+ * envelope。目录控制面（LIST_DIRECTORY/DIRECTORY_LISTED/DIRECTORY_LIST_FAILED）不属于 invocation：以 payload
+ * {@code requestId} 关联且 envelope {@code invocationId} 必须为 null。
+ */
 public record DaemonEnvelope(
     int protocolVersion,
     DaemonMessageType messageType,
@@ -26,10 +30,7 @@ public record DaemonEnvelope(
           DaemonMessageType.CANCELLED,
           DaemonMessageType.LOAD_SKILL,
           DaemonMessageType.SKILL_LOADED,
-          DaemonMessageType.SKILL_LOAD_FAILED,
-          DaemonMessageType.LIST_DIRECTORY,
-          DaemonMessageType.DIRECTORY_LISTED,
-          DaemonMessageType.DIRECTORY_LIST_FAILED);
+          DaemonMessageType.SKILL_LOAD_FAILED);
 
   public DaemonEnvelope {
     if (protocolVersion <= 0) {

@@ -46,8 +46,9 @@ public final class EnvironmentDirectoryBrowser {
     }
   }
 
-  /** 浏览 {@code path}（{@code '.'} 表示 root）的单层目录列表。 */
-  public DaemonDirectoryCodec.DirectoryListed list(String path) throws IOException {
+  /** 浏览 {@code requestId}/{@code path}（{@code '.'} 表示 root）的单层目录列表；{@code requestId} 是请求回显。 */
+  public DaemonDirectoryCodec.DirectoryListed list(String requestId, String path)
+      throws IOException {
     DaemonDirectoryCodec.requireCanonicalRelativePath(path);
     Path canonical = canonicalDirectory(path);
     List<Path> children = listChildren(canonical);
@@ -60,7 +61,13 @@ public final class EnvironmentDirectoryBrowser {
       entries.add(new DaemonDirectoryCodec.DirectoryEntry(name, childWirePath(path, name)));
     }
     return new DaemonDirectoryCodec.DirectoryListed(
-        path, canonical.toString(), parentWirePath(path), truncated, gitBranch(canonical), entries);
+        requestId,
+        path,
+        canonical.toString(),
+        parentWirePath(path),
+        truncated,
+        gitBranch(canonical),
+        entries);
   }
 
   private Path canonicalDirectory(String path) throws IOException {
