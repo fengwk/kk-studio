@@ -132,25 +132,25 @@ class EventFrameCodecTest {
   }
 
   @Test
-  void encodesSubscribedFrameWithCanonicalCursor() {
+  void encodesSubscribedFrameWithVersionAndCanonicalCursor() {
     assertEquals(
-        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"cursor\":\"7\"}",
         CODEC.subscribed(THREAD_KEY, 7L));
   }
 
   @Test
-  void encodesEventFramesWithNameField() {
+  void encodesEventFramesWithUnifiedNameAndDataShape() {
     assertEquals(
-        "{\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
-            + "\"},\"name\":\"revision\",\"revision\":\"8\"}",
+            + "\"},\"name\":\"revision\",\"cursor\":\"8\",\"data\":{\"revision\":\"8\"}}",
         CODEC.event(THREAD_KEY, new Signal.Revision("8")));
     assertEquals(
-        "{\"type\":\"event\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
             + CANVAS
-            + "\"},\"name\":\"version\",\"version\":\"3\"}",
+            + "\"},\"name\":\"version\",\"cursor\":\"3\",\"data\":{\"version\":\"3\"}}",
         CODEC.event(CANVAS_KEY, new Signal.Version(3L)));
 
     RealtimeEvent.ModelDelta delta =
@@ -162,9 +162,9 @@ class EventFrameCodecTest {
             new ProviderStreamEvent.TextDelta("hi"),
             Instant.parse("2026-08-05T00:00:00Z"));
     assertEquals(
-        "{\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
-            + "\"},\"name\":\"realtime\",\"payload\":"
+            + "\"},\"name\":\"realtime\",\"data\":"
             + new RealtimeEventJsonCodec().encode(delta)
             + "}",
         CODEC.event(THREAD_KEY, new Signal.Realtime(delta)));
@@ -173,8 +173,23 @@ class EventFrameCodecTest {
   @Test
   void encodesResyncAndErrorFrames() {
     assertEquals(
-        "{\"type\":\"resync\",\"resource\":{\"kind\":\"canvas\",\"id\":\"" + CANVAS + "\"}}",
+        "{\"version\":1,\"type\":\"resync\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+            + CANVAS
+            + "\"}}",
         CODEC.resync(CANVAS_KEY));
-    assertEquals("{\"type\":\"error\",\"message\":\"boom\"}", CODEC.error("boom"));
+    assertEquals(
+        "{\"version\":1,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"boom\"}",
+        CODEC.error(EventFrameCodec.INVALID_FRAME, "boom"));
+    assertEquals(
+        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"missing\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            + THREAD
+            + "\"}}",
+        CODEC.error(EventFrameCodec.RESOURCE_NOT_FOUND, "missing", THREAD_KEY));
+  }
+
+  @Test
+  void resyncSignalIsNotAnEventFrame() {
+    assertThrows(
+        IllegalArgumentException.class, () -> CODEC.event(THREAD_KEY, new Signal.Resync()));
   }
 }

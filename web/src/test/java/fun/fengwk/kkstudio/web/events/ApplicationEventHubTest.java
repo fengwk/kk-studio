@@ -25,8 +25,13 @@ import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Subscription;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -245,6 +250,94 @@ class ApplicationEventHubTest {
     hub.subscribe(CANVAS_KEY, sink());
     hub.close();
     first.close(); // 关闭后释放是幂等的
+  }
+
+  @Test
+  void signalsArrivingDuringEstablishAreBufferedAndDeliveredAfterCursorFilter() {
+    // establish 期间（第一个订阅者加入前）上游就回调：durable 事件（含 stale）、realtime resync。
+    when(revisionSource.subscribe(any(), any()))
+        .thenAnswer(
+            inv -> {
+              Consumer<ThreadRevisionEventSource.Event> consumer = inv.getArgument(1);
+              consumer.accept(new ThreadRevisionEventSource.Event("4", false)); // <= ack cursor，丢弃
+              consumer.accept(new ThreadRevisionEventSource.Event("6", false)); // > ack cursor，保留
+              return new SourceSubscribed(5L, () -> {});
+            });
+    when(realtimeSource.subscribe(any(), any(), any()))
+        .thenAnswer(
+            inv -> {
+              Runnable resync = inv.getArgument(2);
+              resync.run(); // 断连 resync 早于订阅者加入
+              return (AutoCloseable) () -> {};
+            });
+
+    List<Signal> received = new ArrayList<>();
+    Subscription subscription = hub.subscribe(THREAD_KEY, received::add);
+    assertEquals(5L, subscription.cursor());
+    subscription.activate();
+
+    // early 信号先按 ack cursor 过滤（4 被丢弃），再缓冲到激活后投递。
+    assertEquals(List.of(new Signal.Revision("6"), new Signal.Resync()), received);
+    subscription.close();
+  }
+
+  @Test
+  void concurrentSubscribeReleaseAndFanoutNeverLoseSignalsForLiveSubscribers() throws Exception {
+    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+        new AtomicReference<>();
+    when(revisionSource.subscribe(any(), any()))
+        .thenAnswer(
+            inv -> {
+              revisionConsumer.set(inv.getArgument(1));
+              return new SourceSubscribed(0L, () -> {});
+            });
+    when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});
+
+    List<Signal> live = Collections.synchronizedList(new ArrayList<>());
+    Subscription keep = hub.subscribe(THREAD_KEY, live::add);
+    keep.activate();
+
+    int fanouts = 500;
+    int churners = 4;
+    ExecutorService executor = Executors.newFixedThreadPool(churners);
+    CountDownLatch start = new CountDownLatch(1);
+    CountDownLatch done = new CountDownLatch(churners);
+    try {
+      for (int t = 0; t < churners; t++) {
+        executor.submit(
+            () -> {
+              try {
+                start.await();
+                for (int i = 0; i < 250; i++) {
+                  Subscription subscription = hub.subscribe(THREAD_KEY, sink());
+                  subscription.close();
+                }
+              } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+              } finally {
+                done.countDown();
+              }
+            });
+      }
+      start.countDown();
+      for (int i = 1; i <= fanouts; i++) {
+        revisionConsumer
+            .get()
+            .accept(new ThreadRevisionEventSource.Event(Integer.toString(i), false));
+      }
+      done.await(10, TimeUnit.SECONDS);
+    } finally {
+      executor.shutdownNow();
+    }
+
+    // fanout 与 release 都在资源锁内互斥：存活的订阅者在每次 fanout 时必然在集合中，一个信号都不丢。
+    assertEquals(fanouts, live.size(), "live subscriber must receive every fanout signal");
+    for (int i = 0; i < fanouts; i++) {
+      assertTrue(
+          live.get(i) instanceof Signal.Revision,
+          "signals must arrive in fanout order, got: " + live.get(i));
+    }
+    keep.close();
   }
 
   private static Sink sink() {

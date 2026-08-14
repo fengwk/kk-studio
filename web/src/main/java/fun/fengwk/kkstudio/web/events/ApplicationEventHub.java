@@ -4,7 +4,9 @@ import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventSource;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -102,6 +104,11 @@ final class ApplicationEventHub implements AutoCloseable {
       }
       LocalSubscription subscription = new LocalSubscription(this, resource, state.cursor, sink);
       state.subscribers.add(subscription);
+      // 回放建立上游期间暂存的信号（establish 回调早于第一个订阅者加入）；deliver 按 cursor 过滤并缓冲到激活。
+      for (Signal signal : state.early) {
+        subscription.deliver(signal);
+      }
+      state.early.clear();
       return subscription;
     }
   }
@@ -158,10 +165,19 @@ final class ApplicationEventHub implements AutoCloseable {
     }
   }
 
-  /** 在资源锁内 fan-out：与「读 cursor + 注册订阅者」互斥，保证 ack 后无注册竞态窗口。 */
+  /**
+   * 在资源锁内 fan-out：与「读 cursor + 注册订阅者」互斥，保证 ack 后无注册竞态窗口。 没有订阅者时（establish 上游期间的回调可能先于第一个
+   * LocalSubscription 加入）信号暂存到 {@link ResourceState#early}，由随后加入的订阅者按 cursor 过滤回放。
+   */
   private void fanout(ResourceState state, Signal signal) {
-    for (LocalSubscription subscription : state.subscribers) {
-      subscription.deliver(signal);
+    synchronized (state) {
+      if (state.subscribers.isEmpty()) {
+        state.early.add(signal);
+        return;
+      }
+      for (LocalSubscription subscription : state.subscribers) {
+        subscription.deliver(signal);
+      }
     }
   }
 
@@ -198,6 +214,7 @@ final class ApplicationEventHub implements AutoCloseable {
   private static final class ResourceState {
     private final ResourceKey key;
     private final Set<LocalSubscription> subscribers = new HashSet<>();
+    private final List<Signal> early = new ArrayList<>();
     private AutoCloseable revisionHandle;
     private AutoCloseable realtimeHandle;
     private AutoCloseable versionHandle;
