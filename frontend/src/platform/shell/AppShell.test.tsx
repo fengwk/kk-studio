@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { AppShell } from '@/platform/shell/AppShell'
+import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import { setLocale } from '@/shared/i18n'
 
 describe('AppShell canvas immersive routes', () => {
@@ -162,6 +163,94 @@ describe('AppShell nav Escape priority guards', () => {
     } finally {
       input.remove()
     }
+  })
+
+  it('keeps the nav open when a higher-priority handler already consumed Escape', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/chats']}>
+        <AppShell>
+          <div>Content</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    // 先注册更高优先级消费者（如 Modal 的 capture/更早的 document handler），
+    // 再打开导航；closeOnEscape 必须先检查 defaultPrevented。
+    const consume = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+      }
+    }
+    document.addEventListener('keydown', consume)
+    try {
+      const toggle = screen.getByRole('button', { name: '打开导航' })
+      await user.click(toggle)
+      expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+
+      await user.keyboard('{Escape}')
+      expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+    } finally {
+      document.removeEventListener('keydown', consume)
+    }
+  })
+
+  it('consumes Escape on close so a mounted ThreadComposer cannot steal focus afterwards', async () => {
+    setLocale('zh-CN')
+    const user = userEvent.setup()
+    // 真实 ThreadComposer（focusOnEscape）作为低优先级 window handler 常驻；
+    // 导航关闭时若不禁用该 Escape，它会随后把焦点异步抢回 Composer。
+    render(
+      <MemoryRouter initialEntries={['/chats']}>
+        <AppShell>
+          <ThreadComposer
+            parts={[]}
+            pending={false}
+            disabled={false}
+            onPartsChange={() => undefined}
+            onSubmit={() => undefined}
+            onCommand={() => undefined}
+            focusOnEscape
+          />
+        </AppShell>
+      </MemoryRouter>,
+    )
+    const toggle = screen.getByRole('button', { name: '打开导航' })
+    await user.click(toggle)
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+
+    await user.keyboard('{Escape}')
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'false')
+    expect(document.activeElement).toBe(toggle)
+    // ThreadComposer 的焦点恢复是异步重试（setTimeout）；必须确认其没有抢回焦点。
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(document.activeElement).toBe(toggle)
+  })
+
+  it('closes only the inner listbox on the first Escape and keeps the nav; a second Escape closes the nav', async () => {
+    setLocale('zh-CN')
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/chats']}>
+        <AppShell>
+          <div>Content</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    const toggle = screen.getByRole('button', { name: '打开导航' })
+    await user.click(toggle)
+    const trigger = screen.getAllByRole('button', { name: '语言: 中文' })[0]!
+    await user.click(trigger)
+    expect(screen.getByRole('listbox', { name: '语言' })).toBeInTheDocument()
+
+    // 第一次 Escape：焦点在内层 listbox，只由 LocaleSelector 消费并保留导航。
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('listbox', { name: '语言' })).not.toBeInTheDocument()
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+
+    // 第二次 Escape：内层已关闭，导航关闭并把焦点还给 toggle。
+    await user.keyboard('{Escape}')
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'false')
+    expect(document.activeElement).toBe(toggle)
   })
 })
 

@@ -1820,6 +1820,93 @@ describe('CanvasPage real list/create/load integration', () => {
     expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
   })
 
+  it('consumes Escape on the stage surface and keeps focus on the stage instead of the agent composer', async () => {
+    const { snapshots, commandBodies } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    // 打开 Agent 面板：ThreadComposer 挂载且 focusOnEscape=true（存在异步焦点恢复）。
+    await user.click(screen.getByRole('button', { name: '切换对话面板' }))
+    expect(await screen.findByLabelText('给 AI 发送消息')).toBeInTheDocument()
+
+    // 选中节点并聚焦 stage。
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionChange: (params: { nodes: Array<{ id: string }>; edges: unknown[] }) => void
+      }).onSelectionChange({ nodes: [{ id: NODE_A }], edges: [] })
+    })
+    const stage = screen.getByLabelText(/无限画布/)
+    stage.focus()
+    expect(document.activeElement).toBe(stage)
+
+    await user.keyboard('{Escape}')
+
+    // Canvas 消费：清选 + 焦点留在 stage；Agent panel 是侧栏而非 overlay，保持打开。
+    expect(document.activeElement).toBe(stage)
+    expect(document.querySelector('.agent-panel')).not.toBeNull()
+    expect((flowHarness.current as { nodes: Array<{ selected?: boolean }> }).nodes.some((node) => node.selected)).toBe(false)
+    // ThreadComposer 的焦点恢复是异步重试（setTimeout）；等待其窗口期后焦点仍必须在 stage。
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    expect(document.activeElement).toBe(stage)
+
+    // 选区已清空：随后 Delete 不再产生删除命令。
+    fireEvent.keyDown(window, { key: 'Delete' })
+    expect(commandBodies.some((body) => body.commands[0]?.type === 'DELETE_NODE')).toBe(false)
+  })
+
+  it('leaves Escape inside the agent panel to the composer and keeps the canvas selection', async () => {
+    const { snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+    await user.click(screen.getByRole('button', { name: '切换对话面板' }))
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionChange: (params: { nodes: Array<{ id: string }>; edges: unknown[] }) => void
+      }).onSelectionChange({ nodes: [{ id: NODE_A }], edges: [] })
+    })
+    await user.click(composer)
+    await user.keyboard('{Escape}')
+
+    // Canvas 全局 handler 不抢：panel 保持打开、选区保持、焦点留在 composer。
+    expect(document.querySelector('.agent-panel')).not.toBeNull()
+    expect(document.activeElement).toBe(composer)
+    expect((flowHarness.current as { nodes: Array<{ selected?: boolean }> }).nodes.some((node) => node.selected)).toBe(true)
+  })
+
   it('offers only applicable resource actions and confirms node deletion in the menu', async () => {
     const { commandBodies, snapshots } = installBackend()
     const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO

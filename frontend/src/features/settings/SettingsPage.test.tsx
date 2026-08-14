@@ -147,6 +147,26 @@ describe('SettingsPage notifications', () => {
     expect(switchControl()).toHaveAttribute('aria-checked', 'false')
   })
 
+  it('does not fake-enable on a stale stored flag while permission is still default; clicking requests permission instead of turning the setting off', async () => {
+    // 存储残留 enabled=true，但浏览器 permission 仍为 default（例如用户之前在
+    // 别的浏览器/时刻授权过，或请求被跳过）。UI 必须按 permission 事实显示未启用。
+    localStorage.setItem(STORAGE_KEY, '{"notificationsEnabled":true}')
+    notificationState.permission = 'default'
+    const user = userEvent.setup()
+    renderSettings()
+    expect(switchControl()).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText('未决定')).toBeInTheDocument()
+
+    await user.click(switchControl())
+
+    // 点击走「请求权限」路径，而不是把 setting 关掉。
+    expect(notificationState.requestPermission).toHaveBeenCalledTimes(1)
+    expect(notificationState.permission).toBe('granted')
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('{"notificationsEnabled":true}')
+    expect(switchControl()).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('已允许')).toBeInTheDocument()
+  })
+
   it('renders the read-only keyboard shortcut catalog section', () => {
     renderSettings()
     expect(screen.getByRole('heading', { name: '键盘快捷键' })).toBeInTheDocument()

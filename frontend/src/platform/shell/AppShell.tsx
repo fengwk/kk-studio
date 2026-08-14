@@ -26,6 +26,11 @@ function isChatWorkspaceRoute(pathname: string) {
   return /^\/chats\/[^/]+/.test(pathname)
 }
 
+/** 焦点位于已打开的内层交互作用域（listbox/menu）时返回 true：其 Escape 语义由内层消费。 */
+function isInsideOpenMenuTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[role="listbox"], [role="menu"]') != null
+}
+
 /** Canvas 编辑器沉浸页：仅合法 `/canvas/:canvasId`（canonical UUID），`/canvas` Library 保留全局顶栏。 */
 function isCanvasWorkspaceRoute(pathname: string) {
   const match = /^\/canvas\/([^/]+)\/?$/.exec(pathname)
@@ -54,7 +59,7 @@ export function AppShell({ children }: PropsWithChildren) {
       return
     }
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
+      if (event.key !== 'Escape' || event.defaultPrevented) {
         return
       }
       // 优先级守卫：Modal/Lightbox/alertdialog 拥有自己的 Escape 语义，
@@ -65,6 +70,14 @@ export function AppShell({ children }: PropsWithChildren) {
       if (isEditableKeyboardTarget(event.target)) {
         return
       }
+      // 焦点位于已打开的内层 listbox/menu（如 LocaleSelector）时，第一次
+      // Escape 只由内层交互消费（关闭自身并保留导航），第二次才关闭导航。
+      if (isInsideOpenMenuTarget(event.target)) {
+        return
+      }
+      // 关闭时消费事件（至少 preventDefault），确保低优先级的 ThreadComposer
+      // window handler 依赖 defaultPrevented 让路，不会随后把焦点抢走。
+      event.preventDefault()
       setNavOpen(false)
       navToggleRef.current?.focus()
     }
