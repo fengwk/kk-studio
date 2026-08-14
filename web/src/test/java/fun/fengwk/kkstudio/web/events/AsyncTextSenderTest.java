@@ -21,8 +21,19 @@ import org.mockito.ArgumentCaptor;
 import java.util.ArrayList;
 import java.util.List;
 
-/** AsyncTextSender：串行发送链、有界队列、溢出/失败关闭与 error 帧兜底。 */
+/** AsyncTextSender：串行发送链、有界队列、send timeout、溢出/失败关闭与 error 帧兜底。 */
 class AsyncTextSenderTest {
+
+  @Test
+  void setsBoundedSendTimeoutOnTheAsyncRemote() {
+    Async async = mock(Async.class);
+    Session session = mock(Session.class);
+    when(session.getAsyncRemote()).thenReturn(async);
+
+    new AsyncTextSender(session, 4);
+
+    verify(async).setSendTimeout(AsyncTextSender.SEND_TIMEOUT_MILLIS);
+  }
 
   @Test
   void sendsFramesStrictlySeriallyInEnqueueOrder() {
@@ -108,6 +119,28 @@ class AsyncTextSenderTest {
     assertEquals("{\"type\":\"error\",\"message\":\"bad\"}", remote.sent.get(0).text);
     remote.complete(0);
     verify(session).close(any(CloseReason.class));
+  }
+
+  @Test
+  void synchronousSendTextExceptionClosesSessionAndStopsTheChain() throws Exception {
+    Async async = mock(Async.class);
+    doAnswer(
+            inv -> {
+              throw new IllegalStateException("session already closed");
+            })
+        .when(async)
+        .sendText(any(String.class), any(SendHandler.class));
+    Session session = mock(Session.class);
+    when(session.getAsyncRemote()).thenReturn(async);
+    AsyncTextSender sender = new AsyncTextSender(session, 4);
+
+    assertTrue(sender.enqueue("a"));
+
+    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
+    verify(session).close(reasonCaptor.capture());
+    assertEquals(
+        CloseReason.CloseCodes.UNEXPECTED_CONDITION, reasonCaptor.getValue().getCloseCode());
+    assertFalse(sender.enqueue("b"), "failed sender rejects further enqueues");
   }
 
   private static Session session(FakeAsyncRemote remote) {

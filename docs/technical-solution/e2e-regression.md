@@ -475,11 +475,15 @@ GET  /api/storage/blobs/{blobId}/presigned-preview
 - `GET /changes`：要么返回从 `afterVersion`（含 0）起连续 patches（客户端逐个应用），
   要么返回必须整体替换的权威 snapshot（缓存缺失/gap/损坏）；已处于尾部时返回空 delta，
   未知 canvas 400；
-- WebSocket `/api/events/v1`：客户端帧 `{version:1, type:'subscribe'|'unsubscribe', resource:{kind,id}}`
-  （kind 为 `thread`/`canvas`，id 为 canonical UUID）；服务端帧
-  `subscribed{cursor}`（canonical 非负十进制，即订阅建立瞬间的 durable revision/version）、
-  `event{name:'revision'|'realtime'|'version'}`、`resync`（要求整体快照）、`error`；
-  ack 游标之后的事件不丢失，事件帧不先于 ack 帧；非法帧/未知资源发 error 帧后关闭连接；
+- WebSocket `/api/events/v1`：所有帧都带 `version:1`。客户端帧
+  `{version:1, type:'subscribe'|'unsubscribe', resource:{kind,id}}`（kind 为 `thread`/`canvas`，
+  id 为 canonical UUID）；服务端帧 `subscribed{resource,cursor}`（cursor 为 canonical 非负十进制，
+  即订阅建立瞬间的 durable revision/version）、
+  `event{resource,name,data}`（name 为 `revision`/`realtime`/`version`，revision/version 事件额外带
+  canonical `cursor`，data 分别为 `{revision:"N"}`/`{version:"N"}`/realtime codec JSON 对象）、
+  `resync{resource}`、`error{code,message[,resource]}`；ack 游标之后的事件不丢失，事件帧不先于 ack 帧；
+  未知资源只回资源级 `RESOURCE_NOT_FOUND`（带 resource）并保持连接，非法帧/发送过载回
+  `INVALID_FRAME`/`BACKPRESSURE` 后关闭连接；
 - `POST /thread/messages` 原子首次发送：单事务创建根 Thread、入队有序
   `USER_MESSAGE contents`（`commandId` 作为 `clientCommandId` 幂等键）并绑定
   `canvas_document.thread_id`；已绑定 Thread 时原样重放；`branchSettings` 是冻结的
@@ -505,7 +509,7 @@ WebSocket /api/ai/environment/daemon/v2
 
 WebSocket `/api/events/v1`：Thread 订阅 ack cursor 是 canonical decimal durable revision，Redis
 realtime delta 经 `event{name:'realtime'}` 投递；revision/version 事件只携带 ack 之后的前进值
-（十进制字符串，客户端随后拉 snapshot/changes），`resync` 要求整体快照。
+（`event{name,cursor,data}`，十进制字符串，客户端随后拉 snapshot/changes），`resync` 要求整体快照。
 
 ## 5. MiniMax-H3 手工 smoke
 

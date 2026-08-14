@@ -14,11 +14,15 @@ import java.util.Objects;
  *
  * <p>发送走 {@link jakarta.websocket.Session#getAsyncRemote()} 的 {@link Async#sendText(String,
  * SendHandler)}， 同一时刻只有一个 in-flight 发送（在 SendHandler 回调里发起下一帧），因此帧顺序严格串行且不占用任何常驻/阻塞
- * worker。队列满（过载）或发送失败时 {@link #fail} 清空队列、尽力发出 error 帧后在队尾关闭连接，让客户端重连 恢复；关闭后拒绝新入队。
+ * worker。AsyncRemote 设置有限 send timeout（10s），卡死的对端不会无限占用发送链。
+ *
+ * <p>队列满（过载）或发送失败时 {@link #fail} 清空队列、尽力发出 error 帧后在队尾关闭连接，让客户端重连 恢复；关闭后拒绝新入队。 {@code sendText}
+ * 同步抛异常（如连接已断）也立即关闭连接。
  */
 final class AsyncTextSender {
 
   static final int DEFAULT_CAPACITY = 512;
+  static final long SEND_TIMEOUT_MILLIS = 10_000L;
 
   private final Session session;
   private final int capacity;
@@ -26,6 +30,8 @@ final class AsyncTextSender {
   private final ArrayDeque<String> queue;
   private boolean draining;
   private boolean failed;
+  private CloseReason reason =
+      new CloseReason(CloseReason.CloseCodes.UNEXPECTED_CONDITION, "event channel send failed");
 
   AsyncTextSender(Session session) {
     this(session, DEFAULT_CAPACITY);
@@ -38,6 +44,7 @@ final class AsyncTextSender {
     }
     this.capacity = capacity;
     this.queue = new ArrayDeque<>(capacity);
+    session.getAsyncRemote().setSendTimeout(SEND_TIMEOUT_MILLIS);
   }
 
   /** 入队一帧；未完成帧数（含在途）达到容量或已失败时返回 {@code false}（调用方负责按协议关闭连接）。 */
@@ -98,20 +105,24 @@ final class AsyncTextSender {
       }
       return;
     }
-    session
-        .getAsyncRemote()
-        .sendText(
-            text,
-            new SendHandler() {
-              @Override
-              public void onResult(SendResult result) {
-                if (!result.isOK()) {
-                  sendFailed(result.getException());
-                  return;
+    try {
+      session
+          .getAsyncRemote()
+          .sendText(
+              text,
+              new SendHandler() {
+                @Override
+                public void onResult(SendResult result) {
+                  if (!result.isOK()) {
+                    sendFailed(result.getException());
+                    return;
+                  }
+                  sendNext();
                 }
-                sendNext();
-              }
-            });
+              });
+    } catch (RuntimeException error) {
+      sendFailed(error);
+    }
   }
 
   private void sendFailed(Throwable error) {
@@ -129,7 +140,4 @@ final class AsyncTextSender {
       // 连接已不可用
     }
   }
-
-  private CloseReason reason =
-      new CloseReason(CloseReason.CloseCodes.UNEXPECTED_CONDITION, "event channel send failed");
 }

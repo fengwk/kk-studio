@@ -116,12 +116,12 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * 事件通道的 Redis Pub/Sub realtime source。使用专用（不共享 native connection）的 Lettuce 连接工厂：listener
-   * 需要独占一条订阅连接，不能与 {@link StringRedisTemplate} 共用。
+   * 事件通道 realtime listener 的专用（不共享 native connection）Lettuce 连接工厂：listener 需要独占一条订阅连接， 不能与 {@link
+   * StringRedisTemplate} 共用。工厂作为独立 destroy bean 交给 Spring 管理，避免泄漏。
    */
-  @Bean(destroyMethod = "close")
-  public RedisRealtimeEventSource redisRealtimeEventSource(
-      RedisConnectionDetails connectionDetails, RedisRealtimeConfig config) {
+  @Bean(destroyMethod = "destroy")
+  public LettuceConnectionFactory redisRealtimeConnectionFactory(
+      RedisConnectionDetails connectionDetails) {
     RedisConnectionDetails.Standalone standaloneDetails = connectionDetails.getStandalone();
     RedisStandaloneConfiguration standalone = new RedisStandaloneConfiguration();
     standalone.setHostName(standaloneDetails.getHost());
@@ -132,6 +132,13 @@ public class HarnessRuntimeConfiguration {
     LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(standalone);
     connectionFactory.setShareNativeConnection(false);
     connectionFactory.afterPropertiesSet();
+    return connectionFactory;
+  }
+
+  @Bean(destroyMethod = "close")
+  public RedisRealtimeEventSource redisRealtimeEventSource(
+      @Qualifier("redisRealtimeConnectionFactory") LettuceConnectionFactory connectionFactory,
+      RedisRealtimeConfig config) {
     return new RedisRealtimeEventSource(connectionFactory, config, new RealtimeEventJsonCodec());
   }
 

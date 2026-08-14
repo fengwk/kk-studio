@@ -21,12 +21,20 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 事件通道帧的严格 JSON codec：客户端帧手工字段校验（duplicate/trailing/unknown/missing/wrong-type 全部拒绝）， 服务端帧确定性编码。
+ * 事件通道帧的严格 JSON codec：所有帧（客户端与服务端）都带 {@code version:1}；客户端帧手工字段校验（duplicate/trailing/unknown/
+ * missing/wrong-type 全部拒绝），服务端帧确定性编码。
  *
- * <p>资源 id 必须是 canonical UUID（{@code UUID.fromString} 往返一致）；游标是 canonical 非负十进制字符串 （{@code
- * 0|[1-9][0-9]*}，不超 bigint）。
+ * <p>客户端帧 {@code {version:1, type:'subscribe'|'unsubscribe', resource:{kind:'thread'|'canvas',
+ * id}}} 字段集精确；服务端帧 {@code subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code
+ * resync{resource}} / {@code error{code,message[,resource]}}。资源 id 必须是 canonical UUID （{@code
+ * UUID.fromString} 往返一致）；游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）。
  */
 final class EventFrameCodec {
+
+  static final String INVALID_FRAME = "INVALID_FRAME";
+  static final String RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND";
+  static final String BACKPRESSURE = "BACKPRESSURE";
+  static final String SEND_FAILED = "SEND_FAILED";
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
@@ -67,10 +75,7 @@ final class EventFrameCodec {
     }
     ObjectNode node = requireObject(root, "frame");
     requireExactFields(node, CLIENT_FRAME_FIELDS, "frame");
-    JsonNode version = node.get("version");
-    if (version == null || !version.isIntegralNumber() || version.asLong() != 1L) {
-      throw new IllegalArgumentException("frame.version must be the integer 1");
-    }
+    requireVersionOne(node, "frame");
     String typeName = requiredText(node, "type", "frame");
     ClientFrame.Type type;
     try {
@@ -82,30 +87,38 @@ final class EventFrameCodec {
     return new ClientFrame(type, parseResource(node.get("resource")));
   }
 
-  /** 编码 {@code subscribed} ack 帧。 */
+  /** 编码 {@code subscribed} ack 帧（{@code cursor} 为 canonical 非负十进制）。 */
   String subscribed(ResourceKey resource, long cursor) {
     ObjectNode node = NODES.objectNode();
+    node.put("version", 1);
     node.put("type", "subscribed");
     node.set("resource", resourceNode(resource));
     node.put("cursor", Long.toString(cursor));
     return write(node);
   }
 
-  /** 编码 {@code event} 帧（{@code name} 为 revision/realtime/version）。 */
+  /**
+   * 编码 {@code event} 帧：统一 {@code {version,type,resource,name,data}}；revision/version 事件额外携带
+   * canonical {@code cursor}（本次前进到的值），realtime 事件的 {@code data} 为 realtime codec JSON 对象。
+   */
   String event(ResourceKey resource, Signal signal) {
     Objects.requireNonNull(signal, "signal");
     ObjectNode node = NODES.objectNode();
+    node.put("version", 1);
     node.put("type", "event");
     node.set("resource", resourceNode(resource));
     if (signal instanceof Signal.Revision revision) {
       node.put("name", "revision");
-      node.put("revision", revision.revision());
+      node.put("cursor", revision.revision());
+      node.set("data", dataNode("revision", revision.revision()));
+    } else if (signal instanceof Signal.Version version) {
+      String cursor = Long.toString(version.version());
+      node.put("name", "version");
+      node.put("cursor", cursor);
+      node.set("data", dataNode("version", cursor));
     } else if (signal instanceof Signal.Realtime realtime) {
       node.put("name", "realtime");
-      node.set("payload", realtimeCodec.encodeNode(realtime.event()));
-    } else if (signal instanceof Signal.Version version) {
-      node.put("name", "version");
-      node.put("version", Long.toString(version.version()));
+      node.set("data", realtimeCodec.encodeNode(realtime.event()));
     } else if (signal instanceof Signal.Resync) {
       throw new IllegalArgumentException("resync signal is not an event frame");
     } else {
@@ -117,17 +130,37 @@ final class EventFrameCodec {
   /** 编码 {@code resync} 帧。 */
   String resync(ResourceKey resource) {
     ObjectNode node = NODES.objectNode();
+    node.put("version", 1);
     node.put("type", "resync");
     node.set("resource", resourceNode(resource));
     return write(node);
   }
 
-  /** 编码 {@code error} 帧。 */
-  String error(String message) {
+  /** 编码 {@code error} 帧（连接级，不含 resource）。 */
+  String error(String code, String message) {
     ObjectNode node = NODES.objectNode();
+    node.put("version", 1);
     node.put("type", "error");
+    node.put("code", code);
     node.put("message", message);
     return write(node);
+  }
+
+  /** 编码 {@code error} 帧（资源级，附带 resource 供客户端定位）。 */
+  String error(String code, String message, ResourceKey resource) {
+    ObjectNode node = NODES.objectNode();
+    node.put("version", 1);
+    node.put("type", "error");
+    node.put("code", code);
+    node.put("message", message);
+    node.set("resource", resourceNode(resource));
+    return write(node);
+  }
+
+  private static ObjectNode dataNode(String field, String canonicalValue) {
+    ObjectNode node = NODES.objectNode();
+    node.put(field, canonicalValue);
+    return node;
   }
 
   /** 解析 canonical UUID（{@code UUID.fromString} 往返一致）。 */
@@ -146,6 +179,13 @@ final class EventFrameCodec {
       throw new IllegalArgumentException(field + " must be a canonical UUID: " + value);
     }
     return parsed;
+  }
+
+  private static void requireVersionOne(ObjectNode node, String context) {
+    JsonNode version = node.get("version");
+    if (version == null || !version.isIntegralNumber() || version.asLong() != 1L) {
+      throw new IllegalArgumentException(context + ".version must be the integer 1");
+    }
   }
 
   private static ResourceKey parseResource(JsonNode value) {
