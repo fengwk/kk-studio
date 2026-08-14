@@ -11,7 +11,10 @@ public class ModelAttemptFailureDTO {
   private String turnStartEntryId;
   private String basisHeadEntryId;
   private Integer attempt;
-  private Long sequence;
+
+  /** 当前 attempt 的非负十进制 sequence；保持 bigint-safe 的 HTTP wire 字符串。 */
+  private String sequence;
+
   private String text;
   private String thinking;
   private String errorCode;

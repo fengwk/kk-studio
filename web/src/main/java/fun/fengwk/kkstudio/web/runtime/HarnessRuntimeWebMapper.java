@@ -302,7 +302,7 @@ public final class HarnessRuntimeWebMapper {
       failureDto.setTurnStartEntryId(failure.turnStartEntryId().toString());
       failureDto.setBasisHeadEntryId(failure.basisHeadEntryId().toString());
       failureDto.setAttempt(failure.attempt());
-      failureDto.setSequence(failure.sequence());
+      failureDto.setSequence(Long.toString(failure.sequence()));
       failureDto.setText(failure.text());
       failureDto.setThinking(failure.thinking());
       failureDto.setErrorCode(failure.error().kind().name());
