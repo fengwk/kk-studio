@@ -796,6 +796,7 @@ describe('CanvasPage real list/create/load integration', () => {
         resource: { kind: 'canvas', id: CANVAS_ID },
         name: 'version',
         data: { version: '2' },
+        cursor: '2',
       }),
     )
     act(() =>
@@ -804,6 +805,7 @@ describe('CanvasPage real list/create/load integration', () => {
         resource: { kind: 'canvas', id: CANVAS_ID },
         name: 'version',
         data: { version: '0' },
+        cursor: '0',
       }),
     )
     await waitFor(() => {
