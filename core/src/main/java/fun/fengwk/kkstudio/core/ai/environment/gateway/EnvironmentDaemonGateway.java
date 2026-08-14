@@ -46,6 +46,7 @@ import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -90,6 +91,9 @@ public class EnvironmentDaemonGateway
   private final Map<EnvironmentName, ActiveRemote> activeByEnvironment = new HashMap<>();
   private final Map<String, PendingSkillLoad> pendingSkillLoads = new HashMap<>();
   private final Map<String, PendingDirectoryList> pendingDirectoryLists = new HashMap<>();
+
+  /** 每个连接的目录请求超时 tombstone 上限；超过时 FIFO 淘汰最旧条目。 */
+  static final int MAX_DIRECTORY_TOMBSTONES = 1024;
 
   public EnvironmentDaemonGateway(
       LiveEnvironmentRegistry environmentRegistry,
@@ -280,7 +284,7 @@ public class EnvironmentDaemonGateway
     Objects.requireNonNull(environmentName, "environmentName");
     String directoryPath;
     try {
-      directoryPath = new DaemonDirectoryCodec.ListDirectoryRequest(path).path();
+      directoryPath = DaemonDirectoryCodec.requireCanonicalRelativePath(path);
     } catch (IllegalArgumentException error) {
       // wire 契约在发端即校验：非法路径立即失败，绝不发送 LIST_DIRECTORY。
       return CompletableFuture.completedFuture(
@@ -323,16 +327,26 @@ public class EnvironmentDaemonGateway
       pendingDirectoryLists.put(requestId, pending);
     }
     String payload =
-        directoryCodec.encodeRequest(new DaemonDirectoryCodec.ListDirectoryRequest(directoryPath));
-    SendOutcome outcome =
-        sendWithOutcome(state, DaemonMessageType.LIST_DIRECTORY, requestId, payload);
+        directoryCodec.encodeRequest(
+            new DaemonDirectoryCodec.ListDirectoryRequest(requestId, directoryPath));
+    // 目录控制面不属于 invocation：envelope invocationId 恒为 null，关联 ID 只存在于 payload requestId。
+    SendOutcome outcome = sendWithOutcome(state, DaemonMessageType.LIST_DIRECTORY, null, payload);
     if (outcome == SendOutcome.SENT) {
       return future
           .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
           .exceptionally(
               error -> {
                 synchronized (this) {
-                  pendingDirectoryLists.remove(requestId, pending);
+                  if (pendingDirectoryLists.remove(requestId, pending)) {
+                    // pending -> tombstone：同连接迟到响应按 requestId/path 校验后静默丢弃，不当作 unsolicited。
+                    state.directoryTombstones.addLast(
+                        new DirectoryTombstone(
+                            requestId,
+                            environmentName,
+                            state.connection.connectionId(),
+                            directoryPath));
+                    evictDirectoryTombstones(state);
+                  }
                 }
                 EnvironmentDirectoryFailureCode code =
                     error instanceof TimeoutException
@@ -620,12 +634,27 @@ public class EnvironmentDaemonGateway
   private void handleDirectoryListed(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireReady(state);
-    PendingDirectoryList pending = takePendingDirectoryList(state, envelope);
+    requireNoInvocationId(envelope);
+    // 先严格 decode（失败则 pending 留在 map，closeConnectionState 立即以 ENVIRONMENT_UNAVAILABLE 完成），
+    // 再 peek+ownership，最后 identity remove 并完成。
     DaemonDirectoryCodec.DirectoryListed listed =
         directoryCodec.decodeListed(envelope.payloadJson());
+    PendingDirectoryList pending = peekPendingDirectoryList(state, listed.requestId());
+    if (pending == null) {
+      if (matchesDirectoryTombstone(state, listed.requestId(), listed.path())) {
+        // 超时后的合法迟到响应：严格 decode/校验通过后静默丢弃，不是 unsolicited。
+        return;
+      }
+      throw new DaemonProtocolException(
+          "directory listing callback does not own requestId: " + listed.requestId());
+    }
     if (!pending.path.equals(listed.path())) {
       throw new DaemonProtocolException(
           "DIRECTORY_LISTED path does not match request: " + listed.path());
+    }
+    if (!removePendingDirectoryList(state, listed.requestId(), pending)) {
+      // 超时恰好抢先：pending 已被 orTimeout 移除并完成，tombstone 在同一临界区内落盘，按迟到响应静默丢弃。
+      return;
     }
     deferred.add(
         () -> pending.future.complete(new EnvironmentDirectoryListResult.Loaded(toDto(listed))));
@@ -634,18 +663,75 @@ public class EnvironmentDaemonGateway
   private void handleDirectoryListFailed(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireReady(state);
-    PendingDirectoryList pending = takePendingDirectoryList(state, envelope);
+    requireNoInvocationId(envelope);
     DaemonDirectoryCodec.DirectoryListFailed failed =
         directoryCodec.decodeFailed(envelope.payloadJson());
+    PendingDirectoryList pending = peekPendingDirectoryList(state, failed.requestId());
+    if (pending == null) {
+      if (matchesDirectoryTombstone(state, failed.requestId(), failed.path())) {
+        return;
+      }
+      throw new DaemonProtocolException(
+          "directory listing callback does not own requestId: " + failed.requestId());
+    }
     if (!pending.path.equals(failed.path())) {
       throw new DaemonProtocolException(
           "DIRECTORY_LIST_FAILED path does not match request: " + failed.path());
+    }
+    if (!removePendingDirectoryList(state, failed.requestId(), pending)) {
+      return;
     }
     EnvironmentDirectoryFailureCode code = toApplicationCode(failed.code());
     deferred.add(
         () ->
             pending.future.complete(
                 new EnvironmentDirectoryListResult.Failed(code, failed.message())));
+  }
+
+  /** 只读查找请求的 pending 并校验 ownership（不移动条目：decode/校验失败时 pending 必须留在 map 供断线清理完成）。 */
+  private PendingDirectoryList peekPendingDirectoryList(ConnectionState state, String requestId) {
+    synchronized (this) {
+      PendingDirectoryList pending = pendingDirectoryLists.get(requestId);
+      if (pending == null) {
+        return null;
+      }
+      if (!pending.environmentName.equals(state.environmentName)
+          || !pending.connectionId.equals(state.connection.connectionId())) {
+        throw new DaemonProtocolException(
+            "directory listing callback does not own requestId: " + requestId);
+      }
+      return pending;
+    }
+  }
+
+  /** identity remove：pending 已被并发移除（超时/断线）时返回 false，调用方按迟到响应静默丢弃。 */
+  private boolean removePendingDirectoryList(
+      ConnectionState state, String requestId, PendingDirectoryList pending) {
+    synchronized (this) {
+      return pendingDirectoryLists.remove(requestId, pending);
+    }
+  }
+
+  /** 超时 tombstone 是否覆盖该 requestId/path（同一连接、同一环境、同一请求路径）。 */
+  private boolean matchesDirectoryTombstone(ConnectionState state, String requestId, String path) {
+    synchronized (this) {
+      for (DirectoryTombstone tombstone : state.directoryTombstones) {
+        if (tombstone.requestId().equals(requestId)
+            && tombstone.environmentName().equals(state.environmentName)
+            && tombstone.connectionId().equals(state.connection.connectionId())
+            && tombstone.path().equals(path)) {
+          return true;
+        }
+      }
+      return false;
+    }
+  }
+
+  /** FIFO 有界淘汰：超过 {@link #MAX_DIRECTORY_TOMBSTONES} 时移除最旧条目。调用方必须持有 gateway monitor。 */
+  private static void evictDirectoryTombstones(ConnectionState state) {
+    while (state.directoryTombstones.size() > MAX_DIRECTORY_TOMBSTONES) {
+      state.directoryTombstones.removeFirst();
+    }
   }
 
   /** wire 失败分类原样投影为应用结果分类（wire 只有四种确定性 code）。 */
@@ -657,22 +743,6 @@ public class EnvironmentDaemonGateway
       case NOT_DIRECTORY -> EnvironmentDirectoryFailureCode.NOT_DIRECTORY;
       case IO_ERROR -> EnvironmentDirectoryFailureCode.IO_ERROR;
     };
-  }
-
-  private PendingDirectoryList takePendingDirectoryList(
-      ConnectionState state, DaemonEnvelope envelope) {
-    String requestId = requireNonBlank(envelope.invocationId(), "invocationId");
-    PendingDirectoryList pending;
-    synchronized (this) {
-      pending = pendingDirectoryLists.remove(requestId);
-    }
-    if (pending == null
-        || !pending.environmentName.equals(state.environmentName)
-        || !pending.connectionId.equals(state.connection.connectionId())) {
-      throw new DaemonProtocolException(
-          "directory listing callback does not own invocationId: " + requestId);
-    }
-    return pending;
   }
 
   /** wire {@code DIRECTORY_LISTED} → 应用读模型；条目顺序/截断标记原样保留。 */
@@ -815,6 +885,8 @@ public class EnvironmentDaemonGateway
         doomedSkills = takePendingSkillLoads(environmentName);
         doomedDirectoryLists = takePendingDirectoryLists(environmentName);
       }
+      // 断线清理同时清掉该连接的目录请求 tombstone：晚响应不可能再出现在已清理的连接上。
+      state.directoryTombstones.clear();
       connections.remove(state.connection.connectionId(), state);
     }
     try {
@@ -1104,6 +1176,10 @@ public class EnvironmentDaemonGateway
     }
   }
 
+  /** 目录请求超时 tombstone：同连接迟到响应（requestId/path 均匹配）静默丢弃；FIFO 有界，断线清理时清除。 */
+  private record DirectoryTombstone(
+      String requestId, EnvironmentName environmentName, String connectionId, String path) {}
+
   private static final class ConnectionState {
     private final EnvironmentDaemonConnection connection;
     private volatile EnvironmentName environmentName;
@@ -1115,6 +1191,9 @@ public class EnvironmentDaemonGateway
 
     /** registry/connection 映射已恰好清理一次。 */
     private volatile boolean cleaned;
+
+    /** 已超时的目录请求 tombstone（FIFO，{@link #MAX_DIRECTORY_TOMBSTONES} 上限）；仅 gateway monitor 下访问。 */
+    private final ArrayDeque<DirectoryTombstone> directoryTombstones = new ArrayDeque<>();
 
     private long outboundSequence;
     private InboundEnvelopeIdentity lastInbound;

@@ -77,6 +77,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -515,7 +516,7 @@ class DaemonRuntimeTest {
       completeHandshake(0);
       transport.takeMessages(2);
 
-      transport.receive(listDirectory("dir-1", 1, "."));
+      transport.receive(listDirectory(1, "."));
       List<DaemonEnvelope> messages = transport.takeMessages(2);
       assertMessageTypes(messages, ACK, DIRECTORY_LISTED);
       DaemonDirectoryCodec.DirectoryListed listed =
@@ -529,7 +530,7 @@ class DaemonRuntimeTest {
       // 与 active invocation 并行：invoke 之后仍可立即浏览，互不阻塞。
       transport.receive(invoke("parallel-invocation", 2));
       assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
-      transport.receive(listDirectory("dir-2", 3, "src"));
+      transport.receive(listDirectory(3, "src"));
       assertMessageTypes(transport.takeMessages(2), ACK, DIRECTORY_LISTED);
       assertEquals(1, tool.executions.get());
     } finally {
@@ -537,7 +538,7 @@ class DaemonRuntimeTest {
     }
   }
 
-  /** 缺失/非法路径得到确定性的 DIRECTORY_LIST_FAILED 分类，而不是协议 ERROR。 */
+  /** 缺失/非法路径得到确定性的 DIRECTORY_LIST_FAILED 分类（requestId/path 原样回显），而不是协议 ERROR。 */
   @Test
   void directoryFailuresAreTypedOnTheWire() throws Exception {
     Path envRoot = Files.createTempDirectory("daemon-dir-failure");
@@ -551,24 +552,26 @@ class DaemonRuntimeTest {
       completeHandshake(0);
       transport.takeMessages(2);
 
-      transport.receive(listDirectory("dir-missing", 1, "missing"));
+      String missingRequestId = UUID.randomUUID().toString();
+      transport.receive(listDirectory(missingRequestId, 1, "missing"));
       DaemonDirectoryCodec.DirectoryListFailed notFound =
           new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
       assertEquals(DaemonDirectoryFailureCode.NOT_FOUND, notFound.code());
       assertEquals("missing", notFound.path());
+      assertEquals(missingRequestId, notFound.requestId());
 
-      transport.receive(listDirectory("dir-file", 2, "file.txt"));
+      transport.receive(listDirectory(2, "file.txt"));
       DaemonDirectoryCodec.DirectoryListFailed notDirectory =
           new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
       assertEquals(DaemonDirectoryFailureCode.NOT_DIRECTORY, notDirectory.code());
 
-      transport.receive(listDirectory("dir-escape", 3, "../escape"));
+      transport.receive(listDirectory(3, "../escape"));
       DaemonDirectoryCodec.DirectoryListFailed invalid =
           new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
       assertEquals(DaemonDirectoryFailureCode.INVALID_PATH, invalid.code());
 
-      // 目录浏览不进入 journal：同一 requestId 可以复用而不重放。
-      transport.receive(listDirectory("dir-missing", 4, "missing"));
+      // 目录浏览不进入 journal：每次请求使用独立 canonical UUID requestId 都能正常归因。
+      transport.receive(listDirectory(4, "missing"));
       DaemonDirectoryCodec.DirectoryListFailed again =
           new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
       assertEquals(DaemonDirectoryFailureCode.NOT_FOUND, again.code());
@@ -1764,14 +1767,18 @@ class DaemonRuntimeTest {
             + "\",\"arguments\":{}}");
   }
 
-  private DaemonEnvelope listDirectory(String invocationId, long sequence, String path) {
+  private DaemonEnvelope listDirectory(long sequence, String path) {
+    return listDirectory(UUID.randomUUID().toString(), sequence, path);
+  }
+
+  private DaemonEnvelope listDirectory(String requestId, long sequence, String path) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_3,
         DaemonMessageType.LIST_DIRECTORY,
         ENVIRONMENT_NAME,
-        invocationId,
+        null,
         sequence,
-        "{\"path\":\"" + path + "\"}");
+        "{\"requestId\":\"" + requestId + "\",\"path\":\"" + path + "\"}");
   }
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {

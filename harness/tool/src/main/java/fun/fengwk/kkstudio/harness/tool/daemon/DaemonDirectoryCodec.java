@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.tool.daemon;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -11,6 +13,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Daemon 目录浏览请求/响应 payload 的严格 codec。
@@ -23,20 +26,42 @@ import java.util.Set;
  *   <li>{@link DaemonMessageType#DIRECTORY_LIST_FAILED} → {@link DirectoryListFailed}
  * </ul>
  *
- * <p>三类消息均要求 envelope {@code invocationId} 作为 gateway 与 daemon 的关联 ID。{@code path} 是 Environment
- * Root 下的 canonical 相对 wire 路径（{@code '.'} 表示 root，段一律以 {@code '/'} 分隔）：跨平台拒绝反斜杠、absolute、 空/{@code
- * '.'}/{@code '..'} 段、控制字符与空白路径；越界判定由 daemon 在 canonicalize 时完成。成功响应中 {@code path}/{@code
- * parentPath}/entry {@code path} 都是请求目录或其直接子目录的 canonical wire 路径，entry 只含 {@code name}+{@code
- * path} 两个字段且 {@code name} 必须等于 {@code path} 的最后一段。
+ * <p>目录控制面不属于 invocation：三类消息的 envelope {@code invocationId} 必须为 null，gateway/daemon 以 payload
+ * {@code requestId}（canonical UUID，响应原样回显）关联。{@code path} 是 Environment Root 下的 canonical 相对 wire
+ * 路径（{@code '.'} 表示 root，段一律以 {@code '/'} 分隔）：跨平台拒绝反斜杠、Windows drive 前缀（{@code C:/x}、{@code
+ * C:x}）、absolute、空/{@code '.'}/{@code '..'} 段、控制字符与空白路径；越界判定由 daemon 在 canonicalize 时完成。成功响应中
+ * {@code path}/{@code parentPath}/entry {@code path} 都是请求目录或其直接子目录的 canonical wire 路径，entry 只含
+ * {@code name}+{@code path} 两个字段且 {@code name} 必须等于 {@code path} 的最后一段。
+ *
+ * <p>共享 ObjectMapper 启用 STRICT_DUPLICATE_DETECTION 与 FAIL_ON_TRAILING_TOKENS：三类 payload 顶层与 entry 的
+ * duplicate/trailing/unknown/missing 字段全部拒绝。
  */
 public final class DaemonDirectoryCodec {
 
   /** 单层目录列表的条目数上限；超过时截断并置 {@code truncated=true}。 */
   public static final int MAX_ENTRIES = 1000;
 
-  /** Gateway 请求浏览 Environment Root 下单层目录。 */
-  public record ListDirectoryRequest(String path) {
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+  static {
+    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
+
+  /**
+   * LIST_DIRECTORY payload 的未校验形状读取结果：requestId 必须是 canonical UUID，path 只要求非空文本（供 daemon 归因非法路径）。
+   */
+  public record RawListDirectoryRequest(String requestId, String path) {
+    public RawListDirectoryRequest {
+      requestId = requireCanonicalUuid(requestId);
+      path = requireNonBlank(path, "path");
+    }
+  }
+
+  /** Gateway 请求浏览 Environment Root 下单层目录；{@code requestId} 是 gateway 生成的 canonical UUID。 */
+  public record ListDirectoryRequest(String requestId, String path) {
     public ListDirectoryRequest {
+      requestId = requireCanonicalUuid(requestId);
       path = requireCanonicalRelativePath(path);
     }
   }
@@ -52,8 +77,9 @@ public final class DaemonDirectoryCodec {
     }
   }
 
-  /** Daemon 成功返回的一层目录列表。 */
+  /** Daemon 成功返回的一层目录列表；{@code requestId} 是请求回显。 */
   public record DirectoryListed(
+      String requestId,
       String path,
       String displayPath,
       String parentPath,
@@ -61,6 +87,7 @@ public final class DaemonDirectoryCodec {
       String gitBranch,
       List<DirectoryEntry> entries) {
     public DirectoryListed {
+      requestId = requireCanonicalUuid(requestId);
       path = requireCanonicalRelativePath(path);
       displayPath = requireNonBlank(displayPath, "displayPath");
       parentPath = requireCanonicalRelativePath(parentPath);
@@ -71,22 +98,26 @@ public final class DaemonDirectoryCodec {
     }
   }
 
-  /** Daemon 确定性失败（非法路径、不存在、非目录、IO 错误）。{@code path} 是请求回显，只要求非空（非法请求路径也必须可归因）。 */
-  public record DirectoryListFailed(String path, DaemonDirectoryFailureCode code, String message) {
+  /**
+   * Daemon 确定性失败（非法路径、不存在、非目录、IO 错误）。{@code requestId} 是请求回显（canonical UUID）；{@code path}
+   * 是请求回显，只要求非空 （非法请求路径也必须可归因）。
+   */
+  public record DirectoryListFailed(
+      String requestId, String path, DaemonDirectoryFailureCode code, String message) {
     public DirectoryListFailed {
+      requestId = requireCanonicalUuid(requestId);
       path = requireNonBlank(path, "path");
       code = Objects.requireNonNull(code, "code");
       message = requireNonBlank(message, "message");
     }
   }
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
   /**
    * 校验 canonical 相对 wire 路径并原样返回；{@code '.'} 单独出现表示 root，其余位置拒绝 {@code '.'}/{@code '..'} 段。
    *
-   * <p>wire 路径是跨平台纯字符串契约，不依赖本地 {@code Path} 解析：段一律以 {@code '/'} 分隔（任何位置的反斜杠都拒绝）， 必须以相对路径开头（不得以
-   * {@code '/'} 开头）、无空段、无 ISO 控制字符。越界判定由 daemon 在 canonicalize 时完成。
+   * <p>wire 路径是跨平台纯字符串契约，不依赖本地 {@code Path} 解析：段一律以 {@code '/'} 分隔（任何位置的反斜杠都拒绝），拒绝 Windows drive
+   * 前缀（{@code C:/x}、{@code C:x}）与 absolute（不得以 {@code '/'} 开头）、无空段、无 ISO 控制字符。越界判定由 daemon 在
+   * canonicalize 时完成。
    */
   public static String requireCanonicalRelativePath(String path) {
     String value = requireNonBlank(path, "path");
@@ -95,6 +126,9 @@ public final class DaemonDirectoryCodec {
     }
     if (value.indexOf('\\') >= 0) {
       throw new IllegalArgumentException("path must use '/' separators, not '\\': " + value);
+    }
+    if (value.length() >= 2 && isAsciiLetter(value.charAt(0)) && value.charAt(1) == ':') {
+      throw new IllegalArgumentException("path must not use a Windows drive prefix: " + value);
     }
     if (value.codePoints().anyMatch(Character::isISOControl)) {
       throw new IllegalArgumentException("path must not contain control characters");
@@ -114,27 +148,43 @@ public final class DaemonDirectoryCodec {
     return value;
   }
 
+  private static boolean isAsciiLetter(char character) {
+    return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
+  }
+
   public String encodeRequest(ListDirectoryRequest request) {
     Objects.requireNonNull(request, "request");
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    root.put("requestId", request.requestId());
     root.put("path", request.path());
     return write(root, "LIST_DIRECTORY");
   }
 
   public ListDirectoryRequest decodeRequest(String json) {
-    return new ListDirectoryRequest(readRequestPath(json));
+    RawListDirectoryRequest raw = readRequest(json);
+    return new ListDirectoryRequest(raw.requestId(), raw.path());
   }
 
-  /** 读取并校验 LIST_DIRECTORY payload 的 path 文本（不构造 record，供 daemon 对形状非法路径做错误归因）。 */
-  public String readRequestPath(String json) {
+  /**
+   * 读取并校验 LIST_DIRECTORY payload 的 requestId/path 文本（不构造 record、不校验 path 形状，供 daemon 对形状非法路径做错误归因）。
+   */
+  public RawListDirectoryRequest readRequest(String json) {
     ObjectNode root = requiredObject(json, "LIST_DIRECTORY");
-    rejectUnknownFields(root, Set.of("path"), "LIST_DIRECTORY");
-    return requiredText(root, "path", "LIST_DIRECTORY");
+    rejectUnknownFields(root, Set.of("requestId", "path"), "LIST_DIRECTORY");
+    String requestId = requiredText(root, "requestId", "LIST_DIRECTORY");
+    String path = requiredText(root, "path", "LIST_DIRECTORY");
+    try {
+      return new RawListDirectoryRequest(requestId, path);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          "LIST_DIRECTORY validation failed: " + error.getMessage(), error);
+    }
   }
 
   public String encodeListed(DirectoryListed listed) {
     Objects.requireNonNull(listed, "listed");
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    root.put("requestId", listed.requestId());
     root.put("path", listed.path());
     root.put("displayPath", listed.displayPath());
     root.put("parentPath", listed.parentPath());
@@ -155,7 +205,8 @@ public final class DaemonDirectoryCodec {
     ObjectNode root = requiredObject(json, "DIRECTORY_LISTED");
     rejectUnknownFields(
         root,
-        Set.of("path", "displayPath", "parentPath", "truncated", "gitBranch", "entries"),
+        Set.of(
+            "requestId", "path", "displayPath", "parentPath", "truncated", "gitBranch", "entries"),
         "DIRECTORY_LISTED");
     JsonNode truncated = root.get("truncated");
     if (truncated == null || !truncated.isBoolean()) {
@@ -164,6 +215,7 @@ public final class DaemonDirectoryCodec {
     List<DirectoryEntry> entries = decodeEntries(requiredArray(root, "entries"));
     try {
       return new DirectoryListed(
+          requiredText(root, "requestId", "DIRECTORY_LISTED"),
           requiredText(root, "path", "DIRECTORY_LISTED"),
           requiredText(root, "displayPath", "DIRECTORY_LISTED"),
           requiredText(root, "parentPath", "DIRECTORY_LISTED"),
@@ -179,6 +231,7 @@ public final class DaemonDirectoryCodec {
   public String encodeFailed(DirectoryListFailed failed) {
     Objects.requireNonNull(failed, "failed");
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    root.put("requestId", failed.requestId());
     root.put("path", failed.path());
     root.put("code", failed.code().name());
     root.put("message", failed.message());
@@ -187,7 +240,8 @@ public final class DaemonDirectoryCodec {
 
   public DirectoryListFailed decodeFailed(String json) {
     ObjectNode root = requiredObject(json, "DIRECTORY_LIST_FAILED");
-    rejectUnknownFields(root, Set.of("path", "code", "message"), "DIRECTORY_LIST_FAILED");
+    rejectUnknownFields(
+        root, Set.of("requestId", "path", "code", "message"), "DIRECTORY_LIST_FAILED");
     String codeText = requiredText(root, "code", "DIRECTORY_LIST_FAILED");
     DaemonDirectoryFailureCode code;
     try {
@@ -198,6 +252,7 @@ public final class DaemonDirectoryCodec {
     }
     try {
       return new DirectoryListFailed(
+          requiredText(root, "requestId", "DIRECTORY_LIST_FAILED"),
           requiredText(root, "path", "DIRECTORY_LIST_FAILED"),
           code,
           requiredText(root, "message", "DIRECTORY_LIST_FAILED"));
@@ -316,5 +371,20 @@ public final class DaemonDirectoryCodec {
       throw new IllegalArgumentException(name + " must not be blank");
     }
     return value;
+  }
+
+  /** 校验 requestId 是 canonical UUID 文本并原样返回。 */
+  private static String requireCanonicalUuid(String value) {
+    String text = requireNonBlank(value, "requestId");
+    try {
+      UUID parsed = UUID.fromString(text);
+      if (!parsed.toString().equals(text)) {
+        throw new IllegalArgumentException("requestId must be a canonical UUID string: " + text);
+      }
+      return text;
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          "requestId must be a canonical UUID string: " + text, error);
+    }
   }
 }

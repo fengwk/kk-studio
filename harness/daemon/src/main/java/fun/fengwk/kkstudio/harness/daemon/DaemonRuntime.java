@@ -432,7 +432,7 @@ public final class DaemonRuntime implements AutoCloseable {
           processLoadSkill(connection, envelope);
         }
         case LIST_DIRECTORY -> {
-          requireInvocationId(envelope);
+          requireNoInvocationId(envelope);
           connection.acceptInboundEnvelope(identity);
           processListDirectory(connection, envelope);
         }
@@ -585,31 +585,35 @@ public final class DaemonRuntime implements AutoCloseable {
     handleListDirectory(connection, envelope);
   }
 
-  /** control-plane 目录浏览：与 invocation 并行，不进入 journal，不占 active tool slot。 */
+  /** control-plane 目录浏览：与 invocation 并行，不进入 journal，不占 active tool slot。以 payload requestId 关联。 */
   private void handleListDirectory(ActiveConnection connection, DaemonEnvelope envelope) {
-    String rawPath;
+    DaemonDirectoryCodec.RawListDirectoryRequest raw;
     try {
-      rawPath = directoryCodec.readRequestPath(envelope.payloadJson());
+      raw = directoryCodec.readRequest(envelope.payloadJson());
     } catch (DaemonProtocolException error) {
       sendOn(connection, DaemonMessageType.ERROR, envelope.invocationId(), errorPayload(error));
       return;
     }
     DaemonDirectoryCodec.ListDirectoryRequest request;
     try {
-      request = new DaemonDirectoryCodec.ListDirectoryRequest(rawPath);
+      request = new DaemonDirectoryCodec.ListDirectoryRequest(raw.requestId(), raw.path());
     } catch (IllegalArgumentException error) {
-      // 形状非法是确定性业务失败（INVALID_PATH），不是协议 ERROR。
+      // 形状非法是确定性业务失败（INVALID_PATH），不是协议 ERROR；requestId 原样回显。
       sendOn(
           connection,
           DaemonMessageType.DIRECTORY_LIST_FAILED,
           envelope.invocationId(),
           directoryCodec.encodeFailed(
               new DaemonDirectoryCodec.DirectoryListFailed(
-                  rawPath, DaemonDirectoryFailureCode.INVALID_PATH, error.getMessage())));
+                  raw.requestId(),
+                  raw.path(),
+                  DaemonDirectoryFailureCode.INVALID_PATH,
+                  error.getMessage())));
       return;
     }
     try {
-      DaemonDirectoryCodec.DirectoryListed listed = directoryBrowser.list(request.path());
+      DaemonDirectoryCodec.DirectoryListed listed =
+          directoryBrowser.list(request.requestId(), request.path());
       sendOn(
           connection,
           DaemonMessageType.DIRECTORY_LISTED,
@@ -620,12 +624,13 @@ public final class DaemonRuntime implements AutoCloseable {
           connection,
           DaemonMessageType.DIRECTORY_LIST_FAILED,
           envelope.invocationId(),
-          directoryCodec.encodeFailed(directoryFailure(request.path(), error)));
+          directoryCodec.encodeFailed(
+              directoryFailure(request.requestId(), request.path(), error)));
     }
   }
 
   private static DaemonDirectoryCodec.DirectoryListFailed directoryFailure(
-      String path, Exception error) {
+      String requestId, String path, Exception error) {
     DaemonDirectoryFailureCode code;
     if (error instanceof IllegalArgumentException) {
       code = DaemonDirectoryFailureCode.INVALID_PATH;
@@ -640,7 +645,7 @@ public final class DaemonRuntime implements AutoCloseable {
     if (message == null || message.isBlank()) {
       message = error.getClass().getSimpleName();
     }
-    return new DaemonDirectoryCodec.DirectoryListFailed(path, code, message);
+    return new DaemonDirectoryCodec.DirectoryListFailed(requestId, path, code, message);
   }
 
   private void handleLoadSkill(ActiveConnection connection, DaemonEnvelope envelope) {
@@ -774,6 +779,12 @@ public final class DaemonRuntime implements AutoCloseable {
     if (envelope.invocationId() == null || envelope.invocationId().isBlank()) {
       throw new DaemonProtocolException(
           envelope.messageType() + " requires a non-blank invocationId");
+    }
+  }
+
+  private void requireNoInvocationId(DaemonEnvelope envelope) {
+    if (envelope.invocationId() != null) {
+      throw new DaemonProtocolException(envelope.messageType() + " must not declare invocationId");
     }
   }
 
