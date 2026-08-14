@@ -187,18 +187,18 @@ export function useHarnessThreadRealtime(
   }, [modelInvocation, threadId, toolInvocations])
 
   useEffect(() => {
-    if (
-      !threadId
-      || !subscriptionReady
-      || subscription == null
-      || subscription.threadId !== threadId
-    ) {
+    if (!threadId || !subscriptionReady) {
       clearRecoveryLoop()
       modelStreamRef.current = null
       setModelStream(null)
       toolStreamsRef.current = new Map()
       setToolStreams(new Map())
       toolPartialFingerprintsRef.current = new Map()
+      return undefined
+    }
+    if (subscription == null || subscription.threadId !== threadId) {
+      // 过渡 render：订阅状态尚未就绪（或 threadId 暂不匹配）。保留
+      // snapshot-seeded overlay，等待下一 render 建立订阅后继续消费。
       return undefined
     }
 

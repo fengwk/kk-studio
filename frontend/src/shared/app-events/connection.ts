@@ -116,7 +116,10 @@ export class ApplicationEventConnection {
         return
       }
       // 规范上 error 之后必然派发 close；这里主动关闭，让 close 成为唯一清理点。
-      this.safeClose(socket)
+      if (!this.safeClose(socket)) {
+        // close 同步失败：手动 fence 并走 backoff 重连，避免卡在非空 socket。
+        this.abandonSocket(socket)
+      }
     }
     socket.onclose = (event) => {
       if (!this.isCurrent(generation)) {
@@ -168,7 +171,9 @@ export class ApplicationEventConnection {
       return true
     } catch {
       // 竞态（send 时已关闭）或同步异常：close 是权威清理点，触发重连。
-      this.safeClose(socket)
+      if (!this.safeClose(socket)) {
+        this.abandonSocket(socket)
+      }
       return false
     }
   }
@@ -206,16 +211,32 @@ export class ApplicationEventConnection {
     this.connect()
   }
 
-  /** socket.close() 可能同步抛错（已关闭/浏览器拒绝参数）：绝不逃逸。 */
-  private safeClose(socket: WebSocket | null): void {
+  /** socket.close() 可能同步抛错（已关闭/浏览器拒绝参数）：吞掉但返回是否成功。 */
+  private safeClose(socket: WebSocket | null): boolean {
     if (socket == null) {
-      return
+      return true
     }
     try {
       socket.close()
+      return true
     } catch {
-      // 忽略：状态与重连路径负责收敛。
+      return false
     }
+  }
+
+  /**
+   * 运行期 close 同步失败时的兜底：generation fence 手动清掉当前 socket，
+   * 进入 backoff 并调度重连。仅用于运行期 onerror/send 失败；
+   * disconnect/terminal 仍直接收敛 closed，不走这里。
+   */
+  private abandonSocket(socket: WebSocket): void {
+    if (this.socket !== socket) {
+      return // 已不是当前 socket：disconnect/terminal/新连接已接管。
+    }
+    this.generation += 1
+    this.socket = null
+    this.setStatus('backoff')
+    this.scheduleReconnect()
   }
 
   /**
