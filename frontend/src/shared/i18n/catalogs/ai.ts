@@ -66,8 +66,16 @@ export const aiCatalog = {
     'zh-CN': '运行中',
   },
   'ai.chat.history.confirmDiscardDraft': {
-    'en-US': 'The pane has unsent edits. Relocate anyway and discard them?',
-    'zh-CN': '面板有未发送的修改，仍要重定位并丢弃这些修改吗？',
+    'en-US': 'The pane has unsent changes. Continue and discard them?',
+    'zh-CN': '面板有未发送的修改，是否继续并丢弃这些修改？',
+  },
+  'ai.chat.history.discardDraftTitle': {
+    'en-US': 'Discard unsent changes?',
+    'zh-CN': '丢弃未发送的修改？',
+  },
+  'ai.chat.history.discardDraftConfirm': {
+    'en-US': 'Discard changes',
+    'zh-CN': '丢弃修改',
   },
   'ai.runtime.approval.title': {
     'en-US': 'Tool approval',
@@ -906,6 +914,26 @@ export const aiCatalog = {
     'en-US': 'No Threads',
     'zh-CN': '暂无 Thread',
   },
+  'ai.chat.selection.search': {
+    'en-US': 'Search',
+    'zh-CN': '搜索',
+  },
+  'ai.chat.selection.options': {
+    'en-US': '{{title}} options',
+    'zh-CN': '{{title}}选项',
+  },
+  'ai.chat.selection.noMatch': {
+    'en-US': 'No matches for “{{query}}”',
+    'zh-CN': '没有匹配“{{query}}”的选项',
+  },
+  'ai.chat.selection.meta': {
+    'en-US': '{{visible}} / {{total}} · ↑↓ select · Enter confirm · Esc back{{cycle}}',
+    'zh-CN': '{{visible}} / {{total}} · ↑↓ 选择 · Enter 确认 · Esc 返回{{cycle}}',
+  },
+  'ai.chat.selection.tabSort': {
+    'en-US': 'Tab switch sort',
+    'zh-CN': 'Tab 切换排序',
+  },
   'ai.chat.history.title': {
     'en-US': 'History branches',
     'zh-CN': '历史分支',
@@ -1037,10 +1065,6 @@ export const aiCatalog = {
   'ai.runtime.command.palette': {
     'en-US': 'Command palette',
     'zh-CN': '命令表',
-  },
-  'ai.runtime.command.search': {
-    'en-US': 'Search commands…',
-    'zh-CN': '搜索命令…',
   },
   'ai.runtime.command.noMatch': {
     'en-US': 'No matching commands',

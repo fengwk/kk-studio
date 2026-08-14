@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ThreadComposer,
@@ -26,12 +26,17 @@ import {
   trimMessageParts,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
+import {
+  clearStoredComposerDraft,
+  restoreComposerDraft,
+  storeComposerDraft,
+} from '@/features/ai/composer/composer-draft'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import {
-  AgentSelectionModal,
-  EnvironmentSelectionModal,
-  SelectionListModal,
-} from '@/features/ai/chat/SelectionListModal'
+  AgentSelectionPanel,
+  EnvironmentSelectionPanel,
+  ThreadSelectionPanel,
+} from '@/features/ai/chat/SelectionPanel'
 import {
   toAgentModelViews,
   type AgentModelView,
@@ -43,11 +48,18 @@ import { agentService } from '@/shared/api/agent-service'
 import { isConflictError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
+
+const ConfirmActionModal = lazy(async () => {
+  const module = await import('@/shared/ui/console/ConfirmActionModal')
+  return { default: module.ConfirmActionModal }
+})
 
 export function BlankComposerPane({
   chat,
   agents,
   environments = [],
+  paneId,
   focused,
   threadSort,
   onFocus,
@@ -61,6 +73,7 @@ export function BlankComposerPane({
   chat: ChatDTO | undefined
   agents: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
+  paneId: string
   focused: boolean
   threadSort: PaneSortPreference
   onFocus: () => void
@@ -73,15 +86,19 @@ export function BlankComposerPane({
   onFirstSendRecovery: (threadId: string, recovery: FirstSendRecovery) => void
 }) {
   const { t } = useI18n()
+  const draftStorageScope = chat?.id ? `chat:${chat.id}:pane:${paneId}` : ''
   // 空面板 draft：通过 catalog 将 Chat 默认值 materialize 后，复制第一个可解析值，
   // 再冻结。后续 Chat/Catalog refetch 不会悄悄重写它。
   const [frozenDraft, setFrozenDraft] = useState<BranchDraft | null>(null)
-  const [parts, setParts] = useState<ComposerPart[]>([])
+  const [parts, setPartsState] = useState<ComposerPart[]>(
+    () => restoreComposerDraft(draftStorageScope, []),
+  )
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [agentModalOpen, setAgentModalOpen] = useState(false)
-  const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
-  const [threadModalOpen, setThreadModalOpen] = useState(false)
+  const [interaction, setInteraction] = useState<
+    'agent' | 'environment' | 'thread' | null
+  >(null)
+  const [discardConfirm, setDiscardConfirm] = useState<ConfirmModalState | null>(null)
   /** 等待 agent 补全期间挂起的提交：payload（server uploadId）+ localDraft（客户端 localId）分开保存。 */
   const [pendingContent, setPendingContent] = useState<{
     payload: ComposerPart[]
@@ -91,7 +108,7 @@ export function BlankComposerPane({
   // 不可变的初始值会标记面板为 dirty（state 镜像，绝不是 render-ref）。
   const [initialFrozenDraft, setInitialFrozenDraft] = useState<BranchDraft | null>(null)
   const queryClient = useQueryClient()
-  const threadPicker = useChatThreadPicker(chat?.id ?? '', threadModalOpen, threadSort)
+  const threadPicker = useChatThreadPicker(chat?.id ?? '', interaction === 'thread', threadSort)
   const modelsQuery = useQuery({
     queryKey: queryKeys.models.list,
     queryFn: () => agentService.listModels(),
@@ -138,6 +155,7 @@ export function BlankComposerPane({
     if (!chat || effective == null) {
       return
     }
+    clearStoredComposerDraft(draftStorageScope)
     setPending(true)
     setActionError(null)
     try {
@@ -159,7 +177,7 @@ export function BlankComposerPane({
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.threads(chat.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(result.threadId) }),
       ])
-      setParts([])
+      setPartsState([])
       setPendingContent(null)
       onThreadChange(result.threadId)
     } catch (error) {
@@ -185,7 +203,7 @@ export function BlankComposerPane({
         return
       }
       setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
-      setParts(localDraft)
+      updateParts(localDraft)
     } finally {
       setPending(false)
     }
@@ -203,10 +221,15 @@ export function BlankComposerPane({
       // 补全 draft（绝不创建 provider/model/variant 为空的 Thread，否则会被
       // strict mapper 拒绝）。payload 与 localDraft 分开挂起。
       setPendingContent({ payload, localDraft })
-      setAgentModalOpen(true)
+      setInteraction('agent')
       return
     }
     await runFirstSend(payload, localDraft, frozenDraft)
+  }
+
+  function updateParts(next: ComposerPart[]) {
+    storeComposerDraft(draftStorageScope, next)
+    setPartsState(next)
   }
 
   function handleCommand(command: ThreadCommand) {
@@ -220,13 +243,13 @@ export function BlankComposerPane({
           setActionError(t('ai.runtime.action.threadRunning'))
           return
         }
-        setThreadModalOpen(true)
+        setInteraction('thread')
         return
       case 'agent':
-        setAgentModalOpen(true)
+        setInteraction('agent')
         return
       case 'environment':
-        setEnvironmentModalOpen(true)
+        setInteraction('environment')
         return
       case 'yolo':
         void toggleYolo()
@@ -241,15 +264,32 @@ export function BlankComposerPane({
 
   function selectThread(selectedThreadId: string) {
     // Chat 作用域 picker：切换面板仅作用于面板本地；不会触发任何 Thread mutation。
-    setThreadModalOpen(false)
     if (panePending) {
       setActionError(t('ai.runtime.action.threadRunning'))
       return
     }
-    if (paneDirty && !window.confirm(t('ai.chat.history.confirmDiscardDraft'))) {
+    confirmDiscardIfNeeded(() => {
+      setInteraction(null)
+      updateParts([])
+      onThreadChange(selectedThreadId)
+    })
+  }
+
+  function confirmDiscardIfNeeded(action: () => void) {
+    if (!paneDirty) {
+      action()
       return
     }
-    onThreadChange(selectedThreadId)
+    setDiscardConfirm({
+      title: t('ai.chat.history.discardDraftTitle'),
+      description: t('ai.chat.history.confirmDiscardDraft'),
+      confirmLabel: t('ai.chat.history.discardDraftConfirm'),
+      tone: 'danger',
+      onConfirm: () => {
+        setDiscardConfirm(null)
+        action()
+      },
+    })
   }
 
   function handleAgentSelected(selectedAgentName: string) {
@@ -268,7 +308,7 @@ export function BlankComposerPane({
     // Picker materialization 同样是面板本地基线：只有首次成功的 materialization 才会建立
     // 不可变的初始 draft；后续的 agent/env/yolo 编辑以此为基准（永远不与 null 比较）。
     setInitialFrozenDraft((current) => current ?? next)
-    setAgentModalOpen(false)
+    setInteraction(null)
     setActionError(null)
     // 同步 Chat 默认值以影响后续空面板；当前 frozen draft 保留本面板的值。
     void onAgentChange(selectedAgentName).catch((error: unknown) => {
@@ -287,7 +327,7 @@ export function BlankComposerPane({
     // 与 agent/yolo 一致的语义：立即更新本面板 frozen draft（首次发送 ROOT 使用面板本地值），
     // 同时异步把 Chat 默认值同步为最新选择——即使更新失败/延迟，本面板草稿不受影响。
     setFrozenDraft((current) => (current ? { ...current, environmentName } : current))
-    setEnvironmentModalOpen(false)
+    setInteraction(null)
     setActionError(null)
     void onEnvironmentChange(environmentName).catch((error: unknown) => {
       setActionError(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
@@ -329,6 +369,39 @@ export function BlankComposerPane({
       ? t('ai.runtime.action.agentMissing')
       : t('ai.runtime.action.blankAgent'))
   const environmentName = frozenDraft?.environmentName ?? null
+  const interactionPanel =
+    interaction === 'agent' ? (
+      <AgentSelectionPanel
+        agents={agents.map((agent) => ({
+          name: agent.name,
+          description: agent.description,
+        }))}
+        selectedAgentName={frozenDraft?.agentName ?? chat?.agentName}
+        selectionPending={pending}
+        onClose={() => {
+          setInteraction(null)
+          setPendingContent(null)
+        }}
+        onSelect={handleAgentSelected}
+      />
+    ) : interaction === 'environment' ? (
+      <EnvironmentSelectionPanel
+        environments={environments}
+        selectedEnvironmentName={environmentName}
+        selectionPending={pending}
+        onClose={() => setInteraction(null)}
+        onSelect={handleEnvironmentSelected}
+      />
+    ) : interaction === 'thread' ? (
+      <ThreadSelectionPanel
+        items={threadPicker.items.map((thread) => toThreadSelectionItem(thread, threadSort))}
+        sort={threadSort}
+        loading={threadPicker.isLoading}
+        onSortChange={onThreadSortChange}
+        onClose={() => setInteraction(null)}
+        onSelect={selectThread}
+      />
+    ) : null
 
   return (
     <section className={`chat-pane ${focused ? 'focused' : ''}`} onMouseDown={onFocus}>
@@ -343,13 +416,16 @@ export function BlankComposerPane({
             parts={parts}
             pending={pending}
             disabled={pending}
-            onPartsChange={setParts}
+            onPartsChange={updateParts}
             onSubmit={(payload, localDraft) => {
               void handleSubmit(payload, localDraft)
             }}
             onCommand={handleCommand}
             commands={BLANK_PANE_COMMANDS}
+            focusOnEscape={focused && interactionPanel == null}
+            active={interactionPanel == null}
           />
+          {interactionPanel}
           <ThreadStatusFooter
             agentName={footerAgentName}
             providerName={frozenDraft?.model.providerName || undefined}
@@ -364,51 +440,24 @@ export function BlankComposerPane({
             yoloEnabled={frozenDraft?.yoloEnabled ?? chat?.yoloEnabled}
             onAgentClick={() => {
               onFocus()
-              setAgentModalOpen(true)
+              setInteraction('agent')
             }}
             onEnvironmentClick={() => {
               onFocus()
-              setEnvironmentModalOpen(true)
+              setInteraction('environment')
             }}
           />
         </main>
       </section>
-      <AgentSelectionModal
-        open={agentModalOpen}
-        agents={agents.map((agent) => ({
-          name: agent.name,
-          description: agent.description,
-        }))}
-        onClose={() => {
-          setAgentModalOpen(false)
-          setPendingContent(null)
-        }}
-        onSelect={(selectedAgentName) => {
-          handleAgentSelected(selectedAgentName)
-        }}
-      />
-      <EnvironmentSelectionModal
-        open={environmentModalOpen}
-        environments={environments}
-        selectedEnvironmentName={environmentName}
-        selectionPending={pending}
-        onClose={() => setEnvironmentModalOpen(false)}
-        onSelect={(selectedName) => {
-          handleEnvironmentSelected(selectedName)
-        }}
-      />
-      {/* /thread 仅重新绑定面板；不会修改任何 Thread。 */}
-      <SelectionListModal
-        open={threadModalOpen}
-        title={t('ai.chat.selectThread')}
-        items={threadPicker.items.map((thread) => toThreadSelectionItem(thread, threadSort))}
-        sort={threadSort}
-        onSortChange={onThreadSortChange}
-        loading={threadPicker.isLoading}
-        emptyText={t('ai.chat.noThreads')}
-        onClose={() => setThreadModalOpen(false)}
-        onSelect={selectThread}
-      />
+      {discardConfirm ? (
+        <Suspense fallback={null}>
+          <ConfirmActionModal
+            modal={discardConfirm}
+            pending={false}
+            onClose={() => setDiscardConfirm(null)}
+          />
+        </Suspense>
+      ) : null}
     </section>
   )
 }

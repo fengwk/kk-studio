@@ -3,7 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
-import { createTextPart, type ComposerPart } from '@/features/ai/composer/composer-parts'
+import {
+  createAttachmentPart,
+  createTextPart,
+  slashQueryOf,
+  type ComposerPart,
+} from '@/features/ai/composer/composer-parts'
 import {
   filterThreadCommands,
   threadCommandsForScene,
@@ -62,6 +67,16 @@ describe('ThreadComposer and commands', () => {
     expect(filterThreadCommands('missing')).toEqual([])
   })
 
+  it('uses slash as a text-only shortcut without consuming attachments', () => {
+    expect(slashQueryOf([createTextPart('/stop')])).toBe('stop')
+    expect(
+      slashQueryOf([
+        createTextPart('/stop'),
+        createAttachmentPart('upload-1', 'keep.txt'),
+      ]),
+    ).toBeNull()
+  })
+
   it('allows send and executes slash commands', async () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()
@@ -93,6 +108,7 @@ describe('ThreadComposer and commands', () => {
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: /^stop/ }))
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'stop' }))
+    expect(onPartsChange).toHaveBeenCalledWith([])
 
     onCommand.mockClear()
     rerender(
@@ -110,7 +126,7 @@ describe('ThreadComposer and commands', () => {
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'tree' }))
   })
 
-  it('makes plus equivalent to typing slash in an empty editor', async () => {
+  it('opens the primary command menu from plus without writing slash into the editor', async () => {
     const user = userEvent.setup()
     render(<ControlledComposer />)
     const add = screen.getByRole('button', { name: '打开命令表' })
@@ -121,12 +137,43 @@ describe('ThreadComposer and commands', () => {
 
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     expect(add).toHaveAttribute('aria-expanded', 'true')
-    expect(editor).toHaveTextContent('/')
+    expect(editor).toBeEmptyDOMElement()
+    expect(document.querySelector('.thread-command-search')).toBeNull()
     expect(screen.getByRole('option', { name: /^upload/ })).toBeInTheDocument()
 
+    await user.click(editor)
     await user.keyboard('{Escape}')
     expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
     expect(editor).toBeEmptyDOMElement()
+  })
+
+  it('opens plus menu over a non-empty draft and executes commands without clearing it', async () => {
+    const user = userEvent.setup()
+    const onPartsChange = vi.fn()
+    const onCommand = vi.fn()
+    render(
+      <ThreadComposer
+        parts={[createTextPart('保留这段草稿')]}
+        pending={false}
+        disabled={false}
+        onPartsChange={onPartsChange}
+        onSubmit={vi.fn()}
+        onCommand={onCommand}
+      />,
+    )
+    const editor = screen.getByLabelText('给 AI 发送消息')
+
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    expect(editor).toHaveTextContent('保留这段草稿')
+    expect(onPartsChange).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('option', { name: /^agent/ }))
+
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent' }))
+    expect(onPartsChange).not.toHaveBeenCalled()
+    expect(editor).toHaveTextContent('保留这段草稿')
   })
 
   it('handles /upload locally and keeps the native file input hidden', async () => {
@@ -174,5 +221,27 @@ describe('ThreadComposer and commands', () => {
       />,
     )
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+  })
+
+  it('keeps the placeholder visible for newline-only and whitespace-only drafts', () => {
+    const props = {
+      pending: false,
+      disabled: false,
+      onPartsChange: vi.fn(),
+      onSubmit: vi.fn(),
+      onCommand: vi.fn(),
+    }
+    const { rerender } = render(<ThreadComposer {...props} parts={[]} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    expect(editor).toHaveAttribute('data-placeholder-visible', 'true')
+
+    rerender(<ThreadComposer {...props} parts={[createTextPart('\n')]} />)
+    expect(editor).toHaveAttribute('data-placeholder-visible', 'true')
+
+    rerender(<ThreadComposer {...props} parts={[createTextPart(' \n ')]} />)
+    expect(editor).toHaveAttribute('data-placeholder-visible', 'true')
+
+    rerender(<ThreadComposer {...props} parts={[createTextPart('message')]} />)
+    expect(editor).toHaveAttribute('data-placeholder-visible', 'false')
   })
 })

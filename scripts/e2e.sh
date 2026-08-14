@@ -7,7 +7,7 @@
 #   ./scripts/e2e.sh --real           # + 真 MiniMax 文本轮次（需 TEST_MINIMAX_*）
 #   ./scripts/e2e.sh --real --with-branch
 #   ./scripts/e2e.sh --real --with-tools
-#   ./scripts/e2e.sh --ui              # + Playwright UI smoke（截图进报告）
+#   ./scripts/e2e.sh --ui              # + Playwright UI E2E（截图进报告）
 #   ./scripts/e2e.sh --list           # 只打印矩阵，不执行
 #
 # 文档事实源：
@@ -53,7 +53,7 @@ Options:
   --with-branch     Enable branch usage cases (implies --real)
   --with-canvas-storage  Enable Canvas Resource reserve contract (backend S3 config required)
   --with-canvas-function Enable free fake Canvas Function E2E (implies storage + rebuild)
-  --ui              Enable Playwright UI smoke (screenshots in report)
+  --ui              Enable Playwright UI E2E (screenshots in report)
   --only <caseId>   Run one case id (repeatable)
   --level <Lx>      Filter by level L1/L2/L3/L4 (repeatable)
   --list            List matrix cases
@@ -138,13 +138,13 @@ node "$SCRIPT_DIR/e2e/run-matrix.mjs" "${MATRIX_ARGS[@]}"
 MATRIX_RC=$?
 set -e
 
-# UI smoke 复用 latest 报告目录，把截图并入同一 run
+# UI E2E 复用 latest 报告目录，把截图并入同一 run
 if [ "$WITH_UI" = "true" ]; then
   LATEST_DIR="$REPO_ROOT/reports/e2e/latest"
   if [ ! -d "$LATEST_DIR" ]; then
     die "matrix report latest dir missing; cannot attach UI artifacts"
   fi
-  step "Running UI smoke into $LATEST_DIR"
+  step "Running UI E2E into $LATEST_DIR"
   set +e
   UI_ARGS=(
     --base-url "$FRONTEND_URL"

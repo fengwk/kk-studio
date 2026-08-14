@@ -29,6 +29,12 @@ import {
   trimMessageParts,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
+import {
+  clearStoredComposerDraft,
+  restoreComposerDraft,
+  storeComposerDraft,
+  type ComposerDraftChangeSource,
+} from '@/features/ai/composer/composer-draft'
 import { isConflictError, isConflictReason } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
@@ -134,8 +140,11 @@ export function useAgentThreadController(
   environmentReadyByName: ReadonlyMap<string, boolean> | null = null,
 ) {
   const { t } = useI18n()
-  const [draft, setDraftState] = useState<ComposerPart[]>(initialParts)
-  const draftRef = useRef<ComposerPart[]>(initialParts)
+  const draftStorageScope = `thread:${threadId}`
+  const [draft, setDraftState] = useState<ComposerPart[]>(
+    () => restoreComposerDraft(draftStorageScope, initialParts),
+  )
+  const draftRef = useRef<ComposerPart[]>(draft)
   const [actionError, setActionError] = useState<string | null>(null)
   // 维护局部的 in-flight 计数，保证重叠 mutateAsync 调用下 pending 状态依旧准确。
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
@@ -195,8 +204,10 @@ export function useAgentThreadController(
     if (initializedReplayThreadRef.current === threadId) {
       return
     }
-    setDraftState(initialParts)
-    draftRef.current = initialParts
+    const restoredDraft = restoreComposerDraft(draftStorageScope, initialParts)
+    setDraftState(restoredDraft)
+    draftRef.current = restoredDraft
+    storeComposerDraft(draftStorageScope, restoredDraft)
     replayRef.current = initialReplay ?? null
     setReplayPending(initialReplay != null)
     initializedReplayThreadRef.current = threadId
@@ -204,7 +215,7 @@ export function useAgentThreadController(
     pendingStopRef.current = null
     setStopReplayPending(false)
     decisionIdByInvocation.current.clear()
-  }, [initialParts, initialReplay, threadId])
+  }, [draftStorageScope, initialParts, initialReplay, threadId])
 
   const approvalMutation = useMutation({
     mutationFn: ({
@@ -290,11 +301,21 @@ export function useAgentThreadController(
     setActionError(errorMessage(error))
   }
 
-  function setDraft(next: ComposerPart[]) {
+  function setDraft(
+    next: ComposerPart[],
+    source: ComposerDraftChangeSource = 'edit',
+  ) {
     // 把恢复的 draft 编辑为不同内容会重置请求回放身份。
-    if (replayRef.current != null && partsKey(next) !== partsKey(replayRef.current.parts)) {
+    if (
+      source === 'edit'
+      && replayRef.current != null
+      && partsKey(next) !== partsKey(replayRef.current.parts)
+    ) {
       replayRef.current = null
       setReplayPending(false)
+    }
+    if (source === 'edit') {
+      storeComposerDraft(draftStorageScope, next)
     }
     draftRef.current = next
     setDraftState(next)
@@ -333,6 +354,7 @@ export function useAgentThreadController(
     replayRef.current = { plan: submittedPlan, parts: localDraft }
     setReplayPending(true)
     // 先捕获 parts + id，随后立即清空 draft，以便输入下一条消息。
+    clearStoredComposerDraft(draftStorageScope)
     draftRef.current = []
     setDraftState([])
     setInFlightSubmissions((count) => count + 1)
@@ -360,6 +382,7 @@ export function useAgentThreadController(
             setReplayPending(true)
           }
           // 恢复本地草稿（客户端 localId），与提交 payload 分开。
+          storeComposerDraft(draftStorageScope, localDraft)
           draftRef.current = localDraft
           setDraftState(localDraft)
         }

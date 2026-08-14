@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Playwright UI smoke（L5，可选）。
+ * Playwright UI E2E 矩阵（L5，可选）。
  *
- * - 稳定路径：路由可达、列表渲染、打开创建卡片、无致命 pageerror
+ * - 页面 smoke：路由可达、列表渲染、打开创建卡片、无致命 pageerror
+ * - 交互矩阵：高价值用户路径、状态组合与浏览器布局/Selection 边界
  * - 截图/结果写入 --report-dir（通常是 reports/e2e/<runId>）
  *
  *   node scripts/e2e/ui-smoke.mjs --base-url http://127.0.0.1:5173 --report-dir reports/e2e/<run>
@@ -21,6 +22,7 @@ import {
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createDurationTimer } from './lib/time.mjs'
+import { runComposerMatrix } from './ui/composer-matrix.mjs'
 
 // Playwright 安装在 frontend/node_modules，从仓库根/scripts 直接 import 会找不到包。
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -45,6 +47,7 @@ function parseArgs(argv) {
     reportDir: process.env.E2E_UI_REPORT_DIR || path.resolve('reports/e2e/ui-standalone'),
     headed: false,
     real: false,
+    only: [],
   }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -53,6 +56,7 @@ function parseArgs(argv) {
     else if (a === '--report-dir') args.reportDir = path.resolve(argv[++i])
     else if (a === '--headed') args.headed = true
     else if (a === '--real') args.real = true
+    else if (a === '--only') args.only.push(argv[++i])
     else if (a === '-h' || a === '--help') args.help = true
     else throw new Error(`unknown arg: ${a}`)
   }
@@ -202,7 +206,10 @@ function expectNoFatal(pageErrors, consoleErrors) {
 async function main(argv) {
   const args = parseArgs(argv)
   if (args.help) {
-    console.log('Usage: node scripts/e2e/ui-smoke.mjs --base-url URL --report-dir DIR [--headed]')
+    console.log(
+      'Usage: node scripts/e2e/ui-smoke.mjs --base-url URL --report-dir DIR'
+        + ' [--headed] [--real] [--only CASE_ID]...',
+    )
     return 0
   }
 
@@ -210,6 +217,10 @@ async function main(argv) {
   const artRoot = path.join(reportDir, 'artifacts')
   mkdirSync(path.join(reportDir, 'cases'), { recursive: true })
   mkdirSync(artRoot, { recursive: true })
+  const apiCtx = {
+    call: (method, requestPath, body) =>
+      apiJson(args.backendUrl, method, requestPath, body),
+  }
   if (args.real) await requireRealMiniMaxM27(args.backendUrl)
 
   const browserEnv = { ...process.env }
@@ -237,11 +248,39 @@ async function main(argv) {
 
   const base = args.baseUrl.replace(/\/$/, '')
   const results = []
+  const registeredCaseIds = new Set()
+  const selectedCaseIds = new Set(args.only)
 
   async function goto(p) {
-    pageErrors.length = 0
-    await page.goto(`${base}${p}`, { waitUntil: 'networkidle', timeout: 30_000 })
-    await page.waitForTimeout(400)
+    const targetUrl = `${base}${p}`
+    let lastError = null
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await page.goto(targetUrl, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        })
+        assert(
+          response?.ok(),
+          `navigation HTTP ${response?.status() ?? 'missing'}: ${targetUrl}`,
+        )
+        await page.waitForFunction(
+          () => (document.querySelector('#root')?.childElementCount ?? 0) > 0,
+          undefined,
+          { timeout: 10_000 },
+        )
+        await page.waitForTimeout(400)
+        return
+      } catch (error) {
+        lastError = error
+        if (attempt === 0) {
+          pageErrors.length = 0
+          consoleErrors.length = 0
+          await page.waitForTimeout(250)
+        }
+      }
+    }
+    throw lastError
   }
 
   async function shot(caseArt, name) {
@@ -250,6 +289,12 @@ async function main(argv) {
   }
 
   async function run(id, title, fn) {
+    registeredCaseIds.add(id)
+    if (selectedCaseIds.size > 0 && !selectedCaseIds.has(id)) {
+      return
+    }
+    pageErrors.length = 0
+    consoleErrors.length = 0
     const elapsed = createDurationTimer()
     const caseArt = path.join(artRoot, id.replaceAll('.', '_'))
     mkdirSync(caseArt, { recursive: true })
@@ -270,6 +315,27 @@ async function main(argv) {
       writeFileSync(path.join(reportDir, 'cases', `${id}.json`), `${JSON.stringify(result, null, 2)}\n`)
       console.log(`PASS ${id}`)
     } catch (err) {
+      try {
+        await page.screenshot({
+          path: path.join(caseArt, 'failure.png'),
+          fullPage: true,
+        })
+        writeFileSync(
+          path.join(caseArt, 'failure-state.json'),
+          `${JSON.stringify({
+            url: page.url(),
+            title: await page.title().catch(() => ''),
+            bodyText: await page.locator('body').innerText().catch(() => ''),
+            pageErrors,
+            consoleErrors,
+          }, null, 2)}\n`,
+        )
+      } catch (artifactError) {
+        writeFileSync(
+          path.join(caseArt, 'failure-artifact-error.txt'),
+          `${artifactError?.message || artifactError}\n`,
+        )
+      }
       writeFileSync(path.join(caseArt, 'error.txt'), `${err?.message || err}\n${err?.stack || ''}\n`)
       const result = {
         id,
@@ -406,6 +472,10 @@ async function main(argv) {
 
   await run('ui.environments.page_loads', 'Environments 页可打开', async (caseArt) => {
     await goto('/environments')
+    await page.locator('.environment-list').waitFor({
+      state: 'visible',
+      timeout: 15_000,
+    })
     await shot(caseArt, 'environments')
     expectNoFatal(pageErrors, consoleErrors)
     const body = await page.locator('body').innerText()
@@ -517,7 +587,7 @@ async function main(argv) {
     )
     // 左侧居中 add launcher 仍可打开/关闭菜单。
     const addLauncher = page.getByRole('button', {
-      name: /^(Add resource, Function, or group|添加资源、Function 或分组)$/,
+      name: /^(Add resource or Function|添加资源或 Function)$/,
     })
     await addLauncher.click()
     await page.getByRole('menu').waitFor({ state: 'visible', timeout: 10_000 })
@@ -714,6 +784,18 @@ async function main(argv) {
     await apiDeleteByName(args.backendUrl, 'chats', title)
   })
 
+  await runComposerMatrix({
+    apiCtx,
+    consoleErrors,
+    expectNoFatal,
+    goto,
+    page,
+    pageErrors,
+    run,
+    shot,
+    stamp,
+  })
+
   if (args.real) {
     await run('ui.chat.blank_first_send_real', 'Blank pane 首发真实消息并出现用户气泡', async (caseArt) => {
       const title = `e2e-ui-send-${stamp}`
@@ -758,6 +840,13 @@ async function main(argv) {
     })
   }
 
+  const unknownCaseIds = [...selectedCaseIds].filter(
+    (caseId) => !registeredCaseIds.has(caseId),
+  )
+  if (unknownCaseIds.length > 0) {
+    await browser.close()
+    throw new Error(`unknown UI case id: ${unknownCaseIds.join(', ')}`)
+  }
   await browser.close()
 
   const failed = results.filter((r) => r.status === 'fail')
@@ -774,7 +863,7 @@ async function main(argv) {
   }
   writeFileSync(path.join(reportDir, 'ui-summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
   const lines = [
-    '# UI Smoke Results',
+    '# UI E2E Results',
     '',
     `- Base: \`${args.baseUrl}\``,
     `- Totals: total=${summary.totals.total} pass=${summary.totals.pass} fail=${summary.totals.fail}`,

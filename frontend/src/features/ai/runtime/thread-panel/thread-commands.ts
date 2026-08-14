@@ -14,7 +14,7 @@ export interface ThreadCommand {
 }
 
 /**
- * Slash 命令表（pi 风格）。
+ * 命令菜单（pi 风格）。`+` 是主入口，composer 开头的 `/` 是同一菜单的文本快捷入口。
  * 顺序是稳定的产品顺序，切勿按可用性重新排序。
  */
 export const THREAD_COMMANDS: ThreadCommand[] = [

@@ -54,6 +54,53 @@ describe('ChatPanel', () => {
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
   })
 
+  it('keeps working visible while an interaction panel hides Composer, queue, and widgets', () => {
+    const { container } = render(
+      <ChatPanel
+        labels={{ agentName: 'assistant' }}
+        transcript={{
+          timeline: {
+            messages: [],
+            queuedMessages: [
+              {
+                clientCommandId: 'queued-1',
+                role: 'user',
+                text: 'queued input',
+                sequence: 1,
+              },
+            ],
+            hasPendingInputs: true,
+          },
+          bodyRef: createRef<HTMLDivElement>(),
+          loading: false,
+          error: null,
+        }}
+        composer={{
+          parts: [],
+          pending: false,
+          disabled: false,
+          onPartsChange: vi.fn(),
+          onSubmit: vi.fn(),
+          onCommand: vi.fn(),
+          interactionPanel: <section aria-label="Inline picker">picker</section>,
+        }}
+        footer={{}}
+        activity={{
+          working: true,
+          widgets: <div>task widget</div>,
+        }}
+      />,
+    )
+
+    // Interaction mode keeps only the global working signal; queue/widgets and input are mutually exclusive.
+    expect(screen.getByText('Working...')).toBeInTheDocument()
+    expect(screen.queryByText('queued input')).not.toBeInTheDocument()
+    expect(screen.queryByText('task widget')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Inline picker')).toBeInTheDocument()
+    expect(container.querySelector('.thread-composer')).toHaveAttribute('hidden')
+    expect(screen.getByLabelText('会话状态')).toBeInTheDocument()
+  })
+
   it('treats a missing authoritative original response as an unavailable resource', async () => {
     storageMocks.getBlobOriginalUrl.mockRejectedValue(new Error('missing'))
     storageMocks.getBlobPreviewUrl.mockResolvedValue({
