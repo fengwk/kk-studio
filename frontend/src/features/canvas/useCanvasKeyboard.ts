@@ -15,7 +15,24 @@ type KeyboardApi = {
   closeOverlays: () => void
 }
 
-/** 编辑器键盘快捷键与焦点恢复，与主 controller 主体分离。 */
+/** Agent panel（CanvasAgentDock 的 aside.agent-panel）：panel/Composer 自己的按键作用域。 */
+const AGENT_PANEL_SELECTOR = '.agent-panel'
+/** 自带 Escape 语义的内层菜单（右键菜单/添加菜单）。 */
+const MENU_SELECTOR = '[role="menu"]'
+
+/**
+ * 编辑器键盘快捷键与焦点恢复，与主 controller 主体分离。
+ *
+ * Escape 优先级采用「capture 相位 + 作用域判定」，不依赖 useEffect/window
+ * listener 的注册顺序：
+ * - blocking modal 最高优先级，任何情况下先让路；
+ * - Agent panel（Composer、Event/interaction panel 等）内的按键归 panel/Composer，
+ *   Canvas 全局 handler 不抢；
+ * - 已打开的内层菜单（右键菜单/添加菜单）拥有自己的 Escape 语义；
+ * - Canvas surface（stage 内）上的 Escape 由本 handler 在 capture 相位消费
+ *   （preventDefault + stopPropagation），低优先级的 window bubble handler
+ *   （如 ThreadComposer 的异步焦点恢复）根本收不到该事件，焦点留在 stage。
+ */
 export function useCanvasKeyboard(api: KeyboardApi) {
   const {
     view,
@@ -38,6 +55,14 @@ export function useCanvasKeyboard(api: KeyboardApi) {
         return
       }
       const target = event.target as HTMLElement | null
+      // Agent panel 内的按键由 panel/Composer 处理，Canvas 全局 handler 一律不抢。
+      if (target instanceof HTMLElement && target.closest(AGENT_PANEL_SELECTOR)) {
+        return
+      }
+      // 已打开的内层菜单拥有自己的 Escape 语义（含 rename/confirm 模式的回退）。
+      if (target instanceof HTMLElement && target.closest(MENU_SELECTOR)) {
+        return
+      }
       const isTyping = isEditableKeyboardTarget(target)
       const isButton = Boolean(target?.closest?.('button'))
       const modifier = event.metaKey || event.ctrlKey
@@ -52,9 +77,18 @@ export function useCanvasKeyboard(api: KeyboardApi) {
       }
 
       if (event.key === 'Escape') {
-        // focused Canvas 优先于 focused Pane Composer：消费 Escape，让
-        // ThreadComposer 的全局焦点恢复 handler 让路，焦点留在画布舞台。
+        // 只消费 Canvas surface 上的 Escape：无具体聚焦元素（window/document/body）
+        // 时编辑器视为当前作用域；其余不在 stage 内的目标（顶栏、编辑器头部等）
+        // 交给低优先级作用域处理。
+        const onSurface = target instanceof HTMLElement
+          ? Boolean(stageElementRef.current?.contains(target))
+          : view === 'editor'
+        if (!onSurface) {
+          return
+        }
         event.preventDefault()
+        // capture 相位消费：事件不再下行/冒泡，低优先级 handler 不会随后抢焦点。
+        event.stopPropagation()
         closeOverlays()
         if (view === 'editor') {
           clearSelection()
@@ -93,8 +127,8 @@ export function useCanvasKeyboard(api: KeyboardApi) {
       }
     }
 
-    window.addEventListener('keydown', handleKeyboard)
-    return () => window.removeEventListener('keydown', handleKeyboard)
+    window.addEventListener('keydown', handleKeyboard, true)
+    return () => window.removeEventListener('keydown', handleKeyboard, true)
   }, [
     clearSelection,
     closeOverlays,

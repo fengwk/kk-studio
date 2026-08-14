@@ -14,6 +14,9 @@ import { useI18n } from '@/shared/i18n'
  * Notifications 开关遵循 permission 事实：
  * - `default` 启用时调用浏览器请求，仅 granted 后才写入 enabled=true；
  * - `denied` / `unsupported` 只读引导，不能伪装启用（开关禁用且不写存储）；
+ * - checked 只可能在 `granted && notificationsEnabled` 时为 true：即使存储残留
+ *   `notificationsEnabled:true` 而当前 permission 为 `default`，UI 仍显示未启用，
+ *   点击走请求权限路径，而不是把 setting 关掉；
  * - permission 状态在每次点击后重新读取并更新展示。
  */
 export function SettingsPage() {
@@ -23,7 +26,7 @@ export function SettingsPage() {
     browserNotificationPermission,
   )
   const canEnable = permission === 'granted' || permission === 'default'
-  const enabled = canEnable && notificationsEnabled
+  const enabled = permission === 'granted' && notificationsEnabled
 
   const handleToggle = useCallback(async (next: boolean) => {
     if (!next) {
