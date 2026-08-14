@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
@@ -1321,6 +1321,63 @@ describe('ChatWorkspacePane commands', () => {
       await user.keyboard('/events{Enter}')
       await screen.findByRole('listbox', { name: '事件' })
       await waitFor(() => expect(eventsList().scrollTop).toBe(600))
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+  it('keeps an independent conversation stick lifecycle from the events view and follows the 210px threshold', async () => {
+    const user = userEvent.setup()
+    let current = snapshot(thread({}), { entries: sessionEntries() })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async () => current)
+    // 真实 DOM 属性：jsdom 不计算布局，用 getter spy 提供可滚动的容器尺寸。
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    scrollHeightSpy.mockReturnValue(600)
+    clientHeightSpy.mockReturnValue(200)
+    try {
+      const { queryClient } = renderBoundPane()
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      const dialogue = () => document.querySelector<HTMLElement>('.thread-dialogue')!
+      const eventsList = () => document.querySelector<HTMLElement>('.thread-events')!
+
+      // conversation 首次进入贴底；用户上滑到 450（距底部 -50px，<=210 阈值，stick 仍为 true）。
+      await waitFor(() => expect(dialogue().scrollTop).toBe(600))
+      dialogue().scrollTop = 450
+      fireEvent.scroll(dialogue())
+
+      // 切到 events：首次进入贴底（conversation 的 stick 状态不泄漏到 events）。
+      await user.click(composer)
+      await user.keyboard('/events{Enter}')
+      await screen.findByRole('listbox', { name: '事件' })
+      await waitFor(() => expect(eventsList().scrollTop).toBe(600))
+      // events 用户上滑到 120（距底部 280px，>210 阈值，events stick=false）。
+      eventsList().scrollTop = 120
+      fireEvent.scroll(eventsList())
+
+      // 切回 conversation：恢复 450（阈值内 → stick 跟随自己的恢复位置，而不是 events 的 stick=false）。
+      await user.click(composer)
+      await user.keyboard('/conversation{Enter}')
+      await waitFor(() => expect(dialogue().scrollTop).toBe(450))
+
+      // 内容增长：conversation 仍贴底 —— events 的 stick=false 绝不泄漏到 conversation。
+      current = snapshot(thread({}), {
+        entries: [
+          ...sessionEntries(),
+          entry('s1-extra', 's1-assistant', 'ASSISTANT', 's1 reply 2'),
+        ],
+      })
+      await act(async () => {
+        queryClient.invalidateQueries({ queryKey: ['threads', 'snapshot', 't1'] })
+      })
+      await waitFor(() => expect(dialogue().scrollTop).toBe(600))
+
+      // 再进 events：恢复 120（不是贴底；events 自己的 stick=false 跟随自己的位置）。
+      await user.click(composer)
+      await user.keyboard('/events{Enter}')
+      await screen.findByRole('listbox', { name: '事件' })
+      await waitFor(() => expect(eventsList().scrollTop).toBe(120))
     } finally {
       scrollHeightSpy.mockRestore()
       clientHeightSpy.mockRestore()

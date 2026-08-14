@@ -154,6 +154,7 @@ export function BoundThreadPane({
     switchMainView,
     reset: resetMainViewScroll,
     eventsBodyRef,
+    initialConversationScrollTop,
     initialEventsScrollTop,
   } = useMainViewScrollRestore(controller.bodyRef)
   const [eventDetail, setEventDetail] = useState<ThreadEventItem | null>(null)
@@ -524,6 +525,11 @@ export function BoundThreadPane({
   const transcript: ChatPanelTranscriptInput = {
     timeline: controller.timeline,
     bodyRef: controller.bodyRef,
+    // conversation 重新挂载时以 initialScrollTop 恢复保存位置（null 首次进入贴底）；
+    // resetKey=threadId：重绑后新线程首次进入重新贴底。
+    initialScrollTop: initialConversationScrollTop,
+    resetKey: threadId,
+    eventCount: controller.entries.length + controller.queuedCommands.length,
     loading: controller.messagesLoading,
     error: controller.messagesError,
     approvalPending: controller.approvalPending,

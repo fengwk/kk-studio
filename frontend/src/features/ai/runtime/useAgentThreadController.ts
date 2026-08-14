@@ -10,7 +10,6 @@ import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thre
 import { buildThreadEvents } from '@/features/ai/runtime/thread-events'
 import type { ThreadCommand } from '@/features/ai/runtime'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
-import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
 import { useThreadCommandBatchMutation } from '@/features/ai/runtime/useThreadCommandBatchMutation'
 import {
@@ -207,15 +206,6 @@ export function useAgentThreadController(
   )
   const working = isThreadWorking(thread, timeline)
   const runtimeLabels = resolveRuntimeLabels(thread, agents, models, environmentReadyByName)
-
-  useChatTranscriptAutoScroll(
-    bodyRef,
-    timeline.messages.length,
-    entries.length + queuedCommands.length,
-    null,
-    // Thread 重绑：新线程首次进入重新贴底（不沿用旧线程的 stick 状态）。
-    threadId,
-  )
 
   useEffect(() => {
     if (initializedReplayThreadRef.current === threadId) {

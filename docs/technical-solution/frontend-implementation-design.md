@@ -128,18 +128,22 @@ Bound 场景提供 `/events`、`/conversation`；全部 4 个 Composer 场景（
 
 ```text
 ThreadPanelMainView = 'conversation' | 'events'
-mainView?.events ?? ThreadTranscript        # 互斥：任一时刻只有一个主滚动区
+mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个主滚动区
 ```
 
 - 切换只替换主滚动区：Composer、queue、working、widgets 保持挂载，本地 draft 不丢；
   **切回 conversation 时关闭事件详情**。
 - 每 Pane 独立保存 conversation 与 events 两个 `scrollTop`（`useMainViewScrollRestore`，
-  内存 `positionsRef`，不用 localStorage）：视图重进时恢复原滚动位置（conversation 恢复
-  通过合成 `scroll` 事件同步自动贴底 stick 状态；`useChatTranscriptAutoScroll` 接受
-  `initialScrollTop`，恢复后 `isNearBottom` 决定是否继续贴底）；Thread 重绑清空位置并
-  回到贴底。重绑同时把视图重置回 conversation 并关闭详情与 interaction。
+  内存 `positionsRef`，不用 localStorage）：切换前捕获当前主视图位置，目标视图
+  **把保存位置作为 mount `initialScrollTop` 传入**（conversation 经
+  `ThreadConversationView`、events 经 `ThreadEventView`），由视图内部
+  `useChatTranscriptAutoScroll` 挂载时应用并按 210px 阈值决定 stick——不靠父 effect
+  对新 ref 派发假 scroll；Thread 重绑清空位置并回到贴底，重绑同时把视图重置回
+  conversation 并关闭详情与 interaction。Conversation 与 Event 视图各自拥有独立的
+  stick 生命周期：视图卸载即销毁 scroll listener/ResizeObserver，重新挂载时重新
+  绑定（`useAgentThreadController` 不再常驻自动贴底 hook）。
 - `/events` 打开 `ThreadEventView`（listbox/option）：`↑/↓`、`Home/End`、`PageUp/PageDown`
-  移动 active（初始为最新事件，Page 步长 10），`Enter/Space` 打开详情，`Esc` 在详情打开时
+  移动 active（初始为最新事件，Page 步长 8），`Enter/Space` 打开详情，`Esc` 在详情打开时
   关闭详情、否则透传给全局 Escape（恢复 Composer 焦点）；鼠标 `mousemove` 与 click 都激活
   所在行。
 - 事件详情是**只读 widget**（`ThreadEventDetail`，位于 ThreadWidgetStack、Composer 上方），
@@ -150,9 +154,12 @@ mainView?.events ?? ThreadTranscript        # 互斥：任一时刻只有一个�
   TURN_START/TURN_END/COMPACTION/未知类型）；活跃 model/tool invocation 与 attempt
   failure 是单条事件（Provider delta token 绝不逐条成行），锚定在所属 durable Entry 之后，
   找不到锚点追加到末尾。活跃 overlay 与 durable Entry 重叠窗口（
-  `ModelTerminalPending`/`ToolTerminalPending`）按身份去重：failure 用
-  `attempt:sequence`，tool 用 `toolCallId`（从 MESSAGE/CUSTOM_MESSAGE 的
-  `tool_call`/`tool_result` content 提取），已物化为 durable 的活跃 overlay 不重复展示。
+  `ModelTerminalPending`/`ToolTerminalPending`）按 **Turn 内**身份去重（沿 entries
+  线性路径跟踪当前 `TURN_START.entryId`）：failure 用 `turnStartEntryId + attempt +
+  sequence`，tool 只认已物化的 durable `tool_result`（或 DTO `resultEntryId` 已指向
+  已存在 Entry），身份为 `assistantEntryId 所在 Turn + toolCallId`——旧 Turn 的 durable
+  记录绝不抑制新 Turn 相同数字/复用 toolCallId 的活跃 overlay；durable assistant
+  `tool_call` 不抑制运行中的 tool invocation。
 - `/shortcuts` 打开只读 `ThreadShortcutsPanel`（分组快捷键目录
   `SHORTCUT_CATALOG`：Application / Thread / Events / Canvas，只收录已实现快捷键，每个
   descriptionKey 在 zh-CN / en-US 均可解析 + 统一 ThreadInteractionPanel shell）：

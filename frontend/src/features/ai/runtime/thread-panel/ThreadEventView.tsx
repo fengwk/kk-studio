@@ -3,7 +3,7 @@ import type { ThreadEventItem } from '@/features/ai/runtime/thread-events'
 import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { useI18n } from '@/shared/i18n'
 
-const PAGE_STEP = 10
+const PAGE_STEP = 8
 
 /**
  * Event 主视图：listbox/option 语义，与 Conversation 互斥渲染（只存在一个主滚动区）。

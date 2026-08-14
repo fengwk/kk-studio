@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode, type RefObject } from 'react'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
+import { ThreadConversationView } from '@/features/ai/runtime/thread-panel/ThreadConversationView'
 import { ThreadErrorPanel } from '@/features/ai/runtime/thread-panel/ThreadErrorPanel'
-import { ThreadTranscript } from '@/features/ai/runtime/thread-panel/ThreadTranscript'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
@@ -21,6 +21,12 @@ export interface ThreadPanelTranscriptInput {
   loading: boolean
   error: unknown
   bodyRef: RefObject<HTMLDivElement | null>
+  /** 重新进入 conversation 视图时恢复的 scrollTop；null 表示首次进入（贴底）。 */
+  initialScrollTop?: number | null
+  /** 变化时重置 stick 并重新贴底（Thread 重绑后新线程首次进入）。 */
+  resetKey?: string | number | null
+  /** 非消息内容的变化计数（控制 Entry/queued 等），用于贴底再评估。 */
+  eventCount?: number
   /** 处理待决 ToolInvocation 的审批；当面板没有 Thread 上下文时为空。 */
   onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
   /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
@@ -107,11 +113,14 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots }:
       {slots?.sidebar}
       <main className="chat-main thread-panel-main">
         {mainView?.events ?? (
-          <ThreadTranscript
+          <ThreadConversationView
             messages={transcript.messages}
             loading={transcript.loading}
             error={transcript.error}
             bodyRef={transcript.bodyRef}
+            initialScrollTop={transcript.initialScrollTop}
+            resetKey={transcript.resetKey}
+            eventCount={transcript.eventCount}
             onDecideApproval={transcript.onDecideApproval}
             approvalPending={transcript.approvalPending}
           />
