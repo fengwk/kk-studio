@@ -27,7 +27,9 @@ class RuntimeSpringModuleArchitectureTest {
           "org.springframework.dao.",
           "org.springframework.data.",
           "org.springframework.jdbc.",
-          "org.springframework.transaction.");
+          "org.springframework.transaction.",
+          "reactor.core.",
+          "reactor.util.");
 
   /** 所有生产源码都必须留在 adapter 包内，且禁止引入 Core/Web 技术。 */
   @Test

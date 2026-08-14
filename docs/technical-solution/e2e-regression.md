@@ -362,7 +362,8 @@ POST /api/ai/runtime/threads/{threadId}/commands          -> 202
 PUT  /api/ai/runtime/threads/{threadId}/head
 POST /api/ai/runtime/threads/{threadId}/stop
 POST /api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval
-GET  /api/ai/runtime/threads/{threadId}/events/stream?afterRevision={revision}
+
+WebSocket /api/events/v1        -> 事件通道（thread/canvas 订阅，见下）
 
 GET  /api/ai/runtime/resources/{sha256}?mediaType=&size=&name=  -> 仅瞬时/Invocation ResourceRef 兼容下载
 
@@ -440,7 +441,6 @@ GET    /api/canvases/{canvasId}             -> CanvasSnapshotDTO
 POST   /api/canvases/{canvasId}/commands    -> CanvasPatchDTO
 DELETE /api/canvases/{canvasId}             -> 深删除（含绑定 Thread）
 GET    /api/canvases/{canvasId}/changes?afterVersion=N -> CanvasChangesDTO
-GET    /api/canvases/{canvasId}/events/stream?afterVersion=N -> SSE（'version'/'resync'）
 POST   /api/canvases/{canvasId}/thread/messages -> 200 CREATED 原子首次发送
 GET    /api/canvas-function-models
 POST   /api/canvases/{canvasId}/nodes/{nodeId}/runs
@@ -475,8 +475,11 @@ GET  /api/storage/blobs/{blobId}/presigned-preview
 - `GET /changes`：要么返回从 `afterVersion`（含 0）起连续 patches（客户端逐个应用），
   要么返回必须整体替换的权威 snapshot（缓存缺失/gap/损坏）；已处于尾部时返回空 delta，
   未知 canvas 400；
-- SSE `events/stream`：`afterVersion` 与 `Last-Event-ID` 都是 canonical 非负十进制字符串；
-  `version` 事件只携带前进版本（十进制字符串，客户端随后拉 changes），`resync` 事件要求整体快照；
+- WebSocket `/api/events/v1`：客户端帧 `{version:1, type:'subscribe'|'unsubscribe', resource:{kind,id}}`
+  （kind 为 `thread`/`canvas`，id 为 canonical UUID）；服务端帧
+  `subscribed{cursor}`（canonical 非负十进制，即订阅建立瞬间的 durable revision/version）、
+  `event{name:'revision'|'realtime'|'version'}`、`resync`（要求整体快照）、`error`；
+  ack 游标之后的事件不丢失，事件帧不先于 ack 帧；非法帧/未知资源发 error 帧后关闭连接；
 - `POST /thread/messages` 原子首次发送：单事务创建根 Thread、入队有序
   `USER_MESSAGE contents`（`commandId` 作为 `clientCommandId` 幂等键）并绑定
   `canvas_document.thread_id`；已绑定 Thread 时原样重放；`branchSettings` 是冻结的
@@ -500,7 +503,9 @@ WebSocket /api/ai/environment/daemon/v2
 
 默认 L1 不覆盖 task 心跳与 UI 呈现：`task.status` 心跳、renderer 分发、TaskStatusWidget 与浏览器通知等呈现契约由前端单测覆盖，真实 task 委派只由显式 `--real` 的 `real.task_delegation` 覆盖。
 
-SSE：`afterRevision` 与 `Last-Event-ID` 是 canonical decimal durable cursor；Redis realtime delta 无 SSE id。
+WebSocket `/api/events/v1`：Thread 订阅 ack cursor 是 canonical decimal durable revision，Redis
+realtime delta 经 `event{name:'realtime'}` 投递；revision/version 事件只携带 ack 之后的前进值
+（十进制字符串，客户端随后拉 snapshot/changes），`resync` 要求整体快照。
 
 ## 5. MiniMax-H3 手工 smoke
 

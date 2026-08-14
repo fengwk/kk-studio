@@ -2,10 +2,14 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.data.redis.RedisConnectionDetails;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.connection.RedisPassword;
+import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -33,10 +37,9 @@ import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlWorkListener;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventTail;
 import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeConfig;
 import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeEventSink;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeEventTail;
+import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.spring.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
@@ -103,7 +106,7 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public RedisRealtimeConfig redisRealtimeConfig(HarnessRuntimeProperties properties) {
-    return new RedisRealtimeConfig(properties.getRedisPrefix(), properties.getRedisMaxLength());
+    return new RedisRealtimeConfig(properties.getRedisPrefix());
   }
 
   @Bean
@@ -112,10 +115,24 @@ public class HarnessRuntimeConfiguration {
     return new RedisRealtimeEventSink(stringRedisTemplate, config, new RealtimeEventJsonCodec());
   }
 
-  @Bean
-  public RealtimeEventTail realtimeEventTail(
-      StringRedisTemplate stringRedisTemplate, RedisRealtimeConfig config) {
-    return new RedisRealtimeEventTail(stringRedisTemplate, config, new RealtimeEventJsonCodec());
+  /**
+   * 事件通道的 Redis Pub/Sub realtime source。使用专用（不共享 native connection）的 Lettuce 连接工厂：listener
+   * 需要独占一条订阅连接，不能与 {@link StringRedisTemplate} 共用。
+   */
+  @Bean(destroyMethod = "close")
+  public RedisRealtimeEventSource redisRealtimeEventSource(
+      RedisConnectionDetails connectionDetails, RedisRealtimeConfig config) {
+    RedisConnectionDetails.Standalone standaloneDetails = connectionDetails.getStandalone();
+    RedisStandaloneConfiguration standalone = new RedisStandaloneConfiguration();
+    standalone.setHostName(standaloneDetails.getHost());
+    standalone.setPort(standaloneDetails.getPort());
+    standalone.setDatabase(standaloneDetails.getDatabase());
+    standalone.setUsername(connectionDetails.getUsername());
+    standalone.setPassword(RedisPassword.of(connectionDetails.getPassword()));
+    LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(standalone);
+    connectionFactory.setShareNativeConnection(false);
+    connectionFactory.afterPropertiesSet();
+    return new RedisRealtimeEventSource(connectionFactory, config, new RealtimeEventJsonCodec());
   }
 
   @Bean

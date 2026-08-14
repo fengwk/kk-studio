@@ -107,7 +107,7 @@ Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `
 | `PUT /api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
 | `POST /api/ai/runtime/threads/{threadId}/stop` | stopRequestId + revision CAS |
 | `POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval` | Tool approval 决定（父/子 Thread 同一端点） |
-| `GET /api/ai/runtime/threads/{threadId}/events/stream` | durable revision SSE + realtime overlay |
+| WebSocket `/api/events/v1` | 事件通道：`subscribe/unsubscribe`（thread/canvas），`subscribed/event/resync/error` 帧 |
 | `GET /api/ai/runtime/resources/{sha256}` | 读取仍处于瞬时/Invocation `ResourceRef` 形态的 managed Resource；Entry history 的 Blob Resource 不走该端点 |
 | `GET /api/ai/catalog/tools` | Agent 可选择的 Platform/Environment ToolCatalog（不含内部 load_skill/task） |
 | `GET /api/ai/environment` | 当前 live Environment 内存投影（含 CONNECTING/READY status） |
@@ -116,7 +116,6 @@ Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `
 | `GET /api/canvases/{canvasId}` | Canvas document、ResourceNode/Resource/Function/Run、Group、Link 完整快照 |
 | `POST /api/canvases/{canvasId}/commands` | typed Canvas command batch；version CAS、commandId/hash 幂等与实体 Patch |
 | `GET /api/canvases/{canvasId}/changes` | 连续 Patch 或 gap Snapshot 恢复 |
-| `GET /api/canvases/{canvasId}/events/stream` | Canvas version/resync SSE |
 | `POST /api/canvases/{canvasId}/thread/messages` | 首次创建并绑定真实 Harness Thread；ordered TEXT/ATTACHMENT |
 | `POST /api/storage/uploads` | 全局 Upload reserve；PENDING 返回带 checksum 的 create-only PUT |
 | `POST /api/storage/uploads/{uploadId}/complete` | 校验并绑定 READY Blob |

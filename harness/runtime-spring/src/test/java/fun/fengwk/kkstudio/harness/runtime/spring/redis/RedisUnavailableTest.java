@@ -16,10 +16,9 @@ import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 
 import java.net.ServerSocket;
-import java.time.Duration;
 import java.time.Instant;
 
-/** Redis 不可用时失败必须向上传播，不能被 adapter 吞掉。adapter 直连一个已释放的本地端口，无需 Docker。 */
+/** Redis 不可用时：sink 失败必须向上传播；source 订阅不抛错、可干净关闭。adapter 直连一个已释放的本地端口，无需 Docker。 */
 class RedisUnavailableTest {
 
   private LettuceConnectionFactory connectionFactory;
@@ -33,7 +32,7 @@ class RedisUnavailableTest {
     }
     connectionFactory =
         new LettuceConnectionFactory(new RedisStandaloneConfiguration("127.0.0.1", brokenPort));
-    connectionFactory.setShareNativeConnection(true);
+    connectionFactory.setShareNativeConnection(false);
     connectionFactory.afterPropertiesSet();
     stringRedisTemplate = new StringRedisTemplate(connectionFactory);
   }
@@ -64,14 +63,19 @@ class RedisUnavailableTest {
   }
 
   @Test
-  void tailPropagatesRedisFailure() {
-    RedisRealtimeEventTail tail =
-        new RedisRealtimeEventTail(
-            stringRedisTemplate, new RedisRealtimeConfig(), new RealtimeEventJsonCodec());
-    RuntimeException thrown =
-        assertThrows(
-            RuntimeException.class, () -> tail.readAfter(id(1L), "0-0", 10, Duration.ZERO));
-    assertRedisRelated(thrown);
+  void sourceSubscriptionIsAsyncAndClosesCleanlyWithoutRedis() throws Exception {
+    RedisRealtimeEventSource source =
+        new RedisRealtimeEventSource(
+            connectionFactory, new RedisRealtimeConfig(), new RealtimeEventJsonCodec());
+    try {
+      // 订阅失败在 reactor 上异步发生：调用本身不抛错，也不产生 resync（从未连接成功）。
+      AutoCloseable subscription = source.subscribe(id(1L), event -> {}, () -> {});
+      subscription.close();
+    } finally {
+      source.close();
+    }
+    assertThrows(
+        IllegalStateException.class, () -> source.subscribe(id(1L), event -> {}, () -> {}));
   }
 
   private static void assertRedisRelated(Throwable thrown) {

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.controller;
+package fun.fengwk.kkstudio.web.events;
 
 import lombok.extern.slf4j.Slf4j;
 import org.postgresql.PGConnection;
@@ -24,12 +24,13 @@ import java.util.function.Consumer;
 /**
  * PostgreSQL {@code canvas_document.version} 前进通知的进程内 fan-out。
  *
- * <p>{@code canvas_document} 行与 version 是事实源；本 hub 只负责 LISTEN/NOTIFY 唤醒后重新读取当前 version 再通知 SSE
- * 订阅者（payload 里携带的 version 只作为可恢复性提示）。LISTEN 启动/重连成功时广播 resync，因为断连期间的通知不可恢复。
+ * <p>{@code canvas_document} 行与 version 是事实源；本 hub 只负责 LISTEN/NOTIFY 唤醒后重新读取当前 version 再通知
+ * 订阅者（payload 里携带的 version 只作为可恢复性提示）。LISTEN 启动/重连成功时广播 resync，因为断连期间的通知 不可恢复。{@link #subscribe}
+ * 先注册 consumer 再读当前 version 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
  */
 @Slf4j
 @Component
-final class CanvasVersionSseHub implements SmartLifecycle, CanvasVersionEventSource {
+final class CanvasVersionHub implements SmartLifecycle, CanvasVersionEventSource {
 
   static final String CHANNEL = "canvas_version";
 
@@ -38,25 +39,30 @@ final class CanvasVersionSseHub implements SmartLifecycle, CanvasVersionEventSou
   private volatile boolean running;
   private volatile Thread listenerThread;
 
-  CanvasVersionSseHub(DataSource dataSource) {
+  CanvasVersionHub(DataSource dataSource) {
     this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
   }
 
   @Override
-  public AutoCloseable subscribe(UUID canvasId, long afterVersion, Consumer<Event> consumer) {
+  public SourceSubscribed subscribe(UUID canvasId, Consumer<Event> consumer) {
     Objects.requireNonNull(canvasId, "canvasId");
-    if (afterVersion < 0) {
-      throw new IllegalArgumentException("afterVersion must be non-negative");
-    }
     Objects.requireNonNull(consumer, "consumer");
     Set<Consumer<Event>> canvasSubscribers =
         subscribers.computeIfAbsent(canvasId, ignored -> new CopyOnWriteArraySet<>());
     canvasSubscribers.add(consumer);
     try {
-      long currentVersion = currentVersion(canvasId);
-      if (currentVersion > afterVersion) {
-        consumer.accept(new Event(currentVersion, false));
-      }
+      long cursor = currentVersion(canvasId);
+      return new SourceSubscribed(
+          cursor,
+          () -> {
+            Set<Consumer<Event>> currentSubscribers = subscribers.get(canvasId);
+            if (currentSubscribers != null) {
+              currentSubscribers.remove(consumer);
+              if (currentSubscribers.isEmpty()) {
+                subscribers.remove(canvasId, currentSubscribers);
+              }
+            }
+          });
     } catch (RuntimeException error) {
       canvasSubscribers.remove(consumer);
       if (canvasSubscribers.isEmpty()) {
@@ -64,15 +70,6 @@ final class CanvasVersionSseHub implements SmartLifecycle, CanvasVersionEventSou
       }
       throw error;
     }
-    return () -> {
-      Set<Consumer<Event>> currentSubscribers = subscribers.get(canvasId);
-      if (currentSubscribers != null) {
-        currentSubscribers.remove(consumer);
-        if (currentSubscribers.isEmpty()) {
-          subscribers.remove(canvasId, currentSubscribers);
-        }
-      }
-    };
   }
 
   @Override
