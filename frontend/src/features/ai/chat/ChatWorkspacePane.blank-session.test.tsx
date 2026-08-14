@@ -246,7 +246,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
   it('exposes full command table on blank panes with unsupported entries disabled', () => {
     expect(BLANK_PANE_COMMANDS.map((command) => command.id)).toEqual([
-      'session',
       'thread',
       'agent',
       'environment',
@@ -255,19 +254,25 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       'stop',
       'new',
       'upload',
+      'events',
+      'conversation',
+      'shortcuts',
     ])
-    // /thread 仅切换面板，因此在任何 Thread 存在之前就能生效；/session 和 /tree
-    // 会重新绑定*当前* Thread，因此在空面板上保持禁用。
+    // /thread 仅切换面板，因此在任何 Thread 存在之前就能生效；/tree、/events 与
+    // /conversation 依赖已绑定的 Thread，因此在空面板上保持禁用。/session 已彻底移除。
     expect(BLANK_PANE_COMMANDS.filter((command) => !command.disabled).map((command) => command.id)).toEqual([
       'thread',
       'agent',
       'environment',
       'yolo',
       'upload',
+      'shortcuts',
     ])
-    expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'session')?.disabled).toBe(true)
+    expect(BLANK_PANE_COMMANDS.some((command) => command.id === 'session')).toBe(false)
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'tree')?.disabled).toBe(true)
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'new')?.disabled).toBe(true)
+    expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'events')?.disabled).toBe(true)
+    expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'conversation')?.disabled).toBe(true)
   })
 
   it('restores the pane-scoped browser draft before the first Thread exists', async () => {

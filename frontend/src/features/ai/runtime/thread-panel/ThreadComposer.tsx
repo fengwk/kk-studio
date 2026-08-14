@@ -50,6 +50,7 @@ import {
   type StorageService,
 } from '@/features/ai/composer'
 import { useComposerMessageHistory } from '@/features/ai/runtime/thread-panel/useComposerMessageHistory'
+import { hasBlockingOverlay } from '@/shared/ui/blocking-overlay'
 import { useI18n } from '@/shared/i18n'
 
 const EMPTY_USER_MESSAGES: readonly string[] = []
@@ -233,8 +234,8 @@ export function ThreadComposer({
       ) {
         return
       }
-      // Overlay 保留自己的 Escape 语义；关闭后再次按 Escape 才回到 Composer。
-      if (document.querySelector('.modal-backdrop, [aria-modal="true"], [role="alertdialog"]')) {
+      // Modal/alertdialog/lightbox 保留自己的 Escape 语义；关闭后再次按 Escape 才回到 Composer。
+      if (hasBlockingOverlay()) {
         return
       }
       if (editorRef.current?.getAttribute('contenteditable') !== 'true') {

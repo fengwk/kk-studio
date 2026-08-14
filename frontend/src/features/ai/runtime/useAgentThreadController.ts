@@ -7,6 +7,7 @@ import {
   type AgentModelView,
 } from '@/features/ai/catalog'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
+import { buildThreadEvents } from '@/features/ai/runtime/thread-events'
 import type { ThreadCommand } from '@/features/ai/runtime'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
 import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
@@ -190,6 +191,15 @@ export function useAgentThreadController(
     realtime.toolStreams,
     modelAttemptFailures,
     modelInvocation,
+  )
+  // Event 投影独立于 DialogueMessage：durable Entry 全类型 + 活跃 model/tool overlay。
+  const events = buildThreadEvents(
+    entries,
+    modelInvocation,
+    toolInvocations,
+    modelAttemptFailures,
+    realtime.modelStream,
+    realtime.toolStreams,
   )
   const working = isThreadWorking(thread, timeline)
   const runtimeLabels = resolveRuntimeLabels(thread, agents, models, environmentReadyByName)
@@ -534,6 +544,7 @@ export function useAgentThreadController(
     bound,
     title: thread?.threadId || t('ai.chat.chatLabel'),
     timeline,
+    events,
     runtimeLabels,
     working,
     entries,

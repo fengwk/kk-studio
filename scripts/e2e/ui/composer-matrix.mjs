@@ -590,6 +590,170 @@ export async function runComposerMatrix(ui) {
       )
     },
   )
+
+  await run(
+    'ui.chat.events.conversation_switch',
+    '事件主视图唯一滚动区、只读详情与返回 Conversation 不丢草稿',
+    async (caseArt) => {
+      const historicalMessage = `events baseline ${stamp}`
+      await withUiFixture(
+        page,
+        () => createDurableHistoryFixture(apiCtx, {
+          title: `e2e-ui-events-${stamp}`,
+          messages: [historicalMessage],
+        }),
+        async (fixture) => {
+          const composer = await bindThreadComposer(page, goto, fixture)
+          const draft = `events draft ${stamp}`
+          const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
+
+          // /events：唯一主滚动区切换为事件列表（transcript 卸载）。
+          await composer.pressSequentially('/events')
+          await composer.press('Enter')
+          const listbox = page.getByRole('listbox', { name: '事件' })
+          await listbox.waitFor({ state: 'visible', timeout: 15_000 })
+          assert(
+            (await page.locator('.thread-dialogue').count()) === 0,
+            'transcript stayed mounted while the events view is open',
+          )
+          const optionCount = await listbox.getByRole('option').count()
+          assert(optionCount >= 2, `events list is too short: ${optionCount}`)
+
+          // Composer 保持挂载：detail 不是 InteractionPanel，草稿可继续编辑。
+          await composer.fill(draft)
+          await expectStorage(page, draftKey, draft)
+
+          // 点击 USER 消息事件：只读 detail widget 展示原始 payload JSON。
+          const userOption = listbox.getByRole('option').filter({ hasText: historicalMessage }).first()
+          await userOption.click()
+          const detail = page.getByLabel('事件详情', { exact: true })
+          await detail.waitFor({ state: 'visible', timeout: 10_000 })
+          const payload = await page.locator('.thread-event-detail-payload').innerText()
+          assert(payload.includes('"role"'), `payload lacks role: ${payload.slice(0, 200)}`)
+          assert(
+            payload.includes(historicalMessage),
+            `payload lacks message text: ${payload.slice(0, 200)}`,
+          )
+          await composer.waitFor({ state: 'visible', timeout: 10_000 })
+
+          // + 菜单返回 Conversation：事件视图卸载，草稿与存储保持。
+          await page.getByRole('button', { name: '打开命令表' }).click()
+          await page.getByRole('option', { name: /^conversation/ }).click()
+          await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
+          assert(
+            (await page.locator('.thread-events').count()) === 0,
+            'events view stayed mounted while the conversation is open',
+          )
+          await expectComposerText(page, draft)
+          await expectStorage(page, draftKey, draft)
+
+          await shot(caseArt, 'events-detail-and-switch')
+          expectNoFatal(pageErrors, consoleErrors)
+        },
+      )
+    },
+  )
+
+  await run(
+    'ui.chat.events.keyboard_nav',
+    '事件列表键盘导航、mousemove 激活与 Enter/Esc 详情开关',
+    async (caseArt) => {
+      const historicalMessage = `events keyboard ${stamp}`
+      await withUiFixture(
+        page,
+        () => createDurableHistoryFixture(apiCtx, {
+          title: `e2e-ui-events-keyboard-${stamp}`,
+          messages: [historicalMessage],
+        }),
+        async (fixture) => {
+          const composer = await bindThreadComposer(page, goto, fixture)
+          await composer.pressSequentially('/events')
+          await composer.press('Enter')
+          const listbox = page.getByRole('listbox', { name: '事件' })
+          await listbox.waitFor({ state: 'visible', timeout: 15_000 })
+          const optionCount = await listbox.getByRole('option').count()
+          assert(optionCount > 1, `too few events: ${optionCount}`)
+          await listbox.focus()
+
+          const activeOption = () =>
+            listbox.locator('[role="option"][aria-selected="true"]')
+          const activeText = async () => (await activeOption().innerText()).trim()
+
+          // 初始 active 是最新事件（末尾）；ArrowUp 上移一位。
+          const initialText = await activeText()
+          await listbox.press('ArrowUp')
+          const afterUp = await activeText()
+          assert(afterUp !== initialText, 'ArrowUp did not move the active option')
+
+          // mousemove（hover）驱动 active 到首项。
+          await listbox.getByRole('option').first().hover()
+          const afterHover = await activeText()
+          assert(afterHover !== afterUp, 'hover did not move the active option')
+
+          // 键盘重新接管：ArrowDown 离开首项；Home/End 边界。
+          await listbox.press('ArrowDown')
+          const afterDown = await activeText()
+          assert(afterDown !== afterHover, 'ArrowDown did not move the active option')
+          await listbox.press('Home')
+          assert((await activeText()) === afterHover, 'Home did not move to the first option')
+          await listbox.press('End')
+          assert((await activeText()) === initialText, 'End did not move to the last option')
+
+          // Enter 打开详情，Esc 关闭详情（不落回全局 Escape）。
+          await listbox.press('Enter')
+          const detail = page.getByLabel('事件详情', { exact: true })
+          await detail.waitFor({ state: 'visible', timeout: 10_000 })
+          await listbox.press('Escape')
+          await detail.waitFor({ state: 'hidden', timeout: 10_000 })
+
+          await shot(caseArt, 'events-keyboard-nav')
+          expectNoFatal(pageErrors, consoleErrors)
+        },
+      )
+    },
+  )
+
+  await run(
+    'ui.chat.shortcuts.escape_restores_focus',
+    '/shortcuts 只读面板打开后 Esc 关闭并恢复 Composer 焦点与草稿',
+    async (caseArt) => {
+      const draft = `shortcuts draft ${stamp}`
+      await withUiFixture(
+        page,
+        () => createBlankChatFixture(apiCtx, {
+          title: `e2e-ui-shortcuts-${stamp}`,
+        }),
+        async (fixture) => {
+          const composer = await bindBlankComposer(page, goto, fixture)
+          const blankDraftKey = composerDraftStorageKey(
+            `chat:${fixture.chat.id}:pane:pane-1`,
+          )
+          await composer.fill(draft)
+          await expectStorage(page, blankDraftKey, draft)
+
+          // 非空草稿下通过 + 菜单打开只读快捷键面板。
+          await page.getByRole('button', { name: '打开命令表' }).click()
+          await page.getByRole('option', { name: /^shortcuts/ }).click()
+          const panel = page.getByRole('region', { name: '键盘快捷键' })
+          await panel.waitFor({ state: 'visible', timeout: 10_000 })
+
+          // Esc 关闭面板并恢复 Composer 焦点；草稿与存储保持。
+          await page.keyboard.press('Escape')
+          await page.waitForFunction(
+            () => document.activeElement?.classList.contains('composer-editor') === true,
+            undefined,
+            { timeout: 10_000 },
+          )
+          await panel.waitFor({ state: 'hidden', timeout: 10_000 })
+          await expectComposerText(page, draft)
+          await expectStorage(page, blankDraftKey, draft)
+
+          await shot(caseArt, 'shortcuts-escape-restores-focus')
+          expectNoFatal(pageErrors, consoleErrors)
+        },
+      )
+    },
+  )
 }
 
 async function createBlankChatFixture(apiCtx, { title }) {

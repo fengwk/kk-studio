@@ -1,6 +1,10 @@
 export {
   ThreadComposer,
   ThreadStatusFooter,
+  ThreadEventView,
+  ThreadEventDetail,
+  ThreadShortcutsPanel,
+  type ThreadPanelMainView,
   type ThreadCommand,
 } from '@/features/ai/runtime/thread-panel'
 export { threadCommandsForScene } from '@/features/ai/runtime/thread-panel/thread-commands'

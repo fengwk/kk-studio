@@ -169,6 +169,40 @@ function snapshot(
   }
 }
 
+/** ROOT -> USER -> ASSISTANT 的持久 Entry 路径（事件视图需要可点击的 Entry）。 */
+function sessionEntries(): HarnessSessionEntryDTO[] {
+  return [
+    {
+      entryId: 'root-1',
+      sessionId: 's1',
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payloadJson: '{}',
+      createTime: null,
+    },
+    {
+      entryId: 'user-1',
+      sessionId: 's1',
+      parentEntryId: 'root-1',
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({
+        message: { role: 'USER', contents: [{ type: 'text', text: 's1 prompt' }] },
+      }),
+      createTime: null,
+    },
+    {
+      entryId: 'assistant-1',
+      sessionId: 's1',
+      parentEntryId: 'user-1',
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({
+        message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 's1 reply' }] },
+      }),
+      createTime: null,
+    },
+  ]
+}
+
 function NavigateTo({ to }: { to: string }) {
   const navigate = useNavigate()
   useEffect(() => {
@@ -308,6 +342,47 @@ describe('ChatWorkspacePage', () => {
     expect(document.querySelector('.chat-pane-grid.layout-grid-6')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: '1' }))
     expect(document.querySelector('.chat-pane-grid.layout-single')).toBeTruthy()
+  })
+
+  it('keeps the events main view independent per mounted Pane', async () => {
+    const user = userEvent.setup()
+    const seeded = applyChatLayout(loadChatPaneState('chat-1'), 'split-2')
+    seeded.panes[0].threadId = 't1'
+    seeded.panes[1].threadId = 't1'
+    saveChatPaneState('chat-1', seeded)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({ threadId: 't1' }), { entries: sessionEntries() }),
+    )
+
+    renderWorkspace()
+    const composers = await screen.findAllByLabelText('给 AI 发送消息')
+    expect(composers).toHaveLength(2)
+
+    const paneEvents = (paneId: string) =>
+      document.querySelector(`[data-pane-id="${paneId}"] .thread-events`)
+    const paneTranscript = (paneId: string) =>
+      document.querySelector(`[data-pane-id="${paneId}"] .thread-dialogue`)
+
+    // Pane 1 切到 events：只有 Pane 1 的主滚动区被替换。
+    await user.click(composers[0]!)
+    await user.keyboard('/events{Enter}')
+    await waitFor(() => expect(paneEvents('pane-1')).not.toBeNull())
+    expect(paneTranscript('pane-1')).toBeNull()
+    expect(paneEvents('pane-2')).toBeNull()
+    expect(paneTranscript('pane-2')).not.toBeNull()
+
+    // Pane 2 独立切到 events：两个 Pane 互不影响。
+    await user.click(composers[1]!)
+    await user.keyboard('/events{Enter}')
+    await waitFor(() => expect(paneEvents('pane-2')).not.toBeNull())
+    expect(paneEvents('pane-1')).not.toBeNull()
+    expect(paneTranscript('pane-2')).toBeNull()
+
+    // Pane 2 单独回到 conversation：Pane 1 仍停留在 events 视图。
+    await user.click(composers[1]!)
+    await user.keyboard('/conversation{Enter}')
+    await waitFor(() => expect(paneTranscript('pane-2')).not.toBeNull())
+    expect(paneEvents('pane-1')).not.toBeNull()
   })
 
   it('opens the Agent selector when the blank pane references a missing Agent', async () => {

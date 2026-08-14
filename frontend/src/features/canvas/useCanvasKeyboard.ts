@@ -1,5 +1,6 @@
 import { useEffect, type RefObject } from 'react'
 import type { CanvasView } from '@/features/canvas/types'
+import { hasBlockingOverlay } from '@/shared/ui/blocking-overlay'
 
 type KeyboardApi = {
   view: CanvasView
@@ -49,6 +50,10 @@ export function useCanvasKeyboard(api: KeyboardApi) {
       }
 
       if (event.key === 'Escape') {
+        // Modal/alertdialog/lightbox 优先于全局 Escape：画布不拦截、不抢事件。
+        if (hasBlockingOverlay()) {
+          return
+        }
         closeOverlays()
         if (view === 'editor') {
           clearSelection()

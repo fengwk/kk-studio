@@ -1,4 +1,4 @@
-export type ThreadCommandScene = 'blank' | 'bound'
+export type ThreadCommandScene = 'blank' | 'canvas-blank' | 'bound'
 
 export interface ThreadCommand {
   id: string
@@ -18,14 +18,6 @@ export interface ThreadCommand {
  * 顺序是稳定的产品顺序，切勿按可用性重新排序。
  */
 export const THREAD_COMMANDS: ThreadCommand[] = [
-  {
-    id: 'session',
-    label: 'session',
-    description: '',
-    labelKey: 'ai.runtime.command.sessionLabel',
-    descriptionKey: 'ai.runtime.command.session',
-    keywords: ['chat', 'switch', 'rebind', 'head'],
-  },
   {
     id: 'thread',
     label: 'thread',
@@ -90,22 +82,55 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
     descriptionKey: 'ai.runtime.command.upload',
     keywords: ['attach', 'file', 'image', 'video', 'audio', 'paste'],
   },
+  {
+    id: 'events',
+    label: 'events',
+    description: '',
+    labelKey: 'ai.runtime.command.eventsLabel',
+    descriptionKey: 'ai.runtime.command.events',
+    keywords: ['log', 'audit', 'activity', 'entry'],
+  },
+  {
+    id: 'conversation',
+    label: 'conversation',
+    description: '',
+    labelKey: 'ai.runtime.command.conversationLabel',
+    descriptionKey: 'ai.runtime.command.conversation',
+    keywords: ['chat', 'messages', 'transcript', 'dialogue'],
+  },
+  {
+    id: 'shortcuts',
+    label: 'shortcuts',
+    description: '',
+    labelKey: 'ai.runtime.command.shortcutsLabel',
+    descriptionKey: 'ai.runtime.command.shortcuts',
+    keywords: ['keys', 'keyboard', 'help', 'hotkeys'],
+  },
 ]
 
 /**
- * 空面板下可用的命令。`/thread` 用于选择一个已存在的 Chat-scoped Thread。
- * `/session`（全局 Session 重绑定）已不再存在：树只属于当前 Session，因此该
- * 命令在所有场景下都保持可见但禁用状态。
+ * 每个命令的可用场景。`/session` 已彻底移除：树只属于当前 Session，不存在可用的
+ * 全局 Session 重绑定命令。Canvas blank 没有 Chat-scoped Thread picker，因此
+ * `/thread` 只属于 chat blank 与 bound 场景。
  */
-const BLANK_SCENE_ENABLED = new Set(['upload', 'thread', 'agent', 'environment', 'yolo'])
-const NEVER_ENABLED = new Set(['session'])
+const SCENE_AVAILABILITY: Record<string, ThreadCommandScene[]> = {
+  thread: ['blank', 'bound'],
+  agent: ['blank', 'canvas-blank', 'bound'],
+  environment: ['blank', 'canvas-blank', 'bound'],
+  yolo: ['blank', 'canvas-blank', 'bound'],
+  tree: ['bound'],
+  stop: ['bound'],
+  new: ['bound'],
+  upload: ['blank', 'canvas-blank', 'bound'],
+  events: ['bound'],
+  conversation: ['bound'],
+  shortcuts: ['blank', 'canvas-blank', 'bound'],
+}
 
 /** 投影稳定的 command 列表并附带场景可用性（disabled 仍保留在列表中）。 */
 export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand[] {
   return THREAD_COMMANDS.map((command) => {
-    const disabled =
-      NEVER_ENABLED.has(command.id)
-      || (scene === 'blank' && !BLANK_SCENE_ENABLED.has(command.id))
+    const disabled = !(SCENE_AVAILABILITY[command.id]?.includes(scene) ?? false)
     return {
       ...command,
       disabled,

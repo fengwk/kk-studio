@@ -28,6 +28,14 @@ export interface ThreadPanelTranscriptInput {
 }
 
 /**
+ * 主视图槽位：Conversation 与 Event 互斥，只渲染一个主滚动区（不并排、无 tabs）。
+ * 传入 events 时替换 transcript 滚动区；Composer/queue/working 保持挂载，切换不丢状态。
+ */
+export interface ThreadPanelMainView {
+  events?: ReactNode
+}
+
+/**
  * Composer 区域：slash 命令输入 + 附件 strip + 发送按钮。所有回调都必填，因为
  * composer 是纯受控组件，自身不持有 parts 状态（上传注册表在组件内部）。
  */
@@ -69,6 +77,8 @@ interface ThreadPanelSlots {
 
 interface ThreadPanelProps {
   transcript: ThreadPanelTranscriptInput
+  /** 互斥主视图：传入 events 时替换 transcript（Event view）。 */
+  mainView?: ThreadPanelMainView
   composer: ThreadPanelComposerInput
   activity: ThreadPanelActivityInput
   slots?: ThreadPanelSlots
@@ -76,9 +86,9 @@ interface ThreadPanelProps {
 
 /**
  * 全宽 thread 面板：
- * 持久/实时对话 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
+ * Conversation/Event 互斥主滚动区 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
  */
-export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPanelProps) {
+export function ThreadPanel({ transcript, mainView, composer, activity, slots }: ThreadPanelProps) {
   const interactionOpen = composer.interactionPanel != null
   const historicalUserMessages = useMemo(
     () => transcript.messages.flatMap((message) =>
@@ -96,14 +106,16 @@ export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPan
     <section className="chat-shell thread-panel">
       {slots?.sidebar}
       <main className="chat-main thread-panel-main">
-        <ThreadTranscript
-          messages={transcript.messages}
-          loading={transcript.loading}
-          error={transcript.error}
-          bodyRef={transcript.bodyRef}
-          onDecideApproval={transcript.onDecideApproval}
-          approvalPending={transcript.approvalPending}
-        />
+        {mainView?.events ?? (
+          <ThreadTranscript
+            messages={transcript.messages}
+            loading={transcript.loading}
+            error={transcript.error}
+            bodyRef={transcript.bodyRef}
+            onDecideApproval={transcript.onDecideApproval}
+            approvalPending={transcript.approvalPending}
+          />
+        )}
         <ThreadWidgetStack
           working={activity.working || composer.pending}
           queuedMessages={interactionOpen ? [] : transcript.queuedMessages}

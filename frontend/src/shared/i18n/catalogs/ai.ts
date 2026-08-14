@@ -1094,10 +1094,6 @@ export const aiCatalog = {
     'en-US': 'Upload files and insert ordered attachment references',
     'zh-CN': '上传文件并插入有序附件引用',
   },
-  'ai.runtime.command.session': {
-    'en-US': 'Relocate the current Thread to a history position in the selected Session',
-    'zh-CN': '把当前 Thread 重定位到所选 Session 的历史位置',
-  },
   'ai.runtime.command.thread': {
     'en-US': 'Switch the Thread bound to this Pane (does not modify any Thread)',
     'zh-CN': '切换当前 Pane 绑定的 Thread（不修改任何 Thread）',
@@ -1126,13 +1122,21 @@ export const aiCatalog = {
     'en-US': 'Return to a blank pane; sending creates a new Session / Thread',
     'zh-CN': '回到空面板；发送后创建新的 Session / Thread',
   },
+  'ai.runtime.command.events': {
+    'en-US': 'Inspect the durable Entry log and live model / tool invocations',
+    'zh-CN': '查看持久 Entry 日志与活跃 model / tool 调用',
+  },
+  'ai.runtime.command.conversation': {
+    'en-US': 'Return to the conversation transcript',
+    'zh-CN': '返回对话时间线',
+  },
+  'ai.runtime.command.shortcuts': {
+    'en-US': 'Show the keyboard shortcut catalog',
+    'zh-CN': '查看键盘快捷键目录',
+  },
   'ai.runtime.command.uploadLabel': {
     'en-US': 'upload',
     'zh-CN': 'upload',
-  },
-  'ai.runtime.command.sessionLabel': {
-    'en-US': 'session',
-    'zh-CN': 'session',
   },
   'ai.runtime.command.threadLabel': {
     'en-US': 'thread',
@@ -1161,6 +1165,50 @@ export const aiCatalog = {
   'ai.runtime.command.newLabel': {
     'en-US': 'new',
     'zh-CN': 'new',
+  },
+  'ai.runtime.command.eventsLabel': {
+    'en-US': 'events',
+    'zh-CN': 'events',
+  },
+  'ai.runtime.command.conversationLabel': {
+    'en-US': 'conversation',
+    'zh-CN': 'conversation',
+  },
+  'ai.runtime.command.shortcutsLabel': {
+    'en-US': 'shortcuts',
+    'zh-CN': 'shortcuts',
+  },
+  'ai.runtime.shortcuts.title': {
+    'en-US': 'Keyboard shortcuts',
+    'zh-CN': '键盘快捷键',
+  },
+  'ai.runtime.shortcuts.send': {
+    'en-US': 'Send the message',
+    'zh-CN': '发送消息',
+  },
+  'ai.runtime.shortcuts.newline': {
+    'en-US': 'Insert a new line',
+    'zh-CN': '插入换行',
+  },
+  'ai.runtime.shortcuts.history': {
+    'en-US': 'Browse message history at the line boundary',
+    'zh-CN': '在行首/行尾边界浏览消息历史',
+  },
+  'ai.runtime.shortcuts.escape': {
+    'en-US': 'Close the current panel or return focus to the Composer',
+    'zh-CN': '关闭当前面板或把焦点还给 Composer',
+  },
+  'ai.runtime.shortcuts.commands': {
+    'en-US': 'Open the command palette',
+    'zh-CN': '打开命令表',
+  },
+  'ai.runtime.shortcuts.commandNav': {
+    'en-US': 'Move the active command and confirm',
+    'zh-CN': '移动选中命令并确认',
+  },
+  'ai.runtime.shortcuts.commandEdges': {
+    'en-US': 'Jump to the first / last command',
+    'zh-CN': '跳到第一个/最后一个命令',
   },
   'ai.runtime.thread.loading': {
     'en-US': 'Loading conversation…',
@@ -1541,6 +1589,190 @@ export const aiCatalog = {
   'ai.runtime.entry.unknownText': {
     'en-US': 'This Entry type has no dedicated renderer yet. Expand the raw payload to inspect it.',
     'zh-CN': '该 Entry 类型尚无专用渲染器，原始 payload 可展开查看。',
+  },
+  'ai.runtime.event.list': {
+    'en-US': 'Events',
+    'zh-CN': '事件',
+  },
+  'ai.runtime.event.empty': {
+    'en-US': 'No events yet',
+    'zh-CN': '暂无事件',
+  },
+  'ai.runtime.event.emptyText': {
+    'en-US': '(no summary)',
+    'zh-CN': '（无摘要）',
+  },
+  'ai.runtime.event.abortedText': {
+    'en-US': 'The assistant response was stopped by the user.',
+    'zh-CN': '助手回复已被用户停止。',
+  },
+  'ai.runtime.event.unknownType': {
+    'en-US': 'Unknown entry: {{type}}',
+    'zh-CN': '未知条目：{{type}}',
+  },
+  'ai.runtime.event.unknownTool': {
+    'en-US': 'unknown tool',
+    'zh-CN': '未知工具',
+  },
+  'ai.runtime.event.entryType.ROOT': {
+    'en-US': 'Root',
+    'zh-CN': '根节点',
+  },
+  'ai.runtime.event.entryType.TURN_START': {
+    'en-US': 'Turn start',
+    'zh-CN': '回合开始',
+  },
+  'ai.runtime.event.entryType.MESSAGE': {
+    'en-US': 'Message',
+    'zh-CN': '消息',
+  },
+  'ai.runtime.event.entryType.CUSTOM_MESSAGE': {
+    'en-US': 'Custom message',
+    'zh-CN': '自定义消息',
+  },
+  'ai.runtime.event.entryType.MODEL_ATTEMPT_FAILURE': {
+    'en-US': 'Model attempt failure',
+    'zh-CN': '模型尝试失败',
+  },
+  'ai.runtime.event.entryType.ASSISTANT_ERROR': {
+    'en-US': 'Assistant error',
+    'zh-CN': '助手错误',
+  },
+  'ai.runtime.event.entryType.ASSISTANT_ABORTED': {
+    'en-US': 'Assistant aborted',
+    'zh-CN': '助手已停止',
+  },
+  'ai.runtime.event.entryType.COMPACTION': {
+    'en-US': 'Compaction',
+    'zh-CN': '上下文压缩',
+  },
+  'ai.runtime.event.entryType.TURN_END': {
+    'en-US': 'Turn end',
+    'zh-CN': '回合结束',
+  },
+  'ai.runtime.event.entryType.CUSTOM': {
+    'en-US': 'Custom',
+    'zh-CN': '自定义',
+  },
+  'ai.runtime.event.activeModel': {
+    'en-US': 'Active model invocation',
+    'zh-CN': '活跃模型调用',
+  },
+  'ai.runtime.event.activeTool': {
+    'en-US': 'Active tool invocation',
+    'zh-CN': '活跃工具调用',
+  },
+  'ai.runtime.event.activeFailure': {
+    'en-US': 'Active model attempt failure',
+    'zh-CN': '活跃模型尝试失败',
+  },
+  'ai.runtime.event.detailTitle': {
+    'en-US': 'Event details',
+    'zh-CN': '事件详情',
+  },
+  'ai.runtime.event.closeDetail': {
+    'en-US': 'Close event details',
+    'zh-CN': '关闭事件详情',
+  },
+  'ai.runtime.event.payloadLabel': {
+    'en-US': 'Raw payload',
+    'zh-CN': '原始 payload',
+  },
+  'ai.runtime.event.detail.entryId': {
+    'en-US': 'Entry ID',
+    'zh-CN': 'Entry ID',
+  },
+  'ai.runtime.event.detail.entryType': {
+    'en-US': 'Entry type',
+    'zh-CN': 'Entry 类型',
+  },
+  'ai.runtime.event.detail.createTime': {
+    'en-US': 'Time',
+    'zh-CN': '时间',
+  },
+  'ai.runtime.event.detail.status': {
+    'en-US': 'Status',
+    'zh-CN': '状态',
+  },
+  'ai.runtime.event.detail.attempt': {
+    'en-US': 'Attempt',
+    'zh-CN': '尝试次数',
+  },
+  'ai.runtime.event.detail.sequence': {
+    'en-US': 'Sequence',
+    'zh-CN': '序号',
+  },
+  'ai.runtime.event.detail.toolName': {
+    'en-US': 'Tool',
+    'zh-CN': '工具',
+  },
+  'ai.runtime.event.detail.toolCallId': {
+    'en-US': 'Tool call ID',
+    'zh-CN': '工具调用 ID',
+  },
+  'ai.runtime.event.detail.errorCode': {
+    'en-US': 'Error code',
+    'zh-CN': '错误码',
+  },
+  'ai.runtime.event.detail.errorMessage': {
+    'en-US': 'Error message',
+    'zh-CN': '错误信息',
+  },
+  'ai.runtime.event.detail.failedAt': {
+    'en-US': 'Failed at',
+    'zh-CN': '失败时间',
+  },
+  'ai.runtime.event.detail.retryAt': {
+    'en-US': 'Retry at',
+    'zh-CN': '重试时间',
+  },
+  'ai.runtime.event.detail.chars': {
+    'en-US': 'Streamed characters',
+    'zh-CN': '已流式字符数',
+  },
+  'ai.runtime.event.status.WAITING_APPROVAL': {
+    'en-US': 'Waiting approval',
+    'zh-CN': '等待审批',
+  },
+  'ai.runtime.event.status.READY': {
+    'en-US': 'Ready',
+    'zh-CN': '就绪',
+  },
+  'ai.runtime.event.status.DISPATCHING': {
+    'en-US': 'Dispatching',
+    'zh-CN': '派发中',
+  },
+  'ai.runtime.event.status.RUNNING': {
+    'en-US': 'Running',
+    'zh-CN': '运行中',
+  },
+  'ai.runtime.event.status.SUCCEEDED': {
+    'en-US': 'Succeeded',
+    'zh-CN': '成功',
+  },
+  'ai.runtime.event.status.FAILED': {
+    'en-US': 'Failed',
+    'zh-CN': '失败',
+  },
+  'ai.runtime.event.status.CANCELLED': {
+    'en-US': 'Cancelled',
+    'zh-CN': '已取消',
+  },
+  'ai.runtime.event.status.UNKNOWN': {
+    'en-US': 'Unknown',
+    'zh-CN': '未知',
+  },
+  'ai.runtime.event.status.STREAMING': {
+    'en-US': 'Streaming',
+    'zh-CN': '流式中',
+  },
+  'ai.runtime.event.status.DONE': {
+    'en-US': 'Done',
+    'zh-CN': '完成',
+  },
+  'ai.runtime.event.status.ERROR': {
+    'en-US': 'Error',
+    'zh-CN': '错误',
   },
   'ai.runtime.entry.assistantRequestFailed': {
     'en-US': 'Assistant request failed',

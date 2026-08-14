@@ -291,6 +291,7 @@ function renderBoundPane(overrides?: {
   onThreadSortChange?: (sort: 'recent' | 'created') => void
   onAgentChange?: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
+  paneThreadId?: string
 }) {
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
   const onThreadSortChange = overrides?.onThreadSortChange ?? vi.fn()
@@ -299,7 +300,7 @@ function renderBoundPane(overrides?: {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  render(
+  const element = (
     <QueryClientProvider client={queryClient}>
       <ChatWorkspacePane
         chat={{
@@ -324,7 +325,7 @@ function renderBoundPane(overrides?: {
             skills: [],
           },
         ]}
-        pane={{ id: 'pane-1', threadId: 't1' }}
+        pane={{ id: 'pane-1', threadId: overrides?.paneThreadId ?? 't1' }}
         focused
         threadSort="recent"
         onFocus={() => undefined}
@@ -333,14 +334,42 @@ function renderBoundPane(overrides?: {
         onAgentChange={onAgentChange}
         onYoloChange={onYoloChange}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+  const view = render(element)
   return {
     queryClient,
     onThreadChange,
     onThreadSortChange,
     onAgentChange,
     onYoloChange,
+    rerender: (paneThreadId: string) => {
+      view.rerender(
+        <QueryClientProvider client={queryClient}>
+          <ChatWorkspacePane
+            chat={{
+              id: 'chat-1',
+              title: 'C',
+              agentName: 'assistant',
+              yoloEnabled: false,
+              version: '1',
+              createTime: null,
+              updateTime: null,
+            }}
+            agents={agents}
+            environments={[]}
+            pane={{ id: 'pane-1', threadId: paneThreadId }}
+            focused
+            threadSort="recent"
+            onFocus={() => undefined}
+            onThreadChange={onThreadChange}
+            onThreadSortChange={onThreadSortChange}
+            onAgentChange={onAgentChange}
+            onYoloChange={onYoloChange}
+          />
+        </QueryClientProvider>,
+      )
+    },
   }
 }
 
@@ -536,28 +565,124 @@ describe('ChatWorkspacePane commands', () => {
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
 
-  it('treats /session as a disabled global command with no-op behavior', async () => {
+  it('opens /shortcuts as a read-only interaction panel and Esc returns focus to the Composer', async () => {
     const user = userEvent.setup()
     renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
-    // 输入 /session 会打开 slash palette，展示被禁用的 session command
-    //（以及描述中也包含 "Session" 的 /new command）。
-    await user.keyboard('/session')
-    const options = await screen.findAllByRole('option')
-    const sessionOption = options.find((option) => {
-      const text = option.textContent ?? ''
-      return text.startsWith('session') && option.getAttribute('aria-disabled') === 'true'
+    await user.keyboard('/shortcuts{Enter}')
+
+    const panel = await screen.findByRole('region', { name: '键盘快捷键' })
+    expect(panel).toBeInTheDocument()
+    expect(panel.getAttribute('aria-busy')).toBe('false')
+    // 只读 catalog：不渲染搜索框/选项，只展示快捷键条目。
+    expect(within(panel).queryByRole('searchbox')).not.toBeInTheDocument()
+    expect(within(panel).getByText('Enter')).toBeInTheDocument()
+    expect(within(panel).getByText('发送消息')).toBeInTheDocument()
+    // Composer 与 interaction panel 互斥，但草稿保持挂载。
+    expect(composer.closest('.thread-composer')).toHaveAttribute('hidden')
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('region', { name: '键盘快捷键' })).not.toBeInTheDocument())
+    await waitFor(() => expect(document.activeElement?.classList.contains('composer-editor')).toBe(true))
+  })
+
+  it('keeps the /shortcuts catalog available on blank panes', async () => {
+    const user = userEvent.setup()
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
-    expect(sessionOption).toBeDefined()
-    // 在禁用的 command 上按 Enter 是 no-op：/session 不会打开 Thread picker
-    //（只有 /thread 会触发）。
-    await user.keyboard('{Enter}')
-    expect(screen.queryByRole('region', { name: /选择 Thread/ })).not.toBeInTheDocument()
-    expect(chatService.listChatThreads).not.toHaveBeenCalled()
-    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
-    expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ChatWorkspacePane
+          chat={{
+            id: 'chat-1',
+            title: 'C',
+            agentName: 'assistant',
+            yoloEnabled: false,
+            version: '1',
+            createTime: null,
+            updateTime: null,
+          }}
+          agents={agents}
+          environments={[]}
+          pane={{ id: 'pane-1', threadId: null }}
+          focused
+          threadSort="recent"
+          onFocus={() => undefined}
+          onThreadChange={vi.fn()}
+          onThreadSortChange={() => undefined}
+          onAgentChange={vi.fn(async () => undefined)}
+        />
+      </QueryClientProvider>,
+    )
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/shortcuts{Enter}')
+    expect(await screen.findByRole('region', { name: '键盘快捷键' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('composer-editor')).toBe(true),
+    )
+  })
+
+  it('switches to the events main view, opens a read-only detail, and returns via /conversation', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), { entries: sessionEntries() }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // /events：唯一主滚动区切换为事件列表，transcript 卸载。
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    const list = await screen.findByRole('listbox', { name: '事件' })
+    expect(document.querySelector('.thread-dialogue')).toBeNull()
+    const options = within(list).getAllByRole('option')
+    expect(options.length).toBeGreaterThanOrEqual(3)
+    // Composer 保持 active：事件视图不是 interaction panel。
+    expect(composer.closest('.thread-composer')).not.toHaveAttribute('hidden')
+
+    // 点击事件：Composer 上方展示只读 detail widget（原始 payload JSON 有效）。
+    const userOption = within(list).getByRole('option', { name: /s1 prompt/ })
+    await user.click(userOption)
+    await screen.findByLabelText('事件详情')
+    const payloadPre = document.querySelector<HTMLElement>('.thread-event-detail-payload')
+    expect(payloadPre?.textContent).toContain('"role":"USER"')
+    expect(payloadPre?.textContent).toContain('s1 prompt')
+    expect(() => JSON.parse(payloadPre?.textContent ?? '')).not.toThrow()
+    // detail 不是 InteractionPanel：不隐藏 Composer、不抢焦点。
+    expect(composer.closest('.thread-composer')).not.toHaveAttribute('hidden')
+    expect(document.querySelector('.thread-interaction-panel')).toBeNull()
+
+    // /conversation：回到 transcript，事件视图卸载。
+    await user.click(composer)
+    await user.keyboard('/conversation{Enter}')
+    await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
+    expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
+    // 草稿保持：切换不丢 Composer 状态。
+    expect(composer.textContent).toBe('')
+  })
+
+  it('resets the main view back to conversation when the pane rebinds to another Thread', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), { entries: sessionEntries() }),
+    )
+    const view = renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    await screen.findByRole('listbox', { name: '事件' })
+    expect(document.querySelector('.thread-dialogue')).toBeNull()
+
+    // threadId 改变（pane 重新绑定）：视图重置回 conversation。
+    view.rerender('t2')
+    await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
+    expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
   })
 
   it('rebinds via /tree PUT /head with the snapshot revision as the CAS cursor', async () => {
