@@ -51,6 +51,11 @@ public record LiveEnvironment(
     return capabilities == null ? List.of() : capabilities.mcpServers();
   }
 
+  /** daemon 实际 canonical Environment Root 的展示路径（仅 READY 发布；只读披露，不参与路径解析）。 */
+  public String rootPath() {
+    return capabilities == null ? null : capabilities.environment().rootPath();
+  }
+
   /** 可用性规则：READY + 连接仍打开 + 心跳未超过 {@code heartbeatTimeout} 过期。调用方必须使用与注册表相同的时钟。 */
   public boolean isReady(Instant now, Duration heartbeatTimeout) {
     return status == LiveEnvironmentStatus.READY

@@ -1,15 +1,15 @@
 # Environment Daemon Gateway
 
-本文描述全局 live Environment 注册表与 Daemon v2 WebSocket Gateway 的当前协议、内存边界和运行约束。
+本文描述全局 live Environment 注册表与 Daemon WebSocket Gateway（端点路径 v2；envelope 协议 v3、capabilities v4）的当前协议、内存边界和运行约束。
 
 ## 职责与边界
 
-产品级 Tool 只有 `PLATFORM` / `ENVIRONMENT` 两类。Environment 是**服务器内存**中的实时资源，以 canonical `EnvironmentName`（bounded 小写路由名称）为 route 身份唯一。HELLO 后 registry 即保存绑定连接并标为 `CONNECTING`，此时 capabilities 为 null；READY 先补齐严格 v3 能力对象（environment metadata + skills + MCP server 摘要），再转为 `READY`。可用性 = READY + 连接打开 + 心跳未过期（单一配置超时）。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket 连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
+产品级 Tool 只有 `PLATFORM` / `ENVIRONMENT` 两类。Environment 是**服务器内存**中的实时资源，以 canonical `EnvironmentName`（bounded 小写路由名称）为 route 身份唯一。HELLO 后 registry 即保存绑定连接并标为 `CONNECTING`，此时 capabilities 为 null；READY 先补齐严格 v4 能力对象（environment metadata（含 rootPath）+ skills + MCP server 摘要），再转为 `READY`。可用性 = READY + 连接打开 + 心跳未过期（单一配置超时）。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket 连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
 
 | 层 | 职责 |
 | --- | --- |
 | `core/ai/environment` | `LiveEnvironmentRegistry`、`EnvironmentDaemonGateway`（endpoint/skill loader/transport）、daemon 协议 codec |
-| `harness-tool` | route-neutral Tool API、`EnvironmentName`、`ResourceRef`、`RemoteTool`、Daemon v2 envelope/result codec |
+| `harness-tool` | route-neutral Tool API、`EnvironmentName`、`ResourceRef`、`RemoteTool`、Daemon v3 envelope/result codec |
 | `harness-daemon` | 独立 Daemon 连接、重连、本地工具执行、invocation journal 与 skill 发现 |
 | `harness-runtime` | 统一 `ToolProcessor`、ToolInvocation durable 状态与冻结 route 路由 |
 | `web` | 提供 `/api/ai/environment/daemon/v2` WebSocket 文本帧与只读 `GET /api/ai/environment`；不直接消费 Harness 类型 |
@@ -42,13 +42,13 @@ java ... DaemonMain \
   --gateway-uri ws://studio.example/api/ai/environment/daemon/v2 \
   --gateway-token ${KK_STUDIO_DAEMON_TOKEN} \
   --note "Local development environment." \
-  --workdir /home/dev/project \
+  --environment-root /home/dev/project \
   --skill-dir ~/.agents/skills \
   --mcp-config /etc/kk-studio/daemon-mcp.json \
   --daemon-id optional-stable-daemon-name
 ```
 
-`environment-name`、`gateway-uri` 与 `gateway-token` 必填；连接、身份、note、workdir、skill 与 MCP 配置只来自 CLI。`--note` 可选且只能出现一次，显式值必须非空、单行、无 ISO control、无首尾空白且不超过 512 字符；它是会进入受信任 SYSTEM Prompt 的模型可见配置，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。下游 XML escape 只保证模板结构安全，不能把不可信内容转化为可信指令。省略 `--note` 时按 Daemon 实测 OS 生成固定说明：Windows=`Windows environment.`、WSL=`WSL environment. Windows files may be accessible under /mnt/<drive>, and some Windows commands may be invocable from WSL.`、Linux=`Linux environment.`、macOS=`macOS environment.`。唯一工作目录参数是 `--workdir`：显式值必须是已存在目录并 canonical/绝对化，未提供时使用启动用户 canonical HOME；该目录只约束 CodingTools 本地边界，不进入 READY 或模型 Prompt。`--skill-dir` 可重复，未提供时若存在则默认 `~/.agents/skills`。`--mcp-config` 可选，指向严格的 UTF-8 JSON 文件（见「本地 MCP server」）。Environment 身份即 CLI 声明的 canonical 名称，随每个 envelope 参与作用域校验。
+`environment-name`、`gateway-uri` 与 `gateway-token` 必填；连接、身份、note、environment root、skill 与 MCP 配置只来自 CLI。`--note` 可选且只能出现一次，显式值必须非空、单行、无 ISO control、无首尾空白且不超过 512 字符；它是会进入受信任 SYSTEM Prompt 的模型可见配置，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。下游 XML escape 只保证模板结构安全，不能把不可信内容转化为可信指令。省略 `--note` 时按 Daemon 实测 OS 生成固定说明：Windows=`Windows environment.`、WSL=`WSL environment. Windows files may be accessible under /mnt/<drive>, and some Windows commands may be invocable from WSL.`、Linux=`Linux environment.`、macOS=`macOS environment.`。唯一工作目录参数是 `--environment-root`：显式值必须是已存在目录并 canonical/绝对化，未提供时使用启动用户 canonical HOME；该目录约束 CodingTools 本地边界，并以 READY `rootPath` 只读展示（不进入模型 Prompt），目录浏览 API 的路径也相对它解析。
 
 ## 认证、绑定与目录
 
@@ -61,12 +61,12 @@ Daemon 连接后的首帧必须是 HELLO。canonical `environmentName` 位于 **
 握手顺序：
 
 ```text
-HELLO -> WELCOME {} -> READY {"version":3,"environment":{...},"skills":[...],"mcpServers":[...]}
+HELLO -> WELCOME {} -> READY {"version":4,"environment":{...},"skills":[...],"mcpServers":[...]}
 ```
 
-READY payload 是严格版本化/类型化的能力对象（`DaemonCapabilities` v3），固定字段顺序为 `version/environment/skills/mcpServers`。`environment={operatingSystem,timeZone,note}` 必填且只允许这三个字段：OS wire 值只允许 `windows|wsl|linux|macos`，timeZone 是系统 `ZoneId` ID，note 是显式 `--note` 或对应 OS 的固定默认说明；三项在 `DaemonRuntime` 构造时冻结，重连重复发送同一 metadata。OS 只能由 Daemon 检测：Windows、macOS/Darwin、Linux 保持直接分类；Linux 下先检查 `WSL_DISTRO_NAME` / `WSL_INTEROP`，再以 `/proc/version` 与 `/proc/sys/kernel/osrelease` 的 Microsoft 标记兜底，未知平台 fail closed。codec 拒绝 v2、缺失/未知/重复字段、尾随内容、非法 OS/timeZone/note。`skills` 为 name/description 摘要，`mcpServers` 为 name/status/error/tools(name+description) 摘要。
+READY payload 是严格版本化/类型化的能力对象（`DaemonCapabilities` v4），固定字段顺序为 `version/environment/skills/mcpServers`。`environment={operatingSystem,timeZone,note,rootPath}` 必填且只允许这四个字段：OS wire 值只允许 `windows|wsl|linux|macos`，timeZone 是系统 `ZoneId` ID，note 是显式 `--note` 或对应 OS 的固定默认说明，rootPath 是 canonical 化后的 Environment Root 绝对路径；四项在 `DaemonRuntime` 构造时冻结，重连重复发送同一 metadata。OS 只能由 Daemon 检测：Windows、macOS/Darwin、Linux 保持直接分类；Linux 下先检查 `WSL_DISTRO_NAME` / `WSL_INTEROP`，再以 `/proc/version` 与 `/proc/sys/kernel/osrelease` 的 Microsoft 标记兜底，未知平台 fail closed。codec 拒绝旧协议版本与未来版本、缺失/未知/重复字段、尾随内容、非法 OS/timeZone/note/rootPath。`skills` 为 name/description 摘要，`mcpServers` 为 name/status/error/tools(name+description) 摘要。
 
-READY 不上报 workdir 或其它本地路径，并禁止 SKILL.md 正文、headers/environment 值、命令、URL 与完整工具 schema；完整 schema 只通过固定 `mcp_list_tools` 桥接工具按需返回。公共 `GET /api/ai/environment` 也不投影 operatingSystem/timeZone/note。READY 每个连接恰好一次；Gateway 必须先 `updateCapabilities` 再 `markReady`，而 registry 的 `markReady` 会拒绝 null capabilities；`HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
+READY 只上报 canonical `rootPath`（Environment Root 展示路径），不上报其它本地路径，并禁止 SKILL.md 正文、headers/environment 值、命令、URL 与完整工具 schema；完整 schema 只通过固定 `mcp_list_tools` 桥接工具按需返回。公共 `GET /api/ai/environment` 只投影 rootPath，不投影 operatingSystem/timeZone/note。READY 每个连接恰好一次；Gateway 必须先 `updateCapabilities` 再 `markReady`，而 registry 的 `markReady` 会拒绝 null capabilities；`HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
 
 **并发约束**：每个 Environment 同时最多 1 个 active remote invocation——`EnvironmentDaemonGateway` 以 `activeByEnvironment` 登记 in-flight 调用。已存在 active 时，同 Environment 的并发 sibling 在发送任何 wire INVOKE 前返回 typed `RemoteToolBusyException`；`CoreToolGateway` 把它映射为带配置延迟的 `ToolGateway.Busy`，Harness 将调用重新调度并以 retry 序列化，而不是写入 terminal failure。不同 Environment 的 active 槽位互相独立，可以并发执行。发送 CANCEL 只做幂等取消请求，不立即释放槽位；active 槽位仍在 COMPLETED / FAILED / CANCELLED terminal callback 或连接 cleanup 时释放。
 
@@ -76,7 +76,31 @@ READY 不上报 workdir 或其它本地路径，并禁止 SKILL.md 正文、head
 GET /api/ai/environment
 ```
 
-返回 `name`（canonical 路由身份，唯一键）/ `status` / `ready`（统一可用性标记）/ `tools` / `skills` / `mcpServers`（server 状态与工具摘要）/ `lastSeen`。不公开 READY environment metadata；无 create/update/delete API。
+返回 `name`（canonical 路由身份，唯一键）/ `status` / `ready`（统一可用性标记）/ `tools` / `skills` / `mcpServers`（server 状态与工具摘要）/ `rootPath`（canonical Environment Root 展示路径）/ `lastSeen`。不公开 READY operatingSystem/timeZone/note metadata；无 create/update/delete API。
+
+## Environment Root 目录浏览
+
+Environment Root 的单层目录浏览是 **control-plane 只读查询**：不走 Tool Invocation，不经过 Permission，不占用 active tool slot，不写入 invocation journal，也不进入模型上下文。
+
+```text
+GET /api/ai/environments/{name}/directories?path=.
+```
+
+- `path` 缺省为 `'.'`（Environment Root），是可选的 canonical 相对 wire 路径（段以 `'/'` 分隔）：拒绝 absolute、空段、`'.'`/`'..'` 段、ISO 控制字符与空白路径；`{name}` 是 canonical `EnvironmentName`，非法名称 400 `INVALID_ENVIRONMENT_NAME`。
+- 响应 DTO：`path`（canonical 相对路径，root 为 `'.'`）/ `displayPath`（当前目录最后一段，root 为 `'.'`）/ `parentPath`（父目录 canonical 路径，root 为 `'.'`）/ `truncated`（超过单层上限 1000 条被截断）/ `gitBranch`（可空，浏览目录所在 git 仓库的 symbolic HEAD 分支）/ `entries`（按名称稳定排序的直属子目录，`path`+`displayPath`，不含 symlink 与非目录）。
+- HTTP 错误映射（`errorCode.code` 与 wire 失败分类同名）：`INVALID_PATH` / `NOT_DIRECTORY` → 400；`NOT_FOUND` → 404；`OFFLINE`（环境不存在/未 READY/连接不可用）→ 404；`TIMEOUT`（daemon 往返超时，默认 10 秒，配置键 `kk-studio.harness.environment-gateway.directory-list-timeout`）→ 504；`IO_ERROR`（daemon 本地 IO 失败）→ 502。
+
+wire 消息配对（envelope `invocationId` 是 gateway/daemon 关联 ID；sequence 是连接级连续计数，`LIST_DIRECTORY` 是出站消息不占入站序号）：
+
+| Daemon 消息 | payload | 方向 |
+| --- | --- | --- |
+| `LIST_DIRECTORY` | `{"path"}` | gateway → daemon |
+| `DIRECTORY_LISTED` | `{"path","displayPath","parentPath","truncated","gitBranch","entries":[{"path","displayPath"}]}` | daemon → gateway |
+| `DIRECTORY_LIST_FAILED` | `{"path","code","message"}`（`path` 是请求回显归因，只要求非空） | daemon → gateway |
+
+- 失败码为单个 `DaemonDirectoryFailureCode` 枚举：daemon 产生 `INVALID_PATH`（wire 路径形状非法或越界）/ `NOT_FOUND` / `NOT_DIRECTORY` / `IO_ERROR`；gateway 本地产生 `OFFLINE` / `TIMEOUT`。
+- daemon 侧 `EnvironmentDirectoryBrowser` 安全契约：`environmentRoot.resolve(path).normalize()` 后 `toRealPath()` canonicalize，越出 root 边界即 `INVALID_PATH`；符号链接不跟随且不列入结果；只列目录；按名称稳定排序；至多 1000 条，超出置 `truncated`。失败响应必须能归因非法请求路径，因此 `DIRECTORY_LIST_FAILED.path` 只校验非空。
+- gateway 侧 pending 管理：`EnvironmentDaemonGateway.listDirectory` 用控制面发送（不登记 active invocation 槽位），pending 请求在断线清理、超时（`directoryListTimeout`）与协议失败（含 sequence 错乱）时以 `OFFLINE` / `TIMEOUT` 恰好完成一次，不泄漏未决 future。
 
 ## 本地 MCP server
 
@@ -202,6 +226,6 @@ lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile
 
 另由 `McpBridgeTools.registerAll` 注册固定桥接工具 `mcp_list_tools` / `mcp_call_tool`（见「本地 MCP server」），Environment 固定目录共 11 个工具。动态 MCP 工具绝不进入该目录。
 
-静态 Tool prompt 资源位于 `harness/tool/src/main/resources/.../environment/prompts/`。LSP bridge 协议为 JSON stdin/stdout；未配置 bridge 时不得伪造成功结果。`DaemonMain` 只以 `DaemonConfig.workdir()` 构造 coding 配置，`CodingToolsConfig.environmentRoot/defaultWorkdir` 都等于该 canonical 目录；旧 `kkstudio.daemon.environment-root` / `kkstudio.daemon.default-workdir` 系统属性不再读取。
+静态 Tool prompt 资源位于 `harness/tool/src/main/resources/.../environment/prompts/`。LSP bridge 协议为 JSON stdin/stdout；未配置 bridge 时不得伪造成功结果。`DaemonMain` 只以 `DaemonConfig.environmentRoot()` 构造 coding 配置，`CodingToolsConfig.environmentRoot/defaultWorkdir` 都等于该 canonical 目录；旧 `kkstudio.daemon.environment-root` / `kkstudio.daemon.default-workdir` 系统属性不再读取。
 
-`grep` / `find` 由 Java 21 NIO、regex 与仓库内 glob/`.gitignore` 规则实现，不启动 `rg`、`fd`、`grep` 或 `find` 子进程，也不读取对应 executable 系统属性。搜索不会跟随符号链接，硬排除 `.git`，按 workdir 相对 POSIX 路径稳定排序，并从 environment root 到搜索目录逐层应用 `.gitignore`；被忽略目录在加载后代规则前剪枝。目录 grep 跳过二进制或不可读文件，直接二进制目标返回错误。`bash`、可选 LSP bridge、`javap` 与 resource 相关系统属性保持有效。默认 preview 上限为 2000 行 / 50KB，超出部分外部化为 ResourceRef。
+`grep` / `find` 由 Java 21 NIO、regex 与仓库内 glob/`.gitignore` 规则实现，不启动 `rg`、`fd`、`grep` 或 `find` 子进程，也不读取对应 executable 系统属性。搜索不会跟随符号链接，硬排除 `.git`，按 environment root 相对 POSIX 路径稳定排序，并从 environment root 到搜索目录逐层应用 `.gitignore`；被忽略目录在加载后代规则前剪枝。目录 grep 跳过二进制或不可读文件，直接二进制目标返回错误。`bash`、可选 LSP bridge、`javap` 与 resource 相关系统属性保持有效。默认 preview 上限为 2000 行 / 50KB，超出部分外部化为 ResourceRef。

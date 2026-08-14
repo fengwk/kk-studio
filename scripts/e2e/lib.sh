@@ -189,7 +189,7 @@ start_daemon() {
     --gateway-token "$DAEMON_TOKEN" \
     --daemon-id "$DAEMON_ID" \
     --note "$DAEMON_NOTE" \
-    --workdir "$DAEMON_ENV_ROOT" \
+    --environment-root "$DAEMON_ENV_ROOT" \
     --skill-dir "$SKILL_DIR" \
     >"$WORK_DIR/daemon.log" 2>&1 &
   echo $! >"$WORK_DIR/daemon.pid"

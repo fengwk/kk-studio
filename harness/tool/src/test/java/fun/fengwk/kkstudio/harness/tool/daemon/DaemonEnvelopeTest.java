@@ -12,7 +12,7 @@ class DaemonEnvelopeTest {
 
   private static DaemonEnvelope envelope(String environmentName) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2,
+        DaemonProtocol.VERSION_3,
         DaemonMessageType.READY,
         new EnvironmentName(environmentName),
         null,
@@ -69,7 +69,7 @@ class DaemonEnvelopeTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION_2,
+                DaemonProtocol.VERSION_3,
                 DaemonMessageType.READY,
                 new EnvironmentName("env"),
                 null,
@@ -80,7 +80,7 @@ class DaemonEnvelopeTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION_2,
+                DaemonProtocol.VERSION_3,
                 DaemonMessageType.READY,
                 new EnvironmentName("env"),
                 " ",

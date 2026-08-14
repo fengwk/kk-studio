@@ -25,6 +25,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
@@ -41,6 +43,8 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.io.IOException;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.NotDirectoryException;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -80,6 +84,8 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
+  private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
+  private final EnvironmentDirectoryBrowser directoryBrowser;
   private final AtomicLong outboundSequence = new AtomicLong();
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
   private final AtomicLong connectionGeneration = new AtomicLong();
@@ -242,7 +248,11 @@ public final class DaemonRuntime implements AutoCloseable {
     DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
     this.environmentInfo =
         new DaemonEnvironmentInfo(
-            operatingSystem, ZoneId.systemDefault().getId(), config.effectiveNote(operatingSystem));
+            operatingSystem,
+            ZoneId.systemDefault().getId(),
+            config.effectiveNote(operatingSystem),
+            config.environmentRoot().toString());
+    this.directoryBrowser = new EnvironmentDirectoryBrowser(config.environmentRoot());
     this.nextReconnectDelay = config.initialReconnectDelay();
     if (requireFixedToolCatalog
         && !List.copyOf(toolRegistry.descriptors()).equals(EnvironmentToolCatalog.descriptors())) {
@@ -371,7 +381,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private boolean sendHello(ActiveConnection connection) {
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("daemonId", config.daemonId());
-    payload.put("protocolVersion", DaemonProtocol.VERSION_2);
+    payload.put("protocolVersion", DaemonProtocol.VERSION_3);
     payload.put("toolCatalogVersion", EnvironmentToolCatalog.version());
     payload.put("gatewayToken", config.gatewayToken());
     return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
@@ -420,6 +430,11 @@ public final class DaemonRuntime implements AutoCloseable {
           requireInvocationId(envelope);
           connection.acceptInboundEnvelope(identity);
           processLoadSkill(connection, envelope);
+        }
+        case LIST_DIRECTORY -> {
+          requireInvocationId(envelope);
+          connection.acceptInboundEnvelope(identity);
+          processListDirectory(connection, envelope);
         }
         case WELCOME -> {
           connection.acceptInboundEnvelope(identity);
@@ -563,6 +578,69 @@ public final class DaemonRuntime implements AutoCloseable {
   private void processLoadSkill(ActiveConnection connection, DaemonEnvelope envelope) {
     sendAck(connection, envelope.sequence());
     handleLoadSkill(connection, envelope);
+  }
+
+  private void processListDirectory(ActiveConnection connection, DaemonEnvelope envelope) {
+    sendAck(connection, envelope.sequence());
+    handleListDirectory(connection, envelope);
+  }
+
+  /** control-plane 目录浏览：与 invocation 并行，不进入 journal，不占 active tool slot。 */
+  private void handleListDirectory(ActiveConnection connection, DaemonEnvelope envelope) {
+    String rawPath;
+    try {
+      rawPath = directoryCodec.readRequestPath(envelope.payloadJson());
+    } catch (DaemonProtocolException error) {
+      sendOn(connection, DaemonMessageType.ERROR, envelope.invocationId(), errorPayload(error));
+      return;
+    }
+    DaemonDirectoryCodec.ListDirectoryRequest request;
+    try {
+      request = new DaemonDirectoryCodec.ListDirectoryRequest(rawPath);
+    } catch (IllegalArgumentException error) {
+      // 形状非法是确定性业务失败（INVALID_PATH），不是协议 ERROR。
+      sendOn(
+          connection,
+          DaemonMessageType.DIRECTORY_LIST_FAILED,
+          envelope.invocationId(),
+          directoryCodec.encodeFailed(
+              new DaemonDirectoryCodec.DirectoryListFailed(
+                  rawPath, DaemonDirectoryFailureCode.INVALID_PATH, error.getMessage())));
+      return;
+    }
+    try {
+      DaemonDirectoryCodec.DirectoryListed listed = directoryBrowser.list(request.path());
+      sendOn(
+          connection,
+          DaemonMessageType.DIRECTORY_LISTED,
+          envelope.invocationId(),
+          directoryCodec.encodeListed(listed));
+    } catch (RuntimeException | IOException error) {
+      sendOn(
+          connection,
+          DaemonMessageType.DIRECTORY_LIST_FAILED,
+          envelope.invocationId(),
+          directoryCodec.encodeFailed(directoryFailure(request.path(), error)));
+    }
+  }
+
+  private static DaemonDirectoryCodec.DirectoryListFailed directoryFailure(
+      String path, Exception error) {
+    DaemonDirectoryFailureCode code;
+    if (error instanceof IllegalArgumentException) {
+      code = DaemonDirectoryFailureCode.INVALID_PATH;
+    } else if (error instanceof NoSuchFileException) {
+      code = DaemonDirectoryFailureCode.NOT_FOUND;
+    } else if (error instanceof NotDirectoryException) {
+      code = DaemonDirectoryFailureCode.NOT_DIRECTORY;
+    } else {
+      code = DaemonDirectoryFailureCode.IO_ERROR;
+    }
+    String message = error.getMessage();
+    if (message == null || message.isBlank()) {
+      message = error.getClass().getSimpleName();
+    }
+    return new DaemonDirectoryCodec.DirectoryListFailed(path, code, message);
   }
 
   private void handleLoadSkill(ActiveConnection connection, DaemonEnvelope envelope) {
@@ -748,7 +826,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private DaemonEnvelope envelope(
       DaemonMessageType messageType, String invocationId, String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2,
+        DaemonProtocol.VERSION_3,
         messageType,
         environmentName,
         invocationId,

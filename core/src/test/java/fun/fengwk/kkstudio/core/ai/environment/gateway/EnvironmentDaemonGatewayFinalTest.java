@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -23,6 +24,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
@@ -43,6 +46,7 @@ import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolBusyException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
 
 import java.io.IOException;
 import java.security.MessageDigest;
@@ -57,6 +61,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -80,7 +85,7 @@ class EnvironmentDaemonGatewayFinalTest {
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Linux environment."),
+              DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Linux environment.", "/home/dev"),
           ADVERTISED_SKILLS,
           List.of(
               new DaemonMcpServerDescriptor(
@@ -94,6 +99,7 @@ class EnvironmentDaemonGatewayFinalTest {
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
+  private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
 
   @Test
   void readyNotifiesHandlerAndInvokeSendsProtocolThenMapsCompletion() {
@@ -731,6 +737,216 @@ class EnvironmentDaemonGatewayFinalTest {
         heartbeatAt, fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().lastSeenAt());
   }
 
+  /**
+   * LIST_DIRECTORY 是 control-plane：requestId 关联 DIRECTORY_LISTED 并映射为应用 DTO，不占用 active tool slot。
+   */
+  @Test
+  void listDirectorySendsControlPlaneRequestAndMapsDirectoryListed() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-dir-success");
+    String payload =
+        directoryCodec.encodeListed(
+            new DaemonDirectoryCodec.DirectoryListed(
+                "src",
+                "src",
+                ".",
+                true,
+                "main",
+                List.of(new DaemonDirectoryCodec.DirectoryEntry("src/main", "main"))));
+
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, "src", Duration.ofSeconds(5));
+
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.LIST_DIRECTORY),
+        messageTypes(connection.envelopes()));
+    DaemonEnvelope request = connection.envelopes().get(1);
+    assertNotNull(request.invocationId());
+    assertTrue(request.payloadJson().contains("\"path\":\"src\""));
+
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.DIRECTORY_LISTED,
+            request.invocationId(),
+            2,
+            payload));
+
+    EnvironmentDirectoryListResult result = future.join();
+    assertInstanceOf(EnvironmentDirectoryListResult.Loaded.class, result);
+    EnvironmentDirectoryDTO dto = ((EnvironmentDirectoryListResult.Loaded) result).listing();
+    assertEquals("src", dto.getPath());
+    assertEquals("src", dto.getDisplayPath());
+    assertEquals(".", dto.getParentPath());
+    assertTrue(dto.isTruncated());
+    assertEquals("main", dto.getGitBranch());
+    assertEquals(1, dto.getEntries().size());
+    assertEquals("src/main", dto.getEntries().getFirst().getPath());
+    assertEquals("main", dto.getEntries().getFirst().getDisplayPath());
+  }
+
+  /** 目录浏览与 active invocation 并行：不检查、不占用 active tool slot。 */
+  @Test
+  void listDirectoryRunsConcurrentlyWithActiveInvocation() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-dir-parallel");
+    RecordingListener listener = new RecordingListener();
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, ".", Duration.ofSeconds(5));
+    assertEquals(
+        List.of(
+            DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.LIST_DIRECTORY),
+        messageTypes(connection.envelopes()));
+
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.DIRECTORY_LISTED,
+            connection.envelopes().get(2).invocationId(),
+            2,
+            directoryCodec.encodeListed(
+                new DaemonDirectoryCodec.DirectoryListed(".", ".", ".", false, null, List.of()))));
+    assertInstanceOf(EnvironmentDirectoryListResult.Loaded.class, future.join());
+
+    // active 槽位仍被 invocation 占用：目录浏览不释放它。
+    assertThrows(
+        RemoteToolBusyException.class,
+        () ->
+            fixture.gateway.invoke(
+                ENVIRONMENT_NAME,
+                request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
+                new RecordingListener()));
+  }
+
+  /** 非法 wire 路径在发端立即失败为 INVALID_PATH，绝不发送 LIST_DIRECTORY。 */
+  @Test
+  void listDirectoryRejectsInvalidPathBeforeWireSend() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-dir-invalid");
+
+    EnvironmentDirectoryListResult result =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, "../escape", Duration.ofSeconds(5)).join();
+
+    assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(
+        DaemonDirectoryFailureCode.INVALID_PATH,
+        ((EnvironmentDirectoryListResult.Failed) result).code());
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
+  }
+
+  /** Environment 不存在或未 READY 时立即 Failed(OFFLINE)，不发送 wire。 */
+  @Test
+  void listDirectoryOfflineFailsWithoutWireSend() {
+    Fixture fixture = fixture();
+
+    EnvironmentDirectoryListResult result =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, ".", Duration.ofSeconds(5)).join();
+
+    assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(
+        DaemonDirectoryFailureCode.OFFLINE,
+        ((EnvironmentDirectoryListResult.Failed) result).code());
+  }
+
+  /** daemon 无响应时按 timeout 完成 Failed(TIMEOUT)，并清理 pending；迟到响应按协议失败关闭连接。 */
+  @Test
+  void listDirectoryTimeoutFailsAndCleansPending() throws Exception {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-dir-timeout");
+
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, ".", Duration.ofMillis(30));
+    EnvironmentDirectoryListResult result = future.get(5, TimeUnit.SECONDS);
+
+    assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(
+        DaemonDirectoryFailureCode.TIMEOUT,
+        ((EnvironmentDirectoryListResult.Failed) result).code());
+
+    // 迟到的 DIRECTORY_LISTED 找不到 pending：协议失败并关闭连接。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.DIRECTORY_LISTED,
+            connection.envelopes().get(1).invocationId(),
+            2,
+            directoryCodec.encodeListed(
+                new DaemonDirectoryCodec.DirectoryListed(".", ".", ".", false, null, List.of()))));
+    assertTrue(connection.closed);
+  }
+
+  /** 断线必须清理 pending 目录请求并按 OFFLINE 完成，不泄漏 Future。 */
+  @Test
+  void listDirectoryPendingIsCleanedOnDisconnect() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-dir-drop");
+
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, ".", Duration.ofSeconds(5));
+    fixture.gateway.close(connection.connectionId());
+
+    EnvironmentDirectoryListResult result = future.join();
+    assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(
+        DaemonDirectoryFailureCode.OFFLINE,
+        ((EnvironmentDirectoryListResult.Failed) result).code());
+  }
+
+  /** DIRECTORY_LISTED 回显 path 与请求不一致属于协议失败：连接关闭且 Future 不完成。 */
+  @Test
+  void listDirectoryMismatchedPathIsProtocolFailure() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-dir-mismatch");
+
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, "src", Duration.ofSeconds(5));
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.DIRECTORY_LISTED,
+            connection.envelopes().get(1).invocationId(),
+            2,
+            directoryCodec.encodeListed(
+                new DaemonDirectoryCodec.DirectoryListed(
+                    "other", "other", ".", false, null, List.of()))));
+
+    assertTrue(connection.closed);
+    assertFalse(future.isDone());
+  }
+
+  /** daemon 的 DIRECTORY_LIST_FAILED 分类原样映射为 Failed。 */
+  @Test
+  void listDirectoryMapsDaemonFailureCode() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-dir-daemon-failure");
+
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, "missing", Duration.ofSeconds(5));
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.DIRECTORY_LIST_FAILED,
+            connection.envelopes().get(1).invocationId(),
+            2,
+            directoryCodec.encodeFailed(
+                new DaemonDirectoryCodec.DirectoryListFailed(
+                    "missing", DaemonDirectoryFailureCode.NOT_FOUND, "path does not exist"))));
+
+    EnvironmentDirectoryListResult result = future.join();
+    assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(
+        DaemonDirectoryFailureCode.NOT_FOUND,
+        ((EnvironmentDirectoryListResult.Failed) result).code());
+    assertEquals("path does not exist", ((EnvironmentDirectoryListResult.Failed) result).message());
+  }
+
   private ToolExecutionRequest request(ToolDescriptor descriptor) {
     return request(descriptor, Duration.ofSeconds(30));
   }
@@ -794,7 +1010,7 @@ class EnvironmentDaemonGatewayFinalTest {
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":2,\"toolCatalogVersion\":\""
+        "{\"daemonId\":\"d1\",\"protocolVersion\":3,\"toolCatalogVersion\":\""
             + EnvironmentToolCatalog.version()
             + "\",\"gatewayToken\":\""
             + GATEWAY_TOKEN
@@ -822,7 +1038,7 @@ class EnvironmentDaemonGatewayFinalTest {
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":2,\"toolCatalogVersion\":\""
+        "{\"daemonId\":\"d1\",\"protocolVersion\":3,\"toolCatalogVersion\":\""
             + catalogVersion
             + "\",\"gatewayToken\":\""
             + GATEWAY_TOKEN
@@ -864,7 +1080,7 @@ class EnvironmentDaemonGatewayFinalTest {
       String payload) {
     return envelopeCodec.encode(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             messageType,
             environmentName,
             invocationId,

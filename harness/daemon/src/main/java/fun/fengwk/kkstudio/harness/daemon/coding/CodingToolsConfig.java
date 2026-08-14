@@ -64,9 +64,9 @@ public record CodingToolsConfig(
         DEFAULT_JAVAP_EXECUTABLE);
   }
 
-  /** 使用 CLI 冻结的唯一 workdir，并从其余稳定 Daemon 系统属性构建独立运行配置。 */
-  public static CodingToolsConfig fromSystemProperties(Path workdir) {
-    Path root = canonicalDirectory(workdir, "workdir");
+  /** 使用 CLI 冻结的唯一 environment root，并从其余稳定 Daemon 系统属性构建独立运行配置。 */
+  public static CodingToolsConfig fromSystemProperties(Path environmentRoot) {
+    Path root = canonicalDirectory(environmentRoot, "environmentRoot");
     Path resourceDirectory =
         Path.of(
             System.getProperty(

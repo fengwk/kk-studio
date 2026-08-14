@@ -86,6 +86,7 @@ public class LiveEnvironmentQueryServiceImpl implements LiveEnvironmentQueryServ
       mcpServers.add(serverDto);
     }
     dto.setMcpServers(List.copyOf(mcpServers));
+    dto.setRootPath(environment.rootPath());
     return dto;
   }
 }

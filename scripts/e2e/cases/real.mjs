@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { assert, envelopeData, sleep, cid } from '../lib/http.mjs'
+import { assert, envelopeData, expectHttpError, sleep, cid } from '../lib/http.mjs'
 import {
   approveToolInvocation,
   branchSettingsOf,
@@ -583,11 +583,15 @@ registerCase({
   level: 'L4',
   title: 'Environment GET 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 11 个 tools（version=1）+ skills + mcpServers 摘要，且不公开 READY environment metadata',
+  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 11 个 tools（version=1）+ skills + mcpServers 摘要 + rootPath（daemon canonical Environment Root），且不公开 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
     assert(match?.status === 'READY', JSON.stringify(match))
+    assert(
+      typeof match.rootPath === 'string' && match.rootPath.length > 0,
+      JSON.stringify(match),
+    )
     const expectedToolNames = [
       'read',
       'write',
@@ -635,6 +639,60 @@ registerCase({
     }
     assert(match.ready === true, JSON.stringify(match))
     ctx.vars.daemonEnvironment = match
+  },
+})
+
+registerCase({
+  id: 'daemon.directories',
+  level: 'L4',
+  title: 'Environment Root 单层目录浏览 API',
+  requires: ['tools'],
+  docs: 'GET /api/ai/environments/{name}/directories（control-plane 只读）：缺省 path="." 浏览 root——canonical 相对 wire path/displayPath、root 的 parentPath="."、truncated 布尔、gitBranch 可空、entries 只含直属子目录（path+displayPath 非空）；显式 path="." 与缺省一致；".." 段 400 INVALID_PATH、不存在目录 404 NOT_FOUND、非法环境名 400 INVALID_ENVIRONMENT_NAME',
+  async run(ctx) {
+    const name = ctx.vars.daemonEnvironment?.name ?? ctx.daemonEnv
+    const base = `/api/ai/environments/${encodeURIComponent(name)}/directories`
+    const { json } = await ctx.call('GET', base)
+    const dir = envelopeData(json)
+    assert(dir?.path === '.', JSON.stringify(json))
+    assert(typeof dir.displayPath === 'string' && dir.displayPath.length > 0, JSON.stringify(json))
+    assert(dir.parentPath === '.', JSON.stringify(json))
+    assert(typeof dir.truncated === 'boolean', JSON.stringify(json))
+    assert(
+      !Object.hasOwn(dir, 'gitBranch') || dir.gitBranch === null || typeof dir.gitBranch === 'string',
+      JSON.stringify(json),
+    )
+    assert(Array.isArray(dir.entries), JSON.stringify(json))
+    for (const entry of dir.entries) {
+      assert(
+        typeof entry.path === 'string'
+          && entry.path.length > 0
+          && typeof entry.displayPath === 'string'
+          && entry.displayPath.length > 0,
+        JSON.stringify(entry),
+      )
+    }
+    // 显式 path="." 与缺省一致。
+    const explicit = envelopeData(
+      (await ctx.call('GET', `${base}?path=${encodeURIComponent('.')}`)).json,
+    )
+    assert(explicit.path === '.' && explicit.parentPath === '.', JSON.stringify(explicit))
+    // 非法路径段 => 400 INVALID_PATH（失败响应 path 是请求回显归因）。
+    const invalid = await expectHttpError(
+      () => ctx.call('GET', `${base}?path=${encodeURIComponent('../escape')}`),
+      { status: 400 },
+    )
+    assert(String(invalid.body).includes('INVALID_PATH'), invalid.body)
+    // 不存在目录 => 404 NOT_FOUND。
+    const missing = await expectHttpError(
+      () => ctx.call('GET', `${base}?path=${encodeURIComponent('no-such-dir-zz')}`),
+      { status: 404 },
+    )
+    assert(String(missing.body).includes('NOT_FOUND'), missing.body)
+    // 非法环境名 => 400，不进入 daemon。
+    await expectHttpError(
+      () => ctx.call('GET', '/api/ai/environments/Not-Canonical/directories'),
+      { status: 400 },
+    )
   },
 })
 

@@ -101,7 +101,7 @@ class DaemonConfigTest {
               "PT4S",
               "--note",
               "Custom local environment.",
-              "--workdir",
+              "--environment-root",
               skillDir.toString(),
               "--skill-dir",
               skillDir.toString()
@@ -116,11 +116,11 @@ class DaemonConfigTest {
     assertEquals(Duration.ofSeconds(3), config.maxReconnectDelay());
     assertEquals(Duration.ofSeconds(4), config.defaultToolTimeout());
     assertEquals("Custom local environment.", config.note());
-    assertEquals(skillDir.toRealPath(), config.workdir());
+    assertEquals(skillDir.toRealPath(), config.environmentRoot());
     assertEquals(List.of(skillDir.toAbsolutePath().normalize()), config.skillDirs());
   }
 
-  /** 未显式配置时，workdir 使用启动用户 HOME 的 canonical 目录。 */
+  /** 未显式配置时，Environment Root 使用启动用户 HOME 的 canonical 目录。 */
   @Test
   void defaultsWorkdirToCanonicalUserHome(@TempDir Path home) throws Exception {
     String oldHome = System.getProperty("user.home");
@@ -134,13 +134,13 @@ class DaemonConfigTest {
                 "--gateway-token", "secret"
               });
 
-      assertEquals(home.toRealPath(), config.workdir());
+      assertEquals(home.toRealPath(), config.environmentRoot());
     } finally {
       System.setProperty("user.home", oldHome);
     }
   }
 
-  /** 显式 workdir 必须是唯一、已存在的目录，并在解析时 canonical 化。 */
+  /** 显式 Environment Root 必须是唯一、已存在的目录，并在解析时 canonical 化。 */
   @Test
   void validatesExplicitWorkdir(@TempDir Path root) throws Exception {
     Path file = Files.writeString(root.resolve("file.txt"), "x");
@@ -152,7 +152,7 @@ class DaemonConfigTest {
                   "--environment-name", "env",
                   "--gateway-uri", "ws://gateway.example/daemon",
                   "--gateway-token", "secret",
-                  "--workdir", file.toString()
+                  "--environment-root", file.toString()
                 }));
     assertThrows(
         IllegalArgumentException.class,
@@ -162,8 +162,8 @@ class DaemonConfigTest {
                   "--environment-name", "env",
                   "--gateway-uri", "ws://gateway.example/daemon",
                   "--gateway-token", "secret",
-                  "--workdir", root.toString(),
-                  "--workdir", root.toString()
+                  "--environment-root", root.toString(),
+                  "--environment-root", root.toString()
                 }));
   }
 
@@ -352,7 +352,7 @@ class DaemonConfigTest {
         defaultToolTimeout,
         gatewayToken,
         null,
-        DaemonConfig.defaultWorkdir(),
+        DaemonConfig.defaultEnvironmentRoot(),
         skillDirs,
         null);
   }

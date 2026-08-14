@@ -297,7 +297,10 @@ class DatabaseTurnResolverTest {
         ENV_A,
         List.of(),
         new DaemonEnvironmentInfo(
-            DaemonOperatingSystem.LINUX, "America/Los_Angeles", "Custom <Linux> & tools."));
+            DaemonOperatingSystem.LINUX,
+            "America/Los_Angeles",
+            "Custom <Linux> & tools.",
+            "/home/dev"));
 
     ModelInvocationRequest request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
     String prompt = textOf(request.providerRequest().messages().getFirst());
@@ -328,7 +331,7 @@ class DatabaseTurnResolverTest {
 
     DaemonEnvironmentInfo environmentInfo =
         new DaemonEnvironmentInfo(
-            DaemonOperatingSystem.WSL, "Asia/Tokyo", "Stable WSL environment.");
+            DaemonOperatingSystem.WSL, "Asia/Tokyo", "Stable WSL environment.", "/home/dev");
     Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
     readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
     String ready =
@@ -1784,7 +1787,8 @@ class DatabaseTurnResolverTest {
       readyEnvironment(
           environmentName,
           skills,
-          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Linux environment."));
+          new DaemonEnvironmentInfo(
+              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"));
     }
 
     private void readyEnvironment(
@@ -1805,7 +1809,8 @@ class DatabaseTurnResolverTest {
       readyEnvironmentWithSkills(
           environmentName,
           skills,
-          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Linux environment."),
+          new DaemonEnvironmentInfo(
+              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
           NOW);
     }
 
