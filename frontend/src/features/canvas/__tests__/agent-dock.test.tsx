@@ -402,6 +402,38 @@ describe('Canvas bound thread', () => {
       expect(document.activeElement?.classList.contains('composer-editor')).toBe(true),
     )
   })
+
+  it('projects only controller-supported commands in the canvas bound scene', async () => {
+    const user = userEvent.setup()
+    renderHarness(<CanvasAgentThread />, {
+      threadOpen: true,
+      snapshot: canvasSnapshot(THREAD_ID),
+    })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+
+    // canvas-bound：只把 stop/upload/events/conversation/shortcuts 投影为可用，
+    // agent/environment/yolo/tree/new/thread 一律禁用（controller 只支持 stop）。
+    await user.click(composer)
+    await user.keyboard('/')
+    for (const id of ['thread', 'agent', 'environment', 'yolo', 'tree', 'new']) {
+      expect(screen.getByRole('option', { name: new RegExp(`^${id}`) })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      )
+    }
+    // conversation 是当前激活视图（active-view 规则禁用），其余 controller 能力可用。
+    for (const id of ['stop', 'upload', 'events', 'shortcuts']) {
+      expect(screen.getByRole('option', { name: new RegExp(`^${id}`) })).toHaveAttribute(
+        'aria-disabled',
+        'false',
+      )
+    }
+    expect(screen.getByRole('option', { name: /^conversation/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+  })
 })
 
 describe('Canvas agent panel', () => {

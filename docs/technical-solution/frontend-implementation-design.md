@@ -117,34 +117,50 @@ Composer(active, focus + caret restored)
 
 ### Conversation/Event 互斥主视图与只读面板
 
-Bound 场景提供 `/events`、`/conversation`；全部 Composer 场景（blank / canvas-blank / bound）
-提供 `/shortcuts`；不再提供始终禁用的 `/session`。命令表由单一
-`threadCommandsForScene(scene)` 投影（`THREAD_COMMANDS` + `SCENE_AVAILABILITY`），
-Chat Bound / Canvas Bound / Blank / Canvas Blank 不再各自维护命令表副本。
+Bound 场景提供 `/events`、`/conversation`；全部 4 个 Composer 场景（`chat-blank` /
+`chat-bound` / `canvas-blank` / `canvas-bound`）提供 `/shortcuts`；不再提供始终禁用的
+`/session`。命令表由单一 `threadCommandsForScene(scene)` 投影
+（`THREAD_COMMANDS` + `SCENE_AVAILABILITY: Record<ThreadCommandId, ThreadCommandScene[]>`，
+`ThreadCommandId` 为字面量联合类型），Chat Bound / Canvas Bound / Blank / Canvas Blank
+不再各自维护命令表副本；Canvas Bound 只投影 `stop/upload/events/conversation/shortcuts`
+（controller 仅支持 stop，其余经 Composer 处理）。当前激活视图的切换命令由
+`threadCommandsForActiveView(commands, mainView)` 置为 `disabled`（保持可见）。
 
 ```text
 ThreadPanelMainView = 'conversation' | 'events'
 mainView?.events ?? ThreadTranscript        # 互斥：任一时刻只有一个主滚动区
 ```
 
-- 切换只替换主滚动区：Composer、queue、working、widgets 保持挂载，本地 draft 不丢。
+- 切换只替换主滚动区：Composer、queue、working、widgets 保持挂载，本地 draft 不丢；
+  **切回 conversation 时关闭事件详情**。
+- 每 Pane 独立保存 conversation 与 events 两个 `scrollTop`（`useMainViewScrollRestore`，
+  内存 `positionsRef`，不用 localStorage）：视图重进时恢复原滚动位置（conversation 恢复
+  通过合成 `scroll` 事件同步自动贴底 stick 状态；`useChatTranscriptAutoScroll` 接受
+  `initialScrollTop`，恢复后 `isNearBottom` 决定是否继续贴底）；Thread 重绑清空位置并
+  回到贴底。重绑同时把视图重置回 conversation 并关闭详情与 interaction。
 - `/events` 打开 `ThreadEventView`（listbox/option）：`↑/↓`、`Home/End`、`PageUp/PageDown`
   移动 active（初始为最新事件，Page 步长 10），`Enter/Space` 打开详情，`Esc` 在详情打开时
-  关闭详情、否则透传给全局 Escape（恢复 Composer 焦点）；鼠标只有 `mousemove` 改变
-  active，click 只打开详情。
+  关闭详情、否则透传给全局 Escape（恢复 Composer 焦点）；鼠标 `mousemove` 与 click 都激活
+  所在行。
 - 事件详情是**只读 widget**（`ThreadEventDetail`，位于 ThreadWidgetStack、Composer 上方），
   不是 InteractionPanel：不隐藏 Composer、不抢焦点；展示结构化 label/value 与 durable
-  Entry 原始 payload JSON；X 按钮与详情内 `Esc` 关闭。详情在视图切换间保持打开。
+  Entry 原始 payload JSON；X 按钮与详情内 `Esc` 关闭。详情内容按事件 id 跟随最新投影
+  （同 id 更新内容、id 消失关闭详情）。
 - 事件投影 `buildThreadEvents` 独立于 transcript：durable Entry 全类型保留（含
   TURN_START/TURN_END/COMPACTION/未知类型）；活跃 model/tool invocation 与 attempt
   failure 是单条事件（Provider delta token 绝不逐条成行），锚定在所属 durable Entry 之后，
-  找不到锚点追加到末尾。
-- Thread 重绑（pane 切换 Thread）把视图重置回 conversation 并关闭详情与 interaction。
-- `/shortcuts` 打开只读 `ThreadShortcutsPanel`（`SHORTCUT_CATALOG` 展示数据 + 统一
-  ThreadInteractionPanel shell）：不创建 backdrop，`Esc` 关闭并恢复 Composer 焦点与草稿。
-- 全局 Escape 语义：modal / alertdialog / lightbox（`.modal-backdrop, [aria-modal],
-  [role="alertdialog"], .resource-media-lightbox`）优先拦截；`hasBlockingOverlay()` /
-  `shouldDeferToBlockingOverlay()` 统一判定，Canvas 键盘 Escape 分支同样受守卫。
+  找不到锚点追加到末尾。活跃 overlay 与 durable Entry 重叠窗口（
+  `ModelTerminalPending`/`ToolTerminalPending`）按身份去重：failure 用
+  `attempt:sequence`，tool 用 `toolCallId`（从 MESSAGE/CUSTOM_MESSAGE 的
+  `tool_call`/`tool_result` content 提取），已物化为 durable 的活跃 overlay 不重复展示。
+- `/shortcuts` 打开只读 `ThreadShortcutsPanel`（分组快捷键目录
+  `SHORTCUT_CATALOG`：Application / Thread / Events / Canvas，只收录已实现快捷键，每个
+  descriptionKey 在 zh-CN / en-US 均可解析 + 统一 ThreadInteractionPanel shell）：
+  不创建 backdrop，`Esc` 关闭并恢复 Composer 焦点与草稿。
+- 全局键盘语义：modal / alertdialog / lightbox（`.modal-backdrop, [aria-modal],
+  [role="alertdialog"], .resource-media-lightbox`）优先拦截**全部**全局快捷键（含 Canvas
+  Delete/T/数字键/Fit/Zoom 等），`hasBlockingOverlay()` / `shouldDeferToBlockingOverlay()`
+  统一判定，Canvas 键盘入口整体受守卫。
 
 Turn usage（model token 用量）从 TURN_START 时点移到 TURN_END 时点展示：`EntryProjectionContext`
 携带 `pendingTurnSummary`，ASSISTANT 分支写入、TURN_END 发射 `turn_usage`，TURN_START /

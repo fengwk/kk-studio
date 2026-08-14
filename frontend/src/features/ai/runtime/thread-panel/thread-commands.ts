@@ -1,7 +1,24 @@
-export type ThreadCommandScene = 'blank' | 'canvas-blank' | 'bound'
+export type ThreadCommandScene =
+  | 'chat-blank'
+  | 'chat-bound'
+  | 'canvas-blank'
+  | 'canvas-bound'
+
+export type ThreadCommandId =
+  | 'thread'
+  | 'agent'
+  | 'environment'
+  | 'yolo'
+  | 'tree'
+  | 'stop'
+  | 'new'
+  | 'upload'
+  | 'events'
+  | 'conversation'
+  | 'shortcuts'
 
 export interface ThreadCommand {
-  id: string
+  id: ThreadCommandId
   label: string
   description: string
   labelKey?: string
@@ -109,22 +126,23 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
 ]
 
 /**
- * 每个命令的可用场景。`/session` 已彻底移除：树只属于当前 Session，不存在可用的
- * 全局 Session 重绑定命令。Canvas blank 没有 Chat-scoped Thread picker，因此
- * `/thread` 只属于 chat blank 与 bound 场景。
+ * 每个命令的可用场景。场景区分 Chat 与 Canvas、Blank 与 Bound：
+ * - Canvas Bound 的 controller 只支持 stop（upload 由 ThreadComposer 自身处理文件选择），
+ *   因此 agent/environment/yolo/tree/new/thread 不会投影给只支持 stop 的 controller。
+ * `/session` 已彻底移除：树只属于当前 Session，不存在可用的全局 Session 重绑定命令。
  */
-const SCENE_AVAILABILITY: Record<string, ThreadCommandScene[]> = {
-  thread: ['blank', 'bound'],
-  agent: ['blank', 'canvas-blank', 'bound'],
-  environment: ['blank', 'canvas-blank', 'bound'],
-  yolo: ['blank', 'canvas-blank', 'bound'],
-  tree: ['bound'],
-  stop: ['bound'],
-  new: ['bound'],
-  upload: ['blank', 'canvas-blank', 'bound'],
-  events: ['bound'],
-  conversation: ['bound'],
-  shortcuts: ['blank', 'canvas-blank', 'bound'],
+const SCENE_AVAILABILITY: Record<ThreadCommandId, ThreadCommandScene[]> = {
+  thread: ['chat-blank', 'chat-bound'],
+  agent: ['chat-blank', 'canvas-blank', 'chat-bound'],
+  environment: ['chat-blank', 'canvas-blank', 'chat-bound'],
+  yolo: ['chat-blank', 'canvas-blank', 'chat-bound'],
+  tree: ['chat-bound'],
+  stop: ['chat-bound', 'canvas-bound'],
+  new: ['chat-bound'],
+  upload: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
+  events: ['chat-bound', 'canvas-bound'],
+  conversation: ['chat-bound', 'canvas-bound'],
+  shortcuts: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
 }
 
 /** 投影稳定的 command 列表并附带场景可用性（disabled 仍保留在列表中）。 */
@@ -138,6 +156,21 @@ export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand
       disabledReasonKey: disabled ? 'ai.runtime.command.disabledReason' : undefined,
     }
   })
+}
+
+/**
+ * Bound 主视图互斥：当前已激活的视图命令保持可见但禁用
+ * （events 激活时 `/events` 禁用，conversation 激活时 `/conversation` 禁用）。
+ */
+export function threadCommandsForActiveView(
+  commands: ThreadCommand[],
+  activeView: 'conversation' | 'events',
+): ThreadCommand[] {
+  return commands.map((command) =>
+    command.id === activeView
+      ? { ...command, disabled: true, disabledReasonKey: 'ai.runtime.command.activeView' }
+      : command,
+  )
 }
 
 export function filterThreadCommands(

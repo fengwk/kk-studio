@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import type { ThreadEventItem } from '@/features/ai/runtime/thread-events'
 import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { useI18n } from '@/shared/i18n'
@@ -10,42 +10,73 @@ const PAGE_STEP = 10
  *
  * - 键盘：ArrowUp/Down、Home/End、PageUp/PageDown 移动 active，Enter/Space 打开详情，
  *   Escape 在详情打开时关闭详情（否则交由全局 Escape 恢复 Composer 焦点）；
- * - 鼠标：只有 mousemove 改变 active；click 只打开详情（不改变 active）；
+ * - 鼠标：只有 mousemove 改变 active；click 同时把该行设为 active 并打开详情；
+ * - active id 在事件列表收缩后消失时回到最新事件；
+ * - `initialScrollTop` 非空时挂载即恢复该位置（重新进入事件视图）；否则贴底；
  * - Provider delta token 不逐条成行：活跃 invocation 是单条事件。
  */
 export function ThreadEventView({
   events,
   detailOpen = false,
+  initialScrollTop = null,
+  bodyRef: bodyRefProp,
   onActivate,
   onCloseDetail,
 }: {
   events: ThreadEventItem[]
   detailOpen?: boolean
+  /** 重新进入事件视图时恢复的 scrollTop；null 表示首次进入（贴底）。 */
+  initialScrollTop?: number | null
+  /** 外部 scroll 容器 ref（Pane 在切换离开前捕获 scrollTop）。 */
+  bodyRef?: RefObject<HTMLDivElement | null>
   onActivate: (event: ThreadEventItem) => void
   onCloseDetail: () => void
 }) {
   const { t } = useI18n()
-  const bodyRef = useRef<HTMLDivElement>(null)
+  const internalBodyRef = useRef<HTMLDivElement>(null)
+  const bodyRef = bodyRefProp ?? internalBodyRef
   const [activeId, setActiveId] = useState<string | null>(() => events.at(-1)?.id ?? null)
+  // 初始 active 在挂载时不应触发 scrollIntoView（重新进入时恢复的是历史位置）。
+  const activeIdRef = useRef<string | null>(activeId)
   const activeIndex = useMemo(
     () => events.findIndex((event) => event.id === activeId),
     [activeId, events],
   )
 
-  useChatTranscriptAutoScroll(bodyRef, events.length)
+  useChatTranscriptAutoScroll(bodyRef, events.length, events.length, initialScrollTop)
 
   useEffect(() => {
     bodyRef.current?.focus({ preventScroll: true })
-  }, [])
+  }, [bodyRef])
+
+  // 事件列表收缩后 active id 消失：回到最新事件（空列表时清空）。
+  useEffect(() => {
+    if (events.length === 0) {
+      if (activeId != null) {
+        setActiveId(null)
+      }
+      return
+    }
+    if (activeId == null || !events.some((event) => event.id === activeId)) {
+      const latestId = events.at(-1)!.id
+      if (activeId !== latestId) {
+        setActiveId(latestId)
+      }
+    }
+  }, [activeId, events])
 
   useEffect(() => {
+    if (activeIdRef.current === activeId) {
+      return
+    }
+    activeIdRef.current = activeId
     if (activeIndex < 0) {
       return
     }
     bodyRef.current
       ?.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(events[activeIndex]!.id)}"]`)
       ?.scrollIntoView({ block: 'nearest' })
-  }, [activeIndex, events])
+  }, [activeIndex, activeId, bodyRef, events])
 
   function moveActive(delta: number) {
     if (events.length === 0) {
@@ -132,7 +163,10 @@ export function ThreadEventView({
             role="option"
             aria-selected={active}
             className={`thread-event ${active ? 'active' : ''}`}
-            onClick={() => onActivate(event)}
+            onClick={() => {
+              setActiveId(event.id)
+              onActivate(event)
+            }}
             onMouseMove={() => setActiveId(event.id)}
           >
             <div className="thread-event-title">{event.title}</div>

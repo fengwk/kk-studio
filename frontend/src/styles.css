@@ -3492,6 +3492,30 @@ div.is-error {
   list-style: none;
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.thread-shortcuts-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.thread-shortcuts-group-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.thread-shortcuts-group-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
   gap: 7px;
 }
 

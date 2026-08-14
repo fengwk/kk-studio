@@ -32,6 +32,11 @@ export function useCanvasKeyboard(api: KeyboardApi) {
 
   useEffect(() => {
     function handleKeyboard(event: KeyboardEvent) {
+      // 任何 blocking overlay（modal/alertdialog/lightbox）存在时，Canvas 全局
+      // 快捷键全部让路：不拦截、不抢事件——不只是 Escape。
+      if (hasBlockingOverlay()) {
+        return
+      }
       const target = event.target as HTMLElement | null
       const isTyping = Boolean(
         target
@@ -50,10 +55,6 @@ export function useCanvasKeyboard(api: KeyboardApi) {
       }
 
       if (event.key === 'Escape') {
-        // Modal/alertdialog/lightbox 优先于全局 Escape：画布不拦截、不抢事件。
-        if (hasBlockingOverlay()) {
-          return
-        }
         closeOverlays()
         if (view === 'editor') {
           clearSelection()

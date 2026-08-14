@@ -32,10 +32,17 @@ export function ThreadShortcutsPanel({ onClose }: { onClose: () => void }) {
       }}
     >
       <ul className="thread-shortcuts-list">
-        {SHORTCUT_CATALOG.map((entry) => (
-          <li key={entry.keys} className="thread-shortcuts-row">
-            <kbd className="thread-shortcuts-keys">{entry.keys}</kbd>
-            <span className="thread-shortcuts-description">{t(entry.descriptionKey)}</span>
+        {SHORTCUT_CATALOG.map((group) => (
+          <li key={group.id} className="thread-shortcuts-group">
+            <h4 className="thread-shortcuts-group-title">{t(group.titleKey)}</h4>
+            <ul className="thread-shortcuts-group-list">
+              {group.entries.map((entry) => (
+                <li key={`${group.id}:${entry.keys}`} className="thread-shortcuts-row">
+                  <kbd className="thread-shortcuts-keys">{entry.keys}</kbd>
+                  <span className="thread-shortcuts-description">{t(entry.descriptionKey)}</span>
+                </li>
+              ))}
+            </ul>
           </li>
         ))}
       </ul>

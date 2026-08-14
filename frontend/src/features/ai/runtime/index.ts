@@ -4,10 +4,14 @@ export {
   ThreadEventView,
   ThreadEventDetail,
   ThreadShortcutsPanel,
+  useMainViewScrollRestore,
   type ThreadPanelMainView,
   type ThreadCommand,
 } from '@/features/ai/runtime/thread-panel'
-export { threadCommandsForScene } from '@/features/ai/runtime/thread-panel/thread-commands'
+export {
+  threadCommandsForScene,
+  threadCommandsForActiveView,
+} from '@/features/ai/runtime/thread-panel/thread-commands'
 export {
   ChatPanel,
   type ChatPanelActivityInput,

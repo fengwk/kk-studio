@@ -100,6 +100,34 @@ export function buildThreadEvents(
     group.push(item)
     anchored.set(index, group)
   }
+  // snapshot 在 ModelTerminalPending / ToolTerminalPending 窗口内会同时携带 durable
+  // Entry 与尚未物化的活跃 overlay；按稳定 identity 去重，durable Entry 是权威记录。
+  const durableFailureIdentities = new Set<string>()
+  const durableToolCallIds = new Set<string>()
+  for (const entry of entries) {
+    const payload = parsePayload(entry.payloadJson)
+    if (entry.entryType === 'MODEL_ATTEMPT_FAILURE') {
+      const attempt = asRecord(payload.attempt)
+      const attemptNumber = scalarText(attempt.attempt)
+      const sequence = scalarText(attempt.sequence)
+      if (attemptNumber && sequence) {
+        durableFailureIdentities.add(`${attemptNumber}:${sequence}`)
+      }
+      continue
+    }
+    if (entry.entryType === 'MESSAGE' || entry.entryType === 'CUSTOM_MESSAGE') {
+      const message = asRecord(payload.message)
+      for (const content of getRecordList(message.contents)) {
+        const type = getString(content.type)
+        if (type === 'tool_call' || type === 'tool_result') {
+          const toolCallId = getString(content.toolCallId)
+          if (toolCallId) {
+            durableToolCallIds.add(toolCallId)
+          }
+        }
+      }
+    }
+  }
   const orderedFailures = [...modelAttemptFailures].sort(
     (left, right) => left.attempt - right.attempt || compareTimestamp(left.failedAt, right.failedAt),
   )
@@ -111,6 +139,10 @@ export function buildThreadEvents(
       continue
     }
     seenFailures.add(identity)
+    // durable MODEL_ATTEMPT_FAILURE Entry 已物化同一失败时，跳过活跃 overlay。
+    if (durableFailureIdentities.has(`${failure.attempt}:${failure.sequence}`)) {
+      continue
+    }
     anchor(failure.turnStartEntryId, projectAttemptFailureEvent(failure))
   }
   if (modelInvocation != null) {
@@ -120,6 +152,10 @@ export function buildThreadEvents(
     )
   }
   for (const invocation of toolInvocations) {
+    // durable TOOL Entry 已物化同一 toolCallId 时，跳过活跃 overlay。
+    if (durableToolCallIds.has(invocation.toolCallId)) {
+      continue
+    }
     anchor(
       invocation.assistantEntryId,
       projectToolInvocationEvent(invocation, toolStreams?.get(invocation.id) ?? null),
@@ -184,7 +220,8 @@ function entrySummary(entryType: string, payload: Record<string, unknown>): stri
   if (entryType === 'MODEL_ATTEMPT_FAILURE') {
     const attempt = asRecord(payload.attempt)
     const error = asRecord(payload.error)
-    const attemptText = getString(attempt.attempt)
+    // attempt.attempt 在 durable payload 中是数字（JSON number）。
+    const attemptText = scalarText(attempt.attempt)
     const code = getString(error.code)
     return [`attempt ${attemptText}`, code].filter(Boolean).join(' · ')
   }
@@ -208,6 +245,11 @@ function summarizeField(value: string, fallback: string): string {
     return fallback
   }
   return line.length > 140 ? `${line.slice(0, 140)}…` : line
+}
+
+/** 字符串或数字（JSON number）统一转文本。 */
+function scalarText(value: unknown): string {
+  return typeof value === 'number' ? String(value) : getString(value)
 }
 
 function projectModelInvocationEvent(
