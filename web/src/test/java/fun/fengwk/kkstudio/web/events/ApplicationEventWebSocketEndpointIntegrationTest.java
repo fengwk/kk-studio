@@ -42,7 +42,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     assertEquals(
         "{\"version\":1,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"invalid frame: frame must contain exactly [version, type, resource] fields\"}",
         collector.nextText());
-    assertEquals(1008, collector.nextCloseCode(), "invalid protocol frame must close with 1008");
+    assertEquals(1002, collector.nextCloseCode(), "invalid protocol frame must close with 1002");
   }
 
   @Test

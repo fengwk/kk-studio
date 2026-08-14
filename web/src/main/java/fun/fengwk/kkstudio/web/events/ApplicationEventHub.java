@@ -80,6 +80,9 @@ final class ApplicationEventHub implements AutoCloseable {
   /** 关闭标记：{@link #subscribe} 的 map compute 内原子检查，关闭后不得再建立新订阅。 */
   private volatile boolean closed;
 
+  /** 单订阅待发缓冲与建立期 early 缓冲的最大信号数；溢出折叠为单个 {@link Signal.Resync}，保证可恢复且内存有界。 */
+  static final int MAX_BUFFERED_SIGNALS = 512;
+
   ApplicationEventHub(
       ThreadRevisionEventSource revisionSource,
       RealtimeEventSource realtimeSource,
@@ -135,6 +138,7 @@ final class ApplicationEventHub implements AutoCloseable {
           subscription.deliver(signal);
         }
         state.early.clear();
+        state.earlyCollapsed = false;
         return subscription;
       }
     }
@@ -209,7 +213,8 @@ final class ApplicationEventHub implements AutoCloseable {
 
   /**
    * 在资源锁内 fan-out：与「读 cursor + 注册订阅者」互斥，保证 ack 后无注册竞态窗口。 没有订阅者时（establish 上游期间的回调可能先于第一个
-   * LocalSubscription 加入）信号暂存到 {@link ResourceState#early}，由随后加入的订阅者按 cursor 过滤回放。retired
+   * LocalSubscription 加入）信号暂存到 {@link ResourceState#early}，由随后加入的订阅者按 cursor 过滤回放；early 超过 {@link
+   * #MAX_BUFFERED_SIGNALS} 时清空并折叠为单个 {@link Signal.Resync}，之后不再累积（首订阅前内存有界且可恢复）。 retired
    * 状态（最后释放/建立失败/hub close 淘汰）的迟到回调直接丢弃，不向 detached state 累积。
    */
   private void fanout(ResourceState state, Signal signal) {
@@ -218,6 +223,15 @@ final class ApplicationEventHub implements AutoCloseable {
         return;
       }
       if (state.subscribers.isEmpty()) {
+        if (state.earlyCollapsed) {
+          return;
+        }
+        if (state.early.size() >= MAX_BUFFERED_SIGNALS) {
+          state.early.clear();
+          state.early.add(new Signal.Resync());
+          state.earlyCollapsed = true;
+          return;
+        }
         state.early.add(signal);
         return;
       }
@@ -274,6 +288,9 @@ final class ApplicationEventHub implements AutoCloseable {
     /** 已淘汰（最后释放/建立失败/hub close）：上游回调一律丢弃；只在状态锁内读写。 */
     private boolean retired;
 
+    /** early 已折叠为单个 Resync：首订阅加入前不再累积；只在状态锁内读写。 */
+    private boolean earlyCollapsed;
+
     private ResourceState(ResourceKey key) {
       this.key = key;
     }
@@ -288,6 +305,9 @@ final class ApplicationEventHub implements AutoCloseable {
     private boolean active;
     private boolean closed;
     private final ArrayDeque<Signal> pending = new ArrayDeque<>();
+
+    /** pending 已折叠为单个 Resync：激活前不再累积；只在 subscription lock 内读写。 */
+    private boolean pendingCollapsed;
 
     private LocalSubscription(
         ApplicationEventHub hub, ResourceKey resource, long cursor, Sink sink) {
@@ -314,6 +334,7 @@ final class ApplicationEventHub implements AutoCloseable {
           return;
         }
         active = true;
+        pendingCollapsed = false;
         while (!pending.isEmpty()) {
           sink.accept(pending.poll());
         }
@@ -330,6 +351,7 @@ final class ApplicationEventHub implements AutoCloseable {
       synchronized (lock) {
         closed = true;
         pending.clear();
+        pendingCollapsed = false;
       }
     }
 
@@ -349,6 +371,16 @@ final class ApplicationEventHub implements AutoCloseable {
           return;
         }
         if (!active) {
+          // 激活前缓冲有界：溢出清空并折叠为单个 Resync（客户端整体快照恢复），之后不再累积。
+          if (pendingCollapsed) {
+            return;
+          }
+          if (pending.size() >= MAX_BUFFERED_SIGNALS) {
+            pending.clear();
+            pending.add(new Signal.Resync());
+            pendingCollapsed = true;
+            return;
+          }
           pending.add(signal);
           return;
         }

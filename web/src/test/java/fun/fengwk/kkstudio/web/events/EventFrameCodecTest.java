@@ -60,6 +60,30 @@ class EventFrameCodecTest {
         IllegalArgumentException.class, () -> CODEC.decode("{\"version\":2," + base + "}"));
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode("{\"version\":\"1\"," + base + "}"));
+    // version 必须是精确 integer 1：溢出整数（低 64 位截断为 1）与浮点 1.0 均拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode("{\"version\":18446744073709551617," + base + "}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> CODEC.decode("{\"version\":1.0," + base + "}"));
+  }
+
+  @Test
+  void rejectsNonCanonicalTypeCase() {
+    String resource = "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}";
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode("{\"version\":1,\"type\":\"SUBSCRIBE\",\"resource\":" + resource + "}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode("{\"version\":1,\"type\":\"Subscribe\",\"resource\":" + resource + "}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"version\":1,\"type\":\"UNSUBSCRIBE\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+                    + CANVAS
+                    + "\"}}"));
   }
 
   @Test

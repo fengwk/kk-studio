@@ -143,6 +143,57 @@ class AsyncTextSenderTest {
     assertFalse(sender.enqueue("b"), "failed sender rejects further enqueues");
   }
 
+  @Test
+  void enqueueRejectsWhenTotalPendingUtf8BytesExceedMax() {
+    // maxBytes=6：三帧 2 字节各入队后，第四帧使总量 7 > 6 被拒；在途帧（2B）计入上限。
+    FakeAsyncRemote remote = new FakeAsyncRemote();
+    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L);
+
+    assertTrue(sender.enqueue("ab")); // in-flight 2B
+    assertTrue(sender.enqueue("cd")); // queued 2B
+    assertTrue(sender.enqueue("ef")); // queued 2B，总量 6B 恰好到限
+    assertFalse(sender.enqueue("g"), "total bytes must not exceed maxBytes");
+    assertFalse(sender.enqueue("h"));
+  }
+
+  @Test
+  void countsUtf8BytesNotCharacters() {
+    // "中文" 是 2 个字符、6 个 UTF-8 字节；maxBytes=6 时单帧通过、再加 1 字节帧即拒绝。
+    FakeAsyncRemote remote = new FakeAsyncRemote();
+    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L);
+
+    assertTrue(sender.enqueue("中文"));
+    assertFalse(sender.enqueue("x"), "multibyte frames must count UTF-8 bytes");
+  }
+
+  @Test
+  void inFlightFrameCountsTowardsByteLimitUntilCompleted() {
+    FakeAsyncRemote remote = new FakeAsyncRemote();
+    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L);
+
+    assertTrue(sender.enqueue("abcd")); // in-flight 4B
+    assertTrue(sender.enqueue("ef")); // queued 2B，总量 6B 到限
+    assertFalse(sender.enqueue("g"));
+
+    remote.complete(0); // in-flight 完成，queued "ef" 变为新 in-flight
+    assertEquals("ef", remote.sent.get(1).text);
+    assertFalse(sender.enqueue("12345"), "in-flight bytes still count until completion");
+
+    remote.complete(1);
+    assertTrue(sender.enqueue("x"), "bytes are released after the frame completes");
+  }
+
+  @Test
+  void oversizedSingleFrameIsRejectedWithoutBreakingTheChain() {
+    FakeAsyncRemote remote = new FakeAsyncRemote();
+    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L);
+
+    assertFalse(sender.enqueue("abcdefg"), "a single frame above maxBytes must be rejected");
+    assertTrue(sender.enqueue("ab"));
+    assertEquals(1, remote.sent.size(), "rejected frames must not start or break the chain");
+    remote.complete(0);
+  }
+
   private static Session session(FakeAsyncRemote remote) {
     Async async = mock(Async.class);
     doAnswer(

@@ -152,7 +152,7 @@ class ApplicationEventWebSocketHandlerTest {
   }
 
   @Test
-  void invalidFrameSendsErrorThenCloses() throws Exception {
+  void invalidFrameSendsErrorThenClosesWithProtocolError() throws Exception {
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage("{\"op\":\"subscribe\"}"));
 
@@ -165,7 +165,7 @@ class ApplicationEventWebSocketHandlerTest {
     verify(springSession, never()).close(any());
     verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
         .close(reasonCaptor.capture());
-    assertEquals(CloseReason.CloseCodes.VIOLATED_POLICY, reasonCaptor.getValue().getCloseCode());
+    assertEquals(CloseReason.CloseCodes.PROTOCOL_ERROR, reasonCaptor.getValue().getCloseCode());
   }
 
   @Test
@@ -312,6 +312,39 @@ class ApplicationEventWebSocketHandlerTest {
 
     verify(revisionHandle).close();
     verify(realtimeHandle).close();
+  }
+
+  @Test
+  void shutdownClosesLiveConnectionsWithServiceRestartAndReleasesSubscriptions() throws Exception {
+    AutoCloseable revisionHandle = mock(AutoCloseable.class);
+    AutoCloseable realtimeHandle = mock(AutoCloseable.class);
+    when(revisionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, revisionHandle));
+    when(realtimeSource.subscribe(any(), any(), any())).thenReturn(realtimeHandle);
+    handler.afterConnectionEstablished(springSession);
+    handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
+
+    handler.shutdown();
+
+    // 订阅立即释放；error 帧排在在途 ack 之后作为最后一帧，出队后以 1012 关闭会话。
+    verify(revisionHandle).close();
+    verify(realtimeHandle).close();
+    assertEquals(1, recorder.sent.size(), "error frame must wait behind the in-flight ack");
+    recorder.handlers.get(0).onResult(new SendResult());
+    assertEquals(2, recorder.sent.size());
+    assertEquals(
+        "{\"version\":1,\"type\":\"error\",\"code\":\"SEND_FAILED\",\"message\":\"event channel is shutting down\"}",
+        recorder.sent.get(1));
+    recorder.handlers.get(1).onResult(new SendResult());
+    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
+    verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
+        .close(reasonCaptor.capture());
+    assertEquals(CloseReason.CloseCodes.SERVICE_RESTART, reasonCaptor.getValue().getCloseCode());
+
+    // 幂等：再次 shutdown 与后续帧均安全。
+    handler.shutdown();
+    handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
+    verify(revisionSource, times(1)).subscribe(any(), any());
   }
 
   @Test
