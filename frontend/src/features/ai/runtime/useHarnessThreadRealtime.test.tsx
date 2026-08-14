@@ -284,15 +284,21 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.modelStream?.text).toBe('first'),
     )
 
-    // errorJson 也是终止态栅栏：此时 checkpoint 为空，解析出的 message 被冻结
-    // 作为临时文本；status 为 'error'，绝不会是 'streaming'。
-    rerender({ invocation: { ...modelInvocation(), errorJson: '{"message":"boom"}' } })
+    // errorJson 也是终止态栅栏：checkpoint partial 与错误详情保持分离；
+    // status 为 'error'，绝不会是 'streaming'。
+    rerender({
+      invocation: {
+        ...modelInvocation(),
+        errorJson: '{"kind":"TRANSIENT","message":"boom"}',
+      },
+    })
     await waitFor(() => expect(result.current?.modelStream?.status).toBe('error'))
-    expect(result.current?.modelStream?.text).toBe('boom')
+    expect(result.current?.modelStream?.text).toBe('')
+    expect(result.current?.modelStream?.errorCode).toBe('TRANSIENT')
     expect(result.current?.modelStream?.errorText).toBe('boom')
     act(() => source.emit('realtime', realtime(2, '-late-after-error')))
     await waitFor(() =>
-      expect(result.current?.modelStream?.text).toBe('boom'),
+      expect(result.current?.modelStream?.text).toBe(''),
     )
 
     // Entry 落地：overlay 被清空，此后的迟到 delta 一律被拒绝。
@@ -360,11 +366,12 @@ describe('useHarnessThreadRealtime', () => {
       invocation: {
         ...modelInvocation(),
         streamCheckpointJson: '{"attempt":1,"text":"frozen text","thinking":"","sequence":5}',
-        errorJson: '{"kind":"PROVIDER_ERROR","message":"provider exploded"}',
+        errorJson: '{"kind":"INVALID_REQUEST","message":"provider exploded"}',
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.status).toBe('error'))
     expect(result.current?.modelStream?.text).toBe('frozen text')
+    expect(result.current?.modelStream?.errorCode).toBe('INVALID_REQUEST')
     expect(result.current?.modelStream?.errorText).toBe('provider exploded')
     act(() => source.emit('realtime', realtime(6, '-after-error')))
     await waitFor(() =>

@@ -1,6 +1,8 @@
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
@@ -17,6 +19,8 @@ import type {
 } from '@/features/ai/runtime/thread-timeline-types'
 import { projectDurableEntry } from '@/features/ai/runtime/thread-timeline/entry-projection'
 import { contentText } from '@/features/ai/runtime/thread-timeline/content-utils'
+import { createModelAttemptFailureMessage } from '@/features/ai/runtime/thread-timeline/model-attempt-failure'
+import { translate } from '@/shared/i18n'
 
 /**
  * Thread transcript 投影：
@@ -31,6 +35,8 @@ export function buildThreadTimeline(
   toolInvocations: ToolInvocationDTO[],
   modelStream: RealtimeModelStream | null = null,
   toolStreams: ReadonlyMap<string, RealtimeToolStream> | null = null,
+  modelAttemptFailures: readonly ModelAttemptFailureDTO[] = [],
+  modelInvocation: ModelInvocationDTO | null = null,
 ): ThreadTimeline {
   const messages: DialogueMessage[] = []
   const queuedMessages: QueuedThreadMessage[] = []
@@ -75,17 +81,25 @@ export function buildThreadTimeline(
 
   projectInvocationOverlays(messages, toolInvocations, toolStreams)
 
-  if (!latestTurnIsCompaction && modelStream != null && (modelStream.text || modelStream.thinking)) {
-    messages.push({
-      id: `realtime:model:${modelStream.invocationId}:${modelStream.attempt}`,
-      role: 'assistant',
-      subjectEntryId: null,
-      text: modelStream.text,
-      thinking: modelStream.thinking || undefined,
-      createdAt: modelStream.createdAt,
-      // 终态持久投影（done/error）绝不会以 streaming 形式渲染。
-      status: modelStream.status,
-    })
+  if (!latestTurnIsCompaction) {
+    projectModelAttemptFailures(messages, modelAttemptFailures, modelInvocation)
+  }
+
+  const modelStreamAttemptFailed =
+    modelStream != null
+    && modelAttemptFailures.some(
+      (failure) =>
+        isProjectableModelAttemptFailure(failure)
+        && failure.modelInvocationId === modelStream.invocationId
+        && failure.attempt === modelStream.attempt,
+    )
+  if (!latestTurnIsCompaction && modelStream != null) {
+    projectModelStream(
+      messages,
+      modelStream,
+      modelStreamAttemptFailed,
+      modelInvocation,
+    )
   }
 
   return {
@@ -93,6 +107,143 @@ export function buildThreadTimeline(
     queuedMessages,
     hasPendingInputs,
   }
+}
+
+function projectModelAttemptFailures(
+  messages: DialogueMessage[],
+  failures: readonly ModelAttemptFailureDTO[],
+  modelInvocation: ModelInvocationDTO | null,
+): void {
+  const identities = new Set<string>()
+  const orderedFailures = [...failures].sort((left, right) => left.attempt - right.attempt)
+  for (const failure of orderedFailures) {
+    if (!isProjectableModelAttemptFailure(failure)) {
+      continue
+    }
+    const identity = `${failure.modelInvocationId}:${failure.attempt}`
+    if (identities.has(identity)) {
+      continue
+    }
+    identities.add(identity)
+    const liveRetry = isLiveRetryPending(failure, modelInvocation)
+    messages.push(
+      createModelAttemptFailureMessage({
+        id: `snapshot:model-attempt-failure:${identity}`,
+        subjectEntryId: null,
+        createdAt: failure.failedAt,
+        attempt: failure.attempt,
+        sequence: failure.sequence,
+        text: failure.text,
+        thinking: failure.thinking,
+        errorCode: failure.errorCode,
+        errorMessage: failure.errorMessage,
+        failedAt: failure.failedAt,
+        retryAt: failure.retryAt,
+        nextAttempt: failure.attempt + 1,
+        modelInvocationId: liveRetry ? failure.modelInvocationId : undefined,
+        turnStartEntryId: failure.turnStartEntryId,
+        basisHeadEntryId: failure.basisHeadEntryId,
+      }),
+    )
+  }
+}
+
+function isLiveRetryPending(
+  failure: ModelAttemptFailureDTO,
+  invocation: ModelInvocationDTO | null,
+): boolean {
+  return invocation != null
+    && invocation.id === failure.modelInvocationId
+    && invocation.attempt === failure.attempt
+    && (invocation.status === 'READY' || invocation.status === 'DISPATCHING')
+}
+
+function projectModelStream(
+  messages: DialogueMessage[],
+  stream: RealtimeModelStream,
+  attemptAlreadyFailed: boolean,
+  invocation: ModelInvocationDTO | null,
+): void {
+  const id = `realtime:model:${stream.invocationId}:${stream.attempt}`
+  if (stream.status === 'error') {
+    const errorText =
+      stream.errorText || translate('ai.runtime.entry.assistantRequestFailed')
+    const cancelled =
+      invocation?.id === stream.invocationId && invocation.status === 'CANCELLED'
+    if (cancelled && (stream.text || stream.thinking)) {
+      messages.push({
+        id,
+        role: 'assistant',
+        subjectEntryId: null,
+        text: stream.text,
+        thinking: stream.thinking || undefined,
+        createdAt: stream.createdAt,
+        status: 'done',
+        aborted: true,
+      })
+      return
+    }
+    if (cancelled || attemptAlreadyFailed || stream.attempt <= 0) {
+      messages.push({
+        id,
+        role: 'assistant',
+        subjectEntryId: null,
+        text: errorText,
+        createdAt: stream.createdAt,
+        status: 'error',
+      })
+      return
+    }
+    messages.push(
+      createModelAttemptFailureMessage({
+        id,
+        subjectEntryId: null,
+        createdAt: stream.createdAt,
+        attempt: stream.attempt,
+        sequence: String(stream.sequence),
+        text: stream.text,
+        thinking: stream.thinking,
+        errorCode: stream.errorCode ?? '',
+        errorMessage: errorText,
+        failedAt: stream.createdAt,
+        retryAt: null,
+        nextAttempt: null,
+      }),
+    )
+    return
+  }
+  if (attemptAlreadyFailed || (!stream.text && !stream.thinking)) {
+    return
+  }
+  messages.push({
+    id,
+    role: 'assistant',
+    subjectEntryId: null,
+    text: stream.text,
+    thinking: stream.thinking || undefined,
+    createdAt: stream.createdAt,
+    // 持久终止态 success 投影绝不会以 streaming 形式渲染。
+    status: stream.status,
+  })
+}
+
+function isProjectableModelAttemptFailure(failure: ModelAttemptFailureDTO): boolean {
+  return Boolean(
+    failure.modelInvocationId
+    && failure.turnStartEntryId
+    && failure.basisHeadEntryId
+    && Number.isSafeInteger(failure.attempt)
+    && failure.attempt > 0
+    && isCanonicalNonNegativeDecimal(failure.sequence)
+    && typeof failure.text === 'string'
+    && typeof failure.thinking === 'string'
+    && typeof failure.errorCode === 'string'
+    && typeof failure.errorMessage === 'string',
+  )
+}
+
+function isCanonicalNonNegativeDecimal(value: unknown): value is string {
+  return typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value)
 }
 
 /**

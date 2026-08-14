@@ -221,6 +221,77 @@ describe('useThreadNotifications', () => {
     await waitFor(() => expect(notifications).toHaveLength(1))
     expect(notifications[0]?.title).toBe('Agent 执行失败')
   })
+
+  it('treats a terminal model attempt failure as an error notification', async () => {
+    const notifications = installNotificationSpy()
+    const failure: DialogueMessage = {
+      id: 'failure',
+      role: 'model_attempt_failure',
+      subjectEntryId: 'failure',
+      createdAt: null,
+      status: 'done',
+      attempt: 2,
+      sequence: '4',
+      text: 'partial',
+      thinking: '',
+      errorCode: 'INVALID_REQUEST',
+      errorMessage: 'failed',
+      failedAt: null,
+      retryAt: null,
+      nextAttempt: null,
+    }
+    const { rerender } = renderHook(
+      ({ working }: { working: boolean }) =>
+        useThreadNotifications({
+          threadId: '1',
+          title: 'thread 1',
+          messages: [failure],
+          working,
+          enabled: true,
+        }),
+      { initialProps: { working: true } },
+    )
+
+    rerender({ working: false })
+    await waitFor(() => expect(notifications).toHaveLength(1))
+    expect(notifications[0]?.title).toBe('Agent 执行失败')
+  })
+
+  it('does not treat a retryable model attempt failure as completed', async () => {
+    const notifications = installNotificationSpy()
+    const retrying: DialogueMessage = {
+      id: 'retrying',
+      role: 'model_attempt_failure',
+      subjectEntryId: null,
+      createdAt: null,
+      status: 'done',
+      attempt: 1,
+      sequence: '4',
+      text: 'partial',
+      thinking: '',
+      errorCode: 'TRANSIENT',
+      errorMessage: 'retrying',
+      failedAt: null,
+      retryAt: null,
+      nextAttempt: 2,
+      modelInvocationId: 'model-1',
+    }
+    const { rerender } = renderHook(
+      ({ working }: { working: boolean }) =>
+        useThreadNotifications({
+          threadId: '1',
+          title: 'thread 1',
+          messages: [retrying],
+          working,
+          enabled: true,
+        }),
+      { initialProps: { working: true } },
+    )
+
+    rerender({ working: false })
+    await act(async () => {})
+    expect(notifications).toHaveLength(0)
+  })
 })
 
 function installNotificationSpy(): Array<{ title: string; body: string | undefined }> {

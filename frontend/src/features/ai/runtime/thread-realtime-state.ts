@@ -27,6 +27,8 @@ export interface RealtimeModelStream {
    * 会渲染 status，因此终止态投影永远不会标记为 streaming。
    */
   status: 'streaming' | 'done' | 'error'
+  /** 从持久 errorJson 解析出的 ProviderErrorKind（仅在 status='error' 时存在）。 */
+  errorCode?: string
   /** 从持久 errorJson 解析出的错误消息（仅在 status='error' 时存在）。 */
   errorText?: string
 }
@@ -204,7 +206,7 @@ export function isRealtimeModelDeltaGap(
 /**
  * 提取一次 ModelInvocation 规范的持久流式 checkpoint（如果有）。
  * 与 Java codec + record 构造函数保持一致：text/thinking 仅接受 string 或 null
- * （数字/对象视为格式错误），且二者至少有一个必须非空。
+ * （数字/对象视为格式错误），且二者至少有一个必须非空；纯空白是合法内容。
  * 合法的 null 在此处统一规范化为空字符串。
  */
 export function parseStreamCheckpoint(
@@ -229,8 +231,8 @@ export function parseStreamCheckpoint(
     }
     const normalizedText = text ?? ''
     const normalizedThinking = thinking ?? ''
-    if (!normalizedText.trim() && !normalizedThinking.trim()) {
-      // Java record 构造函数禁止两侧均为空的 checkpoint。
+    if (!normalizedText && !normalizedThinking) {
+      // Java record 构造函数只禁止两侧均为空；不会裁剪合法空白。
       return null
     }
     return {
@@ -291,15 +293,16 @@ export function snapshotModelStream(
   }
   const errorJson = invocation.errorJson
   if (errorJson != null && errorJson.trim()) {
-    // 持久终止态错误：将 checkpoint 冻结为可见文本，并展示解析出的
-    // message；stream 为 'error'，因此 UI 永远不会把它当作 streaming 渲染。
-    const message = parseToolErrorText(errorJson)
+    // 持久终止态错误：checkpoint 仍是用户已见 partial，错误 kind/message
+    // 单独携带；timeline 决定 FAILED/UNKNOWN/CANCELLED 的最终可见形态。
+    const error = parseModelErrorPayload(errorJson)
     return {
       ...base,
-      text: checkpoint?.text ?? (message ?? ''),
+      text: checkpoint?.text ?? '',
       thinking: checkpoint?.thinking ?? '',
       status: 'error',
-      errorText: message ?? undefined,
+      errorCode: error?.code || undefined,
+      errorText: error?.message ?? parseToolErrorText(errorJson) ?? undefined,
     }
   }
   if (checkpoint == null || checkpoint.attempt !== invocation.attempt) {
@@ -330,6 +333,22 @@ function parseModelResultPayload(json: string): { text: string; thinking: string
     const text = getString(value.text)
     const thinking = getString(value.thinking)
     return { text, thinking }
+  } catch {
+    return null
+  }
+}
+
+function parseModelErrorPayload(json: string): { code: string; message: string } | null {
+  try {
+    const value: unknown = JSON.parse(json)
+    if (!isRecord(value)) {
+      return null
+    }
+    const message = getString(value.message)
+    if (!message.trim()) {
+      return null
+    }
+    return { code: getString(value.kind), message }
   } catch {
     return null
   }

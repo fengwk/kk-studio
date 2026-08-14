@@ -161,6 +161,7 @@ export function useAgentThreadController(
     queuedCommands,
     modelInvocation,
     toolInvocations,
+    modelAttemptFailures,
     snapshotQuery,
   } = useAgentThreadQueries(threadId)
   const bound = Boolean(thread)
@@ -178,6 +179,8 @@ export function useAgentThreadController(
     toolInvocations,
     realtime.modelStream,
     realtime.toolStreams,
+    modelAttemptFailures,
+    modelInvocation,
   )
   const working = isThreadWorking(thread, timeline)
   const runtimeLabels = resolveRuntimeLabels(thread, agents, models, environmentReadyByName)

@@ -113,6 +113,7 @@ function snapshot(
     queuedCommands: [],
     modelInvocation: null,
     toolInvocations: [],
+    modelAttemptFailures: [],
     ...extras,
   }
 }

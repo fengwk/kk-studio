@@ -104,6 +104,7 @@ function threadSnapshot(): HarnessThreadSnapshotDTO {
     queuedCommands: [],
     modelInvocation: null,
     toolInvocations: [],
+    modelAttemptFailures: [],
   }
 }
 

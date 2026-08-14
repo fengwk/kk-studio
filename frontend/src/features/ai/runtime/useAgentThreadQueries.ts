@@ -33,6 +33,10 @@ export function useAgentThreadQueries(threadId: string) {
   const queuedCommands = useMemo(() => snapshot?.queuedCommands ?? [], [snapshot])
   const toolInvocations = useMemo(() => snapshot?.toolInvocations ?? [], [snapshot])
   const modelInvocation = useMemo(() => snapshot?.modelInvocation ?? null, [snapshot])
+  const modelAttemptFailures = useMemo(
+    () => snapshot?.modelAttemptFailures ?? [],
+    [snapshot],
+  )
 
   return {
     agentsQuery,
@@ -46,5 +50,6 @@ export function useAgentThreadQueries(threadId: string) {
     queuedCommands,
     modelInvocation,
     toolInvocations,
+    modelAttemptFailures,
   }
 }

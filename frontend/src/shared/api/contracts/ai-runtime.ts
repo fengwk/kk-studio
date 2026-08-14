@@ -1,4 +1,8 @@
-import type { BackendDateTime, InstantTimestamp } from '@/shared/api/contracts/base'
+import type {
+  BackendDateTime,
+  DecimalLong,
+  InstantTimestamp,
+} from '@/shared/api/contracts/base'
 
 /**
  * 冻结进 branch settings 快照的不可变 provider/model/variant 选择。
@@ -27,6 +31,7 @@ export type EntryType =
   | 'MESSAGE'
   | 'CUSTOM'
   | 'CUSTOM_MESSAGE'
+  | 'MODEL_ATTEMPT_FAILURE'
   | 'ASSISTANT_ERROR'
   | 'ASSISTANT_ABORTED'
   | 'COMPACTION'
@@ -210,6 +215,22 @@ export interface ToolInvocationDTO {
   updateTime: BackendDateTime
 }
 
+/** 当前 ModelInvocation 尚未物化到 EntryPath 的失败 attempt 审计投影。 */
+export interface ModelAttemptFailureDTO {
+  modelInvocationId: string
+  turnStartEntryId: string
+  basisHeadEntryId: string
+  attempt: number
+  /** 当前 attempt 的非负十进制 sequence；Java Long 在 HTTP wire 上保持字符串。 */
+  sequence: DecimalLong
+  text: string
+  thinking: string
+  errorCode: string
+  errorMessage: string
+  failedAt: InstantTimestamp
+  retryAt: InstantTimestamp
+}
+
 /**
  * 一致的 Thread 快照投影；所有字段都来自同一个数据库快照。
  * modelInvocation 是当前 Turn 的活动 model invocation（无则为 null）；
@@ -222,4 +243,5 @@ export interface HarnessThreadSnapshotDTO {
   queuedCommands: HarnessThreadCommandDTO[]
   modelInvocation: ModelInvocationDTO | null
   toolInvocations: ToolInvocationDTO[]
+  modelAttemptFailures: ModelAttemptFailureDTO[]
 }

@@ -8,7 +8,7 @@ export function ThinkingBlock({
   thinking: string
   streaming: boolean
 }) {
-  if (!thinking.trim()) {
+  if (!thinking) {
     return null
   }
   return (
