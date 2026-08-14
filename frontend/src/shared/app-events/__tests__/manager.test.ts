@@ -59,6 +59,43 @@ describe('ApplicationEventManager', () => {
     })
   })
 
+  it('refcounts the same listener on one resource: first release keeps the wire subscription', () => {
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+
+    const listener = { onEvent: vi.fn() }
+    const release1 = manager.subscribe(THREAD_A, listener)
+    const release2 = manager.subscribe(THREAD_A, listener)
+    expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: THREAD_A }])
+
+    // 第一个 unsubscribe 不能错误拆 wire：同一 listener 仍有真实 refcount。
+    release1()
+    expect(socket.sentMessages()).toHaveLength(1)
+    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'revision', data: { revision: '1' }, cursor: '1' })
+    expect(listener.onEvent).toHaveBeenCalledTimes(1)
+
+    // 末 ref 才 unsubscribe，之后不再派发。
+    release2()
+    expect(socket.sentMessages().at(-1)).toEqual({
+      version: 1,
+      type: 'unsubscribe',
+      resource: THREAD_A,
+    })
+    socket.emitServer({ type: 'resync', resource: THREAD_A })
+    expect(listener.onEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('registers the listener before sending the first subscribe', () => {
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+
+    // send() 同步派发 subscribed ack：若 listener 未先登记，ack 会因无监听者而丢失。
+    socket.onSendResponse = { type: 'subscribed', resource: THREAD_A, cursor: '0' }
+    const onSubscribed = vi.fn()
+    manager.subscribe(THREAD_A, { onSubscribed })
+    expect(onSubscribed).toHaveBeenCalledWith('0')
+  })
+
   it('holds subscribes until open and re-subscribes every active resource on reconnect', () => {
     vi.useFakeTimers()
     const { manager, harness } = setup()

@@ -32,9 +32,9 @@ describe('ApplicationEventConnection', () => {
     vi.restoreAllMocks()
   })
 
-  it('connects to the configured url and transitions connecting -> open', () => {
+  it('starts idle and transitions idle -> connecting -> open', () => {
     const { connection, harness, onOpen } = openConnection()
-    expect(connection.getStatus()).toBe('closed')
+    expect(connection.getStatus()).toBe('idle')
 
     connection.connect()
     expect(connection.getStatus()).toBe('connecting')
@@ -46,7 +46,8 @@ describe('ApplicationEventConnection', () => {
     expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
-  it('decodes server frames strictly before delivery and drops malformed frames', () => {
+  it('decodes server frames strictly; a protocol violation terminates the connection', () => {
+    vi.useFakeTimers()
     const { connection, harness, onMessage } = openConnection()
     connection.connect()
     const socket = harness.openLatest()
@@ -62,38 +63,22 @@ describe('ApplicationEventConnection', () => {
       cursor: '3',
     })
 
-    for (const raw of [
-      'not json',
-      JSON.stringify({ version: 2, type: 'subscribed', resource: { kind: 'thread', id: THREAD_ID }, cursor: '1' }),
-      JSON.stringify({ version: 1, type: 'unknown' }),
-      JSON.stringify({ version: 1, type: 'subscribed' }),
-      JSON.stringify({ version: 1, type: 'subscribed', resource: { kind: 'thread', id: THREAD_ID } }),
-      JSON.stringify({
-        version: 1,
-        type: 'event',
-        resource: { kind: 'thread', id: THREAD_ID },
-        name: 'bogus',
-        data: {},
-      }),
-      JSON.stringify({
-        version: 1,
-        type: 'event',
-        resource: { kind: 'nope', id: THREAD_ID },
-        name: 'revision',
-        data: { revision: '1' },
-      }),
-      JSON.stringify({
-        version: 1,
-        type: 'event',
-        resource: { kind: 'thread', id: 'not-a-uuid' },
-        name: 'revision',
-        data: { revision: '1' },
-      }),
-      JSON.stringify({ version: 1, type: 'resync', resource: { kind: 'thread', id: THREAD_ID }, extra: true }),
-    ]) {
-      socket.onmessage?.({ data: raw })
-    }
+    // decoder 返回 null = 服务端协议违规：本连接 terminal stop（无 code 安全关闭）。
+    socket.onmessage?.({ data: 'not json' })
+    expect(socket.closed).toBe(true)
+    expect(connection.getStatus()).toBe('closed')
+
+    // 不再继续消费。
+    socket.emitServer({ type: 'resync', resource: { kind: 'thread', id: THREAD_ID } })
     expect(onMessage).toHaveBeenCalledTimes(1)
+
+    // 不无限重连：退避定时器不存在，online 事件与显式 connect() 都无效。
+    vi.advanceTimersByTime(60_000)
+    expect(harness.sockets).toHaveLength(1)
+    window.dispatchEvent(new Event('online'))
+    expect(harness.sockets).toHaveLength(1)
+    connection.connect()
+    expect(harness.sockets).toHaveLength(1)
   })
 
   it('sends encoded client messages only while open', () => {
@@ -128,18 +113,19 @@ describe('ApplicationEventConnection', () => {
     ).toBe(false)
     // close 是权威清理点：触发统一重连路径。
     expect(socket.closed).toBe(true)
+    expect(connection.getStatus()).toBe('backoff')
     expect(vi.getTimerCount()).toBe(1)
     vi.advanceTimersByTime(250)
     expect(harness.sockets).toHaveLength(2)
   })
 
-  it('reconnects with backoff 250/500/1000/2000/5000 capped at 5000ms plus jitter', () => {
+  it('reconnects with backoff 250/500/1000/2000/5000/10000 capped at 10s', () => {
     vi.useFakeTimers()
     const { connection, harness } = openConnection()
     connection.connect()
     harness.openLatest()
 
-    const expectedDelays = [250, 500, 1000, 2000, 5000, 5000, 5000]
+    const expectedDelays = [250, 500, 1000, 2000, 5000, 10000, 10000, 10000]
     for (let attempt = 0; attempt < expectedDelays.length; attempt++) {
       const expected = expectedDelays[attempt] as number
       harness.latest?.fail()
@@ -152,19 +138,88 @@ describe('ApplicationEventConnection', () => {
     }
   })
 
-  it('applies small jitter on top of the backoff', () => {
+  it('applies deterministic jitter of at most 20% of the current base', () => {
     vi.useFakeTimers()
-    vi.mocked(Math.random).mockReturnValue(0.5)
     const { connection, harness } = openConnection()
     connection.connect()
     harness.openLatest()
 
-    harness.latest?.fail()
-    vi.advanceTimersByTime(249)
-    expect(harness.sockets).toHaveLength(1)
-    // 0.5 * 250 = 125ms jitter：总延迟 375ms。
-    vi.advanceTimersByTime(126)
+    // (random, 总延迟) 矩阵：base=250，jitter = floor(random * 250 * 0.2)。
+    const cases: Array<[number, number]> = [
+      [0, 250],
+      [0.5, 275],
+      [1, 300],
+    ]
+    let expectedSockets = 1
+    for (const [random, total] of cases) {
+      vi.mocked(Math.random).mockReturnValue(random)
+      harness.latest?.fail()
+      // 退避时刻之前绝不重连。
+      vi.advanceTimersByTime(total - 1)
+      expect(harness.sockets).toHaveLength(expectedSockets)
+      // 到达退避时刻后立即创建下一个 socket。
+      vi.advanceTimersByTime(1)
+      expectedSockets += 1
+      expect(harness.sockets).toHaveLength(expectedSockets)
+      // open 新 socket 以重置退避序列（每次用例都从 base=250 开始）。
+      harness.openLatest()
+    }
+  })
+
+  it('retries immediately on close code 1012 via a 0-delay timer', () => {
+    vi.useFakeTimers()
+    const { connection, harness } = openConnection()
+    connection.connect()
+    harness.openLatest()
+
+    // 服务端主动重启（无 error 事件）：立即重试，不推进退避序列。
+    harness.latest?.closeWith(1012)
+    expect(connection.getStatus()).toBe('backoff')
+    expect(vi.getTimerCount()).toBe(1)
+    vi.advanceTimersByTime(0)
     expect(harness.sockets).toHaveLength(2)
+    expect(connection.getStatus()).toBe('connecting')
+  })
+
+  it('treats close codes 1002/1008 as terminal: no reconnect, lifecycle listeners unbound', () => {
+    vi.useFakeTimers()
+    for (const code of [1002, 1008]) {
+      const { connection, harness } = openConnection()
+      connection.connect()
+      harness.openLatest()
+
+      harness.latest?.closeWith(code)
+      expect(connection.getStatus()).toBe('closed')
+
+      // 不无限重试。
+      vi.advanceTimersByTime(60_000)
+      expect(harness.sockets).toHaveLength(1)
+      // lifecycle listeners 已解绑：online/visible 不再触发重试，显式 connect() 也无效。
+      window.dispatchEvent(new Event('online'))
+      document.dispatchEvent(new Event('visibilitychange'))
+      expect(harness.sockets).toHaveLength(1)
+      connection.connect()
+      expect(harness.sockets).toHaveLength(1)
+    }
+  })
+
+  it('backs off normally on close code 1013 and network disconnects', () => {
+    vi.useFakeTimers()
+    const { connection, harness } = openConnection()
+    connection.connect()
+    harness.openLatest()
+
+    // 1013（try again later）→ 正常退避。
+    harness.latest?.closeWith(1013)
+    expect(connection.getStatus()).toBe('backoff')
+    vi.advanceTimersByTime(250)
+    expect(harness.sockets).toHaveLength(2)
+    harness.openLatest()
+
+    // 网络断线（1006）→ 正常退避。
+    harness.latest?.closeWith(1006)
+    vi.advanceTimersByTime(250)
+    expect(harness.sockets).toHaveLength(3)
   })
 
   it('retries immediately on online and on visibility becoming visible', () => {
@@ -190,6 +245,56 @@ describe('ApplicationEventConnection', () => {
     window.dispatchEvent(new Event('online'))
     document.dispatchEvent(new Event('visibilitychange'))
     expect(harness.sockets).toHaveLength(count)
+  })
+
+  it('enters backoff when the socket factory throws synchronously and retries', () => {
+    vi.useFakeTimers()
+    const harness = new FakeWebSocketHarness()
+    let calls = 0
+    const connection = new ApplicationEventConnection({
+      url: URL,
+      socketFactory: (url) => {
+        calls += 1
+        if (calls === 1) {
+          throw new Error('factory boom')
+        }
+        return harness.factory(url)
+      },
+    })
+    // 同步抛错绝不逃逸到调用方（Provider effect）：进入 backoff。
+    expect(() => connection.connect()).not.toThrow()
+    expect(connection.getStatus()).toBe('backoff')
+    expect(harness.sockets).toHaveLength(0)
+    expect(vi.getTimerCount()).toBe(1)
+
+    // 退避到期后重试：factory 第二次成功。
+    vi.advanceTimersByTime(250)
+    expect(harness.sockets).toHaveLength(1)
+    expect(connection.getStatus()).toBe('connecting')
+  })
+
+  it('never lets a synchronous socket.close() throw escape (onerror/send/disconnect)', () => {
+    vi.useFakeTimers()
+    const { connection, harness } = openConnection()
+    connection.connect()
+    const socket = harness.openLatest()
+
+    // onerror 路径：close 抛错被吞掉，事件处理不逃逸。
+    socket.closeThrows = true
+    expect(() => socket.onerror?.()).not.toThrow()
+
+    // send 失败路径：send 与 close 都同步抛错，异常绝不逃逸。
+    socket.sendThrows = true
+    expect(() =>
+      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+    ).not.toThrow()
+    expect(
+      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+    ).toBe(false)
+
+    // disconnect 路径：close 抛错不逃逸，状态仍 closed。
+    expect(() => connection.disconnect()).not.toThrow()
+    expect(connection.getStatus()).toBe('closed')
   })
 
   it('never lets stale generation callbacks affect the current connection', () => {
@@ -251,8 +356,11 @@ describe('ApplicationEventConnection', () => {
 })
 
 describe('createApplicationEventUrl', () => {
-  it('builds ws://<origin>/api/events/v1 from the current location', () => {
-    window.history.replaceState({}, '', '/chats/abc')
-    expect(createApplicationEventUrl()).toBe(`ws://${window.location.host}/api/events/v1`)
+  it('builds ws://<origin>/api/events/v1 and clears search/hash', () => {
+    window.history.replaceState({}, '', '/chats/abc?session=1#top')
+    const url = createApplicationEventUrl()
+    expect(url).toBe(`ws://${window.location.host}/api/events/v1`)
+    expect(url).not.toContain('?')
+    expect(url).not.toContain('#')
   })
 })
