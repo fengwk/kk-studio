@@ -101,28 +101,40 @@ export function buildThreadEvents(
     anchored.set(index, group)
   }
   // snapshot 在 ModelTerminalPending / ToolTerminalPending 窗口内会同时携带 durable
-  // Entry 与尚未物化的活跃 overlay；按稳定 identity 去重，durable Entry 是权威记录。
+  // Entry 与尚未物化的活跃 overlay；按「Turn 内」的稳定 identity 去重，durable Entry
+  // 是权威记录。身份必须带 Turn（沿 entries 线性路径跟踪当前 TURN_START entryId）：
+  // 旧 Turn 的 durable Entry 绝不能抑制新 Turn 相同 (attempt, sequence) / toolCallId
+  // 的活跃 overlay。
+  const turnStartByEntryId = new Map<string, string | null>()
   const durableFailureIdentities = new Set<string>()
-  const durableToolCallIds = new Set<string>()
+  const durableToolResultIdentities = new Set<string>()
+  let currentTurnStartEntryId: string | null = null
   for (const entry of entries) {
+    if (entry.entryType === 'TURN_START') {
+      currentTurnStartEntryId = entry.entryId
+    }
+    turnStartByEntryId.set(entry.entryId, currentTurnStartEntryId)
     const payload = parsePayload(entry.payloadJson)
     if (entry.entryType === 'MODEL_ATTEMPT_FAILURE') {
       const attempt = asRecord(payload.attempt)
       const attemptNumber = scalarText(attempt.attempt)
       const sequence = scalarText(attempt.sequence)
       if (attemptNumber && sequence) {
-        durableFailureIdentities.add(`${attemptNumber}:${sequence}`)
+        durableFailureIdentities.add(
+          `${currentTurnStartEntryId ?? ''}:${attemptNumber}:${sequence}`,
+        )
       }
       continue
     }
     if (entry.entryType === 'MESSAGE' || entry.entryType === 'CUSTOM_MESSAGE') {
       const message = asRecord(payload.message)
       for (const content of getRecordList(message.contents)) {
-        const type = getString(content.type)
-        if (type === 'tool_call' || type === 'tool_result') {
+        // 只有物化的 durable tool_result 才让活跃 tool overlay 退休：durable
+        // assistant tool_call 只表示调用已记录，运行中的 invocation 必须继续展示。
+        if (getString(content.type) === 'tool_result') {
           const toolCallId = getString(content.toolCallId)
           if (toolCallId) {
-            durableToolCallIds.add(toolCallId)
+            durableToolResultIdentities.add(`${currentTurnStartEntryId ?? ''}:${toolCallId}`)
           }
         }
       }
@@ -139,8 +151,12 @@ export function buildThreadEvents(
       continue
     }
     seenFailures.add(identity)
-    // durable MODEL_ATTEMPT_FAILURE Entry 已物化同一失败时，跳过活跃 overlay。
-    if (durableFailureIdentities.has(`${failure.attempt}:${failure.sequence}`)) {
+    // durable MODEL_ATTEMPT_FAILURE Entry 已在同一 Turn 物化该失败时，跳过活跃 overlay。
+    if (
+      durableFailureIdentities.has(
+        `${failure.turnStartEntryId}:${failure.attempt}:${failure.sequence}`,
+      )
+    ) {
       continue
     }
     anchor(failure.turnStartEntryId, projectAttemptFailureEvent(failure))
@@ -152,8 +168,16 @@ export function buildThreadEvents(
     )
   }
   for (const invocation of toolInvocations) {
-    // durable TOOL Entry 已物化同一 toolCallId 时，跳过活跃 overlay。
-    if (durableToolCallIds.has(invocation.toolCallId)) {
+    // 运行中的 invocation 在 durable assistant tool_call 物化后仍必须展示：只有
+    // 同一 Turn 的 durable tool_result 已物化（或 DTO resultEntryId 已指向存在的
+    // Entry）时才跳过 terminal-pending overlay；跨 Turn 复用相同 toolCallId 不误抑制。
+    const materialized =
+      durableToolResultIdentities.has(
+        `${turnStartByEntryId.get(invocation.assistantEntryId) ?? ''}:${invocation.toolCallId}`,
+      )
+      || (invocation.resultEntryId != null
+        && entries.some((entry) => entry.entryId === invocation.resultEntryId))
+    if (materialized) {
       continue
     }
     anchor(

@@ -352,6 +352,130 @@ describe('buildThreadEvents', () => {
       'entry:tool-1',
     ])
   })
+
+  it('scopes failure dedup identity to the turn (same attempt/sequence across turns)', () => {
+    // 旧 Turn（turn-1）已有 durable failure (attempt 1, sequence 3)；新 Turn（turn-2）
+    // 的活跃 overlay 复用相同的 attempt/sequence 数字 —— 全局 identity 会误抑制，
+    // 带 Turn 的身份必须让新 Turn 的活跃失败继续展示。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('fail-1', 'MODEL_ATTEMPT_FAILURE', {
+        attempt: { attempt: 1, sequence: 3, text: 'p', thinking: '' },
+        error: { code: 'TRANSIENT', message: 'boom' },
+        retryAt: '2026-07-28T10:00:05Z',
+      }),
+      entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
+      entry('turn-2', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
+    ]
+    const newTurnFailure = attemptFailure({
+      modelInvocationId: 'model-2',
+      turnStartEntryId: 'turn-2',
+      attempt: 1,
+      sequence: '3',
+    })
+    const events = buildThreadEvents(entries, null, [], [newTurnFailure])
+    expect(events.map((event) => event.id)).toEqual([
+      'entry:turn-1',
+      'entry:fail-1',
+      'entry:end-1',
+      'entry:turn-2',
+      'active:attempt-failure:model-2:1',
+      'entry:assistant-2',
+    ])
+  })
+
+  it('keeps running tool overlays visible while only the durable tool_call exists', () => {
+    // durable assistant tool_call 只是调用记录：结果尚未物化时，运行中的 tool
+    // invocation 必须继续作为活跃 overlay 展示。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [
+        { type: 'text', text: 'run' },
+        { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{}' },
+      ])),
+    ]
+    const invocation = toolInvocation({ status: 'RUNNING' })
+    const events = buildThreadEvents(entries, null, [invocation], [])
+    expect(events.map((event) => event.id)).toEqual([
+      'entry:turn-1',
+      'entry:assistant-1',
+      'active:tool:inv-1',
+    ])
+    expect(events[2]!.text).toContain('运行中')
+  })
+
+  it('scopes tool result dedup to the turn (same toolCallId across turns)', () => {
+    // turn-1 的 durable tool_result 已物化 call-1；turn-2 复用同一 toolCallId 的
+    // 新 invocation 仍在运行 —— 跨 Turn 绝不能因旧 Turn 的结果被误抑制。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [
+        { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{}' },
+      ])),
+      entry('tool-1', 'MESSAGE', messagePayload('TOOL', [
+        { type: 'tool_result', toolCallId: 'call-1', contents: [{ type: 'text', text: 'ok' }] },
+      ])),
+      entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
+      entry('turn-2', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-2', 'MESSAGE', messagePayload('ASSISTANT', [
+        { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{}' },
+      ])),
+    ]
+    const newTurnInvocation = toolInvocation({
+      id: 'inv-2',
+      assistantEntryId: 'assistant-2',
+      toolCallId: 'call-1',
+      status: 'RUNNING',
+    })
+    const events = buildThreadEvents(entries, null, [newTurnInvocation], [])
+    expect(events.map((event) => event.id)).toEqual([
+      'entry:turn-1',
+      'entry:assistant-1',
+      'entry:tool-1',
+      'entry:end-1',
+      'entry:turn-2',
+      'entry:assistant-2',
+      'active:tool:inv-2',
+    ])
+  })
+
+  it('suppresses tool overlays when the DTO resultEntryId already points to an existing entry', () => {
+    // durable result Entry 已存在但 payload 不含可解析的 toolCallId：仅凭
+    // resultEntryId 指向已存在的 Entry 也必须跳过 terminal-pending overlay。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [
+        { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{}' },
+      ])),
+      entry('tool-1', 'MESSAGE', messagePayload('TOOL', [
+        { type: 'tool_result', contents: [{ type: 'text', text: 'ok' }] },
+      ])),
+    ]
+    const invocation = toolInvocation({ resultEntryId: 'tool-1' })
+    const events = buildThreadEvents(entries, null, [invocation], [])
+    expect(events.map((event) => event.id)).toEqual([
+      'entry:turn-1',
+      'entry:assistant-1',
+      'entry:tool-1',
+    ])
+  })
+
+  it('keeps tool overlays when resultEntryId points to a missing entry', () => {
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [
+        { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{}' },
+      ])),
+    ]
+    const invocation = toolInvocation({ resultEntryId: 'tool-404' })
+    const events = buildThreadEvents(entries, null, [invocation], [])
+    expect(events.map((event) => event.id)).toEqual([
+      'entry:turn-1',
+      'entry:assistant-1',
+      'active:tool:inv-1',
+    ])
+  })
 })
 
 describe('eventStatusText', () => {

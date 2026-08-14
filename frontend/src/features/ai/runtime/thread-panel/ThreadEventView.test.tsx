@@ -76,7 +76,7 @@ describe('ThreadEventView', () => {
     expect(selectedId()).toBe('thread-event-e15')
 
     await user.keyboard('{PageUp}')
-    expect(selectedId()).toBe('thread-event-e5')
+    expect(selectedId()).toBe('thread-event-e7')
     await user.keyboard('{PageDown}')
     expect(selectedId()).toBe('thread-event-e15')
   })
