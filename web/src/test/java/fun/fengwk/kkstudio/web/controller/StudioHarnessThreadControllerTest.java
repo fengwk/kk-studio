@@ -171,6 +171,90 @@ class StudioHarnessThreadControllerTest {
   }
 
   @Test
+  void enqueueCommandsRejectsMissingSetEnvironmentFieldAsBadRequest() throws Exception {
+    // environment 字段缺省 ≠ 显式 null：SET_ENVIRONMENT 必须携带该字段。
+    String body =
+        """
+        {
+          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
+          "expectedNextCommandSequence": 4,
+          "commands": [
+            {"type": "SET_ENVIRONMENT", "clientCommandId": "00000000-0000-0000-0000-000000000108"}
+          ]
+        }
+        """;
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isBadRequest());
+    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
+  }
+
+  @Test
+  void enqueueCommandsRejectsExplicitNullEnvironmentForOtherDiscriminatorsAsBadRequest()
+      throws Exception {
+    // 其他 discriminator 即使显式 environment:null 也按 forbidden 拒绝。
+    String body =
+        """
+        {
+          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
+          "expectedNextCommandSequence": 4,
+          "commands": [
+            {"type": "SET_AGENT", "agentName": "default-assistant", "environment": null, "clientCommandId": "00000000-0000-0000-0000-000000000109"}
+          ]
+        }
+        """;
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isBadRequest());
+    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
+  }
+
+  @Test
+  void enqueueCommandsRejectsIncompleteEnvironmentBindingAsBadRequest() throws Exception {
+    // binding 嵌套字段缺失必须稳定 400（IAE），绝不能把 NPE 漏成 500。
+    String missingName =
+        """
+        {
+          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
+          "expectedNextCommandSequence": 4,
+          "commands": [
+            {"type": "SET_ENVIRONMENT", "environment": {"workspacePath": "."}, "clientCommandId": "00000000-0000-0000-0000-000000000110"}
+          ]
+        }
+        """;
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingName))
+        .andExpect(status().isBadRequest());
+
+    String missingPath =
+        """
+        {
+          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
+          "expectedNextCommandSequence": 4,
+          "commands": [
+            {"type": "SET_ENVIRONMENT", "environment": {"name": "env-1"}, "clientCommandId": "00000000-0000-0000-0000-000000000111"}
+          ]
+        }
+        """;
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingPath))
+        .andExpect(status().isBadRequest());
+    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
+  }
+
+  @Test
   void enqueueCommandsRejectsUnknownCommandFieldAsBadRequest() throws Exception {
     String body =
         """

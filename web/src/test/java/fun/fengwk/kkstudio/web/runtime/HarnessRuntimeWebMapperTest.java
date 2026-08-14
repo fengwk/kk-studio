@@ -274,11 +274,70 @@ class HarnessRuntimeWebMapperTest {
   }
 
   @Test
-  void setEnvironmentAcceptsNullToClearAndMapsToNullEnvironmentName() {
+  void setEnvironmentRequiresFieldPresenceAndAcceptsExplicitNullToClear() {
+    // 字段缺省（JSON 中未出现）：SET_ENVIRONMENT 确定性拒绝——null 只能通过显式提供表达解绑。
+    HarnessThreadCommandCreateDTO missing = command("SET_ENVIRONMENT", "c-env-missing");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(missing)));
+
+    // 显式 null：成功映射为 null binding（解绑）。
     HarnessThreadCommandCreateDTO environment = command("SET_ENVIRONMENT", "c-env-clear");
+    environment.setEnvironment(null);
     ThreadCommandBatch batch =
         HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(environment));
     assertExactPayload(batch, 0, ThreadCommandType.SET_ENVIRONMENT, "{\"environment\":null}");
+  }
+
+  @Test
+  void rejectsExplicitNullEnvironmentForOtherDiscriminatorsAsForbidden() {
+    HarnessThreadCommandCreateDTO user = command("USER_MESSAGE", "c-1");
+    HarnessUserMessageContentDTO text = content("TEXT");
+    text.setText("hello");
+    user.setContents(List.of(text));
+    user.setEnvironment(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(user)));
+
+    HarnessThreadCommandCreateDTO yolo = command("SET_YOLO", "c-2");
+    yolo.setYoloEnabled(false);
+    yolo.setEnvironment(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(yolo)));
+  }
+
+  @Test
+  void rejectsIncompleteEnvironmentBindingAsIllegalArgumentInsteadOfNpe() {
+    // 嵌套字段缺失必须抛 IAE（HTTP 400），绝不能把 Objects.requireNonNull 的 NPE 漏成 500。
+    HarnessThreadCommandCreateDTO missingName = command("SET_ENVIRONMENT", "c-env-name");
+    missingName.setEnvironment(bindingDto(null, "."));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(missingName)));
+
+    HarnessThreadCommandCreateDTO missingPath = command("SET_ENVIRONMENT", "c-env-path");
+    missingPath.setEnvironment(bindingDto("env-1", null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(missingPath)));
+
+    // Thread create 入口（branchSettings.environment）同样必须 IAE 而非 NPE。
+    HarnessThreadCreateDTO create = new HarnessThreadCreateDTO();
+    HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
+    settings.setEnvironment(bindingDto(null, "."));
+    settings.setAgentName("default-assistant");
+    HarnessModelSelectionDTO selection = new HarnessModelSelectionDTO();
+    selection.setProviderName("openai");
+    selection.setModelName("gpt-5");
+    selection.setVariant("default");
+    settings.setModel(selection);
+    create.setBranchSettings(settings);
+    create.setYoloEnabled(false);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCreateThreadCommand(create));
   }
 
   @Test

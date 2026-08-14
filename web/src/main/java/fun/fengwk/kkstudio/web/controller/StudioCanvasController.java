@@ -191,6 +191,12 @@ public class StudioCanvasController {
     if (settings.getEnvironment() == null) {
       throw new IllegalArgumentException("branchSettings.environment is required");
     }
+    if (settings.getEnvironment().getName() == null) {
+      throw new IllegalArgumentException("branchSettings.environment.name is required");
+    }
+    if (settings.getEnvironment().getWorkspacePath() == null) {
+      throw new IllegalArgumentException("branchSettings.environment.workspacePath is required");
+    }
     return new BranchSettings(
         new EnvironmentBinding(
             new EnvironmentName(settings.getEnvironment().getName()),

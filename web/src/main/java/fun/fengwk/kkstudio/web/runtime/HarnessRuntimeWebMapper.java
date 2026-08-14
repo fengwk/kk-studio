@@ -500,6 +500,10 @@ public final class HarnessRuntimeWebMapper {
       case SET_ENVIRONMENT -> {
         requireForbidden(
             dto, "content", "contents", "role", "agentName", "model", "activeTools", "yoloEnabled");
+        if (!dto.hasEnvironmentField()) {
+          throw new IllegalArgumentException(
+              "SET_ENVIRONMENT must contain environment (a binding object selects, null unbinds)");
+        }
         yield new SetEnvironmentCommandPayload(toEnvironmentBinding(dto.getEnvironment()));
       }
     };
@@ -605,7 +609,7 @@ public final class HarnessRuntimeWebMapper {
             case "model" -> dto.getModel();
             case "activeTools" -> dto.getActiveTools();
             case "yoloEnabled" -> dto.getYoloEnabled();
-            case "environment" -> dto.getEnvironment();
+            case "environment" -> dto.hasEnvironmentField() ? Boolean.TRUE : null;
             default -> throw new IllegalArgumentException("unknown field: " + field);
           };
       if (value != null) {
@@ -659,7 +663,9 @@ public final class HarnessRuntimeWebMapper {
     if (dto == null) {
       return null;
     }
-    return new EnvironmentBinding(new EnvironmentName(dto.getName()), dto.getWorkspacePath());
+    return new EnvironmentBinding(
+        new EnvironmentName(requireText(dto.getName(), "environment.name")),
+        requireText(dto.getWorkspacePath(), "environment.workspacePath"));
   }
 
   private static EnvironmentBindingDTO toEnvironmentBindingDto(EnvironmentBinding binding) {
