@@ -13,7 +13,7 @@ import java.util.Iterator;
 import java.util.Set;
 
 /**
- * Daemon v2 envelope 的 JSON codec。
+ * Daemon v3 envelope 的 JSON codec。
  *
  * <p>codec 在边界拒绝未知版本、未知消息类型、缺失字段、duplicate field、trailing token 和非对象 payload，避免将不完整 wire
  * 消息传给运行时；{@code environmentName} 必须是 canonical 有界小写路由名称。
@@ -54,7 +54,7 @@ public final class DaemonEnvelopeCodec {
     }
   }
 
-  /** 解码且校验单个 v2 envelope。 */
+  /** 解码且校验单个 v3 envelope。 */
   public DaemonEnvelope decode(String json) {
     JsonNode root = readObject(json, "envelope");
     rejectUnknownFields(root);

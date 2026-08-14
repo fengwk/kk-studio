@@ -86,21 +86,22 @@ Environment Root 的单层目录浏览是 **control-plane 只读查询**：不�
 GET /api/ai/environments/{name}/directories?path=.
 ```
 
-- `path` 缺省为 `'.'`（Environment Root），是可选的 canonical 相对 wire 路径（段以 `'/'` 分隔）：拒绝 absolute、空段、`'.'`/`'..'` 段、ISO 控制字符与空白路径；`{name}` 是 canonical `EnvironmentName`，非法名称 400 `INVALID_ENVIRONMENT_NAME`。
-- 响应 DTO：`path`（canonical 相对路径，root 为 `'.'`）/ `displayPath`（当前目录最后一段，root 为 `'.'`）/ `parentPath`（父目录 canonical 路径，root 为 `'.'`）/ `truncated`（超过单层上限 1000 条被截断）/ `gitBranch`（可空，浏览目录所在 git 仓库的 symbolic HEAD 分支）/ `entries`（按名称稳定排序的直属子目录，`path`+`displayPath`，不含 symlink 与非目录）。
-- HTTP 错误映射（`errorCode.code` 与 wire 失败分类同名）：`INVALID_PATH` / `NOT_DIRECTORY` → 400；`NOT_FOUND` → 404；`OFFLINE`（环境不存在/未 READY/连接不可用）→ 404；`TIMEOUT`（daemon 往返超时，默认 10 秒，配置键 `kk-studio.harness.environment-gateway.directory-list-timeout`）→ 504；`IO_ERROR`（daemon 本地 IO 失败）→ 502。
+- `path` 缺省为 `'.'`（Environment Root），是可选的 canonical 相对 wire 路径（段一律以 `'/'` 分隔，跨平台拒绝反斜杠）：拒绝 absolute、空段、`'.'`/`'..'` 段、ISO 控制字符与空白路径；`{name}` 是 canonical `EnvironmentName`，非法名称 400 `INVALID_ENVIRONMENT_NAME`。
+- 响应 DTO：`path`（canonical 相对 wire 路径，root 为 `'.'`）/ `displayPath`（daemon 计算的完整本地展示路径，即浏览目录的 canonical 绝对路径）/ `parentPath`（父目录 canonical wire 路径，root 为 `'.'`）/ `truncated`（超过单层上限 1000 条被截断）/ `gitBranch`（可空，浏览目录所在 git 仓库的 symbolic HEAD 分支）/ `entries`（按名称稳定排序的直属子目录，`{name,path}`：`name` 是目录名且必须等于 `path` 最后一段，`path` 必须是请求目录的直接子路径；不含 symlink 与非目录）。
+- symlink 语义：列表默认不暴露 symlink 目录；显式请求 root 内 symlink alias 时，成功响应的 `path`/`parentPath`/entry `path` 使用请求的 canonical wire 路径（回显 alias 本身），daemon 内部只用 real path 校验与读取，绝不越过 root；越出 root 的 symlink 穿越是 `INVALID_PATH`。
+- HTTP 错误映射（`errorCode.code` 与应用结果分类同名）：`ENVIRONMENT_NOT_FOUND`（registry 无该环境）/ `NOT_FOUND`（路径不存在）→ 404；`ENVIRONMENT_UNAVAILABLE`（环境已注册但未 READY，或连接/心跳不可用）→ 409；`INVALID_PATH` / `NOT_DIRECTORY` → 400；`TIMEOUT`（daemon 往返超时，默认 10 秒，配置键 `kk-studio.harness.environment-gateway.directory-list-timeout`）→ 504；`IO_ERROR`（daemon 本地 IO 失败）→ 502。
 
 wire 消息配对（envelope `invocationId` 是 gateway/daemon 关联 ID；sequence 是连接级连续计数，`LIST_DIRECTORY` 是出站消息不占入站序号）：
 
 | Daemon 消息 | payload | 方向 |
 | --- | --- | --- |
 | `LIST_DIRECTORY` | `{"path"}` | gateway → daemon |
-| `DIRECTORY_LISTED` | `{"path","displayPath","parentPath","truncated","gitBranch","entries":[{"path","displayPath"}]}` | daemon → gateway |
+| `DIRECTORY_LISTED` | `{"path","displayPath","parentPath","truncated","gitBranch","entries":[{"name","path"}]}` | daemon → gateway |
 | `DIRECTORY_LIST_FAILED` | `{"path","code","message"}`（`path` 是请求回显归因，只要求非空） | daemon → gateway |
 
-- 失败码为单个 `DaemonDirectoryFailureCode` 枚举：daemon 产生 `INVALID_PATH`（wire 路径形状非法或越界）/ `NOT_FOUND` / `NOT_DIRECTORY` / `IO_ERROR`；gateway 本地产生 `OFFLINE` / `TIMEOUT`。
+- 失败分类分成两层，职责不混合：wire 只承载 daemon 的确定性失败——`DaemonDirectoryFailureCode` 枚举 `INVALID_PATH`（wire 路径形状非法或越界）/ `NOT_FOUND` / `NOT_DIRECTORY` / `IO_ERROR`；gateway 在本地计算应用结果 `EnvironmentDirectoryFailureCode` 的 `ENVIRONMENT_NOT_FOUND` / `ENVIRONMENT_UNAVAILABLE` / `TIMEOUT`（其余 code 与 wire 同名投影）。
 - daemon 侧 `EnvironmentDirectoryBrowser` 安全契约：`environmentRoot.resolve(path).normalize()` 后 `toRealPath()` canonicalize，越出 root 边界即 `INVALID_PATH`；符号链接不跟随且不列入结果；只列目录；按名称稳定排序；至多 1000 条，超出置 `truncated`。失败响应必须能归因非法请求路径，因此 `DIRECTORY_LIST_FAILED.path` 只校验非空。
-- gateway 侧 pending 管理：`EnvironmentDaemonGateway.listDirectory` 用控制面发送（不登记 active invocation 槽位），pending 请求在断线清理、超时（`directoryListTimeout`）与协议失败（含 sequence 错乱）时以 `OFFLINE` / `TIMEOUT` 恰好完成一次，不泄漏未决 future。
+- gateway 侧 pending 管理：`EnvironmentDaemonGateway.listDirectory` 用控制面发送（不登记 active invocation 槽位），先用 `LiveEnvironmentRegistry.find` 区分环境未知（`ENVIRONMENT_NOT_FOUND`）与已注册但未 READY/心跳过期/连接不可用（`ENVIRONMENT_UNAVAILABLE`）；pending 请求在断线清理、超时（`directoryListTimeout`）与协议失败（含 sequence 错乱）时以 `ENVIRONMENT_UNAVAILABLE` / `TIMEOUT` 恰好完成一次，不泄漏未决 future；发送结果不确定（UNCERTAIN）时关闭连接让清理恰好一次。
 
 ## 本地 MCP server
 

@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -25,8 +24,10 @@ import java.util.Set;
  * </ul>
  *
  * <p>三类消息均要求 envelope {@code invocationId} 作为 gateway 与 daemon 的关联 ID。{@code path} 是 Environment
- * Root 下的 canonical 相对 wire 路径（{@code '.'} 表示 root，段以 {@code '/'} 分隔）：拒绝 absolute、空/{@code
- * '.'}/{@code '..'} 段、 控制字符与空白路径；越界判定由 daemon 在 canonicalize 时完成。
+ * Root 下的 canonical 相对 wire 路径（{@code '.'} 表示 root，段一律以 {@code '/'} 分隔）：跨平台拒绝反斜杠、absolute、 空/{@code
+ * '.'}/{@code '..'} 段、控制字符与空白路径；越界判定由 daemon 在 canonicalize 时完成。成功响应中 {@code path}/{@code
+ * parentPath}/entry {@code path} 都是请求目录或其直接子目录的 canonical wire 路径，entry 只含 {@code name}+{@code
+ * path} 两个字段且 {@code name} 必须等于 {@code path} 的最后一段。
  */
 public final class DaemonDirectoryCodec {
 
@@ -40,11 +41,14 @@ public final class DaemonDirectoryCodec {
     }
   }
 
-  /** 列表中的单个目录条目。 */
-  public record DirectoryEntry(String path, String displayPath) {
+  /** 列表中的单个目录条目：{@code name} 是目录名（{@code path} 的最后一段），{@code path} 是当前列表目录的直接子路径。 */
+  public record DirectoryEntry(String name, String path) {
     public DirectoryEntry {
-      path = requireNonBlank(path, "path");
-      displayPath = requireNonBlank(displayPath, "displayPath");
+      name = requireNonBlank(name, "name");
+      path = requireCanonicalRelativePath(path);
+      if (!name.equals(lastSegment(path))) {
+        throw new IllegalArgumentException("name must be the last segment of path: " + path);
+      }
     }
   }
 
@@ -61,6 +65,9 @@ public final class DaemonDirectoryCodec {
       displayPath = requireNonBlank(displayPath, "displayPath");
       parentPath = requireCanonicalRelativePath(parentPath);
       entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+      for (DirectoryEntry entry : entries) {
+        requireDirectChild(path, entry);
+      }
     }
   }
 
@@ -75,22 +82,24 @@ public final class DaemonDirectoryCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-  /** 校验 canonical 相对 wire 路径并原样返回；{@code '.'} 单独出现表示 root，其余位置拒绝 {@code '.'}/{@code '..'} 段。 */
+  /**
+   * 校验 canonical 相对 wire 路径并原样返回；{@code '.'} 单独出现表示 root，其余位置拒绝 {@code '.'}/{@code '..'} 段。
+   *
+   * <p>wire 路径是跨平台纯字符串契约，不依赖本地 {@code Path} 解析：段一律以 {@code '/'} 分隔（任何位置的反斜杠都拒绝）， 必须以相对路径开头（不得以
+   * {@code '/'} 开头）、无空段、无 ISO 控制字符。越界判定由 daemon 在 canonicalize 时完成。
+   */
   public static String requireCanonicalRelativePath(String path) {
     String value = requireNonBlank(path, "path");
     if (".".equals(value)) {
       return value;
     }
+    if (value.indexOf('\\') >= 0) {
+      throw new IllegalArgumentException("path must use '/' separators, not '\\': " + value);
+    }
     if (value.codePoints().anyMatch(Character::isISOControl)) {
       throw new IllegalArgumentException("path must not contain control characters");
     }
-    Path parsed;
-    try {
-      parsed = Path.of(value);
-    } catch (RuntimeException error) {
-      throw new IllegalArgumentException("path is not a valid path: " + value, error);
-    }
-    if (parsed.isAbsolute()) {
+    if (value.charAt(0) == '/') {
       throw new IllegalArgumentException("path must be relative to the environment root: " + value);
     }
     for (String segment : value.split("/", -1)) {
@@ -136,8 +145,8 @@ public final class DaemonDirectoryCodec {
     ArrayNode entries = root.putArray("entries");
     for (DirectoryEntry entry : listed.entries()) {
       ObjectNode node = entries.addObject();
+      node.put("name", entry.name());
       node.put("path", entry.path());
-      node.put("displayPath", entry.displayPath());
     }
     return write(root, "DIRECTORY_LISTED");
   }
@@ -206,13 +215,12 @@ public final class DaemonDirectoryCodec {
         throw new DaemonProtocolException(
             "DIRECTORY_LISTED entries[" + index + "] must be an object");
       }
-      rejectUnknownFields(
-          node, Set.of("path", "displayPath"), "DIRECTORY_LISTED entries[" + index + "]");
+      rejectUnknownFields(node, Set.of("name", "path"), "DIRECTORY_LISTED entries[" + index + "]");
       try {
         result.add(
             new DirectoryEntry(
-                requiredText(node, "path", "DIRECTORY_LISTED entries[" + index + "]"),
-                requiredText(node, "displayPath", "DIRECTORY_LISTED entries[" + index + "]")));
+                requiredText(node, "name", "DIRECTORY_LISTED entries[" + index + "]"),
+                requiredText(node, "path", "DIRECTORY_LISTED entries[" + index + "]")));
       } catch (IllegalArgumentException error) {
         throw new DaemonProtocolException(
             "DIRECTORY_LISTED entry validation failed: " + error.getMessage(), error);
@@ -220,6 +228,26 @@ public final class DaemonDirectoryCodec {
       index++;
     }
     return List.copyOf(result);
+  }
+
+  /** 校验 {@code entry} 的 {@code path} 是 {@code parentPath} 的直接子路径（root 请求时是单段路径）。 */
+  private static void requireDirectChild(String parentPath, DirectoryEntry entry) {
+    String prefix = ".".equals(parentPath) ? "" : parentPath + "/";
+    String childPath = entry.path();
+    if (!childPath.startsWith(prefix)) {
+      throw new IllegalArgumentException(
+          "entry path must be a direct child of " + parentPath + ": " + childPath);
+    }
+    String remainder = childPath.substring(prefix.length());
+    if (remainder.isEmpty() || remainder.indexOf('/') >= 0) {
+      throw new IllegalArgumentException(
+          "entry path must be a direct child of " + parentPath + ": " + childPath);
+    }
+  }
+
+  private static String lastSegment(String path) {
+    int separator = path.lastIndexOf('/');
+    return separator < 0 ? path : path.substring(separator + 1);
   }
 
   private static String write(ObjectNode root, String context) {

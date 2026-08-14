@@ -56,7 +56,7 @@ flowchart LR
 
 | 模块 | 职责 |
 | --- | --- |
-| `harness-tool` | `Tool`、descriptor、schema、`ResourceRef`、`RemoteTool` 与 Daemon v2 wire |
+| `harness-tool` | `Tool`、descriptor、schema、`ResourceRef`、`RemoteTool` 与 Daemon v3 wire |
 | `harness-runtime` | **纯 Java 领域模块**：Session/Entry/Thread/Command/Invocation/Work 状态机、Thread/Model/Tool processor、Stop/Approval/fencing；不依赖 Spring、数据库、Redis、HTTP 或 Provider SDK |
 | `harness-plugin` | **纯 Java 受信任插件 API**：构建期注册、启动时冻结的 `PluginCatalog`，以及 `BranchView`、同步 `PluginTool`、声明式 `AppendCustomEntry` 与 context projector |
 | `plugins/goal` | Goal 插件：`create_goal` / `get_goal` / `update_goal` v2、branch-scoped `goal/state` 快照与 active goal 上下文投影 |

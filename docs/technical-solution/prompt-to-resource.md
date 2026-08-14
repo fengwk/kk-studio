@@ -141,7 +141,7 @@ ToolBinding.type == PLATFORM
     -> CoreToolGateway -> frozen PluginContribution -> PluginTool(BranchView)
 
 ToolBinding.type == ENVIRONMENT
-  -> CoreToolGateway -> RemoteToolTransport -> EnvironmentDaemonGateway -> Daemon v2 -> Tool
+  -> CoreToolGateway -> RemoteToolTransport -> EnvironmentDaemonGateway -> Daemon v3 -> Tool
 ```
 
 - 外部 I/O 前 `ToolGateway.preflight`：权限判定（Allow/Ask/Deny）与机械校验（未取消/未过期、`name@version` 命中固定目录、arguments 是 JSON object）；plugin Tool 还按 frozen `(pluginId, contributionLocalName)` 恢复贡献并校验 descriptor/state accesses 未漂移；发送结果不确定收敛 `UNKNOWN`，不重放副作用。

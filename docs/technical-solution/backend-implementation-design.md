@@ -32,7 +32,7 @@ flowchart LR
 | `plugins/goal` | Goal v2 工具、`goal/state` 完整快照 codec 与 active context projector |
 | `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、Redis overlay、瞬时 `LocalFileResourceStore` |
 | `harness-runtime` | Thread/Command/Invocation/Work 状态机与 Thread/Model/Tool processor |
-| `harness-tool` | Tool API、descriptor、`ResourceRef`、RemoteTool 与 Daemon v2 wire |
+| `harness-tool` | Tool API、descriptor、`ResourceRef`、RemoteTool 与 Daemon v3 wire |
 
 ## 2. 身份与公开数据
 
@@ -101,7 +101,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | 方法 | 路径 | 语义 |
 | --- | --- | --- |
 | GET | `/api/ai/environment` | 当前 live Environment 内存投影（name/status/ready/tools/skills/mcpServers/lastSeen，status 可为 CONNECTING/READY；不公开 READY operatingSystem/timeZone/note metadata） |
-| WebSocket | `/api/ai/environment/daemon/v2` | Daemon v2 连接（HELLO/WELCOME/READY/INVOKE/回调/心跳） |
+| WebSocket | `/api/ai/environment/daemon/v2` | Daemon v3 连接（HELLO/WELCOME/READY/INVOKE/回调/心跳） |
 
 ## 5. 请求与错误
 

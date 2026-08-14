@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.core.ai.environment.registry.BindResult;
+import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryLister;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
@@ -58,7 +60,7 @@ import java.util.concurrent.TimeoutException;
 /**
  * Environment daemon 的连接/协议 transport 与能力/技能适配器。
  *
- * <p>使用 Daemon v2 wire 协议：每个 envelope 都由 HELLO 时绑定的 canonical {@link EnvironmentName} 限定；名称就是唯一
+ * <p>使用 Daemon v3 wire 协议：每个 envelope 都由 HELLO 时绑定的 canonical {@link EnvironmentName} 限定；名称就是唯一
  * 路由身份，不存在独立展示名。HELLO 声称的名称被另一条 live 连接（打开 + 心跳未过期）持有时抛出 {@link
  * DaemonNameConflictException}（终态错误，daemon 收到后停止重连并非零退出）；持有者连接已关闭或心跳租约过期时，registry 原子接管（{@link
  * BindResult.Replaced}），本类把被替换的旧连接状态恰好清理一次（连接关闭、active remote 按不确定收敛、 pending skill load
@@ -283,23 +285,33 @@ public class EnvironmentDaemonGateway
       // wire 契约在发端即校验：非法路径立即失败，绝不发送 LIST_DIRECTORY。
       return CompletableFuture.completedFuture(
           new EnvironmentDirectoryListResult.Failed(
-              DaemonDirectoryFailureCode.INVALID_PATH, error.getMessage()));
+              EnvironmentDirectoryFailureCode.INVALID_PATH, error.getMessage()));
     }
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must be positive");
     }
     ConnectionState state;
     synchronized (this) {
-      state = environmentConnections.get(environmentName);
-      // 与 Tool invoke/查询完全相同的可用性规则：READY + 连接打开 + 心跳未过期。
-      if (state == null
-          || !state.isReady()
-          || !environmentRegistry.isReady(
-              environmentName, clock.instant(), properties.requireHeartbeatTimeout())) {
+      // registry 是可用性事实源：find 区分「未知」（404）与「已注册但未 READY/不可用」（409）。
+      LiveEnvironment live = environmentRegistry.find(environmentName).orElse(null);
+      if (live == null) {
         return CompletableFuture.completedFuture(
             new EnvironmentDirectoryListResult.Failed(
-                DaemonDirectoryFailureCode.OFFLINE,
-                environmentName + " is offline; directory listing is unavailable"));
+                EnvironmentDirectoryFailureCode.ENVIRONMENT_NOT_FOUND,
+                "environment is not registered: " + environmentName));
+      }
+      if (!live.isReady(clock.instant(), properties.requireHeartbeatTimeout())) {
+        return CompletableFuture.completedFuture(
+            new EnvironmentDirectoryListResult.Failed(
+                EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+                environmentName + " is not ready; directory listing is unavailable"));
+      }
+      state = environmentConnections.get(environmentName);
+      if (state == null || !state.isReady()) {
+        return CompletableFuture.completedFuture(
+            new EnvironmentDirectoryListResult.Failed(
+                EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+                environmentName + " is not ready; directory listing is unavailable"));
       }
     }
     String requestId = UUID.randomUUID().toString();
@@ -312,36 +324,42 @@ public class EnvironmentDaemonGateway
     }
     String payload =
         directoryCodec.encodeRequest(new DaemonDirectoryCodec.ListDirectoryRequest(directoryPath));
-    if (!send(state, DaemonMessageType.LIST_DIRECTORY, requestId, payload)) {
-      synchronized (this) {
-        pendingDirectoryLists.remove(requestId, pending);
-      }
-      future.complete(
-          new EnvironmentDirectoryListResult.Failed(
-              DaemonDirectoryFailureCode.OFFLINE,
-              environmentName + " is offline; directory listing is unavailable"));
-      return future;
+    SendOutcome outcome =
+        sendWithOutcome(state, DaemonMessageType.LIST_DIRECTORY, requestId, payload);
+    if (outcome == SendOutcome.SENT) {
+      return future
+          .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
+          .exceptionally(
+              error -> {
+                synchronized (this) {
+                  pendingDirectoryLists.remove(requestId, pending);
+                }
+                EnvironmentDirectoryFailureCode code =
+                    error instanceof TimeoutException
+                        ? EnvironmentDirectoryFailureCode.TIMEOUT
+                        : EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE;
+                String message =
+                    code == EnvironmentDirectoryFailureCode.TIMEOUT
+                        ? environmentName
+                            + " directory listing timed out after "
+                            + timeout.toMillis()
+                            + "ms"
+                        : environmentName + " is not ready; directory listing is unavailable";
+                return new EnvironmentDirectoryListResult.Failed(code, message);
+              });
     }
-    return future
-        .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
-        .exceptionally(
-            error -> {
-              synchronized (this) {
-                pendingDirectoryLists.remove(requestId, pending);
-              }
-              DaemonDirectoryFailureCode code =
-                  error instanceof TimeoutException
-                      ? DaemonDirectoryFailureCode.TIMEOUT
-                      : DaemonDirectoryFailureCode.OFFLINE;
-              String message =
-                  code == DaemonDirectoryFailureCode.TIMEOUT
-                      ? environmentName
-                          + " directory listing timed out after "
-                          + timeout.toMillis()
-                          + "ms"
-                      : environmentName + " is offline; directory listing is unavailable";
-              return new EnvironmentDirectoryListResult.Failed(code, message);
-            });
+    synchronized (this) {
+      pendingDirectoryLists.remove(requestId, pending);
+    }
+    if (outcome == SendOutcome.UNCERTAIN) {
+      // transport 无法继续发送但清理尚未完成：与 invoke 相同，关闭连接让 closeConnectionState 恰好清理一次。
+      close(state.connection.connectionId());
+    }
+    future.complete(
+        new EnvironmentDirectoryListResult.Failed(
+            EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+            environmentName + " is not ready; directory listing is unavailable"));
+    return future;
   }
 
   private String createInvokePayload(ToolExecutionRequest request) {
@@ -623,10 +641,22 @@ public class EnvironmentDaemonGateway
       throw new DaemonProtocolException(
           "DIRECTORY_LIST_FAILED path does not match request: " + failed.path());
     }
+    EnvironmentDirectoryFailureCode code = toApplicationCode(failed.code());
     deferred.add(
         () ->
             pending.future.complete(
-                new EnvironmentDirectoryListResult.Failed(failed.code(), failed.message())));
+                new EnvironmentDirectoryListResult.Failed(code, failed.message())));
+  }
+
+  /** wire 失败分类原样投影为应用结果分类（wire 只有四种确定性 code）。 */
+  private static EnvironmentDirectoryFailureCode toApplicationCode(
+      DaemonDirectoryFailureCode wireCode) {
+    return switch (wireCode) {
+      case INVALID_PATH -> EnvironmentDirectoryFailureCode.INVALID_PATH;
+      case NOT_FOUND -> EnvironmentDirectoryFailureCode.NOT_FOUND;
+      case NOT_DIRECTORY -> EnvironmentDirectoryFailureCode.NOT_DIRECTORY;
+      case IO_ERROR -> EnvironmentDirectoryFailureCode.IO_ERROR;
+    };
   }
 
   private PendingDirectoryList takePendingDirectoryList(
@@ -656,8 +686,8 @@ public class EnvironmentDaemonGateway
     List<EnvironmentDirectoryEntryDTO> entries = new ArrayList<>();
     for (DaemonDirectoryCodec.DirectoryEntry entry : listed.entries()) {
       EnvironmentDirectoryEntryDTO entryDto = new EnvironmentDirectoryEntryDTO();
+      entryDto.setName(entry.name());
       entryDto.setPath(entry.path());
-      entryDto.setDisplayPath(entry.displayPath());
       entries.add(entryDto);
     }
     dto.setEntries(List.copyOf(entries));
@@ -859,8 +889,8 @@ public class EnvironmentDaemonGateway
     for (PendingDirectoryList pending : doomed) {
       pending.future.complete(
           new EnvironmentDirectoryListResult.Failed(
-              DaemonDirectoryFailureCode.OFFLINE,
-              environmentName + " is offline; directory listing is unavailable"));
+              EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+              environmentName + " is not ready; directory listing is unavailable"));
     }
   }
 

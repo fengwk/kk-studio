@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.ai.environment.service;
 
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
 
 import java.util.Objects;
@@ -16,8 +15,8 @@ public sealed interface EnvironmentDirectoryListResult
     }
   }
 
-  /** 非法路径、daemon 失败、离线或超时等确定性失败。 */
-  record Failed(DaemonDirectoryFailureCode code, String message)
+  /** 非法路径、环境未知/不可用、daemon 失败或超时等确定性失败。 */
+  record Failed(EnvironmentDirectoryFailureCode code, String message)
       implements EnvironmentDirectoryListResult {
     public Failed {
       code = Objects.requireNonNull(code, "code");

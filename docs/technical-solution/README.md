@@ -41,7 +41,7 @@ flowchart TD
 | 10 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage/cost 冻结与 metadata |
 | 11 | [s3-presign.md](s3-presign.md) | S3 预签名直传与直下载 |
 | 12 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流与运行 API |
-| 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment registry、Daemon v2 与 Resource 边界 |
+| 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment registry、Daemon v3 与 Resource 边界 |
 | 14 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
 | 15 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
 | 16 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |

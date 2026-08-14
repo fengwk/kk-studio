@@ -647,14 +647,18 @@ registerCase({
   level: 'L4',
   title: 'Environment Root 单层目录浏览 API',
   requires: ['tools'],
-  docs: 'GET /api/ai/environments/{name}/directories（control-plane 只读）：缺省 path="." 浏览 root——canonical 相对 wire path/displayPath、root 的 parentPath="."、truncated 布尔、gitBranch 可空、entries 只含直属子目录（path+displayPath 非空）；显式 path="." 与缺省一致；".." 段 400 INVALID_PATH、不存在目录 404 NOT_FOUND、非法环境名 400 INVALID_ENVIRONMENT_NAME',
+  docs: 'GET /api/ai/environments/{name}/directories（control-plane 只读）：缺省 path="." 浏览 root——canonical 相对 wire path、displayPath 是 daemon 计算的完整本地展示路径（root 时等于 rootPath）、root 的 parentPath="."、truncated 布尔、gitBranch 可空、entries 只含直属子目录（{name,path}：name 是目录名且等于 path 最后一段，path 是请求目录的直接子路径）；显式 path="." 与缺省一致；".." 段 400 INVALID_PATH、不存在目录 404 NOT_FOUND、非法环境名 400 INVALID_ENVIRONMENT_NAME',
   async run(ctx) {
     const name = ctx.vars.daemonEnvironment?.name ?? ctx.daemonEnv
+    const rootPath = ctx.vars.daemonEnvironment?.rootPath
     const base = `/api/ai/environments/${encodeURIComponent(name)}/directories`
     const { json } = await ctx.call('GET', base)
     const dir = envelopeData(json)
     assert(dir?.path === '.', JSON.stringify(json))
     assert(typeof dir.displayPath === 'string' && dir.displayPath.length > 0, JSON.stringify(json))
+    if (typeof rootPath === 'string') {
+      assert(dir.displayPath === rootPath, JSON.stringify(dir))
+    }
     assert(dir.parentPath === '.', JSON.stringify(json))
     assert(typeof dir.truncated === 'boolean', JSON.stringify(json))
     assert(
@@ -664,12 +668,18 @@ registerCase({
     assert(Array.isArray(dir.entries), JSON.stringify(json))
     for (const entry of dir.entries) {
       assert(
-        typeof entry.path === 'string'
-          && entry.path.length > 0
-          && typeof entry.displayPath === 'string'
-          && entry.displayPath.length > 0,
+        typeof entry.name === 'string'
+          && entry.name.length > 0
+          && typeof entry.path === 'string'
+          && entry.path.length > 0,
         JSON.stringify(entry),
       )
+      // entry 只含 {name,path}：name 等于 path 最后一段，path 是请求目录的直接子路径。
+      assert(!Object.hasOwn(entry, 'displayPath'), JSON.stringify(entry))
+      const prefix = dir.path === '.' ? '' : `${dir.path}/`
+      assert(entry.path.startsWith(prefix), JSON.stringify(entry))
+      assert(!entry.path.slice(prefix.length).includes('/'), JSON.stringify(entry))
+      assert(entry.name === entry.path.split('/').at(-1), JSON.stringify(entry))
     }
     // 显式 path="." 与缺省一致。
     const explicit = envelopeData(

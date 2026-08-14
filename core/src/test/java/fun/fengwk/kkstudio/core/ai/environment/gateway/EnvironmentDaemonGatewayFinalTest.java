@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
@@ -748,11 +749,11 @@ class EnvironmentDaemonGatewayFinalTest {
         directoryCodec.encodeListed(
             new DaemonDirectoryCodec.DirectoryListed(
                 "src",
-                "src",
+                "/home/dev/project/src",
                 ".",
                 true,
                 "main",
-                List.of(new DaemonDirectoryCodec.DirectoryEntry("src/main", "main"))));
+                List.of(new DaemonDirectoryCodec.DirectoryEntry("main", "src/main"))));
 
     CompletableFuture<EnvironmentDirectoryListResult> future =
         fixture.gateway.listDirectory(ENVIRONMENT_NAME, "src", Duration.ofSeconds(5));
@@ -777,13 +778,14 @@ class EnvironmentDaemonGatewayFinalTest {
     assertInstanceOf(EnvironmentDirectoryListResult.Loaded.class, result);
     EnvironmentDirectoryDTO dto = ((EnvironmentDirectoryListResult.Loaded) result).listing();
     assertEquals("src", dto.getPath());
-    assertEquals("src", dto.getDisplayPath());
+    assertEquals("/home/dev/project/src", dto.getDisplayPath());
     assertEquals(".", dto.getParentPath());
     assertTrue(dto.isTruncated());
     assertEquals("main", dto.getGitBranch());
     assertEquals(1, dto.getEntries().size());
+    assertEquals("main", dto.getEntries().getFirst().getName());
     assertEquals("src/main", dto.getEntries().getFirst().getPath());
-    assertEquals("main", dto.getEntries().getFirst().getDisplayPath());
+    assertFalse(connection.closed);
   }
 
   /** 目录浏览与 active invocation 并行：不检查、不占用 active tool slot。 */
@@ -833,14 +835,14 @@ class EnvironmentDaemonGatewayFinalTest {
 
     assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
     assertEquals(
-        DaemonDirectoryFailureCode.INVALID_PATH,
+        EnvironmentDirectoryFailureCode.INVALID_PATH,
         ((EnvironmentDirectoryListResult.Failed) result).code());
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
   }
 
-  /** Environment 不存在或未 READY 时立即 Failed(OFFLINE)，不发送 wire。 */
+  /** registry 中不存在该 Environment 时立即 Failed(ENVIRONMENT_NOT_FOUND)，不发送 wire。 */
   @Test
-  void listDirectoryOfflineFailsWithoutWireSend() {
+  void listDirectoryUnknownEnvironmentFailsWithoutWireSend() {
     Fixture fixture = fixture();
 
     EnvironmentDirectoryListResult result =
@@ -848,7 +850,41 @@ class EnvironmentDaemonGatewayFinalTest {
 
     assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
     assertEquals(
-        DaemonDirectoryFailureCode.OFFLINE,
+        EnvironmentDirectoryFailureCode.ENVIRONMENT_NOT_FOUND,
+        ((EnvironmentDirectoryListResult.Failed) result).code());
+  }
+
+  /** Environment 已绑定但未 READY（CONNECTING）时立即 Failed(ENVIRONMENT_UNAVAILABLE)，不发送 wire。 */
+  @Test
+  void listDirectoryNotReadyEnvironmentFailsWithoutWireSend() {
+    Fixture fixture = fixture();
+    FakeConnection connection = new FakeConnection("connection-dir-connecting");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+
+    EnvironmentDirectoryListResult result =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, ".", Duration.ofSeconds(5)).join();
+
+    assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(
+        EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+        ((EnvironmentDirectoryListResult.Failed) result).code());
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
+  }
+
+  /** 心跳租约过期（READY 条目未刷新）视为不可用：Failed(ENVIRONMENT_UNAVAILABLE)，不发送 wire。 */
+  @Test
+  void listDirectoryExpiredHeartbeatFailsAsUnavailable() {
+    Fixture fixture = fixture();
+    fixture.connectReady("connection-dir-expired-heartbeat");
+    fixture.now.set(NOW.plus(Duration.ofSeconds(61)));
+
+    EnvironmentDirectoryListResult result =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, ".", Duration.ofSeconds(5)).join();
+
+    assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(
+        EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
         ((EnvironmentDirectoryListResult.Failed) result).code());
   }
 
@@ -864,7 +900,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
     assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
     assertEquals(
-        DaemonDirectoryFailureCode.TIMEOUT,
+        EnvironmentDirectoryFailureCode.TIMEOUT,
         ((EnvironmentDirectoryListResult.Failed) result).code());
 
     // 迟到的 DIRECTORY_LISTED 找不到 pending：协议失败并关闭连接。
@@ -880,7 +916,7 @@ class EnvironmentDaemonGatewayFinalTest {
     assertTrue(connection.closed);
   }
 
-  /** 断线必须清理 pending 目录请求并按 OFFLINE 完成，不泄漏 Future。 */
+  /** 断线必须清理 pending 目录请求并按 ENVIRONMENT_UNAVAILABLE 完成，不泄漏 Future。 */
   @Test
   void listDirectoryPendingIsCleanedOnDisconnect() {
     Fixture fixture = fixture();
@@ -893,7 +929,7 @@ class EnvironmentDaemonGatewayFinalTest {
     EnvironmentDirectoryListResult result = future.join();
     assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
     assertEquals(
-        DaemonDirectoryFailureCode.OFFLINE,
+        EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
         ((EnvironmentDirectoryListResult.Failed) result).code());
   }
 
@@ -942,9 +978,48 @@ class EnvironmentDaemonGatewayFinalTest {
     EnvironmentDirectoryListResult result = future.join();
     assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
     assertEquals(
-        DaemonDirectoryFailureCode.NOT_FOUND,
+        EnvironmentDirectoryFailureCode.NOT_FOUND,
         ((EnvironmentDirectoryListResult.Failed) result).code());
     assertEquals("path does not exist", ((EnvironmentDirectoryListResult.Failed) result).message());
+  }
+
+  /**
+   * root 内 symlink alias 的显式请求经 gateway 成功：daemon 按冻结契约回显请求的 canonical wire 路径（alias 本身）而不是 real
+   * path，gateway 不得把它当作 path mismatch 协议失败断开连接。
+   */
+  @Test
+  void listDirectorySymlinkAliasInsideRootSucceedsWithoutDisconnect() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-dir-alias");
+
+    CompletableFuture<EnvironmentDirectoryListResult> future =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, "alias", Duration.ofSeconds(5));
+    DaemonEnvelope request = connection.envelopes().get(1);
+    assertTrue(request.payloadJson().contains("\"path\":\"alias\""));
+
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.DIRECTORY_LISTED,
+            request.invocationId(),
+            2,
+            directoryCodec.encodeListed(
+                new DaemonDirectoryCodec.DirectoryListed(
+                    "alias",
+                    "/home/dev/project/real",
+                    ".",
+                    false,
+                    null,
+                    List.of(new DaemonDirectoryCodec.DirectoryEntry("child", "alias/child"))))));
+
+    EnvironmentDirectoryListResult result = future.join();
+    assertInstanceOf(EnvironmentDirectoryListResult.Loaded.class, result);
+    EnvironmentDirectoryDTO dto = ((EnvironmentDirectoryListResult.Loaded) result).listing();
+    assertEquals("alias", dto.getPath());
+    assertEquals("alias/child", dto.getEntries().getFirst().getPath());
+    assertEquals("child", dto.getEntries().getFirst().getName());
+    assertFalse(connection.closed);
   }
 
   private ToolExecutionRequest request(ToolDescriptor descriptor) {

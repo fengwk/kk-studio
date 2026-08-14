@@ -4,15 +4,15 @@
  * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。scope 字段为 canonical {@code
  * environmentName}（Environment 的唯一路由身份：bounded 小写名称，无空白/无 {@code '/'}）；不存在展示名或 UUID。
  *
- * <p>v3 {@code READY} payload 由 {@link
+ * <p>v4 {@code READY} payload 由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的能力对象： {@code
- * {"version":3,"environment":{"operatingSystem","timeZone","note"},
+ * {"version":4,"environment":{"operatingSystem","timeZone","note"},
  * "skills":[{"name","description"}],"mcpServers":[{"name","status","error",
  * "tools":[{"name","description"}]}]}}。environment 只含 prompt 所需的 OS family、ZoneId 与稳定说明；skills 与
  * MCP server 摘要只含可安全上报的短字段。MCP 工具完整 schema 只通过固定的 {@code mcp_list_tools} 桥接工具返回。Environment 工具由
  * EnvironmentToolCatalog 固定，不按连接协商。
  *
- * <p>v2 Skill 加载消息：
+ * <p>Skill 加载消息：
  *
  * <ul>
  *   <li>{@code LOAD_SKILL}：gateway → daemon，payload {@code {"name":string}}，必须带 {@code
@@ -23,7 +23,7 @@
  *       {"name":string,"message":string}}。
  * </ul>
  *
- * <p>v2 result payload（{@code PARTIAL} / {@code COMPLETED}）由 {@link
+ * <p>result payload（{@code PARTIAL} / {@code COMPLETED}）由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec} 编解码。编码分相：PARTIAL 只允许 text/json，
  * resource/binary 在任何 store 操作之前拒绝；COMPLETED 先对全部内容做计数/单条/聚合资源字节预算预检（默认 8 MiB）， 预检全部通过后才允许任何 store
  * 读写。最终 payload 的 UTF-8 字节数必须 ≤ 16 MiB（bounded 输出在中止点拒绝超限）。 {@code contents} 数组中每个元素为单一对象（最多 64 个）：
