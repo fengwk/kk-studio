@@ -17,6 +17,15 @@ import type {
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
+const { fakeApplicationEvents } = vi.hoisted(() => {
+  const manager = { subscribe: () => () => undefined }
+  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+})
+
+vi.mock('@/shared/app-events', () => ({
+  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
+}))
+
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listAgents: vi.fn(),
@@ -43,7 +52,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
-    createThreadRealtimeStream: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/environment-service', () => ({
@@ -51,12 +59,6 @@ vi.mock('@/shared/api/environment-service', () => ({
     listEnvironments: vi.fn().mockResolvedValue([]),
   },
 }))
-
-class FakeEventSource {
-  close = vi.fn()
-  addEventListener = vi.fn()
-  removeEventListener = vi.fn()
-}
 
 const page = <T,>(results: T[]) => ({
   pageNumber: 1,
@@ -348,9 +350,6 @@ describe('ChatWorkspacePane commands', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue(page(agents))
     vi.mocked(agentService.listModels).mockResolvedValue(page([modelEntry()]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(
-      new FakeEventSource() as unknown as EventSource,
-    )
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({})))
     vi.mocked(chatService.listChatThreads).mockResolvedValue([
       thread({}),

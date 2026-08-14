@@ -16,6 +16,15 @@ import type {
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
+const { fakeApplicationEvents } = vi.hoisted(() => {
+  const manager = { subscribe: () => () => undefined }
+  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+})
+
+vi.mock('@/shared/app-events', () => ({
+  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
+}))
+
 const storageMocks = vi.hoisted(() => ({
   reserveUpload: vi.fn(),
   completeUpload: vi.fn(),
@@ -54,7 +63,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
-    createThreadRealtimeStream: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/environment-service', () => ({
@@ -62,12 +70,6 @@ vi.mock('@/shared/api/environment-service', () => ({
     listEnvironments: vi.fn().mockResolvedValue([]),
   },
 }))
-
-class FakeEventSource {
-  close = vi.fn()
-  addEventListener = vi.fn()
-  removeEventListener = vi.fn()
-}
 
 const page = <T,>(results: T[]) => ({
   pageNumber: 1,
@@ -230,9 +232,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue(page([assistantAgent]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([modelEntry()]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(
-      new FakeEventSource() as unknown as EventSource,
-    )
     vi.mocked(chatService.listChatThreads).mockResolvedValue([
       thread({ threadId: 't-idle' }),
       thread({ threadId: 't-running', status: 'RUNNING', processing: true }),

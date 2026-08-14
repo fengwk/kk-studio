@@ -24,6 +24,15 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 import { setLocale } from '@/shared/i18n'
 
+const { fakeApplicationEvents } = vi.hoisted(() => {
+  const manager = { subscribe: () => () => undefined }
+  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+})
+
+vi.mock('@/shared/app-events', () => ({
+  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
+}))
+
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listAgents: vi.fn(),
@@ -55,7 +64,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
-    createThreadRealtimeStream: vi.fn(),
   },
 }))
 
@@ -115,12 +123,6 @@ const readyEnvironments = [
   { name: 'local', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
   { name: 'remote', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
 ]
-
-class FakeEventSource {
-  close = vi.fn()
-  addEventListener = vi.fn()
-  removeEventListener = vi.fn()
-}
 
 function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
@@ -223,9 +225,6 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(chatService.listChatThreads).mockResolvedValue([])
     vi.mocked(chatService.createChatThread).mockResolvedValue(
       snapshot(thread({ threadId: 't-new' })),
-    )
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(
-      new FakeEventSource() as unknown as EventSource,
     )
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({})))
     vi.mocked(harnessService.enqueueCommands).mockResolvedValue([] as HarnessThreadCommandDTO[])

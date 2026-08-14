@@ -6,80 +6,91 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
 import type { ModelInvocationDTO, ToolInvocationDTO } from '@/shared/api/contracts/ai-runtime'
-import { harnessService } from '@/shared/api/harness-service'
 
-vi.mock('@/shared/api/harness-service', () => ({ harnessService: { createThreadRealtimeStream: vi.fn() } }))
+const threadResource = { kind: 'thread', id: 'thread-1' } as const
 
-class FakeEventSource {
-  readonly close = vi.fn()
-  onerror: ((event: Event) => void) | null = null
-  private readonly listeners = new Map<string, EventListener[]>()
-
-  addEventListener(type: string, listener: EventListener) {
-    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener])
-  }
-
-  emit(type: string, data = '{}') {
-    this.listeners.get(type)?.forEach((listener) => listener({ data } as MessageEvent<string>))
-  }
-
-  fail() {
-    this.onerror?.(new Event('error'))
-  }
+function resource(threadId: string) {
+  return { kind: 'thread', id: threadId } as const
 }
 
-function wrapper(queryClient: QueryClient) {
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+interface RealtimeProps {
+  threadId?: string
+  revision?: string
+  invocation?: ModelInvocationDTO | null
+  invocations?: ToolInvocationDTO[]
+}
+
+function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
+  const sockets = new FakeWebSocketHarness()
+  const rendered = renderHook(
+    (props: RealtimeProps) =>
+      useHarnessThreadRealtime(
+        props.threadId ?? 'thread-1',
+        true,
+        props.revision ?? '42',
+        props.invocation ?? modelInvocation(),
+        props.invocations ?? [],
+      ),
+    {
+      initialProps,
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>
+          <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+            {children}
+          </ApplicationEventProvider>
+        </QueryClientProvider>
+      ),
+    },
+  )
+  return { ...rendered, sockets }
+}
+
+function emitRealtime(sockets: FakeWebSocketHarness, data: string, threadId = 'thread-1') {
+  const socket = sockets.latest
+  if (socket == null) {
+    throw new Error('no socket created')
   }
+  act(() => socket.emitServer({ type: 'event', resource: resource(threadId), name: 'realtime', data }))
 }
 
 describe('useHarnessThreadRealtime', () => {
   afterEach(() => vi.clearAllMocks())
 
-  it('uses one native EventSource, invalidates durable signals, and overlays the next delta', async () => {
+  it('uses one wire subscription, invalidates durable signals, and overlays the next delta', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
-    const { result, rerender } = renderHook(
-      ({ revision }) =>
-        useHarnessThreadRealtime('thread-1', true, revision, modelInvocation(), []),
-      { initialProps: { revision: '42' }, wrapper: wrapper(client) },
-    )
+    const { result, rerender, sockets } = renderRealtime(client, { revision: '42' })
+    const socket = sockets.openLatest()
 
-    await waitFor(() =>
-      expect(harnessService.createThreadRealtimeStream).toHaveBeenCalledWith('thread-1', '42'),
-    )
-    act(() => source.emit('realtime', realtime(1, 'partial')))
+    // 订阅建立（subscribed ack）与 durable 信号都触发 snapshot 对账；
+    // realtime 事件只走 overlay reducer，绝不触发 invalidate。
+    act(() => emitRealtime(sockets, realtime(1, 'partial')))
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('partial'))
     act(() => {
-      source.emit('revision')
-      source.emit('resync')
-      source.fail()
-      source.fail()
+      socket.emitServer({ type: 'subscribed', resource: threadResource })
+      socket.emitServer({ type: 'event', resource: threadResource, name: 'revision' })
+      socket.emitServer({ type: 'resync', resource: threadResource })
+      socket.emitServer({ type: 'error', resource: threadResource, message: 'boom' })
     })
+    // revision 前进不重建订阅：wire 上始终只有一条 subscribe。
     rerender({ revision: '43' })
-    expect(harnessService.createThreadRealtimeStream).toHaveBeenCalledTimes(1)
+    expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
     expect(invalidate).toHaveBeenCalledTimes(4)
   })
 
   it('single-flight gap recovery re-refetches with bounded backoff until the checkpoint catches up', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
-    const { result, rerender } = renderHook(
-      ({ invocation }) =>
-        useHarnessThreadRealtime('thread-1', true, '42', invocation, []),
-      { initialProps: { invocation: modelInvocation() }, wrapper: wrapper(client) },
-    )
+    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    sockets.openLatest()
 
     // 重复且相同的 gap delta 只触发一次恢复循环（永不按每条 delta 单独 refetch）。
-    act(() => source.emit('realtime', realtime(3, 'missing')))
-    act(() => source.emit('realtime', realtime(3, 'missing')))
+    emitRealtime(sockets, realtime(3, 'missing'))
+    emitRealtime(sockets, realtime(3, 'missing'))
     expect(result.current?.modelStream).toBeNull()
     await waitFor(() => expect(invalidate.mock.calls.length).toBe(1), { timeout: 2000 })
 
@@ -127,12 +138,6 @@ describe('useHarnessThreadRealtime', () => {
     try {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       const invalidate = vi.spyOn(client, 'invalidateQueries')
-      const sources = new Map<string, FakeEventSource>()
-      vi.mocked(harnessService.createThreadRealtimeStream).mockImplementation((threadId) => {
-        const source = new FakeEventSource()
-        sources.set(String(threadId), source)
-        return source as EventSource
-      })
       // 首次 refetch（旧 Thread A 的恢复）会一直处于 in-flight，直到手动 resolve。
       let resolveFirstRefetch: (() => void) | null = null
       let firstRefetch = true
@@ -148,20 +153,14 @@ describe('useHarnessThreadRealtime', () => {
         return Promise.resolve()
       })
 
-      const { result, rerender } = renderHook(
-        ({ threadId, invocation }) =>
-          useHarnessThreadRealtime(threadId, true, '42', invocation, []),
-        {
-          initialProps: {
-            threadId: 'thread-A',
-            invocation: modelInvocation('inv-A', 'thread-A'),
-          },
-          wrapper: wrapper(client),
-        },
-      )
+      const { result, rerender, sockets } = renderRealtime(client, {
+        threadId: 'thread-A',
+        invocation: modelInvocation('inv-A', 'thread-A'),
+      })
+      sockets.openLatest()
 
       // Thread A 的 gap delta 会挂起一次恢复 A；它的首次 tick 会卡在 in-flight 的 refetch 上。
-      act(() => sources.get('thread-A')?.emit('realtime', realtime(3, 'missing', 'thread-A', 'inv-A')))
+      emitRealtime(sockets, realtime(3, 'missing', 'thread-A', 'inv-A'), 'thread-A')
       await act(async () => {
         await vi.advanceTimersByTimeAsync(200)
       })
@@ -174,8 +173,7 @@ describe('useHarnessThreadRealtime', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(sources.has('thread-B')).toBe(true)
-      act(() => sources.get('thread-B')?.emit('realtime', realtime(3, 'missing', 'thread-B', 'inv-B')))
+      emitRealtime(sockets, realtime(3, 'missing', 'thread-B', 'inv-B'), 'thread-B')
 
       // A 的陈旧 refetch 完成：绝不能因此清除 B 的恢复，并且重新挂起时
       // 必须调度 B（旧 tick 的 finally 会清除 busy flag）。
@@ -221,20 +219,15 @@ describe('useHarnessThreadRealtime', () => {
   it('survives a failed refetch: keeps backing off and catches up on a later attempt', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
     // 首次 refetch 失败（网络/后端故障），后续 refetch 成功。循环绝不能因
     // 残留的 recoveryRef 又没有定时器而冻结。
     invalidate
       .mockRejectedValueOnce(new Error('refetch failed'))
       .mockResolvedValue(undefined)
-    const { result, rerender } = renderHook(
-      ({ invocation }) =>
-        useHarnessThreadRealtime('thread-1', true, '42', invocation, []),
-      { initialProps: { invocation: modelInvocation() }, wrapper: wrapper(client) },
-    )
+    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    sockets.openLatest()
 
-    act(() => source.emit('realtime', realtime(3, 'missing')))
+    emitRealtime(sockets, realtime(3, 'missing'))
     expect(result.current?.modelStream).toBeNull()
     // 首次 tick 失败仍会重新挂起：必须接着执行第二次（成功的）tick。
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), { timeout: 4000 })
@@ -254,16 +247,11 @@ describe('useHarnessThreadRealtime', () => {
 
   it('rejects late MODEL_DELTA after a durable terminal result and after the Entry lands', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
-    const { result, rerender } = renderHook(
-      ({ invocation }) =>
-        useHarnessThreadRealtime('thread-1', true, '42', invocation, []),
-      { initialProps: { invocation: modelInvocation() }, wrapper: wrapper(client) },
-    )
+    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    sockets.openLatest()
 
     // 进行中的 delta 按正常方式叠加。
-    act(() => source.emit('realtime', realtime(1, 'first')))
+    emitRealtime(sockets, realtime(1, 'first'))
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('first'))
 
     // resultJson 到达（终止态，尚未有 Entry）：完整的持久 result 投影会
@@ -279,7 +267,7 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.modelStream?.text).toBe('first'),
     )
     expect(result.current?.modelStream?.status).toBe('done')
-    act(() => source.emit('realtime', realtime(2, '-late-after-result')))
+    emitRealtime(sockets, realtime(2, '-late-after-result'))
     await waitFor(() =>
       expect(result.current?.modelStream?.text).toBe('first'),
     )
@@ -296,7 +284,7 @@ describe('useHarnessThreadRealtime', () => {
     expect(result.current?.modelStream?.text).toBe('')
     expect(result.current?.modelStream?.errorCode).toBe('TRANSIENT')
     expect(result.current?.modelStream?.errorText).toBe('boom')
-    act(() => source.emit('realtime', realtime(2, '-late-after-error')))
+    emitRealtime(sockets, realtime(2, '-late-after-error'))
     await waitFor(() =>
       expect(result.current?.modelStream?.text).toBe(''),
     )
@@ -310,19 +298,14 @@ describe('useHarnessThreadRealtime', () => {
       },
     })
     await waitFor(() => expect(result.current?.modelStream).toBeNull())
-    act(() => source.emit('realtime', realtime(2, '-late-after-entry')))
+    emitRealtime(sockets, realtime(2, '-late-after-entry'))
     await waitFor(() => expect(result.current?.modelStream).toBeNull())
   })
 
   it('replaces a higher-sequence streaming overlay with the durable terminal projection', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
-    const { result, rerender } = renderHook(
-      ({ invocation }) =>
-        useHarnessThreadRealtime('thread-1', true, '42', invocation, []),
-      { initialProps: { invocation: modelInvocation() }, wrapper: wrapper(client) },
-    )
+    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    sockets.openLatest()
 
     // 持久化 checkpoint 在 seq5；Redis 流式到达 seq8。
     rerender({
@@ -332,9 +315,9 @@ describe('useHarnessThreadRealtime', () => {
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('safe five'))
-    act(() => source.emit('realtime', realtime(6, '-six')))
-    act(() => source.emit('realtime', realtime(7, '-seven')))
-    act(() => source.emit('realtime', realtime(8, '-eight')))
+    emitRealtime(sockets, realtime(6, '-six'))
+    emitRealtime(sockets, realtime(7, '-seven'))
+    emitRealtime(sockets, realtime(8, '-eight'))
     await waitFor(() =>
       expect(result.current?.modelStream?.text).toBe('safe five-six-seven-eight'),
     )
@@ -356,7 +339,7 @@ describe('useHarnessThreadRealtime', () => {
     expect(result.current?.modelStream?.thinking).toBe('durable plan')
     expect(result.current?.modelStream?.status).toBe('done')
     // 迟到的 Redis delta 绝不会追加到持久化投影上。
-    act(() => source.emit('realtime', realtime(9, '-late')))
+    emitRealtime(sockets, realtime(9, '-late'))
     await waitFor(() =>
       expect(result.current?.modelStream?.text).toBe('durable complete answer'),
     )
@@ -373,7 +356,7 @@ describe('useHarnessThreadRealtime', () => {
     expect(result.current?.modelStream?.text).toBe('frozen text')
     expect(result.current?.modelStream?.errorCode).toBe('INVALID_REQUEST')
     expect(result.current?.modelStream?.errorText).toBe('provider exploded')
-    act(() => source.emit('realtime', realtime(6, '-after-error')))
+    emitRealtime(sockets, realtime(6, '-after-error'))
     await waitFor(() =>
       expect(result.current?.modelStream?.text).toBe('frozen text'),
     )
@@ -391,8 +374,6 @@ describe('useHarnessThreadRealtime', () => {
 
   it('deduplicates exact TOOL_PARTIAL redelivery and resets fingerprints on attempt change', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
     const active: ToolInvocationDTO = {
       id: 'inv-tool-1',
       modelInvocationId: 'inv-1',
@@ -414,21 +395,18 @@ describe('useHarnessThreadRealtime', () => {
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
-    const { result, rerender } = renderHook(
-      ({ invocations }) =>
-        useHarnessThreadRealtime('thread-1', true, '42', modelInvocation(), invocations),
-      { initialProps: { invocations: [active] }, wrapper: wrapper(client) },
-    )
+    const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
 
     // 完全相同的 Redis 重投递不能追加两次。
-    act(() => source.emit('realtime', toolPartial('one')))
+    emitRealtime(sockets, toolPartial('one'))
     await waitFor(() => expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('one'))
-    act(() => source.emit('realtime', toolPartial('one')))
+    emitRealtime(sockets, toolPartial('one'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('one'),
     )
     // 不同的块仍然会追加。
-    act(() => source.emit('realtime', toolPartial('two')))
+    emitRealtime(sockets, toolPartial('two'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('onetwo'),
     )
@@ -439,11 +417,11 @@ describe('useHarnessThreadRealtime', () => {
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.attempt).toBe(2),
     )
-    act(() => source.emit('realtime', toolPartial('one', 'inv-tool-1', 1)))
+    emitRealtime(sockets, toolPartial('one', 'inv-tool-1', 1))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(''),
     )
-    act(() => source.emit('realtime', toolPartial('one', 'inv-tool-1', 2)))
+    emitRealtime(sockets, toolPartial('one', 'inv-tool-1', 2))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('one'),
     )
@@ -451,8 +429,6 @@ describe('useHarnessThreadRealtime', () => {
 
   it('evicts only the oldest TOOL_PARTIAL fingerprint at the capacity boundary (FIFO)', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
     const active: ToolInvocationDTO = {
       id: 'inv-tool-1',
       modelInvocationId: 'inv-1',
@@ -474,14 +450,12 @@ describe('useHarnessThreadRealtime', () => {
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
-    const { result } = renderHook(
-      () => useHarnessThreadRealtime('thread-1', true, '42', modelInvocation(), [active]),
-      { wrapper: wrapper(client) },
-    )
+    const { result, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
 
     // 256 个不同块恰好填满指纹集合；第 257 个只淘汰最旧的一个。
     for (let i = 0; i < 257; i++) {
-      act(() => source.emit('realtime', toolPartial(`chunk-${i}`)))
+      emitRealtime(sockets, toolPartial(`chunk-${i}`))
     }
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toContain('chunk-256'),
@@ -491,49 +465,50 @@ describe('useHarnessThreadRealtime', () => {
 
     // 最近块的重新投递必须被去重。整体 clear() 会忘记
     // 一切并再次追加；FIFO 保留最近 N 个指纹。
-    act(() => source.emit('realtime', toolPartial('chunk-256')))
+    emitRealtime(sockets, toolPartial('chunk-256'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(textAfterFill),
     )
 
     // 最旧的块已被淘汰：它的重投递再次成为新块（有界内存，
     // 只有最近 N 个受保护）。
-    act(() => source.emit('realtime', toolPartial('chunk-0')))
+    emitRealtime(sockets, toolPartial('chunk-0'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(`${textAfterFill}chunk-0`),
     )
   })
 
-  it('restores the durable checkpoint and leaves native reconnect on one EventSource', async () => {
+  it('restores the durable checkpoint and keeps one subscription across shared-connection reconnects', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
     const restored = {
       ...modelInvocation(),
       streamCheckpointJson: '{"attempt":1,"text":"safe","thinking":"plan","sequence":2}',
     }
-    const { result } = renderHook(
-      () => useHarnessThreadRealtime('thread-1', true, '42', restored, []),
-      { wrapper: wrapper(client) },
-    )
+    const { result, sockets } = renderRealtime(client, { invocation: restored })
+    const first = sockets.openLatest()
 
     await waitFor(() =>
       expect(result.current?.modelStream).toMatchObject({ text: 'safe', thinking: 'plan', sequence: 2 }),
     )
-    act(() => {
-      source.fail()
-      source.fail()
-      source.fail()
-    })
-    expect(harnessService.createThreadRealtimeStream).toHaveBeenCalledTimes(1)
-    expect(invalidate).toHaveBeenCalledTimes(3)
+
+    // 断线重连由共享 Connection 负责：hook 不重建订阅，每个新 socket 上
+    // 仍只有一条 subscribe（manager 重发）；重连后的 subscribed ack 触发
+    // snapshot 对账，关闭断线窗口。
+    for (let attempt = 0; attempt < 2; attempt++) {
+      sockets.latest?.fail()
+      await waitFor(() => expect(sockets.sockets.length).toBe(attempt + 2), { timeout: 2000 })
+      const next = sockets.openLatest()
+      expect(next.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
+      act(() => next.emitServer({ type: 'subscribed', resource: threadResource }))
+    }
+    expect(first.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
+    // 每次重连的 subscribed ack 各触发一次对账。
+    expect(invalidate).toHaveBeenCalledTimes(2)
   })
 
   it('aggregates TOOL_PARTIAL overlays per invocation and clears on the durable terminal result', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
     const active: ToolInvocationDTO = {
       id: 'inv-tool-1',
       modelInvocationId: 'inv-1',
@@ -555,17 +530,14 @@ describe('useHarnessThreadRealtime', () => {
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
-    const { result, rerender } = renderHook(
-      ({ invocations }) =>
-        useHarnessThreadRealtime('thread-1', true, '42', modelInvocation(), invocations),
-      { initialProps: { invocations: [active] }, wrapper: wrapper(client) },
-    )
+    const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
 
-    act(() => source.emit('realtime', toolPartial('partial-one')))
+    emitRealtime(sockets, toolPartial('partial-one'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('partial-one'),
     )
-    act(() => source.emit('realtime', toolPartial('partial-two')))
+    emitRealtime(sockets, toolPartial('partial-two'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('partial-onepartial-two'),
     )
@@ -607,8 +579,6 @@ describe('useHarnessThreadRealtime', () => {
 
   it('ignores TOOL_PARTIAL after the terminal projection and for unknown/retry-attempt invocations', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
     const active: ToolInvocationDTO = {
       id: 'inv-tool-1',
       modelInvocationId: 'inv-1',
@@ -630,13 +600,10 @@ describe('useHarnessThreadRealtime', () => {
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
-    const { result, rerender } = renderHook(
-      ({ invocations }) =>
-        useHarnessThreadRealtime('thread-1', true, '42', modelInvocation(), invocations),
-      { initialProps: { invocations: [active] }, wrapper: wrapper(client) },
-    )
+    const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
 
-    act(() => source.emit('realtime', toolPartial('one')))
+    emitRealtime(sockets, toolPartial('one'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('one'),
     )
@@ -660,13 +627,13 @@ describe('useHarnessThreadRealtime', () => {
     )
 
     // 迟到的 Redis partial 绝不能追加到完整的终态投影上。
-    act(() => source.emit('realtime', toolPartial('-late')))
+    emitRealtime(sockets, toolPartial('-late'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('terminal answer'),
     )
 
     // 持久化 snapshot 中未知的 invocation 永不展示。
-    act(() => source.emit('realtime', toolPartial('ghost', 'inv-ghost')))
+    emitRealtime(sockets, toolPartial('ghost', 'inv-ghost'))
     await waitFor(() =>
       expect(result.current?.toolStreams.has('inv-ghost')).toBe(false),
     )
@@ -676,7 +643,7 @@ describe('useHarnessThreadRealtime', () => {
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.attempt).toBe(2),
     )
-    act(() => source.emit('realtime', toolPartial('stale-attempt', 'inv-tool-1', 1)))
+    emitRealtime(sockets, toolPartial('stale-attempt', 'inv-tool-1', 1))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(''),
     )
@@ -684,8 +651,6 @@ describe('useHarnessThreadRealtime', () => {
 
   it('projects terminal errorJson (error text) while the durable result Entry is pending', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const source = new FakeEventSource()
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
     const active: ToolInvocationDTO = {
       id: 'inv-tool-1',
       modelInvocationId: 'inv-1',
@@ -707,13 +672,10 @@ describe('useHarnessThreadRealtime', () => {
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
-    const { result, rerender } = renderHook(
-      ({ invocations }) =>
-        useHarnessThreadRealtime('thread-1', true, '42', modelInvocation(), invocations),
-      { initialProps: { invocations: [active] }, wrapper: wrapper(client) },
-    )
+    const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
 
-    act(() => source.emit('realtime', toolPartial('partial-one')))
+    emitRealtime(sockets, toolPartial('partial-one'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('partial-one'),
     )

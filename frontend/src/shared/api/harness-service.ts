@@ -1,4 +1,4 @@
-import { apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
+import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   HarnessThreadCommandBatchDTO,
   HarnessThreadCommandDTO,
@@ -16,7 +16,7 @@ import type {
  * - GET snapshot（一致的 PostgreSQL 投影）
  * - POST commands（202 已接受，返回持久的 command 列表）
  * - PUT head / POST stop / POST approval（均基于 revision CAS）
- * - GET events/stream（基于 Redis overlay 的快照优先 SSE 流）
+ * - 实时事件经应用级 WebSocket（/api/events/v1，见 shared/app-events）
  */
 export function createHarnessService(client: HttpClient = apiClient) {
   return {
@@ -46,11 +46,6 @@ export function createHarnessService(client: HttpClient = apiClient) {
         `/ai/runtime/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
         data,
       ),
-    /** 快照优先的 SSE：持久 revision 带 id；有损的 Redis 增量则刻意不带。 */
-    createThreadRealtimeStream: (threadId: string, afterRevision = '0'): EventSource => {
-      const query = new URLSearchParams({ afterRevision })
-      return new EventSource(`${apiBaseUrl}/ai/runtime/threads/${encodeURIComponent(threadId)}/events/stream?${query}`)
-    },
   }
 }
 
