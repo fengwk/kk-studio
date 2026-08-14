@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.web.events;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
@@ -32,6 +34,11 @@ import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -305,6 +312,116 @@ class ApplicationEventWebSocketHandlerTest {
 
     verify(revisionHandle).close();
     verify(realtimeHandle).close();
+  }
+
+  @Test
+  void subscribeAfterConnectionCloseIsIgnored() {
+    handler.afterConnectionEstablished(springSession);
+    handler.afterConnectionClosed(springSession, CloseStatus.NORMAL);
+
+    handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
+
+    // 关闭后不得再登记订阅/建立上游（修复前该帧会建立 hub 上游并泄漏）。
+    verify(revisionSource, never()).subscribe(any(), any());
+  }
+
+  @Test
+  void connectionCloseDuringSubscribeWaitsForTheInFlightSubscribe() throws Exception {
+    // 确定性复现「建立中 connection close」竞态：subscribe 卡在 hub 建立上游时连接关闭。
+    // 修复后 close 在 closeLock 上等待 in-flight subscribe 完成再关闭新登记订阅（建立、登记、关闭互斥），
+    // 因此 closeDone 在 establish 放行前不可能触发；修复前 close 立即完成，随后 subscribe 登记后无人关闭（泄漏）。
+    AutoCloseable revisionHandle = mock(AutoCloseable.class);
+    CountDownLatch establishing = new CountDownLatch(1);
+    CountDownLatch establishDone = new CountDownLatch(1);
+    CountDownLatch closeTaskStarted = new CountDownLatch(1);
+    CountDownLatch closeDone = new CountDownLatch(1);
+    doAnswer(
+            inv -> {
+              establishing.countDown();
+              establishDone.await();
+              return new SourceSubscribed(5L, revisionHandle);
+            })
+        .when(revisionSource)
+        .subscribe(any(), any());
+    handler.afterConnectionEstablished(springSession);
+
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> frame =
+          executor.submit(
+              () -> handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD))));
+      assertTrue(establishing.await(5, TimeUnit.SECONDS), "subscribe must reach hub establish");
+      Future<?> close =
+          executor.submit(
+              () -> {
+                closeTaskStarted.countDown();
+                handler.afterConnectionClosed(springSession, CloseStatus.NORMAL);
+                closeDone.countDown();
+                return null;
+              });
+      assertTrue(closeTaskStarted.await(5, TimeUnit.SECONDS), "close task must start");
+      // establish 未放行时 close 不可能完成（修复后 close 等待 in-flight subscribe 退出 closeLock）。
+      assertFalse(
+          closeDone.await(2, TimeUnit.SECONDS), "close must wait for the in-flight subscribe");
+
+      establishDone.countDown(); // 放行建立：subscribe 登记完成后 close 才关闭它
+      close.get(5, TimeUnit.SECONDS);
+      frame.get(5, TimeUnit.SECONDS);
+    } finally {
+      executor.shutdownNow();
+    }
+    verify(revisionHandle).close(); // close 后不得遗留 hub 订阅（修复前该订阅泄漏、上游永不释放）
+  }
+
+  @Test
+  void concurrentDuplicateSubscribeRegistersOnlyOneSubscription() throws Exception {
+    // 复现「重复 subscribe 并发窗口」：第二个帧在第一个订阅 ack 入队后、登记（put）前到达（ack-latch 钉住
+    // 第一个帧，第二个帧的幂等检查必然看到未登记状态并进入 hub.subscribe）。修复后两帧经 closeLock 串行：
+    // 第二个帧在第一个登记完成后看到已登记订阅幂等返回，只登记一个订阅；修复前两个帧各登记一个 hub 订阅，
+    // 后 put 覆盖先 put，先登记的那个永不关闭，unsubscribe 后上游仍存活（泄漏）。
+    AutoCloseable revisionHandle = mock(AutoCloseable.class);
+    when(revisionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, revisionHandle));
+    CountDownLatch ackEnqueued = new CountDownLatch(1);
+    CountDownLatch ackRelease = new CountDownLatch(1);
+    CountDownLatch secondTaskStarted = new CountDownLatch(1);
+    Async async =
+        ((Session) ((NativeWebSocketSession) springSession).getNativeSession()).getAsyncRemote();
+    doAnswer(
+            inv -> {
+              ackEnqueued.countDown();
+              ackRelease.await();
+              recorder.sent.add(inv.getArgument(0));
+              recorder.handlers.add(inv.getArgument(1));
+              return null;
+            })
+        .when(async)
+        .sendText(any(String.class), any(SendHandler.class));
+    handler.afterConnectionEstablished(springSession);
+
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> first =
+          executor.submit(
+              () -> handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD))));
+      assertTrue(ackEnqueued.await(5, TimeUnit.SECONDS), "first subscribe must reach ack enqueue");
+      Future<?> second =
+          executor.submit(
+              () -> {
+                secondTaskStarted.countDown();
+                handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
+              });
+      assertTrue(secondTaskStarted.await(5, TimeUnit.SECONDS), "second frame task must start");
+      ackRelease.countDown(); // 放行第一个订阅登记
+      first.get(5, TimeUnit.SECONDS);
+      second.get(5, TimeUnit.SECONDS);
+    } finally {
+      executor.shutdownNow();
+    }
+
+    verify(revisionSource, times(1)).subscribe(any(), any()); // 重复帧只建立一次上游
+    handler.handleTextMessage(springSession, textMessage(unsubscribeFrame(THREAD)));
+    verify(revisionHandle).close(); // 只登记了一个订阅：unsubscribe 后上游必须释放
   }
 
   private static String subscribeFrame(UUID threadId) {

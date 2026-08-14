@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -31,6 +33,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -338,6 +341,160 @@ class ApplicationEventHubTest {
           "signals must arrive in fanout order, got: " + live.get(i));
     }
     keep.close();
+  }
+
+  @Test
+  void subscribeConcurrentWithLastReleaseNeverRebuildsUpstreamOnDetachedState() throws Exception {
+    // 确定性复现 Review 竞态：subscribe 已取得旧 state、最后 release 删除 map 后 subscribe 才继续。
+    // release 在状态锁内先 retire + identity 移除 map entry、再关闭旧上游（用 latch 卡住关闭）；subscribe
+    // 任务在 release 卡住期间已开始执行（start-pin 保证其状态查找先于 release 的 map 删除）。修复前 release
+    // 在 closeQuietly 之后才 remove，此时 subscribe 会拿到旧 state，在 detached state 上重建上游——该订阅
+    // close 后其上游句柄永远不会被释放（orphan）；修复后 subscribe 只能取得全新 state，上游可正常释放。
+    CountDownLatch releaseClosingStarted = new CountDownLatch(1);
+    CountDownLatch releaseClosingDone = new CountDownLatch(1);
+    CountDownLatch subscribeTaskStarted = new CountDownLatch(1);
+    AtomicReference<AutoCloseable> firstRevisionHandle = new AtomicReference<>();
+    AtomicReference<AutoCloseable> secondRevisionHandle = new AtomicReference<>();
+    doAnswer(
+            inv -> {
+              AutoCloseable handle = mock(AutoCloseable.class);
+              if (firstRevisionHandle.compareAndSet(null, handle)) {
+                doAnswer(
+                        blocked -> {
+                          releaseClosingStarted.countDown();
+                          releaseClosingDone.await();
+                          return null;
+                        })
+                    .when(handle)
+                    .close();
+                return new SourceSubscribed(5L, handle);
+              }
+              secondRevisionHandle.set(handle);
+              return new SourceSubscribed(5L, handle);
+            })
+        .when(revisionSource)
+        .subscribe(any(), any());
+
+    Subscription first = hub.subscribe(THREAD_KEY, sink());
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> release =
+          executor.submit(
+              () -> {
+                first.close(); // 最后释放：retire + 移除 map entry，随后卡在关闭旧上游句柄
+                return null;
+              });
+      assertTrue(
+          releaseClosingStarted.await(5, TimeUnit.SECONDS), "release must reach handle close");
+
+      Future<Subscription> subscribe =
+          executor.submit(
+              () -> {
+                subscribeTaskStarted.countDown();
+                return hub.subscribe(THREAD_KEY, sink());
+              });
+      // 等 subscribe 任务已开始执行（其状态查找必然先于 release 放行后的 map 删除）。
+      assertTrue(subscribeTaskStarted.await(5, TimeUnit.SECONDS), "subscribe task must start");
+      releaseClosingDone.countDown(); // 放行旧上游关闭
+      release.get(5, TimeUnit.SECONDS);
+      Subscription second = subscribe.get(5, TimeUnit.SECONDS);
+
+      verify(revisionSource, times(2)).subscribe(any(), any()); // 同一资源只建立两组上游
+      verify(firstRevisionHandle.get()).close(); // 最后释放关闭了第一组上游
+      second.close();
+      verify(secondRevisionHandle.get()).close(); // 修复前 second 建立在 detached state 上，上游永远关不掉
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void lateCallbackAfterLastReleaseIsDropped() {
+    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+        new AtomicReference<>();
+    doAnswer(
+            inv -> {
+              revisionConsumer.set(inv.getArgument(1));
+              return new SourceSubscribed(5L, () -> {});
+            })
+        .when(revisionSource)
+        .subscribe(any(), any());
+    List<Signal> received = new ArrayList<>();
+    Subscription subscription = hub.subscribe(THREAD_KEY, received::add);
+    subscription.activate();
+    subscription.close(); // 最后释放：上游关闭、state 淘汰并移出 map
+
+    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
+    assertTrue(received.isEmpty(), "late callback after last release must be dropped");
+  }
+
+  @Test
+  void failedEstablishRetiresStateAndDropsLateCallbacks() {
+    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> staleConsumer =
+        new AtomicReference<>();
+    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> liveConsumer =
+        new AtomicReference<>();
+    doAnswer(
+            inv -> {
+              staleConsumer.set(inv.getArgument(1));
+              return new SourceSubscribed(5L, () -> {});
+            })
+        .doAnswer(
+            inv -> {
+              liveConsumer.set(inv.getArgument(1));
+              return new SourceSubscribed(5L, () -> {});
+            })
+        .when(revisionSource)
+        .subscribe(any(), any());
+    doThrow(new IllegalArgumentException("realtime unavailable"))
+        .doReturn((AutoCloseable) () -> {})
+        .when(realtimeSource)
+        .subscribe(any(), any(), any());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> hub.subscribe(THREAD_KEY, sink()),
+        "establish failure must fail the subscribe");
+
+    // 建立失败后旧 consumer 的迟到回调必须被丢弃（state 已 retired），不得泄漏到后续订阅。
+    List<Signal> received = new ArrayList<>();
+    staleConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
+    Subscription subscription = hub.subscribe(THREAD_KEY, received::add);
+    subscription.activate();
+    assertTrue(
+        received.isEmpty(),
+        "late callback from failed establish must not leak into the new subscription");
+
+    liveConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
+    assertEquals(List.of(new Signal.Revision("6")), received);
+    subscription.close();
+  }
+
+  @Test
+  void hubCloseMarksSubscriptionsClosedAndRejectsFurtherSubscribe() {
+    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+        new AtomicReference<>();
+    doAnswer(
+            inv -> {
+              revisionConsumer.set(inv.getArgument(1));
+              return new SourceSubscribed(5L, () -> {});
+            })
+        .when(revisionSource)
+        .subscribe(any(), any());
+    List<Signal> received = new ArrayList<>();
+    Subscription subscription = hub.subscribe(THREAD_KEY, received::add);
+
+    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false)); // 激活前缓冲
+    hub.close();
+
+    // 关闭后：本地订阅被标记关闭，旧回调与迟到 activate 都不能再向 sink 投递。
+    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("7", false));
+    subscription.activate();
+    assertTrue(received.isEmpty(), "no delivery after hub close");
+    subscription.close(); // 幂等
+    hub.close(); // 幂等
+
+    assertThrows(IllegalStateException.class, () -> hub.subscribe(THREAD_KEY, sink()));
   }
 
   private static Sink sink() {
