@@ -8,7 +8,7 @@ import java.util.List;
  * Environment Root 下单层目录浏览结果（control-plane 只读，不走 Tool Invocation）。
  *
  * <p>{@code path} / {@code parentPath} 是 canonical 相对 wire 路径（{@code '.'} 表示 root）；{@code
- * displayPath} 是 展示路径（当前目录为其最后一段，root 为 {@code '.'}）；{@code truncated} 表示条目数超过单层上限被截断；{@code
+ * displayPath} 是 daemon 计算的完整本地展示路径（浏览目录的 canonical 绝对路径）；{@code truncated} 表示条目数超过单层上限被截断； {@code
  * gitBranch} 可空，是浏览目录所在 git 仓库的当前分支（仅 symbolic HEAD，不是必需字段）。
  */
 @Data
@@ -16,7 +16,7 @@ public class EnvironmentDirectoryDTO {
   /** 被浏览目录的 canonical 相对路径（{@code '.'} 表示 root）。 */
   private String path;
 
-  /** 被浏览目录的展示路径。 */
+  /** 被浏览目录的完整本地展示路径（daemon 计算的 canonical 绝对路径）。 */
   private String displayPath;
 
   /** 父目录的 canonical 相对路径（root 为 {@code '.'}）。 */

@@ -29,7 +29,7 @@ class EnvironmentDirectoryBrowserTest {
   }
 
   @Test
-  void listsRootWithDotAndReturnsCanonicalRelativePaths() throws Exception {
+  void listsRootWithDotAndReturnsCanonicalWirePaths() throws Exception {
     Files.createDirectories(root.resolve("src/main"));
     Files.createDirectories(root.resolve("src/test"));
     Files.createDirectories(root.resolve("docs"));
@@ -39,32 +39,32 @@ class EnvironmentDirectoryBrowserTest {
     DaemonDirectoryCodec.DirectoryListed listed = browser().list(".");
 
     assertEquals(".", listed.path());
-    assertEquals(".", listed.displayPath());
+    assertEquals(root.toRealPath().toString(), listed.displayPath());
     assertEquals(".", listed.parentPath());
     assertFalse(listed.truncated());
     assertNull(listed.gitBranch());
     assertEquals(
         List.of("docs", "src"),
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
+        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList());
     assertEquals(
         List.of("docs", "src"),
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::displayPath).toList());
+        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
 
     DaemonDirectoryCodec.DirectoryListed nested = browser().list("src");
     assertEquals("src", nested.path());
-    assertEquals("src", nested.displayPath());
+    assertEquals(root.toRealPath().resolve("src").toString(), nested.displayPath());
     assertEquals(".", nested.parentPath());
-    // 条目 path 是 canonical relative（相对 root），displayPath 是目录名。
+    // 条目 path 是请求目录的直接子路径（wire），name 是目录名。
     assertEquals(
         List.of("src/main", "src/test"),
         nested.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
     assertEquals(
         List.of("main", "test"),
-        nested.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::displayPath).toList());
+        nested.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList());
 
     DaemonDirectoryCodec.DirectoryListed deep = browser().list("src/main");
     assertEquals("src/main", deep.path());
-    assertEquals("main", deep.displayPath());
+    assertEquals(root.toRealPath().resolve("src/main").toString(), deep.displayPath());
     assertEquals("src", deep.parentPath());
     assertTrue(deep.entries().isEmpty());
   }
@@ -103,20 +103,32 @@ class EnvironmentDirectoryBrowserTest {
     }
   }
 
-  /** 指向 root 内部的 symlink 路径可浏览（canonicalize 后仍在 root 内），但条目仍不暴露 symlink 本身。 */
+  /** 指向 root 内部的 symlink 路径可浏览：响应回显请求的 wire 路径，内部只用 real path 校验与读取；条目仍不暴露 symlink 本身。 */
   @Test
-  void allowsSymlinkPathInsideRootButNeverListsSymlinkEntries() throws Exception {
+  void allowsSymlinkAliasInsideRootAndEchoesRequestedWirePath() throws Exception {
     Files.createDirectories(root.resolve("real/child"));
     Files.createSymbolicLink(root.resolve("alias"), root.resolve("real"));
 
     DaemonDirectoryCodec.DirectoryListed listed = browser().list("alias");
-    assertEquals("real", listed.path());
+    assertEquals("alias", listed.path());
+    assertEquals(root.toRealPath().resolve("real").toString(), listed.displayPath());
+    assertEquals(".", listed.parentPath());
     assertEquals(
-        List.of("real/child"),
+        List.of("alias/child"),
         listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
     assertEquals(
         List.of("child"),
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::displayPath).toList());
+        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList());
+
+    // 嵌套 alias 的父路径与条目路径同样使用请求的 wire 路径。
+    Files.createDirectories(root.resolve("src"));
+    Files.createSymbolicLink(root.resolve("src/alias"), root.resolve("real"));
+    DaemonDirectoryCodec.DirectoryListed nestedAlias = browser().list("src/alias");
+    assertEquals("src/alias", nestedAlias.path());
+    assertEquals("src", nestedAlias.parentPath());
+    assertEquals(
+        List.of("src/alias/child"),
+        nestedAlias.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
   }
 
   /** 条目按名称稳定排序且最多 1000 条，超出置 truncated。 */
@@ -132,7 +144,7 @@ class EnvironmentDirectoryBrowserTest {
     assertTrue(listed.truncated());
     assertEquals(DaemonDirectoryCodec.MAX_ENTRIES, listed.entries().size());
     List<String> names =
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::displayPath).toList();
+        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList();
     assertEquals(names.stream().sorted().toList(), names);
     assertEquals("aaa", names.getFirst());
     assertEquals("dir-0000", names.get(1));
@@ -146,10 +158,11 @@ class EnvironmentDirectoryBrowserTest {
     assertThrows(NotDirectoryException.class, () -> browser().list("file.txt"));
   }
 
-  /** wire 形状契约在浏览器入口同样强制：absolute、空/点段、控制字符与越界路径拒绝。 */
+  /** wire 形状契约在浏览器入口同样强制：absolute、反斜杠、空/点段、控制字符与越界路径拒绝。 */
   @Test
   void rejectsInvalidWirePathsBeforeIo() {
-    for (String invalid : List.of("/abs", "a//b", "a/./b", "a/../b", "..", "a/", "a\u0000b")) {
+    for (String invalid :
+        List.of("/abs", "a\\b", "a//b", "a/./b", "a/../b", "..", "a/", "a\u0000b")) {
       assertThrows(
           IllegalArgumentException.class,
           () -> browser().list(invalid),

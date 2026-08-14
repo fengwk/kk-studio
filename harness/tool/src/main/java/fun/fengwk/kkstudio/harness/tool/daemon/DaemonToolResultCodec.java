@@ -32,7 +32,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Daemon v2 {@code PARTIAL}/{@code COMPLETED} payload 的 tool-result codec。
+ * Daemon wire {@code PARTIAL}/{@code COMPLETED} payload 的 tool-result codec。
  *
  * <p>wire shape:
  *
@@ -147,13 +147,13 @@ public final class DaemonToolResultCodec {
     return writeBoundedPayload(buildResultTree(result, resourceStore));
   }
 
-  /** 将 v2 wire JSON 文本解码为 {@link ToolResult}；resource 还原为内联 {@link BinaryToolContent}。 */
+  /** 将 wire JSON 文本解码为 {@link ToolResult}；resource 还原为内联 {@link BinaryToolContent}。 */
   public ToolResult decodeResult(String payloadJson) {
     return decodeResult(payloadJson, DEFAULT_MAX_RESOURCE_BYTES, true);
   }
 
   /**
-   * 将 v2 wire JSON 文本解码为 {@link ToolResult}，并在 Base64 分配前限制单个 resource 的声明字节数与聚合解码字节数。
+   * 将 wire JSON 文本解码为 {@link ToolResult}，并在 Base64 分配前限制单个 resource 的声明字节数与聚合解码字节数。
    *
    * @param allowResources false 时拒绝 resource 内容（PARTIAL 使用）。
    */

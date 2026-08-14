@@ -23,9 +23,10 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Environment Root 单层目录浏览 API（control-plane 只读，不走 Tool Invocation/Permission）。
  *
- * <p>HTTP 映射：非法路径（{@code INVALID_PATH}/{@code NOT_DIRECTORY}）→ 400；路径不存在（{@code NOT_FOUND}）与环境不存在/未
- * READY（{@code OFFLINE}）→ 404；daemon 往返超时（{@code TIMEOUT}）→ 504；daemon 本地 IO 失败（{@code IO_ERROR}）→
- * 502。 机器可读错误 {@code code} 与 wire 失败分类同名。
+ * <p>HTTP 映射（{@code errorCode.code} 与应用结果分类同名）：环境未知（{@code ENVIRONMENT_NOT_FOUND}）与路径不存在（{@code
+ * NOT_FOUND}）→ 404；环境已注册但未 READY/连接不可用（{@code ENVIRONMENT_UNAVAILABLE}）→ 409；非法路径（{@code
+ * INVALID_PATH}/{@code NOT_DIRECTORY}）→ 400；daemon 往返超时（{@code TIMEOUT}）→ 504；daemon 本地 IO
+ * 失败（{@code IO_ERROR}）→ 502。
  */
 @RestController
 public class StudioEnvironmentDirectoryController {
@@ -64,8 +65,10 @@ public class StudioEnvironmentDirectoryController {
     return switch (failed.code()) {
       case INVALID_PATH, NOT_DIRECTORY -> errorResponse(
           HttpStatus.BAD_REQUEST, failed.code().name(), failed.message());
-      case NOT_FOUND, OFFLINE -> errorResponse(
+      case ENVIRONMENT_NOT_FOUND, NOT_FOUND -> errorResponse(
           HttpStatus.NOT_FOUND, failed.code().name(), failed.message());
+      case ENVIRONMENT_UNAVAILABLE -> errorResponse(
+          HttpStatus.CONFLICT, failed.code().name(), failed.message());
       case TIMEOUT -> errorResponse(
           HttpStatus.GATEWAY_TIMEOUT, failed.code().name(), failed.message());
       case IO_ERROR -> errorResponse(

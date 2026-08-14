@@ -15,7 +15,7 @@
 
 ```text
 harness/
-├── tool/                # Tool API、descriptor、ResourceRef、RemoteTool、Daemon v2 wire
+├── tool/                # Tool API、descriptor、ResourceRef、RemoteTool、Daemon v3 wire
 ├── runtime/             # 纯 Java：Session/Entry/Thread/Command/Invocation/Work/processor
 ├── plugin/              # 纯 Java trusted build-time 插件 API：Catalog/BranchView/Tool/intents/projector
 ├── runtime-spring/      # Store/Work/Redis/Resource 适配（PostgreSQL、dispatcher）

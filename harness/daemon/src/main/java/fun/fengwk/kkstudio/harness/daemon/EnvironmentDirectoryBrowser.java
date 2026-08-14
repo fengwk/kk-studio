@@ -19,8 +19,13 @@ import java.util.Objects;
  * Environment Root 下的类型化单层目录浏览。
  *
  * <p>control-plane 只读操作，不经 Tool Invocation/Permission，不占 active tool slot。每次只列一层、只返回真实目录、按名称稳定排序、最多
- * {@link DaemonDirectoryCodec#MAX_ENTRIES} 条；默认不暴露 symlink 目录。请求 {@code path} 必须是 Environment Root
- * 下的 canonical 相对 wire 路径（{@code '.'} 表示 root），最终在 daemon 侧 canonicalize：越出 root 的 symlink 穿越被拒绝。
+ * {@link DaemonDirectoryCodec#MAX_ENTRIES} 条；列表默认不暴露 symlink 目录。请求 {@code path} 必须是 Environment
+ * Root 下的 canonical 相对 wire 路径（{@code '.'} 表示 root），最终在 daemon 侧 canonicalize：越出 root 的 symlink
+ * 穿越被拒绝。
+ *
+ * <p>成功响应中 {@code path}/{@code parentPath}/entry {@code path} 一律使用请求的 canonical wire 路径（显式请求 root 内
+ * symlink alias 时也回显 alias 本身，内部只用 real path 校验与读取，绝不越过 root）；{@code displayPath} 是 daemon 计算的
+ * 完整本地展示路径（浏览目录的 canonical 绝对路径）。
  *
  * <p>失败分类：非法路径/越界 → {@link IllegalArgumentException}；不存在 → {@link NoSuchFileException}；非目录 → {@link
  * NotDirectoryException}；其余本地 IO 失败 → {@link IOException}。
@@ -44,23 +49,18 @@ public final class EnvironmentDirectoryBrowser {
   /** 浏览 {@code path}（{@code '.'} 表示 root）的单层目录列表。 */
   public DaemonDirectoryCodec.DirectoryListed list(String path) throws IOException {
     DaemonDirectoryCodec.requireCanonicalRelativePath(path);
-    Path directory = canonicalDirectory(path);
-    List<Path> children = listChildren(directory);
+    Path canonical = canonicalDirectory(path);
+    List<Path> children = listChildren(canonical);
     boolean truncated = children.size() > DaemonDirectoryCodec.MAX_ENTRIES;
     List<DaemonDirectoryCodec.DirectoryEntry> entries = new ArrayList<>();
     int count = Math.min(DaemonDirectoryCodec.MAX_ENTRIES, children.size());
     for (int index = 0; index < count; index++) {
       Path child = children.get(index);
-      entries.add(
-          new DaemonDirectoryCodec.DirectoryEntry(
-              toPosix(environmentRoot.relativize(child)), child.getFileName().toString()));
+      String name = child.getFileName().toString();
+      entries.add(new DaemonDirectoryCodec.DirectoryEntry(name, childWirePath(path, name)));
     }
-    String relativePath = toPosix(environmentRoot.relativize(directory));
-    String displayPath = ".".equals(relativePath) ? "." : lastSegment(relativePath);
-    String parentPath =
-        ".".equals(relativePath) ? "." : toPosix(environmentRoot.relativize(directory.getParent()));
     return new DaemonDirectoryCodec.DirectoryListed(
-        relativePath, displayPath, parentPath, truncated, gitBranch(directory), entries);
+        path, canonical.toString(), parentWirePath(path), truncated, gitBranch(canonical), entries);
   }
 
   private Path canonicalDirectory(String path) throws IOException {
@@ -93,11 +93,21 @@ public final class EnvironmentDirectoryBrowser {
         if (!Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
           continue;
         }
+        if (!isWireRepresentable(child.getFileName().toString())) {
+          continue;
+        }
         children.add(child);
       }
     }
     children.sort(Comparator.comparing(path -> path.getFileName().toString()));
     return children;
+  }
+
+  /** 目录名必须能在 wire 相对路径中表达：非空白、无反斜杠、无 ISO 控制字符（否则条目无法编码为 canonical 路径）。 */
+  private static boolean isWireRepresentable(String name) {
+    return !name.isBlank()
+        && name.indexOf('\\') < 0
+        && name.codePoints().noneMatch(Character::isISOControl);
   }
 
   /** 从浏览目录向上到 root 查找 {@code .git}；仅 symbolic HEAD（{@code ref: refs/heads/...}）返回分支名，其余返回 null。 */
@@ -134,19 +144,14 @@ public final class EnvironmentDirectoryBrowser {
     }
   }
 
-  private static String toPosix(Path path) {
-    StringBuilder result = new StringBuilder();
-    for (Path segment : path) {
-      if (!result.isEmpty()) {
-        result.append('/');
-      }
-      result.append(segment);
-    }
-    return result.length() == 0 ? "." : result.toString();
+  /** entry 的 canonical wire 路径：请求目录的直接子路径（root 请求为单段）。 */
+  private static String childWirePath(String parentPath, String name) {
+    return ".".equals(parentPath) ? name : parentPath + "/" + name;
   }
 
-  private static String lastSegment(String relativePath) {
-    int separator = relativePath.lastIndexOf('/');
-    return separator < 0 ? relativePath : relativePath.substring(separator + 1);
+  /** 请求目录父目录的 canonical wire 路径（root 为 {@code '.'}）。 */
+  private static String parentWirePath(String path) {
+    int separator = path.lastIndexOf('/');
+    return separator < 0 ? "." : path.substring(0, separator);
   }
 }
