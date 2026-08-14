@@ -61,8 +61,15 @@ public class HarnessThreadCommandCreateDTO {
   /** 目标 YOLO 策略：仅 SET_YOLO 必填；其余类型禁止提供。 */
   private Boolean yoloEnabled;
 
-  /** 目标 Environment 完整 binding：仅 SET_ENVIRONMENT 必填；可空对象（null 表示解绑）；其余类型禁止提供。 */
+  /**
+   * 目标 Environment 完整 binding：仅 SET_ENVIRONMENT 必填，且 JSON 中必须出现该字段；可空对象（显式 null 表示解绑）；
+   * 其余类型禁止提供（即使显式 null 也按 forbidden 拒绝）。
+   */
   private EnvironmentBindingDTO environment;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean environmentFieldPresent;
 
   @JsonSetter("content")
   public void setContent(String content) {
@@ -76,6 +83,12 @@ public class HarnessThreadCommandCreateDTO {
     this.contentsFieldPresent = true;
   }
 
+  @JsonSetter("environment")
+  public void setEnvironment(EnvironmentBindingDTO environment) {
+    this.environment = environment;
+    this.environmentFieldPresent = true;
+  }
+
   @JsonIgnore
   public boolean hasContentField() {
     return contentFieldPresent;
@@ -84,6 +97,11 @@ public class HarnessThreadCommandCreateDTO {
   @JsonIgnore
   public boolean hasContentsField() {
     return contentsFieldPresent;
+  }
+
+  @JsonIgnore
+  public boolean hasEnvironmentField() {
+    return environmentFieldPresent;
   }
 
   @JsonAnySetter

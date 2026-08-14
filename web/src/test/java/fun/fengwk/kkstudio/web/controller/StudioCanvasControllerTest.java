@@ -493,6 +493,45 @@ class StudioCanvasControllerTest {
     assertEquals(List.of(new TextMessageContent("hello")), command.contents());
   }
 
+  @Test
+  void firstSendRejectsIncompleteEnvironmentBindingAsBadRequest() throws Exception {
+    // binding 嵌套字段缺失必须稳定 400（IAE），绝不能把 NPE 漏成 500。
+    String missingName =
+        """
+        {"commandId":"%s",
+         "branchSettings":{"environment":{"workspacePath":"."},"agentName":"assistant",
+           "model":{"providerName":"openai","modelName":"gpt-4o","variant":"default"},
+           "activeTools":["read"]},
+         "yoloEnabled":true,
+         "contents":[{"type":"TEXT","text":"hello"}]}
+        """
+            .formatted(COMMAND);
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/thread/messages")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingName))
+        .andExpect(status().isBadRequest());
+
+    String missingPath =
+        """
+        {"commandId":"%s",
+         "branchSettings":{"environment":{"name":"default"},"agentName":"assistant",
+           "model":{"providerName":"openai","modelName":"gpt-4o","variant":"default"},
+           "activeTools":["read"]},
+         "yoloEnabled":true,
+         "contents":[{"type":"TEXT","text":"hello"}]}
+        """
+            .formatted(COMMAND);
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/thread/messages")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingPath))
+        .andExpect(status().isBadRequest());
+    verify(threadService, never()).sendFirstMessage(eq(CANVAS), any(CanvasFirstSendCommand.class));
+  }
+
   private String validCommandJson() {
     return """
         {"expectedVersion":"3","commandId":"%s",

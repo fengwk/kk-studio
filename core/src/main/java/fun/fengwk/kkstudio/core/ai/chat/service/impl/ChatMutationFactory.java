@@ -94,6 +94,13 @@ public class ChatMutationFactory {
     if (dto == null) {
       return null;
     }
+    if (dto.getName() == null) {
+      throw new AiValidationException(RESOURCE, "invalid environment: name must not be null");
+    }
+    if (dto.getWorkspacePath() == null) {
+      throw new AiValidationException(
+          RESOURCE, "invalid environment: workspacePath must not be null");
+    }
     try {
       return new EnvironmentBinding(new EnvironmentName(dto.getName()), dto.getWorkspacePath());
     } catch (IllegalArgumentException error) {

@@ -264,7 +264,7 @@ public final class CoreToolGateway implements ToolGateway {
             new PermissionEvaluationContext(
                 request.binding().descriptor().name(),
                 request.call().argumentsJson(),
-                workdir,
+                permissionWorkdir(request),
                 environmentRoot,
                 settings));
     PermissionAction action = evaluation.action();
@@ -274,6 +274,19 @@ public final class CoreToolGateway implements ToolGateway {
       case DENY -> new ToolGateway.Deny(
           new ToolInvocationError(PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
     };
+  }
+
+  /**
+   * ENVIRONMENT tool 的权限路径上下文体现冻结 binding 的 workspace：以现有 {@link #environmentRoot} 作为逻辑 root，把
+   * canonical {@code workspacePath} 纯路径解析为 effective workdir（不查询 live registry、不做文件系统 IO）；PLATFORM
+   * 与 null Environment binding 保持 server 默认 workdir（null binding 的确定性拒绝仍发生在 {@link #start}）。
+   */
+  private Path permissionWorkdir(ToolInvocationRequest request) {
+    if (request.binding().type() == ToolType.ENVIRONMENT
+        && request.binding().environment() != null) {
+      return environmentRoot.resolve(Path.of(request.binding().environment().workspacePath()));
+    }
+    return workdir;
   }
 
   @Override
