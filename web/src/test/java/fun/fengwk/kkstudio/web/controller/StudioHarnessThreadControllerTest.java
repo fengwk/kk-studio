@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventTail;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -40,7 +39,6 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Executor;
 
 /**
  * {@link StudioHarnessThreadController} HTTP 契约（standalone MockMvc）：命令 batch 映射与 202、 404/409/400
@@ -67,11 +65,8 @@ class StudioHarnessThreadControllerTest {
   void setUp() {
     runtime = mock(HarnessRuntime.class);
     chatThreadCommandService = mock(ChatThreadCommandService.class);
-    RealtimeEventTail tail = mock(RealtimeEventTail.class);
-    ThreadRevisionSseHub hub = mock(ThreadRevisionSseHub.class);
-    Executor executor = Runnable::run;
     StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(runtime, chatThreadCommandService, tail, hub, executor);
+        new StudioHarnessThreadController(runtime, chatThreadCommandService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -460,14 +455,5 @@ class StudioHarnessThreadControllerTest {
         "{\"environmentName\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(6).payload()));
     assertEquals(
         "{\"activeTools\":[]}", COMMAND_PAYLOADS.encode(batch.commands().get(4).payload()));
-  }
-
-  @Test
-  void snapshotNotFoundMapsTo404ForSseGuardPath() throws Exception {
-    when(runtime.getThreadSnapshot(any()))
-        .thenThrow(new HarnessRuntimeNotFoundException("thread 1 does not exist"));
-    mockMvc
-        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/events/stream"))
-        .andExpect(status().isNotFound());
   }
 }

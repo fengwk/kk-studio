@@ -6,37 +6,30 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-/** RedisRealtimeConfig 的默认值、校验与 key 拼接契约。 */
+/** RedisRealtimeConfig 的默认值、校验与 channel 拼接契约。 */
 class RedisRealtimeConfigTest {
 
   @Test
-  void defaultsUseDocumentedPrefixAndMaxLength() {
+  void defaultsUseDocumentedPrefix() {
     RedisRealtimeConfig config = new RedisRealtimeConfig();
     assertEquals("kk-studio:harness:realtime:", config.prefix());
-    assertEquals(5_000, config.maxLength());
   }
 
   @Test
   void blankOrNullPrefixIsRejected() {
-    assertThrows(IllegalArgumentException.class, () -> new RedisRealtimeConfig(null, 5_000));
-    assertThrows(IllegalArgumentException.class, () -> new RedisRealtimeConfig("  ", 5_000));
+    assertThrows(IllegalArgumentException.class, () -> new RedisRealtimeConfig(null));
+    assertThrows(IllegalArgumentException.class, () -> new RedisRealtimeConfig("  "));
   }
 
   @Test
-  void nonPositiveMaxLengthIsRejected() {
-    assertThrows(IllegalArgumentException.class, () -> new RedisRealtimeConfig("p:", 0));
-    assertThrows(IllegalArgumentException.class, () -> new RedisRealtimeConfig("p:", -1));
+  void channelIsPrefixPlusUuidThreadId() {
+    RedisRealtimeConfig config = new RedisRealtimeConfig("kk-studio:harness:realtime:");
+    assertEquals("kk-studio:harness:realtime:" + id(42L), config.channel(id(42L)));
   }
 
   @Test
-  void keyIsPrefixPlusUuidThreadId() {
-    RedisRealtimeConfig config = new RedisRealtimeConfig("kk-studio:harness:realtime:", 5000);
-    assertEquals("kk-studio:harness:realtime:" + id(42L), config.key(id(42L)));
-  }
-
-  @Test
-  void keyRejectsNullThreadId() {
+  void channelRejectsNullThreadId() {
     RedisRealtimeConfig config = new RedisRealtimeConfig();
-    assertThrows(NullPointerException.class, () -> config.key(null));
+    assertThrows(NullPointerException.class, () -> config.channel(null));
   }
 }

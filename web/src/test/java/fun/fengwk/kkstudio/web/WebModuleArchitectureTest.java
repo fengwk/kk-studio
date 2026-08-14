@@ -34,8 +34,7 @@ class WebModuleArchitectureTest {
       List.of(
           CORE_AI_REFERENCE_PREFIX + "environment.gateway." + "EnvironmentDaemonGateway",
           CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironment",
-          CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry",
-          CORE_AI_REFERENCE_PREFIX + "runtime.redis." + "RedisRealtimeEventTail");
+          CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry");
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
       List.of("kk-studio-harness-tool", "kk-studio-harness-daemon");
   private static final String REQUIRED_POM_ARTIFACT = "kk-studio-harness-runtime-spring";

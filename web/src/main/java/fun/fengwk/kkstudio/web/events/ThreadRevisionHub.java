@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.controller;
+package fun.fengwk.kkstudio.web.events;
 
 import lombok.extern.slf4j.Slf4j;
 import org.postgresql.PGConnection;
@@ -24,12 +24,13 @@ import java.util.function.Consumer;
 /**
  * PostgreSQL Thread revision 失效通知的进程内 fan-out。
  *
- * <p>LISTEN/NOTIFY 故意只作为唤醒信号。收到通知后，本 hub 先读取当前持久 revision 再通知 SSE 订阅者； LISTEN 启动/重连成功时会发出 resync
- * 信号，因为断连期间的通知不可恢复。
+ * <p>LISTEN/NOTIFY 故意只作为唤醒信号。收到通知后，本 hub 先读取当前持久 revision 再通知订阅者；LISTEN 启动/重连成功时广播
+ * resync，因为断连期间的通知不可恢复。{@link #subscribe} 先注册 consumer 再读当前 revision 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
  */
 @Slf4j
 @Component
-final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventSource {
+final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSource {
+
   static final String CHANNEL = "harness_thread_revision";
 
   private final DataSource dataSource;
@@ -37,25 +38,30 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
   private volatile boolean running;
   private volatile Thread listenerThread;
 
-  ThreadRevisionSseHub(DataSource dataSource) {
+  ThreadRevisionHub(DataSource dataSource) {
     this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
   }
 
   @Override
-  public AutoCloseable subscribe(UUID threadId, long afterRevision, Consumer<Event> consumer) {
+  public SourceSubscribed subscribe(UUID threadId, Consumer<Event> consumer) {
     Objects.requireNonNull(threadId, "threadId");
-    if (afterRevision < 0) {
-      throw new IllegalArgumentException("afterRevision must be non-negative");
-    }
     Objects.requireNonNull(consumer, "consumer");
     Set<Consumer<Event>> threadSubscribers =
         subscribers.computeIfAbsent(threadId, ignored -> new CopyOnWriteArraySet<>());
     threadSubscribers.add(consumer);
     try {
-      long currentRevision = currentRevision(threadId);
-      if (currentRevision > afterRevision) {
-        consumer.accept(new Event(Long.toString(currentRevision), false));
-      }
+      long cursor = currentRevision(threadId);
+      return new SourceSubscribed(
+          cursor,
+          () -> {
+            Set<Consumer<Event>> currentSubscribers = subscribers.get(threadId);
+            if (currentSubscribers != null) {
+              currentSubscribers.remove(consumer);
+              if (currentSubscribers.isEmpty()) {
+                subscribers.remove(threadId, currentSubscribers);
+              }
+            }
+          });
     } catch (RuntimeException error) {
       threadSubscribers.remove(consumer);
       if (threadSubscribers.isEmpty()) {
@@ -63,15 +69,6 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
       }
       throw error;
     }
-    return () -> {
-      Set<Consumer<Event>> currentSubscribers = subscribers.get(threadId);
-      if (currentSubscribers != null) {
-        currentSubscribers.remove(consumer);
-        if (currentSubscribers.isEmpty()) {
-          subscribers.remove(threadId, currentSubscribers);
-        }
-      }
-    };
   }
 
   @Override

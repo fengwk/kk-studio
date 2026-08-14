@@ -89,6 +89,7 @@ class RuntimeModuleArchitectureTest {
         harnessRoot.resolve("runtime-spring/pom.xml"),
         Set.of(
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
+            "io.projectreactor:reactor-core",
             "org.postgresql:postgresql",
             "org.slf4j:slf4j-api",
             "org.springframework:spring-jdbc",

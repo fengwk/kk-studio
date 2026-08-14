@@ -10,7 +10,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -72,7 +71,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.Executor;
 
 /** Canvas HTTP typed DTO、canonical UUID 字符串、version 与状态码映射。 */
 class StudioCanvasControllerTest {
@@ -95,8 +93,6 @@ class StudioCanvasControllerTest {
   private CanvasRealtimeService realtimeService;
   private CanvasThreadService threadService;
   private StorageBlobManager blobManager;
-  private CanvasVersionEventSource versionEventSource;
-  private Executor eventStreamExecutor;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
@@ -109,7 +105,6 @@ class StudioCanvasControllerTest {
     realtimeService = mock(CanvasRealtimeService.class);
     threadService = mock(CanvasThreadService.class);
     blobManager = mock(StorageBlobManager.class);
-    versionEventSource = mock(CanvasVersionEventSource.class);
     FixedObjectProvider<StorageBlobManager> blobManagers = new FixedObjectProvider<>(blobManager);
     StorageBlob blob = new StorageBlob();
     blob.setId(BLOB_1);
@@ -118,7 +113,6 @@ class StudioCanvasControllerTest {
     blob.setWidth(640L);
     blob.setHeight(480L);
     when(blobManager.getBlob(BLOB_1)).thenReturn(blob);
-    eventStreamExecutor = Runnable::run;
     mockMvc =
         standaloneSetup(
                 new StudioCanvasController(
@@ -126,8 +120,6 @@ class StudioCanvasControllerTest {
                     commandService,
                     realtimeService,
                     threadService,
-                    versionEventSource,
-                    eventStreamExecutor,
                     new StudioWebMapper(blobManagers)))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
@@ -364,9 +356,6 @@ class StudioCanvasControllerTest {
     mockMvc
         .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=9223372036854775808"))
         .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=-1"))
-        .andExpect(status().isBadRequest());
     verify(commandService, never())
         .applyCommands(any(UUID.class), anyLong(), any(UUID.class), anyList());
   }
@@ -497,23 +486,6 @@ class StudioCanvasControllerTest {
             List.of("read")),
         command.branchSettings());
     assertEquals(List.of(new TextMessageContent("hello")), command.contents());
-  }
-
-  @Test
-  void streamEventsRejectsInvalidInputBeforeSubscribing() throws Exception {
-    mockMvc
-        .perform(get("/api/canvases/not-a-uuid/events/stream"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=abc"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=01"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=9223372036854775808"))
-        .andExpect(status().isBadRequest());
-    verifyNoInteractions(versionEventSource);
   }
 
   private String validCommandJson() {

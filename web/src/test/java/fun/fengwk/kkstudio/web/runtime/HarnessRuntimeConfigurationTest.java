@@ -31,9 +31,9 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlWorkListener;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventTail;
+import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeConfig;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeEventTail;
+import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.spring.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.web.WebTestApplication;
@@ -79,7 +79,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private ResourceStore resourceStore;
   @Autowired private RedisRealtimeConfig redisRealtimeConfig;
   @Autowired private RealtimeEventSink realtimeEventSink;
-  @Autowired private RealtimeEventTail realtimeEventTail;
+  @Autowired private RealtimeEventSource realtimeEventSource;
   @Autowired private InvocationRetryPolicy invocationRetryPolicy;
   @Autowired private ThreadProcessor threadProcessor;
   @Autowired private ModelProcessor modelProcessor;
@@ -105,7 +105,7 @@ class HarnessRuntimeConfigurationTest {
   void composesTheFullRuntimeBeanGraph() {
     assertInstanceOf(PostgresqlHarnessStore.class, harnessStore);
     assertInstanceOf(LocalFileResourceStore.class, resourceStore);
-    assertInstanceOf(RedisRealtimeEventTail.class, realtimeEventTail);
+    assertInstanceOf(RedisRealtimeEventSource.class, realtimeEventSource);
     assertNotNull(realtimeEventSink);
     assertNotNull(threadProcessor);
     assertNotNull(modelProcessor);
@@ -135,7 +135,6 @@ class HarnessRuntimeConfigurationTest {
   @Test
   void redisRealtimeConfigUsesDeploymentDefaults() {
     assertEquals("kk-studio:harness:realtime:", redisRealtimeConfig.prefix());
-    assertEquals(5_000L, redisRealtimeConfig.maxLength());
   }
 
   @Test

@@ -23,11 +23,8 @@ public class HarnessRuntimeProperties {
   /** 本地 {@code ResourceStore} 的单对象字节预算（默认 16 MiB）。 */
   private int resourceMaxBytes = 16 * 1024 * 1024;
 
-  /** Redis realtime overlay 的 stream key 前缀。 */
+  /** Redis realtime overlay 的 Pub/Sub channel 前缀。 */
   private String redisPrefix = "kk-studio:harness:realtime:";
-
-  /** 每个 Thread Redis Stream 的 exact maxlen。 */
-  private long redisMaxLength = 5_000L;
 
   /** processor 共用的 claim lease 时长。 */
   private Duration processorLeaseDuration = Duration.ofSeconds(30);
