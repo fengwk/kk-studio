@@ -6,13 +6,13 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **68** 个 API case；标准入口默认执行免费的 **L1 58** 个 case（其中
+当前注册 **69** 个 API case；标准入口默认执行免费的 **L1 59** 个 case（其中
 `canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约）。Canvas
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke
-由 `scripts/e2e.sh --ui` 另行附加，默认注册 15 个免费 UI case，不计入这 68 个 Node API case。
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 15 个免费 UI case，不计入这 69 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -81,7 +81,7 @@ env \
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 ```
 
-该命令选择 61 个免费 API case 和 15 个免费 UI case，不启用真实 Provider、Tool 或
+该命令选择 62 个免费 API case 和 15 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
 rebuild；不得为这条回归追加 `--real`。
 
@@ -89,7 +89,7 @@ rebuild；不得为这条回归追加 `--real`。
 
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
-| L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、内部工具目录、Chat-scoped Thread、命令 batch 严格 wire、CAS/幂等、head move、IDLE stop no-op、i18n 与 proxy |
+| L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、内部工具目录、Chat-scoped Thread、命令 batch 严格 wire、CAS/幂等、head move、IDLE stop no-op、模型 transient attempt retry 可见性、i18n 与 proxy |
 | L2 | `--real` | MiniMax | 文本轮次 durable 边界、真实 task 委派 durable 子 Thread、运行中原子 batch 合并收割、stop partial + REPLAYED + continue |
 | L3 | `--real --with-branch` | MiniMax | 同一 Thread 同 Session move head 回退到历史 Entry 后继续 |
 | L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流、Resource 外部化与同源下载验证 |
@@ -114,7 +114,7 @@ FunctionRun，不下载或导入视频。它只准备页面，不触发生成；
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（注册 61，默认 58）
+### L1（注册 62，默认 59）
 
 ```text
 seed.structured_model_config
@@ -174,6 +174,7 @@ config.agent.invalid.duplicate_subagent
 config.agent.invalid.unknown_subagent
 config.agent.invalid.unknown_field_rejected
 matrix.agent.teardown_model
+model.attempt_failure_visibility
 canvas.storage_upload_contract
 canvas.function_fake_runtime
 chat.attachment_upload_contract
@@ -188,7 +189,7 @@ L1 的关键语义断言：
 - Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `environmentName`（可为 null）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
 - Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId` 均为 canonical UUID string；`nextCommandSequence`、`revision` 为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
-- snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）；
+- snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）、`modelAttemptFailures`（只暴露当前 active Model 尚未物化的失败 attempt；item 为 `modelInvocationId/turnStartEntryId/basisHeadEntryId/attempt/sequence/text/thinking/errorCode/errorMessage/failedAt/retryAt`，其中 `sequence` 是 HTTP decimal string）；
 - 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 的统一信封携带 `errors.reason=STALE_COMMAND_CURSOR`，且 Thread 状态（sequence/revision/head）逐字段不变；
 - `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT)` 列表：`TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`text`/`content` 文本 shorthand 已移除（`text` 为未知字段、`content` 对 USER_MESSAGE 禁用）；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段与非 canonical uploadId 返回 400；`CUSTOM_MESSAGE` 仍使用 `content` 且 role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
 - 命令响应携带 `requestHash`（raw 命令 canonical SHA-256，64 位小写 hex）与 `sequence`；同 `clientCommandId` + 同 hash 整批重放幂等返回既有命令且不二次消费 upload；部分重放 409；replay/400 不依赖异步消费时序；
@@ -196,6 +197,7 @@ L1 的关键语义断言：
 - `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
+- `model.attempt_failure_visibility` 免费 L1：case 内 `node:http` OpenAI-compatible SSE mock 的首次 Provider attempt 先流出确定性 text partial，再通过断连触发 LangChain4j `TRANSIENT`；活跃期轮询同一快照精确断言 `modelAttemptFailures`（`attempt=1`、HTTP decimal-string `sequence`、text/thinking、error、合法 `failedAt/retryAt`），立即 retry 的 Provider `messages` 必须与失败前完全一致且不含失败 partial/error；quiescent 后断言 `MODEL_ATTEMPT_FAILURE` 位于成功 assistant 之前且 payload 保留 partial/error/retryAt、未物化列表清空；第二 turn 的 mock request `messages` 同样不含失败 attempt 的 partial/thinking/error，两个 turn 均 `COMPLETED`，成功 assistant 不拼接失败 partial；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
 - `canvas.api_version_contract` 免费 L1：create/list/get/commands 使用 canonical UUID id 与
   十进制字符串 graph `version`（数据库 `canvas_document.version` 仍是 bigint，wire 是 canonical
@@ -517,5 +519,6 @@ case 与整轮 `durationMs` 使用 Node 单调时钟计算，不受宿主 wall c
 2. 新增或删除 case 后运行 `node scripts/e2e/run-matrix.mjs --list`，以输出的 ID 和总数更新本文件。
 3. Chat/Thread 编排步骤集中在 `scripts/e2e/lib/harness.mjs`；Thread 创建携带完整 `branchSettings`，后续变更通过命令 batch 表达。
 4. 真模型、Tool、分支和 UI 只通过显式开关执行；默认 L1 保持免费。
-5. OpenCLI fake Hub 完整闭环由 `deploy/test/run.sh --with-app` 覆盖；真实 Seedance
+5. `model.attempt_failure_visibility` 必须继续使用 case 内本地 `node:http` SSE mock；先断言活跃窗口的 `modelAttemptFailures` 与立即 retry 的原样 Provider `messages`，再用 quiescent durable Entry 与下一 turn 的 Provider `messages` 断言完成闭环，并将 request/snapshot 写入 case artifact；不得改成真实付费 Provider 或仅 HTTP 500 的弱化路径。
+6. OpenCLI fake Hub 完整闭环由 `deploy/test/run.sh --with-app` 覆盖；真实 Seedance
    prepare-only smoke 必须同时提供确认参数和环境开关，且固定 `submit=0`。
