@@ -54,7 +54,7 @@ class StudioEnvironmentDirectoryControllerTest {
   void returnsTypedDirectoryListing() throws Exception {
     EnvironmentDirectoryDTO dto = new EnvironmentDirectoryDTO();
     dto.setPath("src");
-    dto.setDisplayPath("/home/dev/project/src");
+    dto.setDisplayPath("src");
     dto.setParentPath(".");
     dto.setTruncated(true);
     dto.setGitBranch("main");
@@ -70,7 +70,7 @@ class StudioEnvironmentDirectoryControllerTest {
         .perform(get("/api/ai/environments/env-1/directories").param("path", "src"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.path").value("src"))
-        .andExpect(jsonPath("$.data.displayPath").value("/home/dev/project/src"))
+        .andExpect(jsonPath("$.data.displayPath").value("src"))
         .andExpect(jsonPath("$.data.parentPath").value("."))
         .andExpect(jsonPath("$.data.truncated").value(true))
         .andExpect(jsonPath("$.data.gitBranch").value("main"))

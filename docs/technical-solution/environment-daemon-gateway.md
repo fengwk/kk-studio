@@ -87,7 +87,7 @@ GET /api/ai/environments/{name}/directories?path=.
 ```
 
 - `path` 缺省为 `'.'`（Environment Root），是可选的 canonical 相对 wire 路径（段一律以 `'/'` 分隔，跨平台拒绝反斜杠）：拒绝 absolute、空段、`'.'`/`'..'` 段、ISO 控制字符与空白路径；`{name}` 是 canonical `EnvironmentName`，非法名称 400 `INVALID_ENVIRONMENT_NAME`。
-- 响应 DTO：`path`（canonical 相对 wire 路径，root 为 `'.'`）/ `displayPath`（daemon 计算的完整本地展示路径，即浏览目录的 canonical 绝对路径）/ `parentPath`（父目录 canonical wire 路径，root 为 `'.'`）/ `truncated`（超过单层上限 1000 条被截断）/ `gitBranch`（可空，浏览目录所在 git 仓库的 symbolic HEAD 分支）/ `entries`（按名称稳定排序的直属子目录，`{name,path}`：`name` 是目录名且必须等于 `path` 最后一段，`path` 必须是请求目录的直接子路径；不含 symlink 与非目录）。
+- 响应 DTO：`path`（canonical 相对 wire 路径，root 为 `'.'`）/ `displayPath`（请求 `path` 的最后一段，root 为 `'.'`；只作展示、绝不暴露 daemon 本地绝对路径，codec 严格拒绝其它值）/ `parentPath`（父目录 canonical wire 路径，root 为 `'.'`）/ `truncated`（超过单层上限 1000 条被截断）/ `gitBranch`（可空，浏览目录所在 git 仓库的 symbolic HEAD 分支）/ `entries`（按名称稳定排序的直属子目录，`{name,path}`：`name` 是目录名且必须等于 `path` 最后一段，`path` 必须是请求目录的直接子路径；不含 symlink 与非目录）。
 - symlink 语义：列表默认不暴露 symlink 目录；显式请求 root 内 symlink alias 时，成功响应的 `path`/`parentPath`/entry `path` 使用请求的 canonical wire 路径（回显 alias 本身），daemon 内部只用 real path 校验与读取，绝不越过 root；越出 root 的 symlink 穿越是 `INVALID_PATH`。
 - HTTP 错误映射（`errorCode.code` 与应用结果分类同名）：`ENVIRONMENT_NOT_FOUND`（registry 无该环境）/ `NOT_FOUND`（路径不存在）→ 404；`ENVIRONMENT_UNAVAILABLE`（环境已注册但未 READY，或连接/心跳不可用）→ 409；`INVALID_PATH` / `NOT_DIRECTORY` → 400；`TIMEOUT`（daemon 往返超时，默认 10 秒，配置键 `kk-studio.harness.environment-gateway.directory-list-timeout`）→ 504；`IO_ERROR`（daemon 本地 IO 失败）→ 502。
 

@@ -33,7 +33,8 @@ import java.util.UUID;
  * 路径（{@code '.'} 表示 root，段一律以 {@code '/'} 分隔）：跨平台拒绝反斜杠、Windows drive 前缀（{@code C:/x}、{@code
  * C:x}）、absolute、空/{@code '.'}/{@code '..'} 段、控制字符与空白路径；越界判定由 daemon 在 canonicalize 时完成。成功响应中
  * {@code path}/{@code parentPath}/entry {@code path} 都是请求目录或其直接子目录的 canonical wire 路径，entry 只含
- * {@code name}+{@code path} 两个字段且 {@code name} 必须等于 {@code path} 的最后一段。
+ * {@code name}+{@code path} 两个字段且 {@code name} 必须等于 {@code path} 的最后一段；{@code displayPath} 必须等于请求
+ * {@code path} 的最后一段（root 为 {@code '.'}），codec 层严格拒绝任何其它值（含旧/恶意 daemon 泄漏的本地绝对路径）。
  *
  * <p>共享 ObjectMapper 启用 STRICT_DUPLICATE_DETECTION 与 FAIL_ON_TRAILING_TOKENS：三类 payload 顶层与 entry 的
  * duplicate/trailing/unknown/missing 字段全部拒绝。
@@ -79,7 +80,10 @@ public final class DaemonDirectoryCodec {
     }
   }
 
-  /** Daemon 成功返回的一层目录列表；{@code requestId} 是请求回显。 */
+  /**
+   * Daemon 成功返回的一层目录列表；{@code requestId} 是请求回显，{@code displayPath} 是请求 {@code path} 的最后一段（root 为
+   * {@code '.'}，绝不暴露 daemon 本地绝对路径），任何其它值都拒绝。
+   */
   public record DirectoryListed(
       String requestId,
       String path,
@@ -92,6 +96,9 @@ public final class DaemonDirectoryCodec {
       requestId = requireCanonicalUuid(requestId);
       path = requireCanonicalRelativePath(path);
       displayPath = requireNonBlank(displayPath, "displayPath");
+      if (!displayPath.equals(lastSegment(path))) {
+        throw new IllegalArgumentException("displayPath must be the last segment of path: " + path);
+      }
       parentPath = requireCanonicalRelativePath(parentPath);
       entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
       for (DirectoryEntry entry : entries) {
