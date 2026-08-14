@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router'
 import { useState, type PropsWithChildren } from 'react'
 import { createApplicationExtensionHost } from '@/app/extension-host'
+import { ApplicationSettingsProvider } from '@/features/settings/application-settings'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
 
@@ -14,9 +15,11 @@ export function AppProviders({ children }: PropsWithChildren) {
   return (
     <QueryClientProvider client={queryClient}>
       <ExtensionHostProvider host={extensionHost}>
-        <ApplicationEventProvider>
-          <BrowserRouter>{children}</BrowserRouter>
-        </ApplicationEventProvider>
+        <ApplicationSettingsProvider>
+          <ApplicationEventProvider>
+            <BrowserRouter>{children}</BrowserRouter>
+          </ApplicationEventProvider>
+        </ApplicationSettingsProvider>
       </ExtensionHostProvider>
     </QueryClientProvider>
   )

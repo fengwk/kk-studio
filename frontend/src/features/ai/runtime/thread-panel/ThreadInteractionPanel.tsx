@@ -1,6 +1,6 @@
 import { X } from 'lucide-react'
 import type { KeyboardEventHandler, ReactNode } from 'react'
-import { shouldDeferToBlockingOverlay } from '@/shared/ui/blocking-overlay'
+import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import { useI18n } from '@/shared/i18n'
 
 /**
@@ -46,7 +46,7 @@ export function ThreadInteractionPanel({
       aria-busy={busy}
       onKeyDown={(event) => {
         // Modal/alertdialog/lightbox 优先于全局 Escape；面板自身位于 overlay 内部时除外。
-        if (shouldDeferToBlockingOverlay(event.currentTarget)) {
+        if (shouldDeferToBlockingModal(event.currentTarget)) {
           return
         }
         onKeyDown?.(event)

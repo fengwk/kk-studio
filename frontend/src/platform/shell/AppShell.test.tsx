@@ -44,6 +44,127 @@ describe('AppShell canvas immersive routes', () => {
   )
 })
 
+describe('AppShell settings navigation', () => {
+  it('renders the Gear link in the top navigation for desktop and mobile panels', () => {
+    render(
+      <MemoryRouter initialEntries={['/chats']}>
+        <AppShell>
+          <div>Content</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    const settingsLink = screen.getByRole('link', { name: '设置 Settings' })
+    expect(settingsLink).toHaveAttribute('href', '/settings')
+    expect(settingsLink.querySelector('small')?.textContent).toBe('Settings')
+    // 与 AI/Canvas/Tools 同级，移动端汉堡面板复用同一组链接。
+    expect(settingsLink.closest('nav')).toBe(screen.getByRole('navigation'))
+  })
+
+  it('keeps the global topbar and activates only Settings on /settings', () => {
+    render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <AppShell>
+          <div>Settings content</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('banner')).toBeInTheDocument()
+    expect(document.querySelector('.app-frame')).not.toHaveClass('chat-immersive')
+    expect(document.querySelector('.app-frame')).not.toHaveClass('canvas-immersive')
+    // settings 激活时 AI/Canvas/Tools 一律不误激活。
+    expect(screen.getByRole('link', { name: '设置 Settings' })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: '智能 AI' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '画布 Canvas' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '工具 Tools' })).not.toHaveClass('active')
+  })
+
+  it('does not mis-activate Settings on AI, Canvas or Tools routes', () => {
+    render(
+      <MemoryRouter initialEntries={['/chats']}>
+        <AppShell>
+          <div>Content</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '设置 Settings' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '智能 AI' })).toHaveClass('active')
+  })
+})
+
+describe('AppShell nav Escape priority guards', () => {
+  it('closes the nav on Escape outside modals and editable targets', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/chats']}>
+        <AppShell>
+          <div>Content</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    const toggle = screen.getByRole('button', { name: '打开导航' })
+    await user.click(toggle)
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+
+    await user.keyboard('{Escape}')
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'false')
+    expect(document.activeElement).toBe(toggle)
+  })
+
+  it('does not close the nav while a modal overlay owns Escape', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/chats']}>
+        <AppShell>
+          <div>Content</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    const toggle = screen.getByRole('button', { name: '打开导航' })
+    await user.click(toggle)
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+
+    const modalAction = document.createElement('button')
+    modalAction.type = 'button'
+    modalAction.textContent = 'Modal action'
+    const backdrop = document.createElement('div')
+    backdrop.className = 'modal-backdrop'
+    backdrop.append(modalAction)
+    document.body.append(backdrop)
+    modalAction.focus()
+    try {
+      await user.keyboard('{Escape}')
+      // Modal 拥有优先 Escape 语义，导航保持打开。
+      expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+    } finally {
+      backdrop.remove()
+    }
+  })
+
+  it('does not close the nav while typing in an editable target', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter initialEntries={['/chats']}>
+        <AppShell>
+          <div>Content</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+    const toggle = screen.getByRole('button', { name: '打开导航' })
+    await user.click(toggle)
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+
+    const input = document.createElement('input')
+    document.body.append(input)
+    input.focus()
+    try {
+      await user.keyboard('{Escape}')
+      expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+    } finally {
+      input.remove()
+    }
+  })
+})
+
 describe('AppShell locale selector', () => {
   it('keeps both responsive dropdowns synchronized and supports keyboard controls', async () => {
     setLocale('zh-CN')
