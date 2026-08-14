@@ -7,8 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -27,8 +28,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /** 覆盖 selected-skill 解析、platform source 优先级与离线失败场景。 */
 class LoadSkillToolTest {
 
-  private static final EnvironmentName PLATFORM = new EnvironmentName("platform");
-  private static final EnvironmentName LOCAL_DEV = new EnvironmentName("local-dev");
+  private static final EnvironmentBinding PLATFORM = EnvironmentBindings.binding("platform");
+  private static final EnvironmentBinding LOCAL_DEV = EnvironmentBindings.binding("local-dev");
 
   @Test
   void loadsSelectedSkillBodyFromResolvedSource() throws Exception {
@@ -47,7 +48,7 @@ class LoadSkillToolTest {
             tool, UUID.fromString("00000000-0000-0000-0000-00000000002a"), "{\"name\":\"dev\"}");
     assertFalse(result.error());
     assertEquals("# Skill\n\nDo the thing.\n", ((TextToolContent) result.contents().get(0)).text());
-    assertEquals(PLATFORM, loader.environmentName);
+    assertEquals(PLATFORM, loader.environment);
     assertEquals("dev", loader.skillName);
   }
 
@@ -92,7 +93,7 @@ class LoadSkillToolTest {
 
     assertTrue(result.error());
     assertTrue(text(result).contains("has no Environment body"));
-    assertNull(loader.environmentName);
+    assertNull(loader.environment);
   }
 
   @Test
@@ -159,14 +160,14 @@ class LoadSkillToolTest {
   }
 
   private static final class RecordingBodyLoader implements SkillBodyLoader {
-    private EnvironmentName environmentName;
+    private EnvironmentBinding environment;
     private String skillName;
     private SkillBodyLoadResult result;
 
     @Override
     public CompletableFuture<SkillBodyLoadResult> load(
-        EnvironmentName environmentName, String skillName, Duration timeout) {
-      this.environmentName = environmentName;
+        EnvironmentBinding environment, String skillName, Duration timeout) {
+      this.environment = environment;
       this.skillName = skillName;
       return CompletableFuture.completedFuture(result);
     }

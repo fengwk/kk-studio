@@ -61,8 +61,8 @@ public class HarnessThreadCommandCreateDTO {
   /** 目标 YOLO 策略：仅 SET_YOLO 必填；其余类型禁止提供。 */
   private Boolean yoloEnabled;
 
-  /** 目标 Environment 路由：仅 SET_ENVIRONMENT 必填；可空 canonical bounded 小写名称（null 表示解绑）；其余类型禁止提供。 */
-  private String environmentName;
+  /** 目标 Environment 完整 binding：仅 SET_ENVIRONMENT 必填；可空对象（null 表示解绑）；其余类型禁止提供。 */
+  private EnvironmentBindingDTO environment;
 
   @JsonSetter("content")
   public void setContent(String content) {

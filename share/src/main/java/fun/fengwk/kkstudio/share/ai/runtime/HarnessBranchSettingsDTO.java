@@ -9,14 +9,14 @@ import java.util.List;
 /**
  * 单个 Entry branch 的完整设置快照。
  *
- * <p>{@code environmentName} 是可空的 canonical bounded 小写逻辑路由名称，是 durable 快照中的唯一路由身份。{@code
- * activeTools} 在转换边界处不可变（web mapper 始终执行复制）。
+ * <p>{@code environment} 是可空的完整 Environment binding（{@code {name, workspacePath}}，null 表示未绑定）， 是
+ * durable 快照中的唯一路由身份。{@code activeTools} 在转换边界处不可变（web mapper 始终执行复制）。
  */
 @Data
 public class HarnessBranchSettingsDTO {
-  /** 可空的 live Environment 路由身份：canonical bounded 小写名称；null 表示未绑定 Environment，显示名永不进入该快照。 */
+  /** 可空的完整 Environment binding：canonical 路由名称 + canonical workspace path；null 表示未绑定 Environment。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentName;
+  private EnvironmentBindingDTO environment;
 
   /** 必填 Agent definition 名（canonical text，≤128 字符）。 */
   private String agentName;

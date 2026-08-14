@@ -37,7 +37,9 @@ import fun.fengwk.kkstudio.core.studio.thread.CanvasThreadService.CanvasFirstSen
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasCommandDTO;
@@ -437,7 +439,10 @@ class StudioCanvasControllerTest {
     CanvasThreadFirstSendRequestDTO request = new CanvasThreadFirstSendRequestDTO();
     request.setCommandId(COMMAND.toString());
     CanvasThreadBranchSettingsDTO branchSettings = new CanvasThreadBranchSettingsDTO();
-    branchSettings.setEnvironmentName("default");
+    EnvironmentBindingDTO environment = new EnvironmentBindingDTO();
+    environment.setName("default");
+    environment.setWorkspacePath(".");
+    branchSettings.setEnvironment(environment);
     branchSettings.setAgentName("assistant");
     CanvasThreadBranchSettingsDTO.CanvasThreadModelSelectionDTO model =
         new CanvasThreadBranchSettingsDTO.CanvasThreadModelSelectionDTO();
@@ -460,7 +465,7 @@ class StudioCanvasControllerTest {
                 .content(
                     """
                     {"commandId":"%s",
-                     "branchSettings":{"environmentName":"default","agentName":"assistant",
+                     "branchSettings":{"environment":{"name":"default","workspacePath":"."},"agentName":"assistant",
                        "model":{"providerName":"openai","modelName":"gpt-4o","variant":"default"},
                        "activeTools":["read"]},
                      "yoloEnabled":true,
@@ -480,7 +485,7 @@ class StudioCanvasControllerTest {
     assertEquals(true, command.yoloEnabled());
     assertEquals(
         new BranchSettings(
-            new EnvironmentName("default"),
+            new EnvironmentBinding(new EnvironmentName("default"), "."),
             "assistant",
             new ModelSelection("openai", "gpt-4o", "default"),
             List.of("read")),

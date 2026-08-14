@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentWorkspacePath;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -115,41 +117,11 @@ public final class DaemonDirectoryCodec {
   /**
    * 校验 canonical 相对 wire 路径并原样返回；{@code '.'} 单独出现表示 root，其余位置拒绝 {@code '.'}/{@code '..'} 段。
    *
-   * <p>wire 路径是跨平台纯字符串契约，不依赖本地 {@code Path} 解析：段一律以 {@code '/'} 分隔（任何位置的反斜杠都拒绝），拒绝 Windows drive
-   * 前缀（{@code C:/x}、{@code C:x}）与 absolute（不得以 {@code '/'} 开头）、无空段、无 ISO 控制字符。越界判定由 daemon 在
-   * canonicalize 时完成。
+   * <p>规则与 {@link EnvironmentBinding} 的 workspace path 共用同一 validator（{@link
+   * fun.fengwk.kkstudio.harness.tool.EnvironmentWorkspacePath}），避免两套路径语义。
    */
   public static String requireCanonicalRelativePath(String path) {
-    String value = requireNonBlank(path, "path");
-    if (".".equals(value)) {
-      return value;
-    }
-    if (value.indexOf('\\') >= 0) {
-      throw new IllegalArgumentException("path must use '/' separators, not '\\': " + value);
-    }
-    if (value.length() >= 2 && isAsciiLetter(value.charAt(0)) && value.charAt(1) == ':') {
-      throw new IllegalArgumentException("path must not use a Windows drive prefix: " + value);
-    }
-    if (value.codePoints().anyMatch(Character::isISOControl)) {
-      throw new IllegalArgumentException("path must not contain control characters");
-    }
-    if (value.charAt(0) == '/') {
-      throw new IllegalArgumentException("path must be relative to the environment root: " + value);
-    }
-    for (String segment : value.split("/", -1)) {
-      if (segment.isEmpty()) {
-        throw new IllegalArgumentException("path must not contain empty segments: " + value);
-      }
-      if (".".equals(segment) || "..".equals(segment)) {
-        throw new IllegalArgumentException(
-            "path must not contain '" + segment + "' segments: " + value);
-      }
-    }
-    return value;
-  }
-
-  private static boolean isAsciiLetter(char character) {
-    return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
+    return EnvironmentWorkspacePath.requireCanonicalRelativePath(path);
   }
 
   public String encodeRequest(ListDirectoryRequest request) {

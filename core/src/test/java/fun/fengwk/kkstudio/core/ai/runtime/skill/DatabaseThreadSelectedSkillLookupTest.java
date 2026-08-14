@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
@@ -18,7 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -31,7 +32,7 @@ import java.util.UUID;
  */
 class DatabaseThreadSelectedSkillLookupTest {
 
-  private static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
+  private static final EnvironmentBinding ENV_ID = TestEnvironmentBindings.binding("env-1");
   private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
       new ModelInvocationRequestJsonCodec();
 
@@ -50,7 +51,7 @@ class DatabaseThreadSelectedSkillLookupTest {
     var skill = skills.get(0);
     assertEquals("review", skill.name());
     assertEquals("Review code", skill.description());
-    assertEquals(ENV_ID, skill.sourceEnvironmentName());
+    assertEquals(ENV_ID, skill.sourceEnvironment());
   }
 
   @Test
@@ -70,10 +71,10 @@ class DatabaseThreadSelectedSkillLookupTest {
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
     var skills = lookup.selectedSkills(INVOCATION_ID, THREAD_ID);
     assertEquals(1, skills.size());
-    assertNull(skills.getFirst().sourceEnvironmentName());
+    assertNull(skills.getFirst().sourceEnvironment());
   }
 
-  private static String encodedRequest(EnvironmentName sourceEnvironmentName) {
+  private static String encodedRequest(EnvironmentBinding sourceEnvironment) {
     ModelInvocationRequest request =
         new ModelInvocationRequest(
             ENV_ID,
@@ -84,7 +85,7 @@ class DatabaseThreadSelectedSkillLookupTest {
                 List.of(),
                 ProviderCacheControl.none()),
             List.of(),
-            List.of(new SkillBinding("review", "Review code", sourceEnvironmentName)),
+            List.of(new SkillBinding("review", "Review code", sourceEnvironment)),
             false,
             100_000,
             null);

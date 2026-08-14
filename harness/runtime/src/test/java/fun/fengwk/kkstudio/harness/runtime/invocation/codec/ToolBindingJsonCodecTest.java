@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
@@ -31,9 +32,9 @@ class ToolBindingJsonCodecTest {
     String environmentJson =
         "{\"descriptor\":"
             + descriptorCodec.encode(environment.descriptor())
-            + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
-            + ENVIRONMENT_ID
-            + "\",\"plugin\":null}";
+            + ",\"type\":\"ENVIRONMENT\",\"environment\":"
+            + environmentJson(ENVIRONMENT_ID)
+            + ",\"plugin\":null}";
     assertEquals(environmentJson, codec.encode(environment));
     assertEquals(environment, codec.decode(environmentJson));
     assertEquals(environment, codec.decodeNode(codec.encodeNode(environment)));
@@ -42,10 +43,10 @@ class ToolBindingJsonCodecTest {
     String platformJson =
         "{\"descriptor\":"
             + descriptorCodec.encode(platform.descriptor())
-            + ",\"type\":\"PLATFORM\",\"environmentName\":null,\"plugin\":null}";
+            + ",\"type\":\"PLATFORM\",\"environment\":null,\"plugin\":null}";
     assertEquals(platformJson, codec.encode(platform));
     assertEquals(platform, codec.decode(platformJson));
-    assertNull(codec.decode(platformJson).environmentName());
+    assertNull(codec.decode(platformJson).environment());
 
     PluginToolBinding plugin =
         new PluginToolBinding(
@@ -55,7 +56,7 @@ class ToolBindingJsonCodecTest {
     String pluginJson =
         "{\"descriptor\":"
             + descriptorCodec.encode(platform.descriptor())
-            + ",\"type\":\"PLATFORM\",\"environmentName\":null,\"plugin\":"
+            + ",\"type\":\"PLATFORM\",\"environment\":null,\"plugin\":"
             + "{\"pluginId\":\"goal\",\"contributionLocalName\":\"create\","
             + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}}";
     assertEquals(pluginJson, codec.encode(pluginTool));
@@ -85,56 +86,77 @@ class ToolBindingJsonCodecTest {
     String valid =
         "{\"descriptor\":"
             + descriptor
-            + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
-            + ENVIRONMENT_ID
-            + "\",\"plugin\":null}";
+            + ",\"type\":\"ENVIRONMENT\",\"environment\":"
+            + environmentJson(ENVIRONMENT_ID)
+            + ",\"plugin\":null}";
 
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.substring(0, valid.length() - 1) + ",\"extra\":true}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(valid.replace(",\"environmentName\":\"" + ENVIRONMENT_ID + "\"", "")));
+        () ->
+            codec.decode(valid.replace(",\"environment\":" + environmentJson(ENVIRONMENT_ID), "")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 valid.replace(
-                    ",\"type\":\"ENVIRONMENT\",\"environmentName\":",
-                    ",\"type\":1,\"environmentName\":")));
+                    ",\"type\":\"ENVIRONMENT\",\"environment\":", ",\"type\":1,\"environment\":")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 valid.replace(
-                    ",\"type\":\"ENVIRONMENT\",\"environmentName\":",
-                    ",\"type\":\"OTHER\",\"environmentName\":")));
+                    ",\"type\":\"ENVIRONMENT\",\"environment\":",
+                    ",\"type\":\"OTHER\",\"environment\":")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 valid.replace(
-                    "\"environmentName\":\"" + ENVIRONMENT_ID + "\"", "\"environmentName\":1")));
+                    environmentJson(ENVIRONMENT_ID),
+                    environmentJson(ENVIRONMENT_ID) + ",\"x\":1")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                valid.replace(ENVIRONMENT_ID.value(), ENVIRONMENT_ID.value().toUpperCase())));
+                valid.replace(
+                    "\"" + ENVIRONMENT_ID.environmentName().value() + "\"",
+                    "\"" + ENVIRONMENT_ID.environmentName().value().toUpperCase() + "\"")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"descriptor\":"
                     + descriptorCodec.encode(descriptor(ToolType.PLATFORM))
-                    + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
-                    + ENVIRONMENT_ID
-                    + "\",\"plugin\":null}"));
+                    + ",\"type\":\"ENVIRONMENT\",\"environment\":"
+                    + environmentJson(ENVIRONMENT_ID)
+                    + ",\"plugin\":null}"));
     // ENVIRONMENT binding 的 route 可为 null（最新 branch 未选中/已清空时冻结为 null）。
     ToolBinding nullRoute =
         codec.decode(
             "{\"descriptor\":"
                 + descriptor
-                + ",\"type\":\"ENVIRONMENT\",\"environmentName\":null,\"plugin\":null}");
-    assertNull(nullRoute.environmentName());
+                + ",\"type\":\"ENVIRONMENT\",\"environment\":null,\"plugin\":null}");
+    assertNull(nullRoute.environment());
+    // 旧 wire 的 name-only 字段（environmentName）不再是合法输入，必须拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"descriptor\":"
+                    + descriptor
+                    + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
+                    + ENVIRONMENT_ID.environmentName().value()
+                    + "\",\"plugin\":null}"));
+  }
+
+  private static String environmentJson(EnvironmentBinding binding) {
+    return "{\"name\":\""
+        + binding.environmentName().value()
+        + "\",\"workspacePath\":\""
+        + binding.workspacePath()
+        + "\"}";
   }
 }

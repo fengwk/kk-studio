@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryFailu
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
@@ -73,6 +74,10 @@ import java.util.concurrent.atomic.AtomicReference;
 class EnvironmentDaemonGatewayFinalTest {
   private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("env-1");
   private static final EnvironmentName OTHER_ENVIRONMENT_NAME = new EnvironmentName("env-2");
+  private static final EnvironmentBinding ENVIRONMENT =
+      new EnvironmentBinding(ENVIRONMENT_NAME, ".");
+  private static final EnvironmentBinding OTHER_ENVIRONMENT =
+      new EnvironmentBinding(OTHER_ENVIRONMENT_NAME, ".");
   private static final UUID INVOCATION_ID = new UUID(0L, 9001L);
   private static final UUID SECOND_INVOCATION_ID = new UUID(0L, 9002L);
   private static final UUID THREAD_ID = new UUID(0L, 7001L);
@@ -113,7 +118,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
     RecordingListener listener = new RecordingListener();
     ToolExecutionHandle handle =
-        fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+        fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
         messageTypes(connection.envelopes()));
@@ -135,7 +140,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-partial");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
 
     fixture.gateway.receive(connection.connectionId(), partial(2, resultPayload("chunk")));
     assertEquals("chunk", ((TextToolContent) listener.partial.contents().get(0)).text());
@@ -158,7 +163,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-binary");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
 
     String payload =
         resultCodec.encodeCompleted(
@@ -182,7 +187,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-cancel");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     fixture.gateway.receive(
         connection.connectionId(),
         envelope(
@@ -202,7 +207,7 @@ class EnvironmentDaemonGatewayFinalTest {
         RemoteToolUnavailableException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener()));
+                ENVIRONMENT, request(fixture.descriptor), new RecordingListener()));
   }
 
   @Test
@@ -223,7 +228,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
     assertThrows(
         RemoteToolUnavailableException.class,
-        () -> fixture.gateway.invoke(ENVIRONMENT_NAME, request(drifted), new RecordingListener()));
+        () -> fixture.gateway.invoke(ENVIRONMENT, request(drifted), new RecordingListener()));
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
   }
 
@@ -236,13 +241,12 @@ class EnvironmentDaemonGatewayFinalTest {
         ArithmeticException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_NAME,
+                ENVIRONMENT,
                 request(fixture.descriptor, Duration.ofSeconds(Long.MAX_VALUE)),
                 new RecordingListener()));
 
     ToolExecutionHandle handle =
-        fixture.gateway.invoke(
-            ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener());
+        fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), new RecordingListener());
     assertNotNull(handle);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
@@ -256,13 +260,13 @@ class EnvironmentDaemonGatewayFinalTest {
     FakeConnection connection = fixture.connectReady("connection-busy");
     RecordingListener firstListener = new RecordingListener();
     RecordingListener secondListener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), firstListener);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), firstListener);
 
     assertThrows(
         RemoteToolBusyException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_NAME,
+                ENVIRONMENT,
                 request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
                 secondListener));
     assertEquals(
@@ -276,7 +280,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
     ToolExecutionHandle next =
         fixture.gateway.invoke(
-            ENVIRONMENT_NAME,
+            ENVIRONMENT,
             request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
             secondListener);
     assertNotNull(next);
@@ -291,15 +295,14 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-cancel-release");
     ToolExecutionHandle first =
-        fixture.gateway.invoke(
-            ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener());
+        fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), new RecordingListener());
     first.cancel();
 
     assertThrows(
         RemoteToolBusyException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_NAME,
+                ENVIRONMENT,
                 request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
                 new RecordingListener()));
     fixture.gateway.receive(
@@ -313,7 +316,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
     ToolExecutionHandle next =
         fixture.gateway.invoke(
-            ENVIRONMENT_NAME,
+            ENVIRONMENT,
             request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
             new RecordingListener());
     assertNotNull(next);
@@ -331,7 +334,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-drop");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     fixture.gateway.close(connection.connectionId());
     assertTrue(listener.error instanceof RemoteToolSendUncertainException);
     assertNull(listener.completed);
@@ -371,7 +374,7 @@ class EnvironmentDaemonGatewayFinalTest {
             completeSawLockFree.set(true);
           }
         };
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("done")));
     assertTrue(completeSawLockFree.get());
     assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
@@ -385,7 +388,7 @@ class EnvironmentDaemonGatewayFinalTest {
     RecordingListener listener = new RecordingListener();
     assertThrows(
         RemoteToolSendUncertainException.class,
-        () -> fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener));
+        () -> fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener));
     assertNull(listener.error);
     assertNull(listener.completed);
   }
@@ -402,7 +405,7 @@ class EnvironmentDaemonGatewayFinalTest {
         RemoteToolSendUncertainException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener()));
+                ENVIRONMENT, request(fixture.descriptor), new RecordingListener()));
     assertTrue(connection.closed);
     assertFalse(
         fixture.environmentRegistry.isReady(
@@ -416,7 +419,7 @@ class EnvironmentDaemonGatewayFinalTest {
     FakeConnection connection = fixture.connectReady("connection-cancel-idempotent");
     RecordingListener listener = new RecordingListener();
     ToolExecutionHandle handle =
-        fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+        fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     handle.cancel();
     handle.cancel();
     long cancelCount =
@@ -541,7 +544,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection first = fixture.connectReady("connection-lease-expired");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     CompletableFuture<EnvironmentSkillLoadResult> pendingSkill =
         fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofSeconds(5));
     assertEquals(
@@ -573,7 +576,7 @@ class EnvironmentDaemonGatewayFinalTest {
         fixture.environmentRegistry.isReady(
             ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
     RecordingListener secondListener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), secondListener);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), secondListener);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
         messageTypes(second.envelopes()));
@@ -650,7 +653,7 @@ class EnvironmentDaemonGatewayFinalTest {
         RemoteToolUnavailableException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener()));
+                ENVIRONMENT, request(fixture.descriptor), new RecordingListener()));
     assertFalse(
         fixture.environmentRegistry.isReady(
             ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
@@ -705,8 +708,8 @@ class EnvironmentDaemonGatewayFinalTest {
     RecordingListener listenerA = new RecordingListener();
     RecordingListener listenerB = new RecordingListener();
     // A 尚未 terminal 时 B 仍可发送 INVOKE，证明 active 槽位按 Environment 隔离。
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listenerA);
-    fixture.gateway.invoke(OTHER_ENVIRONMENT_NAME, request(fixture.descriptor), listenerB);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listenerA);
+    fixture.gateway.invoke(OTHER_ENVIRONMENT, request(fixture.descriptor), listenerB);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
         messageTypes(connectionA.envelopes()));
@@ -794,7 +797,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-dir-parallel");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
 
     CompletableFuture<EnvironmentDirectoryListResult> future =
         fixture.gateway.listDirectory(ENVIRONMENT_NAME, ".", Duration.ofSeconds(5));
@@ -822,7 +825,7 @@ class EnvironmentDaemonGatewayFinalTest {
         RemoteToolBusyException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_NAME,
+                ENVIRONMENT,
                 request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
                 new RecordingListener()));
   }

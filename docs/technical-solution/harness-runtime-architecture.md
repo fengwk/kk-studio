@@ -68,7 +68,7 @@ TURN_END
 
 ```java
 public record BranchSettings(
-    EnvironmentName environmentName, // canonical 路由名称，null 表示未选择
+    EnvironmentBinding environment, // 完整 binding{name, workspacePath}，null 表示未选择
     String agentName,
     ModelSelection model,          // providerName/modelName/variant
     List<String> activeTools) {}

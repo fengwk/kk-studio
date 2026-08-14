@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -29,7 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -47,7 +48,7 @@ class ModelAttemptMaterializationTest {
   private static final Instant T3 = T0.plusSeconds(3);
   private static final Instant T4 = T0.plusSeconds(4);
   private static final Instant T6 = T0.plusSeconds(6);
-  private static final EnvironmentName ENVIRONMENT = new EnvironmentName("env-1");
+  private static final EnvironmentBinding ENVIRONMENT = EnvironmentBindings.binding("env-1");
   private static final BranchSettings SETTINGS =
       new BranchSettings(
           ENVIRONMENT, "agent", new ModelSelection("provider", "model", "v1"), List.of());

@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
@@ -187,8 +188,13 @@ public class StudioCanvasController {
     if (settings.getModel() == null) {
       throw new IllegalArgumentException("branchSettings.model is required");
     }
+    if (settings.getEnvironment() == null) {
+      throw new IllegalArgumentException("branchSettings.environment is required");
+    }
     return new BranchSettings(
-        new EnvironmentName(settings.getEnvironmentName()),
+        new EnvironmentBinding(
+            new EnvironmentName(settings.getEnvironment().getName()),
+            settings.getEnvironment().getWorkspacePath()),
         settings.getAgentName(),
         new ModelSelection(
             settings.getModel().getProviderName(),

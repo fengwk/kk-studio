@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -14,7 +15,7 @@ import java.util.Set;
 /** invocation.tool 包共享的测试 fixture。 */
 final class ToolInvocationTestData {
 
-  static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
+  static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
   static final String CALL_ID = "call-1";
 
   private ToolInvocationTestData() {}

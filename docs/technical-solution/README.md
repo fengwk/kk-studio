@@ -62,7 +62,7 @@ flowchart TD
 - Tool terminal success 的 `effects` 与 `SUCCEEDED` 同行原子持久化且 terminal immutable；唯一 `ToolOutcomeAppender` 按 `CUSTOM effects -> Tool Result` 顺序推进 Entry/head。
 - 普通 Model 的 `TRANSIENT` retry 把已展示的 text/thinking、错误与 retry 时间追加到 Invocation `failedAttempts`；active snapshot 通过 `modelAttemptFailures` 暴露，终态/Stop 时按 attempt 顺序物化为 `MODEL_ATTEMPT_FAILURE` 后再写 Assistant 结果。失败 attempt 与 `ASSISTANT_ERROR` 的 partial/error 只用于 UI/audit，绝不进入立即 retry 或后续 turn 的 Provider Context。
 - Durable compaction 复用 MODEL Work 与现有 processor：阈值或一次 overflow recovery 启动 `TURN_START(COMPACTION) -> COMPACTION -> TURN_END`；split turn 使用 HISTORY/TURN_PREFIX，内部 turn 不进入后续 Provider Context 或前端 transcript。
-- Environment 以 canonical bounded 小写 `environmentName` 作为唯一动态路由身份，不持久化独立环境资源；daemon wire 是 v2。
+- Environment 以 canonical bounded 小写 `environmentName` 作为唯一动态路由身份，不持久化独立环境资源；分支快照冻结完整 `EnvironmentBinding{name, workspacePath}`（workspace path 为 Environment Root 下 canonical 相对 wire 路径，`'.'` 表示 root）；daemon wire 是 v3。
 - Resource 安全边界：Tool 边界的 URI 只属于瞬时 `ResourceRef`；写入 Entry 前统一摄入全局 Blob，durable message 只保存 `resource(blobId,name,preview)`。前端通过 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 在渲染期获取短期 URL，并以原件响应的权威 `mediaType/sizeBytes` 分类；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation `file:`、`s3:` 引用兼容。
 
 ## 维护规则

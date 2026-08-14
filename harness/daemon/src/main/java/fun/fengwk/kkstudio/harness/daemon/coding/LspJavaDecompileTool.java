@@ -22,7 +22,9 @@ public final class LspJavaDecompileTool extends AbstractCodingTool {
   ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     Path path =
-        boundary.existing(string(args, "path"), boundary.workdir(optionalString(args, "workdir")));
+        boundary.existing(
+            string(args, "path"),
+            boundary.workdir(optionalString(args, "workdir"), request.workdir()));
     String target = string(args, "target");
     if (target.isBlank()) {
       throw new IllegalArgumentException("target must not be blank");

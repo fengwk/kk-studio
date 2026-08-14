@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.ACK;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.CANCELLED;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.COMPLETED;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.DIRECTORY_LISTED;
+import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.ERROR;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.HELLO;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.PARTIAL;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.READY;
@@ -344,6 +345,131 @@ class DaemonRuntimeTest {
     List<DaemonEnvelope> messages = transport.takeMessages(2);
     assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
     assertTrue(messages.get(1).payloadJson().contains("unknown environment tool"));
+  }
+
+  /** workspacePath 是必填 wire 字段：缺失/非文本/未知字段在协议边界拒绝，不触达 Tool SPI。 */
+  @Test
+  void rejectsMissingOrUnknownInvokeWorkspaceFieldsBeforeSideEffects() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+
+    transport.receiveRaw(
+        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
+            + "\"toolVersion\":\"1.0.0\",\"arguments\":{},\"timeoutMillis\":100}}");
+    assertMessageTypes(transport.takeMessages(1), ERROR);
+
+    transport.receiveRaw(
+        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{\"toolName\":\"test\","
+            + "\"toolVersion\":\"1.0.0\",\"workspacePath\":1,\"arguments\":{},\"timeoutMillis\":100}}");
+    assertMessageTypes(transport.takeMessages(1), ERROR);
+
+    transport.receiveRaw(
+        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":3,\"payload\":{\"toolName\":\"test\","
+            + "\"toolVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100,"
+            + "\"extra\":true}}");
+    assertMessageTypes(transport.takeMessages(1), ERROR);
+    assertEquals(0, tool.executions.get());
+
+    transport.receive(invoke("valid-after-rejected-workspace", 1));
+    transport.takeMessages(2);
+    assertEquals(1, tool.executions.get());
+  }
+
+  /** workspace 必须在 Environment Root 内 canonicalize 为现存目录：形状非法/删除/非目录/symlink 越界都收敛为 FAILED。 */
+  @Test
+  void rejectsWorkspaceThatCannotResolveToDirectoryInsideRoot() throws Exception {
+    Path root = Files.createTempDirectory("daemon-workspace-root");
+    try {
+      Path nested = Files.createDirectories(root.resolve("projects").resolve("web"));
+      Files.writeString(root.resolve("file.txt"), "x");
+      Path outside = Files.createTempDirectory("daemon-workspace-outside");
+      Path escaping = Files.createSymbolicLink(root.resolve("escape"), outside);
+
+      FakeTransport transport = new FakeTransport();
+      TestTool tool = new TestTool();
+      runtime = runtime(transport, tool, root);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      // root 与 nested 现存目录都成功启动，并把 canonical 目录作为 invocation workdir。
+      transport.receive(invokeWithWorkspace("workspace-root", 1, "test", "1.0.0", 100, "."));
+      List<DaemonEnvelope> started = transport.takeMessages(2);
+      assertMessageTypes(started, ACK, STARTED);
+      assertEquals(root.toRealPath(), tool.request.workdir());
+      tool.complete(new ToolResult("workspace-root", List.of(), false, "{}", false));
+      transport.takeMessages(1);
+
+      transport.receive(
+          invokeWithWorkspace("workspace-nested", 2, "test", "1.0.0", 100, "projects/web"));
+      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+      assertEquals(nested.toRealPath(), tool.request.workdir());
+      tool.complete(new ToolResult("workspace-nested", List.of(), false, "{}", false));
+      transport.takeMessages(1);
+
+      // 形状非法（非空但非 canonical）在 workspace canonicalize 层收敛为 FAILED。
+      String[] invalidShapes = {"/abs", "C:\\x", "a\\b", "a/../b", "a\u0007b"};
+      for (int index = 0; index < invalidShapes.length; index++) {
+        transport.receive(
+            invokeWithWorkspace(
+                "invalid-shape-" + index, 3 + index, "test", "1.0.0", 100, invalidShapes[index]));
+        List<DaemonEnvelope> messages = transport.takeMessages(2);
+        assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
+        String payload = messages.get(1).payloadJson();
+        assertTrue(payload.contains("path"), payload);
+      }
+
+      // 空 / 空白 workspacePath 在协议边界（必填非空文本）被拒绝为 ERROR。
+      String[] blankWorkspaces = {"", " "};
+      for (int index = 0; index < blankWorkspaces.length; index++) {
+        transport.receive(
+            invokeWithWorkspace(
+                "blank-workspace-" + index,
+                8 + index,
+                "test",
+                "1.0.0",
+                100,
+                blankWorkspaces[index]));
+        assertMessageTypes(transport.takeMessages(1), ERROR);
+      }
+
+      // 路径删除 / 非目录 / symlink 越界同样是确定性 FAILED，并按原因给出可诊断消息。
+      String[] invalidResolutions = {"deleted", "file.txt", "escape"};
+      String[] expectedMessages = {
+        "does not resolve to an existing directory",
+        "is not a directory",
+        "escapes environment root"
+      };
+      for (int index = 0; index < invalidResolutions.length; index++) {
+        transport.receive(
+            invokeWithWorkspace(
+                "invalid-resolution-" + index,
+                8 + index,
+                "test",
+                "1.0.0",
+                100,
+                invalidResolutions[index]));
+        List<DaemonEnvelope> messages = transport.takeMessages(2);
+        assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
+        assertTrue(
+            messages.get(1).payloadJson().contains(expectedMessages[index]),
+            messages.get(1).payloadJson());
+      }
+      assertEquals(2, tool.executions.get());
+    } finally {
+      deleteRecursively(root);
+    }
   }
 
   /** 引用错误的 Environment 逻辑名称或非法 INVOKE payload 必须得到明确 ERROR 响应。 */
@@ -1747,9 +1873,37 @@ class DaemonRuntimeTest {
             + toolName
             + "\",\"toolVersion\":\""
             + toolVersion
+            + "\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":"
+            + timeoutMillis
+            + "}");
+  }
+
+  private DaemonEnvelope invokeWithWorkspace(
+      String invocationId,
+      long sequence,
+      String toolName,
+      String toolVersion,
+      long timeoutMillis,
+      String workspacePath) {
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION_3,
+        DaemonMessageType.INVOKE,
+        ENVIRONMENT_NAME,
+        invocationId,
+        sequence,
+        "{\"toolName\":\""
+            + toolName
+            + "\",\"toolVersion\":\""
+            + toolVersion
+            + "\",\"workspacePath\":\""
+            + jsonEscape(workspacePath)
             + "\",\"arguments\":{},\"timeoutMillis\":"
             + timeoutMillis
             + "}");
+  }
+
+  private static String jsonEscape(String value) {
+    return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\u0007", "\\u0007");
   }
 
   private DaemonEnvelope invokeWithoutTimeout(
@@ -1764,7 +1918,7 @@ class DaemonRuntimeTest {
             + toolName
             + "\",\"toolVersion\":\""
             + toolVersion
-            + "\",\"arguments\":{}}");
+            + "\",\"workspacePath\":\".\",\"arguments\":{}}");
   }
 
   private DaemonEnvelope listDirectory(long sequence, String path) {

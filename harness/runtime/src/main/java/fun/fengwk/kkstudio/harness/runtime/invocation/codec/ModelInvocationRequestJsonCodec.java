@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +33,7 @@ public final class ModelInvocationRequestJsonCodec {
   public ObjectNode encodeNode(ModelInvocationRequest request) {
     Objects.requireNonNull(request, "request");
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
-    InvocationJsonSupport.putNullable(node, "environmentName", request.environmentName());
+    InvocationJsonSupport.putNullable(node, "environment", request.environment());
     node.set("providerRequest", PROVIDER_CODEC.encodeNode(request.providerRequest()));
     ArrayNode tools = node.putArray("toolBindings");
     for (ToolBinding binding : request.toolBindings()) {
@@ -66,7 +66,7 @@ public final class ModelInvocationRequestJsonCodec {
     InvocationJsonSupport.requireFields(
         node,
         CONTEXT,
-        "environmentName",
+        "environment",
         "providerRequest",
         "toolBindings",
         "skillBindings",
@@ -74,8 +74,8 @@ public final class ModelInvocationRequestJsonCodec {
         "yoloEnabled",
         "contextWindow",
         "compaction");
-    EnvironmentName environmentName =
-        InvocationJsonSupport.nullableEnvironmentName(node, "environmentName", CONTEXT);
+    EnvironmentBinding environment =
+        InvocationJsonSupport.nullableEnvironmentBinding(node, "environment", CONTEXT);
     ProviderRequest providerRequest =
         PROVIDER_CODEC.decodeNode(InvocationJsonSupport.required(node, "providerRequest", CONTEXT));
     ArrayNode toolNodes =
@@ -105,7 +105,7 @@ public final class ModelInvocationRequestJsonCodec {
     CompactionRequest compaction =
         compactionNode.isNull() ? null : decodeCompaction(compactionNode);
     return new ModelInvocationRequest(
-        environmentName,
+        environment,
         providerRequest,
         toolBindings,
         skillBindings,
@@ -155,19 +155,19 @@ public final class ModelInvocationRequestJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.put("name", skill.name());
     node.put("description", skill.description());
-    InvocationJsonSupport.putNullable(node, "sourceEnvironmentName", skill.sourceEnvironmentName());
+    InvocationJsonSupport.putNullable(node, "sourceEnvironment", skill.sourceEnvironment());
     return node;
   }
 
   private static SkillBinding decodeSkill(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, "skillBinding");
     InvocationJsonSupport.requireFields(
-        node, "skillBinding", "name", "description", "sourceEnvironmentName");
+        node, "skillBinding", "name", "description", "sourceEnvironment");
     return new SkillBinding(
         InvocationJsonSupport.text(node, "name", "skillBinding"),
         InvocationJsonSupport.text(node, "description", "skillBinding"),
-        InvocationJsonSupport.nullableEnvironmentName(
-            node, "sourceEnvironmentName", "skillBinding"));
+        InvocationJsonSupport.nullableEnvironmentBinding(
+            node, "sourceEnvironment", "skillBinding"));
   }
 
   private static ObjectNode encodeSubagent(SubagentBinding subagent) {

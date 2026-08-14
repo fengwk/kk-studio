@@ -14,9 +14,9 @@ import java.util.Objects;
  * Resolved 请求与 candidate branch 事实的机械一致性校验（Harness 边界）。
  *
  * <p>Resolver 返回的 {@link ModelInvocationRequest} 中可以直接对照 candidate {@link TurnPlan#candidatePath()}
- * 最新 {@link BranchSettings} 的字段只有：{@code yoloEnabled}、route （{@code
- * environmentName}）、provider/model/variant 选择与有序 tool bindings（request 构造器已保证 provider tools 与
- * bindings 一一对应，只需对照名称序列）。agentName 在 request 中没有直接的 canonical 字段，不做校验。
+ * 最新 {@link BranchSettings} 的字段只有：{@code yoloEnabled}、完整 Environment binding （{@code
+ * environment}）、provider/model/variant 选择与有序 tool bindings（request 构造器已保证 provider tools 与 bindings
+ * 一一对应，只需对照名称序列）。agentName 在 request 中没有直接的 canonical 字段，不做校验。
  *
  * <p>压缩 turn（{@code plan.preparation()} 非空）必须携带与 preparation 逐字段一致的 {@link CompactionRequest}
  * 元数据与相同 {@code contextWindow}，且 tool/skill binding 必须为空（正常 turn 的 tool 名称序列校验不适用于压缩请求）； 正常 turn
@@ -40,12 +40,12 @@ final class ResolvedRequestValidator {
               + " does not match candidate branch yoloEnabled="
               + plan.finalYoloEnabled());
     }
-    if (!Objects.equals(request.environmentName(), settings.environmentName())) {
+    if (!Objects.equals(request.environment(), settings.environment())) {
       throw new IllegalStateException(
-          "resolved request environmentName="
-              + request.environmentName()
-              + " does not match candidate branch environmentName="
-              + settings.environmentName());
+          "resolved request environment="
+              + request.environment()
+              + " does not match candidate branch environment="
+              + settings.environment());
     }
     if (!request.providerRequest().model().providerName().equals(settings.model().providerName())
         || !request.providerRequest().model().modelName().equals(settings.model().modelName())) {

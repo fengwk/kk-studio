@@ -9,24 +9,27 @@ import java.util.Objects;
 /**
  * 为每个面向文件系统的 tool 强制执行 Daemon environment root 边界。
  *
+ * <p>只持有 canonical environment root；每次 invocation 的默认 workdir（workspace 目录）由 Daemon 写入 {@code
+ * ToolExecutionRequest.workdir}，各 tool 以此为缺省基准：未提供 {@code workdir} 时使用 invocation workspace，相对值以
+ * invocation workspace 为基准，absolute 值允许但必须 canonical 在 root 内。
+ *
  * <p>Platform permission 负责授权命令；它绝不会放宽本地的路径与 symlink 边界。
  */
 public final class EnvironmentPathBoundary {
 
   private final Path environmentRoot;
-  private final Path defaultWorkdir;
 
   public EnvironmentPathBoundary(CodingToolsConfig config) {
     this.environmentRoot = config.environmentRoot();
-    this.defaultWorkdir = config.defaultWorkdir();
   }
 
-  /** 解析并 canonicalize environment root 内已存在的 work directory。 */
-  public Path workdir(String rawWorkdir) {
+  /** 解析 invocation workspace 内已存在的 work directory：缺省使用 invocation workspace，相对值以其为基准。 */
+  public Path workdir(String rawWorkdir, Path invocationWorkdir) {
+    Path base = requireWorkdir(invocationWorkdir);
     if (rawWorkdir == null || rawWorkdir.isBlank()) {
-      return defaultWorkdir;
+      return base;
     }
-    Path candidate = resolve(rawWorkdir, defaultWorkdir, "workdir");
+    Path candidate = resolve(rawWorkdir, base, "workdir");
     if (!Files.isDirectory(candidate)) {
       throw new IllegalArgumentException(
           "workdir must be an existing directory: " + display(rawWorkdir));

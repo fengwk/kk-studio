@@ -75,10 +75,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * workdir/environmentRoot 评估冻结的 call/binding，YOLO 在加载 settings / evaluator 之前直接返回 Allow；绝不改写
  * binding/arguments。{@link #start} 按冻结 binding 的 {@link ToolType} 路由：PLATFORM 走 {@link
  * ToolFactories} 精确 name/version + descriptor equality 后提交注入的 {@link ExecutorService}
- * 执行；ENVIRONMENT 只按 {@code binding.environmentName()} 经 {@link RemoteToolTransport} 发送。missing
- * capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active remote
- * invocation 映射 Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定 /
- * 提交结果不确定映射 Indeterminate。
+ * 执行；ENVIRONMENT 只按冻结的完整 binding 经 {@link RemoteToolTransport} 发送。missing capability /
+ * 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active remote invocation 映射
+ * Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定 / 提交结果不确定映射
+ * Indeterminate。
  *
  * <p>回调桥（{@link GatedToolExecutionListener}）：两阶段激活——{@code start()} 绝不打开回调 gate（Tool 的同步回调只进缓冲），
  * {@link ToolGateway.Handle#activate()} 由 Processor 在 attach + durable markRunning 后调用，直接打开 gate +
@@ -490,20 +490,21 @@ public final class CoreToolGateway implements ToolGateway {
   }
 
   /**
-   * ENVIRONMENT：只按冻结 {@code binding.environmentName()} 路由。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未
-   * READY、心跳过期）都是确定性 Rejected；同 Environment 的瞬时容量冲突是 Busy；发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
+   * ENVIRONMENT：只按冻结的完整 binding 路由（transport 使用 {@code binding.environmentName()} 查找连接，并携带 {@code
+   * workspacePath}）。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未 READY、心跳过期）都是确定性 Rejected；同 Environment
+   * 的瞬时容量冲突是 Busy；发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
    */
   private StartResult startEnvironment(Execution execution, Listener listener) {
     ToolDescriptor bindingDescriptor = execution.request().binding().descriptor();
-    if (execution.request().binding().environmentName() == null) {
-      // 冻结 binding 没有 Environment route（分支最新 settings 未选中/被清空）：发送前确定性拒绝，
-      // 绝不进入 transport（否则 null route 会变成不确定结果）。
+    if (execution.request().binding().environment() == null) {
+      // 冻结 binding 没有 Environment（分支最新 settings 未选中/被清空）：发送前确定性拒绝，
+      // 绝不进入 transport（否则 null binding 会变成不确定结果）。
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               UNAVAILABLE_KIND,
               "Environment tool "
                   + bindingDescriptor.name()
-                  + " has no environment route (the branch has no selected environment)."));
+                  + " has no environment binding (the branch has no selected environment)."));
     }
     Optional<ToolDescriptor> capability =
         EnvironmentToolCatalog.find(bindingDescriptor.name(), bindingDescriptor.version());
@@ -536,7 +537,7 @@ public final class CoreToolGateway implements ToolGateway {
     ToolExecutionHandle transportHandle;
     try {
       transportHandle =
-          remoteTransport.invoke(execution.request().binding().environmentName(), request, bridge);
+          remoteTransport.invoke(execution.request().binding().environment(), request, bridge);
     } catch (RemoteToolBusyException busy) {
       // 同 Environment 已有 active remote invocation：INVOKE 肯定未发送，由 Harness 按固定延迟重新 admission，
       // 不创建 durable error。

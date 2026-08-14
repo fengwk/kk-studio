@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
@@ -32,7 +32,7 @@ public final class ToolBindingJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.set("descriptor", DESCRIPTOR_CODEC.encodeNode(binding.descriptor()));
     node.put("type", binding.type().name());
-    InvocationJsonSupport.putNullable(node, "environmentName", binding.environmentName());
+    InvocationJsonSupport.putNullable(node, "environment", binding.environment());
     if (binding.plugin() == null) {
       node.putNull("plugin");
     } else {
@@ -48,15 +48,15 @@ public final class ToolBindingJsonCodec {
   public ToolBinding decodeNode(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
     InvocationJsonSupport.requireFields(
-        node, CONTEXT, "descriptor", "type", "environmentName", "plugin");
+        node, CONTEXT, "descriptor", "type", "environment", "plugin");
     ToolDescriptor descriptor =
         DESCRIPTOR_CODEC.decodeNode(InvocationJsonSupport.required(node, "descriptor", CONTEXT));
     ToolType type = InvocationJsonSupport.requiredEnum(node, "type", ToolType.class, CONTEXT);
-    EnvironmentName environmentName =
-        InvocationJsonSupport.nullableEnvironmentName(node, "environmentName", CONTEXT);
+    EnvironmentBinding environment =
+        InvocationJsonSupport.nullableEnvironmentBinding(node, "environment", CONTEXT);
     PluginToolBinding plugin =
         decodeNullablePlugin(InvocationJsonSupport.declared(node, "plugin", CONTEXT));
-    return new ToolBinding(descriptor, type, environmentName, plugin);
+    return new ToolBinding(descriptor, type, environment, plugin);
   }
 
   private static ObjectNode encodePlugin(PluginToolBinding plugin) {

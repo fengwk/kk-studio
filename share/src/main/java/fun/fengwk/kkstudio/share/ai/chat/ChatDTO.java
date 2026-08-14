@@ -1,7 +1,10 @@
 package fun.fengwk.kkstudio.share.ai.chat;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+
+import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 
 import java.time.Instant;
 
@@ -19,11 +22,11 @@ public class ChatDTO {
   private String agentName;
 
   /**
-   * 可空的默认分支 Environment 逻辑路由名称（canonical bounded 小写名称）；null 表示无默认环境（{@code @JsonInclude(ALWAYS)} 保证
-   * null 显式序列化，前端/契约可区分缺省与显式 null）。
+   * 可空的默认分支完整 Environment binding（canonical 路由名称 + workspace path）；null 表示无默认环境
+   * （{@code @JsonInclude(ALWAYS)} 保证 null 显式序列化，前端/契约可区分缺省与显式 null）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentName;
+  private EnvironmentBindingDTO environment;
 
   /** 可见的发送权限模式。 */
   private boolean yoloEnabled;
@@ -36,4 +39,9 @@ public class ChatDTO {
 
   /** 更新时间（UTC Instant，单调不减）。 */
   private Instant updateTime;
+
+  @JsonAnySetter
+  public void rejectUnknownField(String name, Object value) {
+    throw new IllegalArgumentException("unknown chat field: " + name);
+  }
 }

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -21,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -128,7 +128,7 @@ class HistoryEntryPayloadJsonCodecTest {
   @Test
   void encodesCanonicalFieldOrder() {
     assertEquals(
-        "{\"settings\":{\"environmentName\":null,\"agentName\":\"coding\",\"model\":{"
+        "{\"settings\":{\"environment\":null,\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"},"
             + "\"activeTools\":[\"read\",\"grep\"]},"
             + "\"subagentContext\":null}",
@@ -367,10 +367,10 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.ROOT,
-                "{\"settings\":{\"environmentName\":null,\"agentName\":\"a\",\"model\":{"
+                "{\"settings\":{\"environment\":null,\"agentName\":\"a\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"activeTools\":[]},"
-                    + "\"settings\":{\"environmentName\":null,\"agentName\":\"b\",\"model\":{"
+                    + "\"settings\":{\"environment\":null,\"agentName\":\"b\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"activeTools\":[]}}"));
     assertThrows(
@@ -391,7 +391,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":5,\"settings\":{\"environmentName\":null,\"agentName\":\"a\","
+                "{\"reason\":5,\"settings\":{\"environment\":null,\"agentName\":\"a\","
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"activeTools\":[]}}"));
     assertThrows(
@@ -399,7 +399,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":null,\"agentName\":\"a\","
+                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"a\","
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"activeTools\":{}}}"));
     assertThrows(
@@ -407,14 +407,14 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":null,\"agentName\":\"a\","
+                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"a\","
                     + "\"model\":[\"p\"],\"activeTools\":[]}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":null,\"agentName\":5,"
+                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":5,"
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"activeTools\":[]}}"));
     assertThrows(
@@ -422,7 +422,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":null,\"agentName\":\"a\","
+                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"a\","
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"activeTools\":[5]}}"));
     assertThrows(
@@ -430,7 +430,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":\"Not-A-Name\","
+                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":{\"name\":\"Not-A-Name\",\"workspacePath\":\".\"},"
                     + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\","
                     + "\"variant\":\"v\"},\"activeTools\":[]}}"));
     assertThrows(
@@ -438,7 +438,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":5,"
+                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":5,"
                     + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"activeTools\":[]}}"));
     assertThrows(
@@ -446,7 +446,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":null,\"agentName\":\" \","
+                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\" \","
                     + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"activeTools\":[]}}"));
     assertThrows(
@@ -869,7 +869,7 @@ class HistoryEntryPayloadJsonCodecTest {
 
   private static String rootSettingsWith(String reasonField) {
     return reasonField
-        + "\"settings\":{\"environmentName\":null,\"agentName\":\"a\","
+        + "\"settings\":{\"environment\":null,\"agentName\":\"a\","
         + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
         + "\"activeTools\":[]}}";
   }
@@ -915,7 +915,7 @@ class HistoryEntryPayloadJsonCodecTest {
 
   private static BranchSettings settings(String environmentName) {
     return new BranchSettings(
-        environmentName == null ? null : new EnvironmentName(environmentName),
+        environmentName == null ? null : EnvironmentBindings.binding(environmentName),
         "coding",
         new ModelSelection("anthropic", "claude-sonnet", "default"),
         List.of("read", "grep"));

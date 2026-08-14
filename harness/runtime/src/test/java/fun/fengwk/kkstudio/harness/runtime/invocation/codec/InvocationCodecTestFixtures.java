@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -10,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
@@ -27,10 +28,10 @@ import java.util.Set;
 /** 严格 Invocation codec 测试间共享的小型完整测试值。 */
 final class InvocationCodecTestFixtures {
 
-  static final EnvironmentName ENVIRONMENT_ID =
-      new EnvironmentName("123e4567-e89b-12d3-a456-426614174000");
-  static final EnvironmentName OTHER_ENVIRONMENT_ID =
-      new EnvironmentName("123e4567-e89b-12d3-a456-426614174001");
+  static final EnvironmentBinding ENVIRONMENT_ID =
+      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174000");
+  static final EnvironmentBinding OTHER_ENVIRONMENT_ID =
+      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174001");
 
   private static final ToolDescriptorJsonCodec TOOL_DESCRIPTOR_CODEC =
       new ToolDescriptorJsonCodec();

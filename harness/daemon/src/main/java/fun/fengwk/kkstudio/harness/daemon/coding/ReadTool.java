@@ -28,7 +28,9 @@ public final class ReadTool extends AbstractCodingTool {
   ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
-    Path path = boundary.existing(rawPath, boundary.workdir(optionalString(args, "workdir")));
+    Path path =
+        boundary.existing(
+            rawPath, boundary.workdir(optionalString(args, "workdir"), request.workdir()));
     if (Files.isDirectory(path)) {
       List<String> names;
       try (var entries = Files.list(path)) {

@@ -43,8 +43,10 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJs
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
@@ -172,8 +174,7 @@ public final class HarnessRuntimeWebMapper {
   public static HarnessBranchSettingsDTO toBranchSettingsDto(BranchSettings settings) {
     Objects.requireNonNull(settings, "settings");
     HarnessBranchSettingsDTO dto = new HarnessBranchSettingsDTO();
-    dto.setEnvironmentName(
-        settings.environmentName() == null ? null : settings.environmentName().value());
+    dto.setEnvironment(toEnvironmentBindingDto(settings.environment()));
     dto.setAgentName(settings.agentName());
     dto.setModel(toModelSelectionDto(settings.model()));
     dto.setActiveTools(List.copyOf(settings.activeTools()));
@@ -258,8 +259,7 @@ public final class HarnessRuntimeWebMapper {
     dto.setToolVersion(binding.descriptor().version());
     dto.setRendererKey(binding.descriptor().rendererKey());
     dto.setToolType(binding.type().name());
-    dto.setEnvironmentName(
-        binding.environmentName() == null ? null : binding.environmentName().value());
+    dto.setEnvironment(toEnvironmentBindingDto(binding.environment()));
     dto.setArgumentsJson(invocation.request().call().argumentsJson());
     dto.setApprovalJson(
         invocation.approval() == null ? null : TOOL_APPROVALS.encode(invocation.approval()));
@@ -358,7 +358,7 @@ public final class HarnessRuntimeWebMapper {
   public static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
     return new BranchSettings(
-        toEnvironmentName(dto.getEnvironmentName()),
+        toEnvironmentBinding(dto.getEnvironment()),
         requireText(dto.getAgentName(), "branchSettings.agentName"),
         toModelSelection(dto.getModel()),
         requireList(dto.getActiveTools(), "branchSettings.activeTools"));
@@ -451,13 +451,13 @@ public final class HarnessRuntimeWebMapper {
             "model",
             "activeTools",
             "yoloEnabled",
-            "environmentName");
+            "environment");
         yield new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
       }
       case CUSTOM_MESSAGE -> {
         requireForbidden(
-            dto, "contents", "agentName", "model", "activeTools", "yoloEnabled", "environmentName");
+            dto, "contents", "agentName", "model", "activeTools", "yoloEnabled", "environment");
         AgentMessageRole role = requireRole(dto.getRole());
         yield new CustomMessageCommandPayload(
             new AgentMessage(
@@ -472,7 +472,7 @@ public final class HarnessRuntimeWebMapper {
             "model",
             "activeTools",
             "yoloEnabled",
-            "environmentName");
+            "environment");
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
       case SET_MODEL -> {
@@ -484,37 +484,23 @@ public final class HarnessRuntimeWebMapper {
             "agentName",
             "activeTools",
             "yoloEnabled",
-            "environmentName");
+            "environment");
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
       }
       case SET_ACTIVE_TOOLS -> {
         requireForbidden(
-            dto,
-            "content",
-            "contents",
-            "role",
-            "agentName",
-            "model",
-            "yoloEnabled",
-            "environmentName");
+            dto, "content", "contents", "role", "agentName", "model", "yoloEnabled", "environment");
         yield new SetActiveToolsCommandPayload(requireList(dto.getActiveTools(), "activeTools"));
       }
       case SET_YOLO -> {
         requireForbidden(
-            dto,
-            "content",
-            "contents",
-            "role",
-            "agentName",
-            "model",
-            "activeTools",
-            "environmentName");
+            dto, "content", "contents", "role", "agentName", "model", "activeTools", "environment");
         yield new SetYoloCommandPayload(requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
       }
       case SET_ENVIRONMENT -> {
         requireForbidden(
             dto, "content", "contents", "role", "agentName", "model", "activeTools", "yoloEnabled");
-        yield new SetEnvironmentCommandPayload(toEnvironmentName(dto.getEnvironmentName()));
+        yield new SetEnvironmentCommandPayload(toEnvironmentBinding(dto.getEnvironment()));
       }
     };
   }
@@ -619,7 +605,7 @@ public final class HarnessRuntimeWebMapper {
             case "model" -> dto.getModel();
             case "activeTools" -> dto.getActiveTools();
             case "yoloEnabled" -> dto.getYoloEnabled();
-            case "environmentName" -> dto.getEnvironmentName();
+            case "environment" -> dto.getEnvironment();
             default -> throw new IllegalArgumentException("unknown field: " + field);
           };
       if (value != null) {
@@ -669,8 +655,21 @@ public final class HarnessRuntimeWebMapper {
         "TOOL_ACTIVE context must contain at least one non-terminal tool invocation");
   }
 
-  private static EnvironmentName toEnvironmentName(String value) {
-    return value == null ? null : new EnvironmentName(value);
+  private static EnvironmentBinding toEnvironmentBinding(EnvironmentBindingDTO dto) {
+    if (dto == null) {
+      return null;
+    }
+    return new EnvironmentBinding(new EnvironmentName(dto.getName()), dto.getWorkspacePath());
+  }
+
+  private static EnvironmentBindingDTO toEnvironmentBindingDto(EnvironmentBinding binding) {
+    if (binding == null) {
+      return null;
+    }
+    EnvironmentBindingDTO dto = new EnvironmentBindingDTO();
+    dto.setName(binding.environmentName().value());
+    dto.setWorkspacePath(binding.workspacePath());
+    return dto;
   }
 
   private static String requireText(String value, String field) {

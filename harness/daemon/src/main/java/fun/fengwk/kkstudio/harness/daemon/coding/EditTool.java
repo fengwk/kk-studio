@@ -31,7 +31,9 @@ public final class EditTool extends AbstractCodingTool {
     if (oldText.isEmpty()) {
       throw new IllegalArgumentException("old_string must not be empty");
     }
-    Path path = boundary.existing(rawPath, boundary.workdir(optionalString(args, "workdir")));
+    Path path =
+        boundary.existing(
+            rawPath, boundary.workdir(optionalString(args, "workdir"), request.workdir()));
     if (Files.isDirectory(path)) {
       throw new IllegalArgumentException("path must be a file: " + rawPath);
     }

@@ -100,7 +100,7 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 
 | 事实 | 当前职责 |
 | --- | --- |
-| Chat | 保存 `agentName`、可空默认 `environmentName`、`yoloEnabled` 三个可见发送设置，以及标题、版本和时间 |
+| Chat | 保存 `agentName`、可空默认 `EnvironmentBinding{name, workspacePath}`、`yoloEnabled` 三个可见发送设置，以及标题、版本和时间 |
 | Pane | 浏览器 `localStorage` 中的八个固定槽位、布局、焦点和每个槽位的 `threadId` |
 | Session | 一棵 append-only Entry Tree 的边界；由 Chat-scoped Thread 创建事务产生 |
 | Entry | 对话与运行审计事实，只允许十种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |

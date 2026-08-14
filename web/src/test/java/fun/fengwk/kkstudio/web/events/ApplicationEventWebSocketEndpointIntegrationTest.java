@@ -105,7 +105,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     String chatId = MAPPER.readTree(chatResponse.body()).path("data").path("id").asText();
 
     String createBody =
-        "{\"branchSettings\":{\"environmentName\":null,\"agentName\":\"default-assistant\","
+        "{\"branchSettings\":{\"environment\":null,\"agentName\":\"default-assistant\","
             + "\"model\":{\"providerName\":\"stub\",\"modelName\":\"acceptance-stub\",\"variant\":\"default\"},"
             + "\"activeTools\":[]},\"yoloEnabled\":false}";
     HttpResponse<String> threadResponse =

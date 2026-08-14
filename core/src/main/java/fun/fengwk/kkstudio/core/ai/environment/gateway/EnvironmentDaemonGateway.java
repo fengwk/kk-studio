@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListR
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryLister;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoader;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -165,12 +166,11 @@ public class EnvironmentDaemonGateway
 
   @Override
   public ToolExecutionHandle invoke(
-      EnvironmentName environmentName,
-      ToolExecutionRequest request,
-      ToolExecutionListener listener) {
-    Objects.requireNonNull(environmentName, "environmentName");
+      EnvironmentBinding binding, ToolExecutionRequest request, ToolExecutionListener listener) {
+    Objects.requireNonNull(binding, "binding");
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(listener, "listener");
+    EnvironmentName environmentName = binding.environmentName();
     ConnectionState state;
     ActiveRemote active;
     String invokePayload;
@@ -198,7 +198,7 @@ public class EnvironmentDaemonGateway
       }
       invocationId = request.context().invocationId();
       // 完整编码在注册 active 之前完成；确定性 payload 失败不得留下永远占用 Environment 的幽灵 invocation。
-      invokePayload = createInvokePayload(request);
+      invokePayload = createInvokePayload(binding, request);
       active =
           new ActiveRemote(
               environmentName,
@@ -376,7 +376,7 @@ public class EnvironmentDaemonGateway
     return future;
   }
 
-  private String createInvokePayload(ToolExecutionRequest request) {
+  private String createInvokePayload(EnvironmentBinding binding, ToolExecutionRequest request) {
     long timeoutMillis = Math.max(0, request.timeout().toMillis());
     JsonNode arguments = envelopeCodec.readJson(request.call().argumentsJson());
     if (!arguments.isObject()) {
@@ -385,6 +385,7 @@ public class EnvironmentDaemonGateway
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("toolName", request.call().toolName());
     payload.put("toolVersion", request.descriptor().version());
+    payload.put("workspacePath", binding.workspacePath());
     payload.set("arguments", arguments);
     payload.put("timeoutMillis", timeoutMillis);
     return envelopeCodec.writeJson(payload);

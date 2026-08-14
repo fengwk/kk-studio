@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 
 import java.util.List;
@@ -11,15 +11,16 @@ import java.util.Objects;
 /**
  * 一次 Model invocation 的完整冻结请求。
  *
- * <p>实际 Environment 路由（{@code environmentName}）是该请求的唯一路由，Thread YOLO policy （{@code
+ * <p>实际 Environment 绑定（{@code environment}，完整 binding，可为 null）是该请求的唯一路由，Thread YOLO policy （{@code
  * yoloEnabled}）也在这里冻结；后续的 Environment 下线、branch rebinding、relocation 或 {@code SET_YOLO} 都不会改变已存在的
  * invocation。{@code providerRequest.tools()} 必须与有序的 {@code toolBindings} descriptor 一一对应，tool 和
- * skill binding 名称不能重复，并且每个 environment-bound tool 或 skill 必须引用正好是该请求的路由。{@code contextWindow}
- * 是冻结的正上下文窗口（来自 model config limit.context），触发与规划压缩都以此为准；{@code subagentBindings} 冻结本次调用可委派的 Agent
- * allowlist。{@code compaction} 非空表示这是一次压缩调用（不得携带任何 tool/skill/subagent binding），null 表示正常调用。
+ * skill binding 名称不能重复，并且每个 environment-bound tool 或 skill 必须引用正好是该请求的 binding。{@code
+ * contextWindow} 是冻结的正上下文窗口（来自 model config limit.context），触发与规划压缩都以此为准；{@code subagentBindings}
+ * 冻结本次调用可委派的 Agent allowlist。{@code compaction} 非空表示这是一次压缩调用（不得携带任何 tool/skill/subagent
+ * binding），null 表示正常调用。
  */
 public record ModelInvocationRequest(
-    EnvironmentName environmentName,
+    EnvironmentBinding environment,
     ProviderRequest providerRequest,
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
@@ -30,7 +31,7 @@ public record ModelInvocationRequest(
 
   /** 构造不具备子 Agent 委派能力的请求。 */
   public ModelInvocationRequest(
-      EnvironmentName environmentName,
+      EnvironmentBinding environment,
       ProviderRequest providerRequest,
       List<ToolBinding> toolBindings,
       List<SkillBinding> skillBindings,
@@ -38,7 +39,7 @@ public record ModelInvocationRequest(
       int contextWindow,
       CompactionRequest compaction) {
     this(
-        environmentName,
+        environment,
         providerRequest,
         toolBindings,
         skillBindings,
@@ -62,7 +63,7 @@ public record ModelInvocationRequest(
     requireUniqueToolNames(toolBindings);
     requireUniqueSkillNames(skillBindings);
     requireUniqueSubagentNames(subagentBindings);
-    requireConsistentRoutes(environmentName, toolBindings, skillBindings);
+    requireConsistentRoutes(environment, toolBindings, skillBindings);
     requireCompactionRequestShape(
         providerRequest, toolBindings, skillBindings, subagentBindings, compaction);
   }
@@ -144,21 +145,20 @@ public record ModelInvocationRequest(
   }
 
   private static void requireConsistentRoutes(
-      EnvironmentName environmentName,
+      EnvironmentBinding environment,
       List<ToolBinding> toolBindings,
       List<SkillBinding> skillBindings) {
     for (ToolBinding binding : toolBindings) {
       if (binding.type() == ToolType.ENVIRONMENT
-          && !Objects.equals(environmentName, binding.environmentName())) {
+          && !Objects.equals(environment, binding.environment())) {
         throw new IllegalArgumentException(
-            "tool binding environment route must match request environmentName");
+            "tool binding environment must match request environment");
       }
     }
     for (SkillBinding skill : skillBindings) {
-      if (skill.sourceEnvironmentName() != null
-          && !skill.sourceEnvironmentName().equals(environmentName)) {
+      if (skill.sourceEnvironment() != null && !skill.sourceEnvironment().equals(environment)) {
         throw new IllegalArgumentException(
-            "skill source environment must match request environmentName");
+            "skill source environment must match request environment");
       }
     }
   }
