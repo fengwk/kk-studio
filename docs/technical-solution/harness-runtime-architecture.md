@@ -38,13 +38,14 @@ harness-daemon -> harness-tool
 
 ### Session 与 Entry
 
-Session 只组织一棵 append-only Entry Tree。Entry 类型固定为九种：
+Session 只组织一棵 append-only Entry Tree。Entry 类型固定为十种：
 
 ```text
 ROOT
 TURN_START
 MESSAGE
 CUSTOM
+MODEL_ATTEMPT_FAILURE
 CUSTOM_MESSAGE
 ASSISTANT_ERROR
 ASSISTANT_ABORTED
@@ -56,8 +57,9 @@ TURN_END
 - `TURN_START` 打开一次 Model response turn，payload 携带该 turn 的完整 `BranchSettings` 快照与 `TurnStartReason`（`INPUT` / `CONTINUATION` / `COMPACTION`）。
 - `MESSAGE` 是对话消息；`USER` / `ASSISTANT` / `TOOL` 语义由 payload 子类型决定（Tool 结果消息带 ToolResult 元数据）。
 - `CUSTOM` 是业务插件追加的透明 branch state 节点：允许 ROOT 后任意位置（含 open/closed turn），不参与 turn grammar，provider 消息投影默认忽略；payload 为 `(pluginId, customType, schemaVersion, data)`。Goal 插件用 `goal/state@1` 保存完整替换快照，读取时只取当前 branch 最近一条。
+- `MODEL_ATTEMPT_FAILURE` 是普通 Model 自动 retry 的透明审计节点：payload 为 `{attempt:{attempt,sequence,text,thinking}, error:{code,message}, retryAt}`，`Entry.createdAt` 即 `failedAt`。它只允许位于非 compaction open Turn 的唯一 Assistant 结果之前，attempt 必须是连续 `1..N`，不属于对话语义且不投影到 Provider Context。
 - `CUSTOM_MESSAGE` 是业务扩展注入的对话消息：冻结 `AgentMessage`（SYSTEM/USER）保持 model-visible，`details` 绝不投影；非插件命令消息使用稳定 core 元数据（`pluginId=core`、`customType=message`、`rendererKey=message`、`details={}`）。
-- `ASSISTANT_ERROR` 是 Provider/Assistant-side 失败审计：stable `code` + 非空 `message`（≤2048 字符），不投影到 Provider Context。
+- `ASSISTANT_ERROR` 是 Provider/Assistant-side 失败审计：payload 把 stable `error{code,message}` 与可空 `attempt{attempt,sequence,text,thinking}` 分离；planning/Stop/尚未确认 Provider start 的 barrier 使用 null，已确认 attempt 的 terminal Model 错误即使没有 partial 也保留该 attempt snapshot（text/thinking 可同时为空）。它不投影到 Provider Context。
 - `ASSISTANT_ABORTED` 是用户主动 Stop 的 assistant turn：只保存安全 text/thinking，绝不包含 tool call。
 - `COMPACTION` 是内部压缩 Model 的 durable summary：冻结 phase/trigger、`tokensBefore`、complete 标记与 `firstKeptEntryId`/`cutEntryId`/`turnPrefixStartEntryId`。它只能作为 `TURN_START(COMPACTION)` 的唯一成功结果；HISTORY 为 incomplete，FULL/TURN_PREFIX 为 complete。
 - `TURN_END` 关闭一次 turn，payload 携带 `TurnEndOutcome`（`COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`）与 `TurnEndReason`（`USER_STOP` / `HISTORY_CUT` / `CANCELLED` / `TURN_FAILED`），以及 continuation obligation。
@@ -112,7 +114,7 @@ TURN_START/CONTINUATION 消费但不产生 Message Entry。
 
 | 事实 | durable 字段（要点） |
 | --- | --- |
-| `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、完整 frozen `request` JSON（route/provider/tools/skills/**subagentBindings**/YOLO/contextWindow 与可空 compaction metadata）、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`result`/`error`/`result_entry_id`、时间 |
+| `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、完整 frozen `request` JSON（route/provider/tools/skills/**subagentBindings**/YOLO/contextWindow 与可空 compaction metadata）、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`failed_attempts`（append-only TRANSIENT 失败前缀）、`result`/`error`/`result_entry_id`、时间 |
 | `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`（(assistant_entry_id, ordinal) 唯一）、frozen `request`（binding + plugin provenance/access）、status、attempt、`approval` JSON、`result`/`effects`/`error`/`result_entry_id`、时间 |
 
 冻结 `request` 中的 `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
@@ -121,10 +123,12 @@ TURN_START/CONTINUATION 消费但不产生 Message Entry。
 
 ```text
 READY -> DISPATCHING -> RUNNING -> SUCCEEDED
-                             \-> FAILED
-                             \-> CANCELLED
-                             \-> UNKNOWN     （ownership 不确定时收敛，不重放副作用）
+  ^                        |  \-> FAILED
+  |                        |  \-> CANCELLED
+  +--- TRANSIENT retry ----+  \-> UNKNOWN     （ownership 不确定时收敛，不重放副作用）
 ```
+
+`DISPATCHING -> RUNNING` 才确认一次 Provider start 并把 attempt 恰好 +1；`RUNNING -> READY` retry 保持 attempt，清除当前 checkpoint，并追加恰好一个同 attempt 的 `ModelAttemptFailure`。`failedAttempts` 必须是按时间排序的连续 `1..N` 前缀且每项只允许 `TRANSIENT`：READY/DISPATCHING 时 `N=attempt`，RUNNING 时 `N=attempt-1`。没有历史条数上限。
 
 状态机（Tool）：
 
@@ -135,7 +139,7 @@ WAITING_APPROVAL -> READY -> DISPATCHING -> RUNNING -> SUCCEEDED
                                                        \-> UNKNOWN
 ```
 
-terminal 事实约束：`result` 与 `error` 互斥；`result_entry_id` 在**各自表内**唯一（每张 Invocation 表各自的 partial unique index），terminal 且挂 result Entry 的 Invocation 不再被 apply。Tool 的 `effects` 非 null：只有 `SUCCEEDED` 可非空，且 result/effects/status 在同一次 Store update 中原子持久化；terminal 后 effects 不可变。
+terminal 事实约束：`result` 与 `error` 互斥；`result_entry_id` 在**各自表内**唯一（每张 Invocation 表各自的 partial unique index），terminal 且挂 result Entry 的 Invocation 不再被 apply。普通 Model 在挂结果前由 `ThreadProcessor`/Stop 按序追加全部 `MODEL_ATTEMPT_FAILURE`，再追加唯一 Assistant 结果；`attachResultEntry` 同时清空已物化的 checkpoint/failedAttempts。InMemory/PostgreSQL Store 的 `ModelAttemptMaterialization` 在 update 边界精确比对 EntryPath 中的 attempt/error/partial/时间与 terminal/Stop barrier；compaction invocation 不物化失败 attempt。Tool 的 `effects` 非 null：只有 `SUCCEEDED` 可非空，且 result/effects/status 在同一次 Store update 中原子持久化；terminal 后 effects 不可变。
 
 ### Work
 
@@ -163,19 +167,20 @@ ToolActive              # open Turn 的 Tool siblings 非全部 terminal：Work-
 ToolTerminalPending     # siblings 全部 terminal 且全部未挂结果：按 ordinal 经唯一 appender 原子 apply
 ```
 
-IDLE_OR_HISTORICAL / CONTINUATION_DUE 快照不暴露 Model 与 tools；Model 上下文只暴露 Model；Tool 上下文暴露 Model + 全部 Tool siblings。分类器对破坏的不变量以 `IllegalStateException` 拒绝，绝不降级为业务 kind。
+IDLE_OR_HISTORICAL / CONTINUATION_DUE 快照不暴露 Model、tools 或失败 attempts；ModelActive/ModelTerminalPending 暴露 Model 与尚未物化的 `modelAttemptFailures`；Tool 上下文暴露 Model + 全部 Tool siblings，但不重复暴露已经物化或非当前 Model context 的失败 attempts。分类器对破坏的不变量以 `IllegalStateException` 拒绝，绝不降级为业务 kind。
 
 ## 5. Agent Loop（ThreadProcessor）
 
 ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，每步短事务按分类执行固定优先级：
 
 ```text
-1. MODEL_TERMINAL_PENDING  -> 原子 apply Model terminal：SUCCEEDED 追加 ASSISTANT Entry 并挂 resultEntryId；
+1. MODEL_TERMINAL_PENDING  -> 原子 apply Model terminal：先按 1..N 追加 MODEL_ATTEMPT_FAILURE；
+                              SUCCEEDED 再追加 ASSISTANT Entry 并挂 resultEntryId；
                               无 ToolCall 时追加 TURN_END(COMPLETED, continueModel=false)；
                               有 ToolCall 时按 response ordinal materialize ToolInvocation：通常为 READY；
                               plugin sibling WRITE 后再 READ/WRITE 则直接为 unattached FAILED(SIBLING_STATE_CONFLICT)；
                               仅 READY 等待 TOOL Work
-                              FAILED/错误追加 ASSISTANT_ERROR + FAILED TURN_END
+                              FAILED/错误追加带可空 attempt snapshot 的 ASSISTANT_ERROR + FAILED TURN_END
 2. TOOL_TERMINAL_PENDING   -> 按 ordinal 经唯一 ToolOutcomeAppender 原子 apply 全部 terminal Tool siblings：
                               SUCCEEDED 先按 effects 顺序追加 CUSTOM，再追加 Tool Result MESSAGE Entry，
                               并固定追加 TURN_END(COMPLETED, continueModel=true)，随后 classifier 进入
@@ -223,8 +228,9 @@ ModelProcessor 消费 MODEL Work：
 
 1. claim 校验（fake/expired lease token → `LOST_OWNERSHIP` no-op，绝不 cancel 合法 active execution）；
 2. 两阶段激活：`ModelGateway.start` 返回 `Started` 后由 Processor 在 durable `markRunning` 之后调用 `Handle.activate` 打开回调 gate；`start` 返回 `Busy` 稍后重试；`Rejected` 确定性终结；`Indeterminate` 收敛为 `UNKNOWN`；
-3. 回调（serialized FIFO 单 drainer）：`MODEL_DELTA` 节流写 `stream_checkpoint`（首个 safe delta 立即 flush；tool-call fragment 只推 sequence 不入 checkpoint），**commit 后才 best-effort 发布 Redis realtime delta**；terminal 一次生效，duplicate/stale 回调 no-op；
-4. terminal `resultJson`（ProviderResponse 全量 `{text, thinking, toolCalls, stopReason, usage, cost, requestId, serviceTier, rawUsageJson}`）写入 Invocation，并请求 THREAD Work 做 apply。
+3. 回调（serialized FIFO 单 drainer）：`MODEL_DELTA` 节流写 `stream_checkpoint`（text/thinking 归一化为非 null；至少一侧非空，纯空白合法；首个 safe delta 立即 flush；tool-call fragment 只推 sequence 不入 checkpoint），**commit 后才 best-effort 发布 Redis realtime delta**；
+4. retryable `TRANSIENT` terminal 在同一短事务把 accumulator 的完整 text/thinking、最后已提交 sequence、error、`failedAt/retryAt` 追加为 `failedAttempts`，清除 checkpoint，`RUNNING -> READY` 并 reschedule；terminal/duplicate/stale 回调仍严格 fire-once/no-op；
+5. 最终 `resultJson`（ProviderResponse 全量 `{text, thinking, toolCalls, stopReason, usage, cost, requestId, serviceTier, rawUsageJson}`）或 `errorJson` 写入 Invocation，并请求 THREAD Work 做 apply。
 
 ## 7. ToolProcessor 与结果外部化边界
 
@@ -276,7 +282,7 @@ durable mutation
 
 - Stop 的 durable key 是 `(threadId, stopRequestId)`：重试同 ID 恒命中 replay，`expectedRevision` 只用于未 replay 的首发 CAS；`REPLAYED` 返回被重放的 `stoppedTurnEndEntryId` 且 `cancelledCommandCount=0`。
 - 前端对 ambiguous Stop 保留完整操作（stopRequestId + 原始 expectedRevision + basis head/revision）：basis 未变时精确重试，basis 被权威 snapshot 证明变化时自动 retire 并 mint 新 ID（同步 fence 见 [frontend-implementation-design.md](frontend-implementation-design.md)）。
-- 客户端先读取 Thread snapshot，再订阅 revision SSE。Redis `realtime` 只提供正常 turn 的 text/thinking/tool partial overlay；Runtime 不发布 compaction ModelDelta，只保留其 durable checkpoint 供 Stop/恢复。revision/resync 只触发 snapshot invalidate；terminal `resultJson`/`errorJson` 是 durable 边界，前端无条件压过更高 sequence 的 Redis overlay。前端仍按 TURN_START reason 抑制完整 COMPACTION turn 及其 Model overlay，作为 snapshot 投影防线。
+- 客户端先读取 Thread snapshot，再订阅 revision SSE。Redis `realtime` 只提供正常 turn 的 text/thinking/tool partial overlay；snapshot 的 `modelAttemptFailures` 提供 active retry 的 durable partial/error/retry 时间，终态后由 root-to-head path 上的 `MODEL_ATTEMPT_FAILURE`/`ASSISTANT_ERROR.attempt` 恢复。revision/resync 只触发 snapshot invalidate；同 `(modelInvocationId,attempt)` 的 durable failure 会 fence stale overlay，terminal `resultJson`/`errorJson` 无条件压过更高 sequence。Runtime 不发布 compaction ModelDelta/attempt failure，前端仍按 TURN_START reason 抑制完整 COMPACTION turn 及其 Model overlay。
 
 ## 11. Subagent 委派（task）
 

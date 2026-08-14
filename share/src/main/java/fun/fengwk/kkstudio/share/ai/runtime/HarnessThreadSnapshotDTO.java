@@ -9,7 +9,8 @@ import java.util.List;
  * Coherent Thread 快照投影。
  *
  * <p>所有字段来自同一数据库快照；{@code revision} 是 durable invalidation cursor。{@code modelInvocation} 为当前 Turn
- * 的活跃模型调用（无则 null），{@code toolInvocations} 为其工具兄弟； 列表默认为不可变空列表。
+ * 的活跃模型调用（无则 null），{@code toolInvocations} 为其工具兄弟，{@code modelAttemptFailures} 为当前 Model context
+ * 尚未物化的失败 attempt；列表默认为不可变空列表。
  */
 @Data
 public class HarnessThreadSnapshotDTO {
@@ -34,6 +35,6 @@ public class HarnessThreadSnapshotDTO {
   /** 活跃 ModelInvocation 的工具兄弟列表（ordinal 为 0..N-1 连续前缀；不可变列表，默认空）。 */
   private List<ToolInvocationDTO> toolInvocations = List.of();
 
-  /** 当前 branch 可见的 Model failed attempt 历史（不可变列表，默认空）。 */
+  /** 当前 Model context 尚未物化的 failed attempt 历史（不可变列表，默认空）。 */
   private List<ModelAttemptFailureDTO> modelAttemptFailures = List.of();
 }

@@ -4,12 +4,12 @@
 
 ## 1. 模块与 ID
 
-Runtime 领域包包括 `history`（Entry）、`thread`（Thread/Command/Classifier）、`invocation`（Model/Tool）、`work`、`processor`、`session`（消息语义）、`compaction` 与 `cache`。实体主键（Thread/Session/Entry/Invocation/Command id）在领域模型中是 `UUID`，HTTP wire 上编码为 canonical UUID string；`sequence` 与 `revision` 仍是 `long`，wire 上编码为 strict decimal strings：
+Runtime 领域包包括 `history`（Entry）、`thread`（Thread/Command/Classifier）、`invocation`（Model/Tool）、`work`、`processor`、`session`（消息语义）、`compaction` 与 `cache`。实体主键（Thread/Session/Entry/Invocation/Command id）在领域模型中是 `UUID`，HTTP wire 上编码为 canonical UUID string。HTTP response DTO 中 Java `long`/`Long` 统一编码为 canonical decimal string；请求 mapper 对 cursor/CAS 字段显式按对应领域范围解析，前端使用 `DecimalLong=string`，禁止先转 JavaScript `number`：
 
 ```text
 实体 id（threadId/sessionId/entryId/invocationId/clientCommandId/stopRequestId/decisionId） -> canonical UUID
-sequence               -> [1-9][0-9]*
-revision / afterRevision -> 0|[1-9][0-9]*
+command sequence / nextCommandSequence -> [1-9][0-9]*
+revision / afterRevision / Model attempt sequence -> 0|[1-9][0-9]*
 ```
 
 非法格式由 mapper 抛 `IllegalArgumentException`，Controller 统一映射为 400。Catalog 资源使用永久名称身份：Provider/Agent 是 `name`，Model 是 `(providerName, name)`。
@@ -31,11 +31,11 @@ public record ThreadState(
 - 已提交 Entry append-only；每个 Session 只有一个无 parent ROOT。
 - 创建 Thread 时 `nextCommandSequence=1`、`revision=0`；`validateTransition` 强制每次可见变化 revision 恰好 +1，exact replay 恒接受。
 
-Entry 类型固定为九种：
+Entry 类型固定为十种：
 
 ```java
-ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED,
-COMPACTION, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, MODEL_ATTEMPT_FAILURE, CUSTOM_MESSAGE,
+ASSISTANT_ERROR, ASSISTANT_ABORTED, COMPACTION, TURN_END
 ```
 
 Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentName` 是 canonical bounded 小写路由名称或 null，`agentName`/tool 名是 canonical 非空名称）。`ROOT` 额外携带可选的 `subagentContext`（子 Agent Session 冻结委派归属）：
@@ -48,6 +48,20 @@ Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_STA
 ```
 
 普通用户 Session 的 `subagentContext` 为 null；`depth` 以普通根 Thread 为 1，子 Session 从 2 开始。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`COMPACTION` payload 固定为 `{phase, trigger, tokensBefore, complete, summaryText, firstKeptEntryId, cutEntryId, turnPrefixStartEntryId}`：`tokensBefore` 是 JSON number，Entry ID 是 canonical UUID string。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider；插件自行定义 schema，`ContextProjector` 才能把需要的状态显式投影。Goal 使用 `goal/state@1` 完整替换快照，当前 branch 最近一条生效。
+
+Model attempt 审计 payload 由同一 codec 严格编解码：
+
+```json
+{
+  "attempt": { "attempt": 1, "sequence": 3, "text": "partial", "thinking": "" },
+  "error": { "code": "TRANSIENT", "message": "provider disconnected" },
+  "retryAt": "2026-08-14T00:00:02Z"
+}
+```
+
+- `MODEL_ATTEMPT_FAILURE` 的 `Entry.createdAt` 是 `failedAt`；`retryAt >= failedAt`。它只允许出现在普通 open Turn 的 Assistant 结果之前，attempt 是严格连续的 `1..N`，不属于对话语义、不投影给 Provider。
+- `ASSISTANT_ERROR` payload 固定为 `{"error":{"code","message"},"attempt":null|{attempt,sequence,text,thinking}}`。planning/Stop/尚未确认 Provider start 的 barrier 使用 null；已确认 attempt 的 terminal Model 错误即使没有 partial 也保存空 text/thinking snapshot，并始终把 partial 与 error 分离。
+- `ModelAttemptSnapshot.text/thinking` 始终是非 null 原始字符串；两者可同时为空以表示尚无 partial，纯空白合法且不得 trim。上述 `payloadJson` 内部 sequence 是 codec 的 JSON integer；typed snapshot DTO 的 sequence 则是 bigint-safe decimal string。
 
 ## 3. 命令 batch
 
@@ -109,17 +123,33 @@ SET_ACTIVE_TOOLS, SET_YOLO
   "revision": "7",
   "thread": { "threadId": "00000000-0000-0000-0000-000000000001", "sessionId": "00000000-0000-0000-0000-000000000002", "headEntryId": "00000000-0000-0000-0000-000000000005",
               "yoloEnabled": false, "nextCommandSequence": "4", "revision": "7",
-              "status": "TOOL_RUNNING", "processing": true, "branchSettings": {...},
+              "status": "MODEL_READY", "processing": true, "branchSettings": {...},
               "createTime": "...", "updateTime": "..." },
   "entries": [ ... root-to-head path ... ],
   "queuedCommands": [ ... 未消费未取消 ... ],
   "modelInvocation": null | { ... },
-  "toolInvocations": [ ... ]
+  "toolInvocations": [],
+  "modelAttemptFailures": [
+    {
+      "modelInvocationId": "00000000-0000-0000-0000-000000000010",
+      "turnStartEntryId": "00000000-0000-0000-0000-000000000004",
+      "basisHeadEntryId": "00000000-0000-0000-0000-000000000003",
+      "attempt": 1,
+      "sequence": "3",
+      "text": "partial",
+      "thinking": "",
+      "errorCode": "TRANSIENT",
+      "errorMessage": "provider disconnected",
+      "failedAt": "...",
+      "retryAt": "..."
+    }
+  ]
 }
 ```
 
 - `entries` 是当前 head 的 root-to-head path（recursive CTE 顺序）。
-- `modelInvocation` 是当前 open Turn 的活跃 Model（**单数**；无则 null）；`toolInvocations` 是其 Tool siblings；IDLE/historical/continuation 快照不暴露 Invocation。
+- `modelInvocation` 是当前 open Turn 的活跃 Model（**单数**；无则 null）；`toolInvocations` 是其 Tool siblings。`modelAttemptFailures` 只在 `ModelActive` / `ModelTerminalPending` context 暴露该 invocation 尚未物化的连续 TRANSIENT 失败前缀，按 attempt 递增；compaction、Tool、IDLE/historical/continuation context 返回空列表。
+- `modelAttemptFailures[].sequence` 是 canonical 非负 `DecimalLong`，可以超过 JavaScript safe integer；前端必须按 `/^(?:0|[1-9]\d*)$/` 验证，非法 item fail closed 且不得据此隐藏 realtime overlay。
 - `status` 与 `processing` 是派生展示字段（`IDLE / CONTINUATION_DUE / MODEL_<status> / TOOL_<status> / APPLYING`；仅 IDLE 时 `processing=false`），不是 durable 列。
 - `queuedCommands` 只包含 `consumed_turn_start_entry_id is null and cancelled_at is null` 的命令。
 
@@ -171,6 +201,7 @@ lock Thread
        追加 TURN_START(CONTINUATION) + ASSISTANT_ERROR(CANCELLED)
        再追加 TURN_END(STOPPED, USER_STOP)
   -> Model/Tool active：
+       先按 attempt 顺序物化尚未落 Entry 的 MODEL_ATTEMPT_FAILURE
        有安全 text/thinking -> ASSISTANT_ABORTED
        Model 无安全内容      -> CANCELLED barrier（ASSISTANT_ERROR）
        Tool siblings         -> 按当前状态写 CANCELLED/UNKNOWN Tool Result
@@ -225,7 +256,7 @@ public record ModelInvocationRequest(
 - `ToolBinding(descriptor, type, environmentName, plugin)`：`PLATFORM` binding 的 environmentName 为 null，`ENVIRONMENT` binding 指向具体 route（可为 null）；descriptor 的 type 与 binding type 一致。
 - `plugin` 为 null 或 `PluginToolBinding(pluginId, contributionLocalName, stateAccesses)`；仅 `PLATFORM` 可携带 plugin，identifier 必须 canonical，state accesses 按 customType 唯一且 mode 仅 `READ` / `WRITE`。该 provenance 随 request 冻结，retry 不按工具名重新归属。
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
-- retry 重放同一份 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
+- retry 重放同一份 frozen request；当前失败 attempt 的 text/thinking/error 不修改该 request。后续 turn 的 `DatabaseTurnResolver` 只白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 ContextProjector，`MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR` 永不进入 Provider messages。ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
 - JSON codec 只接受固定顶层字段并严格校验嵌套结构（未知字段拒绝）。
 
 ### Tool success effects
@@ -304,4 +335,5 @@ record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable b
 - revision SSE 帧使用 durable revision 作为 `Last-Event-ID`/`afterRevision` cursor；Redis delta 事件没有 SSE id。
 - 客户端恢复顺序：REST snapshot → durable revision SSE → Redis realtime overlay；revision 是唯一 durable cursor。
 - 前端把 `resultJson`/`errorJson` 当作 terminal 边界：durable terminal projection 无条件压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后移除 overlay。
+- snapshot failure 以 `(modelInvocationId, attempt)` fence 同 attempt 的 stale Model overlay；只有 invocation 仍处于相同 attempt 的 READY/DISPATCHING 时该 failure 是 live retry countdown，下一 attempt 已 RUNNING 后转为静态历史。终态 error 将 checkpoint partial 与 `errorJson` 分开投影，刷新后由 `MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR.attempt` 恢复相同可见轨迹。
 - Runtime 不向 RealtimeEventSink 发布 compaction ModelDelta；其 checkpoint 仅作 Stop/恢复 durable fact。前端再按 `TURN_START(COMPACTION)...TURN_END` 状态化抑制该 turn 的 COMPACTION/ERROR/ABORTED Entry，latest turn 是 COMPACTION 时也不渲染 snapshot Model overlay。

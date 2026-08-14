@@ -415,8 +415,9 @@ public final class HarnessRuntime {
    * -&gt; Tool siblings），跨 transaction 永不混合状态。
    *
    * <p>返回 ThreadState、当前 root-to-head {@link EntryPath}、不可变的已入队 Commands，以及仅与分类器 匹配的
-   * ModelInvocation / Tool siblings：IDLE_OR_HISTORICAL 与 CONTINUATION_DUE 不暴露任何东西， Model context
-   * 仅暴露 Model，Tool context 暴露 Model 与全部 siblings。不持久化也不返回任何派生 状态。
+   * ModelInvocation / Tool siblings / 尚未物化的失败 attempts：IDLE_OR_HISTORICAL 与 CONTINUATION_DUE 不暴露
+   * Invocation，Model context 暴露 Model 与失败 attempts，Tool context 暴露 Model 与全部 siblings。不持久化也不返回任何派生
+   * 状态。
    */
   public ThreadSnapshot getThreadSnapshot(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
