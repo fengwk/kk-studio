@@ -4,7 +4,8 @@ export {
   ThreadEventView,
   ThreadEventDetail,
   ThreadShortcutsPanel,
-  useMainViewScrollRestore,
+  useThreadPanelViewState,
+  type ThreadPanelMainMode,
   type ThreadPanelMainView,
   type ThreadCommand,
 } from '@/features/ai/runtime/thread-panel'

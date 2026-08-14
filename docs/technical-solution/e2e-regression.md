@@ -317,7 +317,7 @@ Composer 矩阵的维度与边界如下：
 | `ui.chat.events.conversation_switch` | durable Thread（真实 USER 条目） | `/events` 唯一主滚动区替换 transcript；点击 USER 事件打开只读 detail 且原始 payload JSON 含 `"role"` 与正文；Composer 保持挂载可编辑；`+` 菜单回 `/conversation` 卸载事件视图且草稿/localStorage 不变 |
 | `ui.chat.events.keyboard_nav` | durable Thread | listbox 初始 active 为最新事件；`ArrowUp` 移动；hover（mousemove）驱动 active；`ArrowDown` 离开首项；`Home`/`End` 边界；`Enter` 开详情、`Esc` 关详情不落回全局 Escape |
 | `ui.chat.shortcuts.escape_restores_focus` | 空 Pane + 草稿 | `+` 菜单打开只读快捷键面板（region `键盘快捷键`）；`Esc` 关闭并恢复 Composer 焦点，草稿/localStorage 不变 |
-| `ui.chat.events.scroll_restore` | 15 条 durable Thread（两类主视图均真实 overflow） | headless 下以 DOM 属性 + 原生 `scroll` 事件向上滚动 600px；`/events` 与 `/conversation` 往返后各自的 `scrollTop` 原样恢复（容差 ±2），不贴底；重绑清零由单元测试覆盖 |
+| `ui.chat.events.scroll_restore` | 30 条 durable Thread（两类主视图均真实 overflow；事件行紧凑布局后需更多条目） | headless 下以 DOM 属性 + 原生 `scroll` 事件向上滚动 600px；`/events` 与 `/conversation` 往返后各自的 `scrollTop` 原样恢复（容差 ±2），不贴底；重绑清零由单元测试覆盖 |
 
 durable fixture 使用不存在的 Agent，使 USER_MESSAGE 在 Provider 调用前确定性物化；queued
 fixture 使用 case 内本地 hold-provider 保持真实 Model invocation 活跃，再通过真实命令 API

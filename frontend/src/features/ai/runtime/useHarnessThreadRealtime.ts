@@ -187,6 +187,10 @@ export function useHarnessThreadRealtime(
   }, [modelInvocation, threadId, toolInvocations])
 
   useEffect(() => {
+    // 只有 Thread 消失或订阅真正被禁用才清空 overlays；`subscription == null` 或
+    // threadId 暂时不匹配只是订阅状态过渡（同一提交中 seed effect 刚播种、
+    // subscription effect 即将落定）：保留 snapshot-seeded overlay，等下一 render
+    // 的 subscription 就绪后通过应用级 Manager 建立订阅。
     if (!threadId || !subscriptionReady) {
       clearRecoveryLoop()
       modelStreamRef.current = null

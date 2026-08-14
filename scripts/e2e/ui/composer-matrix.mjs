@@ -759,7 +759,7 @@ export async function runComposerMatrix(ui) {
     'ui.chat.events.scroll_restore',
     'Conversation/Event 主视图各自恢复 scrollTop（重绑清零由单元测试覆盖）',
     async (caseArt) => {
-      const messages = Array.from({ length: 15 }, (_, index) => `scroll msg ${index} ${stamp}`)
+      const messages = Array.from({ length: 30 }, (_, index) => `scroll msg ${index} ${stamp}`)
       await withUiFixture(
         page,
         () => createDurableHistoryFixture(apiCtx, {

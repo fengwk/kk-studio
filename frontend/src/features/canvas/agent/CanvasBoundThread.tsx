@@ -4,7 +4,7 @@ import {
   ThreadEventDetail,
   ThreadEventView,
   ThreadShortcutsPanel,
-  useMainViewScrollRestore,
+  useThreadPanelViewState,
   type ChatPanelActivityInput,
   type ChatPanelComposerInput,
   type ChatPanelFooterInput,
@@ -18,7 +18,6 @@ import {
   threadCommandsForActiveView,
   threadCommandsForScene,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
-import type { ThreadEventItem } from '@/features/ai/runtime/thread-events'
 import {
   buildMessageBatchPlan,
   type CommandBatchPlan,
@@ -62,14 +61,21 @@ export function CanvasBoundThread({
     environmentReadyByName,
   )
   const {
-    mainView,
-    switchMainView,
-    reset: resetMainViewScroll,
+    mode,
+    switchMode,
+    selectedEventId,
+    selectEvent,
+    activeEventId,
+    setActiveEventId,
     eventsBodyRef,
     initialConversationScrollTop,
     initialEventsScrollTop,
-  } = useMainViewScrollRestore(controller.bodyRef)
-  const [eventDetail, setEventDetail] = useState<ThreadEventItem | null>(null)
+  } = useThreadPanelViewState(threadId, controller.bodyRef, controller.events)
+  // detail widget 按最新 records 派生（id 消失时 hook 已清空 selected）。
+  const selectedRecord =
+    selectedEventId == null
+      ? null
+      : (controller.events.find((event) => event.id === selectedEventId) ?? null)
   const [interaction, setInteraction] = useState<'shortcuts' | null>(null)
   const boundThreadIdRef = useRef<string | null>(null)
   useEffect(() => {
@@ -77,10 +83,9 @@ export function CanvasBoundThread({
       return
     }
     boundThreadIdRef.current = threadId
-    resetMainViewScroll()
-    setEventDetail(null)
+    // 主视图/Event 状态由 useThreadPanelViewState 在 threadId 变化时重置。
     setInteraction(null)
-  }, [resetMainViewScroll, threadId])
+  }, [threadId])
 
   const buildBatch = useCallback(
     (parts: ComposerPart[]): CommandBatchPlan | null => {
@@ -129,12 +134,11 @@ export function CanvasBoundThread({
     }
     switch (command.id) {
       case 'events':
-        switchMainView('events')
+        switchMode('events')
         return
       case 'conversation':
-        // 切回 conversation 同时关闭 event detail（只读 widget 随之卸载）。
-        setEventDetail(null)
-        switchMainView('conversation')
+        // 切回 conversation 同时关闭 event detail（hook 保留 Event active）。
+        switchMode('conversation')
         return
       case 'shortcuts':
         setInteraction('shortcuts')
@@ -148,31 +152,23 @@ export function CanvasBoundThread({
   // 互斥主视图：events 时替换 transcript 滚动区；detail 是 widget zone 的只读展示。
   const mainViewInput: ThreadPanelMainView = {
     events:
-      mainView === 'events' ? (
+      mode === 'events' ? (
         <ThreadEventView
           events={controller.events}
+          activeEventId={activeEventId}
+          onActiveEventIdChange={setActiveEventId}
           bodyRef={eventsBodyRef}
           initialScrollTop={initialEventsScrollTop}
-          detailOpen={eventDetail != null}
-          onActivate={(event) => setEventDetail(event)}
-          onCloseDetail={() => setEventDetail(null)}
+          detailOpen={selectedEventId != null}
+          onSelect={(event) => selectEvent(event.id)}
+          onCloseDetail={() => selectEvent(null)}
         />
       ) : undefined,
   }
-  // events 变化时按 id 刷新已选中的 detail（内容更新跟随新快照）；id 消失则清空。
-  useEffect(() => {
-    setEventDetail((current) => {
-      if (current == null) {
-        return current
-      }
-      const next = controller.events.find((event) => event.id === current.id)
-      return next ?? null
-    })
-  }, [controller.events])
   // 当前已激活的主视图命令保持可见但禁用（events 激活时 /events 禁用）。
   const commands = useMemo(
-    () => threadCommandsForActiveView(CANVAS_BOUND_COMMANDS, mainView),
-    [mainView],
+    () => threadCommandsForActiveView(CANVAS_BOUND_COMMANDS, mode),
+    [mode],
   )
   const composer: ChatPanelComposerInput = {
     parts: controller.draft,
@@ -195,8 +191,8 @@ export function CanvasBoundThread({
   }
   const activity: ChatPanelActivityInput = {
     working: controller.working,
-    widgets: eventDetail ? (
-      <ThreadEventDetail item={eventDetail} onClose={() => setEventDetail(null)} />
+    widgets: selectedRecord ? (
+      <ThreadEventDetail record={selectedRecord} onClose={() => selectEvent(null)} />
     ) : null,
     actionError: controller.actionError,
     onDismissActionError: controller.dismissActionError,

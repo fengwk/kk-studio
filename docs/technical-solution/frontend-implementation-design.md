@@ -124,42 +124,65 @@ Bound 场景提供 `/events`、`/conversation`；全部 4 个 Composer 场景（
 `ThreadCommandId` 为字面量联合类型），Chat Bound / Canvas Bound / Blank / Canvas Blank
 不再各自维护命令表副本；Canvas Bound 只投影 `stop/upload/events/conversation/shortcuts`
 （controller 仅支持 stop，其余经 Composer 处理）。当前激活视图的切换命令由
-`threadCommandsForActiveView(commands, mainView)` 置为 `disabled`（保持可见）。
+`threadCommandsForActiveView(commands, mode)` 置为 `disabled`（保持可见）。
 
 ```text
-ThreadPanelMainView = 'conversation' | 'events'
+ThreadPanelMainMode = 'conversation' | 'events'
 mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个主滚动区
 ```
 
-- 切换只替换主滚动区：Composer、queue、working、widgets 保持挂载，本地 draft 不丢；
-  **切回 conversation 时关闭事件详情**。
-- 每 Pane 独立保存 conversation 与 events 两个 `scrollTop`（`useMainViewScrollRestore`，
-  内存 `positionsRef`，不用 localStorage）：切换前捕获当前主视图位置，目标视图
-  **把保存位置作为 mount `initialScrollTop` 传入**（conversation 经
-  `ThreadConversationView`、events 经 `ThreadEventView`），由视图内部
+- Pane/Thread 级共享状态统一由 `useThreadPanelViewState(threadId, transcriptBodyRef, events)`
+  持有：`mode` / `selectedEventId` / `activeEventId` / `eventsBodyRef` / 双 scrollTop
+  （conversation + events 各一份，内存保存，不用 localStorage），每 Pane 一个实例，
+  Chat Bound 与 Canvas Bound 复用。threadId 重绑全部重置回 conversation
+  （mode/selected/active/scroll 清零）；切回 conversation 关闭 detail，Event active
+  保留（跨视图恢复）；selected id 从列表消失即清空，active id 消失回到最新事件。
+- 切换只替换主滚动区：Composer、queue、working、widgets 保持挂载，本地 draft 不丢。
+  切换前捕获当前主视图位置，目标视图**把保存位置作为 mount `initialScrollTop` 传入**
+  （conversation 经 `ThreadConversationView`、events 经 `ThreadEventView`），由视图内部
   `useChatTranscriptAutoScroll` 挂载时应用并按 210px 阈值决定 stick——不靠父 effect
-  对新 ref 派发假 scroll；Thread 重绑清空位置并回到贴底，重绑同时把视图重置回
-  conversation 并关闭详情与 interaction。Conversation 与 Event 视图各自拥有独立的
-  stick 生命周期：视图卸载即销毁 scroll listener/ResizeObserver，重新挂载时重新
-  绑定（`useAgentThreadController` 不再常驻自动贴底 hook）。
-- `/events` 打开 `ThreadEventView`（listbox/option）：`↑/↓`、`Home/End`、`PageUp/PageDown`
-  移动 active（初始为最新事件，Page 步长 8），`Enter/Space` 打开详情，`Esc` 在详情打开时
-  关闭详情、否则透传给全局 Escape（恢复 Composer 焦点）；鼠标 `mousemove` 与 click 都激活
-  所在行。
-- 事件详情是**只读 widget**（`ThreadEventDetail`，位于 ThreadWidgetStack、Composer 上方），
-  不是 InteractionPanel：不隐藏 Composer、不抢焦点；展示结构化 label/value 与 durable
+  对新 ref 派发假 scroll；Thread 重绑清空位置并回到贴底。Conversation 与 Event 视图各自
+  拥有独立的 stick 生命周期：视图卸载即销毁 scroll listener/ResizeObserver，重新挂载时
+  重新绑定（`useAgentThreadController` 不常驻自动贴底 hook）。
+- `/events` 打开 `ThreadEventView`（listbox/option，紧凑行布局：固定时间列 + kind badge +
+  单行 summary ellipsis；failed 行 danger 色、running 行 pulse dot）：`↑/↓`、`Home/End`、
+  `PageUp/PageDown` 移动 active（初始为最新事件，Page 步长 8），`Enter/Space` 打开详情，
+  `Esc` 在详情打开时关闭详情、否则透传给全局 Escape（恢复 Composer 焦点）；鼠标只有
+  `mousemove` 改变 active，click 同时设为 active 并选择详情。
+- 事件详情是**只读 widget**（`ThreadEventDetail`，位于 widget zone 第一项、TaskStatus
+  之前，ThreadWidgetStack、Composer 上方），不是 InteractionPanel：不隐藏 Composer、
+  不抢焦点、无 backdrop、无 auto focus、无 Copy；展示结构化 label/value 与 durable
   Entry 原始 payload JSON；X 按钮与详情内 `Esc` 关闭。详情内容按事件 id 跟随最新投影
-  （同 id 更新内容、id 消失关闭详情）。
-- 事件投影 `buildThreadEvents` 独立于 transcript：durable Entry 全类型保留（含
-  TURN_START/TURN_END/COMPACTION/未知类型）；活跃 model/tool invocation 与 attempt
-  failure 是单条事件（Provider delta token 绝不逐条成行），锚定在所属 durable Entry 之后，
-  找不到锚点追加到末尾。活跃 overlay 与 durable Entry 重叠窗口（
-  `ModelTerminalPending`/`ToolTerminalPending`）按 **Turn 内**身份去重（沿 entries
-  线性路径跟踪当前 `TURN_START.entryId`）：failure 用 `turnStartEntryId + attempt +
-  sequence`，tool 只认已物化的 durable `tool_result`（或 DTO `resultEntryId` 已指向
-  已存在 Entry），身份为 `assistantEntryId 所在 Turn + toolCallId`——旧 Turn 的 durable
-  记录绝不抑制新 Turn 相同数字/复用 toolCallId 的活跃 overlay；durable assistant
-  `tool_call` 不抑制运行中的 tool invocation。
+  （同 id 更新内容、id 消失关闭详情）。widget zone 高度契约冻结为
+  `max-height: min(36vh, 320px)`（styles.css，有契约测试）。
+- 事件投影是独立模型 `ThreadEventRecord { id, source, entryId, turnStartEntryId,
+  turnNumber, kind, status, title, summary, createdAt, details, rawJson }`：
+  `buildThreadEventTimeline({entries, modelInvocation, toolInvocations,
+  modelAttemptFailures, modelStream, toolStreams})` 线性扫描 entries 计算
+  turnNumber/turnStartEntryId（TURN_START 之前为 0/null），15 个 kind 与 5 态 status
+  （`pending/running/completed/failed/stopped`）精确映射，i18n 用 `kind.*` / `status.*`
+  key；每个 durable Entry **恰好一条记录**（不隐藏 TURN_START/TURN_END/COMPACTION；
+  MESSAGE 按 role 分类：USER→USER_MESSAGE，ASSISTANT 含 tool_call→TOOL_CALL 否则
+  ASSISTANT_MESSAGE，TOOL→TOOL_RESULT，SYSTEM/未知→CUSTOM_MESSAGE，CUSTOM→CUSTOM，
+  未知 entryType→CUSTOM 且标题携带原类型）；活跃 model/tool invocation 与 attempt
+  failure 是单条 synthetic 记录（Provider delta token 绝不逐条成行），锚定在所属
+  durable Entry 之后，找不到锚点追加到末尾（synthetic 的 rawJson 为 null）。
+  活跃 overlay 与 durable Entry 重叠窗口（`ModelTerminalPending`/`ToolTerminalPending`）
+  按 **Turn 内**身份去重（沿 entries 线性路径跟踪当前 `TURN_START.entryId`）：
+  failure 用 `turnStartEntryId + attempt + sequence`，tool 只认已物化的 durable
+  `tool_result`（或 DTO `resultEntryId` 已指向已存在 Entry），身份为
+  `assistantEntryId 所在 Turn + toolCallId`——旧 Turn 的 durable 记录绝不抑制新 Turn
+  相同数字/复用 toolCallId 的活跃 overlay；durable assistant `tool_call` 不抑制
+  运行中的 tool invocation。活跃状态映射五态：model 优先 realtime stream error，
+  tool 优先 stream error → errorJson → resultJson → 常规映射。
+- Turn usage（model token 用量）从 TURN_START 时点移到 TURN_END 时点展示：
+  `EntryProjectionContext` 携带 `pendingTurnSummary`，ASSISTANT 分支写入、TURN_END
+  发射 `turn_usage`，TURN_START / COMPACTION 清除过期摘要——usage 展示的是已结束
+  Turn 的真实用量。TURN_END 事件摘要与 transcript 的 usage 行共用
+  `parseAssistantUsage` + `formatTurnUsageText`：`↑input · ↓output ·
+  RcacheRead · WcacheWrite · $cost`，无 reasoning `T`/cache hit `CH` 段，缺失/零的
+  cache 段省略；详情保留完整 usage（input/output/cacheRead/cacheWrite(含 long)/
+  reasoning/providerTotal/cost/outcome）。
 - `/shortcuts` 打开只读 `ThreadShortcutsPanel`（分组快捷键目录
   `SHORTCUT_CATALOG`：Application / Thread / Events / Canvas，只收录已实现快捷键，每个
   descriptionKey 在 zh-CN / en-US 均可解析 + 统一 ThreadInteractionPanel shell）：
@@ -168,10 +191,6 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
   [role="alertdialog"], .resource-media-lightbox`）优先拦截**全部**全局快捷键（含 Canvas
   Delete/T/数字键/Fit/Zoom 等），`hasBlockingOverlay()` / `shouldDeferToBlockingOverlay()`
   统一判定，Canvas 键盘入口整体受守卫。
-
-Turn usage（model token 用量）从 TURN_START 时点移到 TURN_END 时点展示：`EntryProjectionContext`
-携带 `pendingTurnSummary`，ASSISTANT 分支写入、TURN_END 发射 `turn_usage`，TURN_START /
-COMPACTION 清除过期摘要——usage 展示的是已结束 Turn 的真实用量。
 
 ## 5. Ambiguous exact replay 与 409 rebuild
 
@@ -207,6 +226,10 @@ COMPACTION 清除过期摘要——usage 展示的是已结束 Turn 的真实用
 `useHarnessThreadRealtime`（`threads.snapshot(threadId)` 是唯一业务 query key）：
 
 1. 读取 snapshot；用 `revision` 创建 EventSource；revision/resync 事件只 invalidate snapshot。
+   订阅状态过渡（`subscription` 从 null 初始化、或 threadId 刚切换）**不清空**
+   snapshot-seeded overlay：只有 Thread 消失或订阅真正禁用（`!threadId || !subscriptionReady`）
+   才清空，因此 snapshot 首次就含 terminal-pending tool result 时，overlay 在
+   EventSource 建立前后都保持可见（有回归测试）。
 2. Redis `realtime` 事件叠加流式 overlay：MODEL_DELTA 按 invocation+attempt+sequence 严格推进，TOOL_PARTIAL 按 `createdAt|canonical payload` 指纹去重（FIFO 有界，attempt 变化/terminal/resultEntryId/消失时清空）。
 3. **Attempt visibility**：snapshot `modelAttemptFailures` 按 attempt 排序并以 `(modelInvocationId,attempt)` 去重，先于当前 Model overlay 投影；`sequence` 必须是 canonical 非负 `DecimalLong`，malformed item fail closed 且不能 fence 当前输出。同 identity 的 durable failure 到达后抑制 stale realtime overlay；只有 invocation 仍处于同 attempt 的 READY/DISPATCHING 时显示活动倒计时，下一 attempt 已 RUNNING 后改为静态“已安排重试”。
 4. **Durable recovery**：root-to-head `MODEL_ATTEMPT_FAILURE` 与 terminal `ASSISTANT_ERROR.attempt` 都投影为同一 failure block，保留原始 text/thinking、具体 error 与 retry 状态；error 与 partial 分开渲染。纯空白 text/thinking 是合法用户可见内容，解析、渲染与复制都不得 trim。retryable failure 仍是 pending，不触发错误/完成浏览器通知。

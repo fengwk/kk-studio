@@ -1,16 +1,17 @@
 import { X } from 'lucide-react'
-import type { ThreadEventItem } from '@/features/ai/runtime/thread-events'
+import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import { useI18n } from '@/shared/i18n'
 
 /**
- * 只读 Event detail widget：展示在 ThreadWidgetStack 的 Composer 上方。
- * 不是 InteractionPanel：不抢占焦点、不隐藏 Composer；先不加 Copy Raw。
+ * 只读 Event detail widget：展示在 ThreadWidgetStack 的 Composer 上方（TaskStatus
+ * 之前）。不是 InteractionPanel：不隐藏 Composer、不抢焦点、无 backdrop、无
+ * auto focus、无 Copy；展示结构化 details 与原始 payload JSON（pre 内滚动）。
  */
 export function ThreadEventDetail({
-  item,
+  record,
   onClose,
 }: {
-  item: ThreadEventItem
+  record: ThreadEventRecord
   onClose: () => void
 }) {
   const { t } = useI18n()
@@ -20,7 +21,7 @@ export function ThreadEventDetail({
       aria-label={t('ai.runtime.event.detailTitle')}
     >
       <header className="thread-event-detail-header">
-        <h3>{item.title}</h3>
+        <h3>{record.title}</h3>
         <button
           type="button"
           className="thread-interaction-close"
@@ -30,10 +31,10 @@ export function ThreadEventDetail({
           <X aria-hidden="true" />
         </button>
       </header>
-      <p className="thread-event-detail-text">{item.text}</p>
-      {item.details.length > 0 ? (
+      <p className="thread-event-detail-text">{record.summary}</p>
+      {record.details.length > 0 ? (
         <dl className="thread-event-detail-rows">
-          {item.details.map((row) => (
+          {record.details.map((row) => (
             <div key={row.label} className="thread-event-detail-row">
               <dt>{row.label}</dt>
               <dd>{row.value}</dd>
@@ -41,8 +42,8 @@ export function ThreadEventDetail({
           ))}
         </dl>
       ) : null}
-      {item.payloadJson != null ? (
-        <pre className="thread-event-detail-payload">{item.payloadJson}</pre>
+      {record.rawJson != null ? (
+        <pre className="thread-event-detail-payload">{record.rawJson}</pre>
       ) : null}
     </section>
   )
