@@ -7,6 +7,8 @@ import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websock
 import type { ApplicationEventServerMessage } from '@/shared/app-events/protocol'
 
 const URL = 'ws://test/api/events/v1'
+const THREAD_ID = '11111111-2222-4333-8444-555555555555'
+const CANVAS_ID = 'cccccccc-0000-4000-8000-000000000001'
 
 function openConnection(harness = new FakeWebSocketHarness()) {
   const onOpen = vi.fn()
@@ -49,18 +51,45 @@ describe('ApplicationEventConnection', () => {
     connection.connect()
     const socket = harness.openLatest()
 
-    socket.emitServer({ type: 'subscribed', resource: { kind: 'thread', id: 't-1' } })
+    socket.emitServer({
+      type: 'subscribed',
+      resource: { kind: 'thread', id: THREAD_ID },
+      cursor: '3',
+    })
     expect(onMessage).toHaveBeenCalledWith({
       type: 'subscribed',
-      resource: { kind: 'thread', id: 't-1' },
+      resource: { kind: 'thread', id: THREAD_ID },
+      cursor: '3',
     })
 
     for (const raw of [
       'not json',
-      JSON.stringify({ type: 'unknown' }),
-      JSON.stringify({ type: 'subscribed' }),
-      JSON.stringify({ type: 'event', resource: { kind: 'thread', id: 't' }, name: 'bogus' }),
-      JSON.stringify({ type: 'event', resource: { kind: 'nope', id: 't' }, name: 'revision' }),
+      JSON.stringify({ version: 2, type: 'subscribed', resource: { kind: 'thread', id: THREAD_ID }, cursor: '1' }),
+      JSON.stringify({ version: 1, type: 'unknown' }),
+      JSON.stringify({ version: 1, type: 'subscribed' }),
+      JSON.stringify({ version: 1, type: 'subscribed', resource: { kind: 'thread', id: THREAD_ID } }),
+      JSON.stringify({
+        version: 1,
+        type: 'event',
+        resource: { kind: 'thread', id: THREAD_ID },
+        name: 'bogus',
+        data: {},
+      }),
+      JSON.stringify({
+        version: 1,
+        type: 'event',
+        resource: { kind: 'nope', id: THREAD_ID },
+        name: 'revision',
+        data: { revision: '1' },
+      }),
+      JSON.stringify({
+        version: 1,
+        type: 'event',
+        resource: { kind: 'thread', id: 'not-a-uuid' },
+        name: 'revision',
+        data: { revision: '1' },
+      }),
+      JSON.stringify({ version: 1, type: 'resync', resource: { kind: 'thread', id: THREAD_ID }, extra: true }),
     ]) {
       socket.onmessage?.({ data: raw })
     }
@@ -70,13 +99,38 @@ describe('ApplicationEventConnection', () => {
   it('sends encoded client messages only while open', () => {
     const { connection, harness } = openConnection()
     connection.connect()
-    expect(connection.send({ type: 'subscribe', resource: { kind: 'thread', id: 't-1' } })).toBe(false)
+    expect(
+      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+    ).toBe(false)
 
     const socket = harness.openLatest()
-    expect(connection.send({ type: 'unsubscribe', resource: { kind: 'canvas', id: 'c-1' } })).toBe(true)
+    expect(
+      connection.send({ version: 1, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } }),
+    ).toBe(true)
     expect(socket.sentMessages()).toEqual([
-      { type: 'unsubscribe', resource: { kind: 'canvas', id: 'c-1' } },
+      { version: 1, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } },
     ])
+  })
+
+  it('send never throws: closes the socket and reconnects on a synchronous send failure', () => {
+    vi.useFakeTimers()
+    const { connection, harness } = openConnection()
+    connection.connect()
+    const socket = harness.openLatest()
+    socket.sendThrows = true
+
+    // 异常绝不逃逸到调用方（React effect）。
+    expect(() =>
+      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+    ).not.toThrow()
+    expect(
+      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+    ).toBe(false)
+    // close 是权威清理点：触发统一重连路径。
+    expect(socket.closed).toBe(true)
+    expect(vi.getTimerCount()).toBe(1)
+    vi.advanceTimersByTime(250)
+    expect(harness.sockets).toHaveLength(2)
   })
 
   it('reconnects with backoff 250/500/1000/2000/5000 capped at 5000ms plus jitter', () => {
@@ -154,7 +208,7 @@ describe('ApplicationEventConnection', () => {
 
     // 旧 socket 迟到的事件一律无效：不触发 onOpen/onMessage/重连。
     first.open()
-    first.emitServer({ type: 'subscribed', resource: { kind: 'thread', id: 't-1' } })
+    first.emitServer({ type: 'subscribed', resource: { kind: 'thread', id: THREAD_ID }, cursor: '1' })
     first.onerror?.()
     const socketsAfterStale = harness.sockets.length
     vi.advanceTimersByTime(10_000)
@@ -163,8 +217,11 @@ describe('ApplicationEventConnection', () => {
     expect(onMessage).not.toHaveBeenCalled()
 
     // 当前 socket 的消息仍正常送达。
-    second.emitServer({ type: 'resync', resource: { kind: 'thread', id: 't-1' } })
-    expect(onMessage).toHaveBeenCalledWith({ type: 'resync', resource: { kind: 'thread', id: 't-1' } })
+    second.emitServer({ type: 'resync', resource: { kind: 'thread', id: THREAD_ID } })
+    expect(onMessage).toHaveBeenCalledWith({
+      type: 'resync',
+      resource: { kind: 'thread', id: THREAD_ID },
+    })
   })
 
   it('disconnect closes the socket, stops timers and reconnect; connect restarts', () => {

@@ -1,20 +1,24 @@
 /**
  * 应用事件 WebSocket 协议（/api/events/v1）。
  *
- * client -> server（JSON 文本）：
- * - {"type":"subscribe","resource":{"kind":"thread"|"canvas","id":"..."}}
- * - {"type":"unsubscribe","resource":{...}}
+ * client -> server（JSON 文本，所有帧带 version=1）：
+ * - {"version":1,"type":"subscribe","resource":{"kind":"thread"|"canvas","id":"<UUID>"}}
+ * - {"version":1,"type":"unsubscribe","resource":{...}}
  *
- * server -> client（JSON 文本）：
- * - {"type":"subscribed","resource":{...}}：订阅已在 wire 上建立（首次与重连后都会发送）。
- * - {"type":"event","resource":{...},"name":"revision"|"realtime"|"version","data":<JSON 值>}
- *   - thread：revision（持久 revision 前进）、realtime（Redis delta envelope 的 JSON 文本）。
- *   - canvas：version（{"version":"N"} 对象或其 JSON 文本）。
- * - {"type":"resync","resource":{...}}：需要整体替换为全量快照。
- * - {"type":"error","resource"?:{...},"message"?:string}：订阅/事件处理失败。
+ * server -> client（JSON 文本，所有帧带 version=1）：
+ * - {"version":1,"type":"subscribed","resource":{...},"cursor":"<canonical>"}
+ *   订阅已在 wire 上建立（首次与重连后都会发送）；cursor 是资源当前游标。
+ * - {"version":1,"type":"event","resource":{...},"name":"revision"|"realtime"|"version","data":{...},"cursor":"<canonical>"?}
+ *   - thread revision：data {"revision":"N"}，cursor 为持久 revision。
+ *   - thread realtime：data 为 Redis delta envelope 的 JSON 对象（如 MODEL_DELTA）。
+ *   - canvas version：data {"version":"N"}，cursor 为 graph 版本。
+ * - {"version":1,"type":"resync","resource":{...}}：需要整体替换为全量快照。
+ * - {"version":1,"type":"error","resource"?:{...},"code":"<string>","message":"<string>"}
  *
- * 解码是严格的：帧形状、type、resource 与 event name 不合法一律丢弃，
- * 畸形消息永远不会到达 listeners。
+ * 解码是真正严格的：version 必须为 1、每种 type/name 只接受精确字段集、
+ * 多余/未知字段一律拒绝；resource id 必须是 canonical UUID（小写十六进制）；
+ * cursor 与 revision/version data 必须是 canonical 非负十进制字符串；
+ * realtime data 必须是 JSON 对象。畸形消息永远不会到达 listeners。
  */
 
 export type ApplicationEventResourceKind = 'thread' | 'canvas'
@@ -26,20 +30,28 @@ export interface ApplicationEventResource {
 
 export type ApplicationEventName = 'revision' | 'realtime' | 'version'
 
+/** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
+export type ApplicationEventCursor = string
+
 export type ApplicationEventClientMessage =
-  | { type: 'subscribe'; resource: ApplicationEventResource }
-  | { type: 'unsubscribe'; resource: ApplicationEventResource }
+  | { version: 1; type: 'subscribe'; resource: ApplicationEventResource }
+  | { version: 1; type: 'unsubscribe'; resource: ApplicationEventResource }
 
 export type ApplicationEventServerMessage =
-  | { type: 'subscribed'; resource: ApplicationEventResource }
+  | { type: 'subscribed'; resource: ApplicationEventResource; cursor: ApplicationEventCursor }
   | {
       type: 'event'
       resource: ApplicationEventResource
       name: ApplicationEventName
       data: unknown
+      cursor?: ApplicationEventCursor
     }
   | { type: 'resync'; resource: ApplicationEventResource }
-  | { type: 'error'; resource?: ApplicationEventResource; message?: string }
+  | { type: 'error'; resource?: ApplicationEventResource; code: string; message: string }
+
+const CANONICAL_DECIMAL = /^(0|[1-9][0-9]*)$/
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const EVENT_FIELDS = ['version', 'type', 'resource', 'name', 'data', 'cursor'] as const
 
 export function encodeClientMessage(message: ApplicationEventClientMessage): string {
   return JSON.stringify(message)
@@ -52,25 +64,50 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
   } catch {
     return null
   }
-  if (!isRecord(parsed) || typeof parsed.type !== 'string') {
+  if (!isRecord(parsed) || parsed.version !== 1 || typeof parsed.type !== 'string') {
     return null
   }
   switch (parsed.type) {
     case 'subscribed': {
+      if (!hasOnlyFields(parsed, ['version', 'type', 'resource', 'cursor'])) {
+        return null
+      }
       const resource = parseResource(parsed.resource)
       if (resource == null) {
         return null
       }
-      return { type: 'subscribed', resource }
+      const cursor = parseCursor(parsed.cursor)
+      if (cursor == null) {
+        return null
+      }
+      return { type: 'subscribed', resource, cursor }
     }
     case 'event': {
+      if (!hasOnlyFields(parsed, EVENT_FIELDS)) {
+        return null
+      }
       const resource = parseResource(parsed.resource)
       if (resource == null || !isEventName(parsed.name)) {
         return null
       }
-      return { type: 'event', resource, name: parsed.name, data: parsed.data }
+      const data = parseEventData(parsed.name, parsed.data)
+      if (data == null) {
+        return null
+      }
+      let cursor: string | undefined
+      if (parsed.cursor !== undefined) {
+        const parsedCursor = parseCursor(parsed.cursor)
+        if (parsedCursor == null) {
+          return null
+        }
+        cursor = parsedCursor
+      }
+      return { type: 'event', resource, name: parsed.name, data, cursor }
     }
     case 'resync': {
+      if (!hasOnlyFields(parsed, ['version', 'type', 'resource'])) {
+        return null
+      }
       const resource = parseResource(parsed.resource)
       if (resource == null) {
         return null
@@ -78,33 +115,52 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
       return { type: 'resync', resource }
     }
     case 'error': {
-      const message = typeof parsed.message === 'string' ? parsed.message : undefined
-      if (parsed.resource === undefined) {
-        return { type: 'error', message }
-      }
-      const resource = parseResource(parsed.resource)
-      if (resource == null) {
+      if (!hasOnlyFields(parsed, ['version', 'type', 'resource', 'code', 'message'])) {
         return null
       }
-      return { type: 'error', resource, message }
+      if (parsed.resource === undefined) {
+        if (typeof parsed.code !== 'string' || parsed.code.length === 0) {
+          return null
+        }
+        if (typeof parsed.message !== 'string') {
+          return null
+        }
+        return { type: 'error', code: parsed.code, message: parsed.message }
+      }
+      const resource = parseResource(parsed.resource)
+      if (resource == null || typeof parsed.code !== 'string' || parsed.code.length === 0) {
+        return null
+      }
+      if (typeof parsed.message !== 'string') {
+        return null
+      }
+      return { type: 'error', resource, code: parsed.code, message: parsed.message }
     }
     default:
       return null
   }
 }
 
+/** 只允许声明过的字段；多余/未知字段拒绝。 */
+function hasOnlyFields(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+): boolean {
+  return Object.keys(value).every((key) => fields.includes(key))
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function parseResource(value: unknown): ApplicationEventResource | null {
-  if (!isRecord(value)) {
+  if (!isRecord(value) || typeof value.id !== 'string') {
     return null
   }
   if (value.kind !== 'thread' && value.kind !== 'canvas') {
     return null
   }
-  if (typeof value.id !== 'string' || value.id.length === 0) {
+  if (!CANONICAL_UUID.test(value.id)) {
     return null
   }
   return { kind: value.kind, id: value.id }
@@ -112,4 +168,20 @@ function parseResource(value: unknown): ApplicationEventResource | null {
 
 function isEventName(value: unknown): value is ApplicationEventName {
   return value === 'revision' || value === 'realtime' || value === 'version'
+}
+
+function parseCursor(value: unknown): ApplicationEventCursor | null {
+  return typeof value === 'string' && CANONICAL_DECIMAL.test(value) ? value : null
+}
+
+/** 每种 event name 的 data 形状是精确的：revision/version 单字段对象，realtime JSON 对象。 */
+function parseEventData(name: ApplicationEventName, data: unknown): unknown | null {
+  if (name === 'revision' || name === 'version') {
+    const key = name === 'revision' ? 'revision' : 'version'
+    if (!isRecord(data) || Object.keys(data).length !== 1) {
+      return null
+    }
+    return parseCursor(data[key]) == null ? null : data
+  }
+  return isRecord(data) ? data : null
 }

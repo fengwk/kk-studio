@@ -4,68 +4,116 @@ import {
   encodeClientMessage,
 } from '@/shared/app-events/protocol'
 
-const threadResource = { kind: 'thread', id: 't-1' } as const
-const canvasResource = { kind: 'canvas', id: 'c-1' } as const
+const THREAD_ID = '11111111-2222-4333-8444-555555555555'
+const CANVAS_ID = 'cccccccc-0000-4000-8000-000000000001'
+const threadResource = { kind: 'thread', id: THREAD_ID } as const
+const canvasResource = { kind: 'canvas', id: CANVAS_ID } as const
 
 describe('encodeClientMessage', () => {
-  it('encodes subscribe/unsubscribe with the resource', () => {
-    expect(JSON.parse(encodeClientMessage({ type: 'subscribe', resource: threadResource }))).toEqual({
-      type: 'subscribe',
-      resource: threadResource,
-    })
+  it('encodes subscribe/unsubscribe frames with version=1 and the resource', () => {
     expect(
-      JSON.parse(encodeClientMessage({ type: 'unsubscribe', resource: canvasResource })),
-    ).toEqual({ type: 'unsubscribe', resource: canvasResource })
+      JSON.parse(encodeClientMessage({ version: 1, type: 'subscribe', resource: threadResource })),
+    ).toEqual({ version: 1, type: 'subscribe', resource: threadResource })
+    expect(
+      JSON.parse(
+        encodeClientMessage({ version: 1, type: 'unsubscribe', resource: canvasResource }),
+      ),
+    ).toEqual({ version: 1, type: 'unsubscribe', resource: canvasResource })
   })
 })
 
 describe('decodeServerMessage', () => {
-  it('decodes subscribed/resync frames', () => {
-    expect(decodeServerMessage(JSON.stringify({ type: 'subscribed', resource: threadResource })))
-      .toEqual({ type: 'subscribed', resource: threadResource })
-    expect(decodeServerMessage(JSON.stringify({ type: 'resync', resource: canvasResource })))
-      .toEqual({ type: 'resync', resource: canvasResource })
-  })
-
-  it('decodes event frames with known names and any JSON data', () => {
+  it('decodes subscribed frames with the resource and canonical cursor', () => {
     expect(
       decodeServerMessage(
-        JSON.stringify({ type: 'event', resource: threadResource, name: 'revision' }),
+        JSON.stringify({ version: 1, type: 'subscribed', resource: threadResource, cursor: '42' }),
       ),
-    ).toEqual({ type: 'event', resource: threadResource, name: 'revision', data: undefined })
+    ).toEqual({ type: 'subscribed', resource: threadResource, cursor: '42' })
+  })
+
+  it('decodes resync frames', () => {
+    expect(
+      decodeServerMessage(JSON.stringify({ version: 1, type: 'resync', resource: canvasResource })),
+    ).toEqual({ type: 'resync', resource: canvasResource })
+  })
+
+  it('decodes event frames with strict per-name data shapes and optional cursor', () => {
     expect(
       decodeServerMessage(
         JSON.stringify({
+          version: 1,
+          type: 'event',
+          resource: threadResource,
+          name: 'revision',
+          data: { revision: '43' },
+          cursor: '43',
+        }),
+      ),
+    ).toEqual({
+      type: 'event',
+      resource: threadResource,
+      name: 'revision',
+      data: { revision: '43' },
+      cursor: '43',
+    })
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
           type: 'event',
           resource: threadResource,
           name: 'realtime',
-          data: '{"type":"MODEL_DELTA"}',
+          data: { type: 'MODEL_DELTA', threadId: THREAD_ID, sequence: 1 },
         }),
       ),
     ).toEqual({
       type: 'event',
       resource: threadResource,
       name: 'realtime',
-      data: '{"type":"MODEL_DELTA"}',
+      data: { type: 'MODEL_DELTA', threadId: THREAD_ID, sequence: 1 },
+      cursor: undefined,
     })
     expect(
       decodeServerMessage(
-        JSON.stringify({ type: 'event', resource: canvasResource, name: 'version', data: { version: '3' } }),
+        JSON.stringify({
+          version: 1,
+          type: 'event',
+          resource: canvasResource,
+          name: 'version',
+          data: { version: '3' },
+        }),
       ),
-    ).toEqual({ type: 'event', resource: canvasResource, name: 'version', data: { version: '3' } })
+    ).toEqual({
+      type: 'event',
+      resource: canvasResource,
+      name: 'version',
+      data: { version: '3' },
+      cursor: undefined,
+    })
   })
 
-  it('decodes error frames with and without a resource', () => {
-    expect(decodeServerMessage(JSON.stringify({ type: 'error', message: 'boom' }))).toEqual({
-      type: 'error',
-      resource: undefined,
-      message: 'boom',
-    })
+  it('decodes error frames with code/message, with and without a resource', () => {
     expect(
       decodeServerMessage(
-        JSON.stringify({ type: 'error', resource: threadResource, message: 'boom' }),
+        JSON.stringify({ version: 1, type: 'error', code: 'INTERNAL', message: 'boom' }),
       ),
-    ).toEqual({ type: 'error', resource: threadResource, message: 'boom' })
+    ).toEqual({ type: 'error', code: 'INTERNAL', message: 'boom' })
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'error',
+          resource: threadResource,
+          code: 'RESOURCE_NOT_FOUND',
+          message: 'boom',
+        }),
+      ),
+    ).toEqual({
+      type: 'error',
+      resource: threadResource,
+      code: 'RESOURCE_NOT_FOUND',
+      message: 'boom',
+    })
   })
 
   it('rejects malformed JSON and non-object frames', () => {
@@ -76,34 +124,246 @@ describe('decodeServerMessage', () => {
     expect(decodeServerMessage('"string"')).toBeNull()
   })
 
-  it('rejects unknown types, missing resources and malformed resources', () => {
-    expect(decodeServerMessage(JSON.stringify({ type: 'unknown' }))).toBeNull()
-    expect(decodeServerMessage(JSON.stringify({ type: 'subscribed' }))).toBeNull()
-    expect(decodeServerMessage(JSON.stringify({ type: 'subscribed', resource: {} }))).toBeNull()
+  it('rejects wrong or missing protocol version', () => {
+    const frame = { version: 1, type: 'resync', resource: threadResource }
+    expect(decodeServerMessage(JSON.stringify({ ...frame, version: 2 }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ ...frame, version: '1' }))).toBeNull()
     expect(
-      decodeServerMessage(JSON.stringify({ type: 'subscribed', resource: { kind: 'file', id: 'x' } })),
-    ).toBeNull()
-    expect(
-      decodeServerMessage(JSON.stringify({ type: 'subscribed', resource: { kind: 'thread' } })),
-    ).toBeNull()
-    expect(
-      decodeServerMessage(JSON.stringify({ type: 'subscribed', resource: { kind: 'thread', id: '' } })),
-    ).toBeNull()
-    expect(
-      decodeServerMessage(JSON.stringify({ type: 'resync', resource: { kind: 'canvas', id: 7 } })),
+      decodeServerMessage(JSON.stringify({ type: 'resync', resource: threadResource })),
     ).toBeNull()
   })
 
-  it('rejects event frames with unknown names and keeps valid ones', () => {
+  it('rejects unknown types and malformed resources', () => {
+    expect(decodeServerMessage(JSON.stringify({ version: 1, type: 'unknown' }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ version: 1, type: 'subscribed' }))).toBeNull()
+    expect(
+      decodeServerMessage(JSON.stringify({ version: 1, type: 'subscribed', resource: {} })),
+    ).toBeNull()
     expect(
       decodeServerMessage(
-        JSON.stringify({ type: 'event', resource: threadResource, name: 'snapshot' }),
+        JSON.stringify({ version: 1, type: 'subscribed', resource: { kind: 'file', id: THREAD_ID } }),
       ),
     ).toBeNull()
     expect(
       decodeServerMessage(
-        JSON.stringify({ type: 'event', resource: threadResource, name: 'revision', data: {} }),
+        JSON.stringify({ version: 1, type: 'subscribed', resource: { kind: 'thread' } }),
       ),
-    ).toEqual({ type: 'event', resource: threadResource, name: 'revision', data: {} })
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'resync',
+          resource: { kind: 'canvas', id: 7 },
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects non-canonical UUID resource ids', () => {
+    for (const id of [
+      '', // 空
+      'thread-1', // 非 UUID
+      '11111111-2222-4333-8444-55555555555', // 长度不足
+      '11111111-2222-4333-8444-5555555555555', // 长度超长
+      '11111111-2222-4333-8444-55555555555G', // 非十六进制
+      '11111111-2222-4333-8444-55555555555  ', // 空白
+      '11111111-2222-4333-8444-55555555555\n', // 换行
+    ]) {
+      expect(
+        decodeServerMessage(
+          JSON.stringify({ version: 1, type: 'resync', resource: { kind: 'thread', id } }),
+        ),
+      ).toBeNull()
+    }
+  })
+
+  it('rejects non-canonical cursors', () => {
+    const base = { version: 1, type: 'subscribed', resource: threadResource }
+    for (const cursor of [0, 1, '01', '-1', '1.5', 'abc', '', ' 1', '1 ']) {
+      expect(decodeServerMessage(JSON.stringify({ ...base, cursor }))).toBeNull()
+    }
+    // event 的 cursor 存在时必须 canonical，缺失时允许。
+    const event = {
+      version: 1,
+      type: 'event',
+      resource: threadResource,
+      name: 'revision',
+      data: { revision: '3' },
+    }
+    expect(decodeServerMessage(JSON.stringify({ ...event, cursor: 'abc' }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify(event))).not.toBeNull()
+  })
+
+  it('rejects event frames with unknown names and malformed data shapes', () => {
+    const base = { version: 1, type: 'event', resource: threadResource }
+    expect(decodeServerMessage(JSON.stringify({ ...base, name: 'snapshot', data: {} }))).toBeNull()
+    // revision data 必须是精确单字段 {revision}。
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ ...base, name: 'revision', data: { revision: '3', extra: true } }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(JSON.stringify({ ...base, name: 'revision', data: {} })),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(JSON.stringify({ ...base, name: 'revision', data: { version: '3' } })),
+    ).toBeNull()
+    // version data 必须是精确单字段 {version}。
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ ...base, name: 'version', data: { version: '01' } }),
+      ),
+    ).toBeNull()
+    // realtime data 必须是 JSON 对象（字符串/数组/数字拒绝）。
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ ...base, name: 'realtime', data: '{"type":"MODEL_DELTA"}' }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(JSON.stringify({ ...base, name: 'realtime', data: [1, 2] })),
+    ).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ ...base, name: 'realtime', data: 7 }))).toBeNull()
+  })
+
+  it('rejects unknown or extra fields per frame type', () => {
+    const subscribed = {
+      version: 1,
+      type: 'subscribed',
+      resource: threadResource,
+      cursor: '1',
+      extra: true,
+    }
+    expect(decodeServerMessage(JSON.stringify(subscribed))).toBeNull()
+    const event = {
+      version: 1,
+      type: 'event',
+      resource: threadResource,
+      name: 'revision',
+      data: { revision: '1' },
+      cursor: '1',
+      extra: true,
+    }
+    expect(decodeServerMessage(JSON.stringify(event))).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ version: 1, type: 'resync', resource: threadResource, cursor: '1' }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'error',
+          resource: threadResource,
+          code: 'X',
+          message: 'y',
+          extra: true,
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects error frames without code or message', () => {
+    expect(
+      decodeServerMessage(JSON.stringify({ version: 1, type: 'error', code: 'X' })),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(JSON.stringify({ version: 1, type: 'error', message: 'y' })),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ version: 1, type: 'error', code: '', message: 'y' }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ version: 1, type: 'error', resource: threadResource, code: 'X', message: 7 }),
+      ),
+    ).toBeNull()
+  })
+})
+
+describe('backend wire samples', () => {
+  it('decodes the backend subscribed frame', () => {
+    const raw =
+      `{"version":1,"type":"subscribed","resource":{"kind":"thread","id":"${THREAD_ID}"},"cursor":"42"}`
+    expect(decodeServerMessage(raw)).toEqual({
+      type: 'subscribed',
+      resource: { kind: 'thread', id: THREAD_ID },
+      cursor: '42',
+    })
+  })
+
+  it('decodes the backend thread revision event frame', () => {
+    const raw =
+      `{"version":1,"type":"event","resource":{"kind":"thread","id":"${THREAD_ID}"},"name":"revision","data":{"revision":"43"},"cursor":"43"}`
+    expect(decodeServerMessage(raw)).toEqual({
+      type: 'event',
+      resource: { kind: 'thread', id: THREAD_ID },
+      name: 'revision',
+      data: { revision: '43' },
+      cursor: '43',
+    })
+  })
+
+  it('decodes the backend thread realtime event frame (MODEL_DELTA object data)', () => {
+    const raw =
+      `{"version":1,"type":"event","resource":{"kind":"thread","id":"${THREAD_ID}"},"name":"realtime","data":{"threadId":"${THREAD_ID}","subjectKind":"MODEL_INVOCATION","subjectId":"11111111-2222-4333-8444-555555555556","attempt":1,"sequence":2,"type":"MODEL_DELTA","payload":{"kind":"TEXT_DELTA","text":"hello"},"createdAt":"2026-01-01T00:00:00Z"}}`
+    expect(decodeServerMessage(raw)).toEqual({
+      type: 'event',
+      resource: { kind: 'thread', id: THREAD_ID },
+      name: 'realtime',
+      data: {
+        threadId: THREAD_ID,
+        subjectKind: 'MODEL_INVOCATION',
+        subjectId: '11111111-2222-4333-8444-555555555556',
+        attempt: 1,
+        sequence: 2,
+        type: 'MODEL_DELTA',
+        payload: { kind: 'TEXT_DELTA', text: 'hello' },
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      cursor: undefined,
+    })
+  })
+
+  it('decodes the backend canvas version event frame', () => {
+    const raw =
+      `{"version":1,"type":"event","resource":{"kind":"canvas","id":"${CANVAS_ID}"},"name":"version","data":{"version":"7"},"cursor":"7"}`
+    expect(decodeServerMessage(raw)).toEqual({
+      type: 'event',
+      resource: { kind: 'canvas', id: CANVAS_ID },
+      name: 'version',
+      data: { version: '7' },
+      cursor: '7',
+    })
+  })
+
+  it('decodes the backend resync frame', () => {
+    const raw =
+      `{"version":1,"type":"resync","resource":{"kind":"canvas","id":"${CANVAS_ID}"}}`
+    expect(decodeServerMessage(raw)).toEqual({
+      type: 'resync',
+      resource: { kind: 'canvas', id: CANVAS_ID },
+    })
+  })
+
+  it('decodes the backend error frames (with and without resource)', () => {
+    expect(
+      decodeServerMessage(
+        `{"version":1,"type":"error","resource":{"kind":"thread","id":"${THREAD_ID}"},"code":"SUBSCRIBE_FAILED","message":"boom"}`,
+      ),
+    ).toEqual({
+      type: 'error',
+      resource: { kind: 'thread', id: THREAD_ID },
+      code: 'SUBSCRIBE_FAILED',
+      message: 'boom',
+    })
+    expect(
+      decodeServerMessage(`{"version":1,"type":"error","code":"INTERNAL","message":"boom"}`),
+    ).toEqual({ type: 'error', code: 'INTERNAL', message: 'boom' })
   })
 })

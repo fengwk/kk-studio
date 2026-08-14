@@ -28,6 +28,9 @@ import type {
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
+/** 控制器 Thread id：资源订阅经严格 codec，必须是 canonical UUID。 */
+const THREAD_ID = '11111111-2222-4333-8444-555555555555'
+
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listAgents: vi.fn(),
@@ -70,7 +73,7 @@ function branchSettings(
 
 function threadFixture(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
-    threadId: 't1',
+    threadId: THREAD_ID,
     sessionId: 's1',
     headEntryId: 'h1',
     yoloEnabled: false,
@@ -261,7 +264,7 @@ describe('useAgentThreadController', () => {
 
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
     const [threadIdArg, batchArg] = vi.mocked(harnessService.enqueueCommands).mock.calls[0]!
-    expect(threadIdArg).toBe('t1')
+    expect(threadIdArg).toBe(THREAD_ID)
     expect(batchArg.expectedHeadEntryId).toBe('h1')
     expect(batchArg.expectedNextCommandSequence).toBe('1')
     const types = batchArg.commands.map((command) => command.type)
@@ -758,7 +761,7 @@ describe('useAgentThreadController', () => {
         cancelledCommandCount: 0,
       } as HarnessThreadStopResultDTO)
 
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -790,7 +793,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -805,8 +808,9 @@ describe('useAgentThreadController', () => {
     // 操作自动失效；realtime revision 信号触发一次 refetch。
     act(() => realtimeSockets.latest?.emitServer({
       type: 'event',
-      resource: { kind: 'thread', id: 't1' },
+      resource: { kind: 'thread', id: THREAD_ID },
       name: 'revision',
+      data: { revision: '2' },
     }))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     await waitFor(() => expect(result.current.stopReplayPending).toBe(false))
@@ -836,7 +840,7 @@ describe('useAgentThreadController', () => {
         stoppedTurnEndEntryId: null,
         cancelledCommandCount: 0,
       } as HarnessThreadStopResultDTO)
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -865,7 +869,7 @@ describe('useAgentThreadController', () => {
         stoppedTurnEndEntryId: null,
         cancelledCommandCount: 0,
       } as HarnessThreadStopResultDTO)
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -915,7 +919,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -931,8 +935,9 @@ describe('useAgentThreadController', () => {
     // 因此上述栅栏契约由前面的 retireStaleStopPending 单元测试固化。）
     act(() => realtimeSockets.latest?.emitServer({
       type: 'event',
-      resource: { kind: 'thread', id: 't1' },
+      resource: { kind: 'thread', id: THREAD_ID },
       name: 'revision',
+      data: { revision: '2' },
     }))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     vi.mocked(harnessService.stopThread).mockResolvedValue({
@@ -951,7 +956,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('mints a fresh stopRequestId after a successful stop', async () => {
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -993,7 +998,7 @@ describe('useAgentThreadController', () => {
         updateTime: null,
       } as ToolInvocationDTO)
 
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -1001,7 +1006,7 @@ describe('useAgentThreadController', () => {
     })
     expect(harnessService.decideApproval).toHaveBeenCalledTimes(1)
     const firstCall = vi.mocked(harnessService.decideApproval).mock.calls[0]
-    expect(firstCall?.[0]).toBe('t1')
+    expect(firstCall?.[0]).toBe(THREAD_ID)
     expect(firstCall?.[1]).toBe('tool-1')
     expect(firstCall?.[2]).toMatchObject({
       decision: 'ALLOW',
@@ -1022,7 +1027,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('mints a fresh decisionId for a different invocation', async () => {
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -1068,7 +1073,7 @@ describe('useAgentThreadController', () => {
         updateTime: null,
       } as ToolInvocationDTO)
 
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     // 子 Thread 审批：mutation 必须打到 status.threadId，而不是父 Thread。
@@ -1101,7 +1106,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.decideApproval).mockRejectedValueOnce(
       new ApiError('stale child revision', 409),
     )
-    const { result } = renderHook(() => useAgentThreadController('t1'), {
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1118,7 +1123,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('invalidates the snapshot after a successful stop', async () => {
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     const initialCalls = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
@@ -1209,7 +1214,7 @@ describe('useAgentThreadController', () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
-    const { result } = renderHook(() => useAgentThreadController('t1'), {
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))

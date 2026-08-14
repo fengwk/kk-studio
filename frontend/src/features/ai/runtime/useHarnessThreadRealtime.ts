@@ -204,10 +204,10 @@ export function useHarnessThreadRealtime(
 
     const invalidateSnapshot = () =>
       queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
-    // 协议 data 是 JSON 值；realtime 事件承载 delta envelope 的 JSON 文本
-    // （对象形式则回序列化为同一文本），reducer 的严格解析保持不变。
+    // 协议 data 是 delta envelope 的 JSON 对象；回序列化为同一文本后，
+    // reducer 的严格解析保持不变。
     const handleRealtime = (data: unknown) => {
-      const raw = typeof data === 'string' ? data : JSON.stringify(data)
+      const raw = JSON.stringify(data)
       const delta = parseRealtimeModelDelta(raw)
       if (delta != null && delta.threadId === threadId) {
         // 持久化终态 fence：终态 ModelInvocation（result/error/已挂接 result

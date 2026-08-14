@@ -15,12 +15,17 @@ export class FakeWebSocket {
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
   closed = false
+  /** 为 true 时 send 同步抛错（模拟 open 与 send 之间的竞态/传输故障）。 */
+  sendThrows = false
 
   constructor(url: string) {
     this.url = url
   }
 
   send(data: string): void {
+    if (this.sendThrows) {
+      throw new Error('WebSocket is not open')
+    }
     this.sent.push(data)
   }
 
@@ -42,8 +47,12 @@ export class FakeWebSocket {
     this.onclose?.()
   }
 
+  /**
+   * 以真实 wire 帧派发 server 消息：自动补齐协议 version=1，
+   * 连接端 codec 会做完整严格校验。
+   */
   emitServer(message: ApplicationEventServerMessage): void {
-    this.onmessage?.({ data: JSON.stringify(message) })
+    this.onmessage?.({ data: JSON.stringify({ version: 1, ...message }) })
   }
 
   sentMessages(): ApplicationEventClientMessage[] {
