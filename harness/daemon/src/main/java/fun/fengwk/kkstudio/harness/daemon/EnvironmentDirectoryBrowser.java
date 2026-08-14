@@ -24,8 +24,8 @@ import java.util.Objects;
  * 穿越被拒绝。
  *
  * <p>成功响应中 {@code path}/{@code parentPath}/entry {@code path} 一律使用请求的 canonical wire 路径（显式请求 root 内
- * symlink alias 时也回显 alias 本身，内部只用 real path 校验与读取，绝不越过 root）；{@code displayPath} 是 daemon 计算的
- * 完整本地展示路径（浏览目录的 canonical 绝对路径）。
+ * symlink alias 时也回显 alias 本身，内部只用 real path 校验与读取，绝不越过 root）；{@code displayPath} 是请求 {@code path}
+ * 的最后一段（root 为 {@code '.'}，symlink alias 请求回显 alias 段），只作展示、绝不暴露 daemon 本地绝对路径。
  *
  * <p>失败分类：非法路径/越界 → {@link IllegalArgumentException}；不存在 → {@link NoSuchFileException}；非目录 → {@link
  * NotDirectoryException}；其余本地 IO 失败 → {@link IOException}。
@@ -63,7 +63,7 @@ public final class EnvironmentDirectoryBrowser {
     return new DaemonDirectoryCodec.DirectoryListed(
         requestId,
         path,
-        canonical.toString(),
+        displayPath(path),
         parentWirePath(path),
         truncated,
         gitBranch(canonical),
@@ -154,6 +154,12 @@ public final class EnvironmentDirectoryBrowser {
   /** entry 的 canonical wire 路径：请求目录的直接子路径（root 请求为单段）。 */
   private static String childWirePath(String parentPath, String name) {
     return ".".equals(parentPath) ? name : parentPath + "/" + name;
+  }
+
+  /** {@code displayPath} 是请求 wire path 的最后一段（root 为 {@code '.'}），绝不暴露本地绝对路径。 */
+  private static String displayPath(String path) {
+    int separator = path.lastIndexOf('/');
+    return separator < 0 ? path : path.substring(separator + 1);
   }
 
   /** 请求目录父目录的 canonical wire 路径（root 为 {@code '.'}）。 */

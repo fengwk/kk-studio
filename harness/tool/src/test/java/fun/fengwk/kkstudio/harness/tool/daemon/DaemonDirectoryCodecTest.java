@@ -36,7 +36,7 @@ class DaemonDirectoryCodecTest {
         new DaemonDirectoryCodec.DirectoryListed(
             REQUEST_ID,
             "src",
-            "/home/dev/project/src",
+            "src",
             ".",
             true,
             "main",
@@ -49,8 +49,7 @@ class DaemonDirectoryCodecTest {
     assertEquals("main", decoded.gitBranch());
 
     DaemonDirectoryCodec.DirectoryListed withoutBranch =
-        new DaemonDirectoryCodec.DirectoryListed(
-            REQUEST_ID, ".", "/home/dev/project", ".", false, null, List.of());
+        new DaemonDirectoryCodec.DirectoryListed(REQUEST_ID, ".", ".", ".", false, null, List.of());
     DaemonDirectoryCodec.DirectoryListed decodedWithout =
         codec.decodeListed(codec.encodeListed(withoutBranch));
     assertEquals(withoutBranch, decodedWithout);
@@ -134,7 +133,7 @@ class DaemonDirectoryCodecTest {
             codec.decodeListed(
                 "{\"requestId\":\""
                     + REQUEST_ID
-                    + "\",\"path\":\".\",\"displayPath\":\"/root\",\"parentPath\":\".\",\"truncated\":false,"
+                    + "\",\"path\":\".\",\"displayPath\":\".\",\"parentPath\":\".\",\"truncated\":false,"
                     + "\"entries\":[{\"name\":\"a\",\"path\":\"a\",\"extra\":1}]}"));
     assertThrows(
         DaemonProtocolException.class,
@@ -142,7 +141,7 @@ class DaemonDirectoryCodecTest {
             codec.decodeListed(
                 "{\"requestId\":\""
                     + REQUEST_ID
-                    + "\",\"path\":\".\",\"displayPath\":\"/root\",\"parentPath\":\".\",\"truncated\":false,"
+                    + "\",\"path\":\".\",\"displayPath\":\".\",\"parentPath\":\".\",\"truncated\":false,"
                     + "\"entries\":[{\"name\":\"a\",\"path\":\"a\",\"displayPath\":\"a\"}]}"));
     assertThrows(
         DaemonProtocolException.class,
@@ -150,7 +149,7 @@ class DaemonDirectoryCodecTest {
             codec.decodeListed(
                 "{\"requestId\":\""
                     + REQUEST_ID
-                    + "\",\"path\":\".\",\"displayPath\":\"/root\",\"parentPath\":\".\",\"truncated\":false,"
+                    + "\",\"path\":\".\",\"displayPath\":\".\",\"parentPath\":\".\",\"truncated\":false,"
                     + "\"entries\":[{\"name\":\"a\"}]}"));
     assertThrows(
         DaemonProtocolException.class,
@@ -158,7 +157,7 @@ class DaemonDirectoryCodecTest {
             codec.decodeListed(
                 "{\"requestId\":\""
                     + REQUEST_ID
-                    + "\",\"path\":\".\",\"displayPath\":\"/root\",\"parentPath\":\".\",\"truncated\":\"no\","
+                    + "\",\"path\":\".\",\"displayPath\":\".\",\"parentPath\":\".\",\"truncated\":\"no\","
                     + "\"entries\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
@@ -166,12 +165,12 @@ class DaemonDirectoryCodecTest {
             codec.decodeListed(
                 "{\"requestId\":\""
                     + REQUEST_ID
-                    + "\",\"path\":\".\",\"displayPath\":\"/root\",\"parentPath\":\".\",\"entries\":[]}"));
+                    + "\",\"path\":\".\",\"displayPath\":\".\",\"parentPath\":\".\",\"entries\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decodeListed(
-                "{\"path\":\".\",\"displayPath\":\"/root\",\"parentPath\":\".\",\"truncated\":false,\"entries\":[]}"));
+                "{\"path\":\".\",\"displayPath\":\".\",\"parentPath\":\".\",\"truncated\":false,\"entries\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
@@ -219,7 +218,7 @@ class DaemonDirectoryCodecTest {
             codec.decodeListed(
                 "{\"requestId\":\""
                     + REQUEST_ID
-                    + "\",\"path\":\".\",\"displayPath\":\"/root\",\"parentPath\":\".\",\"truncated\":false,"
+                    + "\",\"path\":\".\",\"displayPath\":\".\",\"parentPath\":\".\",\"truncated\":false,"
                     + "\"entries\":[{\"name\":\"a\",\"name\":\"a\",\"path\":\"a\"}]}"));
     assertThrows(
         DaemonProtocolException.class,
@@ -227,7 +226,7 @@ class DaemonDirectoryCodecTest {
             codec.decodeListed(
                 "{\"requestId\":\""
                     + REQUEST_ID
-                    + "\",\"path\":\".\",\"displayPath\":\"/root\",\"parentPath\":\".\",\"truncated\":false,"
+                    + "\",\"path\":\".\",\"displayPath\":\".\",\"parentPath\":\".\",\"truncated\":false,"
                     + "\"entries\":[{\"name\":\"a\",\"path\":\"a\"}]} trailing"));
     assertThrows(
         DaemonProtocolException.class,
@@ -291,7 +290,7 @@ class DaemonDirectoryCodecTest {
             new DaemonDirectoryCodec.DirectoryListed(
                 REQUEST_ID,
                 "src",
-                "/root/src",
+                "src",
                 ".",
                 false,
                 null,
@@ -302,7 +301,7 @@ class DaemonDirectoryCodecTest {
             new DaemonDirectoryCodec.DirectoryListed(
                 REQUEST_ID,
                 "src",
-                "/root/src",
+                "src",
                 ".",
                 false,
                 null,
@@ -313,16 +312,16 @@ class DaemonDirectoryCodecTest {
             new DaemonDirectoryCodec.DirectoryListed(
                 REQUEST_ID,
                 ".",
-                "/root",
+                ".",
                 ".",
                 false,
                 null,
                 List.of(new DaemonDirectoryCodec.DirectoryEntry("a", "a/b"))));
-    // 合法组合仍然通过。
+    // 合法组合仍然通过（displayPath 是请求 path 的最后一段）。
     new DaemonDirectoryCodec.DirectoryListed(
         REQUEST_ID,
         ".",
-        "/root",
+        ".",
         ".",
         false,
         null,
@@ -330,11 +329,64 @@ class DaemonDirectoryCodecTest {
     new DaemonDirectoryCodec.DirectoryListed(
         REQUEST_ID,
         "src",
-        "/root/src",
+        "src",
         ".",
         false,
         null,
         List.of(new DaemonDirectoryCodec.DirectoryEntry("main", "src/main")));
+  }
+
+  /** displayPath 必须等于请求 path 的最后一段（root 为 '.'）；旧/恶意 daemon 泄漏本地绝对路径在 codec 层严格拒绝。 */
+  @Test
+  void rejectsDisplayPathThatIsNotTheLastSegmentOfPath() {
+    // record 构造入口：绝对路径与任何不一致值都拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, ".", "/home/dev/project", ".", false, null, List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, "src", "/home/dev/project/src", ".", false, null, List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, "src", "src/main", ".", false, null, List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, "src/main", "src", "src", false, null, List.of()));
+    // wire decode 入口：旧/恶意 daemon 的 DIRECTORY_LISTED 同样严格拒绝。
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeListed(
+                "{\"requestId\":\""
+                    + REQUEST_ID
+                    + "\",\"path\":\".\",\"displayPath\":\"/home/dev/project\",\"parentPath\":\".\",\"truncated\":false,"
+                    + "\"entries\":[]}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeListed(
+                "{\"requestId\":\""
+                    + REQUEST_ID
+                    + "\",\"path\":\"src\",\"displayPath\":\"/home/dev/project/src\",\"parentPath\":\".\",\"truncated\":false,"
+                    + "\"entries\":[]}"));
+    // 合法组合：root 为 '.'，其余是请求 path 的最后一段。
+    assertEquals(
+        ".",
+        new DaemonDirectoryCodec.DirectoryListed(REQUEST_ID, ".", ".", ".", false, null, List.of())
+            .displayPath());
+    assertEquals(
+        "main",
+        new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, "src/main", "main", "src", false, null, List.of())
+            .displayPath());
   }
 
   private static void assertInvalidPath(String path) {

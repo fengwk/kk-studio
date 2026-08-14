@@ -41,7 +41,7 @@ class EnvironmentDirectoryBrowserTest {
     DaemonDirectoryCodec.DirectoryListed listed = browser().list(REQUEST_ID, ".");
 
     assertEquals(".", listed.path());
-    assertEquals(root.toRealPath().toString(), listed.displayPath());
+    assertEquals(".", listed.displayPath());
     assertEquals(".", listed.parentPath());
     assertFalse(listed.truncated());
     assertNull(listed.gitBranch());
@@ -54,7 +54,7 @@ class EnvironmentDirectoryBrowserTest {
 
     DaemonDirectoryCodec.DirectoryListed nested = browser().list(REQUEST_ID, "src");
     assertEquals("src", nested.path());
-    assertEquals(root.toRealPath().resolve("src").toString(), nested.displayPath());
+    assertEquals("src", nested.displayPath());
     assertEquals(".", nested.parentPath());
     // 条目 path 是请求目录的直接子路径（wire），name 是目录名。
     assertEquals(
@@ -66,7 +66,7 @@ class EnvironmentDirectoryBrowserTest {
 
     DaemonDirectoryCodec.DirectoryListed deep = browser().list(REQUEST_ID, "src/main");
     assertEquals("src/main", deep.path());
-    assertEquals(root.toRealPath().resolve("src/main").toString(), deep.displayPath());
+    assertEquals("main", deep.displayPath());
     assertEquals("src", deep.parentPath());
     assertTrue(deep.entries().isEmpty());
   }
@@ -113,7 +113,7 @@ class EnvironmentDirectoryBrowserTest {
 
     DaemonDirectoryCodec.DirectoryListed listed = browser().list(REQUEST_ID, "alias");
     assertEquals("alias", listed.path());
-    assertEquals(root.toRealPath().resolve("real").toString(), listed.displayPath());
+    assertEquals("alias", listed.displayPath());
     assertEquals(".", listed.parentPath());
     assertEquals(
         List.of("alias/child"),
@@ -127,6 +127,7 @@ class EnvironmentDirectoryBrowserTest {
     Files.createSymbolicLink(root.resolve("src/alias"), root.resolve("real"));
     DaemonDirectoryCodec.DirectoryListed nestedAlias = browser().list(REQUEST_ID, "src/alias");
     assertEquals("src/alias", nestedAlias.path());
+    assertEquals("alias", nestedAlias.displayPath());
     assertEquals("src", nestedAlias.parentPath());
     assertEquals(
         List.of("src/alias/child"),

@@ -648,6 +648,7 @@ class DaemonRuntimeTest {
       DaemonDirectoryCodec.DirectoryListed listed =
           new DaemonDirectoryCodec().decodeListed(messages.get(1).payloadJson());
       assertEquals(".", listed.path());
+      assertEquals(".", listed.displayPath());
       assertEquals(
           List.of("docs", "src"),
           listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
@@ -657,7 +658,12 @@ class DaemonRuntimeTest {
       transport.receive(invoke("parallel-invocation", 2));
       assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
       transport.receive(listDirectory(3, "src"));
-      assertMessageTypes(transport.takeMessages(2), ACK, DIRECTORY_LISTED);
+      List<DaemonEnvelope> nestedMessages = transport.takeMessages(2);
+      assertMessageTypes(nestedMessages, ACK, DIRECTORY_LISTED);
+      DaemonDirectoryCodec.DirectoryListed nested =
+          new DaemonDirectoryCodec().decodeListed(nestedMessages.get(1).payloadJson());
+      assertEquals("src", nested.path());
+      assertEquals("src", nested.displayPath());
       assertEquals(1, tool.executions.get());
     } finally {
       deleteRecursively(envRoot);

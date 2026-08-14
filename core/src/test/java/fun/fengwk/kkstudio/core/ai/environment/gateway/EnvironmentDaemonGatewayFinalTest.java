@@ -767,7 +767,7 @@ class EnvironmentDaemonGatewayFinalTest {
             new DaemonDirectoryCodec.DirectoryListed(
                 requestId,
                 "src",
-                "/home/dev/project/src",
+                "src",
                 ".",
                 true,
                 "main",
@@ -781,7 +781,7 @@ class EnvironmentDaemonGatewayFinalTest {
     assertInstanceOf(EnvironmentDirectoryListResult.Loaded.class, result);
     EnvironmentDirectoryDTO dto = ((EnvironmentDirectoryListResult.Loaded) result).listing();
     assertEquals("src", dto.getPath());
-    assertEquals("/home/dev/project/src", dto.getDisplayPath());
+    assertEquals("src", dto.getDisplayPath());
     assertEquals(".", dto.getParentPath());
     assertTrue(dto.isTruncated());
     assertEquals("main", dto.getGitBranch());
@@ -925,7 +925,7 @@ class EnvironmentDaemonGatewayFinalTest {
             2,
             directoryCodec.encodeListed(
                 new DaemonDirectoryCodec.DirectoryListed(
-                    requestId, ".", "/home/dev/project", ".", false, null, List.of()))));
+                    requestId, ".", ".", ".", false, null, List.of()))));
     assertFalse(connection.closed);
 
     // 连接仍然健康：下一次请求成功完成。
@@ -941,7 +941,7 @@ class EnvironmentDaemonGatewayFinalTest {
             3,
             directoryCodec.encodeListed(
                 new DaemonDirectoryCodec.DirectoryListed(
-                    nextRequestId, ".", "/home/dev/project", ".", false, null, List.of()))));
+                    nextRequestId, ".", ".", ".", false, null, List.of()))));
     assertInstanceOf(EnvironmentDirectoryListResult.Loaded.class, next.join());
     assertFalse(connection.closed);
   }
@@ -989,13 +989,7 @@ class EnvironmentDaemonGatewayFinalTest {
             2,
             directoryCodec.encodeListed(
                 new DaemonDirectoryCodec.DirectoryListed(
-                    UUID.randomUUID().toString(),
-                    ".",
-                    "/home/dev/project",
-                    ".",
-                    false,
-                    null,
-                    List.of()))));
+                    UUID.randomUUID().toString(), ".", ".", ".", false, null, List.of()))));
     assertTrue(connection.closed);
   }
 
@@ -1086,7 +1080,7 @@ class EnvironmentDaemonGatewayFinalTest {
             2,
             directoryCodec.encodeListed(
                 new DaemonDirectoryCodec.DirectoryListed(
-                    requestId, "src", "/home/dev/project/src", ".", false, null, List.of()))));
+                    requestId, "src", "src", ".", false, null, List.of()))));
 
     assertTrue(connection.closed);
     assertTrue(future.isDone());
@@ -1152,7 +1146,7 @@ class EnvironmentDaemonGatewayFinalTest {
                 new DaemonDirectoryCodec.DirectoryListed(
                     requestId,
                     "alias",
-                    "/home/dev/project/real",
+                    "alias",
                     ".",
                     false,
                     null,
@@ -1162,6 +1156,7 @@ class EnvironmentDaemonGatewayFinalTest {
     assertInstanceOf(EnvironmentDirectoryListResult.Loaded.class, result);
     EnvironmentDirectoryDTO dto = ((EnvironmentDirectoryListResult.Loaded) result).listing();
     assertEquals("alias", dto.getPath());
+    assertEquals("alias", dto.getDisplayPath());
     assertEquals("alias/child", dto.getEntries().getFirst().getPath());
     assertEquals("child", dto.getEntries().getFirst().getName());
     assertFalse(connection.closed);
@@ -1195,13 +1190,7 @@ class EnvironmentDaemonGatewayFinalTest {
             2,
             directoryCodec.encodeListed(
                 new DaemonDirectoryCodec.DirectoryListed(
-                    requestIds.getFirst(),
-                    ".",
-                    "/home/dev/project",
-                    ".",
-                    false,
-                    null,
-                    List.of()))));
+                    requestIds.getFirst(), ".", ".", ".", false, null, List.of()))));
     assertFalse(connection.closed);
 
     // 第 1025 个超时淘汰最旧 tombstone：其迟到响应重新按未知 requestId 协议失败并关闭连接。
@@ -1218,13 +1207,7 @@ class EnvironmentDaemonGatewayFinalTest {
             3,
             directoryCodec.encodeListed(
                 new DaemonDirectoryCodec.DirectoryListed(
-                    requestIds.getFirst(),
-                    ".",
-                    "/home/dev/project",
-                    ".",
-                    false,
-                    null,
-                    List.of()))));
+                    requestIds.getFirst(), ".", ".", ".", false, null, List.of()))));
     assertTrue(connection.closed);
   }
 
