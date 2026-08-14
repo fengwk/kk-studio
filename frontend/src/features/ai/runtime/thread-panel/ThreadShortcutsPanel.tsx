@@ -1,13 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { ThreadInteractionPanel } from '@/features/ai/runtime/thread-panel/ThreadInteractionPanel'
-import {
-  SHORTCUT_CATALOG,
-} from '@/features/ai/runtime/thread-panel/shortcut-catalog'
+import { KeyboardShortcutList } from '@/shared/shortcuts/KeyboardShortcutList'
 import { useI18n } from '@/shared/i18n'
 
 /**
  * 只读快捷键面板：在所有 Composer 场景可用（Blank/Bound、Chat/Canvas）。
  * Esc 关闭并恢复 Composer 焦点；catalog 是展示数据，不做全局 dispatcher。
+ * 列表渲染复用共享 {@link KeyboardShortcutList}（与 Settings 页同一事实源）。
  */
 export function ThreadShortcutsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useI18n()
@@ -31,21 +30,7 @@ export function ThreadShortcutsPanel({ onClose }: { onClose: () => void }) {
         }
       }}
     >
-      <ul className="thread-shortcuts-list">
-        {SHORTCUT_CATALOG.map((group) => (
-          <li key={group.id} className="thread-shortcuts-group">
-            <h4 className="thread-shortcuts-group-title">{t(group.titleKey)}</h4>
-            <ul className="thread-shortcuts-group-list">
-              {group.entries.map((entry) => (
-                <li key={`${group.id}:${entry.keys}`} className="thread-shortcuts-row">
-                  <kbd className="thread-shortcuts-keys">{entry.keys}</kbd>
-                  <span className="thread-shortcuts-description">{t(entry.descriptionKey)}</span>
-                </li>
-              ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
+      <KeyboardShortcutList />
     </ThreadInteractionPanel>
   )
 }

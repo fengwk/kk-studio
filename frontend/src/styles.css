@@ -3520,22 +3520,23 @@ div.is-error {
   overflow-y: auto;
 }
 
-.thread-shortcuts-list {
+/* 共享 KeyboardShortcutList：Settings 页与 Thread /shortcuts 面板复用同一事实源 */
+.shortcut-list {
   margin: 0;
-  padding: 10px 12px;
+  padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 18px;
 }
 
-.thread-shortcuts-group {
+.shortcut-group {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
 }
 
-.thread-shortcuts-group-title {
+.shortcut-group-title {
   margin: 0;
   font-size: 11px;
   font-weight: 600;
@@ -3544,24 +3545,44 @@ div.is-error {
   color: var(--fg-muted);
 }
 
-.thread-shortcuts-group-list {
+.shortcut-group-list {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 9px;
 }
 
-.thread-shortcuts-row {
+.shortcut-row {
   display: grid;
-  grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
-  gap: 12px;
+  gap: 14px;
 }
 
-.thread-shortcuts-keys {
-  justify-self: start;
+.shortcut-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.shortcut-label {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.4;
+}
+
+.shortcut-description {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.shortcut-keys {
+  justify-self: end;
   padding: 2px 7px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -3573,10 +3594,144 @@ div.is-error {
   white-space: nowrap;
 }
 
-.thread-shortcuts-description {
-  color: var(--fg-muted);
+/* 全局 Settings 页 */
+.settings-body {
+  max-width: 760px;
+  margin: 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.settings-card {
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(113, 231, 154, 0.05), transparent 55%),
+    linear-gradient(180deg, var(--white-02) 0%, transparent 100%),
+    var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-card-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--fg);
+}
+
+.settings-card-header p {
+  margin: 0;
   font-size: 12px;
   line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 2px;
+}
+
+.settings-row-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-row-text strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.settings-permission {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.settings-permission-value {
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.settings-permission-value[data-permission='granted'] {
+  color: var(--green-primary);
+}
+
+.settings-permission-value[data-permission='denied'],
+.settings-permission-value[data-permission='unsupported'] {
+  color: var(--danger);
+}
+
+.settings-switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.settings-switch[aria-checked='true'] {
+  border-color: var(--green-border);
+  background: var(--green-deep);
+}
+
+.settings-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.settings-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+
+.settings-switch[aria-checked='true'] .settings-switch-thumb {
+  transform: translateX(18px);
+  background: var(--green-primary);
+}
+
+.settings-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.settings-hint.danger {
+  color: var(--danger);
 }
 
 .thread-selection-search {

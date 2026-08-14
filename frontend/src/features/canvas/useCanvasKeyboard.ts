@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from 'react'
 import type { CanvasView } from '@/features/canvas/types'
-import { hasBlockingOverlay } from '@/shared/ui/blocking-overlay'
+import { hasBlockingModal, isEditableKeyboardTarget } from '@/shared/ui/blocking-overlay'
 
 type KeyboardApi = {
   view: CanvasView
@@ -34,14 +34,11 @@ export function useCanvasKeyboard(api: KeyboardApi) {
     function handleKeyboard(event: KeyboardEvent) {
       // 任何 blocking overlay（modal/alertdialog/lightbox）存在时，Canvas 全局
       // 快捷键全部让路：不拦截、不抢事件——不只是 Escape。
-      if (hasBlockingOverlay()) {
+      if (hasBlockingModal()) {
         return
       }
       const target = event.target as HTMLElement | null
-      const isTyping = Boolean(
-        target
-        && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable),
-      )
+      const isTyping = isEditableKeyboardTarget(target)
       const isButton = Boolean(target?.closest?.('button'))
       const modifier = event.metaKey || event.ctrlKey
 
@@ -55,6 +52,9 @@ export function useCanvasKeyboard(api: KeyboardApi) {
       }
 
       if (event.key === 'Escape') {
+        // focused Canvas 优先于 focused Pane Composer：消费 Escape，让
+        // ThreadComposer 的全局焦点恢复 handler 让路，焦点留在画布舞台。
+        event.preventDefault()
         closeOverlays()
         if (view === 'editor') {
           clearSelection()

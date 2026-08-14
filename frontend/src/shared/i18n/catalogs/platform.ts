@@ -25,6 +25,14 @@ export const platformCatalog = {
     'en-US': 'Tools',
     'zh-CN': '工具 Tools',
   },
+  'platform.nav.settings': {
+    'en-US': 'Settings',
+    'zh-CN': '设置',
+  },
+  'platform.nav.settingsAria': {
+    'en-US': 'Settings',
+    'zh-CN': '设置 Settings',
+  },
   'platform.primaryNavigation': {
     'en-US': 'Primary navigation',
     'zh-CN': '主导航',
