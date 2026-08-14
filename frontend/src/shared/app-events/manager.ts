@@ -9,14 +9,14 @@ import type {
 } from '@/shared/app-events/protocol'
 
 export interface ApplicationEventListener {
-  /** wire 订阅建立（首次与每次重连后都会触发）：调用方在此与权威快照对账。 */
-  onSubscribed?: () => void
-  /** 资源事件：thread 为 revision/realtime，canvas 为 version。 */
-  onEvent?: (name: ApplicationEventName, data: unknown) => void
+  /** wire 订阅建立（首次与每次重连后都会触发）；cursor 是资源当前游标。 */
+  onSubscribed?: (cursor: string) => void
+  /** 资源事件：thread 为 revision/realtime，canvas 为 version；cursor 存在时是服务端游标。 */
+  onEvent?: (name: ApplicationEventName, data: unknown, cursor: string | undefined) => void
   /** 服务端要求整体替换为全量快照。 */
   onResync?: () => void
   /** 服务端报告该资源订阅/事件处理失败。 */
-  onError?: (message: string | undefined) => void
+  onError?: (code: string, message: string) => void
 }
 
 export interface ApplicationEventManagerOptions {
@@ -68,7 +68,7 @@ export class ApplicationEventManager {
     if (entry == null) {
       entry = { resource, listeners: new Set() }
       this.subscriptions.set(key, entry)
-      this.connection.send({ type: 'subscribe', resource })
+      this.connection.send({ version: 1, type: 'subscribe', resource })
     }
     entry.listeners.add(listener)
     return () => {
@@ -79,14 +79,14 @@ export class ApplicationEventManager {
       current.listeners.delete(listener)
       if (current.listeners.size === 0) {
         this.subscriptions.delete(key)
-        this.connection.send({ type: 'unsubscribe', resource })
+        this.connection.send({ version: 1, type: 'unsubscribe', resource })
       }
     }
   }
 
   private resubscribeAll(): void {
     for (const entry of this.subscriptions.values()) {
-      this.connection.send({ type: 'subscribe', resource: entry.resource })
+      this.connection.send({ version: 1, type: 'subscribe', resource: entry.resource })
     }
   }
 
@@ -100,7 +100,7 @@ export class ApplicationEventManager {
         return
       }
       for (const listener of [...entry.listeners]) {
-        listener.onError?.(message.message)
+        listener.onError?.(message.code, message.message)
       }
       return
     }
@@ -110,9 +110,9 @@ export class ApplicationEventManager {
     }
     for (const listener of [...entry.listeners]) {
       if (message.type === 'subscribed') {
-        listener.onSubscribed?.()
+        listener.onSubscribed?.(message.cursor)
       } else if (message.type === 'event') {
-        listener.onEvent?.(message.name, message.data)
+        listener.onEvent?.(message.name, message.data, message.cursor)
       } else {
         listener.onResync?.()
       }

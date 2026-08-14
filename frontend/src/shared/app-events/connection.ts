@@ -120,13 +120,24 @@ export class ApplicationEventConnection {
     this.setStatus('closed')
   }
 
-  /** 仅 open 时发送；返回是否真正写入 wire（未连接时调用方按 pending 处理）。 */
+  /**
+   * 仅 open 时发送；返回是否真正写入 wire（未连接时调用方按 pending 处理）。
+   * open 检查与 send 之间 socket 可能刚关闭，或 send 本身同步抛错：异常
+   * 绝不逃逸到调用方（React effect），而是关闭 socket 走统一重连路径。
+   */
   send(message: ApplicationEventClientMessage): boolean {
-    if (this.status !== 'open' || this.socket == null) {
+    const socket = this.socket
+    if (this.status !== 'open' || socket == null) {
       return false
     }
-    this.socket.send(encodeClientMessage(message))
-    return true
+    try {
+      socket.send(encodeClientMessage(message))
+      return true
+    } catch {
+      // 竞态（send 时已关闭）或同步异常：close 是权威清理点，触发重连。
+      socket.close()
+      return false
+    }
   }
 
   private scheduleReconnect(): void {

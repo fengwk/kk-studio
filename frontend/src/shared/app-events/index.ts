@@ -19,6 +19,7 @@ export {
   decodeServerMessage,
   encodeClientMessage,
   type ApplicationEventClientMessage,
+  type ApplicationEventCursor,
   type ApplicationEventName,
   type ApplicationEventResource,
   type ApplicationEventResourceKind,

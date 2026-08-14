@@ -781,10 +781,10 @@ describe('CanvasPage real list/create/load integration', () => {
 
     act(() => socket.open())
     expect(socket.sentMessages()).toEqual([
-      { type: 'subscribe', resource: { kind: 'canvas', id: CANVAS_ID } },
+      { version: 1, type: 'subscribe', resource: { kind: 'canvas', id: CANVAS_ID } },
     ])
     // subscribed ack 关闭「快照 GET 与 wire 建立之间」的版本缺口。
-    act(() => socket.emitServer({ type: 'subscribed', resource: { kind: 'canvas', id: CANVAS_ID } }))
+    act(() => socket.emitServer({ type: 'subscribed', resource: { kind: 'canvas', id: CANVAS_ID }, cursor: '0' }))
     await waitFor(() => {
       expect(changesQueries).toHaveLength(1)
     })

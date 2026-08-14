@@ -53,26 +53,19 @@ describe('useCanvasVersionEvents', () => {
     const { sockets, onVersion } = renderEvents({ version: '7' })
     const socket = sockets.openLatest()
 
-    expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: canvasResource }])
+    expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: canvasResource }])
     // 快照 GET 与 wire 建立之间的缺口由 subscribed ack 关闭。
     expect(onVersion).not.toHaveBeenCalled()
-    act(() => socket.emitServer({ type: 'subscribed', resource: canvasResource }))
+    act(() => socket.emitServer({ type: 'subscribed', resource: canvasResource, cursor: '0' }))
     expect(onVersion).toHaveBeenCalledTimes(1)
   })
 
-  it('triggers changes sync only for canonical string versions newer than the known one', () => {
+  it('triggers changes sync only for versions newer than the known one', () => {
     const { sockets, onVersion, rerender } = renderEvents({ version: '7' })
 
-    // 数字/前导零/负数/畸形 payload 一律忽略；字符串旧版本也忽略。
-    versionEvent(sockets, 6)
-    versionEvent(sockets, '6')
-    versionEvent(sockets, '01')
-    versionEvent(sockets, '-1')
-    versionEvent(sockets, 'not-json')
-    versionEvent(sockets, '{"version":"6"}')
-    expect(onVersion).toHaveBeenCalledTimes(0)
-
-    // 对象与 JSON 文本两种 data 形式都接受。
+    // codec 已拒绝数字/前导零/负数/畸形/字符串 data；hook 层只负责
+    // 与最后已知版本比较，旧版本事件不触发同步。
+    versionEvent(sockets, { version: '6' })
     versionEvent(sockets, { version: '8' })
     expect(onVersion).toHaveBeenCalledTimes(1)
 
@@ -103,14 +96,21 @@ describe('useCanvasVersionEvents', () => {
     act(() => socket.emitServer({ type: 'resync', resource: canvasResource }))
     expect(onResync).toHaveBeenCalledTimes(1)
     // 订阅/事件处理失败：增量状态不可信，回退全量快照。
-    act(() => socket.emitServer({ type: 'error', resource: canvasResource, message: 'boom' }))
+    act(() =>
+      socket.emitServer({
+        type: 'error',
+        resource: canvasResource,
+        code: 'SUBSCRIBE_FAILED',
+        message: 'boom',
+      }),
+    )
     expect(onResync).toHaveBeenCalledTimes(2)
   })
 
   it('re-syncs via the subscribed ack after a shared-connection reconnect', async () => {
     const { sockets, onVersion } = renderEvents({ version: '3' })
     const first = sockets.openLatest()
-    act(() => first.emitServer({ type: 'subscribed', resource: canvasResource }))
+    act(() => first.emitServer({ type: 'subscribed', resource: canvasResource, cursor: '0' }))
     expect(onVersion).toHaveBeenCalledTimes(1)
 
     // 断线重连由共享 Connection 负责：新 socket 上重发 subscribe，
@@ -118,8 +118,8 @@ describe('useCanvasVersionEvents', () => {
     first.fail()
     await waitFor(() => expect(sockets.sockets.length).toBe(2), { timeout: 2000 })
     const second = sockets.openLatest()
-    expect(second.sentMessages()).toEqual([{ type: 'subscribe', resource: canvasResource }])
-    act(() => second.emitServer({ type: 'subscribed', resource: canvasResource }))
+    expect(second.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: canvasResource }])
+    act(() => second.emitServer({ type: 'subscribed', resource: canvasResource, cursor: '0' }))
     expect(onVersion).toHaveBeenCalledTimes(2)
   })
 
@@ -129,10 +129,10 @@ describe('useCanvasVersionEvents', () => {
 
     rerender({ enabled: true })
     const socket = sockets.openLatest()
-    expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: canvasResource }])
+    expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: canvasResource }])
 
     // 连接仍存活时禁用订阅：wire 上出现 unsubscribe（refcount 释放路径）。
     rerender({ enabled: false })
-    expect(socket.sentMessages().at(-1)).toEqual({ type: 'unsubscribe', resource: canvasResource })
+    expect(socket.sentMessages().at(-1)).toEqual({ version: 1, type: 'unsubscribe', resource: canvasResource })
   })
 })

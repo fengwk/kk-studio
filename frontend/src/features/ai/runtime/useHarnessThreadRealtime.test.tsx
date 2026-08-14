@@ -11,7 +11,10 @@ import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websock
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
 import type { ModelInvocationDTO, ToolInvocationDTO } from '@/shared/api/contracts/ai-runtime'
 
-const threadResource = { kind: 'thread', id: 'thread-1' } as const
+const THREAD_ID = '11111111-2222-4333-8444-555555555555'
+const THREAD_A_ID = 'aaaaaaaa-0000-4000-8000-000000000001'
+const THREAD_B_ID = 'bbbbbbbb-0000-4000-8000-000000000002'
+const threadResource = { kind: 'thread', id: THREAD_ID } as const
 
 function resource(threadId: string) {
   return { kind: 'thread', id: threadId } as const
@@ -29,7 +32,7 @@ function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
   const rendered = renderHook(
     (props: RealtimeProps) =>
       useHarnessThreadRealtime(
-        props.threadId ?? 'thread-1',
+        props.threadId ?? THREAD_ID,
         true,
         props.revision ?? '42',
         props.invocation ?? modelInvocation(),
@@ -49,12 +52,20 @@ function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
   return { ...rendered, sockets }
 }
 
-function emitRealtime(sockets: FakeWebSocketHarness, data: string, threadId = 'thread-1') {
+function emitRealtime(sockets: FakeWebSocketHarness, data: string, threadId = THREAD_ID) {
   const socket = sockets.latest
   if (socket == null) {
     throw new Error('no socket created')
   }
-  act(() => socket.emitServer({ type: 'event', resource: resource(threadId), name: 'realtime', data }))
+  // 协议 data 是 delta envelope 的 JSON 对象。
+  act(() =>
+    socket.emitServer({
+      type: 'event',
+      resource: resource(threadId),
+      name: 'realtime',
+      data: JSON.parse(data),
+    }),
+  )
 }
 
 describe('useHarnessThreadRealtime', () => {
@@ -71,14 +82,19 @@ describe('useHarnessThreadRealtime', () => {
     act(() => emitRealtime(sockets, realtime(1, 'partial')))
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('partial'))
     act(() => {
-      socket.emitServer({ type: 'subscribed', resource: threadResource })
-      socket.emitServer({ type: 'event', resource: threadResource, name: 'revision' })
+      socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' })
+      socket.emitServer({
+        type: 'event',
+        resource: threadResource,
+        name: 'revision',
+        data: { revision: '43' },
+      })
       socket.emitServer({ type: 'resync', resource: threadResource })
-      socket.emitServer({ type: 'error', resource: threadResource, message: 'boom' })
+      socket.emitServer({ type: 'error', resource: threadResource, code: 'SUBSCRIBE_FAILED', message: 'boom' })
     })
     // revision 前进不重建订阅：wire 上始终只有一条 subscribe。
     rerender({ revision: '43' })
-    expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
+    expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: threadResource }])
     expect(invalidate).toHaveBeenCalledTimes(4)
   })
 
@@ -144,7 +160,7 @@ describe('useHarnessThreadRealtime', () => {
       invalidate.mockImplementation(async (options) => {
         const key = (options?.queryKey ?? []) as readonly unknown[]
         const refetchThreadId = String(key[key.length - 1] ?? '')
-        if (firstRefetch && refetchThreadId === 'thread-A') {
+        if (firstRefetch && refetchThreadId === THREAD_A_ID) {
           firstRefetch = false
           return new Promise<void>((resolve) => {
             resolveFirstRefetch = resolve
@@ -154,13 +170,13 @@ describe('useHarnessThreadRealtime', () => {
       })
 
       const { result, rerender, sockets } = renderRealtime(client, {
-        threadId: 'thread-A',
-        invocation: modelInvocation('inv-A', 'thread-A'),
+        threadId: THREAD_A_ID,
+        invocation: modelInvocation('inv-A', THREAD_A_ID),
       })
       sockets.openLatest()
 
       // Thread A 的 gap delta 会挂起一次恢复 A；它的首次 tick 会卡在 in-flight 的 refetch 上。
-      emitRealtime(sockets, realtime(3, 'missing', 'thread-A', 'inv-A'), 'thread-A')
+      emitRealtime(sockets, realtime(3, 'missing', THREAD_A_ID, 'inv-A'), THREAD_A_ID)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(200)
       })
@@ -169,11 +185,11 @@ describe('useHarnessThreadRealtime', () => {
       // 在 A 的 refetch 仍在 in-flight 时切到 Thread B；B 自己的 gap 独立计算。
       // 由于旧 tick 仍持有 busy flag，新挂起的调度被跳过。B 的订阅 effect
       // 还需要再渲染一次（订阅状态的回路往返）。
-      rerender({ threadId: 'thread-B', invocation: modelInvocation('inv-B', 'thread-B') })
+      rerender({ threadId: THREAD_B_ID, invocation: modelInvocation('inv-B', THREAD_B_ID) })
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      emitRealtime(sockets, realtime(3, 'missing', 'thread-B', 'inv-B'), 'thread-B')
+      emitRealtime(sockets, realtime(3, 'missing', THREAD_B_ID, 'inv-B'), THREAD_B_ID)
 
       // A 的陈旧 refetch 完成：绝不能因此清除 B 的恢复，并且重新挂起时
       // 必须调度 B（旧 tick 的 finally 会清除 busy flag）。
@@ -186,15 +202,15 @@ describe('useHarnessThreadRealtime', () => {
       })
       expect(
         invalidate.mock.calls.some(
-          (call) => String((call[0]?.queryKey as readonly unknown[])?.at(-1)) === 'thread-B',
+          (call) => String((call[0]?.queryKey as readonly unknown[])?.at(-1)) === THREAD_B_ID,
         ),
       ).toBe(true)
 
       // B 追平：overlay 出现，循环停止。
       rerender({
-        threadId: 'thread-B',
+        threadId: THREAD_B_ID,
         invocation: {
-          ...modelInvocation('inv-B', 'thread-B'),
+          ...modelInvocation('inv-B', THREAD_B_ID),
           streamCheckpointJson: '{"attempt":1,"text":"recovered","thinking":"","sequence":3}',
         },
       })
@@ -499,10 +515,10 @@ describe('useHarnessThreadRealtime', () => {
       sockets.latest?.fail()
       await waitFor(() => expect(sockets.sockets.length).toBe(attempt + 2), { timeout: 2000 })
       const next = sockets.openLatest()
-      expect(next.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
-      act(() => next.emitServer({ type: 'subscribed', resource: threadResource }))
+      expect(next.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: threadResource }])
+      act(() => next.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
     }
-    expect(first.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
+    expect(first.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: threadResource }])
     // 每次重连的 subscribed ack 各触发一次对账。
     expect(invalidate).toHaveBeenCalledTimes(2)
   })
@@ -694,7 +710,7 @@ describe('useHarnessThreadRealtime', () => {
 function realtime(
   sequence: number,
   text: string,
-  threadId = 'thread-1',
+  threadId = THREAD_ID,
   invocationId = 'inv-1',
 ) {
   return JSON.stringify({
@@ -705,7 +721,7 @@ function realtime(
 
 function toolPartial(text: string, invocationId = 'inv-tool-1', attempt = 1) {
   return JSON.stringify({
-    threadId: 'thread-1', subjectKind: 'TOOL_INVOCATION', subjectId: invocationId, attempt,
+    threadId: THREAD_ID, subjectKind: 'TOOL_INVOCATION', subjectId: invocationId, attempt,
     type: 'TOOL_PARTIAL', payload: { toolCallId: 'call-1', contents: [{ type: 'text', text }], error: null, details: null },
     createdAt: '2026-01-01T00:00:00Z',
   })
@@ -713,7 +729,7 @@ function toolPartial(text: string, invocationId = 'inv-tool-1', attempt = 1) {
 
 function modelInvocation(
   invocationId = 'inv-1',
-  threadId = 'thread-1',
+  threadId = THREAD_ID,
 ): ModelInvocationDTO {
   return {
     id: invocationId,
