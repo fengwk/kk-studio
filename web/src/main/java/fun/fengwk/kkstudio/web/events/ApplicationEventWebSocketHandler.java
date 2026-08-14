@@ -94,7 +94,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         "event channel requires a servlet NativeWebSocketSession with a jakarta Session");
   }
 
-  /** 单连接的协议状态：订阅表 + 发送队列。 */
+  /** 单连接的协议状态：订阅表 + 发送队列；closeLock 使「建立、登记、关闭」互斥，杜绝关闭竞态下的订阅泄漏。 */
   private static final class ConnectionState {
 
     private final ApplicationEventHub hub;
@@ -129,39 +129,46 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     }
 
     private void subscribe(ResourceKey resource) {
-      if (subscriptions.containsKey(resource)) {
-        return; // 重复 subscribe 幂等
-      }
-      Subscription subscription;
-      try {
-        subscription = hub.subscribe(resource, signal -> enqueueSignal(resource, signal));
-      } catch (IllegalArgumentException error) {
-        // 资源不存在：只回资源级 error，保持连接。
-        if (!sender.enqueue(
-            codec.error(EventFrameCodec.RESOURCE_NOT_FOUND, error.getMessage(), resource))) {
+      synchronized (closeLock) {
+        if (closed) {
+          return; // 连接已关闭：不再登记新订阅
+        }
+        if (subscriptions.containsKey(resource)) {
+          return; // 重复 subscribe 幂等
+        }
+        Subscription subscription;
+        try {
+          subscription = hub.subscribe(resource, signal -> enqueueSignal(resource, signal));
+        } catch (IllegalArgumentException error) {
+          // 资源不存在：只回资源级 error，保持连接。
+          if (!sender.enqueue(
+              codec.error(EventFrameCodec.RESOURCE_NOT_FOUND, error.getMessage(), resource))) {
+            fail(
+                EventFrameCodec.BACKPRESSURE,
+                "event queue is full",
+                CloseReason.CloseCodes.TRY_AGAIN_LATER);
+          }
+          return;
+        }
+        if (!sender.enqueue(codec.subscribed(resource, subscription.cursor()))) {
+          subscription.close();
           fail(
               EventFrameCodec.BACKPRESSURE,
               "event queue is full",
               CloseReason.CloseCodes.TRY_AGAIN_LATER);
+          return;
         }
-        return;
+        subscription.activate();
+        subscriptions.put(resource, subscription);
       }
-      if (!sender.enqueue(codec.subscribed(resource, subscription.cursor()))) {
-        subscription.close();
-        fail(
-            EventFrameCodec.BACKPRESSURE,
-            "event queue is full",
-            CloseReason.CloseCodes.TRY_AGAIN_LATER);
-        return;
-      }
-      subscription.activate();
-      subscriptions.put(resource, subscription);
     }
 
     private void unsubscribe(ResourceKey resource) {
-      Subscription subscription = subscriptions.remove(resource);
-      if (subscription != null) {
-        subscription.close();
+      synchronized (closeLock) {
+        Subscription subscription = subscriptions.remove(resource);
+        if (subscription != null) {
+          subscription.close();
+        }
       }
     }
 
@@ -188,11 +195,11 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
           return;
         }
         closed = true;
+        for (Subscription subscription : subscriptions.values()) {
+          subscription.close();
+        }
+        subscriptions.clear();
       }
-      for (Subscription subscription : subscriptions.values()) {
-        subscription.close();
-      }
-      subscriptions.clear();
     }
   }
 }
