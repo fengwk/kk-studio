@@ -137,7 +137,7 @@ describe('ApplicationEventManager', () => {
     const release2 = manager.subscribe(THREAD_A, { onEvent: onEvent2 })
 
     release()
-    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'revision', data: { revision: '1' } })
+    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'revision', data: { revision: '1' }, cursor: '1' })
     expect(onEvent).not.toHaveBeenCalled()
     expect(onEvent2).toHaveBeenCalledTimes(1)
 

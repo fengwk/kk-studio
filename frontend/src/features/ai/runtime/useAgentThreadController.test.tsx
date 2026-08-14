@@ -811,6 +811,7 @@ describe('useAgentThreadController', () => {
       resource: { kind: 'thread', id: THREAD_ID },
       name: 'revision',
       data: { revision: '2' },
+      cursor: '2',
     }))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     await waitFor(() => expect(result.current.stopReplayPending).toBe(false))
@@ -938,6 +939,7 @@ describe('useAgentThreadController', () => {
       resource: { kind: 'thread', id: THREAD_ID },
       name: 'revision',
       data: { revision: '2' },
+      cursor: '2',
     }))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     vi.mocked(harnessService.stopThread).mockResolvedValue({

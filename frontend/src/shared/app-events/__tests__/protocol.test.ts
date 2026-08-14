@@ -37,7 +37,7 @@ describe('decodeServerMessage', () => {
     ).toEqual({ type: 'resync', resource: canvasResource })
   })
 
-  it('decodes event frames with strict per-name data shapes and optional cursor', () => {
+  it('decodes event frames with strict per-name data shapes and mandatory matching cursor', () => {
     expect(
       decodeServerMessage(
         JSON.stringify({
@@ -71,7 +71,6 @@ describe('decodeServerMessage', () => {
       resource: threadResource,
       name: 'realtime',
       data: { type: 'MODEL_DELTA', threadId: THREAD_ID, sequence: 1 },
-      cursor: undefined,
     })
     expect(
       decodeServerMessage(
@@ -81,6 +80,7 @@ describe('decodeServerMessage', () => {
           resource: canvasResource,
           name: 'version',
           data: { version: '3' },
+          cursor: '3',
         }),
       ),
     ).toEqual({
@@ -88,7 +88,7 @@ describe('decodeServerMessage', () => {
       resource: canvasResource,
       name: 'version',
       data: { version: '3' },
-      cursor: undefined,
+      cursor: '3',
     })
   })
 
@@ -183,7 +183,7 @@ describe('decodeServerMessage', () => {
     for (const cursor of [0, 1, '01', '-1', '1.5', 'abc', '', ' 1', '1 ']) {
       expect(decodeServerMessage(JSON.stringify({ ...base, cursor }))).toBeNull()
     }
-    // event 的 cursor 存在时必须 canonical，缺失时允许。
+    // durable 事件的 cursor 必须 canonical 且与 data 值完全相等（缺失拒绝）。
     const event = {
       version: 1,
       type: 'event',
@@ -192,40 +192,54 @@ describe('decodeServerMessage', () => {
       data: { revision: '3' },
     }
     expect(decodeServerMessage(JSON.stringify({ ...event, cursor: 'abc' }))).toBeNull()
-    expect(decodeServerMessage(JSON.stringify(event))).not.toBeNull()
+    expect(decodeServerMessage(JSON.stringify(event))).toBeNull()
   })
 
   it('rejects event frames with unknown names and malformed data shapes', () => {
-    const base = { version: 1, type: 'event', resource: threadResource }
-    expect(decodeServerMessage(JSON.stringify({ ...base, name: 'snapshot', data: {} }))).toBeNull()
+    const threadBase = { version: 1, type: 'event', resource: threadResource }
+    expect(
+      decodeServerMessage(JSON.stringify({ ...threadBase, name: 'snapshot', data: {} })),
+    ).toBeNull()
     // revision data 必须是精确单字段 {revision}。
     expect(
       decodeServerMessage(
-        JSON.stringify({ ...base, name: 'revision', data: { revision: '3', extra: true } }),
+        JSON.stringify({
+          ...threadBase,
+          name: 'revision',
+          data: { revision: '3', extra: true },
+          cursor: '3',
+        }),
       ),
     ).toBeNull()
     expect(
-      decodeServerMessage(JSON.stringify({ ...base, name: 'revision', data: {} })),
+      decodeServerMessage(
+        JSON.stringify({ ...threadBase, name: 'revision', data: {}, cursor: '3' }),
+      ),
     ).toBeNull()
-    expect(
-      decodeServerMessage(JSON.stringify({ ...base, name: 'revision', data: { version: '3' } })),
-    ).toBeNull()
-    // version data 必须是精确单字段 {version}。
     expect(
       decodeServerMessage(
-        JSON.stringify({ ...base, name: 'version', data: { version: '01' } }),
+        JSON.stringify({ ...threadBase, name: 'revision', data: { version: '3' }, cursor: '3' }),
+      ),
+    ).toBeNull()
+    // version data 必须是精确单字段 {version}。
+    const canvasBase = { version: 1, type: 'event', resource: canvasResource }
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ ...canvasBase, name: 'version', data: { version: '01' }, cursor: '01' }),
       ),
     ).toBeNull()
     // realtime data 必须是 JSON 对象（字符串/数组/数字拒绝）。
     expect(
       decodeServerMessage(
-        JSON.stringify({ ...base, name: 'realtime', data: '{"type":"MODEL_DELTA"}' }),
+        JSON.stringify({ ...threadBase, name: 'realtime', data: '{"type":"MODEL_DELTA"}' }),
       ),
     ).toBeNull()
     expect(
-      decodeServerMessage(JSON.stringify({ ...base, name: 'realtime', data: [1, 2] })),
+      decodeServerMessage(JSON.stringify({ ...threadBase, name: 'realtime', data: [1, 2] })),
     ).toBeNull()
-    expect(decodeServerMessage(JSON.stringify({ ...base, name: 'realtime', data: 7 }))).toBeNull()
+    expect(
+      decodeServerMessage(JSON.stringify({ ...threadBase, name: 'realtime', data: 7 })),
+    ).toBeNull()
   })
 
   it('rejects unknown or extra fields per frame type', () => {
@@ -261,6 +275,114 @@ describe('decodeServerMessage', () => {
           code: 'X',
           message: 'y',
           extra: true,
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects resources with extra fields on every frame type', () => {
+    const tainted = { kind: 'thread', id: THREAD_ID, extra: true }
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ version: 1, type: 'subscribed', resource: tainted, cursor: '1' }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'event',
+          resource: tainted,
+          name: 'revision',
+          data: { revision: '1' },
+          cursor: '1',
+        }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(JSON.stringify({ version: 1, type: 'resync', resource: tainted })),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({ version: 1, type: 'error', resource: tainted, code: 'X', message: 'y' }),
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects cross-resource illegal names', () => {
+    // canvas 上不允许 thread 的 revision/realtime；thread 上不允许 canvas 的 version。
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'event',
+          resource: canvasResource,
+          name: 'revision',
+          data: { revision: '1' },
+          cursor: '1',
+        }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'event',
+          resource: canvasResource,
+          name: 'realtime',
+          data: { type: 'MODEL_DELTA' },
+        }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'event',
+          resource: threadResource,
+          name: 'version',
+          data: { version: '1' },
+          cursor: '1',
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects durable events with a missing or mismatched cursor', () => {
+    const revision = {
+      version: 1,
+      type: 'event',
+      resource: threadResource,
+      name: 'revision',
+      data: { revision: '3' },
+    }
+    const version = {
+      version: 1,
+      type: 'event',
+      resource: canvasResource,
+      name: 'version',
+      data: { version: '3' },
+    }
+    // 缺失 cursor。
+    expect(decodeServerMessage(JSON.stringify(revision))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify(version))).toBeNull()
+    // cursor 与 data 值不相等（含非 canonical 表示与非字符串）。
+    expect(decodeServerMessage(JSON.stringify({ ...revision, cursor: '4' }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ ...version, cursor: '4' }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ ...revision, cursor: '03' }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ ...version, cursor: 3 }))).toBeNull()
+  })
+
+  it('rejects realtime events carrying a cursor', () => {
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          version: 1,
+          type: 'event',
+          resource: threadResource,
+          name: 'realtime',
+          data: { type: 'MODEL_DELTA' },
+          cursor: '3',
         }),
       ),
     ).toBeNull()
@@ -326,7 +448,6 @@ describe('backend wire samples', () => {
         payload: { kind: 'TEXT_DELTA', text: 'hello' },
         createdAt: '2026-01-01T00:00:00Z',
       },
-      cursor: undefined,
     })
   })
 

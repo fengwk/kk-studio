@@ -88,6 +88,7 @@ describe('useHarnessThreadRealtime', () => {
         resource: threadResource,
         name: 'revision',
         data: { revision: '43' },
+        cursor: '43',
       })
       socket.emitServer({ type: 'resync', resource: threadResource })
       socket.emitServer({ type: 'error', resource: threadResource, code: 'SUBSCRIBE_FAILED', message: 'boom' })

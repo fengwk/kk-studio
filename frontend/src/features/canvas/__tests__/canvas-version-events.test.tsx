@@ -38,13 +38,20 @@ function renderEvents(initialProps: Props = {}) {
   return { ...rendered, sockets, onVersion, onResync }
 }
 
-function versionEvent(sockets: FakeWebSocketHarness, data: unknown) {
+function versionEvent(sockets: FakeWebSocketHarness, version: string) {
   const socket = sockets.latest
   if (socket == null) {
     throw new Error('no socket created')
   }
+  // durable version 事件必须携带与 data.version 完全相等的 canonical cursor。
   act(() =>
-    socket.emitServer({ type: 'event', resource: canvasResource, name: 'version', data }),
+    socket.emitServer({
+      type: 'event',
+      resource: canvasResource,
+      name: 'version',
+      data: { version },
+      cursor: version,
+    }),
   )
 }
 
@@ -63,15 +70,15 @@ describe('useCanvasVersionEvents', () => {
   it('triggers changes sync only for versions newer than the known one', () => {
     const { sockets, onVersion, rerender } = renderEvents({ version: '7' })
 
-    // codec 已拒绝数字/前导零/负数/畸形/字符串 data；hook 层只负责
-    // 与最后已知版本比较，旧版本事件不触发同步。
-    versionEvent(sockets, { version: '6' })
-    versionEvent(sockets, { version: '8' })
+    // codec 已拒绝数字/前导零/负数/畸形 data 与缺失/不匹配的 cursor；hook 层
+    // 只负责与最后已知版本比较，旧版本事件不触发同步。
+    versionEvent(sockets, '6')
+    versionEvent(sockets, '8')
     expect(onVersion).toHaveBeenCalledTimes(1)
 
     // 本地版本前进后，迟到的旧事件不再触发同步。
     rerender({ version: '8' })
-    versionEvent(sockets, { version: '8' })
+    versionEvent(sockets, '8')
     expect(onVersion).toHaveBeenCalledTimes(1)
   })
 
@@ -79,13 +86,13 @@ describe('useCanvasVersionEvents', () => {
     const { sockets, onVersion, rerender } = renderEvents({ version: '9007199254740992' })
 
     // MAX_SAFE_INTEGER+1 在 JS number 中无法区分，但十进制字符串必须精确比较。
-    versionEvent(sockets, { version: '9007199254740993' })
+    versionEvent(sockets, '9007199254740993')
     expect(onVersion).toHaveBeenCalledTimes(1)
-    versionEvent(sockets, { version: '9007199254740992' })
+    versionEvent(sockets, '9007199254740992')
     expect(onVersion).toHaveBeenCalledTimes(1)
 
     rerender({ version: '9007199254740993' })
-    versionEvent(sockets, { version: '9007199254740994' })
+    versionEvent(sockets, '9007199254740994')
     expect(onVersion).toHaveBeenCalledTimes(2)
   })
 
