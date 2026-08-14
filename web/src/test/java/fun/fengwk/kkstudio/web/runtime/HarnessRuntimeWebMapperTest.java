@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.MoveHeadCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -22,6 +23,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -528,6 +531,42 @@ class HarnessRuntimeWebMapperTest {
     assertEquals("{}", tool.path("argumentsJson").asText());
     assertTrue(tool.path("approvalJson").asText().contains("\"required\":true"));
     assertTrue(tool.path("approvalJson").asText().contains("\"decision\":null"));
+  }
+
+  @Test
+  void mapsAttemptFailureSequenceAsACanonicalDecimalString() throws Exception {
+    EntryPath path =
+        new EntryPath(
+            List.of(
+                HarnessRuntimeTestFixtures.rootEntry(),
+                HarnessRuntimeTestFixtures.turnStartEntry()));
+    ModelAttemptFailureProjection failure =
+        new ModelAttemptFailureProjection(
+            id(10),
+            id(2),
+            id(2),
+            1,
+            Long.MAX_VALUE,
+            "partial answer",
+            "partial thinking",
+            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider unavailable"),
+            HarnessRuntimeTestFixtures.NOW,
+            HarnessRuntimeTestFixtures.NOW.plusSeconds(1));
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(
+            HarnessRuntimeTestFixtures.thread(id(2)),
+            path,
+            List.of(),
+            model(ModelInvocationStatus.READY, null),
+            List.of(),
+            List.of(failure));
+
+    JsonNode json =
+        MAPPER.readTree(MAPPER.writeValueAsString(HarnessRuntimeWebMapper.toSnapshotDto(snapshot)));
+    JsonNode sequence = json.path("modelAttemptFailures").get(0).path("sequence");
+
+    assertTrue(sequence.isTextual());
+    assertEquals(Long.toString(Long.MAX_VALUE), sequence.asText());
   }
 
   @Test

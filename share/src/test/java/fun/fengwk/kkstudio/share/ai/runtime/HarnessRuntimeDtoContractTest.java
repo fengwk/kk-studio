@@ -77,9 +77,12 @@ class HarnessRuntimeDtoContractTest {
     assertTrue(dto.getQueuedCommands().isEmpty());
     assertNull(dto.getModelInvocation());
     assertTrue(dto.getToolInvocations().isEmpty());
+    assertTrue(dto.getModelAttemptFailures().isEmpty());
     assertThrows(UnsupportedOperationException.class, () -> dto.getEntries().add(null));
     assertThrows(UnsupportedOperationException.class, () -> dto.getQueuedCommands().add(null));
     assertThrows(UnsupportedOperationException.class, () -> dto.getToolInvocations().add(null));
+    assertThrows(
+        UnsupportedOperationException.class, () -> dto.getModelAttemptFailures().add(null));
 
     dto.setRevision("7");
     HarnessThreadDTO thread = new HarnessThreadDTO();
@@ -93,6 +96,15 @@ class HarnessRuntimeDtoContractTest {
     assertEquals(invocation, dto.getModelInvocation());
     assertEquals(1, dto.getToolInvocations().size());
     assertTrue(dto.getEntries().isEmpty()); // 未设置的列表保持默认不可变空
+  }
+
+  @Test
+  void modelAttemptFailureSequenceIsABigintSafeDecimalString() {
+    ModelAttemptFailureDTO dto = new ModelAttemptFailureDTO();
+    dto.setSequence("9223372036854775807");
+
+    assertEquals("9223372036854775807", dto.getSequence());
+    assertEquals(String.class, fieldType(ModelAttemptFailureDTO.class, "sequence"));
   }
 
   @Test
