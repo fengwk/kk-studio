@@ -27,9 +27,16 @@ import { setLocale } from '@/shared/i18n'
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const THREAD_ID = 'a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d'
 
-const { sendCanvasThreadFirstSend, createCanvasRealtimeStream } = vi.hoisted(() => ({
+const { sendCanvasThreadFirstSend } = vi.hoisted(() => ({
   sendCanvasThreadFirstSend: vi.fn(),
-  createCanvasRealtimeStream: vi.fn(),
+}))
+
+const { fakeApplicationEvents } = vi.hoisted(() => {
+  const manager = { subscribe: vi.fn(() => () => undefined) }
+  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+})
+vi.mock('@/shared/app-events', () => ({
+  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
 }))
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -51,19 +58,11 @@ vi.mock('@/shared/api/harness-service', () => ({
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
-    createThreadRealtimeStream: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/studio-service', () => ({
   sendCanvasThreadFirstSend,
-  createCanvasRealtimeStream,
 }))
-
-class FakeEventSource {
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
-}
 
 const assistantAgent = {
   name: 'assistant',
@@ -174,8 +173,6 @@ beforeEach(() => {
   })
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(threadSnapshot())
-  vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource())
-  vi.mocked(createCanvasRealtimeStream).mockReturnValue(new FakeEventSource())
 })
 
 describe('Canvas add menu', () => {
@@ -306,7 +303,7 @@ describe('Canvas blank thread', () => {
 
 describe('Canvas bound thread', () => {
   // document.threadId 存在时复用真实 Harness Thread：controller 查询快照、
-  // 订阅实时流并把消息/工作状态渲染到共享 ChatPanel。
+  // 订阅应用事件并把消息/工作状态渲染到共享 ChatPanel。
   it('renders the real thread transcript and composer without an implicit canvas switcher', async () => {
     const user = userEvent.setup()
     renderHarness(<CanvasAgentThread />, {
@@ -318,7 +315,10 @@ describe('Canvas bound thread', () => {
       expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID)
     })
     await waitFor(() => {
-      expect(harnessService.createThreadRealtimeStream).toHaveBeenCalled()
+      expect(fakeApplicationEvents.useApplicationEvents().subscribe).toHaveBeenCalledWith(
+        { kind: 'thread', id: THREAD_ID },
+        expect.any(Object),
+      )
     })
     expect(document.querySelector('.chat-shell.thread-panel')).not.toBeNull()
     expect(screen.getByRole('textbox', { name: /消息|Message/i })).toBeInTheDocument()

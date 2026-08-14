@@ -13,6 +13,8 @@ import {
 } from '@/features/ai/chat/command-batch-plan'
 import { branchDraftFromThread, type BranchDraft } from '@/features/ai/chat/branch-draft'
 import { createAttachmentPart, createTextPart, partsToText, type ComposerPart } from '@/features/ai/composer/composer-parts'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
@@ -40,40 +42,8 @@ vi.mock('@/shared/api/harness-service', () => ({
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
-    createThreadRealtimeStream: vi.fn(),
   },
 }))
-
-class FakeEventSource {
-  private readonly listeners = new Map<string, EventListener[]>()
-
-  addEventListener(type: string, listener: EventListener): void {
-    const existing = this.listeners.get(type) ?? []
-    existing.push(listener)
-    this.listeners.set(type, existing)
-  }
-
-  removeEventListener(type: string, listener: EventListener): void {
-    const existing = this.listeners.get(type) ?? []
-    this.listeners.set(
-      type,
-      existing.filter((value) => value !== listener),
-    )
-  }
-
-  emit(type: string): void {
-    const listeners = this.listeners.get(type)
-    if (listeners) {
-      for (const listener of listeners) {
-        listener({} as Event)
-      }
-    }
-  }
-
-  close(): void {
-    this.listeners.clear()
-  }
-}
 
 function modelSelection(
   overrides: Partial<HarnessModelSelectionDTO> = {},
@@ -143,13 +113,31 @@ const assistantAgentEntry = {
   updateTime: null,
 }
 
-let realtimeSource: FakeEventSource
+let realtimeSockets: FakeWebSocketHarness
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  return (
+    <QueryClientProvider client={client}>
+      <ApplicationEventProvider url="ws://test/events/v1" socketFactory={realtimeSockets.factory}>
+        {children}
+      </ApplicationEventProvider>
+    </QueryClientProvider>
+  )
+}
+
+function clientWrapper(client: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={client}>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={realtimeSockets.factory}>
+          {children}
+        </ApplicationEventProvider>
+      </QueryClientProvider>
+    )
+  }
 }
 
 function buildBatchFor(
@@ -164,7 +152,7 @@ function buildBatchFor(
 describe('useAgentThreadController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    realtimeSource = new FakeEventSource()
+    realtimeSockets = new FakeWebSocketHarness()
     vi.mocked(agentService.listAgents).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
@@ -205,9 +193,6 @@ describe('useAgentThreadController', () => {
         },
       ],
     })
-    vi.mocked(harnessService.createThreadRealtimeStream).mockImplementation(
-      () => realtimeSource as unknown as EventSource,
-    )
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(threadFixture()))
     vi.mocked(harnessService.enqueueCommands).mockResolvedValue(
       [] as HarnessThreadCommandDTO[],
@@ -818,7 +803,11 @@ describe('useAgentThreadController', () => {
 
     // 权威 snapshot 推进到 Turn 2（head + revision 均已变化）：含糊的
     // 操作自动失效；realtime revision 信号触发一次 refetch。
-    act(() => realtimeSource.emit('revision'))
+    act(() => realtimeSockets.latest?.emitServer({
+      type: 'event',
+      resource: { kind: 'thread', id: 't1' },
+      name: 'revision',
+    }))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     await waitFor(() => expect(result.current.stopReplayPending).toBe(false))
 
@@ -940,7 +929,11 @@ describe('useAgentThreadController', () => {
     // 不得依赖被动清理 effect 的 flush：它自身的同步栅栏会失效陈旧 basis，
     // 并基于当前 revision 派生一个新的 id。（在 RTL 下 effect 会随 commit 一同 flush，
     // 因此上述栅栏契约由前面的 retireStaleStopPending 单元测试固化。）
-    act(() => realtimeSource.emit('revision'))
+    act(() => realtimeSockets.latest?.emitServer({
+      type: 'event',
+      resource: { kind: 'thread', id: 't1' },
+      name: 'revision',
+    }))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     vi.mocked(harnessService.stopThread).mockResolvedValue({
       status: 'IDLE',
@@ -1109,9 +1102,7 @@ describe('useAgentThreadController', () => {
       new ApiError('stale child revision', 409),
     )
     const { result } = renderHook(() => useAgentThreadController('t1'), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
+      wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
@@ -1219,9 +1210,7 @@ describe('useAgentThreadController', () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
     const { result } = renderHook(() => useAgentThreadController('t1'), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
+      wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 

@@ -23,6 +23,8 @@ import type {
   CanvasSnapshotDTO,
 } from '@/shared/api/contracts/studio'
 import { setLocale } from '@/shared/i18n'
+import { ApplicationEventProvider, createApplicationEventUrl } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 
 const CANVAS_ID = 'd1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d'
 const CREATED_CANVAS_ID = 'e2f3a4b5-6c7d-4e8f-9a0b-1c2d3e4f5a6b'
@@ -43,51 +45,10 @@ const flowHarness = vi.hoisted(() => ({
   zoomTo: vi.fn(async () => undefined),
 }))
 
-/** 记录每个被创建的 EventSource，测试可向实例派发 'version'/'resync' 事件。 */
-const eventSourceHarness = vi.hoisted(() => ({
-  instances: [] as Array<{
-    url: string
-    dispatch: (type: string, data?: string) => void
-    close: () => void
-  }>,
+/** 记录每个被创建的 WebSocket；测试可打开连接并派发 server 帧。 */
+const socketHarness = vi.hoisted(() => ({
+  harness: null as unknown as import('@/shared/app-events/__tests__/fake-websocket').FakeWebSocketHarness,
 }))
-
-class FakeEventSource {
-  private readonly listeners = new Map<string, Set<EventListener>>()
-  onerror: ((event: Event) => void) | null = null
-  private closed = false
-
-  constructor(readonly url: string) {
-    eventSourceHarness.instances.push({
-      url,
-      dispatch: (type, data) => this.dispatch(type, data),
-      close: () => this.close(),
-    })
-  }
-
-  addEventListener(type: string, listener: EventListener): void {
-    let set = this.listeners.get(type)
-    if (!set) {
-      set = new Set()
-      this.listeners.set(type, set)
-    }
-    set.add(listener)
-  }
-
-  removeEventListener(type: string, listener: EventListener): void {
-    this.listeners.get(type)?.delete(listener)
-  }
-
-  close(): void {
-    this.closed = true
-  }
-
-  private dispatch(type: string, data?: string): void {
-    for (const listener of [...(this.listeners.get(type) ?? [])]) {
-      listener(new MessageEvent(type, { data }))
-    }
-  }
-}
 
 vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -585,13 +546,18 @@ function PathnameProbe() {
 
 function renderCanvasPage(initialEntries = ['/canvas']) {
   return render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <PathnameProbe />
-      <Routes>
-        <Route path="/canvas" element={<CanvasPage />} />
-        <Route path="/canvas/:canvasId" element={<CanvasPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <ApplicationEventProvider
+      url={createApplicationEventUrl()}
+      socketFactory={socketHarness.harness.factory}
+    >
+      <MemoryRouter initialEntries={initialEntries}>
+        <PathnameProbe />
+        <Routes>
+          <Route path="/canvas" element={<CanvasPage />} />
+          <Route path="/canvas/:canvasId" element={<CanvasPage />} />
+        </Routes>
+      </MemoryRouter>
+    </ApplicationEventProvider>,
   )
 }
 
@@ -608,8 +574,7 @@ describe('CanvasPage real list/create/load integration', () => {
     flowHarness.setViewport.mockResolvedValue(undefined)
     flowHarness.zoomTo.mockReset()
     flowHarness.zoomTo.mockResolvedValue(undefined)
-    eventSourceHarness.instances.length = 0
-    vi.stubGlobal('EventSource', FakeEventSource)
+    socketHarness.harness = new FakeWebSocketHarness()
   })
 
   afterEach(() => {
@@ -801,30 +766,46 @@ describe('CanvasPage real list/create/load integration', () => {
     }).defaultViewport).toEqual({ x: 30, y: -20, zoom: 0.7 })
   })
 
-  it('subscribes the version SSE with the last known version and fetches changes on version events', async () => {
-    // SSE 连接建立即按当前版本同步一次 changes；'version' 事件再触发一次，
-    // 但重复/旧版本事件不产生额外请求。
+  it('subscribes the canvas resource over the shared WebSocket and fetches changes on version events', async () => {
+    // subscribed ack（首次订阅建立）即按当前版本同步一次 changes；'version'
+    // 事件再触发一次，但重复/旧版本事件不产生额外请求。
     const { changesQueries } = installBackend()
     renderCanvasPage([`/canvas/${CANVAS_ID}`])
 
     await screen.findByLabelText(/无限画布/)
-    await waitFor(() => {
-      expect(changesQueries).toContainEqual({ canvasId: CANVAS_ID, afterVersion: '0' })
-    })
-    expect(eventSourceHarness.instances).toHaveLength(1)
-    expect(eventSourceHarness.instances[0]?.url).toBe(
-      `/api/canvases/${CANVAS_ID}/events/stream?afterVersion=0`,
-    )
+    const socket = socketHarness.harness.latest as NonNullable<
+      typeof socketHarness.harness.latest
+    >
+    // 生产 URL 构造：ws(s)://<origin>/api/events/v1。
+    expect(socket.url).toBe(createApplicationEventUrl())
 
-    const source = eventSourceHarness.instances[0] as {
-      dispatch: (type: string, data?: string) => void
-    }
-    act(() => {
-      source.dispatch('version', JSON.stringify({ version: '2' }))
+    act(() => socket.open())
+    expect(socket.sentMessages()).toEqual([
+      { type: 'subscribe', resource: { kind: 'canvas', id: CANVAS_ID } },
+    ])
+    // subscribed ack 关闭「快照 GET 与 wire 建立之间」的版本缺口。
+    act(() => socket.emitServer({ type: 'subscribed', resource: { kind: 'canvas', id: CANVAS_ID } }))
+    await waitFor(() => {
+      expect(changesQueries).toHaveLength(1)
     })
-    act(() => {
-      source.dispatch('version', JSON.stringify({ version: '0' }))
-    })
+    expect(changesQueries[0]).toEqual({ canvasId: CANVAS_ID, afterVersion: '0' })
+
+    act(() =>
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'canvas', id: CANVAS_ID },
+        name: 'version',
+        data: { version: '2' },
+      }),
+    )
+    act(() =>
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'canvas', id: CANVAS_ID },
+        name: 'version',
+        data: { version: '0' },
+      }),
+    )
     await waitFor(() => {
       expect(changesQueries).toHaveLength(2)
     })

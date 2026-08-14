@@ -3,7 +3,6 @@ import type { UUIDString } from '@/shared/api/contracts/studio'
 import {
   cancelCanvasFunctionRun,
   createCanvas,
-  createCanvasRealtimeStream,
   getCanvas,
   getCanvasChanges,
   getCanvasFunctionRun,
@@ -112,12 +111,7 @@ describe('studio-service', () => {
     })
   })
 
-  it('fetches changes with afterVersion and creates the SSE stream URL', async () => {
-    class FakeEventSource {
-      constructor(readonly url: string) {}
-      close(): void {}
-    }
-    vi.stubGlobal('EventSource', FakeEventSource)
+  it('fetches changes with afterVersion', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(result({
       patches: [],
       snapshot: null,
@@ -129,10 +123,6 @@ describe('studio-service', () => {
     expect(fetch).toHaveBeenCalledWith(`/api/canvases/${CANVAS_ID}/changes?afterVersion=4`, expect.objectContaining({
       method: 'GET',
     }))
-
-    const source = createCanvasRealtimeStream(CANVAS_ID, '4')
-    expect(source.url).toBe(`/api/canvases/${CANVAS_ID}/events/stream?afterVersion=4`)
-    source.close()
   })
 
   it('sends the canvas-scoped atomic first-send request with ordered contents', async () => {
