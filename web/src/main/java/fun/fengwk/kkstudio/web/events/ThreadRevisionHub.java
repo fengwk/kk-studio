@@ -46,29 +46,32 @@ final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSour
   public SourceSubscribed subscribe(UUID threadId, Consumer<Event> consumer) {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(consumer, "consumer");
-    Set<Consumer<Event>> threadSubscribers =
-        subscribers.computeIfAbsent(threadId, ignored -> new CopyOnWriteArraySet<>());
-    threadSubscribers.add(consumer);
+    // add 与 map 条目创建在同一 compute 内原子完成；最后释放的 remove-if-empty 在 computeIfPresent 内原子完成，
+    // 杜绝「新订阅者加入已移除集合」的 detached subscriber 竞态。
+    subscribers.compute(
+        threadId,
+        (id, existing) -> {
+          Set<Consumer<Event>> threadSubscribers =
+              existing != null ? existing : new CopyOnWriteArraySet<>();
+          threadSubscribers.add(consumer);
+          return threadSubscribers;
+        });
     try {
       long cursor = currentRevision(threadId);
-      return new SourceSubscribed(
-          cursor,
-          () -> {
-            Set<Consumer<Event>> currentSubscribers = subscribers.get(threadId);
-            if (currentSubscribers != null) {
-              currentSubscribers.remove(consumer);
-              if (currentSubscribers.isEmpty()) {
-                subscribers.remove(threadId, currentSubscribers);
-              }
-            }
-          });
+      return new SourceSubscribed(cursor, () -> release(threadId, consumer));
     } catch (RuntimeException error) {
-      threadSubscribers.remove(consumer);
-      if (threadSubscribers.isEmpty()) {
-        subscribers.remove(threadId, threadSubscribers);
-      }
+      release(threadId, consumer);
       throw error;
     }
+  }
+
+  private void release(UUID threadId, Consumer<Event> consumer) {
+    subscribers.computeIfPresent(
+        threadId,
+        (id, threadSubscribers) -> {
+          threadSubscribers.remove(consumer);
+          return threadSubscribers.isEmpty() ? null : threadSubscribers;
+        });
   }
 
   @Override
@@ -168,7 +171,15 @@ final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSour
   private void publish(UUID threadId, Event event) {
     Set<Consumer<Event>> threadSubscribers = subscribers.get(threadId);
     if (threadSubscribers != null) {
-      threadSubscribers.forEach(consumer -> consumer.accept(event));
+      // 单个消费者回调异常只隔离该消费者，不阻断同资源其他消费者，也不杀死 LISTEN 循环。
+      for (Consumer<Event> consumer : threadSubscribers) {
+        try {
+          consumer.accept(event);
+        } catch (RuntimeException error) {
+          log.warn(
+              "thread revision subscriber callback failed threadId={}; skipping", threadId, error);
+        }
+      }
     }
   }
 

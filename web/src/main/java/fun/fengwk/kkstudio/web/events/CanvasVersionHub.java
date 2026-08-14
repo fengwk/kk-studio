@@ -47,29 +47,32 @@ final class CanvasVersionHub implements SmartLifecycle, CanvasVersionEventSource
   public SourceSubscribed subscribe(UUID canvasId, Consumer<Event> consumer) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(consumer, "consumer");
-    Set<Consumer<Event>> canvasSubscribers =
-        subscribers.computeIfAbsent(canvasId, ignored -> new CopyOnWriteArraySet<>());
-    canvasSubscribers.add(consumer);
+    // add 与 map 条目创建在同一 compute 内原子完成；最后释放的 remove-if-empty 在 computeIfPresent 内原子完成，
+    // 杜绝「新订阅者加入已移除集合」的 detached subscriber 竞态。
+    subscribers.compute(
+        canvasId,
+        (id, existing) -> {
+          Set<Consumer<Event>> canvasSubscribers =
+              existing != null ? existing : new CopyOnWriteArraySet<>();
+          canvasSubscribers.add(consumer);
+          return canvasSubscribers;
+        });
     try {
       long cursor = currentVersion(canvasId);
-      return new SourceSubscribed(
-          cursor,
-          () -> {
-            Set<Consumer<Event>> currentSubscribers = subscribers.get(canvasId);
-            if (currentSubscribers != null) {
-              currentSubscribers.remove(consumer);
-              if (currentSubscribers.isEmpty()) {
-                subscribers.remove(canvasId, currentSubscribers);
-              }
-            }
-          });
+      return new SourceSubscribed(cursor, () -> release(canvasId, consumer));
     } catch (RuntimeException error) {
-      canvasSubscribers.remove(consumer);
-      if (canvasSubscribers.isEmpty()) {
-        subscribers.remove(canvasId, canvasSubscribers);
-      }
+      release(canvasId, consumer);
       throw error;
     }
+  }
+
+  private void release(UUID canvasId, Consumer<Event> consumer) {
+    subscribers.computeIfPresent(
+        canvasId,
+        (id, canvasSubscribers) -> {
+          canvasSubscribers.remove(consumer);
+          return canvasSubscribers.isEmpty() ? null : canvasSubscribers;
+        });
   }
 
   @Override
@@ -168,7 +171,15 @@ final class CanvasVersionHub implements SmartLifecycle, CanvasVersionEventSource
   private void publish(UUID canvasId, Event event) {
     Set<Consumer<Event>> canvasSubscribers = subscribers.get(canvasId);
     if (canvasSubscribers != null) {
-      canvasSubscribers.forEach(consumer -> consumer.accept(event));
+      // 单个消费者回调异常只隔离该消费者，不阻断同资源其他消费者，也不杀死 LISTEN 循环。
+      for (Consumer<Event> consumer : canvasSubscribers) {
+        try {
+          consumer.accept(event);
+        } catch (RuntimeException error) {
+          log.warn(
+              "canvas version subscriber callback failed canvasId={}; skipping", canvasId, error);
+        }
+      }
     }
   }
 

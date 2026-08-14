@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.events;
 
+import jakarta.annotation.PreDestroy;
 import jakarta.websocket.CloseReason;
 import jakarta.websocket.Session;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -76,6 +77,17 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     close(session.getId());
   }
 
+  /**
+   * 应用 shutdown：让现存浏览器连接以 1012 {@code SERVICE_RESTART} 收敛（error 帧出队后关闭），并释放全部订阅。
+   * 幂等；之后到达的帧按正常断线路径处理。
+   */
+  @PreDestroy
+  public void shutdown() {
+    for (ConnectionState state : connections.values()) {
+      state.shutdown();
+    }
+  }
+
   private void close(String sessionId) {
     ConnectionState state = connections.remove(sessionId);
     if (state != null) {
@@ -119,7 +131,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         fail(
             EventFrameCodec.INVALID_FRAME,
             "invalid frame: " + error.getMessage(),
-            CloseReason.CloseCodes.VIOLATED_POLICY);
+            CloseReason.CloseCodes.PROTOCOL_ERROR);
         return;
       }
       switch (frame.type()) {
@@ -200,6 +212,15 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         }
         subscriptions.clear();
       }
+    }
+
+    /** 应用 shutdown：先以 1012 收敛发送链（error 帧出队后关闭会话），再释放全部订阅。 */
+    private void shutdown() {
+      fail(
+          EventFrameCodec.SEND_FAILED,
+          "event channel is shutting down",
+          CloseReason.CloseCodes.SERVICE_RESTART);
+      close();
     }
   }
 }

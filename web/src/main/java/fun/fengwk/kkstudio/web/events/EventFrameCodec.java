@@ -78,9 +78,12 @@ final class EventFrameCodec {
     requireVersionOne(node, "frame");
     String typeName = requiredText(node, "type", "frame");
     ClientFrame.Type type;
-    try {
-      type = ClientFrame.Type.valueOf(typeName.toUpperCase());
-    } catch (IllegalArgumentException error) {
+    if ("subscribe".equals(typeName)) {
+      type = ClientFrame.Type.SUBSCRIBE;
+    } else if ("unsubscribe".equals(typeName)) {
+      type = ClientFrame.Type.UNSUBSCRIBE;
+    } else {
+      // 只接受精确小写；toUpperCase 归一化会放行 SUBSCRIBE/Subscribe 等非 canonical 值。
       throw new IllegalArgumentException(
           "frame.type must be subscribe or unsubscribe: " + typeName);
     }
@@ -183,7 +186,8 @@ final class EventFrameCodec {
 
   private static void requireVersionOne(ObjectNode node, String context) {
     JsonNode version = node.get("version");
-    if (version == null || !version.isIntegralNumber() || version.asLong() != 1L) {
+    // 数值必须精确等于 integer 1；asLong() 会接受溢出整数的截断结果（如 2^64），isInt() 限定 int 范围。
+    if (version == null || !version.isInt() || version.asInt() != 1) {
       throw new IllegalArgumentException(context + ".version must be the integer 1");
     }
   }

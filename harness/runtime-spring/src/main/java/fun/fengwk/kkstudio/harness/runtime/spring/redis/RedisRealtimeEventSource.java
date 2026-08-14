@@ -49,8 +49,15 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
       ReactiveRedisConnectionFactory connectionFactory,
       RedisRealtimeConfig config,
       RealtimeEventJsonCodec eventCodec) {
-    Objects.requireNonNull(connectionFactory, "connectionFactory");
-    this.container = new ReactiveRedisMessageListenerContainer(connectionFactory);
+    this(new ReactiveRedisMessageListenerContainer(connectionFactory), config, eventCodec);
+  }
+
+  /** 测试可注入 listener container（fake/受控 Flux）。 */
+  RedisRealtimeEventSource(
+      ReactiveRedisMessageListenerContainer container,
+      RedisRealtimeConfig config,
+      RealtimeEventJsonCodec eventCodec) {
+    this.container = Objects.requireNonNull(container, "container");
     this.config = Objects.requireNonNull(config, "config");
     this.eventCodec = Objects.requireNonNull(eventCodec, "eventCodec");
   }
@@ -61,26 +68,37 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(onEvent, "onEvent");
     Objects.requireNonNull(onResync, "onResync");
-    if (closed.get()) {
-      throw new IllegalStateException("RedisRealtimeEventSource is already closed");
-    }
-    ChannelState channel =
-        channels.computeIfAbsent(threadId, id -> new ChannelState(id, config.channel(id)));
-    synchronized (channel) {
-      if (channel.subscribers.isEmpty()) {
-        // receiveLater 在 Redis 确认订阅完成后才发出消息流，用作"曾成功连接"标志。
-        channel.listen =
-            container
-                .receiveLater(new ChannelTopic(channel.name))
-                .doOnNext(ignored -> channel.connected.set(true))
-                .flatMapMany(flux -> flux)
-                .doOnError(error -> onChannelError(channel, error))
-                .retryWhen(Retry.fixedDelay(UNBOUNDED_RETRIES, RETRY_DELAY))
-                .subscribe(message -> dispatch(channel, message));
+    while (true) {
+      // compute 原子完成「检查 closed + 创建/获取 channel」；随后在 channel 锁内校验未被并发最后释放/hub close 淘汰
+      // （retired 则重取新状态），再按需建立 listen，杜绝在 detached channel 上重建 listener。
+      ChannelState channel =
+          channels.compute(
+              threadId,
+              (id, existing) -> {
+                if (closed.get()) {
+                  throw new IllegalStateException("RedisRealtimeEventSource is already closed");
+                }
+                return existing != null ? existing : new ChannelState(id, config.channel(id));
+              });
+      synchronized (channel) {
+        if (channel.retired) {
+          continue;
+        }
+        if (channel.subscribers.isEmpty()) {
+          // receiveLater 在 Redis 确认订阅完成后才发出消息流，用作"曾成功连接"标志。
+          channel.listen =
+              container
+                  .receiveLater(new ChannelTopic(channel.name))
+                  .doOnNext(ignored -> channel.connected.set(true))
+                  .flatMapMany(flux -> flux)
+                  .doOnError(error -> onChannelError(channel, error))
+                  .retryWhen(Retry.fixedDelay(UNBOUNDED_RETRIES, RETRY_DELAY))
+                  .subscribe(message -> dispatch(channel, message));
+        }
+        Subscriber subscriber = new Subscriber(onEvent, onResync);
+        channel.subscribers.add(subscriber);
+        return () -> release(threadId, channel, subscriber);
       }
-      Subscriber subscriber = new Subscriber(onEvent, onResync);
-      channel.subscribers.add(subscriber);
-      return () -> release(threadId, channel, subscriber);
     }
   }
 
@@ -89,24 +107,30 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-    for (ChannelState channel : channels.values()) {
-      synchronized (channel) {
-        disposeListen(channel);
+    // 逐个 channel 在锁内 retire + identity 移除；并发 in-flight subscribe 的 compute 已插入的条目由外层循环兜底清空
+    // （closed 检查与插入同处 compute，destroy 后不会再有新 listen）。
+    while (!channels.isEmpty()) {
+      for (ChannelState channel : channels.values()) {
+        synchronized (channel) {
+          if (channel.retired) {
+            continue;
+          }
+          channel.retired = true;
+          channels.remove(channel.threadId, channel);
+          disposeListen(channel);
+        }
       }
     }
-    channels.clear();
     container.destroy();
   }
 
   private void dispatch(ChannelState channel, Message<String, String> message) {
+    RealtimeEvent event;
+    String payload = message.getMessage();
     try {
-      String payload = message.getMessage();
-      RealtimeEvent event = eventCodec.decode(payload);
+      event = eventCodec.decode(payload);
       if (!eventCodec.encode(event).equals(payload)) {
         throw new IllegalArgumentException("realtime pub/sub message must use canonical JSON");
-      }
-      for (Subscriber subscriber : channel.subscribers) {
-        subscriber.onEvent.accept(event);
       }
     } catch (RuntimeException error) {
       LOG.warn(
@@ -114,6 +138,16 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
           channel.name,
           error);
       channel.resync();
+      return;
+    }
+    for (Subscriber subscriber : channel.subscribers) {
+      try {
+        subscriber.onEvent.accept(event);
+      } catch (RuntimeException error) {
+        // 单个消费者回调异常只隔离该消费者，不阻断同 channel 其他消费者，也不触发全局 resync。
+        LOG.warn(
+            "realtime subscriber callback failed on channel={}; skipping", channel.name, error);
+      }
     }
   }
 
@@ -129,10 +163,15 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
 
   private void release(UUID threadId, ChannelState channel, Subscriber subscriber) {
     synchronized (channel) {
+      if (channel.retired) {
+        return; // 并发最后释放/hub close 已清理（幂等）
+      }
       channel.subscribers.remove(subscriber);
       if (channel.subscribers.isEmpty()) {
-        disposeListen(channel);
+        channel.retired = true;
+        // 先移除 map entry 再取消 listen：并发 subscribe 只能取得全新 channel，不会复用正在退役的旧 channel。
         channels.remove(threadId, channel);
+        disposeListen(channel);
       }
     }
   }
@@ -149,18 +188,27 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
 
   private static final class ChannelState {
 
+    private final UUID threadId;
     private final String name;
     private final Set<Subscriber> subscribers = new CopyOnWriteArraySet<>();
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private volatile Disposable listen;
 
+    /** 已淘汰（最后释放/hub close）：不再建立 listen，订阅回调一律丢弃；只在 channel 锁内读写。 */
+    private boolean retired;
+
     private ChannelState(UUID threadId, String name) {
+      this.threadId = threadId;
       this.name = name;
     }
 
     private void resync() {
       for (Subscriber subscriber : subscribers) {
-        subscriber.onResync.run();
+        try {
+          subscriber.onResync.run();
+        } catch (RuntimeException error) {
+          LOG.warn("realtime resync callback failed on channel={}; skipping", name, error);
+        }
       }
     }
   }
