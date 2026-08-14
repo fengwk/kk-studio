@@ -18,9 +18,10 @@ import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinit
 import fun.fengwk.kkstudio.core.ai.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.time.Duration;
 import java.util.List;
@@ -28,7 +29,7 @@ import java.util.List;
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
 class AgentBranchSettingsMaterializerTest {
 
-  private static final EnvironmentName ENV = new EnvironmentName("prod");
+  private static final EnvironmentBinding ENV = TestEnvironmentBindings.binding("prod");
   private static final int MAX_DEPTH = 2;
 
   private AgentDefinitionRepository agentRepository;
@@ -77,7 +78,7 @@ class AgentBranchSettingsMaterializerTest {
 
     BranchSettings settings = materializer.materialize("alpha", ENV, 1, config);
 
-    assertEquals(ENV, settings.environmentName());
+    assertEquals(ENV, settings.environment());
     assertEquals("alpha", settings.agentName());
     assertEquals(new ModelSelection("openai", "gpt-x", "quality"), settings.model());
     assertEquals(List.of("get_goal", "load_skill", "task"), settings.activeTools());

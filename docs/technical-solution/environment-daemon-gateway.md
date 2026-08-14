@@ -140,7 +140,7 @@ Skill 通过 `LOAD_SKILL` / `SKILL_LOADED` / `SKILL_LOAD_FAILED` 按需加载；
 
 ## Invocation 分发
 
-`harness_tool_invocation.request` 冻结 binding（descriptor/type/environmentName/plugin）；ENVIRONMENT binding 的 plugin 恒为 null。统一 `ToolProcessor` 只消费 dispatcher 已 claim 的 TOOL Work：
+`harness_tool_invocation.request` 冻结 binding（descriptor/type/environment binding/plugin）；ENVIRONMENT binding 的 plugin 恒为 null。统一 `ToolProcessor` 只消费 dispatcher 已 claim 的 TOOL Work：
 
 ```text
 claim TOOL Work（Work-only 短事务）
@@ -229,6 +229,6 @@ lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile
 
 另由 `McpBridgeTools.registerAll` 注册固定桥接工具 `mcp_list_tools` / `mcp_call_tool`（见「本地 MCP server」），Environment 固定目录共 11 个工具。动态 MCP 工具绝不进入该目录。
 
-静态 Tool prompt 资源位于 `harness/tool/src/main/resources/.../environment/prompts/`。LSP bridge 协议为 JSON stdin/stdout；未配置 bridge 时不得伪造成功结果。`DaemonMain` 只以 `DaemonConfig.environmentRoot()` 构造 coding 配置，`CodingToolsConfig.environmentRoot/defaultWorkdir` 都等于该 canonical 目录；旧 `kkstudio.daemon.environment-root` / `kkstudio.daemon.default-workdir` 系统属性不再读取。
+静态 Tool prompt 资源位于 `harness/tool/src/main/resources/.../environment/prompts/`。LSP bridge 协议为 JSON stdin/stdout；未配置 bridge 时不得伪造成功结果。`DaemonMain` 只以 `DaemonConfig.environmentRoot()` 构造 coding 配置，`CodingToolsConfig` 只持有 canonical `environmentRoot`；每次 invocation 的默认 workdir 由 Daemon 在 INVOKE 时把 payload `workspacePath` canonicalize 为 Environment Root 内现存目录后写入 `ToolExecutionRequest.workdir`，coding tools 以它为缺省基准（相对 `workdir` 值也以其为基准，absolute 允许但必须 canonical 在 root 内）。旧 `kkstudio.daemon.environment-root` / `kkstudio.daemon.default-workdir` 系统属性不再读取。
 
 `grep` / `find` 由 Java 21 NIO、regex 与仓库内 glob/`.gitignore` 规则实现，不启动 `rg`、`fd`、`grep` 或 `find` 子进程，也不读取对应 executable 系统属性。搜索不会跟随符号链接，硬排除 `.git`，按 environment root 相对 POSIX 路径稳定排序，并从 environment root 到搜索目录逐层应用 `.gitignore`；被忽略目录在加载后代规则前剪枝。目录 grep 跳过二进制或不可读文件，直接二进制目标返回错误。`bash`、可选 LSP bridge、`javap` 与 resource 相关系统属性保持有效。默认 preview 上限为 2000 行 / 50KB，超出部分外部化为 ResourceRef。

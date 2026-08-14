@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -43,14 +44,18 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.NotDirectoryException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -528,6 +533,9 @@ public final class DaemonRuntime implements AutoCloseable {
     }
 
     try {
+      // workspace 必须在发送 STARTED / 执行工具之前 canonicalize 为 Environment Root 内现存目录；
+      // 形状非法、symlink 越界、路径删除或非目录都是确定性 FAILED，绝不产生 STARTED。
+      Path workdir = canonicalWorkspace(payload.workspacePath());
       Tool tool =
           toolRegistry
               .find(payload.toolName())
@@ -545,7 +553,9 @@ public final class DaemonRuntime implements AutoCloseable {
           new ToolExecutionRequest(
               descriptor,
               new ToolCall(envelope.invocationId(), payload.toolName(), payload.argumentsJson()),
-              timeout);
+              timeout,
+              null,
+              workdir);
       RunningInvocation invocation = new RunningInvocation(envelope.invocationId());
       running.put(envelope.invocationId(), invocation);
       if (!started.get() || !isRunning(envelope.invocationId()) || !invocation.begin()) {
@@ -749,8 +759,53 @@ public final class DaemonRuntime implements AutoCloseable {
     return descriptor.timeout().isZero() ? config.defaultToolTimeout() : descriptor.timeout();
   }
 
+  /**
+   * INVOKE payload 是严格字段集：toolName/toolVersion/workspacePath/arguments 必填，timeoutMillis 可选（缺省时按
+   * descriptor/daemon 默认收敛）；未知字段一律协议拒绝。workspacePath 的形状（canonical 相对 wire 路径）在 {@link
+   * #handleInvoke} 中与本地解析一起确定性收敛为 FAILED。
+   */
+  private static final Set<String> INVOKE_PAYLOAD_FIELDS =
+      Set.of("toolName", "toolVersion", "workspacePath", "arguments", "timeoutMillis");
+
+  private static final Set<String> REQUIRED_INVOKE_PAYLOAD_FIELDS =
+      Set.of("toolName", "toolVersion", "workspacePath", "arguments");
+
+  /**
+   * 把 INVOKE 的 canonical 相对 wire workspace path 解析为 Environment Root 内的 canonical 现存目录。
+   *
+   * <p>先经共享 workspace validator 做形状校验（{@code '.'} 表示 root、仅 {@code '/'} 分隔、拒绝 absolute/Windows
+   * drive/反斜杠/空段/{@code '.'}/{@code '..'} 段/控制字符），再相对 environment root 解析并 {@code toRealPath}：
+   * symlink 越界（real path 不在 root 内）、路径删除、非目录都是确定性 {@link IllegalArgumentException}（由调用方收敛为
+   * FAILED）；root 内 symlink alias 的 real path 仍在 root 内时允许。
+   */
+  private Path canonicalWorkspace(String workspacePath) {
+    EnvironmentWorkspacePath.requireCanonicalRelativePath(workspacePath);
+    Path candidate = config.environmentRoot().resolve(Path.of(workspacePath)).normalize();
+    Path canonical;
+    try {
+      canonical = candidate.toRealPath();
+    } catch (IOException error) {
+      throw new IllegalArgumentException(
+          "workspace does not resolve to an existing directory: " + workspacePath, error);
+    }
+    if (!canonical.startsWith(config.environmentRoot())) {
+      throw new IllegalArgumentException("workspace escapes environment root: " + workspacePath);
+    }
+    if (!Files.isDirectory(canonical)) {
+      throw new IllegalArgumentException("workspace is not a directory: " + workspacePath);
+    }
+    return canonical;
+  }
+
   private InvokePayload readInvokePayload(DaemonEnvelope envelope) {
     ObjectNode payload = envelopeCodec.readPayload(envelope);
+    Set<String> actual = new LinkedHashSet<>();
+    payload.fieldNames().forEachRemaining(actual::add);
+    if (!actual.containsAll(REQUIRED_INVOKE_PAYLOAD_FIELDS)
+        || !INVOKE_PAYLOAD_FIELDS.containsAll(actual)) {
+      throw new DaemonProtocolException(
+          "INVOKE payload must declare exactly " + INVOKE_PAYLOAD_FIELDS + ": " + actual);
+    }
     JsonNode arguments = payload.get("arguments");
     if (arguments == null || !arguments.isObject()) {
       throw new DaemonProtocolException("INVOKE payload.arguments must be a JSON object");
@@ -759,6 +814,7 @@ public final class DaemonRuntime implements AutoCloseable {
     return new InvokePayload(
         requiredPayloadText(payload, "toolName"),
         requiredPayloadText(payload, "toolVersion"),
+        requiredPayloadText(payload, "workspacePath"),
         envelopeCodec.writeJson(arguments),
         Duration.ofMillis(timeoutMillis));
   }
@@ -1206,5 +1262,9 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private record InvokePayload(
-      String toolName, String toolVersion, String argumentsJson, Duration timeout) {}
+      String toolName,
+      String toolVersion,
+      String workspacePath,
+      String argumentsJson,
+      Duration timeout) {}
 }

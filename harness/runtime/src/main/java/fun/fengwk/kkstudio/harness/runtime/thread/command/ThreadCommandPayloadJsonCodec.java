@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.nio.charset.StandardCharsets;
@@ -29,7 +30,8 @@ import java.util.Set;
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
  * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_MODEL 携带完整 {@link
- * ModelSelection}；SET_ENVIRONMENT 的 {@code environmentName} 为可空 canonical 逻辑路由名称，null 表示 clear。
+ * ModelSelection}；SET_ENVIRONMENT 的 {@code environment} 为可空完整 binding 对象（{@code {name,
+ * workspacePath}}，null 表示 clear）。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -46,7 +48,8 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
   private static final Set<String> SET_ACTIVE_TOOLS_FIELDS = orderedSet("activeTools");
   private static final Set<String> SET_YOLO_FIELDS = orderedSet("yoloEnabled");
-  private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
+  private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environment");
+  private static final Set<String> ENVIRONMENT_BINDING_FIELDS = orderedSet("name", "workspacePath");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
 
@@ -172,10 +175,23 @@ public final class ThreadCommandPayloadJsonCodec {
       case SetYoloCommandPayload value -> NODES
           .objectNode()
           .put("yoloEnabled", value.yoloEnabled());
-      case SetEnvironmentCommandPayload value -> value.environmentName() == null
-          ? NODES.objectNode().putNull("environmentName")
-          : NODES.objectNode().put("environmentName", value.environmentName().value());
+      case SetEnvironmentCommandPayload value -> {
+        ObjectNode node = NODES.objectNode();
+        if (value.environment() == null) {
+          node.putNull("environment");
+        } else {
+          node.set("environment", encodeEnvironmentBinding(value.environment()));
+        }
+        yield node;
+      }
     };
+  }
+
+  private static ObjectNode encodeEnvironmentBinding(EnvironmentBinding binding) {
+    return NODES
+        .objectNode()
+        .put("name", binding.environmentName().value())
+        .put("workspacePath", binding.workspacePath());
   }
 
   private static ObjectNode encodeModelSelection(ModelSelection selection) {
@@ -238,14 +254,27 @@ public final class ThreadCommandPayloadJsonCodec {
   private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
     ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
     requireExactFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
-    JsonNode environmentName = node.get("environmentName");
-    if (environmentName.isNull()) {
+    JsonNode environment = node.get("environment");
+    if (environment.isNull()) {
       return new SetEnvironmentCommandPayload(null);
     }
-    if (!environmentName.isTextual()) {
-      throw new IllegalArgumentException("SET_ENVIRONMENT.environmentName must be text or null");
+    if (!environment.isObject()) {
+      throw new IllegalArgumentException("SET_ENVIRONMENT.environment must be an object or null");
     }
-    return new SetEnvironmentCommandPayload(new EnvironmentName(environmentName.textValue()));
+    return new SetEnvironmentCommandPayload(decodeEnvironmentBinding(environment));
+  }
+
+  private static EnvironmentBinding decodeEnvironmentBinding(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_ENVIRONMENT.environment");
+    requireExactFields(node, ENVIRONMENT_BINDING_FIELDS, "SET_ENVIRONMENT.environment");
+    String name = canonicalText(node, "name", "SET_ENVIRONMENT.environment");
+    JsonNode workspacePathNode = node.get("workspacePath");
+    if (!workspacePathNode.isTextual() || workspacePathNode.textValue().isBlank()) {
+      throw new IllegalArgumentException(
+          "SET_ENVIRONMENT.environment.workspacePath must be a non-blank string");
+    }
+    // workspacePath 形状（canonical 相对 wire 路径）由 EnvironmentBinding 构造器统一校验。
+    return new EnvironmentBinding(new EnvironmentName(name), workspacePathNode.textValue());
   }
 
   private static ModelSelection decodeModelSelection(JsonNode value) {

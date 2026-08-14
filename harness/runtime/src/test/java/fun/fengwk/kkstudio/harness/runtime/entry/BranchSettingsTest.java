@@ -6,7 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,10 +15,10 @@ import java.util.List;
 /** Branch settings 的 immutable snapshot、Environment route identity 和 active tool 规范化。 */
 class BranchSettingsTest {
 
-  private static final EnvironmentName ENV =
-      new EnvironmentName("123e4567-e89b-12d3-a456-426614174000");
-  private static final EnvironmentName OTHER =
-      new EnvironmentName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  private static final EnvironmentBinding ENV =
+      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174000");
+  private static final EnvironmentBinding OTHER =
+      EnvironmentBindings.binding("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
 
   @Test
   void preservesEnvironmentAndDeduplicatesToolsInOrder() {
@@ -30,7 +31,7 @@ class BranchSettingsTest {
             sourceTools);
 
     sourceTools.add("write");
-    assertEquals(ENV, settings.environmentName());
+    assertEquals(ENV, settings.environment());
     assertEquals(List.of("read", "grep", "bash"), settings.activeTools());
     assertThrows(UnsupportedOperationException.class, () -> settings.activeTools().add("write"));
   }
@@ -41,12 +42,12 @@ class BranchSettingsTest {
         new BranchSettings(
             null, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), List.of());
 
-    assertNull(settings.environmentName());
+    assertNull(settings.environment());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new BranchSettings(
-                new EnvironmentName("123E4567-E89B-12D3-A456-426614174000"),
+                EnvironmentBindings.binding("123E4567-E89B-12D3-A456-426614174000"),
                 "coding",
                 settings.model(),
                 List.of()));
@@ -64,11 +65,11 @@ class BranchSettingsTest {
             new ModelSelection("anthropic", "claude-sonnet", "default"),
             List.of("read"));
 
-    BranchSettings cleared = base.withEnvironmentName(null);
-    BranchSettings rebound = cleared.withEnvironmentName(OTHER);
+    BranchSettings cleared = base.withEnvironment(null);
+    BranchSettings rebound = cleared.withEnvironment(OTHER);
 
-    assertNull(cleared.environmentName());
-    assertEquals(OTHER, rebound.environmentName());
+    assertNull(cleared.environment());
+    assertEquals(OTHER, rebound.environment());
     assertEquals(base.agentName(), rebound.agentName());
     assertEquals(base.model(), rebound.model());
   }

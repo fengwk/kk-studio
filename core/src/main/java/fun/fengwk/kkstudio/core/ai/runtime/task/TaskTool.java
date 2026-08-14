@@ -195,7 +195,7 @@ public final class TaskTool implements Tool {
           BranchSettings target =
               settingsMaterializer.materialize(
                   selected.name(),
-                  child.entryPath().baseSettings().environmentName(),
+                  child.entryPath().baseSettings().environment(),
                   depth(child),
                   config);
           List<NewThreadCommand> commands =
@@ -371,7 +371,7 @@ public final class TaskTool implements Tool {
     BranchSettings settings =
         settingsMaterializer.materialize(
             subagentType,
-            parent.snapshot().entryPath().baseSettings().environmentName(),
+            parent.snapshot().entryPath().baseSettings().environment(),
             childDepth,
             config);
     CreatedThread created =
@@ -411,10 +411,7 @@ public final class TaskTool implements Tool {
     }
     // 目标 Agent 可在恢复时切换；完整 settings diff 与 prompt 在同一 command batch 中提交。
     settingsMaterializer.materialize(
-        subagentType,
-        snapshot.entryPath().baseSettings().environmentName(),
-        context.depth(),
-        config);
+        subagentType, snapshot.entryPath().baseSettings().environment(), context.depth(), config);
     return snapshot;
   }
 

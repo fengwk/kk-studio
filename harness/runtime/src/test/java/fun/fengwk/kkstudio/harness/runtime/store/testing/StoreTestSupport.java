@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -48,7 +49,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -73,7 +74,7 @@ import java.util.function.Consumer;
  */
 final class StoreTestSupport {
 
-  static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
+  static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
   static final Instant T0 = Instant.ofEpochMilli(1000);
   static final Instant T1 = Instant.ofEpochMilli(2000);
   static final Instant T2 = Instant.ofEpochMilli(3000);
@@ -415,7 +416,7 @@ final class StoreTestSupport {
                 descriptor.sideEffect(),
                 descriptor.timeout()),
             invocation.request().binding().type(),
-            invocation.request().binding().environmentName(),
+            invocation.request().binding().environment(),
             invocation.request().binding().plugin());
     return new ToolInvocation(
         invocation.id(),

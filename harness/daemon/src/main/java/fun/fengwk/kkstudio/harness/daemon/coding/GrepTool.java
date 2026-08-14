@@ -38,7 +38,7 @@ public final class GrepTool extends AbstractCodingTool {
   ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String sourcePattern = string(args, "pattern");
-    Path workdir = boundary.workdir(optionalString(args, "workdir"));
+    Path workdir = boundary.workdir(optionalString(args, "workdir"), request.workdir());
     Path path = boundary.existingWithoutSymlinks(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 100, 100_000);
     Duration timeout =

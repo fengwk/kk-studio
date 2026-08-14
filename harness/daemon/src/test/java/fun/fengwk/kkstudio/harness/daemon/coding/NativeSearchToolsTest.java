@@ -320,7 +320,7 @@ class NativeSearchToolsTest {
   }
 
   private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
-    return new CodingToolsConfig(environmentRoot, environmentRoot, lines, bytes, "bash", store);
+    return new CodingToolsConfig(environmentRoot, lines, bytes, "bash", store);
   }
 
   private void write(String relative, String content) throws Exception {
@@ -335,7 +335,9 @@ class NativeSearchToolsTest {
         new ToolExecutionRequest(
             tool.descriptor(),
             new ToolCall("native-search", tool.descriptor().name(), arguments),
-            Duration.ZERO),
+            Duration.ZERO,
+            null,
+            environmentRoot),
         listener);
     assertTrue(listener.completed.await(5, TimeUnit.SECONDS));
     return listener.result;

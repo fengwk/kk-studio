@@ -2182,7 +2182,7 @@ public abstract class HarnessStoreInvocationContract {
       CompactionPhase phase, UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
     ModelInvocationRequest base = modelRequest();
     return new ModelInvocationRequest(
-        base.environmentName(),
+        base.environment(),
         base.providerRequest(),
         List.of(),
         List.of(),

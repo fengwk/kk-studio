@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -29,14 +30,15 @@ import java.util.concurrent.atomic.AtomicReference;
 
 class RemoteToolTest {
 
-  private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("env-a");
+  private static final EnvironmentBinding ENVIRONMENT =
+      new EnvironmentBinding(new EnvironmentName("env-a"), ".");
 
   @Test
   void executeDelegatesInvokeAndMapsCancel() {
     AtomicReference<ToolExecutionListener> listenerRef = new AtomicReference<>();
     RecordingTransport transport = new RecordingTransport(listenerRef);
     ToolDescriptor descriptor = descriptor();
-    RemoteTool tool = new RemoteTool(descriptor, ENVIRONMENT_NAME, transport);
+    RemoteTool tool = new RemoteTool(descriptor, ENVIRONMENT, transport);
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             descriptor,
@@ -46,7 +48,7 @@ class RemoteToolTest {
     RecordingListener listener = new RecordingListener();
 
     ToolExecutionHandle handle = tool.execute(request, listener);
-    assertEquals(ENVIRONMENT_NAME, transport.environmentName);
+    assertEquals(ENVIRONMENT, transport.environment);
     assertSame(request, transport.request);
     handle.cancel();
     assertTrue(transport.cancelled);
@@ -63,15 +65,15 @@ class RemoteToolTest {
     RemoteTool unavailable =
         new RemoteTool(
             descriptor,
-            ENVIRONMENT_NAME,
-            (environmentName, request, listener) -> {
+            ENVIRONMENT,
+            (binding, request, listener) -> {
               throw new RemoteToolUnavailableException("offline");
             });
     RemoteTool uncertain =
         new RemoteTool(
             descriptor,
-            ENVIRONMENT_NAME,
-            (environmentName, request, listener) -> {
+            ENVIRONMENT,
+            (binding, request, listener) -> {
               throw new RemoteToolSendUncertainException("maybe");
             });
     ToolExecutionRequest request =
@@ -102,7 +104,7 @@ class RemoteToolTest {
 
   private static final class RecordingTransport implements RemoteToolTransport {
     private final AtomicReference<ToolExecutionListener> listenerRef;
-    private EnvironmentName environmentName;
+    private EnvironmentBinding environment;
     private ToolExecutionRequest request;
     private boolean cancelled;
 
@@ -112,10 +114,10 @@ class RemoteToolTest {
 
     @Override
     public ToolExecutionHandle invoke(
-        EnvironmentName environmentName,
+        EnvironmentBinding environment,
         ToolExecutionRequest request,
         ToolExecutionListener listener) {
-      this.environmentName = environmentName;
+      this.environment = environment;
       this.request = request;
       listenerRef.set(listener);
       return new ToolExecutionHandle() {

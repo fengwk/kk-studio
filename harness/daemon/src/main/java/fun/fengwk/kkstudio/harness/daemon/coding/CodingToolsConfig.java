@@ -5,10 +5,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/** Daemon coding tools 共享的不可变本地执行配置。 */
+/**
+ * Daemon coding tools 共享的不可变本地执行配置。
+ *
+ * <p>默认 cwd 不是静态配置：每次 invocation 的 workspace 目录由 Daemon 从 INVOKE payload canonicalize 后写入 {@code
+ * ToolExecutionRequest.workdir}，coding tools 以它为缺省 workdir；本配置只持有 environment root 与输出/进程参数。
+ */
 public record CodingToolsConfig(
     Path environmentRoot,
-    Path defaultWorkdir,
     int previewMaxLines,
     int previewMaxBytes,
     String bashExecutable,
@@ -22,15 +26,6 @@ public record CodingToolsConfig(
 
   public CodingToolsConfig {
     environmentRoot = canonicalDirectory(environmentRoot, "environmentRoot");
-    defaultWorkdir =
-        Objects.requireNonNull(defaultWorkdir, "defaultWorkdir").toAbsolutePath().normalize();
-    if (!defaultWorkdir.startsWith(environmentRoot)) {
-      throw new IllegalArgumentException("defaultWorkdir must be inside environmentRoot");
-    }
-    defaultWorkdir = canonicalDirectory(defaultWorkdir, "defaultWorkdir");
-    if (!defaultWorkdir.startsWith(environmentRoot)) {
-      throw new IllegalArgumentException("defaultWorkdir resolves outside environmentRoot");
-    }
     if (previewMaxLines < 1 || previewMaxBytes < 1) {
       throw new IllegalArgumentException("preview output limits must be positive");
     }
@@ -48,14 +43,12 @@ public record CodingToolsConfig(
   /** 便捷构造器：保持可选 LSP bridge 处于禁用状态。 */
   public CodingToolsConfig(
       Path environmentRoot,
-      Path defaultWorkdir,
       int previewMaxLines,
       int previewMaxBytes,
       String bashExecutable,
       ResourceStore resourceStore) {
     this(
         environmentRoot,
-        defaultWorkdir,
         previewMaxLines,
         previewMaxBytes,
         bashExecutable,
@@ -73,7 +66,6 @@ public record CodingToolsConfig(
                 "kkstudio.daemon.resource-directory",
                 root.resolve(".kkstudio").resolve("resources").toString()));
     return new CodingToolsConfig(
-        root,
         root,
         DEFAULT_PREVIEW_MAX_LINES,
         DEFAULT_PREVIEW_MAX_BYTES,

@@ -18,8 +18,11 @@ public class ChatDO {
   /** 必填 Agent definition name；不建立外键，Agent 硬删除期间该名称暂时无法解析，同名重建后重新生效。 */
   private String agentName;
 
-  /** 可空的默认分支 Environment 逻辑路由名称。 */
+  /** 可空的默认分支 Environment 逻辑路由名称（与 {@code workspacePath} 同存同空）。 */
   private String environmentName;
+
+  /** 可空的默认分支 Environment workspace path（与 {@code environmentName} 同存同空）。 */
+  private String workspacePath;
 
   /** YOLO 模式开关：true 时工具调用跳过权限评估直接 Allow；创建时未显式指定则取部署级 ToolSettings 的 defaultYolo。 */
   private boolean yoloEnabled;

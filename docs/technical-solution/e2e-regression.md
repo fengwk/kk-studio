@@ -192,7 +192,7 @@ L1 的关键语义断言：
 - Provider/Agent name 与 Model `(providerName,name)` 创建、更新、硬删除、同名重建；记录存续期间名称不可修改，DELETE 带 `expectedVersion` 硬删除后列表不再出现，同名立即可重建且 `version` 从 `"0"` 重新开始并读取到新数据（删除前数据不残留）；
 - Agent config 的 `tools`/`skills`/`subagents` 三个列表**必填**（缺失 400），元素去重、非空白短名；`tools` 只允许可选目录中的名称（未知 400），`subagents` 是 Agent 名称 allowlist——引用锁定（被引用的 Agent 不可删除，DELETE 409；移除引用后即可硬删除），未知引用 404；
 - `GET /api/ai/catalog/tools` 只返回可选 Platform/Environment 目录：`load_skill`/`task` 两个内部 Platform Tool 绝不出现；Goal 插件 `create_goal/get_goal/update_goal` 必须作为可选 ToolCatalog 能力通过 Agent config 校验；
-- Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `environmentName`（可为 null）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
+- Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `EnvironmentBinding{name, workspacePath}`（可为 null，两字段同存同空）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
 - Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId` 均为 canonical UUID string；`nextCommandSequence`、`revision` 为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
 - snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）、`modelAttemptFailures`（只暴露当前 active Model 尚未物化的失败 attempt；item 为 `modelInvocationId/turnStartEntryId/basisHeadEntryId/attempt/sequence/text/thinking/errorCode/errorMessage/failedAt/retryAt`，其中 `sequence` 是 HTTP decimal string）；
@@ -253,7 +253,7 @@ tool.read_turn
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；`rootPath` 存在；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `daemon.directories` | `--with-tools` | `GET /api/ai/environments/{name}/directories` 缺省 `path="."` 浏览 root（canonical 相对 wire path；`displayPath` 是 daemon 计算的完整本地展示路径且 root 时等于 `rootPath`；root `parentPath="."`；`truncated` 布尔；`gitBranch` 可空；entries 只含直属子目录 `{name,path}`：`name` 等于 `path` 最后一段、`path` 是请求目录的直接子路径）；显式 `path="."` 与缺省一致；`..` 段 400 `INVALID_PATH`、不存在目录 404 `NOT_FOUND`、非法环境名 400 `INVALID_ENVIRONMENT_NAME` |
-| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/sizeBytes 与 fixture 字节一致 |
+| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/sizeBytes 与 fixture 字节一致 |
 
 ### L5 UI（默认 29，`--real` 追加 1）
 
@@ -388,7 +388,7 @@ Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
 {
   "title": null,
   "branchSettings": {
-    "environmentName": null,
+    "environment": null,
     "agentName": "default-assistant",
     "model": { "providerName": "minimax", "modelName": "MiniMax-M2.7", "variant": "default" },
     "activeTools": []
@@ -413,7 +413,7 @@ Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
 }
 ```
 
-`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId,name,preview)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE` 使用 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
+`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId,name,preview)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE` 使用 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environment)`（完整 `{name, workspacePath}` 对象或 null）、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
 
 head move 与 stop 均为 revision CAS：
 
@@ -508,9 +508,9 @@ GET /api/ai/environment            -> LiveEnvironmentDTO[]（name = canonical �
 WebSocket /api/ai/environment/daemon/v2
 ```
 
-- Thread create / `SET_ENVIRONMENT` 的 `environmentName` 只接受 canonical bounded 小写路由名称（或 null 清除），非法名称 400；mapper 不查注册表；turn 规划时 ENVIRONMENT 工具按最新名称绑定、缺失/未 READY **不拒绝**（实际 start 时确定性 `Rejected`，durable `FAILED` ToolResult 模型可见），Agent skills 则要求最新选中 Environment live（缺失/未 READY/无名称精确拒绝）；
+- Thread create / `SET_ENVIRONMENT` 的 `environment` 必须是完整 `{name, workspacePath}` 对象（name 为 canonical bounded 小写路由名称、workspacePath 为 canonical 相对 wire 路径，`'.'` 表示 root）或 null 清除，非法形状 400；mapper 不查注册表；turn 规划时 ENVIRONMENT 工具按最新 `EnvironmentBinding` 绑定、缺失/未 READY **不拒绝**（实际 start 时确定性 `Rejected`，durable `FAILED` ToolResult 模型可见），Agent skills 则要求最新选中 Environment live（缺失/未 READY/无名称精确拒绝）；
 - daemon 由 `scripts/e2e/lib.sh` 以唯一 `--environment-root "$DAEMON_ENV_ROOT"` 和显式 `--note "$DAEMON_NOTE"` 启动；`DAEMON_NOTE` 默认稳定为 `E2E daemon environment.`，可由环境变量覆盖。environment root 只作为 CodingTools 本地边界，note 只经真实 CLI/READY 进入模型上下文；`GET /api/ai/environment` 只返回既有投影加 `rootPath`（READY 的 canonical Environment Root），`daemon.ready` 显式断言 `rootPath` 存在且不存在 `operatingSystem` / `workingDirectory` / `timeZone` / `note` 字段；`daemon.directories` 覆盖 `GET /api/ai/environments/{name}/directories` 的 root 形状与 400/404 错误映射；
-- Chat 默认值（agentName/yoloEnabled/environmentName）仅作 blank pane 初始值（environmentName 可为 null，发送前可改/清空）；Thread `branchSettings` 独立持久化，Environment route immutable；
+- Chat 默认值（agentName/yoloEnabled/environment binding）仅作 blank pane 初始值（environment 可为 null，发送前可改/清空）；Thread `branchSettings` 独立持久化，Environment route immutable；
 - daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会先外部化为瞬时 ResourceRef（`file:///` URI，携带 mediaType/size/sha256）；Entry 写入前再摄入全局 Blob，durable message 为 `resource(blobId,name,preview)`；daemon preview 阈值默认 2000 行 / 50KB；
 - durable Blob Resource 经 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 渲染，原件响应提供权威 mediaType/sizeBytes；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation file/s3 ResourceRef 兼容，未知或不完整内容身份不产生链接。
 

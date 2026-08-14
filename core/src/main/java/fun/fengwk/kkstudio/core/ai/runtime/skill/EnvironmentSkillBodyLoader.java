@@ -6,13 +6,13 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoader;
 import fun.fengwk.kkstudio.harness.runtime.skill.SkillBodyLoader;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
-/** 为平台工具适配 {@link EnvironmentSkillLoader}。 */
+/** 为平台工具适配 {@link EnvironmentSkillLoader}：路由只使用冻结 binding 的 {@code environmentName}。 */
 @Component
 public final class EnvironmentSkillBodyLoader implements SkillBodyLoader {
   private final EnvironmentSkillLoader environmentSkillLoader;
@@ -24,9 +24,10 @@ public final class EnvironmentSkillBodyLoader implements SkillBodyLoader {
 
   @Override
   public CompletableFuture<SkillBodyLoadResult> load(
-      EnvironmentName environmentName, String skillName, Duration timeout) {
+      EnvironmentBinding binding, String skillName, Duration timeout) {
+    Objects.requireNonNull(binding, "binding");
     return environmentSkillLoader
-        .loadSkill(environmentName, skillName, timeout)
+        .loadSkill(binding.environmentName(), skillName, timeout)
         .thenApply(EnvironmentSkillBodyLoader::map);
   }
 

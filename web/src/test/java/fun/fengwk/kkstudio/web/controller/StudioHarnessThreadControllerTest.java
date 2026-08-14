@@ -114,7 +114,8 @@ class StudioHarnessThreadControllerTest {
             {"type": "SET_ACTIVE_TOOLS", "activeTools": ["web_search"], "clientCommandId": "00000000-0000-0000-0000-000000000104"},
             {"type": "SET_YOLO", "yoloEnabled": true, "clientCommandId": "00000000-0000-0000-0000-000000000105"},
             {"type": "SET_ENVIRONMENT",
-             "environmentName": "123e4567-e89b-12d3-a456-426614174000", "clientCommandId": "00000000-0000-0000-0000-000000000106"},
+             "environment": {"name": "123e4567-e89b-12d3-a456-426614174000", "workspacePath": "."},
+             "clientCommandId": "00000000-0000-0000-0000-000000000106"},
             {"type": "CUSTOM_MESSAGE", "role": "SYSTEM", "content": "rules", "clientCommandId": "00000000-0000-0000-0000-000000000107"}
           ]
         }
@@ -144,7 +145,7 @@ class StudioHarnessThreadControllerTest {
         COMMAND_PAYLOADS.encode(batch.commands().get(0).payload()));
     assertEquals(ThreadCommandType.SET_ENVIRONMENT, batch.commands().get(5).payload().type());
     assertEquals(
-        "{\"environmentName\":\"123e4567-e89b-12d3-a456-426614174000\"}",
+        "{\"environment\":{\"name\":\"123e4567-e89b-12d3-a456-426614174000\",\"workspacePath\":\".\"}}",
         COMMAND_PAYLOADS.encode(batch.commands().get(5).payload()));
     assertEquals(ThreadCommandType.CUSTOM_MESSAGE, batch.commands().get(6).payload().type());
   }
@@ -436,7 +437,7 @@ class StudioHarnessThreadControllerTest {
             {"type": "SET_MODEL", "model": {"providerName": "p", "modelName": "m", "variant": "v"}, "clientCommandId": "00000000-0000-0000-0000-000000000104"},
             {"type": "SET_ACTIVE_TOOLS", "activeTools": [], "clientCommandId": "00000000-0000-0000-0000-000000000105"},
             {"type": "SET_YOLO", "yoloEnabled": false, "clientCommandId": "00000000-0000-0000-0000-000000000106"},
-            {"type": "SET_ENVIRONMENT", "environmentName": null, "clientCommandId": "00000000-0000-0000-0000-000000000107"}
+            {"type": "SET_ENVIRONMENT", "environment": null, "clientCommandId": "00000000-0000-0000-0000-000000000107"}
           ]
         }
         """;
@@ -452,7 +453,7 @@ class StudioHarnessThreadControllerTest {
     ThreadCommandBatch batch = captor.getValue();
     assertEquals(7, batch.commands().size());
     assertEquals(
-        "{\"environmentName\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(6).payload()));
+        "{\"environment\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(6).payload()));
     assertEquals(
         "{\"activeTools\":[]}", COMMAND_PAYLOADS.encode(batch.commands().get(4).payload()));
   }

@@ -48,7 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -84,8 +84,8 @@ final class HarnessRuntimeTestSupport {
   static final Instant T3 = Instant.ofEpochMilli(4_000);
   static final Instant T5 = Instant.ofEpochMilli(6_000);
   static final Instant T6 = Instant.ofEpochMilli(7_000);
-  static final EnvironmentName ENV = new EnvironmentName("env-1");
-  static final EnvironmentName ENV2 = new EnvironmentName("env-2");
+  static final EnvironmentBinding ENV = EnvironmentBindings.binding("env-1");
+  static final EnvironmentBinding ENV2 = EnvironmentBindings.binding("env-2");
 
   private HarnessRuntimeTestSupport() {}
 

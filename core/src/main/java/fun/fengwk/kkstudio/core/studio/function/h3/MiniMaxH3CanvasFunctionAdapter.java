@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
@@ -147,8 +148,10 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       UUID threadId =
           oneShotService.submit(
               requireText(properties.getPromptAgentName(), "promptAgentName"),
-              new EnvironmentName(
-                  requireText(properties.getPromptEnvironmentName(), "promptEnvironmentName")),
+              new EnvironmentBinding(
+                  new EnvironmentName(
+                      requireText(properties.getPromptEnvironmentName(), "promptEnvironmentName")),
+                  "."),
               promptBuilder.systemPrompt(),
               promptRequest,
               mediaPreflight(context, manifest));

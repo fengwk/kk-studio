@@ -134,7 +134,7 @@ class HarnessRuntimeDtoContractTest {
     typed.setAgentName("assistant");
     typed.setModel(new HarnessModelSelectionDTO());
     typed.setYoloEnabled(false);
-    typed.setEnvironmentName(null);
+    typed.setEnvironment(null);
     assertEquals("USER_MESSAGE", typed.getType());
     assertEquals("cmd-1", typed.getClientCommandId());
     assertEquals(List.of(attachment), typed.getContents());
@@ -145,7 +145,7 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("USER", typed.getRole());
     assertEquals("assistant", typed.getAgentName());
     assertEquals(Boolean.FALSE, typed.getYoloEnabled());
-    assertNull(typed.getEnvironmentName());
+    assertNull(typed.getEnvironment());
   }
 
   @Test
@@ -189,7 +189,10 @@ class HarnessRuntimeDtoContractTest {
     tool.setToolName("bash");
     tool.setToolVersion("1.0");
     tool.setToolType("SHELL");
-    tool.setEnvironmentName("env-1");
+    EnvironmentBindingDTO environment = new EnvironmentBindingDTO();
+    environment.setName("env-1");
+    environment.setWorkspacePath(".");
+    tool.setEnvironment(environment);
     tool.setArgumentsJson("{}");
     tool.setApprovalJson(null);
     tool.setResultJson(null);
@@ -207,7 +210,7 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("bash", tool.getToolName());
     assertEquals("1.0", tool.getToolVersion());
     assertEquals("SHELL", tool.getToolType());
-    assertEquals("env-1", tool.getEnvironmentName());
+    assertEquals("env-1", tool.getEnvironment().getName());
     assertEquals("{}", tool.getArgumentsJson());
     assertNull(tool.getApprovalJson());
     assertNull(tool.getResultEntryId());

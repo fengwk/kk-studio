@@ -9,8 +9,8 @@ import java.time.Instant;
  * ToolInvocation 查询投影（tool_invocation 表）；实体 id 均为 canonical UUID string。
  *
  * <p>请求字段由 tool binding 与 call 派生；{@code approvalJson} / {@code resultJson} / {@code errorJson} 为
- * canonical runtime codec JSON，仅对应阶段非 null；{@code environmentName} 为 nullable canonical bounded
- * lowercase name route identity。
+ * canonical runtime codec JSON，仅对应阶段非 null；{@code environment} 为 nullable 完整 Environment binding
+ * （{@code {name, workspacePath}}）。
  */
 @Data
 public class ToolInvocationDTO {
@@ -51,11 +51,11 @@ public class ToolInvocationDTO {
   private String toolType;
 
   /**
-   * 实际 Environment 路由：canonical lowercase 逻辑名称；PLATFORM 工具恒为 null，ENVIRONMENT
-   * 工具必填（{@code @JsonInclude(ALWAYS)}）。
+   * 完整 Environment binding：PLATFORM 工具恒为 null，ENVIRONMENT 工具为冻结的 {@code {name,
+   * workspacePath}}（{@code @JsonInclude(ALWAYS)} 保证 null 显式序列化）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentName;
+  private EnvironmentBindingDTO environment;
 
   /** Provider 提供的 JSON 参数原文（tool call arguments）。 */
   private String argumentsJson;

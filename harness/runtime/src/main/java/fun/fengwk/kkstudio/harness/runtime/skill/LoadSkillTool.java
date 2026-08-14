@@ -100,12 +100,12 @@ public final class LoadSkillTool implements Tool {
         return handle;
       }
       SkillBinding skill = selected.get();
-      if (skill.sourceEnvironmentName() == null) {
+      if (skill.sourceEnvironment() == null) {
         complete(handle, error(callId, "skill has no Environment body: " + skill.name()));
         return handle;
       }
       CompletableFuture<SkillBodyLoader.SkillBodyLoadResult> future =
-          skillBodyLoader.load(skill.sourceEnvironmentName(), skill.name(), loadTimeout);
+          skillBodyLoader.load(skill.sourceEnvironment(), skill.name(), loadTimeout);
       handle.future.set(future);
       future.whenComplete(
           (result, error) -> {

@@ -9,8 +9,10 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
@@ -39,6 +41,7 @@ class AgentPromptComposerTest {
     String expected =
         "<current_environment>\n"
             + "- name: none\n"
+            + "- workspace: none\n"
             + "- system: none\n"
             + "- date: 2026-08-09\n"
             + "- note: none\n"
@@ -76,9 +79,12 @@ class AgentPromptComposerTest {
   void escapesXmlInDynamicValues() {
     EnvironmentName name = mock(EnvironmentName.class);
     when(name.value()).thenReturn("env<&\"'");
+    EnvironmentBinding binding = mock(EnvironmentBinding.class);
+    when(binding.environmentName()).thenReturn(name);
+    when(binding.workspacePath()).thenReturn("sub/<&\"'");
     CurrentEnvironmentContext environment =
         new CurrentEnvironmentContext(
-            name,
+            binding,
             DaemonOperatingSystem.WSL,
             LocalDate.of(2026, 8, 9),
             "Use <mount> & \"commands\" from 'Windows'.");
@@ -91,6 +97,7 @@ class AgentPromptComposerTest {
             List.of(new SubagentBinding("x<y>", "desc & more")));
 
     assertTrue(result.contains("- name: env&lt;&amp;&quot;&apos;"), result);
+    assertTrue(result.contains("- workspace: sub/&lt;&amp;&quot;&apos;"), result);
     assertTrue(
         result.contains(
             "- note: Use &lt;mount&gt; &amp; &quot;commands&quot; from &apos;Windows&apos;."),
@@ -154,12 +161,12 @@ class AgentPromptComposerTest {
   @Test
   void validatesCurrentEnvironmentContextInvariants() {
     LocalDate date = LocalDate.of(2026, 8, 9);
-    EnvironmentName name = new EnvironmentName("env");
+    EnvironmentBinding binding = TestEnvironmentBindings.binding("env");
 
     assertEquals(new CurrentEnvironmentContext(null, null, date, null), none());
     CurrentEnvironmentContext selectedWithoutMetadata =
-        new CurrentEnvironmentContext(name, null, date, null);
-    assertEquals(name, selectedWithoutMetadata.name());
+        new CurrentEnvironmentContext(binding, null, date, null);
+    assertEquals(binding, selectedWithoutMetadata.binding());
     assertEquals(null, selectedWithoutMetadata.operatingSystem());
     assertEquals(null, selectedWithoutMetadata.note());
     assertThrows(
@@ -167,10 +174,10 @@ class AgentPromptComposerTest {
         () -> new CurrentEnvironmentContext(null, DaemonOperatingSystem.LINUX, date, "note"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(name, DaemonOperatingSystem.LINUX, date, null));
+        () -> new CurrentEnvironmentContext(binding, DaemonOperatingSystem.LINUX, date, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CurrentEnvironmentContext(name, null, date, "note"));
+        () -> new CurrentEnvironmentContext(binding, null, date, "note"));
     assertThrows(
         NullPointerException.class, () -> new CurrentEnvironmentContext(null, null, null, null));
   }
@@ -179,19 +186,21 @@ class AgentPromptComposerTest {
   @Test
   void validatesCurrentEnvironmentContextNote() {
     LocalDate date = LocalDate.of(2026, 8, 9);
-    EnvironmentName name = new EnvironmentName("env");
+    EnvironmentBinding binding = TestEnvironmentBindings.binding("env");
 
-    assertInvalidContextNote(name, date, "", "note must not be blank");
-    assertInvalidContextNote(name, date, " ", "note must not be blank");
-    assertInvalidContextNote(name, date, " leading", "note must not have surrounding whitespace");
-    assertInvalidContextNote(name, date, "trailing ", "note must not have surrounding whitespace");
+    assertInvalidContextNote(binding, date, "", "note must not be blank");
+    assertInvalidContextNote(binding, date, " ", "note must not be blank");
     assertInvalidContextNote(
-        name, date, "first\nsecond", "note must not contain ISO control characters");
-    assertInvalidContextNote(name, date, "first\u2028second", "note must be a single line");
+        binding, date, " leading", "note must not have surrounding whitespace");
     assertInvalidContextNote(
-        name, date, "control\u0007value", "note must not contain ISO control characters");
+        binding, date, "trailing ", "note must not have surrounding whitespace");
     assertInvalidContextNote(
-        name,
+        binding, date, "first\nsecond", "note must not contain ISO control characters");
+    assertInvalidContextNote(binding, date, "first\u2028second", "note must be a single line");
+    assertInvalidContextNote(
+        binding, date, "control\u0007value", "note must not contain ISO control characters");
+    assertInvalidContextNote(
+        binding,
         date,
         "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1),
         "note exceeds " + DaemonEnvironmentInfo.MAX_NOTE_CHARS + " characters");
@@ -199,7 +208,7 @@ class AgentPromptComposerTest {
     String maximumLength = "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS);
     assertEquals(
         maximumLength,
-        new CurrentEnvironmentContext(name, DaemonOperatingSystem.LINUX, date, maximumLength)
+        new CurrentEnvironmentContext(binding, DaemonOperatingSystem.LINUX, date, maximumLength)
             .note());
   }
 
@@ -208,11 +217,11 @@ class AgentPromptComposerTest {
   }
 
   private static void assertInvalidContextNote(
-      EnvironmentName name, LocalDate date, String note, String expectedMessage) {
+      EnvironmentBinding binding, LocalDate date, String note, String expectedMessage) {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new CurrentEnvironmentContext(name, DaemonOperatingSystem.LINUX, date, note));
+            () -> new CurrentEnvironmentContext(binding, DaemonOperatingSystem.LINUX, date, note));
     assertEquals(expectedMessage, error.getMessage());
   }
 

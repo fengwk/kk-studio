@@ -25,17 +25,17 @@ interface ChatDTO {
   id: string
   title: string | null
   agentName: string
-  environmentName: string | null
+  environment: { name: string; workspacePath: string } | null   // 完整 binding；null 显式发射
   yoloEnabled: boolean
   version: string
 }
 ```
 
-Chat 编辑器更新 `agentName`、`environmentName`、`yoloEnabled` 时携带 `expectedVersion`，pending 期间锁定该 Chat 的发送。Pane 本地维护完整 `BranchDraft`：
+Chat 编辑器更新 `agentName`、`environment`、`yoloEnabled` 时携带 `expectedVersion`，pending 期间锁定该 Chat 的发送。Pane 本地维护完整 `BranchDraft`：
 
 ```ts
 interface BranchDraft {
-  environmentName: string | null   // canonical 路由名称
+  environment: { name: string; workspacePath: string } | null   // 完整 binding；workspacePath 为 canonical 相对 wire 路径
   agentName: string
   model: { providerName, modelName, variant }
   activeTools: string[]
