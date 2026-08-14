@@ -62,8 +62,8 @@ describe('ThreadComposer interactions', () => {
     const editor = screen.getByLabelText('给 AI 发送消息')
     await user.type(editor, '/')
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
-    // 稳定产品顺序保持不变：session -> thread -> agent。
-    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
+    // 稳定产品顺序保持不变：thread -> agent -> environment；初始 active 是第一项。
+    await user.keyboard('{ArrowDown}{Enter}')
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent' }))
   })
 

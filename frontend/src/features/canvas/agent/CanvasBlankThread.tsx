@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ThreadComposer,
+  ThreadShortcutsPanel,
   ThreadStatusFooter,
   type ThreadCommand,
 } from '@/features/ai/runtime'
-import { THREAD_COMMANDS } from '@/features/ai/runtime/thread-panel/thread-commands'
+import { threadCommandsForScene } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
   AgentSelectionPanel,
   EnvironmentSelectionPanel,
@@ -41,17 +42,10 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 
 /**
- * Canvas 空 Thread 的 slash 命令表：upload/agent/environment/yolo 可用；
- * thread/session/tree/new/stop 保持可见但禁用。
+ * Canvas 空 Thread 的 slash 命令表：复用统一场景投影（canvas-blank 场景无
+ * Chat-scoped Thread picker，因此 /thread 保持禁用）。
  */
-const CANVAS_BLANK_COMMANDS: ThreadCommand[] = THREAD_COMMANDS.map((command) => ({
-  ...command,
-  disabled: !['upload', 'agent', 'environment', 'yolo'].includes(command.id),
-  disabledReason: undefined,
-  disabledReasonKey: ['upload', 'agent', 'environment', 'yolo'].includes(command.id)
-    ? undefined
-    : 'ai.runtime.command.disabledReason',
-}))
+const CANVAS_BLANK_COMMANDS: ThreadCommand[] = threadCommandsForScene('canvas-blank')
 
 /**
  * Canvas 空 Thread（document.threadId == null）：
@@ -81,7 +75,7 @@ export function CanvasBlankThread({
   )
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [interaction, setInteraction] = useState<'agent' | 'environment' | null>(null)
+  const [interaction, setInteraction] = useState<'agent' | 'environment' | 'shortcuts' | null>(null)
   const modelsQuery = useQuery({
     queryKey: queryKeys.models.list,
     queryFn: () => agentService.listModels(),
@@ -167,6 +161,9 @@ export function CanvasBlankThread({
       case 'environment':
         setInteraction('environment')
         return
+      case 'shortcuts':
+        setInteraction('shortcuts')
+        return
       case 'yolo':
         if (!pending) {
           setFrozenDraft((current) => current ? { ...current, yoloEnabled: !current.yoloEnabled } : current)
@@ -222,6 +219,8 @@ export function CanvasBlankThread({
         onClose={() => setInteraction(null)}
         onSelect={handleEnvironmentSelected}
       />
+    ) : interaction === 'shortcuts' ? (
+      <ThreadShortcutsPanel onClose={() => setInteraction(null)} />
     ) : null
 
   return (

@@ -215,4 +215,55 @@ describe('ChatPanel', () => {
     expect(screen.getByRole('button', { name: '预览 image.png' })).toBeInTheDocument()
     expect(screen.queryByText('资源不可用')).not.toBeInTheDocument()
   })
+
+  it('renders the events main view exclusively: transcript is unmounted, composer/queue stay', () => {
+    const { container } = render(
+      <ChatPanel
+        labels={{ agentName: 'assistant' }}
+        transcript={{
+          timeline: {
+            messages: [{ id: 'm1', role: 'user', text: 'conversation text', subjectEntryId: 'e1', createdAt: null }],
+            queuedMessages: [
+              {
+                clientCommandId: 'queued-1',
+                role: 'user',
+                text: 'queued input',
+                sequence: 1,
+              },
+            ],
+            hasPendingInputs: true,
+          },
+          bodyRef: createRef<HTMLDivElement>(),
+          loading: false,
+          error: null,
+        }}
+        mainView={{
+          events: (
+            <div role="listbox" aria-label="事件">
+              <div role="option">entry event</div>
+            </div>
+          ),
+        }}
+        composer={{
+          parts: [],
+          pending: false,
+          disabled: false,
+          onPartsChange: vi.fn(),
+          onSubmit: vi.fn(),
+          onCommand: vi.fn(),
+        }}
+        footer={{}}
+        activity={{ working: true }}
+      />,
+    )
+
+    // Conversation 与 Event 只渲染一个主滚动区：transcript 被替换。
+    expect(screen.getByRole('listbox', { name: '事件' })).toBeInTheDocument()
+    expect(screen.queryByText('conversation text')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-dialogue')).toBeNull()
+    // Composer 与 queue/working 保持挂载（切换不丢状态）。
+    expect(container.querySelector('.thread-composer')).not.toBeNull()
+    expect(screen.getByText('queued input')).toBeInTheDocument()
+    expect(screen.getByText('Working...')).toBeInTheDocument()
+  })
 })

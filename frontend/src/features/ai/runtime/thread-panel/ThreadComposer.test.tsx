@@ -33,7 +33,6 @@ function ControlledComposer() {
 describe('ThreadComposer and commands', () => {
   it('keeps stable command order and grays unsupported blank-scene commands', () => {
     expect(THREAD_COMMANDS.map((c) => c.id)).toEqual([
-      'session',
       'thread',
       'agent',
       'environment',
@@ -42,28 +41,37 @@ describe('ThreadComposer and commands', () => {
       'stop',
       'new',
       'upload',
+      'events',
+      'conversation',
+      'shortcuts',
     ])
+    // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
+    expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
     const blank = threadCommandsForScene('blank')
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    // 空面板还没有 Thread，因此 `/session`（用于重新绑定当前 Thread）不可用，
-    // 而 `/thread`（仅切换面板）保持可用。
+    // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/events`/`/conversation`
+    // 不可用，而 `/thread`（仅切换面板）与 `/shortcuts` 保持可用。
     expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
       'thread',
       'agent',
       'environment',
       'yolo',
       'upload',
+      'shortcuts',
     ])
-    expect(blank.find((c) => c.id === 'session')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'tree')?.disabled).toBe(true)
-    expect(threadCommandsForScene('bound').every((c) => c.id === 'session' || !c.disabled)).toBe(true)
+    expect(blank.find((c) => c.id === 'events')?.disabled).toBe(true)
+    expect(blank.find((c) => c.id === 'conversation')?.disabled).toBe(true)
+    expect(threadCommandsForScene('bound').every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
     expect(filterThreadCommands('tree')[0]?.id).toBe('tree')
+    expect(filterThreadCommands('events')[0]?.id).toBe('events')
+    expect(filterThreadCommands('shortcuts')[0]?.id).toBe('shortcuts')
     expect(['history', 'branch', 'rebind', 'head'].every((keyword) => filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
     expect(filterThreadCommands('', blank).map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    expect(firstEnabledCommandIndex(blank)).toBe(1)
+    expect(firstEnabledCommandIndex(blank)).toBe(0)
     expect(filterThreadCommands('missing')).toEqual([])
   })
 

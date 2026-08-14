@@ -10,6 +10,9 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChatPanel,
+  ThreadEventDetail,
+  ThreadEventView,
+  ThreadShortcutsPanel,
   type ChatPanelActivityInput,
   type ChatPanelComposerInput,
   type ChatPanelFooterInput,
@@ -17,8 +20,10 @@ import {
   type ChatPanelTranscriptInput,
   type CommandBatchReplay,
   type ThreadCommand,
+  type ThreadPanelMainView,
   useAgentThreadController,
 } from '@/features/ai/runtime'
+import type { ThreadEventItem } from '@/features/ai/runtime/thread-events'
 import {
   browserNotificationPermission,
   requestBrowserNotificationPermission,
@@ -138,8 +143,11 @@ export function BoundThreadPane({
     initialized: boolean
   } | null>(null)
   const [interaction, setInteraction] = useState<
-    'thread' | 'agent' | 'environment' | 'history' | null
+    'thread' | 'agent' | 'environment' | 'history' | 'shortcuts' | null
   >(null)
+  // 互斥主视图与 Event detail：每个 mounted Pane 独立；threadId 改变时重置回 conversation。
+  const [mainView, setMainView] = useState<'conversation' | 'events'>('conversation')
+  const [eventDetail, setEventDetail] = useState<ThreadEventItem | null>(null)
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
   const [discardConfirm, setDiscardConfirm] = useState<ConfirmModalState | null>(null)
   const queryClient = useQueryClient()
@@ -160,6 +168,7 @@ export function BoundThreadPane({
 
   // 将面板重新绑定到另一个 Thread 时，会清空所有面板本地状态，并从新 snapshot
   // 重新初始化 draft（controller 也会重置其 stop/decision replay 状态）。
+  // threadId 改变时主视图重置回 conversation（含 Event selection/scroll）。
   useEffect(() => {
     if (boundThreadIdRef.current === threadId) {
       return
@@ -167,6 +176,8 @@ export function BoundThreadPane({
     boundThreadIdRef.current = threadId
     setBranchState(null)
     setInteraction(null)
+    setMainView('conversation')
+    setEventDetail(null)
     setRebindBlockedReason(null)
     setDiscardConfirm(null)
   }, [threadId])
@@ -415,9 +426,6 @@ export function BoundThreadPane({
       return
     }
     switch (command.id) {
-      case 'session':
-        // 全局 Session rebind 已不再存在：保持可见但禁用。
-        return
       case 'thread':
         if (panePending) {
           setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
@@ -436,6 +444,16 @@ export function BoundThreadPane({
         return
       case 'tree':
         openHistory()
+        return
+      case 'events':
+        // 互斥主视图切换：Composer 保持挂载，draft/queue/working 状态不受影响。
+        setMainView('events')
+        return
+      case 'conversation':
+        setMainView('conversation')
+        return
+      case 'shortcuts':
+        setInteraction('shortcuts')
         return
       case 'new':
         if (panePending) {
@@ -549,6 +567,8 @@ export function BoundThreadPane({
         }}
         onRebind={rebindTo}
       />
+    ) : interaction === 'shortcuts' ? (
+      <ThreadShortcutsPanel onClose={() => setInteraction(null)} />
     ) : null
   const composer: ChatPanelComposerInput = {
     parts: controller.draft,
@@ -594,22 +614,42 @@ export function BoundThreadPane({
       void toggleNotifications()
     },
   }
+  // 互斥主视图：events 时替换 transcript 滚动区；detail 是 widget zone 的只读展示，
+  // 不是 InteractionPanel（不隐藏 Composer、不抢焦点）。
+  const mainViewInput: ThreadPanelMainView = {
+    events:
+      mainView === 'events' ? (
+        <ThreadEventView
+          events={controller.events}
+          detailOpen={eventDetail != null}
+          onActivate={(event) => setEventDetail(event)}
+          onCloseDetail={() => setEventDetail(null)}
+        />
+      ) : undefined,
+  }
   const activity: ChatPanelActivityInput = {
     working: controller.working,
     // 子任务 widget 只读消费 timeline；审批按钮的决策回传目标子 Thread
     // （status.threadId），由 controller 的 targetThreadId 参数转发。
-    widgets: threadUiPreferences.taskStatusEnabled ? (
-      <TaskStatusWidget
-        messages={controller.timeline.messages}
-        approvalPending={controller.approvalPending}
-        onDecideApproval={(targetThreadId, invocationId, decision) => {
-          if (decision === 'DENY') {
-            threadNotifications.markPermissionRejected()
-          }
-          void controller.decideApproval(invocationId, decision, targetThreadId)
-        }}
-      />
-    ) : null,
+    widgets: (
+      <>
+        {eventDetail ? (
+          <ThreadEventDetail item={eventDetail} onClose={() => setEventDetail(null)} />
+        ) : null}
+        {threadUiPreferences.taskStatusEnabled ? (
+          <TaskStatusWidget
+            messages={controller.timeline.messages}
+            approvalPending={controller.approvalPending}
+            onDecideApproval={(targetThreadId, invocationId, decision) => {
+              if (decision === 'DENY') {
+                threadNotifications.markPermissionRejected()
+              }
+              void controller.decideApproval(invocationId, decision, targetThreadId)
+            }}
+          />
+        ) : null}
+      </>
+    ),
     actionError: rebindBlockedReason ?? controller.actionError,
     onDismissActionError: () => {
       setRebindBlockedReason(null)
@@ -626,6 +666,7 @@ export function BoundThreadPane({
       <ChatPanel
         labels={labels}
         transcript={transcript}
+        mainView={mainViewInput}
         composer={composer}
         footer={footer}
         activity={activity}

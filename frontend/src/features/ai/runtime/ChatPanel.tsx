@@ -5,6 +5,7 @@ import {
   ThreadStatusFooter,
   type ThreadPanelActivityInput,
   type ThreadPanelComposerInput,
+  type ThreadPanelMainView,
   type ThreadPanelTranscriptInput,
 } from '@/features/ai/runtime/thread-panel'
 import {
@@ -77,12 +78,15 @@ export interface ChatPanelActivityInput {
 export function ChatPanel({
   labels,
   transcript,
+  mainView,
   composer,
   footer,
   activity,
 }: {
   labels: ChatPanelLabels
   transcript: ChatPanelTranscriptInput
+  /** 互斥主视图：传入 events 时替换 transcript（Event view）。 */
+  mainView?: ThreadPanelMainView
   composer: ChatPanelComposerInput
   footer: ChatPanelFooterInput
   activity: ChatPanelActivityInput
@@ -129,6 +133,7 @@ export function ChatPanel({
     <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>
       <ThreadPanel
         transcript={threadPanelTranscript}
+        mainView={mainView}
         composer={composer}
         activity={panelActivity}
         slots={{

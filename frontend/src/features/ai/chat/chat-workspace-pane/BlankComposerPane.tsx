@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ThreadComposer,
+  ThreadShortcutsPanel,
   ThreadStatusFooter,
   type ThreadCommand,
 } from '@/features/ai/runtime'
@@ -96,7 +97,7 @@ export function BlankComposerPane({
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [interaction, setInteraction] = useState<
-    'agent' | 'environment' | 'thread' | null
+    'agent' | 'environment' | 'thread' | 'shortcuts' | null
   >(null)
   const [discardConfirm, setDiscardConfirm] = useState<ConfirmModalState | null>(null)
   /** 等待 agent 补全期间挂起的提交：payload（server uploadId）+ localDraft（客户端 localId）分开保存。 */
@@ -254,6 +255,9 @@ export function BlankComposerPane({
       case 'yolo':
         void toggleYolo()
         return
+      case 'shortcuts':
+        setInteraction('shortcuts')
+        return
       default:
         setActionError(
           command.disabledReason
@@ -401,6 +405,8 @@ export function BlankComposerPane({
         onClose={() => setInteraction(null)}
         onSelect={selectThread}
       />
+    ) : interaction === 'shortcuts' ? (
+      <ThreadShortcutsPanel onClose={() => setInteraction(null)} />
     ) : null
 
   return (

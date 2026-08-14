@@ -12,7 +12,7 @@ Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI E2E
-由 `scripts/e2e.sh --ui` 另行附加，默认注册 25 个免费 UI case，不计入这 69 个 Node API case。
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 28 个免费 UI case，不计入这 69 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -87,7 +87,7 @@ env \
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 ```
 
-该命令选择 62 个免费 API case 和 25 个免费 UI case，不启用真实 Provider、Tool 或
+该命令选择 62 个免费 API case 和 28 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
 rebuild；不得为这条回归追加 `--real`。
 
@@ -253,7 +253,7 @@ tool.read_turn
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/sizeBytes 与 fixture 字节一致 |
 
-### L5 UI（默认 25，`--real` 追加 1）
+### L5 UI（默认 28，`--real` 追加 1）
 
 `scripts/e2e.sh --ui` 的免费 UI E2E 矩阵包含：
 
@@ -283,6 +283,9 @@ ui.chat.composer.palette_precedence
 ui.chat.selection_panel.keyboard_mode
 ui.chat.composer.escape_refocus
 ui.chat.composer.submit_clears_draft
+ui.chat.events.conversation_switch
+ui.chat.events.keyboard_nav
+ui.chat.shortcuts.escape_restores_focus
 ```
 
 其中 `ui.canvas.page_loads` 验证 `/canvas` library 保留全局顶栏，点击或创建后进入
@@ -311,6 +314,9 @@ Composer 矩阵的维度与边界如下：
 | `ui.chat.selection_panel.keyboard_mode` | Chat-scoped Thread picker + `/tree` history panel + 两条真实 Thread | 无 modal backdrop；Composer 与 interaction panel 互斥；搜索自动聚焦；Tab 切换排序；方向键移动；丢弃确认优先于 picker 且取消后恢复搜索；Esc 返回 Composer 并保留草稿 |
 | `ui.chat.composer.escape_refocus` | transcript 文字选区 + 当前 Pane 草稿 | 全局 Escape 恢复当前 Pane Composer 的焦点与末尾 caret，草稿/localStorage 不变 |
 | `ui.chat.composer.submit_clears_draft` | durable Thread + 新提交 | 提交后 composer/localStorage 立即清空，用户消息进入 timeline |
+| `ui.chat.events.conversation_switch` | durable Thread（真实 USER 条目） | `/events` 唯一主滚动区替换 transcript；点击 USER 事件打开只读 detail 且原始 payload JSON 含 `"role"` 与正文；Composer 保持挂载可编辑；`+` 菜单回 `/conversation` 卸载事件视图且草稿/localStorage 不变 |
+| `ui.chat.events.keyboard_nav` | durable Thread | listbox 初始 active 为最新事件；`ArrowUp` 移动；hover（mousemove）驱动 active；`ArrowDown` 离开首项；`Home`/`End` 边界；`Enter` 开详情、`Esc` 关详情不落回全局 Escape |
+| `ui.chat.shortcuts.escape_restores_focus` | 空 Pane + 草稿 | `+` 菜单打开只读快捷键面板（region `键盘快捷键`）；`Esc` 关闭并恢复 Composer 焦点，草稿/localStorage 不变 |
 
 durable fixture 使用不存在的 Agent，使 USER_MESSAGE 在 Provider 调用前确定性物化；queued
 fixture 使用 case 内本地 hold-provider 保持真实 Model invocation 活跃，再通过真实命令 API

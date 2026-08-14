@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import type { KeyboardEventHandler, ReactNode } from 'react'
+import { shouldDeferToBlockingOverlay } from '@/shared/ui/blocking-overlay'
 import { useI18n } from '@/shared/i18n'
 
 /**
@@ -17,6 +18,7 @@ export function ThreadInteractionPanel({
   bodyClassName,
   closeDisabled = false,
   busy = false,
+  panelRef,
   onClose,
   onKeyDown,
 }: {
@@ -28,21 +30,23 @@ export function ThreadInteractionPanel({
   bodyClassName?: string
   closeDisabled?: boolean
   busy?: boolean
+  /** 只读面板可把焦点挂到 section 自身（如快捷键目录），使键盘事件可达。 */
+  panelRef?: React.Ref<HTMLElement>
   onClose: () => void
   onKeyDown?: KeyboardEventHandler<HTMLElement>
 }) {
   const { t } = useI18n()
   return (
     <section
+      ref={panelRef}
+      tabIndex={panelRef ? -1 : undefined}
       className={['thread-interaction-panel', className].filter(Boolean).join(' ')}
       role="region"
       aria-label={title}
       aria-busy={busy}
       onKeyDown={(event) => {
-        const blockingModal = document.querySelector<HTMLElement>(
-          '.modal-backdrop, [aria-modal="true"], [role="alertdialog"]',
-        )
-        if (blockingModal && !blockingModal.contains(event.currentTarget)) {
+        // Modal/alertdialog/lightbox 优先于全局 Escape；面板自身位于 overlay 内部时除外。
+        if (shouldDeferToBlockingOverlay(event.currentTarget)) {
           return
         }
         onKeyDown?.(event)

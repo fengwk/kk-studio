@@ -299,6 +299,26 @@ describe('Canvas blank thread', () => {
     expect(screen.getByText('暂无可用 Agent')).toBeInTheDocument()
     expect(screen.queryByText('暂无可解析的 Agent 配置，请先选择一个 Agent。')).not.toBeInTheDocument()
   })
+
+  it('keeps /shortcuts available and /thread disabled in the canvas blank scene', async () => {
+    const user = userEvent.setup()
+    renderHarness(<CanvasAgentThread />, { threadOpen: true })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // canvas-blank 场景：/thread（无 Chat-scoped picker）保持禁用，/shortcuts 可用。
+    await user.click(composer)
+    await user.keyboard('/thread')
+    const threadOption = await screen.findByRole('option', { name: /^thread/ })
+    expect(threadOption.getAttribute('aria-disabled')).toBe('true')
+    await user.keyboard('{Escape}')
+
+    await user.keyboard('/shortcuts{Enter}')
+    expect(await screen.findByRole('region', { name: '键盘快捷键' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('composer-editor')).toBe(true),
+    )
+  })
 })
 
 describe('Canvas bound thread', () => {
@@ -337,6 +357,50 @@ describe('Canvas bound thread', () => {
         }),
       )
     })
+  })
+
+  it('switches between /events and /conversation without losing the composer draft', async () => {
+    const user = userEvent.setup()
+    renderHarness(<CanvasAgentThread />, {
+      threadOpen: true,
+      snapshot: canvasSnapshot(THREAD_ID),
+    })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+
+    await user.type(composer, 'canvas draft')
+    // 非空草稿下通过 + 菜单切换到 events 主视图。
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    await user.click(await screen.findByRole('option', { name: /^events/ }))
+    await screen.findByRole('listbox', { name: '事件' })
+    expect(document.querySelector('.thread-dialogue')).toBeNull()
+    // 切换不丢 Composer draft：composer 保持挂载且内容不变。
+    expect(composer.textContent).toBe('canvas draft')
+    expect(composer.closest('.thread-composer')).not.toHaveAttribute('hidden')
+
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    await user.click(await screen.findByRole('option', { name: /^conversation/ }))
+    await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
+    expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
+    expect(composer.textContent).toBe('canvas draft')
+  })
+
+  it('opens the read-only /shortcuts panel in the canvas bound scene', async () => {
+    const user = userEvent.setup()
+    renderHarness(<CanvasAgentThread />, {
+      threadOpen: true,
+      snapshot: canvasSnapshot(THREAD_ID),
+    })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+
+    await user.click(composer)
+    await user.keyboard('/shortcuts{Enter}')
+    expect(await screen.findByRole('region', { name: '键盘快捷键' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('composer-editor')).toBe(true),
+    )
   })
 })
 

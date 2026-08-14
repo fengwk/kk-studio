@@ -115,6 +115,41 @@ Composer(active, focus + caret restored)
 - interaction panel 打开时仅保留全局 Working 状态；queued 输入与 Task widgets 暂时隐藏，
   footer 继续展示。破坏性丢弃确认仍使用 alertdialog，取消后返回原 interaction panel。
 
+### Conversation/Event 互斥主视图与只读面板
+
+Bound 场景提供 `/events`、`/conversation`；全部 Composer 场景（blank / canvas-blank / bound）
+提供 `/shortcuts`；不再提供始终禁用的 `/session`。命令表由单一
+`threadCommandsForScene(scene)` 投影（`THREAD_COMMANDS` + `SCENE_AVAILABILITY`），
+Chat Bound / Canvas Bound / Blank / Canvas Blank 不再各自维护命令表副本。
+
+```text
+ThreadPanelMainView = 'conversation' | 'events'
+mainView?.events ?? ThreadTranscript        # 互斥：任一时刻只有一个主滚动区
+```
+
+- 切换只替换主滚动区：Composer、queue、working、widgets 保持挂载，本地 draft 不丢。
+- `/events` 打开 `ThreadEventView`（listbox/option）：`↑/↓`、`Home/End`、`PageUp/PageDown`
+  移动 active（初始为最新事件，Page 步长 10），`Enter/Space` 打开详情，`Esc` 在详情打开时
+  关闭详情、否则透传给全局 Escape（恢复 Composer 焦点）；鼠标只有 `mousemove` 改变
+  active，click 只打开详情。
+- 事件详情是**只读 widget**（`ThreadEventDetail`，位于 ThreadWidgetStack、Composer 上方），
+  不是 InteractionPanel：不隐藏 Composer、不抢焦点；展示结构化 label/value 与 durable
+  Entry 原始 payload JSON；X 按钮与详情内 `Esc` 关闭。详情在视图切换间保持打开。
+- 事件投影 `buildThreadEvents` 独立于 transcript：durable Entry 全类型保留（含
+  TURN_START/TURN_END/COMPACTION/未知类型）；活跃 model/tool invocation 与 attempt
+  failure 是单条事件（Provider delta token 绝不逐条成行），锚定在所属 durable Entry 之后，
+  找不到锚点追加到末尾。
+- Thread 重绑（pane 切换 Thread）把视图重置回 conversation 并关闭详情与 interaction。
+- `/shortcuts` 打开只读 `ThreadShortcutsPanel`（`SHORTCUT_CATALOG` 展示数据 + 统一
+  ThreadInteractionPanel shell）：不创建 backdrop，`Esc` 关闭并恢复 Composer 焦点与草稿。
+- 全局 Escape 语义：modal / alertdialog / lightbox（`.modal-backdrop, [aria-modal],
+  [role="alertdialog"], .resource-media-lightbox`）优先拦截；`hasBlockingOverlay()` /
+  `shouldDeferToBlockingOverlay()` 统一判定，Canvas 键盘 Escape 分支同样受守卫。
+
+Turn usage（model token 用量）从 TURN_START 时点移到 TURN_END 时点展示：`EntryProjectionContext`
+携带 `pendingTurnSummary`，ASSISTANT 分支写入、TURN_END 发射 `turn_usage`，TURN_START /
+COMPACTION 清除过期摘要——usage 展示的是已结束 Turn 的真实用量。
+
 ## 5. Ambiguous exact replay 与 409 rebuild
 
 `replayRef` 保存 `{plan, content}`；`CommandBatchPlan.identity = {threadId, content, draft}`（**不含 effectiveBase**：queued SET_* 投影变化不改变用户意图）。
@@ -205,7 +240,7 @@ frontend/src
 │   ├── catalog/
 │   ├── chat/            # ChatWorkspacePane / BlankComposerPane / BoundThreadPane / command-batch-plan
 │   ├── environment/
-│   └── runtime/         # useAgentThreadController / useHarnessThreadRealtime / thread-timeline / task-status / thread-notifications / thread-ui-preferences
+│   └── runtime/         # useAgentThreadController / useHarnessThreadRealtime / thread-timeline / thread-events / thread-panel（transcript、event view、shortcuts、composer）/ task-status / thread-notifications / thread-ui-preferences
 ├── features/canvas/
 ├── shared/api/
 │   ├── contracts/ai-catalog.ts
