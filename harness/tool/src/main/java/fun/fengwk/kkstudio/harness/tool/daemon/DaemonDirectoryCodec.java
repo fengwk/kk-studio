@@ -1,0 +1,292 @@
+package fun.fengwk.kkstudio.harness.tool.daemon;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+
+/**
+ * Daemon 目录浏览请求/响应 payload 的严格 codec。
+ *
+ * <p>消息配对：
+ *
+ * <ul>
+ *   <li>{@link DaemonMessageType#LIST_DIRECTORY} → {@link ListDirectoryRequest}
+ *   <li>{@link DaemonMessageType#DIRECTORY_LISTED} → {@link DirectoryListed}
+ *   <li>{@link DaemonMessageType#DIRECTORY_LIST_FAILED} → {@link DirectoryListFailed}
+ * </ul>
+ *
+ * <p>三类消息均要求 envelope {@code invocationId} 作为 gateway 与 daemon 的关联 ID。{@code path} 是 Environment
+ * Root 下的 canonical 相对 wire 路径（{@code '.'} 表示 root，段以 {@code '/'} 分隔）：拒绝 absolute、空/{@code
+ * '.'}/{@code '..'} 段、 控制字符与空白路径；越界判定由 daemon 在 canonicalize 时完成。
+ */
+public final class DaemonDirectoryCodec {
+
+  /** 单层目录列表的条目数上限；超过时截断并置 {@code truncated=true}。 */
+  public static final int MAX_ENTRIES = 1000;
+
+  /** Gateway 请求浏览 Environment Root 下单层目录。 */
+  public record ListDirectoryRequest(String path) {
+    public ListDirectoryRequest {
+      path = requireCanonicalRelativePath(path);
+    }
+  }
+
+  /** 列表中的单个目录条目。 */
+  public record DirectoryEntry(String path, String displayPath) {
+    public DirectoryEntry {
+      path = requireNonBlank(path, "path");
+      displayPath = requireNonBlank(displayPath, "displayPath");
+    }
+  }
+
+  /** Daemon 成功返回的一层目录列表。 */
+  public record DirectoryListed(
+      String path,
+      String displayPath,
+      String parentPath,
+      boolean truncated,
+      String gitBranch,
+      List<DirectoryEntry> entries) {
+    public DirectoryListed {
+      path = requireCanonicalRelativePath(path);
+      displayPath = requireNonBlank(displayPath, "displayPath");
+      parentPath = requireCanonicalRelativePath(parentPath);
+      entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+    }
+  }
+
+  /** Daemon 确定性失败（非法路径、不存在、非目录、IO 错误）。{@code path} 是请求回显，只要求非空（非法请求路径也必须可归因）。 */
+  public record DirectoryListFailed(String path, DaemonDirectoryFailureCode code, String message) {
+    public DirectoryListFailed {
+      path = requireNonBlank(path, "path");
+      code = Objects.requireNonNull(code, "code");
+      message = requireNonBlank(message, "message");
+    }
+  }
+
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+  /** 校验 canonical 相对 wire 路径并原样返回；{@code '.'} 单独出现表示 root，其余位置拒绝 {@code '.'}/{@code '..'} 段。 */
+  public static String requireCanonicalRelativePath(String path) {
+    String value = requireNonBlank(path, "path");
+    if (".".equals(value)) {
+      return value;
+    }
+    if (value.codePoints().anyMatch(Character::isISOControl)) {
+      throw new IllegalArgumentException("path must not contain control characters");
+    }
+    Path parsed;
+    try {
+      parsed = Path.of(value);
+    } catch (RuntimeException error) {
+      throw new IllegalArgumentException("path is not a valid path: " + value, error);
+    }
+    if (parsed.isAbsolute()) {
+      throw new IllegalArgumentException("path must be relative to the environment root: " + value);
+    }
+    for (String segment : value.split("/", -1)) {
+      if (segment.isEmpty()) {
+        throw new IllegalArgumentException("path must not contain empty segments: " + value);
+      }
+      if (".".equals(segment) || "..".equals(segment)) {
+        throw new IllegalArgumentException(
+            "path must not contain '" + segment + "' segments: " + value);
+      }
+    }
+    return value;
+  }
+
+  public String encodeRequest(ListDirectoryRequest request) {
+    Objects.requireNonNull(request, "request");
+    ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    root.put("path", request.path());
+    return write(root, "LIST_DIRECTORY");
+  }
+
+  public ListDirectoryRequest decodeRequest(String json) {
+    return new ListDirectoryRequest(readRequestPath(json));
+  }
+
+  /** 读取并校验 LIST_DIRECTORY payload 的 path 文本（不构造 record，供 daemon 对形状非法路径做错误归因）。 */
+  public String readRequestPath(String json) {
+    ObjectNode root = requiredObject(json, "LIST_DIRECTORY");
+    rejectUnknownFields(root, Set.of("path"), "LIST_DIRECTORY");
+    return requiredText(root, "path", "LIST_DIRECTORY");
+  }
+
+  public String encodeListed(DirectoryListed listed) {
+    Objects.requireNonNull(listed, "listed");
+    ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    root.put("path", listed.path());
+    root.put("displayPath", listed.displayPath());
+    root.put("parentPath", listed.parentPath());
+    root.put("truncated", listed.truncated());
+    if (listed.gitBranch() != null) {
+      root.put("gitBranch", listed.gitBranch());
+    }
+    ArrayNode entries = root.putArray("entries");
+    for (DirectoryEntry entry : listed.entries()) {
+      ObjectNode node = entries.addObject();
+      node.put("path", entry.path());
+      node.put("displayPath", entry.displayPath());
+    }
+    return write(root, "DIRECTORY_LISTED");
+  }
+
+  public DirectoryListed decodeListed(String json) {
+    ObjectNode root = requiredObject(json, "DIRECTORY_LISTED");
+    rejectUnknownFields(
+        root,
+        Set.of("path", "displayPath", "parentPath", "truncated", "gitBranch", "entries"),
+        "DIRECTORY_LISTED");
+    JsonNode truncated = root.get("truncated");
+    if (truncated == null || !truncated.isBoolean()) {
+      throw new DaemonProtocolException("DIRECTORY_LISTED 'truncated' must be a boolean");
+    }
+    List<DirectoryEntry> entries = decodeEntries(requiredArray(root, "entries"));
+    try {
+      return new DirectoryListed(
+          requiredText(root, "path", "DIRECTORY_LISTED"),
+          requiredText(root, "displayPath", "DIRECTORY_LISTED"),
+          requiredText(root, "parentPath", "DIRECTORY_LISTED"),
+          truncated.booleanValue(),
+          optionalText(root, "gitBranch", "DIRECTORY_LISTED"),
+          entries);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          "DIRECTORY_LISTED validation failed: " + error.getMessage(), error);
+    }
+  }
+
+  public String encodeFailed(DirectoryListFailed failed) {
+    Objects.requireNonNull(failed, "failed");
+    ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    root.put("path", failed.path());
+    root.put("code", failed.code().name());
+    root.put("message", failed.message());
+    return write(root, "DIRECTORY_LIST_FAILED");
+  }
+
+  public DirectoryListFailed decodeFailed(String json) {
+    ObjectNode root = requiredObject(json, "DIRECTORY_LIST_FAILED");
+    rejectUnknownFields(root, Set.of("path", "code", "message"), "DIRECTORY_LIST_FAILED");
+    String codeText = requiredText(root, "code", "DIRECTORY_LIST_FAILED");
+    DaemonDirectoryFailureCode code;
+    try {
+      code = DaemonDirectoryFailureCode.valueOf(codeText);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          "DIRECTORY_LIST_FAILED 'code' is unknown: " + codeText, error);
+    }
+    try {
+      return new DirectoryListFailed(
+          requiredText(root, "path", "DIRECTORY_LIST_FAILED"),
+          code,
+          requiredText(root, "message", "DIRECTORY_LIST_FAILED"));
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          "DIRECTORY_LIST_FAILED validation failed: " + error.getMessage(), error);
+    }
+  }
+
+  private static List<DirectoryEntry> decodeEntries(JsonNode entriesNode) {
+    List<DirectoryEntry> result = new ArrayList<>();
+    int index = 0;
+    for (JsonNode element : entriesNode) {
+      if (!(element instanceof ObjectNode node)) {
+        throw new DaemonProtocolException(
+            "DIRECTORY_LISTED entries[" + index + "] must be an object");
+      }
+      rejectUnknownFields(
+          node, Set.of("path", "displayPath"), "DIRECTORY_LISTED entries[" + index + "]");
+      try {
+        result.add(
+            new DirectoryEntry(
+                requiredText(node, "path", "DIRECTORY_LISTED entries[" + index + "]"),
+                requiredText(node, "displayPath", "DIRECTORY_LISTED entries[" + index + "]")));
+      } catch (IllegalArgumentException error) {
+        throw new DaemonProtocolException(
+            "DIRECTORY_LISTED entry validation failed: " + error.getMessage(), error);
+      }
+      index++;
+    }
+    return List.copyOf(result);
+  }
+
+  private static String write(ObjectNode root, String context) {
+    try {
+      return OBJECT_MAPPER.writeValueAsString(root);
+    } catch (JsonProcessingException error) {
+      throw new DaemonProtocolException("cannot encode " + context + " payload", error);
+    }
+  }
+
+  private static ObjectNode requiredObject(String json, String context) {
+    if (json == null) {
+      throw new DaemonProtocolException(context + " payload must not be null");
+    }
+    try {
+      JsonNode value = OBJECT_MAPPER.readTree(json);
+      if (value == null || !value.isObject()) {
+        throw new DaemonProtocolException(context + " payload must be a JSON object");
+      }
+      return (ObjectNode) value;
+    } catch (JsonProcessingException error) {
+      throw new DaemonProtocolException(context + " payload must be valid JSON", error);
+    }
+  }
+
+  private static JsonNode requiredArray(ObjectNode root, String fieldName) {
+    JsonNode node = root.get(fieldName);
+    if (node == null || !node.isArray()) {
+      throw new DaemonProtocolException("DIRECTORY_LISTED '" + fieldName + "' must be an array");
+    }
+    return node;
+  }
+
+  private static void rejectUnknownFields(ObjectNode root, Set<String> allowed, String context) {
+    Iterator<String> fields = root.fieldNames();
+    while (fields.hasNext()) {
+      String field = fields.next();
+      if (!allowed.contains(field)) {
+        throw new DaemonProtocolException(context + " has unknown field: " + field);
+      }
+    }
+  }
+
+  private static String requiredText(ObjectNode root, String fieldName, String context) {
+    String value = optionalText(root, fieldName, context);
+    if (value == null) {
+      throw new DaemonProtocolException(context + " '" + fieldName + "' is required");
+    }
+    return value;
+  }
+
+  private static String optionalText(ObjectNode root, String fieldName, String context) {
+    JsonNode value = root.get(fieldName);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual() || value.textValue().isBlank()) {
+      throw new DaemonProtocolException(
+          context + " '" + fieldName + "' must be a non-blank string");
+    }
+    return value.textValue();
+  }
+
+  private static String requireNonBlank(String value, String name) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException(name + " must not be blank");
+    }
+    return value;
+  }
+}

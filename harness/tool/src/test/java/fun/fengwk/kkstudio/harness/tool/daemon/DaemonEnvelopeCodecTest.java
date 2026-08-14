@@ -18,7 +18,7 @@ class DaemonEnvelopeCodecTest {
   void encodesAndDecodesVersionTwoEnvelope() {
     DaemonEnvelope envelope =
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.INVOKE,
             new EnvironmentName("environment"),
             "invocation",
@@ -40,7 +40,7 @@ class DaemonEnvelopeCodecTest {
         "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":3,\"messageType\":\"READY\",\"environmentName\":\"e\","
+        "{\"protocolVersion\":4,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
         "{\"protocolVersion\":2,\"messageType\":\"FUTURE\",\"environmentName\":\"e\","
@@ -93,7 +93,7 @@ class DaemonEnvelopeCodecTest {
   void encodesConnectionLevelEnvelopeAndExposesPayloadHelpers() {
     DaemonEnvelope envelope =
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.READY,
             new EnvironmentName("environment"),
             null,

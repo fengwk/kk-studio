@@ -6,6 +6,8 @@ import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.core.ai.environment.registry.BindResult;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
+import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryLister;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoader;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -15,6 +17,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
@@ -32,6 +36,8 @@ import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolFailedException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryEntryDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -47,6 +53,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Environment daemon 的连接/协议 transport 与能力/技能适配器。
@@ -62,13 +69,17 @@ import java.util.concurrent.TimeUnit;
  */
 @Service
 public class EnvironmentDaemonGateway
-    implements EnvironmentDaemonEndpoint, EnvironmentSkillLoader, RemoteToolTransport {
+    implements EnvironmentDaemonEndpoint,
+        EnvironmentSkillLoader,
+        RemoteToolTransport,
+        EnvironmentDirectoryLister {
 
   private final LiveEnvironmentRegistry environmentRegistry;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
+  private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
   private final EnvironmentGatewayProperties properties;
   private final Clock clock;
   private final EnvironmentReadyListener environmentReadyListener;
@@ -76,6 +87,7 @@ public class EnvironmentDaemonGateway
   private final Map<EnvironmentName, ConnectionState> environmentConnections = new HashMap<>();
   private final Map<EnvironmentName, ActiveRemote> activeByEnvironment = new HashMap<>();
   private final Map<String, PendingSkillLoad> pendingSkillLoads = new HashMap<>();
+  private final Map<String, PendingDirectoryList> pendingDirectoryLists = new HashMap<>();
 
   public EnvironmentDaemonGateway(
       LiveEnvironmentRegistry environmentRegistry,
@@ -260,6 +272,78 @@ public class EnvironmentDaemonGateway
             });
   }
 
+  @Override
+  public CompletableFuture<EnvironmentDirectoryListResult> listDirectory(
+      EnvironmentName environmentName, String path, Duration timeout) {
+    Objects.requireNonNull(environmentName, "environmentName");
+    String directoryPath;
+    try {
+      directoryPath = new DaemonDirectoryCodec.ListDirectoryRequest(path).path();
+    } catch (IllegalArgumentException error) {
+      // wire 契约在发端即校验：非法路径立即失败，绝不发送 LIST_DIRECTORY。
+      return CompletableFuture.completedFuture(
+          new EnvironmentDirectoryListResult.Failed(
+              DaemonDirectoryFailureCode.INVALID_PATH, error.getMessage()));
+    }
+    if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+      throw new IllegalArgumentException("timeout must be positive");
+    }
+    ConnectionState state;
+    synchronized (this) {
+      state = environmentConnections.get(environmentName);
+      // 与 Tool invoke/查询完全相同的可用性规则：READY + 连接打开 + 心跳未过期。
+      if (state == null
+          || !state.isReady()
+          || !environmentRegistry.isReady(
+              environmentName, clock.instant(), properties.requireHeartbeatTimeout())) {
+        return CompletableFuture.completedFuture(
+            new EnvironmentDirectoryListResult.Failed(
+                DaemonDirectoryFailureCode.OFFLINE,
+                environmentName + " is offline; directory listing is unavailable"));
+      }
+    }
+    String requestId = UUID.randomUUID().toString();
+    CompletableFuture<EnvironmentDirectoryListResult> future = new CompletableFuture<>();
+    PendingDirectoryList pending =
+        new PendingDirectoryList(
+            environmentName, directoryPath, state.connection.connectionId(), future);
+    synchronized (this) {
+      pendingDirectoryLists.put(requestId, pending);
+    }
+    String payload =
+        directoryCodec.encodeRequest(new DaemonDirectoryCodec.ListDirectoryRequest(directoryPath));
+    if (!send(state, DaemonMessageType.LIST_DIRECTORY, requestId, payload)) {
+      synchronized (this) {
+        pendingDirectoryLists.remove(requestId, pending);
+      }
+      future.complete(
+          new EnvironmentDirectoryListResult.Failed(
+              DaemonDirectoryFailureCode.OFFLINE,
+              environmentName + " is offline; directory listing is unavailable"));
+      return future;
+    }
+    return future
+        .orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
+        .exceptionally(
+            error -> {
+              synchronized (this) {
+                pendingDirectoryLists.remove(requestId, pending);
+              }
+              DaemonDirectoryFailureCode code =
+                  error instanceof TimeoutException
+                      ? DaemonDirectoryFailureCode.TIMEOUT
+                      : DaemonDirectoryFailureCode.OFFLINE;
+              String message =
+                  code == DaemonDirectoryFailureCode.TIMEOUT
+                      ? environmentName
+                          + " directory listing timed out after "
+                          + timeout.toMillis()
+                          + "ms"
+                      : environmentName + " is offline; directory listing is unavailable";
+              return new EnvironmentDirectoryListResult.Failed(code, message);
+            });
+  }
+
   private String createInvokePayload(ToolExecutionRequest request) {
     long timeoutMillis = Math.max(0, request.timeout().toMillis());
     JsonNode arguments = envelopeCodec.readJson(request.call().argumentsJson());
@@ -299,7 +383,9 @@ public class EnvironmentDaemonGateway
       case ERROR -> handleError(state, envelope);
       case SKILL_LOADED -> handleSkillLoaded(state, envelope, deferred);
       case SKILL_LOAD_FAILED -> handleSkillLoadFailed(state, envelope, deferred);
-      case WELCOME, INVOKE, CANCEL, LOAD_SKILL -> throw new DaemonProtocolException(
+      case DIRECTORY_LISTED -> handleDirectoryListed(state, envelope, deferred);
+      case DIRECTORY_LIST_FAILED -> handleDirectoryListFailed(state, envelope, deferred);
+      case WELCOME, INVOKE, CANCEL, LOAD_SKILL, LIST_DIRECTORY -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to gateway");
     }
   }
@@ -315,9 +401,9 @@ public class EnvironmentDaemonGateway
         Set.of("daemonId", "protocolVersion", "gatewayToken", "toolCatalogVersion"),
         "HELLO payload");
     requiredText(payload, "daemonId", "HELLO payload");
-    if (requiredLong(payload, "protocolVersion", "HELLO payload") != DaemonProtocol.VERSION_2) {
+    if (requiredLong(payload, "protocolVersion", "HELLO payload") != DaemonProtocol.VERSION_3) {
       throw new DaemonProtocolException(
-          "HELLO payload.protocolVersion must be " + DaemonProtocol.VERSION_2);
+          "HELLO payload.protocolVersion must be " + DaemonProtocol.VERSION_3);
     }
     if (!EnvironmentToolCatalog.version()
         .equals(requiredText(payload, "toolCatalogVersion", "HELLO payload"))) {
@@ -513,6 +599,71 @@ public class EnvironmentDaemonGateway
     return pending;
   }
 
+  private void handleDirectoryListed(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    requireReady(state);
+    PendingDirectoryList pending = takePendingDirectoryList(state, envelope);
+    DaemonDirectoryCodec.DirectoryListed listed =
+        directoryCodec.decodeListed(envelope.payloadJson());
+    if (!pending.path.equals(listed.path())) {
+      throw new DaemonProtocolException(
+          "DIRECTORY_LISTED path does not match request: " + listed.path());
+    }
+    deferred.add(
+        () -> pending.future.complete(new EnvironmentDirectoryListResult.Loaded(toDto(listed))));
+  }
+
+  private void handleDirectoryListFailed(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    requireReady(state);
+    PendingDirectoryList pending = takePendingDirectoryList(state, envelope);
+    DaemonDirectoryCodec.DirectoryListFailed failed =
+        directoryCodec.decodeFailed(envelope.payloadJson());
+    if (!pending.path.equals(failed.path())) {
+      throw new DaemonProtocolException(
+          "DIRECTORY_LIST_FAILED path does not match request: " + failed.path());
+    }
+    deferred.add(
+        () ->
+            pending.future.complete(
+                new EnvironmentDirectoryListResult.Failed(failed.code(), failed.message())));
+  }
+
+  private PendingDirectoryList takePendingDirectoryList(
+      ConnectionState state, DaemonEnvelope envelope) {
+    String requestId = requireNonBlank(envelope.invocationId(), "invocationId");
+    PendingDirectoryList pending;
+    synchronized (this) {
+      pending = pendingDirectoryLists.remove(requestId);
+    }
+    if (pending == null
+        || !pending.environmentName.equals(state.environmentName)
+        || !pending.connectionId.equals(state.connection.connectionId())) {
+      throw new DaemonProtocolException(
+          "directory listing callback does not own invocationId: " + requestId);
+    }
+    return pending;
+  }
+
+  /** wire {@code DIRECTORY_LISTED} → 应用读模型；条目顺序/截断标记原样保留。 */
+  private static EnvironmentDirectoryDTO toDto(DaemonDirectoryCodec.DirectoryListed listed) {
+    EnvironmentDirectoryDTO dto = new EnvironmentDirectoryDTO();
+    dto.setPath(listed.path());
+    dto.setDisplayPath(listed.displayPath());
+    dto.setParentPath(listed.parentPath());
+    dto.setTruncated(listed.truncated());
+    dto.setGitBranch(listed.gitBranch());
+    List<EnvironmentDirectoryEntryDTO> entries = new ArrayList<>();
+    for (DaemonDirectoryCodec.DirectoryEntry entry : listed.entries()) {
+      EnvironmentDirectoryEntryDTO entryDto = new EnvironmentDirectoryEntryDTO();
+      entryDto.setPath(entry.path());
+      entryDto.setDisplayPath(entry.displayPath());
+      entries.add(entryDto);
+    }
+    dto.setEntries(List.copyOf(entries));
+    return dto;
+  }
+
   private ActiveRemote requireActive(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
@@ -554,7 +705,7 @@ public class EnvironmentDaemonGateway
       }
       DaemonEnvelope envelope =
           new DaemonEnvelope(
-              DaemonProtocol.VERSION_2,
+              DaemonProtocol.VERSION_3,
               type,
               state.environmentName,
               invocationId,
@@ -587,7 +738,7 @@ public class EnvironmentDaemonGateway
         if (!state.cleaned && !state.sendFailed && state.connection.isOpen()) {
           DaemonEnvelope envelope =
               new DaemonEnvelope(
-                  DaemonProtocol.VERSION_2,
+                  DaemonProtocol.VERSION_3,
                   DaemonMessageType.ERROR,
                   receivedEnvironmentName,
                   null,
@@ -609,6 +760,7 @@ public class EnvironmentDaemonGateway
   private void closeConnectionState(ConnectionState state) {
     ActiveRemote lostRemote = null;
     List<PendingSkillLoad> doomedSkills = List.of();
+    List<PendingDirectoryList> doomedDirectoryLists = List.of();
     EnvironmentName environmentName = null;
     synchronized (this) {
       if (state.cleaned) {
@@ -631,6 +783,7 @@ public class EnvironmentDaemonGateway
           }
         }
         doomedSkills = takePendingSkillLoads(environmentName);
+        doomedDirectoryLists = takePendingDirectoryLists(environmentName);
       }
       connections.remove(state.connection.connectionId(), state);
     }
@@ -652,6 +805,7 @@ public class EnvironmentDaemonGateway
                               + "; remote tool outcome is uncertain."))));
     }
     completeDoomedSkillLoads(environmentName, doomedSkills);
+    completeDoomedDirectoryLists(environmentName, doomedDirectoryLists);
   }
 
   private List<PendingSkillLoad> takePendingSkillLoads(EnvironmentName environmentName) {
@@ -679,6 +833,34 @@ public class EnvironmentDaemonGateway
           new EnvironmentSkillLoadResult.Failed(
               pending.skillName,
               environmentName + " is offline; " + pending.skillName + " is unavailable"));
+    }
+  }
+
+  private List<PendingDirectoryList> takePendingDirectoryLists(EnvironmentName environmentName) {
+    List<PendingDirectoryList> doomed = new ArrayList<>();
+    List<String> keys = new ArrayList<>();
+    for (Map.Entry<String, PendingDirectoryList> entry : pendingDirectoryLists.entrySet()) {
+      if (environmentName.equals(entry.getValue().environmentName)) {
+        keys.add(entry.getKey());
+        doomed.add(entry.getValue());
+      }
+    }
+    for (String key : keys) {
+      pendingDirectoryLists.remove(key);
+    }
+    return doomed;
+  }
+
+  private void completeDoomedDirectoryLists(
+      EnvironmentName environmentName, List<PendingDirectoryList> doomed) {
+    if (environmentName == null || doomed.isEmpty()) {
+      return;
+    }
+    for (PendingDirectoryList pending : doomed) {
+      pending.future.complete(
+          new EnvironmentDirectoryListResult.Failed(
+              DaemonDirectoryFailureCode.OFFLINE,
+              environmentName + " is offline; directory listing is unavailable"));
     }
   }
 
@@ -869,6 +1051,24 @@ public class EnvironmentDaemonGateway
         CompletableFuture<EnvironmentSkillLoadResult> future) {
       this.environmentName = environmentName;
       this.skillName = skillName;
+      this.connectionId = connectionId;
+      this.future = future;
+    }
+  }
+
+  private static final class PendingDirectoryList {
+    private final EnvironmentName environmentName;
+    private final String path;
+    private final String connectionId;
+    private final CompletableFuture<EnvironmentDirectoryListResult> future;
+
+    private PendingDirectoryList(
+        EnvironmentName environmentName,
+        String path,
+        String connectionId,
+        CompletableFuture<EnvironmentDirectoryListResult> future) {
+      this.environmentName = environmentName;
+      this.path = path;
       this.connectionId = connectionId;
       this.future = future;
     }

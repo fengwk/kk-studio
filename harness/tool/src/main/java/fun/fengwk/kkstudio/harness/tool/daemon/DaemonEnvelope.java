@@ -26,7 +26,10 @@ public record DaemonEnvelope(
           DaemonMessageType.CANCELLED,
           DaemonMessageType.LOAD_SKILL,
           DaemonMessageType.SKILL_LOADED,
-          DaemonMessageType.SKILL_LOAD_FAILED);
+          DaemonMessageType.SKILL_LOAD_FAILED,
+          DaemonMessageType.LIST_DIRECTORY,
+          DaemonMessageType.DIRECTORY_LISTED,
+          DaemonMessageType.DIRECTORY_LIST_FAILED);
 
   public DaemonEnvelope {
     if (protocolVersion <= 0) {

@@ -59,7 +59,7 @@ public final class DaemonEnvelopeCodec {
     JsonNode root = readObject(json, "envelope");
     rejectUnknownFields(root);
     int protocolVersion = requiredInt(root, "protocolVersion");
-    if (protocolVersion != DaemonProtocol.VERSION_2) {
+    if (protocolVersion != DaemonProtocol.VERSION_3) {
       throw new DaemonProtocolException("unsupported protocolVersion: " + protocolVersion);
     }
     String messageTypeValue = requiredText(root, "messageType");
