@@ -55,6 +55,7 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
+    listDirectories: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -128,7 +129,7 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     activeTools: [],
@@ -238,6 +239,14 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(agentService.listModels).mockResolvedValue(page([miniMaxModel]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
     vi.mocked(environmentService.listEnvironments).mockResolvedValue(readyEnvironments)
+    vi.mocked(environmentService.listDirectories).mockResolvedValue({
+      path: '.',
+      displayPath: '.',
+      parentPath: '.',
+      truncated: false,
+      gitBranch: null,
+      entries: [{ name: 'proj', path: 'proj' }],
+    })
     vi.mocked(chatService.getChat).mockResolvedValue({
       id: 'chat-1',
       title: 'Workspace',
@@ -413,7 +422,7 @@ describe('ChatWorkspacePage', () => {
         id: 'chat-1',
         title: 'Workspace',
         agentName: 'assistant',
-        environmentName: data.environmentName ?? null,
+        environment: data.environment ?? null,
         yoloEnabled: false,
         version: String(1 + updateCalls),
         createTime: null,
@@ -426,18 +435,22 @@ describe('ChatWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
+    const dirPanel = await screen.findByLabelText('local 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
     expect(
       screen.getByRole('button', { name: /env:local/ }),
     ).toBeInTheDocument()
-    // 选中的名称异步同步为 Chat 默认值（版本化 CAS）；footer 使用面板本地草稿。
+    // 选中的完整 binding 异步同步为 Chat 默认值（版本化 CAS）；footer 使用面板本地草稿。
     await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(1))
     expect(chatService.updateChat).toHaveBeenNthCalledWith(1, 'chat-1', {
-      environmentName: 'local',
+      environment: { name: 'local', workspacePath: '.' },
       expectedVersion: '1',
     })
 
     // 显式清空（无）同步为 Chat 默认 null。
     await user.click(screen.getByRole('button', { name: /env:local/ }))
+    const dirAgain = await screen.findByLabelText('local 目录')
+    await user.click(within(dirAgain).getByRole('button', { name: '返回 Environment 列表' }))
     const envModalAgain = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModalAgain).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
     expect(
@@ -445,7 +458,7 @@ describe('ChatWorkspacePage', () => {
     ).toBeInTheDocument()
     await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(2))
     expect(chatService.updateChat).toHaveBeenNthCalledWith(2, 'chat-1', {
-      environmentName: null,
+      environment: null,
       expectedVersion: '2',
     })
   })
@@ -462,7 +475,10 @@ describe('ChatWorkspacePage', () => {
           sessionId: `session-${threadId}`,
           headEntryId: `head-${threadId}`,
           branchSettings: branchSettings({
-            environmentName: threadId === 't-local' ? 'local' : 'remote',
+            environment: {
+              name: threadId === 't-local' ? 'local' : 'remote',
+              workspacePath: '.',
+            },
           }),
         }),
       ),
@@ -472,7 +488,9 @@ describe('ChatWorkspacePage', () => {
     await waitFor(() => {
       const environmentButtons = screen.getAllByRole('button', { name: /env:/ })
       const labels = environmentButtons.map((button) => button.textContent)
-      expect(labels).toEqual(expect.arrayContaining(['env:local', 'env:remote']))
+      expect(labels).toEqual(
+        expect.arrayContaining(['env:local · ws:.', 'env:remote · ws:.']),
+      )
     })
     expect(chatService.updateChat).not.toHaveBeenCalled()
   })
@@ -597,6 +615,8 @@ describe('ChatWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
+    const dirPanel = await screen.findByLabelText('local 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
     expect(
       screen.getByRole('button', { name: /env:local/ }),
     ).toBeInTheDocument()
@@ -607,7 +627,7 @@ describe('ChatWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalled())
     const createArg = vi.mocked(chatService.createChatThread).mock.calls.at(-1)![1]!
-    expect(createArg.branchSettings.environmentName).toBe('local')
+    expect(createArg.branchSettings.environment).toEqual({ name: 'local', workspacePath: '.' })
   })
 
   it('detaches a stale persisted thread when its snapshot is not found', async () => {
@@ -667,7 +687,7 @@ describe('ChatWorkspacePage', () => {
         title: 'Workspace',
         branchSettings: expect.objectContaining({
           agentName: 'assistant',
-          environmentName: null,
+          environment: null,
         }),
         yoloEnabled: false,
       }),

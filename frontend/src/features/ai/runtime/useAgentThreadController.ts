@@ -579,18 +579,21 @@ function resolveRuntimeLabels(
   const agent = agents.find((item) => item.name === settings?.agentName)
   const model = models.find((item) => modelRef(item) === agent?.model)
   const contextWindow = extractContextWindow(model)
-  const environmentName = settings?.environmentName ?? null
+  const environment = settings?.environment
+    ? { name: settings.environment.name, workspacePath: settings.environment.workspacePath }
+    : null
   return {
     agentName: settings?.agentName || translate('ai.runtime.action.blankAgent'),
     providerName: settings?.model.providerName || undefined,
     // 规范的展示身份是 provider/model。
     modelName: formatModelRef(settings?.model.providerName, settings?.model.modelName),
     variantName: settings?.model.variant || undefined,
-    // canonical 名称即展示身份；ready 标记来自 live 列表，缺失/未知 => 不可用。
-    environmentName,
-    environmentReady: environmentName == null
+    // 完整 binding 即展示身份（name + workspacePath）；ready 标记仍按 name 查询
+    // live 列表，缺失/未知 => 不可用。
+    environment,
+    environmentReady: environment == null
       ? undefined
-      : (environmentReadyByName?.get(environmentName) ?? false),
+      : (environmentReadyByName?.get(environment.name) ?? false),
     contextWindow,
   }
 }

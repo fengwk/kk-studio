@@ -13,6 +13,7 @@ import {
   type ResourceBlobUrls,
 } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { storageService } from '@/shared/api/storage-service'
+import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
@@ -25,7 +26,8 @@ export interface ChatPanelLabels {
   providerName?: string
   modelName?: string
   variantName?: string
-  environmentName?: string | null
+  /** 完整 Environment binding（name + workspacePath）；null 表示未绑定。 */
+  environment?: EnvironmentBindingDTO | null
   environmentReady?: boolean
   contextWindow?: number
 }
@@ -152,7 +154,7 @@ export function ChatPanel({
               providerName={labels.providerName}
               modelName={labels.modelName}
               variantName={labels.variantName}
-              environmentName={labels.environmentName}
+              environment={labels.environment}
               environmentReady={labels.environmentReady}
               yoloEnabled={footer.yoloEnabled}
               onAgentClick={footer.onAgentClick}

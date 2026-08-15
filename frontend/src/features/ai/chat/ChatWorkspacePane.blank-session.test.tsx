@@ -9,12 +9,17 @@ import { composerDraftStorageKey } from '@/features/ai/composer/composer-draft'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { chatService } from '@/shared/api/chat-service'
+import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import type {
+  EnvironmentBindingDTO,
+  EnvironmentDirectoryDTO,
+} from '@/shared/api/contracts/ai-environment'
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
   const manager = { subscribe: () => () => undefined }
@@ -68,6 +73,7 @@ vi.mock('@/shared/api/harness-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn().mockResolvedValue([]),
+    listDirectories: vi.fn(),
   },
 }))
 
@@ -77,6 +83,16 @@ const page = <T,>(results: T[]) => ({
   totalCount: results.length,
   results,
 })
+
+/** 默认单层目录响应：root 下有一个直属子目录 proj。 */
+const ROOT_DIRECTORY: EnvironmentDirectoryDTO = {
+  path: '.',
+  displayPath: '.',
+  parentPath: '.',
+  truncated: false,
+  gitBranch: null,
+  entries: [{ name: 'proj', path: 'proj' }],
+}
 
 function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
@@ -89,7 +105,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     status: 'IDLE',
     processing: false,
     branchSettings: {
-      environmentName: null,
+      environment: null,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       activeTools: [],
@@ -158,10 +174,10 @@ function renderBlankPane(overrides?: {
   onThreadChange?: (threadId: string | null) => void
   onAgentChange?: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
-  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  onEnvironmentChange?: (environment: EnvironmentBindingDTO | null) => Promise<void>
   agentName?: string | null
   yoloEnabled?: boolean
-  environmentName?: string | null
+  environment?: EnvironmentBindingDTO | null
   initialThreadId?: string | null
   title?: string | null
   agents?: Array<typeof assistantAgent>
@@ -185,7 +201,7 @@ function renderBlankPane(overrides?: {
           id: 'chat-1',
           title: overrides?.title === undefined ? 'C' : overrides.title,
           agentName: overrides?.agentName === undefined ? 'assistant' : overrides.agentName,
-          environmentName: overrides?.environmentName ?? null,
+          environment: overrides?.environment ?? null,
           yoloEnabled: overrides?.yoloEnabled ?? false,
           version: '1',
           createTime: null,
@@ -232,6 +248,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue(page([assistantAgent]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([modelEntry()]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
+    vi.mocked(environmentService.listDirectories).mockResolvedValue(ROOT_DIRECTORY)
     vi.mocked(chatService.listChatThreads).mockResolvedValue([
       thread({ threadId: 't-idle' }),
       thread({ threadId: 't-running', status: 'RUNNING', processing: true }),
@@ -289,7 +306,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     )
   })
 
-  it('keeps Environment selection as a local blank-pane draft', async () => {
+  it('keeps Environment selection as a local blank-pane draft (confirm full binding)', async () => {
     const user = userEvent.setup()
     renderBlankPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -299,15 +316,42 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const envModal = await screen.findByLabelText('选择 Environment')
     expect(within(envModal).getByRole('option', { name: /^local/ })).toBeInTheDocument()
     expect(within(envModal).queryByRole('option', { name: /connecting/ })).not.toBeInTheDocument()
+    // 选择 local 进入目录浏览（root '.'），确认后才提交完整 binding。
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
+    const dirPanel = await screen.findByLabelText('local 目录')
+    expect(within(dirPanel).getByText('当前：.')).toBeInTheDocument()
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
 
-    // 空面板 footer 立即反映 draft。
-    expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
+    // 空面板 footer 立即反映 draft（binding name + workspacePath）。
+    expect(await screen.findByRole('button', { name: /env:local · ws:\./ })).toBeInTheDocument()
 
+    // 已有 binding：再次打开直接进入目录模式；返回列表后选择“无环境”提交 null。
     await user.click(screen.getByRole('button', { name: /env:local/ }))
-    const envModalAgain = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModalAgain).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
+    const dirAgain = await screen.findByLabelText('local 目录')
+    await user.click(within(dirAgain).getByRole('button', { name: '返回 Environment 列表' }))
+    const listAgain = await screen.findByLabelText('选择 Environment')
+    await user.click(within(listAgain).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
     expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
+  })
+
+  it('closing the workspace picker cancels without mutating the blank pane draft', async () => {
+    const user = userEvent.setup()
+    const onEnvironmentChange = vi.fn(async () => undefined)
+    renderBlankPane({ onEnvironmentChange })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
+    const envModal = await screen.findByLabelText('选择 Environment')
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
+    await screen.findByLabelText('local 目录')
+    // Escape 只取消：不调用 onSelect，footer 保持 env:none，Chat 默认值未同步。
+    await user.keyboard('{Escape}')
+    expect(screen.queryByLabelText('local 目录')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /env:none/ })).toBeInTheDocument()
+    expect(onEnvironmentChange).not.toHaveBeenCalled()
+    expect(chatService.createChatThread).not.toHaveBeenCalled()
+    expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
 
   it('materializes the blank pane frozen draft from the catalog (footer shows agent/model)', async () => {
@@ -326,35 +370,42 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
 
-  it('starts the blank pane draft from the Chat default Environment and allows changing it before first send', async () => {
+  it('starts the blank pane draft from the Chat default Environment binding and allows changing it before first send', async () => {
     const user = userEvent.setup()
-    renderBlankPane({ environmentName: 'local' })
+    renderBlankPane({ environment: { name: 'local', workspacePath: '.' } })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // Chat 默认 Environment 是空面板草稿的起点：footer 立即反映 env:local。
+    // Chat 默认 binding 是空面板草稿的起点：footer 立即反映 env:local · ws:.。
     expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
 
-    // 发送前可清空：显式选择（无）=> env:none。
+    // 已有 binding：初次打开直接浏览该 environment/path（root '.'）。
     await user.click(screen.getByRole('button', { name: /env:local/ }))
+    let dirPanel = await screen.findByLabelText('local 目录')
+    expect(within(dirPanel).getByText('当前：.')).toBeInTheDocument()
+
+    // 发送前可清空：返回列表选择（无）=> env:none。
+    await user.click(within(dirPanel).getByRole('button', { name: '返回 Environment 列表' }))
     let envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
     expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
 
-    // 发送前可重新更改：选回 local 后首次发送携带 environmentName。
+    // 发送前可重新更改：选回 local 并确认 root workspace，首次发送携带完整 binding。
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
-    const createdThread = thread({ threadId: 't-created', environmentName: 'local' })
+    dirPanel = await screen.findByLabelText('local 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    const createdThread = thread({ threadId: 't-created' })
     vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
     await user.click(composer)
     await user.type(composer, 'hello with default env')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalled())
     const createArgs = vi.mocked(chatService.createChatThread).mock.calls.at(-1)!
-    expect(createArgs[1].branchSettings.environmentName).toBe('local')
+    expect(createArgs[1].branchSettings.environment).toEqual({ name: 'local', workspacePath: '.' })
   })
 
-  it('syncs the Chat default Environment when selected or explicitly cleared in the blank pane', async () => {
+  it('syncs the Chat default Environment binding when selected or explicitly cleared in the blank pane', async () => {
     const user = userEvent.setup()
     const onEnvironmentChange = vi.fn(async () => undefined)
     renderBlankPane({ onEnvironmentChange })
@@ -362,11 +413,15 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     let envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
+    const dirPanel = await screen.findByLabelText('local 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
     expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
-    expect(onEnvironmentChange).toHaveBeenCalledWith('local')
+    expect(onEnvironmentChange).toHaveBeenCalledWith({ name: 'local', workspacePath: '.' })
 
     // 显式清空：null 同步为 Chat 默认（清空语义，绝不能被当作缺省忽略）。
     await user.click(screen.getByRole('button', { name: /env:local/ }))
+    const dirAgain = await screen.findByLabelText('local 目录')
+    await user.click(within(dirAgain).getByRole('button', { name: '返回 Environment 列表' }))
     envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
     expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
@@ -374,7 +429,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(chatService.createChatThread).not.toHaveBeenCalled()
   })
 
-  it('uses the pane-local Environment for the first send even when the Chat default update fails', async () => {
+  it('uses the pane-local Environment binding for the first send even when the Chat default update fails', async () => {
     const user = userEvent.setup()
     const onEnvironmentChange = vi.fn(async () => {
       throw new Error('update failed')
@@ -385,23 +440,25 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
+    const dirPanel = await screen.findByLabelText('local 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
     expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
     // 更新失败仅提示（错误 banner）；不阻塞发送。
     expect(await screen.findByText('update failed')).toBeInTheDocument()
 
-    const createdThread = thread({ threadId: 't-created', environmentName: 'local' })
+    const createdThread = thread({ threadId: 't-created' })
     vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
     await user.click(composer)
     await user.type(composer, 'hello with local env')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalled())
     const createArgs = vi.mocked(chatService.createChatThread).mock.calls.at(-1)!
-    expect(createArgs[1].branchSettings.environmentName).toBe('local')
+    expect(createArgs[1].branchSettings.environment).toEqual({ name: 'local', workspacePath: '.' })
   })
 
   it('performs atomic createChatThread + enqueueCommands first send', async () => {
     const user = userEvent.setup()
-    const createdThread = thread({ threadId: 't-created', environmentName: null })
+    const createdThread = thread({ threadId: 't-created', environment: null })
     vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
     renderBlankPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -418,7 +475,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
         yoloEnabled: false,
         branchSettings: expect.objectContaining({
           agentName: 'assistant',
-          environmentName: null,
+          environment: null,
           model: expect.objectContaining({
             providerName: 'minimax',
             modelName: 'MiniMax',
@@ -439,9 +496,9 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     // 严格 wire：USER_MESSAGE 绝不携带 role。
     expect(batchArg.commands[0]).not.toHaveProperty('role')
     expect(batchArg.commands[0]?.clientCommandId).toBeTruthy()
-    // 首次发送的 command batch 中没有 environment：environment 已在创建 Thread 时
-    // 通过 branchSettings.environmentName 烘焙进去。
-    expect(batchArg.commands[0]).not.toHaveProperty('environmentName')
+    // 首次发送的 command batch 中没有 environment：binding 已在创建 Thread 时
+    // 通过 branchSettings.environment 烘焙进去。
+    expect(batchArg.commands[0]).not.toHaveProperty('environment')
 
     // 面板绑定到已创建的 Thread 后，空面板正文随即消失。
     await waitFor(() =>
@@ -642,7 +699,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
         yoloEnabled: false,
         branchSettings: expect.objectContaining({
           agentName: 'assistant',
-          environmentName: null,
+          environment: null,
           model: expect.objectContaining({
             providerName: 'minimax',
             modelName: 'MiniMax',
@@ -708,7 +765,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     const payload = vi.mocked(chatService.createChatThread).mock.calls[0]![1]
     expect(payload.branchSettings).toEqual({
-      environmentName: null,
+      environment: null,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       activeTools: ['web-search'],
@@ -749,6 +806,8 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.keyboard('/environment{Enter}')
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
+    const dirPanel = await screen.findByLabelText('local 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/thread{Enter}')
@@ -780,6 +839,8 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.keyboard('/environment{Enter}')
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
     await user.click(within(screen.getByLabelText('选择 Environment')).getByRole('option', { name: /^local/ }))
+    const dirPanel = await screen.findByLabelText('local 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/thread{Enter}')

@@ -54,8 +54,11 @@ export function useChatListController(
       chatService.createChat({
         title: title.trim(),
         agentName: selectedAgentName,
-        // 可选默认环境：canonical 名称或 null（无默认）。
-        environmentName: selectedEnvironmentName.trim() || null,
+        // 可选默认 Environment：Modal 不承载目录浏览，选择某 Environment 时
+        // 明确映射为 root binding {name, workspacePath:'.'}；未选择为 null。
+        environment: selectedEnvironmentName.trim()
+          ? { name: selectedEnvironmentName.trim(), workspacePath: '.' }
+          : null,
       }),
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {

@@ -34,9 +34,9 @@ import { useThreadUiPreferences } from '@/features/ai/runtime/thread-ui-preferen
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import {
   AgentSelectionPanel,
-  EnvironmentSelectionPanel,
   ThreadSelectionPanel,
 } from '@/features/ai/chat/SelectionPanel'
+import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import { TaskStatusWidget } from '@/features/ai/runtime/thread-panel/TaskStatusWidget'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { BOUND_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
@@ -63,7 +63,10 @@ import { branchTarget } from '@/features/ai/chat/session-entry-tree'
 import { toThreadSelectionItem } from '@/features/ai/chat/thread-selection'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentBindingDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts/ai-environment'
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
@@ -333,9 +336,9 @@ export function BoundThreadPane({
     setInteraction(null)
   }
 
-  function selectEnvironment(environmentName: string | null) {
+  function selectEnvironment(environment: EnvironmentBindingDTO | null) {
     setRebindBlockedReason(null)
-    editDraft({ environmentName })
+    editDraft({ environment })
     setInteraction(null)
   }
 
@@ -512,15 +515,15 @@ export function BoundThreadPane({
       ? `${draft.model.providerName}/${draft.model.modelName}`
       : controller.runtimeLabels.modelName,
     variantName: draft?.model.variant || controller.runtimeLabels.variantName,
-    environmentName:
-      draft?.environmentName != null
-        ? draft.environmentName
-        : (draft?.environmentName == null && draft != null
+    environment:
+      draft?.environment != null
+        ? draft.environment
+        : (draft?.environment == null && draft != null
             ? null
-            : controller.runtimeLabels.environmentName),
+            : controller.runtimeLabels.environment),
     environmentReady:
-      draft?.environmentName != null
-        ? (environmentReadyByName.get(draft.environmentName) ?? false)
+      draft?.environment != null
+        ? (environmentReadyByName.get(draft.environment.name) ?? false)
         : controller.runtimeLabels.environmentReady,
     contextWindow: extractContextWindow(draftModel) ?? controller.runtimeLabels.contextWindow,
   }
@@ -567,9 +570,9 @@ export function BoundThreadPane({
         onSelect={selectAgent}
       />
     ) : interaction === 'environment' ? (
-      <EnvironmentSelectionPanel
+      <EnvironmentWorkspacePanel
         environments={environments}
-        selectedEnvironmentName={branchState?.draft.environmentName ?? null}
+        current={branchState?.draft.environment ?? null}
         onClose={() => setInteraction(null)}
         onSelect={selectEnvironment}
       />

@@ -8,8 +8,6 @@ import {
 import { Search } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/ai/runtime/thread-panel/ThreadInteractionPanel'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
-import { filterReadyEnvironments } from '@/features/ai/environment/environment-utils'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 
 export interface SelectionPanelItem {
@@ -307,45 +305,6 @@ export function AgentSelectionPanel({
       selectionPending={selectionPending}
       emptyText={t('ai.chat.noAgents')}
       onSelect={onSelect}
-      onClose={onClose}
-    />
-  )
-}
-
-export function EnvironmentSelectionPanel({
-  environments,
-  selectedEnvironmentName,
-  selectionPending = false,
-  onSelect,
-  onClose,
-}: {
-  environments: LiveEnvironmentDTO[]
-  selectedEnvironmentName?: string | null
-  selectionPending?: boolean
-  onSelect: (environmentName: string | null) => void | Promise<void>
-  onClose: () => void
-}) {
-  const { t } = useI18n()
-  const selected = selectedEnvironmentName?.trim() || ''
-  const items: SelectionPanelItem[] = [
-    {
-      id: '',
-      title: t('ai.chat.noneEnvironment'),
-    },
-    ...filterReadyEnvironments(environments).map((environment) => ({
-      id: environment.name,
-      title: environment.name,
-      subtitle: environment.status,
-    })),
-  ]
-  return (
-    <SelectionPanel
-      title={t('ai.chat.selectEnvironment')}
-      items={items}
-      selectedId={selected}
-      selectionPending={selectionPending}
-      emptyText={t('ai.chat.noEnvironments')}
-      onSelect={(environmentName) => onSelect(environmentName || null)}
       onClose={onClose}
     />
   )

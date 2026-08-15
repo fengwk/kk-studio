@@ -81,7 +81,7 @@ describe('useChatListController', () => {
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: 'Hello',
         agentName: 'assistant',
-        environmentName: null,
+        environment: null,
       }),
     )
   })
@@ -119,7 +119,8 @@ describe('useChatListController', () => {
       expect(lastCall[0]).toEqual({
         title: 'Chat',
         agentName: 'assistant',
-        environmentName: 'dev',
+        // Modal 语义：选择某 Environment 映射为 root binding；绝不发送裸名称。
+        environment: { name: 'dev', workspacePath: '.' },
       })
     })
   })

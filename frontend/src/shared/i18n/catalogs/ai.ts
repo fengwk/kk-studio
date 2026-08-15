@@ -934,6 +934,66 @@ export const aiCatalog = {
     'en-US': 'Tab switch sort',
     'zh-CN': 'Tab 切换排序',
   },
+  'ai.chat.workspace.directoryTitle': {
+    'en-US': '{{name}} directory',
+    'zh-CN': '{{name}} 目录',
+  },
+  'ai.chat.workspace.currentPath': {
+    'en-US': 'Current: {{path}}',
+    'zh-CN': '当前：{{path}}',
+  },
+  'ai.chat.workspace.entries': {
+    'en-US': 'Directory entries',
+    'zh-CN': '目录条目',
+  },
+  'ai.chat.workspace.up': {
+    'en-US': 'Up',
+    'zh-CN': '上一级',
+  },
+  'ai.chat.workspace.upTitle': {
+    'en-US': 'Go to parent directory',
+    'zh-CN': '进入父目录',
+  },
+  'ai.chat.workspace.refresh': {
+    'en-US': 'Refresh',
+    'zh-CN': '刷新',
+  },
+  'ai.chat.workspace.backToEnvironments': {
+    'en-US': 'Back to environments',
+    'zh-CN': '返回 Environment 列表',
+  },
+  'ai.chat.workspace.confirm': {
+    'en-US': 'Use current Workspace',
+    'zh-CN': '使用当前 Workspace',
+  },
+  'ai.chat.workspace.confirmDisabled': {
+    'en-US': 'Choose a directory before confirming',
+    'zh-CN': '请先选择一个目录',
+  },
+  'ai.chat.workspace.empty': {
+    'en-US': 'This directory has no subdirectories',
+    'zh-CN': '该目录没有子目录',
+  },
+  'ai.chat.workspace.truncated': {
+    'en-US': 'Too many entries; only the first 1000 are shown',
+    'zh-CN': '目录条目过多，仅显示前 1000 个',
+  },
+  'ai.chat.workspace.gitBranch': {
+    'en-US': 'branch: {{branch}}',
+    'zh-CN': '分支：{{branch}}',
+  },
+  'ai.chat.workspace.loadFailed': {
+    'en-US': 'Failed to load the directory',
+    'zh-CN': '目录加载失败',
+  },
+  'ai.chat.workspace.enterDirectory': {
+    'en-US': 'Enter {{name}}',
+    'zh-CN': '进入 {{name}}',
+  },
+  'ai.chat.workspace.loading': {
+    'en-US': 'Loading directory…',
+    'zh-CN': '正在加载目录…',
+  },
   'ai.chat.history.title': {
     'en-US': 'History branches',
     'zh-CN': '历史分支',
@@ -1347,8 +1407,8 @@ export const aiCatalog = {
     'zh-CN': 'env:none',
   },
   'ai.runtime.status.environmentUnavailableText': {
-    'en-US': 'env:{{name}} (unavailable)',
-    'zh-CN': 'env:{{name}} (unavailable)',
+    'en-US': 'env:{{name}} · ws:{{workspace}} (unavailable)',
+    'zh-CN': 'env:{{name}} · ws:{{workspace}} (unavailable)',
   },
   'ai.runtime.status.agentSwitchTitle': {
     'en-US': 'Click to switch Agent',
@@ -1375,8 +1435,8 @@ export const aiCatalog = {
     'zh-CN': '{{model}} · {{variant}}',
   },
   'ai.runtime.status.environmentText': {
-    'en-US': 'env:{{name}}',
-    'zh-CN': 'env:{{name}}',
+    'en-US': 'env:{{name}} · ws:{{workspace}}',
+    'zh-CN': 'env:{{name}} · ws:{{workspace}}',
   },
   'ai.runtime.status.taskStatusOn': {
     'en-US': 'task-status:on',

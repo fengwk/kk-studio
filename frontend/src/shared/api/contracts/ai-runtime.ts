@@ -3,6 +3,7 @@ import type {
   DecimalLong,
   InstantTimestamp,
 } from '@/shared/api/contracts/base'
+import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 
 /**
  * 冻结进 branch settings 快照的不可变 provider/model/variant 选择。
@@ -16,10 +17,11 @@ export interface HarnessModelSelectionDTO {
 /**
  * 单个 Entry branch 的完整 branch settings 快照。
  *
- * environmentName 是可空的规范小写路由名称；展示名称永远不会进入此持久快照。
+ * environment 是可空的完整 Environment binding（{name, workspacePath}，null 表示未绑定），
+ * 是 durable 快照中的唯一路由身份。
  */
 export interface HarnessBranchSettingsDTO {
-  environmentName: string | null
+  environment: EnvironmentBindingDTO | null
   agentName: string
   model: HarnessModelSelectionDTO
   activeTools: string[]
@@ -121,7 +123,7 @@ export type HarnessThreadCommandCreateDTO =
   | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
   | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
   | { type: 'SET_YOLO'; clientCommandId: string; yoloEnabled: boolean }
-  | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environmentName: string | null }
+  | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environment: EnvironmentBindingDTO | null }
 
 /** 原子化的 Thread mailbox 入队请求；期望游标来自最新的 thread DTO。 */
 export interface HarnessThreadCommandBatchDTO {
@@ -191,7 +193,7 @@ export interface ModelInvocationDTO {
 /**
  * ToolInvocation 查询投影；id 均为 canonical UUID string。
  * approvalJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段
- * 非 null；environmentName 是可空的规范小写路由名称。
+ * 非 null；environment 是可空的完整 Environment binding。
  */
 export interface ToolInvocationDTO {
   id: string
@@ -205,7 +207,7 @@ export interface ToolInvocationDTO {
   toolVersion: string
   rendererKey: string
   toolType: string
-  environmentName: string | null
+  environment: EnvironmentBindingDTO | null
   argumentsJson: string
   approvalJson: string | null
   resultJson: string | null

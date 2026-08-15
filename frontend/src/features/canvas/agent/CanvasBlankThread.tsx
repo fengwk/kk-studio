@@ -9,8 +9,8 @@ import {
 import { threadCommandsForScene } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
   AgentSelectionPanel,
-  EnvironmentSelectionPanel,
 } from '@/features/ai/chat/SelectionPanel'
+import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors'
 import {
   materializeAgentBranchDraft,
@@ -31,7 +31,10 @@ import {
   storeComposerDraft,
 } from '@/features/ai/composer/composer-draft'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentBindingDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts/ai-environment'
 import type {
   CanvasDocumentDTO,
   UUIDString,
@@ -112,7 +115,9 @@ export function CanvasBlankThread({
       const result = await sendCanvasThreadFirstSend(canvasId, {
         commandId: crypto.randomUUID(),
         branchSettings: {
-          environmentName: effective.environmentName,
+          environment: effective.environment
+            ? { name: effective.environment.name, workspacePath: effective.environment.workspacePath }
+            : null,
           agentName: effective.agentName,
           model: { ...effective.model },
           activeTools: [...effective.activeTools],
@@ -189,16 +194,16 @@ export function CanvasBlankThread({
     setActionError(null)
   }
 
-  function handleEnvironmentSelected(environmentName: string | null) {
+  function handleEnvironmentSelected(environment: EnvironmentBindingDTO | null) {
     if (pending) {
       return
     }
-    setFrozenDraft((current) => (current ? { ...current, environmentName } : current))
+    setFrozenDraft((current) => (current ? { ...current, environment } : current))
     setInteraction(null)
     setActionError(null)
   }
 
-  const environmentName = frozenDraft?.environmentName ?? null
+  const environment = frozenDraft?.environment ?? null
   const interactionPanel =
     interaction === 'agent' ? (
       <AgentSelectionPanel
@@ -212,10 +217,10 @@ export function CanvasBlankThread({
         onSelect={handleAgentSelected}
       />
     ) : interaction === 'environment' ? (
-      <EnvironmentSelectionPanel
+      <EnvironmentWorkspacePanel
         environments={environments}
-        selectedEnvironmentName={environmentName}
-        selectionPending={pending}
+        current={environment}
+        pending={pending}
         onClose={() => setInteraction(null)}
         onSelect={handleEnvironmentSelected}
       />
@@ -254,11 +259,11 @@ export function CanvasBlankThread({
               : undefined
           }
           variantName={frozenDraft?.model.variant || undefined}
-          environmentName={environmentName}
+          environment={environment}
           environmentReady={
-            environmentName == null
+            environment == null
               ? undefined
-              : (environmentReadyByName.get(environmentName) ?? false)
+              : (environmentReadyByName.get(environment.name) ?? false)
           }
           yoloEnabled={frozenDraft?.yoloEnabled ?? false}
           onAgentClick={() => setInteraction('agent')}
