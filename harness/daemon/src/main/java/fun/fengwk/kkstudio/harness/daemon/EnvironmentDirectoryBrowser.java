@@ -54,19 +54,13 @@ public final class EnvironmentDirectoryBrowser {
       throws IOException {
     DaemonDirectoryCodec.requireCanonicalRelativePath(path);
     Path canonical = canonicalDirectory(path);
-    List<Path> children = listChildren(canonical);
-    boolean truncated = children.size() > DaemonDirectoryCodec.MAX_ENTRIES;
-    List<DaemonDirectoryCodec.DirectoryEntry> entries = new ArrayList<>();
-    int count = Math.min(DaemonDirectoryCodec.MAX_ENTRIES, children.size());
-    for (int index = 0; index < count; index++) {
-      Path child = children.get(index);
-      String name = child.getFileName().toString();
-      String childPath = childWirePath(path, name);
-      if (!isWireRepresentableChild(childPath, name)) {
-        continue;
-      }
-      entries.add(new DaemonDirectoryCodec.DirectoryEntry(name, childPath));
-    }
+    List<DaemonDirectoryCodec.DirectoryEntry> representable =
+        listRepresentableEntries(canonical, path);
+    boolean truncated = representable.size() > DaemonDirectoryCodec.MAX_ENTRIES;
+    List<DaemonDirectoryCodec.DirectoryEntry> entries =
+        List.copyOf(
+            representable.subList(
+                0, Math.min(DaemonDirectoryCodec.MAX_ENTRIES, representable.size())));
     return new DaemonDirectoryCodec.DirectoryListed(
         requestId,
         path,
@@ -97,8 +91,10 @@ public final class EnvironmentDirectoryBrowser {
     return canonical;
   }
 
-  private List<Path> listChildren(Path directory) throws IOException {
-    List<Path> children = new ArrayList<>();
+  /** 先收集可编码为 wire 的直属子目录，再按名称稳定排序；截断基于该集合，避免非法本地名挤掉后续合法条目。 */
+  private List<DaemonDirectoryCodec.DirectoryEntry> listRepresentableEntries(
+      Path directory, String requestPath) throws IOException {
+    List<DaemonDirectoryCodec.DirectoryEntry> entries = new ArrayList<>();
     try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
       for (Path child : stream) {
         if (Files.isSymbolicLink(child)) {
@@ -107,14 +103,19 @@ public final class EnvironmentDirectoryBrowser {
         if (!Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
           continue;
         }
-        if (!isWireRepresentableName(child.getFileName().toString())) {
+        String name = child.getFileName().toString();
+        if (!isWireRepresentableName(name)) {
           continue;
         }
-        children.add(child);
+        String childPath = childWirePath(requestPath, name);
+        if (!isWireRepresentableChild(childPath, name)) {
+          continue;
+        }
+        entries.add(new DaemonDirectoryCodec.DirectoryEntry(name, childPath));
       }
     }
-    children.sort(Comparator.comparing(path -> path.getFileName().toString()));
-    return children;
+    entries.sort(Comparator.comparing(DaemonDirectoryCodec.DirectoryEntry::name));
+    return entries;
   }
 
   /** 目录名必须能作为 wire 段：非空白、无 '/'、无反斜杠、无 ISO 控制字符。 */
