@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.ACK;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.CANCELLED;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.COMPLETED;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.DIRECTORY_LISTED;
+import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.DIRECTORY_LIST_FAILED;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.ERROR;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.HELLO;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.PARTIAL;
@@ -83,6 +84,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -707,6 +710,97 @@ class DaemonRuntimeTest {
       DaemonDirectoryCodec.DirectoryListFailed again =
           new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
       assertEquals(DaemonDirectoryFailureCode.NOT_FOUND, again.code());
+    } finally {
+      deleteRecursively(envRoot);
+    }
+  }
+
+  /** LIST_DIRECTORY 的文件系统 IO 不得阻塞 inbound 回调：ACK 先回，后续消息可继续处理，被拦住的目录任务之后才发 DIRECTORY_LISTED。 */
+  @Test
+  void listDirectoryAcknowledgesWithoutBlockingInboundThenListsOnWorker() throws Exception {
+    Path envRoot = Files.createTempDirectory("daemon-dir-async");
+    Files.createDirectories(envRoot.resolve("docs"));
+    CountDownLatch started = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    ExecutorService directoryWorker = Executors.newSingleThreadExecutor();
+    Executor holdingWorker =
+        command ->
+            directoryWorker.execute(
+                () -> {
+                  started.countDown();
+                  try {
+                    if (!release.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                      throw new IllegalStateException("test did not release directory worker");
+                    }
+                  } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(error);
+                  }
+                  command.run();
+                });
+    try {
+      FakeTransport transport = new FakeTransport();
+      TestTool tool = new TestTool();
+      runtime = runtime(transport, tool, envRoot, holdingWorker);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      transport.receive(listDirectory(1, "."));
+      assertMessageTypes(transport.takeMessages(1), ACK);
+      assertTrue(started.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      assertFalse(transport.hasMessages());
+
+      transport.receive(invoke("after-list", 2));
+      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+      assertEquals(1, tool.executions.get());
+
+      release.countDown();
+      List<DaemonEnvelope> listed = transport.takeMessages(1);
+      assertMessageTypes(listed, DIRECTORY_LISTED);
+      assertEquals(
+          "docs",
+          new DaemonDirectoryCodec()
+              .decodeListed(listed.get(0).payloadJson())
+              .entries()
+              .get(0)
+              .path());
+    } finally {
+      release.countDown();
+      directoryWorker.shutdownNow();
+      deleteRecursively(envRoot);
+    }
+  }
+
+  /** 目录 worker 队列拒绝时立即回 correlated DIRECTORY_LIST_FAILED，不悬挂请求。 */
+  @Test
+  void listDirectoryQueueRejectionReturnsTypedFailure() throws Exception {
+    Path envRoot = Files.createTempDirectory("daemon-dir-reject");
+    Files.createDirectories(envRoot.resolve("docs"));
+    Executor directoryWorker =
+        command -> {
+          throw new RejectedExecutionException("directory queue full");
+        };
+    try {
+      FakeTransport transport = new FakeTransport();
+      runtime = runtime(transport, new TestTool(), envRoot, directoryWorker);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      String requestId = UUID.randomUUID().toString();
+      transport.receive(listDirectory(requestId, 1, "."));
+      List<DaemonEnvelope> messages = transport.takeMessages(2);
+      assertMessageTypes(messages, ACK, DIRECTORY_LIST_FAILED);
+      DaemonDirectoryCodec.DirectoryListFailed failed =
+          new DaemonDirectoryCodec().decodeFailed(messages.get(1).payloadJson());
+      assertEquals(requestId, failed.requestId());
+      assertEquals(".", failed.path());
+      assertEquals(DaemonDirectoryFailureCode.IO_ERROR, failed.code());
     } finally {
       deleteRecursively(envRoot);
     }
@@ -1635,6 +1729,33 @@ class DaemonRuntimeTest {
         DaemonSkillRegistry.empty(),
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor());
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport, Tool tool, Path environmentRoot, Executor directoryWorker) {
+    handshakeTransport = transport;
+    DaemonToolRegistry registry = new DaemonToolRegistry();
+    registry.register(tool);
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            new EnvironmentName("environment"),
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            null,
+            environmentRoot,
+            List.of(),
+            null),
+        transport,
+        registry,
+        DaemonSkillRegistry.empty(),
+        new InMemoryDaemonInvocationJournal(),
+        Executors.newSingleThreadScheduledExecutor(),
+        directoryWorker);
   }
 
   private DaemonRuntime runtime(FakeTransport transport, Tool tool, ResourceStore resourceStore) {

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -334,6 +335,76 @@ class DaemonDirectoryCodecTest {
         false,
         null,
         List.of(new DaemonDirectoryCodec.DirectoryEntry("main", "src/main")));
+  }
+
+  /** parentPath 必须是 path 的 lexical 父路径：root 与单段为 '.'，多段为去掉最后一段后的前缀。 */
+  @Test
+  void rejectsParentPathThatIsNotLexicalParent() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, "src", "src", "src", false, null, List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, "src/main", "main", ".", false, null, List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, ".", ".", "src", false, null, List.of()));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeListed(
+                "{\"requestId\":\""
+                    + REQUEST_ID
+                    + "\",\"path\":\"src/main\",\"displayPath\":\"main\",\"parentPath\":\".\",\"truncated\":false,"
+                    + "\"entries\":[]}"));
+    assertEquals(
+        ".",
+        new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, "src", "src", ".", false, null, List.of())
+            .parentPath());
+    assertEquals(
+        "src",
+        new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, "src/main", "main", "src", false, null, List.of())
+            .parentPath());
+  }
+
+  /** 超过 MAX_ENTRIES 的 entries 在 record 构造与 decode 入口都拒绝；decode 在物化全部条目前按数组长度拒绝。 */
+  @Test
+  void rejectsMoreThanMaxEntries() {
+    List<DaemonDirectoryCodec.DirectoryEntry> tooMany = new ArrayList<>();
+    for (int index = 0; index < DaemonDirectoryCodec.MAX_ENTRIES + 1; index++) {
+      String name = "d" + index;
+      tooMany.add(new DaemonDirectoryCodec.DirectoryEntry(name, name));
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonDirectoryCodec.DirectoryListed(
+                REQUEST_ID, ".", ".", ".", false, null, tooMany));
+    StringBuilder json = new StringBuilder();
+    json.append("{\"requestId\":\"")
+        .append(REQUEST_ID)
+        .append(
+            "\",\"path\":\".\",\"displayPath\":\".\",\"parentPath\":\".\",\"truncated\":false,\"entries\":[");
+    for (int index = 0; index < DaemonDirectoryCodec.MAX_ENTRIES + 1; index++) {
+      if (index > 0) {
+        json.append(',');
+      }
+      json.append("{\"name\":\"d")
+          .append(index)
+          .append("\",\"path\":\"d")
+          .append(index)
+          .append("\"}");
+    }
+    json.append("]}");
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeListed(json.toString()));
   }
 
   /** displayPath 必须等于请求 path 的最后一段（root 为 '.'）；旧/恶意 daemon 泄漏本地绝对路径在 codec 层严格拒绝。 */

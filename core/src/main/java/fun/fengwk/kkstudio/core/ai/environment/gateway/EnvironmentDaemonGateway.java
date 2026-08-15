@@ -135,6 +135,10 @@ public class EnvironmentDaemonGateway
     RuntimeException protocolError = null;
     EnvironmentName receivedEnvironmentName = null;
     synchronized (state) {
+      // close 先在 state 锁上立 cleaned 围栏；已清理连接上的迟到 HELLO 不得再绑定。
+      if (state.cleaned) {
+        return;
+      }
       try {
         DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
         receivedEnvironmentName = envelope.environmentName();
@@ -862,8 +866,11 @@ public class EnvironmentDaemonGateway
     ActiveRemote lostRemote = null;
     List<PendingSkillLoad> doomedSkills = List.of();
     List<PendingDirectoryList> doomedDirectoryLists = List.of();
-    EnvironmentName environmentName = null;
-    synchronized (this) {
+    EnvironmentName environmentName;
+    // 锁序固定为 state → this：先在 state 上立 cleaned/sendFailed，再清理 map/registry。
+    // 这样 in-flight receive（含 HELLO tryBind）会先完成绑定，close 才能看见并摘掉条目；
+    // 已 cleaned 的迟到 receive 直接忽略，不会留下幽灵 registry 占用。
+    synchronized (state) {
       if (state.cleaned) {
         return;
       }
@@ -871,6 +878,8 @@ public class EnvironmentDaemonGateway
       state.cleaned = true;
       state.sendFailed = true;
       environmentName = state.environmentName;
+    }
+    synchronized (this) {
       if (environmentName != null) {
         environmentRegistry.unregister(environmentName, state.connection);
         environmentConnections.remove(environmentName, state);

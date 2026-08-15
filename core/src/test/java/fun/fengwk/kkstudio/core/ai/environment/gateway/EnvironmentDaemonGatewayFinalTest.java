@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.ai.environment.registry.BindResult;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryFailureCode;
@@ -63,6 +64,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -327,6 +329,64 @@ class EnvironmentDaemonGatewayFinalTest {
             DaemonMessageType.CANCEL,
             DaemonMessageType.INVOKE),
         messageTypes(connection.envelopes()));
+  }
+
+  /** close 必须等 in-flight HELLO 的 tryBind 完成后再摘 registry：否则 unbound 清理会放过随后绑定，留下幽灵占用。 */
+  @Test
+  void closeWaitsForInFlightHelloThenLeavesNoGhostBinding() throws Exception {
+    CountDownLatch bindEntered = new CountDownLatch(1);
+    CountDownLatch allowBind = new CountDownLatch(1);
+    LiveEnvironmentRegistry registry =
+        new LiveEnvironmentRegistry() {
+          @Override
+          public synchronized BindResult tryBind(
+              EnvironmentName environmentName,
+              EnvironmentDaemonConnection connection,
+              Instant now,
+              Duration heartbeatTimeout) {
+            bindEntered.countDown();
+            try {
+              if (!allowBind.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("test did not release tryBind");
+              }
+            } catch (InterruptedException error) {
+              Thread.currentThread().interrupt();
+              throw new IllegalStateException(error);
+            }
+            return super.tryBind(environmentName, connection, now, heartbeatTimeout);
+          }
+        };
+    EnvironmentGatewayProperties gatewayProperties = new EnvironmentGatewayProperties();
+    gatewayProperties.setDaemonToken(GATEWAY_TOKEN);
+    EnvironmentDaemonGateway gateway =
+        new EnvironmentDaemonGateway(
+            registry, gatewayProperties, Clock.fixed(NOW, ZoneOffset.UTC), environmentName -> {});
+    FakeConnection connection = new FakeConnection("connection-race");
+    gateway.open(connection);
+    Thread receiveThread =
+        new Thread(() -> gateway.receive(connection.connectionId(), hello(0)), "hello-receive");
+    receiveThread.start();
+    assertTrue(bindEntered.await(5, TimeUnit.SECONDS));
+    Thread closeThread = new Thread(() -> gateway.close(connection.connectionId()), "close-race");
+    closeThread.start();
+    // close 必须卡在 in-flight receive 上：此时 registry 仍空，连接也尚未被清理关闭。
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!isWaitingForMonitor(closeThread) && System.nanoTime() < deadline) {
+      Thread.yield();
+    }
+    assertTrue(
+        isWaitingForMonitor(closeThread),
+        "close must wait for in-flight receive, state=" + closeThread.getState());
+    assertTrue(registry.find(ENVIRONMENT_NAME).isEmpty());
+    assertTrue(connection.isOpen());
+    allowBind.countDown();
+    receiveThread.join(TimeUnit.SECONDS.toMillis(5));
+    closeThread.join(TimeUnit.SECONDS.toMillis(5));
+    assertFalse(receiveThread.isAlive());
+    assertFalse(closeThread.isAlive());
+    assertTrue(registry.find(ENVIRONMENT_NAME).isEmpty());
+    assertFalse(connection.isOpen());
+    assertEquals(1, connection.closeCount);
   }
 
   @Test
@@ -1350,6 +1410,13 @@ class EnvironmentDaemonGatewayFinalTest {
             invocationId,
             sequence,
             payload));
+  }
+
+  private static boolean isWaitingForMonitor(Thread thread) {
+    Thread.State state = thread.getState();
+    return state == Thread.State.BLOCKED
+        || state == Thread.State.WAITING
+        || state == Thread.State.TIMED_WAITING;
   }
 
   private static List<DaemonMessageType> messageTypes(List<DaemonEnvelope> envelopes) {
