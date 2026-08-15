@@ -33,8 +33,10 @@ import java.util.UUID;
  * 路径（{@code '.'} 表示 root，段一律以 {@code '/'} 分隔）：跨平台拒绝反斜杠、Windows drive 前缀（{@code C:/x}、{@code
  * C:x}）、absolute、空/{@code '.'}/{@code '..'} 段、控制字符与空白路径；越界判定由 daemon 在 canonicalize 时完成。成功响应中
  * {@code path}/{@code parentPath}/entry {@code path} 都是请求目录或其直接子目录的 canonical wire 路径，entry 只含
- * {@code name}+{@code path} 两个字段且 {@code name} 必须等于 {@code path} 的最后一段；{@code displayPath} 必须等于请求
- * {@code path} 的最后一段（root 为 {@code '.'}），codec 层严格拒绝任何其它值（含旧/恶意 daemon 泄漏的本地绝对路径）。
+ * {@code name}+{@code path} 两个字段且 {@code name} 必须等于 {@code path} 的最后一段；{@code parentPath} 必须等于
+ * {@code path} 的 lexical 父路径（root 与单段路径均为 {@code '.'}）；{@code displayPath} 必须等于请求 {@code path}
+ * 的最后一段（root 为 {@code '.'}），codec 层严格拒绝任何其它值（含旧/恶意 daemon 泄漏的本地绝对路径）。{@code entries} 不得超过 {@link
+ * #MAX_ENTRIES}。
  *
  * <p>共享 ObjectMapper 启用 STRICT_DUPLICATE_DETECTION 与 FAIL_ON_TRAILING_TOKENS：三类 payload 顶层与 entry 的
  * duplicate/trailing/unknown/missing 字段全部拒绝。
@@ -82,7 +84,8 @@ public final class DaemonDirectoryCodec {
 
   /**
    * Daemon 成功返回的一层目录列表；{@code requestId} 是请求回显，{@code displayPath} 是请求 {@code path} 的最后一段（root 为
-   * {@code '.'}，绝不暴露 daemon 本地绝对路径），任何其它值都拒绝。
+   * {@code '.'}，绝不暴露 daemon 本地绝对路径），{@code parentPath} 必须等于 {@code path} 的 lexical 父路径（root 与单段路径均为
+   * {@code '.'}），{@code entries} 不得超过 {@link #MAX_ENTRIES}，任何其它值都拒绝。
    */
   public record DirectoryListed(
       String requestId,
@@ -100,7 +103,14 @@ public final class DaemonDirectoryCodec {
         throw new IllegalArgumentException("displayPath must be the last segment of path: " + path);
       }
       parentPath = requireCanonicalRelativePath(parentPath);
+      if (!parentPath.equals(lexicalParentPath(path))) {
+        throw new IllegalArgumentException(
+            "parentPath must be the lexical parent of path: " + path);
+      }
       entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+      if (entries.size() > MAX_ENTRIES) {
+        throw new IllegalArgumentException("entries must not exceed " + MAX_ENTRIES);
+      }
       for (DirectoryEntry entry : entries) {
         requireDirectChild(path, entry);
       }
@@ -191,7 +201,11 @@ public final class DaemonDirectoryCodec {
     if (truncated == null || !truncated.isBoolean()) {
       throw new DaemonProtocolException("DIRECTORY_LISTED 'truncated' must be a boolean");
     }
-    List<DirectoryEntry> entries = decodeEntries(requiredArray(root, "entries"));
+    JsonNode entriesNode = requiredArray(root, "entries");
+    if (entriesNode.size() > MAX_ENTRIES) {
+      throw new DaemonProtocolException("DIRECTORY_LISTED entries must not exceed " + MAX_ENTRIES);
+    }
+    List<DirectoryEntry> entries = decodeEntries(entriesNode);
     try {
       return new DirectoryListed(
           requiredText(root, "requestId", "DIRECTORY_LISTED"),
@@ -282,6 +296,15 @@ public final class DaemonDirectoryCodec {
   private static String lastSegment(String path) {
     int separator = path.lastIndexOf('/');
     return separator < 0 ? path : path.substring(separator + 1);
+  }
+
+  /** {@code '.'} 与单段路径的 lexical 父路径都是 {@code '.'}，其余为最后一个 {@code '/'} 之前的前缀。 */
+  private static String lexicalParentPath(String path) {
+    if (".".equals(path)) {
+      return ".";
+    }
+    int separator = path.lastIndexOf('/');
+    return separator < 0 ? "." : path.substring(0, separator);
   }
 
   private static String write(ObjectNode root, String context) {

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -178,6 +179,24 @@ class EnvironmentDirectoryBrowserTest {
             () -> browser().list(REQUEST_ID, "../" + outside.getFileName()));
     assertTrue(
         escaped.getMessage().contains("'..' segments") || escaped.getMessage().contains("escapes"));
+  }
+
+  /** 本地目录名若无法编码为合法 wire 子路径（Unix 上的 {@code C:}），该条目被跳过，其余合法目录仍返回。 */
+  @Test
+  void skipsLocalDirectoryWhoseWireChildPathIsInvalid() throws Exception {
+    Path invalidChild = root.resolve("C:");
+    try {
+      Files.createDirectories(invalidChild);
+    } catch (IOException error) {
+      assumeTrue(false, "host cannot create a C: directory name: " + error.getMessage());
+    }
+    assumeTrue(Files.isDirectory(invalidChild), "host cannot retain a C: directory name");
+    Files.createDirectories(root.resolve("ok"));
+
+    DaemonDirectoryCodec.DirectoryListed listed = browser().list(REQUEST_ID, ".");
+    assertEquals(
+        List.of("ok"),
+        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
   }
 
   /** 可选 gitBranch：浏览目录或其祖先含 symbolic HEAD 时返回分支名，否则 null。 */

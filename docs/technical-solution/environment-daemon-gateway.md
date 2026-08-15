@@ -87,7 +87,7 @@ GET /api/ai/environments/{name}/directories?path=.
 ```
 
 - `path` 缺省为 `'.'`（Environment Root），是可选的 canonical 相对 wire 路径（段一律以 `'/'` 分隔，跨平台拒绝反斜杠）：拒绝 absolute、空段、`'.'`/`'..'` 段、ISO 控制字符与空白路径；`{name}` 是 canonical `EnvironmentName`，非法名称 400 `INVALID_ENVIRONMENT_NAME`。
-- 响应 DTO：`path`（canonical 相对 wire 路径，root 为 `'.'`）/ `displayPath`（请求 `path` 的最后一段，root 为 `'.'`；只作展示、绝不暴露 daemon 本地绝对路径，codec 严格拒绝其它值）/ `parentPath`（父目录 canonical wire 路径，root 为 `'.'`）/ `truncated`（超过单层上限 1000 条被截断）/ `gitBranch`（可空，浏览目录所在 git 仓库的 symbolic HEAD 分支）/ `entries`（按名称稳定排序的直属子目录，`{name,path}`：`name` 是目录名且必须等于 `path` 最后一段，`path` 必须是请求目录的直接子路径；不含 symlink 与非目录）。
+- 响应 DTO：`path`（canonical 相对 wire 路径，root 为 `'.'`）/ `displayPath`（请求 `path` 的最后一段，root 为 `'.'`；只作展示、绝不暴露 daemon 本地绝对路径，codec 严格拒绝其它值）/ `parentPath`（必须等于请求 `path` 的 lexical 父路径：root 与单段路径均为 `'.'`）/ `truncated`（超过单层上限 1000 条被截断）/ `gitBranch`（可空，浏览目录所在 git 仓库的 symbolic HEAD 分支）/ `entries`（按名称稳定排序的直属子目录，至多 1000 条，`{name,path}`：`name` 是目录名且必须等于 `path` 最后一段，`path` 必须是请求目录的直接子路径；不含 symlink 与非目录；无法编码为合法 wire 子路径的本地目录名被跳过）。
 - symlink 语义：列表默认不暴露 symlink 目录；显式请求 root 内 symlink alias 时，成功响应的 `path`/`parentPath`/entry `path` 使用请求的 canonical wire 路径（回显 alias 本身），daemon 内部只用 real path 校验与读取，绝不越过 root；越出 root 的 symlink 穿越是 `INVALID_PATH`。
 - HTTP 错误映射（`errorCode.code` 与应用结果分类同名）：`ENVIRONMENT_NOT_FOUND`（registry 无该环境）/ `NOT_FOUND`（路径不存在）→ 404；`ENVIRONMENT_UNAVAILABLE`（环境已注册但未 READY，或连接/心跳不可用）→ 409；`INVALID_PATH` / `NOT_DIRECTORY` → 400；`TIMEOUT`（daemon 往返超时，默认 10 秒，配置键 `kk-studio.harness.environment-gateway.directory-list-timeout`）→ 504；`IO_ERROR`（daemon 本地 IO 失败）→ 502。
 
@@ -101,7 +101,8 @@ wire 消息配对（目录控制面不属于 invocation：envelope `invocationId
 
 - 三类 payload 共享严格 codec（ObjectMapper 启用 STRICT_DUPLICATE_DETECTION 与 FAIL_ON_TRAILING_TOKENS）：顶层与 entry 的 duplicate/trailing/unknown/missing 字段全部拒绝；`requestId` 必须 canonical UUID。
 - 失败分类分成两层，职责不混合：wire 只承载 daemon 的确定性失败——`DaemonDirectoryFailureCode` 枚举 `INVALID_PATH`（wire 路径形状非法或越界）/ `NOT_FOUND` / `NOT_DIRECTORY` / `IO_ERROR`；gateway 在本地计算应用结果 `EnvironmentDirectoryFailureCode` 的 `ENVIRONMENT_NOT_FOUND` / `ENVIRONMENT_UNAVAILABLE` / `TIMEOUT`（其余 code 与 wire 同名投影）。
-- daemon 侧 `EnvironmentDirectoryBrowser` 安全契约：`environmentRoot.resolve(path).normalize()` 后 `toRealPath()` canonicalize，越出 root 边界即 `INVALID_PATH`；符号链接不跟随且不列入结果；只列目录；按名称稳定排序；至多 1000 条，超出置 `truncated`。失败响应必须能归因非法请求路径，因此 `DIRECTORY_LIST_FAILED.path` 只校验非空。
+- daemon 侧 `EnvironmentDirectoryBrowser` 安全契约：`environmentRoot.resolve(path).normalize()` 后 `toRealPath()` canonicalize，越出 root 边界即 `INVALID_PATH`；符号链接不跟随且不列入结果；只列目录；按名称稳定排序；至多 1000 条，超出置 `truncated`；本地子目录名若无法通过共享 `EnvironmentWorkspacePath` 编码为合法 wire 子路径则跳过该条目。失败响应必须能归因非法请求路径，因此 `DIRECTORY_LIST_FAILED.path` 只校验非空。
+- daemon 目录 IO 走共享有界单 worker：inbound 回调只解析/校验/ACK；队列满或 worker 关闭时立即回 `DIRECTORY_LIST_FAILED`/`IO_ERROR`，不为每个请求创建线程。
 - gateway 侧 pending 管理：`EnvironmentDaemonGateway.listDirectory` 用控制面发送（不登记 active invocation 槽位），先用 `LiveEnvironmentRegistry.find` 区分环境未知（`ENVIRONMENT_NOT_FOUND`）与已注册但未 READY/心跳过期/连接不可用（`ENVIRONMENT_UNAVAILABLE`）；pending 请求在断线清理、超时（`directoryListTimeout`）与协议失败（含 sequence 错乱）时以 `ENVIRONMENT_UNAVAILABLE` / `TIMEOUT` 恰好完成一次，不泄漏未决 future；发送结果不确定（UNCERTAIN）时关闭连接让清理恰好一次。
 - 超时后的合法晚响应：timeout 时 pending 转为有界 tombstone（requestId/environment/connection/path，每连接最多 1024 条，FIFO 淘汰；断线清理同时清除）；同连接的晚响应仍严格 decode 并校验 requestId/path 回显后静默丢弃，不当作 unsolicited 协议错误；未知 requestId（无 pending 也无 tombstone）仍是协议失败。handler 先 peek+ownership 再严格 decode/校验，最后 identity remove 并完成：malformed/mismatch 不会把 pending 提前移走，协议关闭路径立即以 `ENVIRONMENT_UNAVAILABLE` 完成该 Future。
 
