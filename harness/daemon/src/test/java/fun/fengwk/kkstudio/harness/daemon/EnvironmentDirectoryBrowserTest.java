@@ -181,9 +181,9 @@ class EnvironmentDirectoryBrowserTest {
         escaped.getMessage().contains("'..' segments") || escaped.getMessage().contains("escapes"));
   }
 
-  /** 本地目录名若无法编码为合法 wire 子路径（Unix 上的 {@code C:}），该条目被跳过，其余合法目录仍返回。 */
+  /** 本地目录名若无法编码为合法 wire 子路径（Unix 上的 {@code C:}），该条目被跳过；截断按可编码条目计算，仍能填满 MAX_ENTRIES。 */
   @Test
-  void skipsLocalDirectoryWhoseWireChildPathIsInvalid() throws Exception {
+  void skipsInvalidWireChildAndTruncatesFromRepresentableEntries() throws Exception {
     Path invalidChild = root.resolve("C:");
     try {
       Files.createDirectories(invalidChild);
@@ -191,12 +191,21 @@ class EnvironmentDirectoryBrowserTest {
       assumeTrue(false, "host cannot create a C: directory name: " + error.getMessage());
     }
     assumeTrue(Files.isDirectory(invalidChild), "host cannot retain a C: directory name");
-    Files.createDirectories(root.resolve("ok"));
+    // C: 按名称排在 dir-0000 之前：若先按全部真实目录截断，会少返回一条合法条目。
+    for (int index = 0; index < DaemonDirectoryCodec.MAX_ENTRIES + 5; index++) {
+      Files.createDirectories(root.resolve("dir-" + String.format("%04d", index)));
+    }
 
     DaemonDirectoryCodec.DirectoryListed listed = browser().list(REQUEST_ID, ".");
-    assertEquals(
-        List.of("ok"),
-        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
+
+    assertTrue(listed.truncated());
+    assertEquals(DaemonDirectoryCodec.MAX_ENTRIES, listed.entries().size());
+    List<String> names =
+        listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::name).toList();
+    assertEquals(names.stream().sorted().toList(), names);
+    assertFalse(names.contains("C:"));
+    assertEquals("dir-0000", names.getFirst());
+    assertEquals("dir-0999", names.getLast());
   }
 
   /** 可选 gitBranch：浏览目录或其祖先含 symbolic HEAD 时返回分支名，否则 null。 */
