@@ -6,13 +6,13 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **69** 个 API case；标准入口默认执行免费的 **L1 59** 个 case（其中
+当前注册 **70** 个 API case；标准入口默认执行免费的 **L1 59** 个 case（其中
 `canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约）。Canvas
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI E2E
-由 `scripts/e2e.sh --ui` 另行附加，默认注册 29 个免费 UI case，不计入这 69 个 Node API case。
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 29 个免费 UI case，不计入这 70 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -287,6 +287,7 @@ ui.chat.composer.escape_refocus
 ui.chat.composer.submit_clears_draft
 ui.chat.events.conversation_switch
 ui.chat.events.keyboard_nav
+ui.chat.events.scroll_restore
 ui.chat.shortcuts.escape_restores_focus
 ```
 
@@ -555,7 +556,7 @@ HTTP routes 覆盖 multipart、history、streaming、恢复与 materialize。
 | `scripts/e2e.sh` | 环境启停、凭证同步、矩阵与 UI E2E 编排 |
 | `scripts/e2e/run-matrix.mjs` | Node case 注册、筛选、执行和报告 |
 | `scripts/e2e/lib/registry.mjs` | case 注册表 |
-| `scripts/e2e/lib/harness.mjs` | Chat-scoped Thread、命令 batch、head/stop CAS、approval、快照轮询、SSE 等共享步骤 |
+| `scripts/e2e/lib/harness.mjs` | Chat-scoped Thread、命令 batch、head/stop CAS、approval、快照轮询、事件通道订阅等共享步骤 |
 | `scripts/e2e/cases/*.mjs` | API case |
 | `scripts/e2e/ui-smoke.mjs` | Playwright UI E2E 编排、筛选、报告与失败留证 |
 | `scripts/e2e/ui/composer-matrix.mjs` | Composer durable/queued/draft 浏览器矩阵与免费 deterministic fixture |

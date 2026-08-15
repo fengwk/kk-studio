@@ -8,17 +8,17 @@
 | --- | --- |
 | 工程 | 独立 Vite/TypeScript 工程，发布时由 Maven 嵌入 `web` |
 | 服务端状态 | React Query |
-| 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位、全局 Locale 与 Thread UI 偏好 |
+| 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位、全局 Locale 与应用设置（`kkstudio.application-settings.v1`） |
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
-| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `commands` / `head` / `stop` / `tool-invocations/{id}/approval` / `events/stream` |
-| Realtime | REST snapshot first；durable revision SSE + 无 id 的 Redis realtime overlay |
+| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `commands` / `head` / `stop` / `tool-invocations/{id}/approval`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
+| Realtime | REST snapshot first；应用事件 WebSocket（durable `revision`/`resync` + 无 cursor 的 Redis realtime overlay） |
 | 浏览器路由 | `BrowserRouter`，服务端对 SPA 路径回退 `index.html` |
 | 视觉规范 | [前端设计规范](../product-design/frontend-design-system.md) |
 
 ## 2. Chat defaults 与 Pane BranchDraft
 
-Chat DTO 保存唯一的可见发送设置：
+Chat DTO 保存唯一的可见发送设置（`environment` 为完整 `{name, workspacePath}` 或 null，原子语义见 [environment-workspace-binding.md](environment-workspace-binding.md)）：
 
 ```ts
 interface ChatDTO {
@@ -77,7 +77,7 @@ SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
 
 - batch 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 来自最新 snapshot Thread DTO。
 - `USER_MESSAGE` 之外的命令携带 pane 本地 draft 的对应字段（diff 相对 `effectiveBase`，避免重发 in-flight 设置）。
-- 服务端 202 只表示已接受；queued 命令由 ThreadProcessor 收割，前端以 snapshot 轮询/SSE 投影。
+- 服务端 202 只表示已接受；queued 命令由 ThreadProcessor 收割，前端以 snapshot 轮询/事件通道投影。
 
 ### 共享 Attachment Pill Composer
 
@@ -225,11 +225,12 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
 
 `useHarnessThreadRealtime`（`threads.snapshot(threadId)` 是唯一业务 query key）：
 
-1. 读取 snapshot；用 `revision` 创建 EventSource；revision/resync 事件只 invalidate snapshot。
-   订阅状态过渡（`subscription` 从 null 初始化、或 threadId 刚切换）**不清空**
+1. 读取 snapshot；经 `useApplicationEvents().subscribe({kind:'thread', id})` 订阅：`subscribed`
+   （首次订阅与每次重连重订阅后都会到达）、`revision`、`resync` 与资源级 `error` 都只
+   invalidate snapshot。订阅状态过渡（`subscription` 从 null 初始化、或 threadId 刚切换）**不清空**
    snapshot-seeded overlay：只有 Thread 消失或订阅真正禁用（`!threadId || !subscriptionReady`）
    才清空，因此 snapshot 首次就含 terminal-pending tool result 时，overlay 在
-   EventSource 建立前后都保持可见（有回归测试）。
+   事件通道订阅建立前后都保持可见（有回归测试）。
 2. Redis `realtime` 事件叠加流式 overlay：MODEL_DELTA 按 invocation+attempt+sequence 严格推进，TOOL_PARTIAL 按 `createdAt|canonical payload` 指纹去重（FIFO 有界，attempt 变化/terminal/resultEntryId/消失时清空）。
 3. **Attempt visibility**：snapshot `modelAttemptFailures` 按 attempt 排序并以 `(modelInvocationId,attempt)` 去重，先于当前 Model overlay 投影；`sequence` 必须是 canonical 非负 `DecimalLong`，malformed item fail closed 且不能 fence 当前输出。同 identity 的 durable failure 到达后抑制 stale realtime overlay；只有 invocation 仍处于同 attempt 的 READY/DISPATCHING 时显示活动倒计时，下一 attempt 已 RUNNING 后改为静态“已安排重试”。
 4. **Durable recovery**：root-to-head `MODEL_ATTEMPT_FAILURE` 与 terminal `ASSISTANT_ERROR.attempt` 都投影为同一 failure block，保留原始 text/thinking、具体 error 与 retry 状态；error 与 partial 分开渲染。纯空白 text/thinking 是合法用户可见内容，解析、渲染与复制都不得 trim。retryable failure 仍是 pending，不触发错误/完成浏览器通知。
@@ -273,8 +274,18 @@ Agent 表单的 Tools/Skills/Subagents 只保存**名称集合**（DTO 三个必
 - **TaskToolRenderer**：call 阶段展示解析后的 `{subagent_type, session_id, maxTurns, prompt}`（prompt 在 `ToolOutputViewport` 中）与最新 `task.status` 状态条；result 阶段解析 `<task id state>` envelope 展示 `<task_result>`/`<task_error>`；非规范文本回退原始文本 + 错误（不丢信息）。
 - **ToolOutputViewport**：完整保留 Tool 输出（全量文本仍在 DOM），默认以可滚动五行视口跟随尾部；用户向上滚动后暂停自动跟随。
 - **TaskStatusWidget**（挂载在 `ThreadWidgetStack.children`）：一次 reduce 把全部活动 task 消息按 `parentTaskLevel + depth` 聚合为层级列表（同子 Thread 只保留最新帧，深度变化移层）；`waiting_approval`/含审批项的行展示子工具名称、原因与 Allow/Deny——决策经宿主 controller 转发到**子 ThreadId** 的既有 approval 端点（`harnessService.decideApproval(targetThreadId, ...)`），**replay 身份包含 `targetThreadId + invocationId + decision`**（不同子 Thread 可能复用相同 invocationId）。
-- **浏览器通知**（`useThreadNotifications`，best-effort UI 副作用）：汇总父 Thread、直接子 task 与 descendant relay 的**全部待决审批**（身份含实际目标 Thread）；父/子 Agent 完成与错误通知在 working 结束后触发，deny 后 5 秒内抑制 completion；不建立第二套 Session 状态。
-- **Thread UI 偏好**：`localStorage` 键 `kkstudio.ai.thread-ui-preferences.v1` 控制任务状态 widget / 通知 footer 的开关（默认任务状态开、通知关），是浏览器本地偏好，**不是 durable runtime 状态**。
+- **浏览器通知**（`useThreadNotifications`，best-effort UI 副作用）：开关唯一来自
+  `ApplicationSettingsProvider` 的 `kkstudio.application-settings.v1.notificationsEnabled`（默认 false，
+  同 Tab 经 CustomEvent、跨 Tab 经 storage 事件同步，浏览器禁用存储时仍在本 Tab 生效；非法/未知版本存储
+  回退默认）。开启后汇总父 Thread、直接子 task 与 descendant relay 的**全部待决审批**（身份含实际目标
+  Thread）；父/子 Agent 完成与错误通知在 working 结束后触发，deny 后 5 秒内抑制 completion；不建立第二套
+  Session 状态。
+- **TaskStatusWidget 永久挂载**（`BoundThreadPane` 的 widget zone 第二项、事件详情之后）：无活动 task
+  消息时组件自身返回 null，不占位；不再存在任何偏好开关控制它。
+- **Footer 段顺序**固定为 agent → model → Environment binding → Branch Usage → Notifications（`ThreadStatusFooter`
+  → `buildThreadStatusModel`）：Environment 段展示完整 binding（null 为 `env:none`，不可用时标注 unavailable）；
+  Branch Usage 段聚合**当前 root-to-head 已关闭** `turn_usage`（未关闭 Turn、compaction 与失败残留不计入，
+  见 `thread-timeline/turn-usage.ts`），为空时不显示；Notifications 段展示全局开关状态并可点击切换。
 
 ## 13. 前端目录
 
@@ -286,7 +297,7 @@ frontend/src
 │   ├── catalog/
 │   ├── chat/            # ChatWorkspacePane / BlankComposerPane / BoundThreadPane / command-batch-plan
 │   ├── environment/
-│   └── runtime/         # useAgentThreadController / useHarnessThreadRealtime / thread-timeline / thread-events / thread-panel（transcript、event view、shortcuts、composer）/ task-status / thread-notifications / thread-ui-preferences
+│   └── runtime/         # useAgentThreadController / useHarnessThreadRealtime / thread-timeline / thread-events / thread-panel（transcript、event view、shortcuts、composer）/ task-status / thread-notifications
 ├── features/canvas/
 ├── shared/api/
 │   ├── contracts/ai-catalog.ts
@@ -329,4 +340,4 @@ npm run lint
 npm run build
 ```
 
-前端 API 契约重点覆盖名称身份、Model ref、命令 batch 严格 wire、CAS、exact replay 与 409 rebuild、approval/stop 身份、snapshot-first SSE、attempt failure 的 active/durable/terminal 投影、stale overlay fence、whitespace 保真与 terminal 投影；task 呈现契约（`task.status` 心跳解析/规范化去重、`<task>` envelope 解析、renderer 分发、TaskStatusWidget 聚合与子审批转发、浏览器通知、UI 偏好）由前端单测覆盖，不依赖真实付费模型。
+前端 API 契约重点覆盖名称身份、Model ref、命令 batch 严格 wire、CAS、exact replay 与 409 rebuild、approval/stop 身份、snapshot-first 事件通道、attempt failure 的 active/durable/terminal 投影、stale overlay fence、whitespace 保真与 terminal 投影；task 呈现契约（`task.status` 心跳解析/规范化去重、`<task>` envelope 解析、renderer 分发、TaskStatusWidget 聚合与子审批转发、浏览器通知与应用设置）由前端单测覆盖，不依赖真实付费模型。

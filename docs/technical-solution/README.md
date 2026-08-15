@@ -20,6 +20,8 @@ flowchart TD
     A --> J[s3-presign.md<br/>S3 预签名直传]
     A --> K[comfyui-workflow-api.md<br/>ComfyUI 工作流与运行 API]
     A --> L[environment-daemon-gateway.md<br/>Environment Daemon Gateway v2]
+    A --> W[environment-workspace-binding.md<br/>Environment Workspace 绑定]
+    A --> V[application-event-channel.md<br/>应用事件通道 /api/events/v1]
     A --> M[prompt-to-resource.md<br/>Prompt 到 Resource 数据流]
     A --> P[e2e-regression.md<br/>E2E 回归矩阵与报告]
     A --> R[docker-reliability-stack.md<br/>Docker Reliability 隔离栈]
@@ -42,9 +44,11 @@ flowchart TD
 | 11 | [s3-presign.md](s3-presign.md) | S3 预签名直传与直下载 |
 | 12 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流与运行 API |
 | 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment registry、Daemon v3 与 Resource 边界 |
-| 14 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
-| 15 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
-| 16 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
+| 14 | [environment-workspace-binding.md](environment-workspace-binding.md) | `{name, workspacePath}\|null` 原子绑定、canonical 规则与目录隐私 |
+| 15 | [application-event-channel.md](application-event-channel.md) | `/api/events/v1` WebSocket 事件通道帧协议与恢复 |
+| 16 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
+| 17 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
+| 18 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
 
 ## 贯穿约束
 

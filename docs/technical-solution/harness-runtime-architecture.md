@@ -282,7 +282,7 @@ durable mutation
 
 - Stop 的 durable key 是 `(threadId, stopRequestId)`：重试同 ID 恒命中 replay，`expectedRevision` 只用于未 replay 的首发 CAS；`REPLAYED` 返回被重放的 `stoppedTurnEndEntryId` 且 `cancelledCommandCount=0`。
 - 前端对 ambiguous Stop 保留完整操作（stopRequestId + 原始 expectedRevision + basis head/revision）：basis 未变时精确重试，basis 被权威 snapshot 证明变化时自动 retire 并 mint 新 ID（同步 fence 见 [frontend-implementation-design.md](frontend-implementation-design.md)）。
-- 客户端先读取 Thread snapshot，再订阅 revision SSE。Redis `realtime` 只提供正常 turn 的 text/thinking/tool partial overlay；snapshot 的 `modelAttemptFailures` 提供 active retry 的 durable partial/error/retry 时间，终态后由 root-to-head path 上的 `MODEL_ATTEMPT_FAILURE`/`ASSISTANT_ERROR.attempt` 恢复。revision/resync 只触发 snapshot invalidate；同 `(modelInvocationId,attempt)` 的 durable failure 会 fence stale overlay，terminal `resultJson`/`errorJson` 无条件压过更高 sequence。Runtime 不发布 compaction ModelDelta/attempt failure，前端仍按 TURN_START reason 抑制完整 COMPACTION turn 及其 Model overlay。
+- 客户端先读取 Thread snapshot，再经应用事件通道（`/api/events/v1`）订阅 revision。Redis `realtime` 只提供正常 turn 的 text/thinking/tool partial overlay；snapshot 的 `modelAttemptFailures` 提供 active retry 的 durable partial/error/retry 时间，终态后由 root-to-head path 上的 `MODEL_ATTEMPT_FAILURE`/`ASSISTANT_ERROR.attempt` 恢复。revision/resync/subscribed 只触发 snapshot invalidate；同 `(modelInvocationId,attempt)` 的 durable failure 会 fence stale overlay，terminal `resultJson`/`errorJson` 无条件压过更高 sequence。Runtime 不发布 compaction ModelDelta/attempt failure，前端仍按 TURN_START reason 抑制完整 COMPACTION turn 及其 Model overlay。事件通道帧协议见 [application-event-channel.md](application-event-channel.md)。
 
 ## 11. Subagent 委派（task）
 

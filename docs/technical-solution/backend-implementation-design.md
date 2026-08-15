@@ -1,6 +1,6 @@
 # 后端落地设计
 
-本文描述当前 `share`、`core`、`web`、Harness Runtime 与受信任插件的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 Store/Work/Redis 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment 与 Chat 应用能力；Goal 由 `plugins/goal` 提供；`web` 是生产组合根并映射 HTTP/SSE/WebSocket。
+本文描述当前 `share`、`core`、`web`、Harness Runtime 与受信任插件的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 Store/Work/Redis 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment 与 Chat 应用能力；Goal 由 `plugins/goal` 提供；`web` 是生产组合根并映射 HTTP/WebSocket。
 
 ## 1. 分层
 
@@ -24,7 +24,7 @@ flowchart LR
 | 层 | 职责 |
 | --- | --- |
 | `share` | DTO、JSON 字段、分页与错误边界 |
-| `web` | 生产组合根、Runtime/dispatcher/listener 生命周期、路由、参数校验、HTTP 状态、SSE emitter、WebSocket v2 adapter |
+| `web` | 生产组合根、Runtime/dispatcher/listener 生命周期、路由、参数校验、HTTP 状态、浏览器事件 WebSocket adapter、Daemon WebSocket v2 adapter |
 | `core.ai.catalog` | Provider/Model/Agent 的名称身份、结构化 config 与版本并发 |
 | `core.ai.chat` | Chat CRUD、`agentName`/可空默认 `EnvironmentBinding{name, workspacePath}`/`yoloEnabled` 可见发送设置与 Chat↔Thread 关系 |
 | `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
@@ -53,7 +53,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | 配置 | 装配 |
 | --- | --- |
 | `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、Redis sink/tail、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/listener/executor；注入 Core 的 TurnResolver/ModelGateway/ToolGateway ports |
-| `HarnessRuntimeLifecycle` | 启动/停止 dispatcher 与 processor；REST/SSE 只经 `HarnessRuntime` 门面 |
+| `HarnessRuntimeLifecycle` | 启动/停止 dispatcher 与 processor；REST 与事件通道只经 `HarnessRuntime` 门面 |
 | `ModelExecutionConfiguration` | `ObjectProvider<ProviderFactory>` 收集并索引；`CoreModelGateway`（serialized FIFO 单 drainer 回调桥） |
 | `web.runtime.BuiltInPluginConfiguration` | 在生产组合根注册随应用交付的受信任 `GoalPlugin` |
 | `PluginCatalogConfiguration` | 收集全部 `HarnessPlugin` beans，构造并冻结 `PluginCatalog`；Core 不依赖具体插件实现 |
@@ -89,7 +89,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | PUT | `/api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
 | POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedRevision}`；STOPPED/IDLE/REPLAYED |
 | POST | `/api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval` | `{decision: ALLOW|DENY, decisionId, actor, reason}` |
-| GET | `/api/ai/runtime/threads/{threadId}/events/stream` | durable revision SSE + Redis realtime overlay |
+| WebSocket | `/api/events/v1` | 浏览器事件通道（thread/canvas 订阅；协议见 [application-event-channel.md](application-event-channel.md)） |
 | GET | `/api/ai/runtime/resources/{sha256}` | 瞬时/Invocation `ResourceRef` 兼容下载：Core `ManagedResourceDownloadService` 按 `mediaType`/`size`/可选 `name` 重建引用，Web 只负责 attachment + `X-Content-Type-Options: nosniff`；Entry history 的 Blob Resource 不走该端点 |
 | POST/DELETE | `/api/storage/uploads[/{uploadId}]` | 全局 Upload reserve、complete 与释放；READY Handle 供 `ATTACHMENT(uploadId)` 原子消费 |
 | GET | `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` | durable Blob Resource 的渲染期短期 URL；原件响应额外携带权威 `mediaType/sizeBytes` |
@@ -125,7 +125,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | 组件 | 职责 |
 | --- | --- |
 | `ChatThreadServiceImpl` | 调用 `HarnessRuntime.createThread`（Session/ROOT/Thread 原子）并写入 Chat 关系 |
-| `StudioHarnessThreadController` | 仅映射 `HarnessRuntime` 门面 + SSE tail + typed 异常翻译 |
+| `StudioHarnessThreadController` | 仅映射 `HarnessRuntime` 门面 + typed 异常翻译 |
 | `HarnessRuntime` | `createThread`/`enqueueCommands`/`moveHead`/`stop`/`decideToolApproval`/`getThreadSnapshot` 单事务控制面 |
 | `ThreadProcessor` | Agent Loop：Model terminal apply 前按序物化失败 attempt、continuation、INPUT turn、QUIESCENT |
 | `ModelProcessor` | 两阶段激活、checkpoint/failedAttempts/terminal 持久化、terminal-once、Thread revision touch、Work/realtime 与 reschedule；不写 Entry/head |
@@ -151,21 +151,16 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 
 权限保持既有管线：YOLO 在加载 settings/evaluator 之前直接 Allow；否则 Allow/Ask/Deny，Ask 即既有 ToolInvocation `WAITING_APPROVAL`，不存在第二套权限实体；子 Thread 继承父 Thread YOLO，子工具审批仍走同一 `POST /tool-invocations/{id}/approval` 端点（携带子 ThreadId）。
 
-## 7. Snapshot-first SSE
+## 7. Snapshot-first 事件通道
 
-客户端先读取：
+客户端先读取权威 snapshot，再经单条应用级 WebSocket（`/api/events/v1`）订阅资源：
 
 ```text
 GET /api/ai/runtime/threads/{threadId}/snapshot
+-> WS subscribe {version:1, type:'subscribe', resource:{kind:'thread', id}}
 ```
 
-再以 snapshot `revision` 打开：
-
-```text
-GET /api/ai/runtime/threads/{threadId}/events/stream?afterRevision={revision}
-```
-
-revision 帧使用 durable SSE id（`Last-Event-ID` 覆盖 `afterRevision`）；Redis `realtime` delta 没有 SSE id，只作为临时 overlay。重连通过 revision 重新读取 snapshot，Redis Stream 不承担恢复职责。
+`subscribed` ack 携带订阅建立瞬间的 durable revision；其后的事件保证送达（事件帧不先于 ack 帧）。`revision` 事件只触发 snapshot invalidate，Redis `realtime` delta 只作为临时 overlay；`resync` 要求整体快照。重连重订阅后重新读取 snapshot，Redis Stream 不承担恢复职责。完整帧协议见 [application-event-channel.md](application-event-channel.md)。
 
 ## 8. 代码入口
 
