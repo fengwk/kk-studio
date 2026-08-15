@@ -21,9 +21,9 @@ function isToolsRoute(pathname: string) {
   return pathname.startsWith('/comfyui') || pathname.startsWith('/tools')
 }
 
-/** Chat 工作区沉浸页：`/chats/:chatId`，不含列表 `/chats`。 */
+/** Chat 工作区沉浸页：仅 `/chats/:chatId`（可带尾斜杠），不含列表与更深子路径。 */
 function isChatWorkspaceRoute(pathname: string) {
-  return /^\/chats\/[^/]+/.test(pathname)
+  return /^\/chats\/[^/]+\/?$/.test(pathname)
 }
 
 /** 焦点位于已打开的内层交互作用域（listbox/menu）时返回 true：其 Escape 语义由内层消费。 */

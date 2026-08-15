@@ -21,6 +21,21 @@ const AGENT_PANEL_SELECTOR = '.agent-panel'
 const MENU_SELECTOR = '[role="menu"]'
 
 /**
+ * window/document/documentElement/body 没有具体聚焦控件，编辑器视为
+ * Canvas surface；真正落在 HTMLElement 上的焦点仍按 stage.contains 判定。
+ */
+function isCanvasSurfaceEscapeTarget(
+  target: EventTarget | null,
+  stage: HTMLElement | null,
+  view: CanvasView,
+): boolean {
+  if (!(target instanceof HTMLElement) || target === document.body || target === document.documentElement) {
+    return view === 'editor'
+  }
+  return Boolean(stage?.contains(target))
+}
+
+/**
  * 编辑器键盘快捷键与焦点恢复，与主 controller 主体分离。
  *
  * Escape 优先级采用「capture 相位 + 作用域判定」，不依赖 useEffect/window
@@ -77,12 +92,10 @@ export function useCanvasKeyboard(api: KeyboardApi) {
       }
 
       if (event.key === 'Escape') {
-        // 只消费 Canvas surface 上的 Escape：无具体聚焦元素（window/document/body）
-        // 时编辑器视为当前作用域；其余不在 stage 内的目标（顶栏、编辑器头部等）
-        // 交给低优先级作用域处理。
-        const onSurface = target instanceof HTMLElement
-          ? Boolean(stageElementRef.current?.contains(target))
-          : view === 'editor'
+        // 只消费 Canvas surface 上的 Escape：无具体聚焦元素（window/document/
+        // documentElement/body）时编辑器视为当前作用域；其余不在 stage 内的
+        // 目标（顶栏、编辑器头部等）交给低优先级作用域处理。
+        const onSurface = isCanvasSurfaceEscapeTarget(target, stageElementRef.current, view)
         if (!onSurface) {
           return
         }

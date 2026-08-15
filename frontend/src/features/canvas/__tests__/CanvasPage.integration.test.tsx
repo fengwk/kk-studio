@@ -1870,6 +1870,63 @@ describe('CanvasPage real list/create/load integration', () => {
     expect(commandBodies.some((body) => body.commands[0]?.type === 'DELETE_NODE')).toBe(false)
   })
 
+  it.each([
+    { name: 'body', dispatchTarget: () => document.body },
+    { name: 'no concrete focus', dispatchTarget: () => window },
+  ])('treats Escape from $name as canvas surface without collapsing the agent panel', async ({ dispatchTarget }) => {
+    const { snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+    await user.click(screen.getByRole('button', { name: '切换对话面板' }))
+    expect(await screen.findByLabelText('给 AI 发送消息')).toBeInTheDocument()
+
+    act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 220, clientY: 180, preventDefault: vi.fn() },
+        { id: NODE_A, selected: true },
+      )
+    })
+    expect(await screen.findByRole('menu', { name: '画布节点操作' })).toBeInTheDocument()
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionChange: (params: { nodes: Array<{ id: string }>; edges: unknown[] }) => void
+      }).onSelectionChange({ nodes: [{ id: NODE_A }], edges: [] })
+    })
+
+    if (dispatchTarget() === document.body) {
+      document.body.focus()
+    } else if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
+    fireEvent.keyDown(dispatchTarget(), { key: 'Escape' })
+
+    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+    expect(document.querySelector('.agent-panel')).not.toBeNull()
+    expect((flowHarness.current as { nodes: Array<{ selected?: boolean }> }).nodes.some((node) => node.selected)).toBe(false)
+    expect(document.activeElement).toBe(screen.getByLabelText(/无限画布/))
+  })
+
   it('leaves Escape inside the agent panel to the composer and keeps the canvas selection', async () => {
     const { snapshots } = installBackend()
     const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO

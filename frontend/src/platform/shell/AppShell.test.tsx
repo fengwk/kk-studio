@@ -6,6 +6,45 @@ import { AppShell } from '@/platform/shell/AppShell'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import { setLocale } from '@/shared/i18n'
 
+describe('AppShell chat immersive routes', () => {
+  it.each([
+    '/chats/chat-1',
+    '/chats/chat-1/',
+  ])('hides the global topbar and adds the immersive class for %s', (path) => {
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <AppShell>
+          <div>Chat workspace</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument()
+    expect(document.querySelector('.app-frame')).toHaveClass('chat-immersive')
+    expect(document.querySelector('.app-frame')).not.toHaveClass('canvas-immersive')
+    expect(screen.getByText('Chat workspace')).toBeInTheDocument()
+  })
+
+  it.each([
+    '/chats',
+    '/chats/',
+    '/chats/chat-1/extra',
+    '/chats/chat-1/7',
+  ])('keeps the global topbar outside a valid chat workspace route: %s', (path) => {
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <AppShell>
+          <div>Chat route</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('banner')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'KK Studio' })).toBeInTheDocument()
+    expect(document.querySelector('.app-frame')).not.toHaveClass('chat-immersive')
+  })
+})
+
 describe('AppShell canvas immersive routes', () => {
   it('hides the global topbar and adds the immersive class for a valid /canvas/:canvasId editor route', () => {
     render(

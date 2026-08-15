@@ -22,7 +22,7 @@
 -- application (client for node/group/request/command ids, server for
 -- document/resource/run-target ids) and inserted explicitly; there are no
 -- id sequences. `canvas_document.version` is the single graph version cursor;
--- version changes are hinted to the Canvas SSE hub via the `canvas_version`
+-- version changes are hinted to the Canvas version/application event hub via the `canvas_version`
 -- NOTIFY trigger (section 5). Resource blobs are owned by the global
 -- `storage_blob` refcount lifecycle; Canvas rows only reference them (RESTRICT).
 --
@@ -798,7 +798,7 @@ alter table canvas_function_resource_ref
 -- Canvas document version NOTIFY hint.
 --
 -- version is owned by the application; PostgreSQL never bumps it. This trigger
--- is only a wake-up hint for the in-process Canvas SSE hub: it notifies when a
+-- is only a wake-up hint for the in-process Canvas version/application event hub: it notifies when a
 -- canvas_document row is inserted or its version column actually changed, and
 -- never mutates the row. The NOTIFY payload is the parsable text
 -- `{canvasId}:{version}`.
