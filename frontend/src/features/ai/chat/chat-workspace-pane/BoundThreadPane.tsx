@@ -174,9 +174,10 @@ export function BoundThreadPane({
   // 全局应用设置（AppProviders mount-once）：通知开关是 SettingsPage 与所有
   // Bound 面板共享的唯一事实源，不再维护面板本地偏好。
   const { notificationsEnabled, setNotificationsEnabled } = useApplicationSettings()
-  const [notificationPermission, setNotificationPermission] = useState(
-    browserNotificationPermission,
-  )
+  // permission 每次渲染都从当前浏览器状态派生，绝不缓存 mount 时快照：
+  // SettingsPage 可能在别处请求权限后置全局 enabled，已挂载面板必须立即反映
+  // 真实 permission，通知 hook 与 footer 才不会被陈旧快照门控。
+  const notificationPermission = browserNotificationPermission()
   const threadNotifications = useThreadNotifications({
     threadId,
     title: controller.title,
@@ -362,7 +363,6 @@ export function BoundThreadPane({
       return
     }
     const permission = await requestBrowserNotificationPermission()
-    setNotificationPermission(permission)
     if (permission === 'granted') {
       setNotificationsEnabled(true)
       return

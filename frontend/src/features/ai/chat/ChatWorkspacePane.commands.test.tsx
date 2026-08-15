@@ -1713,6 +1713,78 @@ describe('ChatWorkspacePane commands', () => {
     }
   })
 
+  it('derives the notification permission live when settings change from an external consumer', async () => {
+    const user = userEvent.setup()
+    const notificationSpy = vi.fn()
+    let permission: NotificationPermission = 'default'
+    class FakeNotification {
+      static get permission(): NotificationPermission {
+        return permission
+      }
+      static requestPermission = vi.fn(async () => 'granted' as const)
+      constructor(title: string, options?: NotificationOptions) {
+        notificationSpy(title, options)
+      }
+    }
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: FakeNotification,
+    })
+    // 快照包含一条等待审批的父 Thread 工具调用：通知 hook 启用后会为它推送
+    // permission 通知（new Notification 被 spy 捕获），用于精确验证 hook 的
+    // enabled 未被 mount 时的陈旧 permission 门控。
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), {
+        entries: [
+          ...sessionEntries(),
+          toolCallEntry('e-bash', 's1-assistant', 'call-bash', 'bash'),
+        ],
+        toolInvocations: [
+          toolInvocation({
+            id: 'inv-bash',
+            assistantEntryId: 'e-bash',
+            toolCallId: 'call-bash',
+            toolName: 'bash',
+          }),
+        ],
+      }),
+    )
+    function SettingsPageProbe() {
+      const { notificationsEnabled, setNotificationsEnabled } = useApplicationSettings()
+      return (
+        <button type="button" onClick={() => setNotificationsEnabled(true)}>
+          {notificationsEnabled ? 'on' : 'off'}
+        </button>
+      )
+    }
+    try {
+      renderBoundPane({ children: <SettingsPageProbe /> })
+      await screen.findByLabelText('给 AI 发送消息')
+
+      // mount 时浏览器 permission=default 且全局 off：hook 禁用、footer 显示 off。
+      expect(screen.getByRole('button', { name: /^(on|off)$/ })).toHaveTextContent('off')
+      expect(screen.getByRole('button', { name: 'notify:off' })).toBeInTheDocument()
+      expect(notificationSpy).not.toHaveBeenCalled()
+
+      // 模拟 SettingsPage：先获得浏览器权限，再通过全局设置启用通知。
+      permission = 'granted'
+      await user.click(screen.getByRole('button', { name: /^(on|off)$/ }))
+
+      // footer 与通知 hook 都基于当前浏览器 permission 生效，而非 mount 时快照。
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'notify:on' })).toBeInTheDocument(),
+      )
+      await waitFor(() => expect(notificationSpy).toHaveBeenCalled())
+      expect(notificationSpy).toHaveBeenCalledWith(
+        '等待审批',
+        expect.objectContaining({ body: expect.stringContaining('bash') }),
+      )
+    } finally {
+      delete (window as unknown as { Notification?: unknown }).Notification
+      localStorage.removeItem('kkstudio.application-settings.v1')
+    }
+  })
+
   it('freezes the widget zone height contract at min(36vh, 320px)', () => {
     const css = readFileSync(resolve(process.cwd(), 'src', 'styles.css'), 'utf8')
     const rule = css.match(/\.thread-widget-zone\s*\{[^}]*\}/)
