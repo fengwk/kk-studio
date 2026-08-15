@@ -31,7 +31,7 @@ import java.util.function.Consumer;
  * 并丢弃。
  *
  * <p>连接失联/异常时 channel Flux 报错：若此前曾成功连接，先对受影响本地订阅触发 resync，再以固定 1s 延迟 无限重连（未连接成功过的失败只记 debug，不产生
- * resync 风暴）。关闭后不再接受订阅。
+ * resync 风暴）。{@link #lifecycleFence} 把关闭边界与 channel 发布串在同一把锁上，关闭后不再接受订阅，也不会在 destroy 之后遗留 listen。
  */
 public final class RedisRealtimeEventSource implements RealtimeEventSource {
 
@@ -43,6 +43,13 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
   private final RedisRealtimeConfig config;
   private final RealtimeEventJsonCodec eventCodec;
   private final Map<UUID, ChannelState> channels = new ConcurrentHashMap<>();
+
+  /**
+   * 生命周期围栏：{@link #subscribe} 的「检查 closed + 发布 channel」与 {@link #close()} 的「设立 closed 边界 + 排空
+   * map」共用，避免 compute 内读 closed 与 close 观察空 map 之间的窗口。
+   */
+  private final Object lifecycleFence = new Object();
+
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
   public RedisRealtimeEventSource(
@@ -69,17 +76,19 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
     Objects.requireNonNull(onEvent, "onEvent");
     Objects.requireNonNull(onResync, "onResync");
     while (true) {
-      // compute 原子完成「检查 closed + 创建/获取 channel」；随后在 channel 锁内校验未被并发最后释放/hub close 淘汰
+      // 围栏内完成「检查 closed + 创建/获取 channel」；随后在 channel 锁内校验未被并发最后释放/source close 淘汰
       // （retired 则重取新状态），再按需建立 listen，杜绝在 detached channel 上重建 listener。
-      ChannelState channel =
-          channels.compute(
-              threadId,
-              (id, existing) -> {
-                if (closed.get()) {
-                  throw new IllegalStateException("RedisRealtimeEventSource is already closed");
-                }
-                return existing != null ? existing : new ChannelState(id, config.channel(id));
-              });
+      ChannelState channel;
+      synchronized (lifecycleFence) {
+        if (closed.get()) {
+          throw new IllegalStateException("RedisRealtimeEventSource is already closed");
+        }
+        channel =
+            channels.compute(
+                threadId,
+                (id, existing) ->
+                    existing != null ? existing : new ChannelState(id, config.channel(id)));
+      }
       synchronized (channel) {
         if (channel.retired) {
           continue;
@@ -104,20 +113,21 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
 
   @Override
   public void close() {
-    if (!closed.compareAndSet(false, true)) {
-      return;
-    }
-    // 逐个 channel 在锁内 retire + identity 移除；并发 in-flight subscribe 的 compute 已插入的条目由外层循环兜底清空
-    // （closed 检查与插入同处 compute，destroy 后不会再有新 listen）。
-    while (!channels.isEmpty()) {
-      for (ChannelState channel : channels.values()) {
-        synchronized (channel) {
-          if (channel.retired) {
-            continue;
+    synchronized (lifecycleFence) {
+      if (!closed.compareAndSet(false, true)) {
+        return;
+      }
+      // 围栏内排空：此后 subscribe 不能再发布新 channel；已插入、尚未 retired 的条目在 channel 锁内淘汰。
+      while (!channels.isEmpty()) {
+        for (ChannelState channel : channels.values()) {
+          synchronized (channel) {
+            if (channel.retired) {
+              continue;
+            }
+            channel.retired = true;
+            channels.remove(channel.threadId, channel);
+            disposeListen(channel);
           }
-          channel.retired = true;
-          channels.remove(channel.threadId, channel);
-          disposeListen(channel);
         }
       }
     }

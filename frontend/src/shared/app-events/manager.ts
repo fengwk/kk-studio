@@ -113,22 +113,36 @@ export class ApplicationEventManager {
       if (entry == null) {
         return
       }
-      for (const listener of [...entry.refs.keys()]) {
+      this.notifyListeners(entry, (listener) => {
         listener.onError?.(message.code, message.message)
-      }
+      })
       return
     }
     const entry = this.subscriptions.get(resourceKey(message.resource))
     if (entry == null) {
       return
     }
-    for (const listener of [...entry.refs.keys()]) {
+    this.notifyListeners(entry, (listener) => {
       if (message.type === 'subscribed') {
         listener.onSubscribed?.(message.cursor)
       } else if (message.type === 'event') {
         listener.onEvent?.(message.name, message.data, 'cursor' in message ? message.cursor : undefined)
       } else {
         listener.onResync?.()
+      }
+    })
+  }
+
+  /** 快照迭代；单个 listener 抛错只隔离该消费者，不阻断同资源其他 listener。 */
+  private notifyListeners(
+    entry: SubscriptionEntry,
+    notify: (listener: ApplicationEventListener) => void,
+  ): void {
+    for (const listener of [...entry.refs.keys()]) {
+      try {
+        notify(listener)
+      } catch (error) {
+        console.error('application event listener failed', error)
       }
     }
   }

@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -126,6 +127,69 @@ class RedisRealtimeEventSourceConcurrencyTest {
   }
 
   @Test
+  void concurrentSubscribeAndCloseLeavesNoLiveListen() throws Exception {
+    // 复现 close 与 publish 竞态：closed 检查若只在 compute 内、close 只观察 isEmpty，subscribe 可在
+    // close 排空后插入存活 channel 并建立 listen。围栏把「设立 closed」与「发布 channel」串在同一把锁上后，
+    // 并发 subscribe 要么在 close 前完成（随后被 close 取消 listen），要么看到 closed 被拒绝。
+    FakeContainer container = new FakeContainer();
+    RedisRealtimeEventSource source = new RedisRealtimeEventSource(container, CONFIG, CODEC);
+    int workers = 8;
+    ExecutorService executor = Executors.newFixedThreadPool(workers + 1);
+    CountDownLatch start = new CountDownLatch(1);
+    List<Future<?>> tasks = new ArrayList<>();
+    List<AutoCloseable> accepted = Collections.synchronizedList(new ArrayList<>());
+    try {
+      for (int i = 0; i < workers; i++) {
+        UUID threadId = new UUID(0L, 60L + i);
+        tasks.add(
+            executor.submit(
+                () -> {
+                  start.await();
+                  try {
+                    accepted.add(source.subscribe(threadId, event -> {}, () -> {}));
+                  } catch (IllegalStateException ignored) {
+                    // close 已设立边界：拒绝是正确结果。
+                  }
+                  return null;
+                }));
+      }
+      tasks.add(
+          executor.submit(
+              () -> {
+                start.await();
+                source.close();
+                return null;
+              }));
+      start.countDown();
+      for (Future<?> task : tasks) {
+        task.get(10, TimeUnit.SECONDS);
+      }
+
+      assertEquals(
+          container.receiveLaterCalls.get(),
+          container.disposeCalls.get(),
+          "every established listen must be disposed; none may survive source close");
+      assertThrows(
+          IllegalStateException.class,
+          () -> source.subscribe(new UUID(0L, 99L), event -> {}, () -> {}));
+      assertEquals(
+          container.receiveLaterCalls.get(),
+          container.disposeCalls.get(),
+          "post-close subscribe must not build another listener");
+      for (AutoCloseable handle : accepted) {
+        handle.close();
+      }
+      assertEquals(
+          container.receiveLaterCalls.get(),
+          container.disposeCalls.get(),
+          "accepted subscriptions must already be retired; release is a no-op");
+    } finally {
+      executor.shutdownNow();
+      source.close();
+    }
+  }
+
+  @Test
   void subscribeAfterCloseIsRejectedAndCloseIsIdempotent() throws Exception {
     UUID threadId = new UUID(0L, 52L);
     FakeContainer container = new FakeContainer();
@@ -178,6 +242,7 @@ class RedisRealtimeEventSourceConcurrencyTest {
   private static final class FakeContainer extends ReactiveRedisMessageListenerContainer {
 
     private final AtomicInteger receiveLaterCalls = new AtomicInteger();
+    private final AtomicInteger disposeCalls = new AtomicInteger();
     private final List<ControllableFlux> fluxes = new ArrayList<>();
 
     private FakeContainer() {
@@ -188,7 +253,7 @@ class RedisRealtimeEventSourceConcurrencyTest {
     public Mono<Flux<ReactiveSubscription.Message<String, String>>> receiveLater(
         ChannelTopic... topics) {
       receiveLaterCalls.incrementAndGet();
-      ControllableFlux flux = new ControllableFlux();
+      ControllableFlux flux = new ControllableFlux(disposeCalls);
       fluxes.add(flux);
       return Mono.just(flux);
     }
@@ -198,11 +263,16 @@ class RedisRealtimeEventSourceConcurrencyTest {
   private static final class ControllableFlux
       extends Flux<ReactiveSubscription.Message<String, String>> {
 
+    private final AtomicInteger disposeCalls;
     private final CountDownLatch disposeStarted = new CountDownLatch(1);
     private final CountDownLatch disposeDone = new CountDownLatch(1);
     private volatile boolean blockDispose;
     private volatile CoreSubscriber<? super ReactiveSubscription.Message<String, String>>
         subscriber;
+
+    private ControllableFlux(AtomicInteger disposeCalls) {
+      this.disposeCalls = disposeCalls;
+    }
 
     @Override
     public void subscribe(
@@ -215,6 +285,7 @@ class RedisRealtimeEventSourceConcurrencyTest {
 
             @Override
             public void cancel() {
+              disposeCalls.incrementAndGet();
               disposeStarted.countDown();
               if (blockDispose) {
                 try {
