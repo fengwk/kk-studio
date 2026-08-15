@@ -1,5 +1,6 @@
 import type { CanvasVersion } from '@/shared/api/contracts/base'
 import type { HarnessUserMessageContentDTO } from '@/shared/api/contracts/ai-runtime'
+import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 
 /**
  * Canonical UUID ids cross the HTTP boundary as lowercase dashed strings.
@@ -316,7 +317,7 @@ export type CanvasCommandDTO =
  * 是冻结的 provider/model/variant 三元组。
  */
 export interface CanvasThreadBranchSettingsDTO {
-  environmentName: string | null
+  environment: EnvironmentBindingDTO | null
   agentName: string
   model: {
     providerName: string

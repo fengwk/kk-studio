@@ -49,6 +49,7 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
+    listDirectories: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -86,7 +87,7 @@ const threadFixture: HarnessThreadDTO = {
   status: 'IDLE',
   processing: false,
   branchSettings: {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     activeTools: [],
@@ -276,7 +277,7 @@ describe('Canvas blank thread', () => {
         commandId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
         yoloEnabled: false,
         branchSettings: {
-          environmentName: null,
+          environment: null,
           agentName: 'assistant',
           model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
           activeTools: [],

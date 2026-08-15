@@ -3886,6 +3886,151 @@ div.is-error {
   text-align: center;
 }
 
+/* Environment Workspace 目录 picker：单层浏览 + 恢复操作，沿用 thread-selection token。 */
+.environment-workspace-list {
+  min-height: 120px;
+}
+
+.environment-workspace-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.environment-workspace-meta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.environment-workspace-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-workspace-branch {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green-primary);
+  font-size: 10px;
+}
+
+.environment-workspace-entries {
+  min-height: 120px;
+}
+
+.environment-workspace-entries .thread-selection-item {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.environment-workspace-entries .thread-selection-item svg {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+}
+
+.environment-workspace-error {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--danger);
+}
+
+.environment-workspace-error span:last-child {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.environment-workspace-notice {
+  margin: 0;
+  padding: 4px 10px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-align: center;
+}
+
+.environment-workspace-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.thread-selection-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.thread-selection-action:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+}
+
+.thread-selection-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-selection-action svg {
+  width: 13px;
+  height: 13px;
+  color: var(--fg-muted);
+}
+
+.thread-selection-action.primary {
+  margin-left: auto;
+  border-color: var(--green-primary);
+  background: var(--green-soft);
+  color: var(--green-primary);
+}
+
+.thread-selection-action.primary:disabled {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--fg-dim);
+}
+
+.thread-selection-action.primary:hover:not(:disabled) {
+  background: var(--green-primary);
+  color: #101512;
+}
+
+@media (max-width: 420px) {
+  .environment-workspace-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .thread-selection-action.primary {
+    margin-left: 0;
+  }
+}
+
 .thread-command-palette {
   width: 100%;
   margin: 0 0 8px;

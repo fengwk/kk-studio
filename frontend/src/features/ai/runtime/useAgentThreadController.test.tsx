@@ -63,7 +63,7 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: modelSelection(),
     activeTools: [],
@@ -220,7 +220,7 @@ describe('useAgentThreadController', () => {
           toolVersion: '1',
           rendererKey: 'demo',
           toolType: 'PLATFORM',
-          environmentName: null,
+          environment: null,
           argumentsJson: '{}',
           approvalJson: '{}',
           resultJson: null,
@@ -990,7 +990,7 @@ describe('useAgentThreadController', () => {
         toolVersion: '1',
         rendererKey: 'demo',
         toolType: 'PLATFORM',
-        environmentName: null,
+        environment: null,
         argumentsJson: '{}',
         approvalJson: '{}',
         resultJson: null,
@@ -1065,7 +1065,7 @@ describe('useAgentThreadController', () => {
         toolVersion: '1',
         rendererKey: 'bash',
         toolType: 'PLATFORM',
-        environmentName: null,
+        environment: null,
         argumentsJson: '{}',
         approvalJson: '{}',
         resultJson: null,
@@ -1141,7 +1141,9 @@ describe('useAgentThreadController', () => {
     // name -> ready（统一可用性标记）；display name 已不存在。
     const environments = new Map<string, boolean>([['env-local', true]])
     const currentThread = threadFixture({
-      branchSettings: branchSettings({ environmentName: 'env-local' }),
+      branchSettings: branchSettings({
+        environment: { name: 'env-local', workspacePath: 'proj/a' },
+      }),
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
 
@@ -1151,7 +1153,11 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
     expect(result.current.runtimeLabels.agentName).toBe('assistant')
-    expect(result.current.runtimeLabels.environmentName).toBe('env-local')
+    // runtime label 是完整 binding（name + workspacePath）；ready 仍按 name 查询。
+    expect(result.current.runtimeLabels.environment).toEqual({
+      name: 'env-local',
+      workspacePath: 'proj/a',
+    })
     expect(result.current.runtimeLabels.environmentReady).toBe(true)
     expect(result.current.runtimeLabels.modelName).toBe('minimax/MiniMax')
     expect(result.current.thread?.headEntryId).toBe('h1')

@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import {
   AgentSelectionPanel,
-  EnvironmentSelectionPanel,
   SelectionPanel,
   ThreadSelectionPanel,
 } from '@/features/ai/chat/SelectionPanel'
@@ -138,9 +137,8 @@ describe('SelectionPanel', () => {
     expect(onSortChange).toHaveBeenCalledWith('created')
   })
 
-  it('lists agents and only READY environments', async () => {
-    const user = userEvent.setup()
-    const { rerender } = render(
+  it('lists agents', async () => {
+    render(
       <AgentSelectionPanel
         agents={[{ name: 'assistant', description: 'desc' }]}
         onSelect={vi.fn()}
@@ -148,19 +146,5 @@ describe('SelectionPanel', () => {
       />,
     )
     expect(screen.getByRole('option', { name: /assistant/ })).toBeInTheDocument()
-
-    rerender(
-      <EnvironmentSelectionPanel
-        environments={[
-          { name: 'local', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
-          { name: 'booting', ready: false, status: 'CONNECTING', lastSeen: null, tools: [], skills: [] },
-        ]}
-        onSelect={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    )
-    expect(screen.getByRole('option', { name: /^local/ })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: /booting/ })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: /^local/ }))
   })
 })

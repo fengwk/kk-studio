@@ -9,6 +9,7 @@ import { composerDraftStorageKey } from '@/features/ai/composer/composer-draft'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { chatService } from '@/shared/api/chat-service'
+import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessBranchSettingsDTO,
@@ -60,6 +61,7 @@ vi.mock('@/shared/api/harness-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn().mockResolvedValue([]),
+    listDirectories: vi.fn(),
   },
 }))
 
@@ -83,7 +85,7 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: modelSelection(),
     activeTools: [],
@@ -206,7 +208,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     toolVersion: '1',
     rendererKey: 'bash',
     toolType: 'shell',
-    environmentName: null,
+    environment: null,
     argumentsJson: '{"command":"ls"}',
     approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
     resultJson: null,
@@ -382,6 +384,14 @@ describe('ChatWorkspacePane commands', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue(page(agents))
     vi.mocked(agentService.listModels).mockResolvedValue(page([modelEntry()]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
+    vi.mocked(environmentService.listDirectories).mockResolvedValue({
+      path: '.',
+      displayPath: '.',
+      parentPath: '.',
+      truncated: false,
+      gitBranch: null,
+      entries: [{ name: 'proj', path: 'proj' }],
+    })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({})))
     vi.mocked(chatService.listChatThreads).mockResolvedValue([
       thread({}),
@@ -416,8 +426,11 @@ describe('ChatWorkspacePane commands', () => {
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/environment{Enter}')
+    // 绑定面板无默认 binding：先看到 Environment 列表，选择 remote 进入目录浏览后确认。
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
     await user.click(within(screen.getByLabelText('选择 Environment')).getByRole('option', { name: /^remote/ }))
+    const dirPanel = await screen.findByLabelText('remote 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
     await waitFor(() => expect(harnessService.updateThreadHead).not.toHaveBeenCalled())
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
@@ -442,6 +455,8 @@ describe('ChatWorkspacePane commands', () => {
     expect(within(envModal).getByRole('option', { name: /^local/ })).toBeInTheDocument()
     expect(within(envModal).queryByRole('option', { name: /connecting/ })).not.toBeInTheDocument()
     await user.click(within(envModal).getByRole('option', { name: /^remote/ }))
+    const dirPanel = await screen.findByLabelText('remote 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
 
     // 绑定面板仅更新 draft；发送之前 footer 仍反映 thread snapshot，
     // 暂时不会发起 harness 调用。
@@ -456,7 +471,7 @@ describe('ChatWorkspacePane commands', () => {
         thread({
           branchSettings: branchSettings({
             agentName: 'assistant',
-            environmentName: null,
+            environment: null,
           }),
         }),
       ),
@@ -471,6 +486,8 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/environment{Enter}')
     await user.click(within(await screen.findByLabelText('选择 Environment')).getByRole('option', { name: /^remote/ }))
+    const dirPanel = await screen.findByLabelText('remote 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.type(composer, 'hello world')
@@ -493,7 +510,7 @@ describe('ChatWorkspacePane commands', () => {
     const setAgent = batchArg.commands.find((command) => command.type === 'SET_AGENT')!
     expect(setAgent.agentName).toBe('coder')
     const setEnv = batchArg.commands.find((command) => command.type === 'SET_ENVIRONMENT')!
-    expect(setEnv.environmentName).toBe('remote')
+    expect(setEnv.environment).toEqual({ name: 'remote', workspacePath: '.' })
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
   })
 
@@ -783,7 +800,7 @@ describe('ChatWorkspacePane commands', () => {
         thread({
           branchSettings: branchSettings({
             agentName: 'assistant',
-            environmentName: null,
+            environment: null,
           }),
         }),
       ),

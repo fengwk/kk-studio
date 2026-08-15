@@ -18,6 +18,7 @@ export const queryKeys = {
   environments: {
     all: ['environments'] as const,
     list: ['environments', 'list'] as const,
+    directory: (name: string, path: string) => ['environments', 'directory', name, path] as const,
   },
   chats: {
     all: ['chats'] as const,

@@ -107,7 +107,7 @@ export function CanvasBoundThread({
     providerName: controller.runtimeLabels.providerName,
     modelName: controller.runtimeLabels.modelName,
     variantName: controller.runtimeLabels.variantName,
-    environmentName: controller.runtimeLabels.environmentName,
+    environment: controller.runtimeLabels.environment,
     environmentReady: controller.runtimeLabels.environmentReady,
     contextWindow: controller.runtimeLabels.contextWindow,
   }

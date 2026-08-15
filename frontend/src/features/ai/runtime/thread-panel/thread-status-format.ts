@@ -1,5 +1,16 @@
 import { translate } from '@/shared/i18n'
 
+/**
+ * Environment binding 的只读形状（{name, workspacePath}）。
+ *
+ * thread-panel 是可移植包，只允许依赖 thread-timeline-types 与本地模块（no-restricted-imports），
+ * 因此不直接引用 API contract 类型；调用方传入的结构与该形状结构兼容。
+ */
+export interface EnvironmentBindingShape {
+  name: string
+  workspacePath: string
+}
+
 export interface ThreadStatusSegment {
   key: 'agent' | 'model' | 'environment' | 'task-status' | 'notifications'
   className: string
@@ -15,6 +26,7 @@ export interface ThreadStatusModel {
   model: string
   variant: string
   environment: string
+  environmentWorkspacePath: string
   yoloOn: boolean
   agentText: string
   modelText: string
@@ -27,9 +39,9 @@ export interface ThreadStatusModelInput {
   providerName?: string
   modelName?: string
   variantName?: string
-  /** canonical 路由名称（可 null）：null/空白 => `env:none`。 */
-  environmentName?: string | null
-  /** 该名称的实时可用标记（统一可用性规则）；false/未知 => `env:<name> (unavailable)`。 */
+  /** 完整 Environment binding（可 null）：null => `env:none`；非 null 时展示 name + workspacePath。 */
+  environment?: EnvironmentBindingShape | null
+  /** 该 binding name 的实时可用标记（统一可用性规则）；false/未知 => `env:<name> · ws:<path> (unavailable)`。 */
   environmentReady?: boolean
   yoloEnabled?: boolean
   onAgentClick?: () => void
@@ -52,17 +64,15 @@ function clean(value?: string | null): string {
   return text
 }
 
-
-
-
-
 /** 由面板输入构建稳定的纯文本状态模型，不涉及布局与 DOM。 */
 export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadStatusModel {
   const agentLabel = clean(input.agentName) || translate('ai.runtime.status.agentFallback')
   const provider = clean(input.providerName)
   const model = clean(input.modelName) || translate('ai.runtime.status.modelFallback')
   const variant = clean(input.variantName) || translate('ai.runtime.status.variantFallback')
-  const environmentName = clean(input.environmentName)
+  const binding = input.environment
+  const environmentName = binding ? clean(binding.name) : ''
+  const environmentWorkspacePath = binding ? clean(binding.workspacePath) : ''
   const yoloOn = Boolean(input.yoloEnabled)
 
   // 调用方传入的 modelName 可能已是规范的 provider/model 引用。
@@ -79,8 +89,14 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     environmentName === ''
       ? translate('ai.runtime.status.environmentNoneText')
       : input.environmentReady === false
-        ? translate('ai.runtime.status.environmentUnavailableText', { name: environmentName })
-        : translate('ai.runtime.status.environmentText', { name: environmentName })
+        ? translate('ai.runtime.status.environmentUnavailableText', {
+          name: environmentName,
+          workspace: environmentWorkspacePath,
+        })
+        : translate('ai.runtime.status.environmentText', {
+          name: environmentName,
+          workspace: environmentWorkspacePath,
+        })
 
   const segments: ThreadStatusSegment[] = [
     {
@@ -150,6 +166,7 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     model,
     variant,
     environment: environmentName,
+    environmentWorkspacePath,
     yoloOn,
     agentText,
     modelText,

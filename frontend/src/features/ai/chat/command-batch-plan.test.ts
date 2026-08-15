@@ -16,7 +16,7 @@ import type {
 
 function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBranchSettingsDTO {
   return {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     activeTools: [],
@@ -43,7 +43,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
 
 function draftOf(overrides: Partial<BranchDraft> = {}): BranchDraft {
   return {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     activeTools: [],
@@ -107,6 +107,14 @@ describe('command batch replay identity (immutable user intent)', () => {
       parts: partsOf(createTextPart('hello')),
     })
     expect(editedDraft.identity).not.toBe(original.identity)
+    // 整个 binding 参与不可变身份：仅 workspacePath 变化也会改变身份。
+    const editedEnvironment = buildMessageBatchPlan({
+      thread: t,
+      effectiveBase: base,
+      draft: draftOf({ environment: { name: 'local', workspacePath: 'proj/a' } }),
+      parts: partsOf(createTextPart('hello')),
+    })
+    expect(editedEnvironment.identity).not.toBe(original.identity)
     const otherThread = buildMessageBatchPlan({
       thread: thread({ threadId: 't2' }),
       effectiveBase: base,

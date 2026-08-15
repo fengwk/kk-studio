@@ -57,7 +57,7 @@ describe('chatService', () => {
     await service.createChatThread('chat /1', {
       title: 'New Thread',
       branchSettings: {
-        environmentName: null,
+        environment: null,
         agentName: 'assistant',
         model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
         activeTools: ['web-search'],
@@ -69,7 +69,7 @@ describe('chatService', () => {
     expect(client.post).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads', {
       title: 'New Thread',
       branchSettings: {
-        environmentName: null,
+        environment: null,
         agentName: 'assistant',
         model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
         activeTools: ['web-search'],
@@ -78,5 +78,30 @@ describe('chatService', () => {
     })
     // 无分页参数、无游标：Chat 返回完整 Thread 数组。
     expect(client.get).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads')
+  })
+
+  it('sends the atomic EnvironmentBinding on Chat create and update', async () => {
+    const client = createClient()
+    const service = createChatService(client)
+    await service.createChat({
+      title: 'A',
+      agentName: '9',
+      environment: { name: 'local', workspacePath: 'proj/a' },
+    })
+    await service.updateChat('chat /1', {
+      environment: null,
+      expectedVersion: '4',
+    })
+
+    expect(client.post).toHaveBeenCalledWith('/ai/chat', {
+      title: 'A',
+      agentName: '9',
+      environment: { name: 'local', workspacePath: 'proj/a' },
+    })
+    // 显式 null 清空默认 Environment；绝不回退为裸 environmentName。
+    expect(client.put).toHaveBeenCalledWith('/ai/chat/chat%20%2F1', {
+      environment: null,
+      expectedVersion: '4',
+    })
   })
 })

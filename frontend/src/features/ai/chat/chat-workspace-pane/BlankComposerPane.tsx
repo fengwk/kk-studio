@@ -17,6 +17,7 @@ import {
 } from '@/features/ai/chat/chat-first-send'
 import {
   branchDraftsEqual,
+  copyBinding,
   materializeAgentBranchDraft,
   materializeBlankBranchDraft,
   type BranchDraft,
@@ -35,16 +36,19 @@ import {
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import {
   AgentSelectionPanel,
-  EnvironmentSelectionPanel,
   ThreadSelectionPanel,
 } from '@/features/ai/chat/SelectionPanel'
+import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import {
   toAgentModelViews,
   type AgentModelView,
 } from '@/features/ai/catalog'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentBindingDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts/ai-environment'
 import { agentService } from '@/shared/api/agent-service'
 import { isConflictError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -83,7 +87,7 @@ export function BlankComposerPane({
   onAgentChange: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
   /** 空面板显式选择/清空 Environment 草稿时同步 Chat 默认值（版本化 CAS）；失败仅提示，不影响本面板草稿。 */
-  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  onEnvironmentChange?: (environment: EnvironmentBindingDTO | null) => Promise<void>
   onFirstSendRecovery: (threadId: string, recovery: FirstSendRecovery) => void
 }) {
   const { t } = useI18n()
@@ -137,8 +141,8 @@ export function BlankComposerPane({
       chatAgent,
       chat.yoloEnabled,
       models,
-      // Chat 默认 Environment 名称是空面板草稿的起点；用户可在首次发送前更改或清空。
-      chat.environmentName ?? null,
+      // Chat 默认 Environment binding 是空面板草稿的起点；用户可在首次发送前更改或清空。
+      chat.environment ?? null,
     )
     if (materialized != null) {
       setInitialFrozenDraft((current) => current ?? materialized)
@@ -167,7 +171,7 @@ export function BlankComposerPane({
         // Session 拒绝空标题；Chat title 可为空——保持 null。
         title: chat.title ?? null,
         branchSettings: {
-          environmentName: effective.environmentName,
+          environment: copyBinding(effective.environment),
           agentName: effective.agentName,
           model: { ...effective.model },
           activeTools: [...effective.activeTools],
@@ -324,16 +328,16 @@ export function BlankComposerPane({
     }
   }
 
-  function handleEnvironmentSelected(environmentName: string | null) {
+  function handleEnvironmentSelected(environment: EnvironmentBindingDTO | null) {
     if (pending) {
       return
     }
     // 与 agent/yolo 一致的语义：立即更新本面板 frozen draft（首次发送 ROOT 使用面板本地值），
     // 同时异步把 Chat 默认值同步为最新选择——即使更新失败/延迟，本面板草稿不受影响。
-    setFrozenDraft((current) => (current ? { ...current, environmentName } : current))
+    setFrozenDraft((current) => (current ? { ...current, environment } : current))
     setInteraction(null)
     setActionError(null)
-    void onEnvironmentChange(environmentName).catch((error: unknown) => {
+    void onEnvironmentChange(environment).catch((error: unknown) => {
       setActionError(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
     })
   }
@@ -372,7 +376,7 @@ export function BlankComposerPane({
     || (chat?.agentName
       ? t('ai.runtime.action.agentMissing')
       : t('ai.runtime.action.blankAgent'))
-  const environmentName = frozenDraft?.environmentName ?? null
+  const environment = frozenDraft?.environment ?? null
   const interactionPanel =
     interaction === 'agent' ? (
       <AgentSelectionPanel
@@ -389,10 +393,10 @@ export function BlankComposerPane({
         onSelect={handleAgentSelected}
       />
     ) : interaction === 'environment' ? (
-      <EnvironmentSelectionPanel
+      <EnvironmentWorkspacePanel
         environments={environments}
-        selectedEnvironmentName={environmentName}
-        selectionPending={pending}
+        current={environment}
+        pending={pending}
         onClose={() => setInteraction(null)}
         onSelect={handleEnvironmentSelected}
       />
@@ -441,8 +445,8 @@ export function BlankComposerPane({
                 : undefined
             }
             variantName={frozenDraft?.model.variant || undefined}
-            environmentName={environmentName}
-            environmentReady={environmentName == null ? undefined : (environmentReadyByName.get(environmentName) ?? false)}
+            environment={environment}
+            environmentReady={environment == null ? undefined : (environmentReadyByName.get(environment.name) ?? false)}
             yoloEnabled={frozenDraft?.yoloEnabled ?? chat?.yoloEnabled}
             onAgentClick={() => {
               onFocus()

@@ -11,7 +11,7 @@ describe('ThreadStatusFooter', () => {
         providerName="minimax"
         modelName="MiniMax"
         variantName="default"
-        environmentName="local"
+        environment={{ name: 'local', workspacePath: 'proj/a' }}
         yoloEnabled
       />,
     )
@@ -21,6 +21,8 @@ describe('ThreadStatusFooter', () => {
     expect(line).toContain('minimax/MiniMax · default')
     expect(line).not.toContain('(minimax)')
     expect(line).toContain('local')
+    // binding 的 workspacePath 必须可见。
+    expect(line).toContain('ws:proj/a')
     expect(footer.querySelectorAll('.thread-status-seg').length).toBe(3)
   })
 
@@ -40,28 +42,28 @@ describe('ThreadStatusFooter', () => {
     expect(line).not.toContain('YOLO')
   })
 
-  it('renders env:<name> and env:<name> (unavailable) without fallback', () => {
+  it('renders env:<name> · ws:<path> and env:<name> · ws:<path> (unavailable) without fallback', () => {
     const { rerender } = render(
       <ThreadStatusFooter
         agentName="assistant"
-        environmentName="dev"
+        environment={{ name: 'dev', workspacePath: 'src' }}
         environmentReady
       />,
     )
     const readyLine = screen.getByLabelText('会话状态').textContent ?? ''
-    expect(readyLine).toContain('env:dev')
+    expect(readyLine).toContain('env:dev · ws:src')
     expect(readyLine).not.toContain('(unavailable)')
 
-    // 选中但不可用（统一可用性规则）=> env:<name> (unavailable)；绝不 fallback 到别的 env。
+    // 选中但不可用（统一可用性规则）=> env:<name> · ws:<path> (unavailable)；绝不 fallback 到别的 env。
     rerender(
       <ThreadStatusFooter
         agentName="assistant"
-        environmentName="dev"
+        environment={{ name: 'dev', workspacePath: 'src' }}
         environmentReady={false}
       />,
     )
     const unavailableLine = screen.getByLabelText('会话状态').textContent ?? ''
-    expect(unavailableLine).toContain('env:dev (unavailable)')
+    expect(unavailableLine).toContain('env:dev · ws:src (unavailable)')
   })
 
   it('hides YOLO when yoloEnabled is false', () => {

@@ -92,7 +92,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     toolVersion: '1',
     rendererKey: 'bash',
     toolType: 'shell',
-    environmentName: null,
+    environment: null,
     argumentsJson: '{"command":"ls"}',
     approvalJson: null,
     resultJson: null,
