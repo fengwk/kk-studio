@@ -12,6 +12,7 @@ import {
   createChatThread,
   enqueueCommands,
   getThreadSnapshot,
+  waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { getCase, registerCase } from '../lib/registry.mjs'
 
@@ -40,16 +41,21 @@ registerCase({
     const snapshot = await createChatThread(ctx, chat.id, {
       title: null,
       yoloEnabled: false,
-      branchSettings: branchSettingsOf(ctx.vars.agent, {
-        providerName: 'minimax',
-        modelName: 'MiniMax-M2.7',
-        variant: 'default',
-      }, { activeTools: [] }),
+      // 使用不存在的 Agent，让附件命令确定性物化后在 Provider 调用前 PLANNING_FAILED。
+      branchSettings: branchSettingsOf(
+        { name: `e2e-attachment-missing-${cid().slice(0, 8)}` },
+        {
+          providerName: 'minimax',
+          modelName: 'MiniMax-M2.7',
+          variant: 'default',
+        },
+        { activeTools: [] },
+      ),
     })
     const thread = snapshot.thread
 
     // 1. reserve：PENDING + PUT + 不暴露 bucket/key。
-    const content = Buffer.from('e2e chat attachment payload', 'utf8')
+    const content = Buffer.from(`e2e chat attachment payload ${cid()}`, 'utf8')
     const sha256 = createHash('sha256').update(content).digest('hex')
     const { json: reserveJson } = await ctx.call('POST', '/api/storage/uploads', {
       filename: 'e2e-attachment.txt',
@@ -72,7 +78,7 @@ registerCase({
     // 2. 真实 presigned PUT（MinIO path-style public endpoint）。
     const putRes = await fetch(pending.presignedPut.url, {
       method: 'PUT',
-      headers: { ...pending.presignedPut.headers, 'Content-Type': 'text/plain' },
+      headers: pending.presignedPut.headers || {},
       body: content,
     })
     assert(
@@ -113,8 +119,12 @@ registerCase({
     // 5. 整批重放：返回既有命令（requestHash 一致），不二次消费。
     const replayed = await enqueueCommands(ctx, String(thread.threadId), batch)
     assert(String(replayed[0].requestHash) === String(command.requestHash), JSON.stringify(replayed))
+    await waitForQuiescentThread(ctx, String(thread.threadId), {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
     const snapshotAfterReplay = await getThreadSnapshot(ctx, String(thread.threadId))
-    assert(snapshotAfterReplay.queuedCommands.length === 1, JSON.stringify(snapshotAfterReplay.queuedCommands))
+    assert(snapshotAfterReplay.queuedCommands.length === 0, JSON.stringify(snapshotAfterReplay.queuedCommands))
 
     // 6. upload 行已消费：同一 uploadId 的 NEW 命令确定性 400。
     await expectHttpError(

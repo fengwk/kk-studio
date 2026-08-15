@@ -476,7 +476,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 environmentName；Thread 创建携带完整 branchSettings（Environment 路由名称或 null）；更新 Chat 默认值不改变既有 Thread',
+  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 EnvironmentBinding；Thread 创建携带完整 branchSettings；更新 Chat 默认值不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -490,13 +490,13 @@ registerCase({
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
-          && chat.environmentName === null,
+          && chat.environment === null,
         JSON.stringify(chat),
       )
       // 先创建 Thread，再更新 Chat 默认值，最后 reread 同一 Thread：更新 Chat 不影响既有 Thread
       // 的 branchSettings（immutable Environment route；Thread 快照是运行时事实）。
       const requested = {
-        environmentName: null,
+        environment: null,
         agentName: agent.name,
         model: modelSelectionFor(agent),
         activeTools: [],
@@ -524,7 +524,7 @@ registerCase({
       assert(
         updated.agentName === agent.name
           && updated.yoloEnabled === true
-          && updated.environmentName === null,
+          && updated.environment === null,
         JSON.stringify(updated),
       )
       // 同一 Thread reread：branchSettings 逐字段不变。
@@ -619,7 +619,7 @@ registerCase({
       branchSettings: branchSettingsOf(
         { name: agent.name },
         modelSelectionFor(agent),
-        { environmentName: null },
+        { environment: null },
       ),
     })
     const second = await createChatThread(ctx, chat.id, {
@@ -628,7 +628,7 @@ registerCase({
       branchSettings: branchSettingsOf(
         { name: agent.name },
         modelSelectionFor(agent),
-        { environmentName: null },
+        { environment: null },
       ),
     })
     try {
@@ -643,7 +643,7 @@ registerCase({
         branchSettings: branchSettingsOf(
           { name: agent.name },
           modelSelectionFor(agent),
-          { environmentName: null },
+          { environment: null },
         ),
       })
       await ctx.call(
@@ -662,12 +662,13 @@ registerCase({
       // 新到旧：最近创建（third）排在最前。
       assert(scopedIds[0] === String(third.thread.threadId), `expected newest-first: ${JSON.stringify(scoped)}`)
 
-      // 未知 Thread 关联 => 404。
+      // canonical 但未知的 Thread 关联 => 404。
+      const unknownThreadId = '00000000-0000-0000-0000-000000000999'
       await expectHttpError(
         () =>
           ctx.call(
             'PUT',
-            `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/999999999`,
+            `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/${unknownThreadId}`,
           ),
         { status: 404, messageIncludes: /unknown|not found/i },
       )

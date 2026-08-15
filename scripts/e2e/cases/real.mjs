@@ -4,6 +4,7 @@ import { assert, envelopeData, expectHttpError, sleep, cid } from '../lib/http.m
 import {
   approveToolInvocation,
   branchSettingsOf,
+  canonicalUuid,
   createChat,
   createChatThread,
   createConfiguredChatThread,
@@ -15,7 +16,7 @@ import {
   stopThread,
   updateThreadHead,
   userMessageCommand,
-  waitForModelTextDeltaAfterSseConnected,
+  waitForModelTextDeltaAfterEventSubscribed,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
@@ -162,7 +163,7 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environmentName: null, activeTools: ['task'] },
+          { environment: null, activeTools: ['task'] },
         ),
       })
       const parentThreadId = String(snapshot.thread.threadId)
@@ -200,8 +201,9 @@ registerCase({
         .filter((content) => content?.type === 'text')
         .map((content) => String(content.text || ''))
         .join('')
-      const taskId = /<task id="([1-9]\d*)" state="completed">/.exec(taskText)?.[1]
+      const taskId = /<task id="([^"]+)" state="completed">/.exec(taskText)?.[1]
       assert(taskId, `completed task envelope missing: ${taskText}`)
+      canonicalUuid(taskId, 'task envelope thread id')
       assert(taskText.includes(marker), `subagent report missing marker: ${taskText}`)
 
       const childSnapshot = await getThreadSnapshot(ctx, taskId)
@@ -211,7 +213,7 @@ registerCase({
       assert(
         String(context?.parentThreadId) === parentThreadId
           && String(context?.rootThreadId) === parentThreadId
-          && /^[1-9]\d*$/.test(String(context?.taskInvocationId || ''))
+          && canonicalUuid(context?.taskInvocationId, 'subagentContext.taskInvocationId')
           && context?.depth === 2,
         `invalid child ROOT subagentContext: ${JSON.stringify(context)}`,
       )
@@ -268,7 +270,7 @@ registerCase({
     })
     const tid = String(snapshot.thread.threadId)
     const { signal: firstDelta, startResult } =
-      await waitForModelTextDeltaAfterSseConnected(
+      await waitForModelTextDeltaAfterEventSubscribed(
         ctx,
         tid,
         () =>
@@ -378,7 +380,7 @@ registerCase({
     const tid = String(snapshot.thread.threadId)
 
     const { signal: firstDelta, startResult } =
-      await waitForModelTextDeltaAfterSseConnected(
+      await waitForModelTextDeltaAfterEventSubscribed(
         ctx,
         tid,
         () =>
@@ -405,7 +407,7 @@ registerCase({
     })
     assert(stop.status === 'STOPPED', JSON.stringify(stop))
     assert(
-      stop.stoppedTurnEndEntryId != null && /^[1-9]\d*$/.test(String(stop.stoppedTurnEndEntryId)),
+      stop.stoppedTurnEndEntryId != null,
       JSON.stringify(stop),
     )
     assert(
@@ -710,7 +712,7 @@ registerCase({
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
   requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（frozen environmentName、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节',
+  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（冻结 EnvironmentBinding、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -742,7 +744,10 @@ registerCase({
           && JSON.stringify(agentConfig.subagents) === JSON.stringify([]),
         `temporary tool Agent config must be exactly tools=[read], skills=[], subagents=[]: ${JSON.stringify(toolAgent)}`,
       )
-      const environmentName = ctx.vars.daemonEnvironment.name
+      const environment = {
+        name: ctx.vars.daemonEnvironment.name,
+        workspacePath: '.',
+      }
       // 固定大文本 fixture（临时 root，不进仓库）：单行 >8KB，core externalizer 内联阈值
       // (INLINE_RESULT_UTF8_BYTES=8KB) 之上、daemon preview 阈值（50KB）之下 => read 返回 Text，
       // Tool Result Entry 写入前由 history materializer 摄入全局 Blob，durable history 不保留 file URI。
@@ -765,12 +770,12 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environmentName, activeTools: ['read'] },
+          { environment, activeTools: ['read'] },
         ),
       })
       const tid = snapshot.thread.threadId
       assert(
-        snapshot.thread.branchSettings.environmentName === environmentName,
+        JSON.stringify(snapshot.thread.branchSettings.environment) === JSON.stringify(environment),
         JSON.stringify(snapshot.thread.branchSettings),
       )
       await enqueueCommands(ctx, tid, {
@@ -804,10 +809,10 @@ registerCase({
       assert(readInvocation, `no WAITING_APPROVAL read invocation: ${JSON.stringify(waiting)}`)
       assert(readInvocation.status === 'WAITING_APPROVAL', JSON.stringify(readInvocation))
       assert(
-        readInvocation.environmentName === environmentName,
-        `read invocation must freeze the Environment route name: ${JSON.stringify({
+        JSON.stringify(readInvocation.environment) === JSON.stringify(environment),
+        `read invocation must freeze the complete Environment binding: ${JSON.stringify({
           readInvocation,
-          environmentName,
+          environment,
         })}`,
       )
       assert(
