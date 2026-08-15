@@ -4,6 +4,7 @@ import {
   branchDraftFromBranchSettings,
   branchDraftsEqual,
   buildBranchDiffCommands,
+  materializeAgentBranchDraft,
   materializeBlankBranchDraft,
   projectPendingTarget,
 } from '@/features/ai/chat/branch-draft'
@@ -123,6 +124,17 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
     expect(materialized?.environment).toEqual(binding)
     // 复制而非共享引用：后续编辑不会反向影响调用方对象。
     expect(materialized?.environment).not.toBe(binding)
+
+    const rematerialized = materializeAgentBranchDraft(
+      agent(['read'], [], []),
+      [model],
+      null,
+      true,
+      binding,
+    )
+    expect(rematerialized?.yoloEnabled).toBe(true)
+    expect(rematerialized?.environment).toEqual(binding)
+    expect(rematerialized?.environment).not.toBe(binding)
 
     const fromSettings = branchDraftFromBranchSettings(settingsWith(binding), false)
     expect(fromSettings.environment).toEqual(binding)

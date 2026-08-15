@@ -304,7 +304,13 @@ export function BlankComposerPane({
     const agent = agents.find((item) => item.name === selectedAgentName)
     const next =
       agent != null
-        ? materializeAgentBranchDraft(agent, models, frozenDraft, chat?.yoloEnabled)
+        ? materializeAgentBranchDraft(
+          agent,
+          models,
+          frozenDraft,
+          chat?.yoloEnabled,
+          chat?.environment ?? null,
+        )
         : null
     if (next == null) {
       setActionError(t('ai.runtime.action.agentUnresolvable', { agent: selectedAgentName }))

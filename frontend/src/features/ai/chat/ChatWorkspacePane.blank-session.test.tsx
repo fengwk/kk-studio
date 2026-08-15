@@ -711,7 +711,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     )
   })
 
-  it('keeps chat.yoloEnabled when a stale Chat agent triggers full materialization', async () => {
+  it('keeps Chat runtime defaults when a stale Chat agent triggers full materialization', async () => {
     const user = userEvent.setup()
     const createdThread = thread({ threadId: 't-materialized-yolo' })
     vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
@@ -719,9 +719,14 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       ...assistantAgent,
       config: { tools: ['web-search'], skills: [] },
     }
-    // 已过期的 Chat agent（catalog 无匹配） + Chat 默认 yolo=true：完整 materialization
-    // 必须保留用户设置的 yolo 偏好，而不是悄悄回退为 false。
-    renderBlankPane({ agentName: 'ghost', yoloEnabled: true, agents: [tooledAgent] })
+    // 已过期的 Chat agent（catalog 无匹配）：完整 materialization 必须保留 Chat 默认
+    // yolo 与整个 Environment binding，而不是悄悄回退为 false/null。
+    renderBlankPane({
+      agentName: 'ghost',
+      yoloEnabled: true,
+      environment: { name: 'local', workspacePath: 'proj/app' },
+      agents: [tooledAgent],
+    })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
@@ -733,6 +738,10 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const payload = vi.mocked(chatService.createChatThread).mock.calls[0]![1]
     expect(payload.yoloEnabled).toBe(true)
     expect(payload.branchSettings.agentName).toBe('assistant')
+    expect(payload.branchSettings.environment).toEqual({
+      name: 'local',
+      workspacePath: 'proj/app',
+    })
     expect(payload.branchSettings.activeTools).toEqual(['web-search'])
   })
 

@@ -71,7 +71,14 @@ export function EnvironmentWorkspacePanel({
     enabled: browse != null,
     retry: false,
   })
-  const data = directoryQuery.data
+  const data =
+    browse != null && directoryQuery.data?.path === browse.path
+      ? directoryQuery.data
+      : undefined
+  const invalidResponse =
+    browse != null
+    && directoryQuery.data != null
+    && directoryQuery.data.path !== browse.path
   const error = directoryQuery.error
 
   const readyEnvironments = useMemo(
@@ -153,7 +160,7 @@ export function EnvironmentWorkspacePanel({
   }
 
   function enterDirectory(path: string) {
-    if (pending || browse == null || !path.trim()) {
+    if (busy || browse == null || !path.trim()) {
       return
     }
     setBrowse({ name: browse.name, path })
@@ -175,7 +182,7 @@ export function EnvironmentWorkspacePanel({
   }
 
   function goUp() {
-    if (pending || browse == null) {
+    if (busy || browse == null) {
       return
     }
     const parent = parentPathOf(browse.path)
@@ -185,7 +192,7 @@ export function EnvironmentWorkspacePanel({
   }
 
   function refresh() {
-    if (pending || browse == null) {
+    if (busy || browse == null) {
       return
     }
     void directoryQuery.refetch()
@@ -195,6 +202,11 @@ export function EnvironmentWorkspacePanel({
     if (pending) {
       return
     }
+    setActiveId(
+      current != null && readyEnvironments.some((environment) => environment.name === current.name)
+        ? current.name
+        : NONE_ID,
+    )
     setBrowse(null)
   }
 
@@ -202,16 +214,17 @@ export function EnvironmentWorkspacePanel({
   function canConfirm(): boolean {
     return browse != null
       && data != null
-      && !pending
+      && error == null
+      && !invalidResponse
+      && !busy
       && Boolean(browse.path.trim())
-      && data.path.trim() !== ''
   }
 
   function confirmDirectory() {
     if (!canConfirm() || browse == null || data == null) {
       return
     }
-    // 提交 wire 返回的权威 path（data.path 与请求 path 一致，但以响应为准）。
+    // 只有响应 path 与请求 path 精确一致时才会到达这里。
     void onSelect({ name: browse.name, workspacePath: data.path })
   }
 
@@ -354,12 +367,11 @@ export function EnvironmentWorkspacePanel({
       ) : (
         <div className="environment-workspace-body">
           <div className="environment-workspace-meta">
-            {/* 展示完整安全 wire path（data.path 与请求 path 一致，以响应为准），
-                displayPath 只是末段展示名，绝不当完整当前路径。 */}
+            {/* 展示请求的完整安全 wire path；displayPath 只是末段展示名，绝不当完整当前路径。 */}
             <span className="environment-workspace-path">
-              {t('ai.chat.workspace.currentPath', { path: data?.path ?? browse.path })}
+              {t('ai.chat.workspace.currentPath', { path: browse.path })}
             </span>
-            {data?.gitBranch ? (
+            {error == null && !invalidResponse && data?.gitBranch ? (
               <span className="environment-workspace-branch">
                 {t('ai.chat.workspace.gitBranch', { branch: data.gitBranch })}
               </span>
@@ -376,16 +388,22 @@ export function EnvironmentWorkspacePanel({
             {directoryQuery.isLoading ? (
               <li className="thread-selection-empty">{t('ai.chat.workspace.loading')}</li>
             ) : null}
-            {error != null ? (
+            {error != null || invalidResponse ? (
               <li className="thread-selection-empty environment-workspace-error" role="alert">
                 <span>{t('ai.chat.workspace.loadFailed')}</span>
-                <span>{error instanceof Error ? error.message : String(error)}</span>
+                {error != null ? (
+                  <span>{error instanceof Error ? error.message : String(error)}</span>
+                ) : null}
               </li>
             ) : null}
-            {!directoryQuery.isLoading && error == null && data != null && data.entries.length === 0 ? (
+            {!directoryQuery.isLoading
+            && error == null
+            && !invalidResponse
+            && data != null
+            && data.entries.length === 0 ? (
               <li className="thread-selection-empty">{t('ai.chat.workspace.empty')}</li>
             ) : null}
-            {!directoryQuery.isLoading && error == null
+            {!directoryQuery.isLoading && error == null && !invalidResponse
               ? data?.entries.map((entry) => {
                 const active = entry.path === activeId
                 return (
@@ -396,7 +414,7 @@ export function EnvironmentWorkspacePanel({
                       aria-selected={active}
                       aria-label={t('ai.chat.workspace.enterDirectory', { name: entry.name })}
                       className={['thread-selection-item', active ? 'active' : ''].filter(Boolean).join(' ')}
-                      disabled={pending}
+                      disabled={busy}
                       onFocus={() => setActiveId(entry.path)}
                       onMouseMove={() => setActiveId(entry.path)}
                       onMouseDown={(event) => event.preventDefault()}
@@ -412,7 +430,7 @@ export function EnvironmentWorkspacePanel({
               })
               : null}
           </ul>
-          {data?.truncated ? (
+          {error == null && !invalidResponse && data?.truncated ? (
             <p className="environment-workspace-notice">{t('ai.chat.workspace.truncated')}</p>
           ) : null}
           <div className="environment-workspace-actions">
@@ -420,7 +438,7 @@ export function EnvironmentWorkspacePanel({
               type="button"
               className="thread-selection-action"
               title={t('ai.chat.workspace.upTitle')}
-              disabled={pending || browse == null || parentPathOf(browse.path) == null}
+              disabled={busy || browse == null || parentPathOf(browse.path) == null}
               onMouseDown={(event) => event.preventDefault()}
               onClick={goUp}
             >
@@ -430,7 +448,7 @@ export function EnvironmentWorkspacePanel({
             <button
               type="button"
               className="thread-selection-action"
-              disabled={pending}
+              disabled={busy}
               onMouseDown={(event) => event.preventDefault()}
               onClick={refresh}
             >
