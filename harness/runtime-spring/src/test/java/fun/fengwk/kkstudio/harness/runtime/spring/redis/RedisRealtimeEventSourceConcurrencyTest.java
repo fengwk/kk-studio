@@ -40,6 +40,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -186,6 +187,46 @@ class RedisRealtimeEventSourceConcurrencyTest {
     } finally {
       executor.shutdownNow();
       source.close();
+    }
+  }
+
+  @Test
+  void closeDoesNotHoldLifecycleFenceWhileDisposingListen() throws Exception {
+    // 围栏只设立 closed：排空时 dispose 若回等待，不得再持有围栏，否则并发 subscribe 会死锁。
+    UUID threadId = new UUID(0L, 70L);
+    FakeContainer container = new FakeContainer();
+    RedisRealtimeEventSource source = new RedisRealtimeEventSource(container, CONFIG, CODEC);
+    AutoCloseable first = source.subscribe(threadId, event -> {}, () -> {});
+    assertEquals(1, container.receiveLaterCalls.get());
+    container.fluxes.get(0).armDisposeBlock();
+
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> closing = executor.submit(source::close);
+      assertTrue(
+          container.fluxes.get(0).awaitDisposeStarted(5, TimeUnit.SECONDS),
+          "close must reach listen dispose");
+
+      Future<?> subscribe =
+          executor.submit(
+              () -> {
+                source.subscribe(new UUID(0L, 71L), event -> {}, () -> {});
+                return null;
+              });
+      ExecutionException error =
+          assertThrows(
+              ExecutionException.class,
+              () -> subscribe.get(5, TimeUnit.SECONDS),
+              "subscribe during drain must not wait on the lifecycle fence");
+      assertTrue(
+          error.getCause() instanceof IllegalStateException,
+          "post-boundary subscribe must be rejected while drain is still disposing");
+
+      container.fluxes.get(0).allowDispose();
+      closing.get(5, TimeUnit.SECONDS);
+      first.close();
+    } finally {
+      executor.shutdownNow();
     }
   }
 
