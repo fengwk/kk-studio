@@ -203,7 +203,7 @@ L1 的关键语义断言：
 - `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
-- `model.attempt_failure_visibility` 免费 L1：case 内 `node:http` OpenAI-compatible SSE mock 的首次 Provider attempt 先流出确定性 text partial，再通过断连触发 LangChain4j `TRANSIENT`；活跃期轮询同一快照精确断言 `modelAttemptFailures`（`attempt=1`、HTTP decimal-string `sequence`、text/thinking、error、合法 `failedAt/retryAt`），立即 retry 的 Provider `messages` 必须与失败前完全一致且不含失败 partial/error；quiescent 后断言 `MODEL_ATTEMPT_FAILURE` 位于成功 assistant 之前且 payload 保留 partial/error/retryAt、未物化列表清空；第二 turn 的 mock request `messages` 同样不含失败 attempt 的 partial/thinking/error，两个 turn 均 `COMPLETED`，成功 assistant 不拼接失败 partial；
+- `model.attempt_failure_visibility` 免费 L1：先通过 `/api/events/v1` 建立 Thread 订阅并收到 `subscribed` ack；case 内 `node:http` OpenAI-compatible SSE mock 的首次 Provider attempt 随后流出确定性 text partial，再通过断连触发 LangChain4j `TRANSIENT`。事件通道必须观测到该 partial；活跃期轮询同一快照精确断言 `modelAttemptFailures`（`attempt=1`、HTTP decimal-string `sequence`、text/thinking、error、合法 `failedAt/retryAt`），立即 retry 的 Provider `messages` 必须与失败前完全一致且不含失败 partial/error；quiescent 后断言 `MODEL_ATTEMPT_FAILURE` 位于成功 assistant 之前且 payload 保留 partial/error/retryAt、未物化列表清空；第二 turn 的 mock request `messages` 同样不含失败 attempt 的 partial/thinking/error，两个 turn 均 `COMPLETED`，成功 assistant 不拼接失败 partial；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
 - `canvas.api_version_contract` 免费 L1：create/list/get/commands 使用 canonical UUID id 与
   十进制字符串 graph `version`（数据库 `canvas_document.version` 仍是 bigint，wire 是 canonical
@@ -582,6 +582,6 @@ case 与整轮 `durationMs` 使用 Node 单调时钟计算，不受宿主 wall c
 2. 新增或删除 case 后运行 `node scripts/e2e/run-matrix.mjs --list`，以输出的 ID 和总数更新本文件。
 3. Chat/Thread 编排步骤集中在 `scripts/e2e/lib/harness.mjs`；Thread 创建携带完整 `branchSettings`，后续变更通过命令 batch 表达。
 4. 真模型、Tool、分支和 UI 只通过显式开关执行；默认 L1 保持免费。
-5. `model.attempt_failure_visibility` 必须继续使用 case 内本地 `node:http` SSE mock；先断言活跃窗口的 `modelAttemptFailures` 与立即 retry 的原样 Provider `messages`，再用 quiescent durable Entry 与下一 turn 的 Provider `messages` 断言完成闭环，并将 request/snapshot 写入 case artifact；不得改成真实付费 Provider 或仅 HTTP 500 的弱化路径。
+5. `model.attempt_failure_visibility` 必须继续使用 case 内本地 `node:http` SSE mock；先建立 `/api/events/v1` Thread 订阅并以 realtime partial 证明 ack 后投递，再断言活跃窗口的 `modelAttemptFailures` 与立即 retry 的原样 Provider `messages`，最后用 quiescent durable Entry 与下一 turn 的 Provider `messages` 断言完成闭环，并将 request/snapshot 写入 case artifact；不得改成真实付费 Provider 或仅 HTTP 500 的弱化路径。
 6. OpenCLI fake Hub 完整闭环由 `deploy/test/run.sh --with-app` 覆盖；真实 Seedance
    prepare-only smoke 必须同时提供确认参数和环境开关，且固定 `submit=0`。

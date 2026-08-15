@@ -9,6 +9,7 @@ import {
   getThreadSnapshot,
   stopThread,
   userMessageCommand,
+  waitForModelTextDeltaAfterEventSubscribed,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig } from '../lib/fixtures.mjs'
@@ -22,7 +23,7 @@ registerCase({
   id: 'model.attempt_failure_visibility',
   level: 'L1',
   title: '模型失败 attempt partial 可见、持久恢复且不进入 Provider 上下文',
-  docs: '本地 node:http OpenAI Chat Completions SSE mock：首次 Provider attempt 输出确定性 partial 后断连，后续自动重试成功；轮询活跃 snapshot 的 modelAttemptFailures，断言 MODEL_ATTEMPT_FAILURE durable 顺序/精确 payload、失败 partial 不拼入 assistant，第二 turn 的 Provider messages 排除失败 partial/thinking/error',
+  docs: '本地 node:http OpenAI Chat Completions SSE mock：先建立 /api/events/v1 Thread 订阅并收到 ack，首次 Provider attempt 输出确定性 partial 后断连，后续自动重试成功；轮询活跃 snapshot 的 modelAttemptFailures，断言 MODEL_ATTEMPT_FAILURE durable 顺序/精确 payload、失败 partial 不拼入 assistant，第二 turn 的 Provider messages 排除失败 partial/thinking/error',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const initialMarker = `ATTEMPT-VISIBILITY-FIRST-${suffix}`
@@ -105,16 +106,27 @@ registerCase({
       })
       threadId = String(created.thread.threadId)
 
-      const startResult = await enqueueCommands(ctx, threadId, {
-        expectedHeadEntryId: created.thread.headEntryId,
-        expectedNextCommandSequence: created.thread.nextCommandSequence,
-        commands: [userMessageCommand(initialMarker, cid())],
-      })
+      const { signal: firstDelta, startResult } =
+        await waitForModelTextDeltaAfterEventSubscribed(
+          ctx,
+          threadId,
+          () =>
+            enqueueCommands(ctx, threadId, {
+              expectedHeadEntryId: created.thread.headEntryId,
+              expectedNextCommandSequence: created.thread.nextCommandSequence,
+              commands: [userMessageCommand(initialMarker, cid())],
+            }),
+          { timeoutMs: 30_000 },
+        )
       assert(
         Array.isArray(startResult)
           && startResult.length === 1
           && startResult[0].type === 'USER_MESSAGE',
         `initial message batch: ${JSON.stringify(startResult)}`,
+      )
+      assert(
+        firstDelta.text.includes(PARTIAL_TEXT),
+        `application event channel missed the failed-attempt partial: ${JSON.stringify(firstDelta)}`,
       )
 
       const activeResult = await waitForActiveAttemptFailure(ctx, threadId, {
