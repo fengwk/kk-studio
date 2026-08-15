@@ -525,6 +525,7 @@ export function BoundThreadPane({
       draft?.environment != null
         ? (environmentReadyByName.get(draft.environment.name) ?? false)
         : controller.runtimeLabels.environmentReady,
+    usageText: controller.branchUsageText,
     contextWindow: extractContextWindow(draftModel) ?? controller.runtimeLabels.contextWindow,
   }
   const transcript: ChatPanelTranscriptInput = {

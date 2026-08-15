@@ -18,6 +18,17 @@ export type EntryEventKind =
   | 'unsupported_message'
   | 'unknown_entry'
 
+/** 已关闭 Turn 的完整 provider usage；各 token 字段互斥，cost 为冻结的 total。 */
+export interface TurnUsage {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  reasoning: number
+  providerTotal: number
+  cost: number
+}
+
 export interface ToolAttachment {
   type: ToolAttachmentType
   name: string
@@ -114,6 +125,8 @@ export interface MetaDialogueMessage extends BaseDialogueMessage {
   role: 'meta'
   kind: MetaMessageKind
   text: string
+  /** TURN_END 后发射的类型化 usage；Branch Usage 只聚合该字段。 */
+  turnUsage?: TurnUsage
   /** 可选结构化字段（token/费用等），便于以后扩展 */
   details?: Record<string, unknown>
 }

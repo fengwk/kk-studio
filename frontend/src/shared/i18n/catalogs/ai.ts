@@ -1438,6 +1438,10 @@ export const aiCatalog = {
     'en-US': 'env:{{name}} · ws:{{workspace}}',
     'zh-CN': 'env:{{name}} · ws:{{workspace}}',
   },
+  'ai.runtime.status.branchUsageTitle': {
+    'en-US': 'Branch usage: {{usage}}',
+    'zh-CN': '分支用量：{{usage}}',
+  },
   'ai.runtime.status.notificationsOn': {
     'en-US': 'notify:on',
     'zh-CN': 'notify:on',

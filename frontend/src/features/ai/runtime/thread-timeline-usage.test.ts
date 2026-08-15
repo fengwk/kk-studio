@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline-builder'
+import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
 
 /**
  * Turn usage 矩阵：usage 绝不紧跟 Assistant，必须在相应 TURN_END 之后投影为
@@ -55,8 +56,13 @@ function userMessage(text: string): HarnessSessionEntryDTO {
   )
 }
 
-function usageMetadata(input: number, output: number, cost = 0.001) {
-  return { usage: { inputTokens: input, outputTokens: output }, cost }
+function usageMetadata(
+  input: number,
+  output: number,
+  cost = 0.001,
+  extras: Record<string, unknown> = {},
+) {
+  return { usage: { inputTokens: input, outputTokens: output, ...extras }, cost }
 }
 
 describe('Turn usage after TURN_END', () => {
@@ -65,7 +71,10 @@ describe('Turn usage after TURN_END', () => {
       [
         turnStart(),
         userMessage('问题'),
-        assistant('assistant-1', '回答', usageMetadata(10, 20)),
+        assistant('assistant-1', '回答', usageMetadata(10, 20, 0.001, {
+          reasoningTokens: 3,
+          providerTotalTokens: 33,
+        })),
         turnEnd(),
       ],
       [],
@@ -86,6 +95,21 @@ describe('Turn usage after TURN_END', () => {
     })
     expect(usage?.text).toContain('↑10')
     expect(usage?.text).toContain('↓20')
+    expect(usage).toMatchObject({
+      turnUsage: {
+        input: 10,
+        output: 20,
+        cacheRead: 0,
+        cacheWrite: 0,
+        reasoning: 3,
+        providerTotal: 33,
+        cost: 0.001,
+      },
+      details: {
+        reasoning: 3,
+        providerTotal: 33,
+      },
+    })
   })
 
   it('places the summary after tool results of the same turn', () => {
@@ -241,5 +265,36 @@ describe('Turn usage after TURN_END', () => {
       [],
     )
     expect(timeline.messages.some((message) => message.role === 'meta')).toBe(false)
+  })
+
+  it('aggregates only TURN_END summaries, excluding compaction and an incomplete turn', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart('compact', 'COMPACTION'),
+        assistant('assistant-compact', 'summary', usageMetadata(100, 50, 1)),
+        turnEnd('compact-end'),
+        turnStart('turn-1'),
+        assistant('assistant-1', 'done', usageMetadata(10, 20, 0.125, {
+          cacheReadTokens: 5,
+          reasoningTokens: 2,
+          providerTotalTokens: 37,
+        })),
+        turnEnd('end-1'),
+        turnStart('turn-2'),
+        assistant('assistant-2', 'not closed', usageMetadata(30, 40, 0.5)),
+      ],
+      [],
+      [],
+    )
+
+    expect(aggregateBranchUsage(timeline.messages)).toEqual({
+      input: 10,
+      output: 20,
+      cacheRead: 5,
+      cacheWrite: 0,
+      reasoning: 2,
+      providerTotal: 37,
+      cost: 0.125,
+    })
   })
 })

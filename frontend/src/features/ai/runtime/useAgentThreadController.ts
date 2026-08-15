@@ -8,6 +8,8 @@ import {
 } from '@/features/ai/catalog'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
 import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
+import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
+import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
 import type { ThreadCommand } from '@/features/ai/runtime'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
@@ -191,6 +193,10 @@ export function useAgentThreadController(
     modelAttemptFailures,
     modelInvocation,
   )
+  const branchUsage = aggregateBranchUsage(timeline.messages)
+  const branchUsageText = branchUsage == null
+    ? undefined
+    : formatTurnUsageText(branchUsage)
   // Event 投影独立于 DialogueMessage：durable Entry 全类型 + 活跃 model/tool overlay。
   // useMemo 保证快照未变化时 events 引用稳定（Pane 的 selected/active 跟随 effect 依赖它）。
   const events = useMemo(
@@ -543,6 +549,8 @@ export function useAgentThreadController(
     timeline,
     events,
     runtimeLabels,
+    branchUsage,
+    branchUsageText,
     working,
     entries,
     messagesLoading: snapshotQuery.isLoading,

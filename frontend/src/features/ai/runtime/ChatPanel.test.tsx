@@ -25,6 +25,7 @@ describe('ChatPanel', () => {
           providerName: 'minimax',
           modelName: 'MiniMax',
           variantName: 'default',
+          usageText: '↑10 · ↓2 · $0.125',
         }}
         transcript={{
           timeline: {
@@ -44,12 +45,13 @@ describe('ChatPanel', () => {
           onSubmit: vi.fn(),
           onCommand: vi.fn(),
         }}
-        footer={{ yoloEnabled: true, usage: undefined }}
+        footer={{ yoloEnabled: true }}
         activity={{ working: false }}
       />,
     )
     expect(screen.getByText('hello')).toBeInTheDocument()
     expect(screen.getByText(/assistant/)).toBeInTheDocument()
+    expect(screen.getByText('↑10 · ↓2 · $0.125')).toBeInTheDocument()
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
   })

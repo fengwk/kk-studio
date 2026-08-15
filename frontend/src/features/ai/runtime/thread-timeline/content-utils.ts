@@ -1,5 +1,9 @@
 import { asRecord, getString } from '@/features/ai/runtime/payload-json'
-import type { ToolAttachment, ToolAttachmentType } from '@/features/ai/runtime/thread-timeline-types'
+import type {
+  ToolAttachment,
+  ToolAttachmentType,
+  TurnUsage,
+} from '@/features/ai/runtime/thread-timeline-types'
 import { apiBaseUrl } from '@/shared/api/client'
 
 const MANAGED_RESOURCE_URI_PATTERN = /^(file:|s3:)/i
@@ -159,24 +163,11 @@ export function formatCompactTokens(count: number): string {
   return `${(count / 1_000_000).toFixed(1)}M`
 }
 
-/** 从持久 ASSISTANT assistantMetadata 解析出的完整用量（全零时为 null）。 */
-export interface ParsedTurnUsage {
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
-  /** 仅详情展示；不进摘要文本。 */
-  reasoning: number
-  /** Provider 报告的 total；仅详情展示，绝不与 input+output 混算。 */
-  providerTotal: number
-  cost: number
-}
-
 /**
  * 从持久 ASSISTANT Entry 的 `assistantMetadata` 提取完整 usage/cost。
  * 字段名以 harness 持久 codec 为准（camelCase），并容忍常见别名。
  */
-export function parseAssistantUsage(metadata: Record<string, unknown>): ParsedTurnUsage | null {
+export function parseAssistantUsage(metadata: Record<string, unknown>): TurnUsage | null {
   const usage = asRecord(metadata.usage)
   const costNode = metadata.cost
   const input = numberField(usage, 'inputTokens', 'input_tokens', 'promptTokens')

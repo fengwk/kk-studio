@@ -13,9 +13,11 @@ import {
   contentText,
   formatTurnUsageText,
   parseAssistantUsage,
-  type ParsedTurnUsage,
 } from '@/features/ai/runtime/thread-timeline/content-utils'
-import type { DialogueTimestamp } from '@/features/ai/runtime/thread-timeline-types'
+import type {
+  DialogueTimestamp,
+  TurnUsage,
+} from '@/features/ai/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
 
 /**
@@ -161,7 +163,7 @@ export function buildThreadEventTimeline(
   const durableToolResultIdentities = new Set<string>()
   let currentTurnStartEntryId: string | null = null
   let currentTurnNumber = 0
-  let pendingUsage: ParsedTurnUsage | null = null
+  let pendingUsage: TurnUsage | null = null
   for (const entry of entries) {
     if (entry.entryType === 'TURN_START') {
       currentTurnStartEntryId = entry.entryId
@@ -290,7 +292,7 @@ export function buildThreadEventTimeline(
 interface EntryTurnContext {
   turnStartEntryId: string | null
   turnNumber: number
-  pendingUsage: ParsedTurnUsage | null
+  pendingUsage: TurnUsage | null
 }
 
 /** durable 记录的公共字段（kind/status/title/summary/details 由各分支补全）。 */

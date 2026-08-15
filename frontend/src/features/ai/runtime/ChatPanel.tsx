@@ -29,6 +29,8 @@ export interface ChatPanelLabels {
   /** 完整 Environment binding（name + workspacePath）；null 表示未绑定。 */
   environment?: EnvironmentBindingDTO | null
   environmentReady?: boolean
+  /** 当前 root-to-head branch 的已关闭 Turn 累计 usage 摘要。 */
+  usageText?: string
   contextWindow?: number
 }
 
@@ -154,6 +156,7 @@ export function ChatPanel({
               variantName={labels.variantName}
               environment={labels.environment}
               environmentReady={labels.environmentReady}
+              usageText={labels.usageText}
               yoloEnabled={footer.yoloEnabled}
               onAgentClick={footer.onAgentClick}
               onModelClick={footer.onModelClick}

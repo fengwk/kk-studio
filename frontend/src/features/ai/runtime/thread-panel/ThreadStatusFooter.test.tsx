@@ -122,4 +122,36 @@ describe('ThreadStatusFooter', () => {
     await user.click(screen.getByRole('button', { name: 'notify:off' }))
     expect(notificationToggles).toBe(1)
   })
+
+  it('renders Branch Usage after environment and before notifications', () => {
+    render(
+      <ThreadStatusFooter
+        agentName="assistant"
+        environment={{ name: 'local', workspacePath: '.' }}
+        usageText="↑30 · ↓9 · R14 · W17 · $0.500"
+        notificationsEnabled={false}
+        notificationPermission="default"
+        onNotificationsToggle={() => undefined}
+      />,
+    )
+
+    const segments = [...screen.getByLabelText('会话状态').querySelectorAll('.thread-status-seg')]
+    expect(segments.map((segment) => segment.textContent)).toEqual([
+      'agent:assistant',
+      'unknown-model · unknown-variant',
+      'env:local · ws:.',
+      '↑30 · ↓9 · R14 · W17 · $0.500',
+      'notify:off',
+    ])
+    expect(segments[3]).toHaveAttribute(
+      'title',
+      '分支用量：↑30 · ↓9 · R14 · W17 · $0.500',
+    )
+    expect(segments[3]).toHaveClass('thread-status-usage')
+  })
+
+  it('does not render a usage segment for blank text', () => {
+    render(<ThreadStatusFooter agentName="assistant" usageText="  " />)
+    expect(screen.getByLabelText('会话状态').querySelector('.thread-status-usage')).toBeNull()
+  })
 })
