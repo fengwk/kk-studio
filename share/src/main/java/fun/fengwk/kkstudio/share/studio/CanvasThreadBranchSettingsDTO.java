@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
+import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,7 +18,7 @@ public class CanvasThreadBranchSettingsDTO {
 
   /** required-nullable：分支未绑定环境时必须显式输出 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentName;
+  private EnvironmentBindingDTO environment;
 
   private String agentName;
 

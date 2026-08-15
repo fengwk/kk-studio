@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
@@ -6,6 +7,16 @@ import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { comfyuiService } from '@/shared/api/comfyui-service'
 import { environmentService } from '@/shared/api/environment-service'
+
+const { fakeApplicationEvents } = vi.hoisted(() => {
+  const manager = { subscribe: () => () => undefined }
+  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+})
+// jsdom 没有 WebSocket：应用事件 Provider 在 App 级测试中退化为透传。
+vi.mock('@/shared/app-events', () => ({
+  ApplicationEventProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
+}))
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: { listProviders: vi.fn(), listModels: vi.fn(), listAgents: vi.fn() },

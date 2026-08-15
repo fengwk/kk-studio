@@ -83,21 +83,6 @@ export function getCanvasChanges(
 }
 
 /**
- * GET /canvases/{id}/events/stream?afterVersion=N：版本事件 SSE。
- * 'version' 事件触发 changes 拉取；'resync' 事件触发全量快照。
- * 断线重连时使用客户端最后已知版本。
- */
-export function createCanvasRealtimeStream(
-  canvasId: UUIDString,
-  afterVersion: CanvasVersion = '0',
-): EventSource {
-  const query = new URLSearchParams({ afterVersion })
-  return new EventSource(
-    `${apiBaseUrl}/canvases/${encodeURIComponent(canvasId)}/events/stream?${query}`,
-  )
-}
-
-/**
  * POST /canvases/{id}/thread/messages：Canvas 空 Thread 的原子首次发送。
  * 创建绑定到本画布的 Thread 并发送有序 USER_MESSAGE contents；
  * 返回绑定后的 threadId 与携带 threadId 的最新 document。

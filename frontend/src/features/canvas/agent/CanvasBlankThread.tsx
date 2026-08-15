@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ThreadComposer,
+  ThreadShortcutsPanel,
   ThreadStatusFooter,
   type ThreadCommand,
 } from '@/features/ai/runtime'
-import { THREAD_COMMANDS } from '@/features/ai/runtime/thread-panel/thread-commands'
+import { threadCommandsForScene } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
-  AgentSelectionModal,
-  EnvironmentSelectionModal,
-} from '@/features/ai/chat/SelectionListModal'
+  AgentSelectionPanel,
+} from '@/features/ai/chat/SelectionPanel'
+import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors'
 import {
   materializeAgentBranchDraft,
@@ -24,8 +25,16 @@ import {
   trimMessageParts,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
+import {
+  clearStoredComposerDraft,
+  restoreComposerDraft,
+  storeComposerDraft,
+} from '@/features/ai/composer/composer-draft'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentBindingDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts/ai-environment'
 import type {
   CanvasDocumentDTO,
   UUIDString,
@@ -36,21 +45,14 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 
 /**
- * Canvas 空 Thread 的 slash 命令表：upload/agent/environment/yolo 可用；
- * thread/session/tree/new/stop 保持可见但禁用。
+ * Canvas 空 Thread 的 slash 命令表：复用统一场景投影（canvas-blank 场景无
+ * Chat-scoped Thread picker，因此 /thread 保持禁用）。
  */
-const CANVAS_BLANK_COMMANDS: ThreadCommand[] = THREAD_COMMANDS.map((command) => ({
-  ...command,
-  disabled: !['upload', 'agent', 'environment', 'yolo'].includes(command.id),
-  disabledReason: undefined,
-  disabledReasonKey: ['upload', 'agent', 'environment', 'yolo'].includes(command.id)
-    ? undefined
-    : 'ai.runtime.command.disabledReason',
-}))
+const CANVAS_BLANK_COMMANDS: ThreadCommand[] = threadCommandsForScene('canvas-blank')
 
 /**
  * Canvas 空 Thread（document.threadId == null）：
- * 提供 compact 的 Agent/Environment/YOLO 选择（ThreadStatusFooter + 选择弹层），
+ * 提供 compact 的 Agent/Environment/YOLO 选择（ThreadStatusFooter + 内联选择面板），
  * 首次发送走 canvas-scoped 原子端点 POST /canvases/{id}/thread/messages
  * （branch settings + 有序 USER_MESSAGE contents），成功后把携带 threadId 的
  * document 交还 controller，由绑定 Thread 接管面板。
@@ -67,14 +69,16 @@ export function CanvasBlankThread({
   onThreadBound: (document: CanvasDocumentDTO) => void
 }) {
   const { t } = useI18n()
+  const draftStorageScope = `canvas:${canvasId}`
   // catalog 加载期间保持 draft 未冻结；第一个可 materialize 的 Agent 是
   // 确定性默认值（缺失/不可解析时面板显示明确错误并打开 agent picker）。
   const [frozenDraft, setFrozenDraft] = useState<BranchDraft | null>(null)
-  const [parts, setParts] = useState<ComposerPart[]>([])
+  const [parts, setPartsState] = useState<ComposerPart[]>(
+    () => restoreComposerDraft(draftStorageScope, []),
+  )
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [agentModalOpen, setAgentModalOpen] = useState(false)
-  const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
+  const [interaction, setInteraction] = useState<'agent' | 'environment' | 'shortcuts' | null>(null)
   const modelsQuery = useQuery({
     queryKey: queryKeys.models.list,
     queryFn: () => agentService.listModels(),
@@ -104,13 +108,16 @@ export function CanvasBlankThread({
     localDraft: ComposerPart[],
     effective: BranchDraft,
   ) {
+    clearStoredComposerDraft(draftStorageScope)
     setPending(true)
     setActionError(null)
     try {
       const result = await sendCanvasThreadFirstSend(canvasId, {
         commandId: crypto.randomUUID(),
         branchSettings: {
-          environmentName: effective.environmentName,
+          environment: effective.environment
+            ? { name: effective.environment.name, workspacePath: effective.environment.workspacePath }
+            : null,
           agentName: effective.agentName,
           model: { ...effective.model },
           activeTools: [...effective.activeTools],
@@ -118,11 +125,11 @@ export function CanvasBlankThread({
         yoloEnabled: effective.yoloEnabled,
         contents: partsToMessageContents(sendParts),
       })
-      setParts([])
+      setPartsState([])
       onThreadBound(result.document)
     } catch (error) {
       setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
-      setParts(localDraft)
+      updateParts(localDraft)
     } finally {
       setPending(false)
     }
@@ -137,10 +144,15 @@ export function CanvasBlankThread({
     if (!frozenDraft) {
       // catalog 未加载或 Agent/model 无法解析：打开 picker 补全 draft。
       setActionError(t('canvas.agent.agentMissing'))
-      setAgentModalOpen(true)
+      setInteraction('agent')
       return
     }
     void runFirstSend(payload, localDraft, frozenDraft)
+  }
+
+  function updateParts(next: ComposerPart[]) {
+    storeComposerDraft(draftStorageScope, next)
+    setPartsState(next)
   }
 
   function handleCommand(command: ThreadCommand) {
@@ -149,10 +161,13 @@ export function CanvasBlankThread({
     }
     switch (command.id) {
       case 'agent':
-        setAgentModalOpen(true)
+        setInteraction('agent')
         return
       case 'environment':
-        setEnvironmentModalOpen(true)
+        setInteraction('environment')
+        return
+      case 'shortcuts':
+        setInteraction('shortcuts')
         return
       case 'yolo':
         if (!pending) {
@@ -175,83 +190,86 @@ export function CanvasBlankThread({
       return
     }
     setFrozenDraft(next)
-    setAgentModalOpen(false)
+    setInteraction(null)
     setActionError(null)
   }
 
-  function handleEnvironmentSelected(environmentName: string | null) {
+  function handleEnvironmentSelected(environment: EnvironmentBindingDTO | null) {
     if (pending) {
       return
     }
-    setFrozenDraft((current) => (current ? { ...current, environmentName } : current))
-    setEnvironmentModalOpen(false)
+    setFrozenDraft((current) => (current ? { ...current, environment } : current))
+    setInteraction(null)
     setActionError(null)
   }
 
-  const environmentName = frozenDraft?.environmentName ?? null
-
-  return (
-    <>
-      <section className="chat-shell thread-panel canvas-blank-thread">
-        <main className="chat-main thread-panel-main">
-          <div className="blank-pane-body">
-            <h2>{t('canvas.agent.blankTitle')}</h2>
-            <p>{t('canvas.agent.blankDescription')}</p>
-            {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
-          </div>
-          <ThreadComposer
-            parts={parts}
-            pending={pending}
-            disabled={pending}
-            onPartsChange={setParts}
-            onSubmit={(payload, localDraft) => {
-              handleSubmit(payload, localDraft)
-            }}
-            onCommand={handleCommand}
-            commands={CANVAS_BLANK_COMMANDS}
-          />
-          <ThreadStatusFooter
-            agentName={frozenDraft?.agentName || t('ai.runtime.action.blankAgent')}
-            providerName={frozenDraft?.model.providerName || undefined}
-            modelName={
-              frozenDraft?.model.providerName && frozenDraft.model.modelName
-                ? `${frozenDraft.model.providerName}/${frozenDraft.model.modelName}`
-                : undefined
-            }
-            variantName={frozenDraft?.model.variant || undefined}
-            environmentName={environmentName}
-            environmentReady={
-              environmentName == null
-                ? undefined
-                : (environmentReadyByName.get(environmentName) ?? false)
-            }
-            yoloEnabled={frozenDraft?.yoloEnabled ?? false}
-            onAgentClick={() => setAgentModalOpen(true)}
-            onEnvironmentClick={() => setEnvironmentModalOpen(true)}
-          />
-        </main>
-      </section>
-      <AgentSelectionModal
-        open={agentModalOpen}
+  const environment = frozenDraft?.environment ?? null
+  const interactionPanel =
+    interaction === 'agent' ? (
+      <AgentSelectionPanel
         agents={agents.map((agent) => ({
           name: agent.name,
           description: agent.description,
         }))}
-        onClose={() => setAgentModalOpen(false)}
-        onSelect={(selectedAgentName) => {
-          handleAgentSelected(selectedAgentName)
-        }}
-      />
-      <EnvironmentSelectionModal
-        open={environmentModalOpen}
-        environments={environments}
-        selectedEnvironmentName={environmentName}
+        selectedAgentName={frozenDraft?.agentName}
         selectionPending={pending}
-        onClose={() => setEnvironmentModalOpen(false)}
-        onSelect={(selectedName) => {
-          handleEnvironmentSelected(selectedName)
-        }}
+        onClose={() => setInteraction(null)}
+        onSelect={handleAgentSelected}
       />
-    </>
+    ) : interaction === 'environment' ? (
+      <EnvironmentWorkspacePanel
+        environments={environments}
+        current={environment}
+        pending={pending}
+        onClose={() => setInteraction(null)}
+        onSelect={handleEnvironmentSelected}
+      />
+    ) : interaction === 'shortcuts' ? (
+      <ThreadShortcutsPanel onClose={() => setInteraction(null)} />
+    ) : null
+
+  return (
+    <section className="chat-shell thread-panel canvas-blank-thread">
+      <main className="chat-main thread-panel-main">
+        <div className="blank-pane-body">
+          <h2>{t('canvas.agent.blankTitle')}</h2>
+          <p>{t('canvas.agent.blankDescription')}</p>
+          {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
+        </div>
+        <ThreadComposer
+          parts={parts}
+          pending={pending}
+          disabled={pending}
+          onPartsChange={updateParts}
+          onSubmit={(payload, localDraft) => {
+            handleSubmit(payload, localDraft)
+          }}
+          onCommand={handleCommand}
+          commands={CANVAS_BLANK_COMMANDS}
+          focusOnEscape={interactionPanel == null}
+          active={interactionPanel == null}
+        />
+        {interactionPanel}
+        <ThreadStatusFooter
+          agentName={frozenDraft?.agentName || t('ai.runtime.action.blankAgent')}
+          providerName={frozenDraft?.model.providerName || undefined}
+          modelName={
+            frozenDraft?.model.providerName && frozenDraft.model.modelName
+              ? `${frozenDraft.model.providerName}/${frozenDraft.model.modelName}`
+              : undefined
+          }
+          variantName={frozenDraft?.model.variant || undefined}
+          environment={environment}
+          environmentReady={
+            environment == null
+              ? undefined
+              : (environmentReadyByName.get(environment.name) ?? false)
+          }
+          yoloEnabled={frozenDraft?.yoloEnabled ?? false}
+          onAgentClick={() => setInteraction('agent')}
+          onEnvironmentClick={() => setInteraction('environment')}
+        />
+      </main>
+    </section>
   )
 }

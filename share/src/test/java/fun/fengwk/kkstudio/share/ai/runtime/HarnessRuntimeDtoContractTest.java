@@ -117,11 +117,12 @@ class HarnessRuntimeDtoContractTest {
     assertTrue(batch.getCommands().isEmpty());
     assertThrows(UnsupportedOperationException.class, () -> batch.getCommands().add(null));
 
-    // 命令 DTO 的可选字段保持 null 默认：mapper 以 null 区分 forbidden 与未设置。
+    // 命令 DTO 的可选字段保持 null 默认：mapper 以 presence marker 区分 forbidden 与未设置。
     HarnessThreadCommandCreateDTO command = new HarnessThreadCommandCreateDTO();
     assertNull(command.getActiveTools());
     assertTrue(!command.hasContentField());
     assertTrue(!command.hasContentsField());
+    assertTrue(!command.hasEnvironmentField());
 
     HarnessThreadCommandCreateDTO typed = new HarnessThreadCommandCreateDTO();
     typed.setType("USER_MESSAGE");
@@ -134,7 +135,7 @@ class HarnessRuntimeDtoContractTest {
     typed.setAgentName("assistant");
     typed.setModel(new HarnessModelSelectionDTO());
     typed.setYoloEnabled(false);
-    typed.setEnvironmentName(null);
+    typed.setEnvironment(null);
     assertEquals("USER_MESSAGE", typed.getType());
     assertEquals("cmd-1", typed.getClientCommandId());
     assertEquals(List.of(attachment), typed.getContents());
@@ -145,7 +146,9 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("USER", typed.getRole());
     assertEquals("assistant", typed.getAgentName());
     assertEquals(Boolean.FALSE, typed.getYoloEnabled());
-    assertNull(typed.getEnvironmentName());
+    assertNull(typed.getEnvironment());
+    // 显式 null（无论 JSON 还是 setter）置位 presence marker：null 与缺省可区分。
+    assertTrue(typed.hasEnvironmentField());
   }
 
   @Test
@@ -189,7 +192,10 @@ class HarnessRuntimeDtoContractTest {
     tool.setToolName("bash");
     tool.setToolVersion("1.0");
     tool.setToolType("SHELL");
-    tool.setEnvironmentName("env-1");
+    EnvironmentBindingDTO environment = new EnvironmentBindingDTO();
+    environment.setName("env-1");
+    environment.setWorkspacePath(".");
+    tool.setEnvironment(environment);
     tool.setArgumentsJson("{}");
     tool.setApprovalJson(null);
     tool.setResultJson(null);
@@ -207,7 +213,7 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("bash", tool.getToolName());
     assertEquals("1.0", tool.getToolVersion());
     assertEquals("SHELL", tool.getToolType());
-    assertEquals("env-1", tool.getEnvironmentName());
+    assertEquals("env-1", tool.getEnvironment().getName());
     assertEquals("{}", tool.getArgumentsJson());
     assertNull(tool.getApprovalJson());
     assertNull(tool.getResultEntryId());

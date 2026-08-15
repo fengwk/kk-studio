@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
 import fun.fengwk.kkstudio.core.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
@@ -121,7 +122,10 @@ public class ChatServiceImpl implements ChatService {
       throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
     }
     ensureExpectedVersion(locked, id, expectedVersion, expected);
-    List<UUID> threadIds = chatThreadRepository.listThreadIds(locked.getId());
+    List<UUID> threadIds =
+        chatThreadRepository.listThreadIds(locked.getId()).stream()
+            .sorted(UuidOrder.COMPARATOR)
+            .collect(Collectors.toList());
     if (!threadIds.isEmpty()) {
       // Thread 只可能由 Harness Runtime 创建：无 Runtime（无 store）部署中不存在绑定 Thread；存在即不变量违反。
       HarnessStore harnessStore = harnessStoreProvider.getIfAvailable();

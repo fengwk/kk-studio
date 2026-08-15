@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -10,11 +10,11 @@ import java.util.Set;
 /**
  * 一次 Entry branch 的完整不可变 settings 快照。
  *
- * <p>Environment 通过其 canonical {@link EnvironmentName} 逻辑路由名称绑定；该名称是唯一的路由身份，不会出现旧的 UUID
- * 身份或独立展示名。YOLO 被刻意省略：它属于 Thread runtime policy，而不是 branch 历史。
+ * <p>Environment 通过完整 {@link EnvironmentBinding}（canonical 路由名称 + workspace path）原子绑定；null 表示未选择
+ * Environment。YOLO 被刻意省略：它属于 Thread runtime policy，而不是 branch 历史。
  */
 public record BranchSettings(
-    EnvironmentName environmentName,
+    EnvironmentBinding environment,
     String agentName,
     ModelSelection model,
     List<String> activeTools) {
@@ -33,21 +33,21 @@ public record BranchSettings(
 
   /** 返回仅替换 agent 引用后的快照。 */
   public BranchSettings withAgentName(String value) {
-    return new BranchSettings(environmentName, value, model, activeTools);
+    return new BranchSettings(environment, value, model, activeTools);
   }
 
   /** 返回整体原子替换 model selection 后的快照。 */
   public BranchSettings withModel(ModelSelection value) {
-    return new BranchSettings(environmentName, agentName, value, activeTools);
+    return new BranchSettings(environment, agentName, value, activeTools);
   }
 
   /** 返回仅替换有序 active tool 名称后的快照。 */
   public BranchSettings withActiveTools(List<String> values) {
-    return new BranchSettings(environmentName, agentName, model, values);
+    return new BranchSettings(environment, agentName, model, values);
   }
 
-  /** 返回仅替换 Environment 逻辑路由名称后的快照。 */
-  public BranchSettings withEnvironmentName(EnvironmentName value) {
+  /** 返回仅替换完整 Environment binding 后的快照（null 表示解绑）。 */
+  public BranchSettings withEnvironment(EnvironmentBinding value) {
     return new BranchSettings(value, agentName, model, activeTools);
   }
 

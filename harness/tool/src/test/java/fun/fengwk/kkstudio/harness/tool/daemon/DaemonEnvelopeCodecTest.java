@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
-/** Daemon v2 codec 的协议边界测试。 */
+/** Daemon v3 codec 的协议边界测试。 */
 class DaemonEnvelopeCodecTest {
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
@@ -18,7 +18,7 @@ class DaemonEnvelopeCodecTest {
   void encodesAndDecodesVersionTwoEnvelope() {
     DaemonEnvelope envelope =
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.INVOKE,
             new EnvironmentName("environment"),
             "invocation",
@@ -40,7 +40,7 @@ class DaemonEnvelopeCodecTest {
         "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":3,\"messageType\":\"READY\",\"environmentName\":\"e\","
+        "{\"protocolVersion\":4,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
         "{\"protocolVersion\":2,\"messageType\":\"FUTURE\",\"environmentName\":\"e\","
@@ -70,7 +70,7 @@ class DaemonEnvelopeCodecTest {
     assertProtocolError(
         "{\"protocolVersion\":2,\"messageType\":\"READY\",\"environmentName\":7,"
             + "\"sequence\":0,\"payload\":{}}");
-    // 旧协议的 environmentId 字段不再属于 v2 envelope。
+    // 旧协议的 environmentId 字段不再属于 v3 envelope。
     assertProtocolError(
         "{\"protocolVersion\":2,\"messageType\":\"READY\",\"environmentId\":\""
             + "123e4567-e89b-12d3-a456-426614174000"
@@ -93,7 +93,7 @@ class DaemonEnvelopeCodecTest {
   void encodesConnectionLevelEnvelopeAndExposesPayloadHelpers() {
     DaemonEnvelope envelope =
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.READY,
             new EnvironmentName("environment"),
             null,

@@ -21,14 +21,21 @@ describe('Thread snapshot architecture', () => {
     expect(threadKeys).not.toMatch(/detail:|entries:|inputs:|events:|toolInvocations:/)
   })
 
-  it('keeps durable and lossy SSE paths causally separate', () => {
+  it('keeps durable and lossy realtime paths causally separate', () => {
     const realtime = source('features/ai/runtime/useHarnessThreadRealtime.ts')
 
-    expect(realtime).toContain('subscription.revision')
-    expect(realtime).toContain("addEventListener('revision', invalidateSnapshot")
-    expect(realtime).toContain("addEventListener('resync', invalidateSnapshot")
-    expect(realtime).not.toContain("addEventListener('realtime', invalidateSnapshot")
-    expect(realtime.match(/createThreadRealtimeStream\(/g)).toHaveLength(1)
+    expect(realtime).toContain('subscription.threadId')
+    expect(realtime).toContain("name === 'revision'")
+    expect(realtime).toContain('invalidateSnapshot()')
+    // realtime 事件只走 overlay reducer，绝不触发 snapshot invalidate。
+    expect(realtime).toContain('handleRealtime(data)')
+    expect(realtime.match(/applicationEvents\.subscribe\(/g)).toHaveLength(1)
+    expect(realtime).toContain("{ kind: 'thread', id: subscription.threadId }")
+    // subscribed/resync/error 与 revision 一样触发 snapshot 对账。
+    expect(realtime).toContain('onSubscribed: invalidateSnapshot')
+    expect(realtime).toContain('onResync: invalidateSnapshot')
+    expect(realtime).toContain('onError: invalidateSnapshot')
+    expect(realtime).not.toMatch(/EventSource|createThreadRealtimeStream/)
     // 有界的 single-flight gap recovery 可以使用 timer，但每个 timer 必须可取消，
     // 并在 unmount 或 Thread 切换时清理（避免遗留循环）。
     if (/setTimeout/.test(realtime)) {
@@ -36,6 +43,5 @@ describe('Thread snapshot architecture', () => {
     } else {
       expect(realtime).not.toContain('setInterval')
     }
-    expect(realtime).toMatch(/eventSource\.close\(\)/)
   })
 })

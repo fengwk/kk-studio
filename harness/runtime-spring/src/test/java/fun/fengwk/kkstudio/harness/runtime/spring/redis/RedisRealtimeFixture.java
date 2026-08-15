@@ -12,7 +12,8 @@ import java.util.Set;
 /**
  * 进程级单例 {@code redis:7-alpine} Testcontainer 与直连 {@link StringRedisTemplate}。
  *
- * <p>连接不共享 native connection，使 blocking XREAD 与并发写入各占独立连接。Docker 不可用时容器启动直接失败，让 集成测试红屏而不是静默跳过。
+ * <p>连接不共享 native connection，使 blocking SUBSCRIBE、reactive listener 与并发写入各占独立连接。Docker
+ * 不可用时容器启动直接失败，让集成测试红屏而不是静默跳过。
  */
 final class RedisRealtimeFixture {
 
@@ -22,22 +23,28 @@ final class RedisRealtimeFixture {
           .withExposedPorts(6379)
           .waitingFor(Wait.forListeningPort());
 
+  private static final LettuceConnectionFactory CONNECTION_FACTORY;
   private static final StringRedisTemplate TEMPLATE;
 
   static {
     REDIS.start();
-    LettuceConnectionFactory factory =
+    CONNECTION_FACTORY =
         new LettuceConnectionFactory(
             new RedisStandaloneConfiguration(REDIS.getHost(), REDIS.getMappedPort(6379)));
-    factory.setShareNativeConnection(false);
-    factory.afterPropertiesSet();
-    TEMPLATE = new StringRedisTemplate(factory);
+    CONNECTION_FACTORY.setShareNativeConnection(false);
+    CONNECTION_FACTORY.afterPropertiesSet();
+    TEMPLATE = new StringRedisTemplate(CONNECTION_FACTORY);
   }
 
   private RedisRealtimeFixture() {}
 
   static StringRedisTemplate template() {
     return TEMPLATE;
+  }
+
+  /** 供 reactive pub/sub listener 使用的专用连接工厂（每次取用独立连接）。 */
+  static LettuceConnectionFactory connectionFactory() {
+    return CONNECTION_FACTORY;
   }
 
   /** 删除指定 prefix 下的所有 key，保证用例之间互不干扰。 */

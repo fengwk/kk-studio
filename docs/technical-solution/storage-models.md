@@ -152,7 +152,7 @@ Provider attempt 才从 `storage_blob` 读取媒体事实并生成新鲜预签�
 物化中与 pinned orphan 可以暂时无 owner。Canvas Resource 行贡献一个 Blob 引用；删除行必须显式
 release。
 
-`canvas_document.version` 是 command、Patch、SSE 与 Function 可见状态的公共坐标：
+`canvas_document.version` 是 command、Patch、事件通道与 Function 可见状态的公共坐标：
 
 - 成功 command batch +1；
 - Function start/cancel/success/failure +1；

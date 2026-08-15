@@ -92,7 +92,7 @@ services:
       - docker-reliability-daemon
       - --note
       - Isolated Docker reliability environment.
-      - --workdir
+      - --environment-root
       - /workspace
     volumes:
       - daemon-workspace:/workspace

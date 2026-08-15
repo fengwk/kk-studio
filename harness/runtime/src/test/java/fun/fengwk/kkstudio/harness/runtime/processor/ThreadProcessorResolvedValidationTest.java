@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -28,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.List;
 import java.util.UUID;
@@ -41,7 +41,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
 
   @Test
   void routeMismatchIsContractErrorWithZeroMutation() {
-    assertMismatchRollsBack(branchSettings().withEnvironmentName(new EnvironmentName("env-2")));
+    assertMismatchRollsBack(branchSettings().withEnvironment(EnvironmentBindings.binding("env-2")));
   }
 
   @Test

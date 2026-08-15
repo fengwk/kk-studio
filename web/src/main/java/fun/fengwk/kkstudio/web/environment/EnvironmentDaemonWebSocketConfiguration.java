@@ -10,7 +10,7 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 
 /**
- * Daemon v2 Environment gateway 的 WebSocket 传输注册。
+ * Daemon 端点 v2（WebSocket 路径 `/api/ai/environment/daemon/v2`）Environment gateway 的 WebSocket 传输注册。
  *
  * <p>当 Daemon 宣告 skills 时，{@code READY} 帧可能超过 Tomcat 默认的 8 KiB 文本缓冲区。存在真实 servlet container 时，宽容的
  * {@link ServletServerContainerFactoryBean} 会提高 JSR-356 {@link

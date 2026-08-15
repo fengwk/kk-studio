@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.skill;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -10,12 +10,12 @@ import java.util.concurrent.CompletableFuture;
  * 从指定 Environment 加载完整 SKILL.md body，不暴露本地路径。
  *
  * <p>在 Core 的 Environment skill loader 之上做的轻量 Runtime port，使 PLATFORM tool 不直接依赖 Host lifecycle
- * bean。
+ * bean。路由只使用冻结 binding 的 {@code environmentName}，workspace path 不参与 skill 加载。
  */
 public interface SkillBodyLoader {
 
   CompletableFuture<SkillBodyLoadResult> load(
-      EnvironmentName environmentName, String skillName, Duration timeout);
+      EnvironmentBinding binding, String skillName, Duration timeout);
 
   /** 有界 skill body 加载结果。 */
   sealed interface SkillBodyLoadResult

@@ -13,18 +13,24 @@ import {
 } from '@/features/ai/chat/command-batch-plan'
 import { branchDraftFromThread, type BranchDraft } from '@/features/ai/chat/branch-draft'
 import { createAttachmentPart, createTextPart, partsToText, type ComposerPart } from '@/features/ai/composer/composer-parts'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
+  HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadStopResultDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
+
+/** 控制器 Thread id：资源订阅经严格 codec，必须是 canonical UUID。 */
+const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -40,40 +46,8 @@ vi.mock('@/shared/api/harness-service', () => ({
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
-    createThreadRealtimeStream: vi.fn(),
   },
 }))
-
-class FakeEventSource {
-  private readonly listeners = new Map<string, EventListener[]>()
-
-  addEventListener(type: string, listener: EventListener): void {
-    const existing = this.listeners.get(type) ?? []
-    existing.push(listener)
-    this.listeners.set(type, existing)
-  }
-
-  removeEventListener(type: string, listener: EventListener): void {
-    const existing = this.listeners.get(type) ?? []
-    this.listeners.set(
-      type,
-      existing.filter((value) => value !== listener),
-    )
-  }
-
-  emit(type: string): void {
-    const listeners = this.listeners.get(type)
-    if (listeners) {
-      for (const listener of listeners) {
-        listener({} as Event)
-      }
-    }
-  }
-
-  close(): void {
-    this.listeners.clear()
-  }
-}
 
 function modelSelection(
   overrides: Partial<HarnessModelSelectionDTO> = {},
@@ -90,7 +64,7 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: modelSelection(),
     activeTools: [],
@@ -100,7 +74,7 @@ function branchSettings(
 
 function threadFixture(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
-    threadId: 't1',
+    threadId: THREAD_ID,
     sessionId: 's1',
     headEntryId: 'h1',
     yoloEnabled: false,
@@ -143,13 +117,31 @@ const assistantAgentEntry = {
   updateTime: null,
 }
 
-let realtimeSource: FakeEventSource
+let realtimeSockets: FakeWebSocketHarness
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  return (
+    <QueryClientProvider client={client}>
+      <ApplicationEventProvider url="ws://test/events/v1" socketFactory={realtimeSockets.factory}>
+        {children}
+      </ApplicationEventProvider>
+    </QueryClientProvider>
+  )
+}
+
+function clientWrapper(client: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={client}>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={realtimeSockets.factory}>
+          {children}
+        </ApplicationEventProvider>
+      </QueryClientProvider>
+    )
+  }
 }
 
 function buildBatchFor(
@@ -164,7 +156,7 @@ function buildBatchFor(
 describe('useAgentThreadController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    realtimeSource = new FakeEventSource()
+    realtimeSockets = new FakeWebSocketHarness()
     vi.mocked(agentService.listAgents).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
@@ -205,9 +197,6 @@ describe('useAgentThreadController', () => {
         },
       ],
     })
-    vi.mocked(harnessService.createThreadRealtimeStream).mockImplementation(
-      () => realtimeSource as unknown as EventSource,
-    )
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(threadFixture()))
     vi.mocked(harnessService.enqueueCommands).mockResolvedValue(
       [] as HarnessThreadCommandDTO[],
@@ -232,7 +221,7 @@ describe('useAgentThreadController', () => {
           toolVersion: '1',
           rendererKey: 'demo',
           toolType: 'PLATFORM',
-          environmentName: null,
+          environment: null,
           argumentsJson: '{}',
           approvalJson: '{}',
           resultJson: null,
@@ -260,7 +249,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -276,7 +265,7 @@ describe('useAgentThreadController', () => {
 
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
     const [threadIdArg, batchArg] = vi.mocked(harnessService.enqueueCommands).mock.calls[0]!
-    expect(threadIdArg).toBe('t1')
+    expect(threadIdArg).toBe(THREAD_ID)
     expect(batchArg.expectedHeadEntryId).toBe('h1')
     expect(batchArg.expectedNextCommandSequence).toBe('1')
     const types = batchArg.commands.map((command) => command.type)
@@ -305,7 +294,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -382,7 +371,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, base),
           new Map(),
@@ -445,7 +434,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, base),
           new Map(),
@@ -545,7 +534,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -589,7 +578,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -644,7 +633,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatch,
           new Map(),
@@ -683,7 +672,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -720,7 +709,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -746,7 +735,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, draft),
           new Map(),
@@ -773,7 +762,7 @@ describe('useAgentThreadController', () => {
         cancelledCommandCount: 0,
       } as HarnessThreadStopResultDTO)
 
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -805,7 +794,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -818,7 +807,13 @@ describe('useAgentThreadController', () => {
 
     // 权威 snapshot 推进到 Turn 2（head + revision 均已变化）：含糊的
     // 操作自动失效；realtime revision 信号触发一次 refetch。
-    act(() => realtimeSource.emit('revision'))
+    act(() => realtimeSockets.latest?.emitServer({
+      type: 'event',
+      resource: { kind: 'thread', id: THREAD_ID },
+      name: 'revision',
+      data: { revision: '2' },
+      cursor: '2',
+    }))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     await waitFor(() => expect(result.current.stopReplayPending).toBe(false))
 
@@ -847,7 +842,7 @@ describe('useAgentThreadController', () => {
         stoppedTurnEndEntryId: null,
         cancelledCommandCount: 0,
       } as HarnessThreadStopResultDTO)
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -876,7 +871,7 @@ describe('useAgentThreadController', () => {
         stoppedTurnEndEntryId: null,
         cancelledCommandCount: 0,
       } as HarnessThreadStopResultDTO)
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -926,7 +921,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -940,7 +935,13 @@ describe('useAgentThreadController', () => {
     // 不得依赖被动清理 effect 的 flush：它自身的同步栅栏会失效陈旧 basis，
     // 并基于当前 revision 派生一个新的 id。（在 RTL 下 effect 会随 commit 一同 flush，
     // 因此上述栅栏契约由前面的 retireStaleStopPending 单元测试固化。）
-    act(() => realtimeSource.emit('revision'))
+    act(() => realtimeSockets.latest?.emitServer({
+      type: 'event',
+      resource: { kind: 'thread', id: THREAD_ID },
+      name: 'revision',
+      data: { revision: '2' },
+      cursor: '2',
+    }))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     vi.mocked(harnessService.stopThread).mockResolvedValue({
       status: 'IDLE',
@@ -958,7 +959,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('mints a fresh stopRequestId after a successful stop', async () => {
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -990,7 +991,7 @@ describe('useAgentThreadController', () => {
         toolVersion: '1',
         rendererKey: 'demo',
         toolType: 'PLATFORM',
-        environmentName: null,
+        environment: null,
         argumentsJson: '{}',
         approvalJson: '{}',
         resultJson: null,
@@ -1000,7 +1001,7 @@ describe('useAgentThreadController', () => {
         updateTime: null,
       } as ToolInvocationDTO)
 
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -1008,7 +1009,7 @@ describe('useAgentThreadController', () => {
     })
     expect(harnessService.decideApproval).toHaveBeenCalledTimes(1)
     const firstCall = vi.mocked(harnessService.decideApproval).mock.calls[0]
-    expect(firstCall?.[0]).toBe('t1')
+    expect(firstCall?.[0]).toBe(THREAD_ID)
     expect(firstCall?.[1]).toBe('tool-1')
     expect(firstCall?.[2]).toMatchObject({
       decision: 'ALLOW',
@@ -1029,7 +1030,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('mints a fresh decisionId for a different invocation', async () => {
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -1065,7 +1066,7 @@ describe('useAgentThreadController', () => {
         toolVersion: '1',
         rendererKey: 'bash',
         toolType: 'PLATFORM',
-        environmentName: null,
+        environment: null,
         argumentsJson: '{}',
         approvalJson: '{}',
         resultJson: null,
@@ -1075,7 +1076,7 @@ describe('useAgentThreadController', () => {
         updateTime: null,
       } as ToolInvocationDTO)
 
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     // 子 Thread 审批：mutation 必须打到 status.threadId，而不是父 Thread。
@@ -1108,10 +1109,8 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.decideApproval).mockRejectedValueOnce(
       new ApiError('stale child revision', 409),
     )
-    const { result } = renderHook(() => useAgentThreadController('t1'), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+      wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
@@ -1127,7 +1126,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('invalidates the snapshot after a successful stop', async () => {
-    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     const initialCalls = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
@@ -1143,22 +1142,82 @@ describe('useAgentThreadController', () => {
     // name -> ready（统一可用性标记）；display name 已不存在。
     const environments = new Map<string, boolean>([['env-local', true]])
     const currentThread = threadFixture({
-      branchSettings: branchSettings({ environmentName: 'env-local' }),
+      branchSettings: branchSettings({
+        environment: { name: 'env-local', workspacePath: 'proj/a' },
+      }),
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
 
     const { result } = renderHook(
-      () => useAgentThreadController(currentThread.threadId, '', undefined, null, environments),
+      () => useAgentThreadController(currentThread.threadId, [], undefined, null, environments),
       { wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
     expect(result.current.runtimeLabels.agentName).toBe('assistant')
-    expect(result.current.runtimeLabels.environmentName).toBe('env-local')
+    // runtime label 是完整 binding（name + workspacePath）；ready 仍按 name 查询。
+    expect(result.current.runtimeLabels.environment).toEqual({
+      name: 'env-local',
+      workspacePath: 'proj/a',
+    })
     expect(result.current.runtimeLabels.environmentReady).toBe(true)
     expect(result.current.runtimeLabels.modelName).toBe('minimax/MiniMax')
     expect(result.current.thread?.headEntryId).toBe('h1')
     expect(result.current.thread?.nextCommandSequence).toBe('1')
   })
+
+  it('derives Branch Usage from completed TURN_END summaries in the current snapshot', async () => {
+    const currentThread = threadFixture()
+    const entry = (
+      entryId: string,
+      entryType: HarnessSessionEntryDTO['entryType'],
+      payload: Record<string, unknown>,
+    ): HarnessSessionEntryDTO => ({
+      entryId,
+      sessionId: 's1',
+      parentEntryId: null,
+      entryType,
+      payloadJson: JSON.stringify(payload),
+      createTime: null,
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(currentThread, {
+        entries: [
+          entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+          entry('assistant-1', 'MESSAGE', {
+            message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'done' }] },
+            assistantMetadata: {
+              usage: {
+                inputTokens: 1_200,
+                outputTokens: 80,
+                cacheReadTokens: 300,
+                cacheWriteTokens: 40,
+                reasoningTokens: 20,
+                providerTotalTokens: 1_640,
+              },
+              cost: { total: 0.25 },
+            },
+          }),
+          entry('end-1', 'TURN_END', { outcome: 'COMPLETED', continueModel: false }),
+        ],
+      }),
+    )
+
+    const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
+      wrapper,
+    })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    expect(result.current.branchUsage).toEqual({
+      input: 1_200,
+      output: 80,
+      cacheRead: 300,
+      cacheWrite: 40,
+      reasoning: 20,
+      providerTotal: 1_640,
+      cost: 0.25,
+    })
+    expect(result.current.branchUsageText).toBe('↑1.2k · ↓80 · R300 · W40 · $0.250')
+  })
+
   it('clears the exact replay on 409 so the retry mints fresh command ids and cursors', async () => {
     const currentThread = threadFixture({
       revision: '1',
@@ -1176,7 +1235,7 @@ describe('useAgentThreadController', () => {
       () =>
         useAgentThreadController(
           currentThread.threadId,
-          '',
+          [],
           undefined,
           buildBatchFor(currentThread, base, base),
           new Map(),
@@ -1218,10 +1277,8 @@ describe('useAgentThreadController', () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
-    const { result } = renderHook(() => useAgentThreadController('t1'), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+      wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 

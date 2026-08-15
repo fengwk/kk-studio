@@ -3,7 +3,6 @@ import type { UUIDString } from '@/shared/api/contracts/studio'
 import {
   cancelCanvasFunctionRun,
   createCanvas,
-  createCanvasRealtimeStream,
   getCanvas,
   getCanvasChanges,
   getCanvasFunctionRun,
@@ -112,12 +111,7 @@ describe('studio-service', () => {
     })
   })
 
-  it('fetches changes with afterVersion and creates the SSE stream URL', async () => {
-    class FakeEventSource {
-      constructor(readonly url: string) {}
-      close(): void {}
-    }
-    vi.stubGlobal('EventSource', FakeEventSource)
+  it('fetches changes with afterVersion', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(result({
       patches: [],
       snapshot: null,
@@ -129,10 +123,6 @@ describe('studio-service', () => {
     expect(fetch).toHaveBeenCalledWith(`/api/canvases/${CANVAS_ID}/changes?afterVersion=4`, expect.objectContaining({
       method: 'GET',
     }))
-
-    const source = createCanvasRealtimeStream(CANVAS_ID, '4')
-    expect(source.url).toBe(`/api/canvases/${CANVAS_ID}/events/stream?afterVersion=4`)
-    source.close()
   })
 
   it('sends the canvas-scoped atomic first-send request with ordered contents', async () => {
@@ -144,7 +134,7 @@ describe('studio-service', () => {
     const response = await sendCanvasThreadFirstSend(CANVAS_ID, {
       commandId: '22222222-3333-4444-8555-666666666666',
       branchSettings: {
-        environmentName: null,
+        environment: null,
         agentName: 'assistant',
         model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
         activeTools: [],
@@ -159,7 +149,7 @@ describe('studio-service', () => {
     expect(body).toEqual({
       commandId: '22222222-3333-4444-8555-666666666666',
       branchSettings: {
-        environmentName: null,
+        environment: null,
         agentName: 'assistant',
         model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
         activeTools: [],
@@ -170,6 +160,30 @@ describe('studio-service', () => {
     expect(fetch).toHaveBeenCalledWith(`/api/canvases/${CANVAS_ID}/thread/messages`, expect.objectContaining({
       method: 'POST',
     }))
+  })
+
+  it('serializes a full EnvironmentBinding in the canvas first-send branchSettings', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(result({
+      threadId: THREAD_ID,
+      document: documentFixture('0', THREAD_ID),
+    }, 201))
+
+    await sendCanvasThreadFirstSend(CANVAS_ID, {
+      commandId: '22222222-3333-4444-8555-666666666666',
+      branchSettings: {
+        environment: { name: 'local', workspacePath: 'proj/sub' },
+        agentName: 'assistant',
+        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        activeTools: [],
+      },
+      yoloEnabled: false,
+      contents: [{ type: 'TEXT', text: 'hello' }],
+    })
+
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body.branchSettings.environment).toEqual({ name: 'local', workspacePath: 'proj/sub' })
+    // 裸 environmentName 兼容字段绝不进入 wire。
+    expect(body.branchSettings).not.toHaveProperty('environmentName')
   })
 
   it('requires the Result envelope and preserves backend status', async () => {

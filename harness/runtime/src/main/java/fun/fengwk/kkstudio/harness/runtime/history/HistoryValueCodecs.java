@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
@@ -32,7 +33,8 @@ final class HistoryValueCodecs {
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("environmentName", "agentName", "model", "activeTools");
+      orderedSet("environment", "agentName", "model", "activeTools");
+  private static final Set<String> ENVIRONMENT_BINDING_FIELDS = orderedSet("name", "workspacePath");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
@@ -68,10 +70,10 @@ final class HistoryValueCodecs {
 
   static ObjectNode encodeBranchSettings(BranchSettings settings) {
     ObjectNode node = NODES.objectNode();
-    if (settings.environmentName() == null) {
-      node.putNull("environmentName");
+    if (settings.environment() == null) {
+      node.putNull("environment");
     } else {
-      node.put("environmentName", settings.environmentName().value());
+      node.set("environment", encodeEnvironmentBinding(settings.environment()));
     }
     node.put("agentName", settings.agentName());
     node.set("model", encodeModelSelection(settings.model()));
@@ -82,14 +84,35 @@ final class HistoryValueCodecs {
     return node;
   }
 
+  static ObjectNode encodeEnvironmentBinding(EnvironmentBinding binding) {
+    ObjectNode node = NODES.objectNode();
+    node.put("name", binding.environmentName().value());
+    node.put("workspacePath", binding.workspacePath());
+    return node;
+  }
+
   static BranchSettings decodeBranchSettings(JsonNode value, String context) {
     ObjectNode node = requireObject(value, context);
     requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
     return new BranchSettings(
-        nullableEnvironmentName(node, "environmentName", context),
+        nullableEnvironmentBinding(node, "environment", context),
         requiredText(node, "agentName", context),
         decodeModelSelection(node.get("model"), context + ".model"),
         decodeActiveTools(node.get("activeTools"), context));
+  }
+
+  /** 读取可空完整 Environment binding 对象；null 表示未绑定。 */
+  static EnvironmentBinding nullableEnvironmentBinding(
+      ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    ObjectNode binding = requireObject(value, context + "." + field);
+    requireExactFields(binding, ENVIRONMENT_BINDING_FIELDS, context + "." + field);
+    return new EnvironmentBinding(
+        new EnvironmentName(requiredText(binding, "name", context + "." + field)),
+        requiredText(binding, "workspacePath", context + "." + field));
   }
 
   private static List<String> decodeActiveTools(JsonNode value, String context) {
@@ -338,17 +361,6 @@ final class HistoryValueCodecs {
       throw new IllegalArgumentException(
           context + "." + field + " must be a canonical UUID string", error);
     }
-  }
-
-  static EnvironmentName nullableEnvironmentName(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isTextual()) {
-      throw new IllegalArgumentException(context + "." + field + " must be text or null");
-    }
-    return new EnvironmentName(value.textValue());
   }
 
   static void requireExactFields(ObjectNode node, Set<String> expected, String context) {

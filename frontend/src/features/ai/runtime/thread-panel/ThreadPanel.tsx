@@ -1,7 +1,7 @@
-import type { ReactNode, RefObject } from 'react'
+import { useMemo, type ReactNode, type RefObject } from 'react'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
+import { ThreadConversationView } from '@/features/ai/runtime/thread-panel/ThreadConversationView'
 import { ThreadErrorPanel } from '@/features/ai/runtime/thread-panel/ThreadErrorPanel'
-import { ThreadTranscript } from '@/features/ai/runtime/thread-panel/ThreadTranscript'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
@@ -21,10 +21,24 @@ export interface ThreadPanelTranscriptInput {
   loading: boolean
   error: unknown
   bodyRef: RefObject<HTMLDivElement | null>
+  /** 重新进入 conversation 视图时恢复的 scrollTop；null 表示首次进入（贴底）。 */
+  initialScrollTop?: number | null
+  /** 变化时重置 stick 并重新贴底（Thread 重绑后新线程首次进入）。 */
+  resetKey?: string | number | null
+  /** 非消息内容的变化计数（控制 Entry/queued 等），用于贴底再评估。 */
+  eventCount?: number
   /** 处理待决 ToolInvocation 的审批；当面板没有 Thread 上下文时为空。 */
   onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
   /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
   approvalPending?: boolean
+}
+
+/**
+ * 主视图槽位：Conversation 与 Event 互斥，只渲染一个主滚动区（不并排、无 tabs）。
+ * 传入 events 时替换 transcript 滚动区；Composer/queue/working 保持挂载，切换不丢状态。
+ */
+export interface ThreadPanelMainView {
+  events?: ReactNode
 }
 
 /**
@@ -36,10 +50,15 @@ export interface ThreadPanelComposerInput {
   pending: boolean
   disabled: boolean
   onPartsChange: (parts: ComposerPart[]) => void
+  onHistoryPartsChange?: (parts: ComposerPart[]) => void
   /** 提交载荷：payload（server uploadId）与 localDraft（客户端 localId 快照）分开传递。 */
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
+  /** 当前交互作用域是否允许 Escape 把焦点恢复到此 Composer。 */
+  focusOnEscape?: boolean
+  /** 与 Composer 互斥的轻量选择/操作面板；Composer 保持挂载以保留草稿上传状态。 */
+  interactionPanel?: ReactNode
 }
 
 /**
@@ -64,6 +83,8 @@ interface ThreadPanelSlots {
 
 interface ThreadPanelProps {
   transcript: ThreadPanelTranscriptInput
+  /** 互斥主视图：传入 events 时替换 transcript（Event view）。 */
+  mainView?: ThreadPanelMainView
   composer: ThreadPanelComposerInput
   activity: ThreadPanelActivityInput
   slots?: ThreadPanelSlots
@@ -71,26 +92,44 @@ interface ThreadPanelProps {
 
 /**
  * 全宽 thread 面板：
- * 持久/实时对话 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
+ * Conversation/Event 互斥主滚动区 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
  */
-export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPanelProps) {
+export function ThreadPanel({ transcript, mainView, composer, activity, slots }: ThreadPanelProps) {
+  const interactionOpen = composer.interactionPanel != null
+  const historicalUserMessages = useMemo(
+    () => transcript.messages.flatMap((message) =>
+      message.role === 'user' && message.text.length > 0 ? [message.text] : [],
+    ),
+    [transcript.messages],
+  )
+  const queuedUserMessages = useMemo(
+    () => transcript.queuedMessages.flatMap((message) =>
+      message.role === 'user' && message.text.length > 0 ? [message.text] : [],
+    ),
+    [transcript.queuedMessages],
+  )
   return (
     <section className="chat-shell thread-panel">
       {slots?.sidebar}
       <main className="chat-main thread-panel-main">
-        <ThreadTranscript
-          messages={transcript.messages}
-          loading={transcript.loading}
-          error={transcript.error}
-          bodyRef={transcript.bodyRef}
-          onDecideApproval={transcript.onDecideApproval}
-          approvalPending={transcript.approvalPending}
-        />
+        {mainView?.events ?? (
+          <ThreadConversationView
+            messages={transcript.messages}
+            loading={transcript.loading}
+            error={transcript.error}
+            bodyRef={transcript.bodyRef}
+            initialScrollTop={transcript.initialScrollTop}
+            resetKey={transcript.resetKey}
+            eventCount={transcript.eventCount}
+            onDecideApproval={transcript.onDecideApproval}
+            approvalPending={transcript.approvalPending}
+          />
+        )}
         <ThreadWidgetStack
           working={activity.working || composer.pending}
-          queuedMessages={transcript.queuedMessages}
+          queuedMessages={interactionOpen ? [] : transcript.queuedMessages}
         >
-          {activity.widgets}
+          {interactionOpen ? null : activity.widgets}
         </ThreadWidgetStack>
         {activity.actionError ? (
           <ThreadErrorPanel message={activity.actionError} onDismiss={activity.onDismissActionError} />
@@ -100,10 +139,16 @@ export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPan
           pending={composer.pending}
           disabled={composer.disabled}
           onPartsChange={composer.onPartsChange}
+          onHistoryPartsChange={composer.onHistoryPartsChange}
           onSubmit={composer.onSubmit}
           onCommand={composer.onCommand}
           commands={composer.commands}
+          focusOnEscape={composer.focusOnEscape && !interactionOpen}
+          active={!interactionOpen}
+          historicalUserMessages={historicalUserMessages}
+          queuedUserMessages={queuedUserMessages}
         />
+        {composer.interactionPanel}
         {slots?.footer}
       </main>
     </section>

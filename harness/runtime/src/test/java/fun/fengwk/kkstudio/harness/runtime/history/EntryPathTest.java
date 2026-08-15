@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -27,7 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -104,7 +105,7 @@ class EntryPathTest {
     // baseSettings() 必须返回最新 ROOT/TURN_START 的完整快照，绝不回看更旧的非 null environment/agent。
     BranchSettings rootSettings = settings(null, "root-agent");
     BranchSettings firstTurn =
-        settings(new EnvironmentName("env-a"), "first-agent")
+        settings(EnvironmentBindings.binding("env-a"), "first-agent")
             .withModel(new ModelSelection("anthropic", "claude-sonnet", "custom"))
             .withActiveTools(List.of("read", "bash"));
     BranchSettings latestTurn = settings(null, "latest-agent");
@@ -122,7 +123,7 @@ class EntryPathTest {
 
     BranchSettings base = path.baseSettings();
     assertEquals(latestTurn, base);
-    assertNull(base.environmentName());
+    assertNull(base.environment());
     assertEquals("latest-agent", base.agentName());
     assertEquals(new ModelSelection("anthropic", "claude-sonnet", "default"), base.model());
     assertEquals(List.of("read"), base.activeTools());
@@ -1168,9 +1169,9 @@ class EntryPathTest {
     return settings(null, agentName);
   }
 
-  private static BranchSettings settings(EnvironmentName environmentName, String agentName) {
+  private static BranchSettings settings(EnvironmentBinding environment, String agentName) {
     return new BranchSettings(
-        environmentName,
+        environment,
         agentName,
         new ModelSelection("anthropic", "claude-sonnet", "default"),
         List.of("read"));

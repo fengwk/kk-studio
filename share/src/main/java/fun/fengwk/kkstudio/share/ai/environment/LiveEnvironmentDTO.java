@@ -32,4 +32,7 @@ public class LiveEnvironmentDTO {
 
   /** 该 Environment 的 daemon 声明的 MCP server 摘要列表（仅 READY 状态发布；稳定展示，不作为动态可选 Agent 工具）。 */
   private List<LiveEnvironmentMcpServerDTO> mcpServers;
+
+  /** 该 Environment 的 daemon 实际 canonical root display path（仅 READY 状态发布；只读披露，不参与路径解析）。 */
+  private String rootPath;
 }

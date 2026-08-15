@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 
 import java.sql.Connection;
 import java.time.Instant;
@@ -182,46 +183,59 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
   }
 
   @Test
-  void environmentNameDefaultIsNullableSetAndClearable() {
+  void environmentDefaultIsNullableSetAndClearable() {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("env-default");
     create.setAgentName("default-assistant");
-    create.setEnvironmentName("env-dev");
+    create.setEnvironment(bindingDto("env-dev", "."));
     ChatDTO created = chatService.createChat(create);
-    assertEquals("env-dev", created.getEnvironmentName());
+    assertEquals("env-dev", created.getEnvironment().getName());
+    assertEquals(".", created.getEnvironment().getWorkspacePath());
     String chatId = created.getId();
     try {
       ChatUpdateDTO clear = new ChatUpdateDTO();
-      clear.setEnvironmentName(null);
+      clear.setEnvironment(null);
       clear.setExpectedVersion("0");
       ChatDTO cleared = chatService.updateChat(chatId, clear);
-      assertNull(cleared.getEnvironmentName());
+      assertNull(cleared.getEnvironment());
 
       ChatUpdateDTO set = new ChatUpdateDTO();
-      set.setEnvironmentName("env-2");
+      set.setEnvironment(bindingDto("env-2", "sub/dir"));
       set.setExpectedVersion("1");
       ChatDTO updated = chatService.updateChat(chatId, set);
-      assertEquals("env-2", updated.getEnvironmentName());
+      assertEquals("env-2", updated.getEnvironment().getName());
+      assertEquals("sub/dir", updated.getEnvironment().getWorkspacePath());
 
-      // 非 canonical 名称提供时确定性拒绝，绝不持久化。
+      // 非 canonical 名称 / 非法 workspace 路径提供时确定性拒绝，绝不持久化。
       ChatUpdateDTO invalid = new ChatUpdateDTO();
-      invalid.setEnvironmentName("Bad Name");
+      invalid.setEnvironment(bindingDto("Bad Name", "."));
       invalid.setExpectedVersion("2");
       assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, invalid));
+      ChatUpdateDTO invalidPath = new ChatUpdateDTO();
+      invalidPath.setEnvironment(bindingDto("env-2", "/abs"));
+      invalidPath.setExpectedVersion("2");
+      assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, invalidPath));
       ChatCreateDTO invalidCreate = new ChatCreateDTO();
       invalidCreate.setTitle("invalid-env");
       invalidCreate.setAgentName("default-assistant");
-      invalidCreate.setEnvironmentName("env/name");
+      invalidCreate.setEnvironment(bindingDto("env/name", "."));
       assertThrows(AiValidationException.class, () -> chatService.createChat(invalidCreate));
 
-      // 缺省（不提供 environmentName）保留当前值。
+      // 缺省（不提供 environment）保留当前值。
       ChatUpdateDTO untouched = new ChatUpdateDTO();
       untouched.setTitle("still env-2");
       untouched.setExpectedVersion("2");
-      assertEquals("env-2", chatService.updateChat(chatId, untouched).getEnvironmentName());
+      assertEquals("env-2", chatService.updateChat(chatId, untouched).getEnvironment().getName());
     } finally {
       chatService.deleteChat(chatId, chatService.getChat(chatId).getVersion());
     }
+  }
+
+  private static EnvironmentBindingDTO bindingDto(String name, String workspacePath) {
+    EnvironmentBindingDTO dto = new EnvironmentBindingDTO();
+    dto.setName(name);
+    dto.setWorkspacePath(workspacePath);
+    return dto;
   }
 
   private static int indexOf(List<ChatDTO> listed, String id) {

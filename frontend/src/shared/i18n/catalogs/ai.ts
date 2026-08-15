@@ -66,8 +66,16 @@ export const aiCatalog = {
     'zh-CN': '运行中',
   },
   'ai.chat.history.confirmDiscardDraft': {
-    'en-US': 'The pane has unsent edits. Relocate anyway and discard them?',
-    'zh-CN': '面板有未发送的修改，仍要重定位并丢弃这些修改吗？',
+    'en-US': 'The pane has unsent changes. Continue and discard them?',
+    'zh-CN': '面板有未发送的修改，是否继续并丢弃这些修改？',
+  },
+  'ai.chat.history.discardDraftTitle': {
+    'en-US': 'Discard unsent changes?',
+    'zh-CN': '丢弃未发送的修改？',
+  },
+  'ai.chat.history.discardDraftConfirm': {
+    'en-US': 'Discard changes',
+    'zh-CN': '丢弃修改',
   },
   'ai.runtime.approval.title': {
     'en-US': 'Tool approval',
@@ -906,6 +914,86 @@ export const aiCatalog = {
     'en-US': 'No Threads',
     'zh-CN': '暂无 Thread',
   },
+  'ai.chat.selection.search': {
+    'en-US': 'Search',
+    'zh-CN': '搜索',
+  },
+  'ai.chat.selection.options': {
+    'en-US': '{{title}} options',
+    'zh-CN': '{{title}}选项',
+  },
+  'ai.chat.selection.noMatch': {
+    'en-US': 'No matches for “{{query}}”',
+    'zh-CN': '没有匹配“{{query}}”的选项',
+  },
+  'ai.chat.selection.meta': {
+    'en-US': '{{visible}} / {{total}} · ↑↓ select · Enter confirm · Esc back{{cycle}}',
+    'zh-CN': '{{visible}} / {{total}} · ↑↓ 选择 · Enter 确认 · Esc 返回{{cycle}}',
+  },
+  'ai.chat.selection.tabSort': {
+    'en-US': 'Tab switch sort',
+    'zh-CN': 'Tab 切换排序',
+  },
+  'ai.chat.workspace.directoryTitle': {
+    'en-US': '{{name}} directory',
+    'zh-CN': '{{name}} 目录',
+  },
+  'ai.chat.workspace.currentPath': {
+    'en-US': 'Current: {{path}}',
+    'zh-CN': '当前：{{path}}',
+  },
+  'ai.chat.workspace.entries': {
+    'en-US': 'Directory entries',
+    'zh-CN': '目录条目',
+  },
+  'ai.chat.workspace.up': {
+    'en-US': 'Up',
+    'zh-CN': '上一级',
+  },
+  'ai.chat.workspace.upTitle': {
+    'en-US': 'Go to parent directory',
+    'zh-CN': '进入父目录',
+  },
+  'ai.chat.workspace.refresh': {
+    'en-US': 'Refresh',
+    'zh-CN': '刷新',
+  },
+  'ai.chat.workspace.backToEnvironments': {
+    'en-US': 'Back to environments',
+    'zh-CN': '返回 Environment 列表',
+  },
+  'ai.chat.workspace.confirm': {
+    'en-US': 'Use current Workspace',
+    'zh-CN': '使用当前 Workspace',
+  },
+  'ai.chat.workspace.confirmDisabled': {
+    'en-US': 'Choose a directory before confirming',
+    'zh-CN': '请先选择一个目录',
+  },
+  'ai.chat.workspace.empty': {
+    'en-US': 'This directory has no subdirectories',
+    'zh-CN': '该目录没有子目录',
+  },
+  'ai.chat.workspace.truncated': {
+    'en-US': 'Too many entries; only the first 1000 are shown',
+    'zh-CN': '目录条目过多，仅显示前 1000 个',
+  },
+  'ai.chat.workspace.gitBranch': {
+    'en-US': 'branch: {{branch}}',
+    'zh-CN': '分支：{{branch}}',
+  },
+  'ai.chat.workspace.loadFailed': {
+    'en-US': 'Failed to load the directory',
+    'zh-CN': '目录加载失败',
+  },
+  'ai.chat.workspace.enterDirectory': {
+    'en-US': 'Enter {{name}}',
+    'zh-CN': '进入 {{name}}',
+  },
+  'ai.chat.workspace.loading': {
+    'en-US': 'Loading directory…',
+    'zh-CN': '正在加载目录…',
+  },
   'ai.chat.history.title': {
     'en-US': 'History branches',
     'zh-CN': '历史分支',
@@ -1038,10 +1126,6 @@ export const aiCatalog = {
     'en-US': 'Command palette',
     'zh-CN': '命令表',
   },
-  'ai.runtime.command.search': {
-    'en-US': 'Search commands…',
-    'zh-CN': '搜索命令…',
-  },
   'ai.runtime.command.noMatch': {
     'en-US': 'No matching commands',
     'zh-CN': '无匹配命令',
@@ -1066,13 +1150,13 @@ export const aiCatalog = {
     'en-US': 'Select or create a Thread first',
     'zh-CN': '选择或创建 Thread 后可用',
   },
+  'ai.runtime.command.activeView': {
+    'en-US': 'This view is already active',
+    'zh-CN': '当前已激活该视图',
+  },
   'ai.runtime.command.upload': {
     'en-US': 'Upload files and insert ordered attachment references',
     'zh-CN': '上传文件并插入有序附件引用',
-  },
-  'ai.runtime.command.session': {
-    'en-US': 'Relocate the current Thread to a history position in the selected Session',
-    'zh-CN': '把当前 Thread 重定位到所选 Session 的历史位置',
   },
   'ai.runtime.command.thread': {
     'en-US': 'Switch the Thread bound to this Pane (does not modify any Thread)',
@@ -1102,13 +1186,21 @@ export const aiCatalog = {
     'en-US': 'Return to a blank pane; sending creates a new Session / Thread',
     'zh-CN': '回到空面板；发送后创建新的 Session / Thread',
   },
+  'ai.runtime.command.events': {
+    'en-US': 'Inspect the durable Entry log and live model / tool invocations',
+    'zh-CN': '查看持久 Entry 日志与活跃 model / tool 调用',
+  },
+  'ai.runtime.command.conversation': {
+    'en-US': 'Return to the conversation transcript',
+    'zh-CN': '返回对话时间线',
+  },
+  'ai.runtime.command.shortcuts': {
+    'en-US': 'Show the keyboard shortcut catalog',
+    'zh-CN': '查看键盘快捷键目录',
+  },
   'ai.runtime.command.uploadLabel': {
     'en-US': 'upload',
     'zh-CN': 'upload',
-  },
-  'ai.runtime.command.sessionLabel': {
-    'en-US': 'session',
-    'zh-CN': 'session',
   },
   'ai.runtime.command.threadLabel': {
     'en-US': 'thread',
@@ -1137,6 +1229,22 @@ export const aiCatalog = {
   'ai.runtime.command.newLabel': {
     'en-US': 'new',
     'zh-CN': 'new',
+  },
+  'ai.runtime.command.eventsLabel': {
+    'en-US': 'events',
+    'zh-CN': 'events',
+  },
+  'ai.runtime.command.conversationLabel': {
+    'en-US': 'conversation',
+    'zh-CN': 'conversation',
+  },
+  'ai.runtime.command.shortcutsLabel': {
+    'en-US': 'shortcuts',
+    'zh-CN': 'shortcuts',
+  },
+  'ai.runtime.shortcuts.title': {
+    'en-US': 'Keyboard shortcuts',
+    'zh-CN': '键盘快捷键',
   },
   'ai.runtime.thread.loading': {
     'en-US': 'Loading conversation…',
@@ -1299,8 +1407,8 @@ export const aiCatalog = {
     'zh-CN': 'env:none',
   },
   'ai.runtime.status.environmentUnavailableText': {
-    'en-US': 'env:{{name}} (unavailable)',
-    'zh-CN': 'env:{{name}} (unavailable)',
+    'en-US': 'env:{{name}} · ws:{{workspace}} (unavailable)',
+    'zh-CN': 'env:{{name}} · ws:{{workspace}} (unavailable)',
   },
   'ai.runtime.status.agentSwitchTitle': {
     'en-US': 'Click to switch Agent',
@@ -1327,20 +1435,12 @@ export const aiCatalog = {
     'zh-CN': '{{model}} · {{variant}}',
   },
   'ai.runtime.status.environmentText': {
-    'en-US': 'env:{{name}}',
-    'zh-CN': 'env:{{name}}',
+    'en-US': 'env:{{name}} · ws:{{workspace}}',
+    'zh-CN': 'env:{{name}} · ws:{{workspace}}',
   },
-  'ai.runtime.status.taskStatusOn': {
-    'en-US': 'task-status:on',
-    'zh-CN': 'task-status:on',
-  },
-  'ai.runtime.status.taskStatusOff': {
-    'en-US': 'task-status:off',
-    'zh-CN': 'task-status:off',
-  },
-  'ai.runtime.status.taskStatusToggleTitle': {
-    'en-US': 'Toggle the live subagent task widget',
-    'zh-CN': '切换子任务实时状态组件',
+  'ai.runtime.status.branchUsageTitle': {
+    'en-US': 'Branch usage: {{usage}}',
+    'zh-CN': '分支用量：{{usage}}',
   },
   'ai.runtime.status.notificationsOn': {
     'en-US': 'notify:on',
@@ -1517,6 +1617,210 @@ export const aiCatalog = {
   'ai.runtime.entry.unknownText': {
     'en-US': 'This Entry type has no dedicated renderer yet. Expand the raw payload to inspect it.',
     'zh-CN': '该 Entry 类型尚无专用渲染器，原始 payload 可展开查看。',
+  },
+  'ai.runtime.event.list': {
+    'en-US': 'Events',
+    'zh-CN': '事件',
+  },
+  'ai.runtime.event.empty': {
+    'en-US': 'No events yet',
+    'zh-CN': '暂无事件',
+  },
+  'ai.runtime.event.emptyText': {
+    'en-US': '(no summary)',
+    'zh-CN': '（无摘要）',
+  },
+  'ai.runtime.event.abortedText': {
+    'en-US': 'The assistant response was stopped by the user.',
+    'zh-CN': '助手回复已被用户停止。',
+  },
+  'ai.runtime.event.unknownType': {
+    'en-US': 'Unknown entry: {{type}}',
+    'zh-CN': '未知条目：{{type}}',
+  },
+  'ai.runtime.event.unknownTool': {
+    'en-US': 'unknown tool',
+    'zh-CN': '未知工具',
+  },
+  'ai.runtime.event.kind.ROOT': {
+    'en-US': 'Root',
+    'zh-CN': '根节点',
+  },
+  'ai.runtime.event.kind.TURN_START': {
+    'en-US': 'Turn start',
+    'zh-CN': '回合开始',
+  },
+  'ai.runtime.event.kind.USER_MESSAGE': {
+    'en-US': 'User message',
+    'zh-CN': '用户消息',
+  },
+  'ai.runtime.event.kind.ASSISTANT_MESSAGE': {
+    'en-US': 'Assistant message',
+    'zh-CN': '助手消息',
+  },
+  'ai.runtime.event.kind.TOOL_CALL': {
+    'en-US': 'Tool call',
+    'zh-CN': '工具调用',
+  },
+  'ai.runtime.event.kind.TOOL_RESULT': {
+    'en-US': 'Tool result',
+    'zh-CN': '工具结果',
+  },
+  'ai.runtime.event.kind.MODEL_ATTEMPT_FAILURE': {
+    'en-US': 'Model attempt failure',
+    'zh-CN': '模型尝试失败',
+  },
+  'ai.runtime.event.kind.ASSISTANT_ERROR': {
+    'en-US': 'Assistant error',
+    'zh-CN': '助手错误',
+  },
+  'ai.runtime.event.kind.ASSISTANT_ABORTED': {
+    'en-US': 'Assistant aborted',
+    'zh-CN': '助手已停止',
+  },
+  'ai.runtime.event.kind.CUSTOM': {
+    'en-US': 'Custom',
+    'zh-CN': '自定义',
+  },
+  'ai.runtime.event.kind.CUSTOM_MESSAGE': {
+    'en-US': 'Custom message',
+    'zh-CN': '自定义消息',
+  },
+  'ai.runtime.event.kind.COMPACTION': {
+    'en-US': 'Compaction',
+    'zh-CN': '上下文压缩',
+  },
+  'ai.runtime.event.kind.TURN_END': {
+    'en-US': 'Turn end',
+    'zh-CN': '回合结束',
+  },
+  'ai.runtime.event.kind.ACTIVE_MODEL_INVOCATION': {
+    'en-US': 'Active model invocation',
+    'zh-CN': '活跃模型调用',
+  },
+  'ai.runtime.event.kind.ACTIVE_TOOL_INVOCATION': {
+    'en-US': 'Active tool invocation',
+    'zh-CN': '活跃工具调用',
+  },
+  'ai.runtime.event.detailTitle': {
+    'en-US': 'Event details',
+    'zh-CN': '事件详情',
+  },
+  'ai.runtime.event.closeDetail': {
+    'en-US': 'Close event details',
+    'zh-CN': '关闭事件详情',
+  },
+  'ai.runtime.event.detail.entryId': {
+    'en-US': 'Entry ID',
+    'zh-CN': 'Entry ID',
+  },
+  'ai.runtime.event.detail.entryType': {
+    'en-US': 'Entry type',
+    'zh-CN': 'Entry 类型',
+  },
+  'ai.runtime.event.detail.createTime': {
+    'en-US': 'Time',
+    'zh-CN': '时间',
+  },
+  'ai.runtime.event.detail.turn': {
+    'en-US': 'Turn',
+    'zh-CN': '回合',
+  },
+  'ai.runtime.event.detail.role': {
+    'en-US': 'Role',
+    'zh-CN': '角色',
+  },
+  'ai.runtime.event.detail.status': {
+    'en-US': 'Status',
+    'zh-CN': '状态',
+  },
+  'ai.runtime.event.detail.attempt': {
+    'en-US': 'Attempt',
+    'zh-CN': '尝试次数',
+  },
+  'ai.runtime.event.detail.sequence': {
+    'en-US': 'Sequence',
+    'zh-CN': '序号',
+  },
+  'ai.runtime.event.detail.toolName': {
+    'en-US': 'Tool',
+    'zh-CN': '工具',
+  },
+  'ai.runtime.event.detail.toolCallId': {
+    'en-US': 'Tool call ID',
+    'zh-CN': '工具调用 ID',
+  },
+  'ai.runtime.event.detail.errorCode': {
+    'en-US': 'Error code',
+    'zh-CN': '错误码',
+  },
+  'ai.runtime.event.detail.errorMessage': {
+    'en-US': 'Error message',
+    'zh-CN': '错误信息',
+  },
+  'ai.runtime.event.detail.failedAt': {
+    'en-US': 'Failed at',
+    'zh-CN': '失败时间',
+  },
+  'ai.runtime.event.detail.retryAt': {
+    'en-US': 'Retry at',
+    'zh-CN': '重试时间',
+  },
+  'ai.runtime.event.detail.chars': {
+    'en-US': 'Streamed characters',
+    'zh-CN': '已流式字符数',
+  },
+  'ai.runtime.event.detail.outcome': {
+    'en-US': 'Outcome',
+    'zh-CN': '结果',
+  },
+  'ai.runtime.event.detail.input': {
+    'en-US': 'Input tokens',
+    'zh-CN': '输入 tokens',
+  },
+  'ai.runtime.event.detail.output': {
+    'en-US': 'Output tokens',
+    'zh-CN': '输出 tokens',
+  },
+  'ai.runtime.event.detail.cacheRead': {
+    'en-US': 'Cache read tokens',
+    'zh-CN': '缓存读 tokens',
+  },
+  'ai.runtime.event.detail.cacheWrite': {
+    'en-US': 'Cache write tokens',
+    'zh-CN': '缓存写 tokens',
+  },
+  'ai.runtime.event.detail.reasoning': {
+    'en-US': 'Reasoning tokens',
+    'zh-CN': '推理 tokens',
+  },
+  'ai.runtime.event.detail.providerTotal': {
+    'en-US': 'Provider total tokens',
+    'zh-CN': 'Provider 总 tokens',
+  },
+  'ai.runtime.event.detail.cost': {
+    'en-US': 'Cost',
+    'zh-CN': '费用',
+  },
+  'ai.runtime.event.status.PENDING': {
+    'en-US': 'Pending',
+    'zh-CN': '等待中',
+  },
+  'ai.runtime.event.status.RUNNING': {
+    'en-US': 'Running',
+    'zh-CN': '运行中',
+  },
+  'ai.runtime.event.status.COMPLETED': {
+    'en-US': 'Completed',
+    'zh-CN': '已完成',
+  },
+  'ai.runtime.event.status.FAILED': {
+    'en-US': 'Failed',
+    'zh-CN': '失败',
+  },
+  'ai.runtime.event.status.STOPPED': {
+    'en-US': 'Stopped',
+    'zh-CN': '已停止',
   },
   'ai.runtime.entry.assistantRequestFailed': {
     'en-US': 'Assistant request failed',

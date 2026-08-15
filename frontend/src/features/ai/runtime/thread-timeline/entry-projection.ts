@@ -1,6 +1,10 @@
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
-import type { DialogueMessage, ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import type {
+  DialogueMessage,
+  MetaDialogueMessage,
+  ToolDialogueMessage,
+} from '@/features/ai/runtime/thread-timeline-types'
 import {
   contentText,
   toResourceAttachment,
@@ -15,10 +19,19 @@ import {
 import { projectTurnUsageFromAssistantMetadata } from '@/features/ai/runtime/thread-timeline/meta-projection'
 import { translate } from '@/shared/i18n'
 
+/**
+ * 逐 turn 的投影上下文。Turn usage 不紧跟 Assistant：summary 先挂起，在相应
+ * TURN_END 之后才投影为 TurnSummary；新 turn 开始时丢弃未关闭 turn 的残留。
+ */
+export interface EntryProjectionContext {
+  pendingTurnSummary: MetaDialogueMessage | null
+}
+
 export function projectDurableEntry(
   entry: HarnessSessionEntryDTO,
   messages: DialogueMessage[],
   durableToolArguments: Map<string, string[]>,
+  context: EntryProjectionContext,
 ) {
   const payload = parsePayload(entry.payloadJson)
   const entryType = entry.entryType
@@ -28,6 +41,17 @@ export function projectDurableEntry(
   }
   if (entryType === 'TURN_START' || entryType === 'COMPACTION' || entryType === 'TURN_END') {
     // 控制边界：不显示成 unknown entry，也不进入对话时间线。
+    if (entryType === 'TURN_END') {
+      // TurnSummary：usage 挂起至相应 TURN_END 之后投影（绝不紧跟 Assistant）。
+      const summary = context.pendingTurnSummary
+      context.pendingTurnSummary = null
+      if (summary != null) {
+        messages.push(summary)
+      }
+    } else {
+      // 新 turn 开始：丢弃上一 turn 未关闭的残留 usage。
+      context.pendingTurnSummary = null
+    }
     return
   }
   if (entryType === 'MODEL_ATTEMPT_FAILURE') {
@@ -146,14 +170,12 @@ export function projectDurableEntry(
       messages.push(projectEmptyMessageEntry(entry, role))
     }
     const metadata = asRecord(payload.assistantMetadata)
-    const turnUsage = projectTurnUsageFromAssistantMetadata(
+    // Turn usage 不在此处投影：挂起到当前 turn 的 TURN_END 之后再输出。
+    context.pendingTurnSummary = projectTurnUsageFromAssistantMetadata(
       entry.entryId,
       metadata,
       entry.createTime,
     )
-    if (turnUsage) {
-      messages.push(turnUsage)
-    }
     return
   }
   if (role === 'TOOL') {

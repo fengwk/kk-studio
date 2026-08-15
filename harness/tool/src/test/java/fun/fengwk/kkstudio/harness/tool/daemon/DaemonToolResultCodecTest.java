@@ -25,7 +25,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 
-/** Daemon v2 PARTIAL / COMPLETED payload codec 的双向与拒绝契约测试。 */
+/** Daemon wire PARTIAL / COMPLETED payload codec 的双向与拒绝契约测试。 */
 class DaemonToolResultCodecTest {
 
   private static final String EXPORT_URI = "file:///export/abc";

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { isPaneBound, type ChatPane, type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentBindingDTO, LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import type { CommandBatchReplay } from '@/features/ai/runtime'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import type { FirstSendRecovery } from '@/features/ai/chat/chat-first-send'
@@ -42,7 +42,7 @@ export function ChatWorkspacePane({
   onThreadSortChange: (sort: PaneSortPreference) => void
   onAgentChange: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
-  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  onEnvironmentChange?: (environment: EnvironmentBindingDTO | null) => Promise<void>
 }) {
   const [firstSendRecovery, setFirstSendRecovery] = useState<{
     threadId: string
@@ -97,6 +97,7 @@ export function ChatWorkspacePane({
       chat={chat}
       agents={agents}
       environments={environments}
+      paneId={pane.id}
       focused={focused}
       threadSort={threadSort}
       onFocus={onFocus}

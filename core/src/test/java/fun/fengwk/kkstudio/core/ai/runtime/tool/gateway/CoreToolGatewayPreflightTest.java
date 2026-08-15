@@ -14,8 +14,13 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -25,6 +30,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -157,9 +163,72 @@ class CoreToolGatewayPreflightTest {
     }
   }
 
+  @Test
+  void environmentWorkspaceBecomesDefaultWorkdirForAskPreview() {
+    // ENVIRONMENT tool 的权限上下文必须体现冻结 binding 的 workspace：Ask reason 的默认 workdir 是
+    // environmentRoot 下的 canonical workspacePath，而不是 server 默认 workdir。
+    EnvironmentBinding binding = new EnvironmentBinding(new EnvironmentName("env-1"), "repo/sub");
+    ToolGateway.PreflightResult result =
+        environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", PermissionAction.ASK);
+    ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
+    assertTrue(ask.reason().contains("/environment-root/repo/sub (default)"), ask.reason());
+  }
+
+  @Test
+  void environmentWorkspaceExpandsPathCandidatesUnderEnvironmentRoot() {
+    // path 候选必须包含 environmentRoot 相对 workspace 路径（repo/sub/src/Main.java），因此 repo/sub/**
+    // 规则命中 DENY；若 preflight 仍用 server 默认 workdir，候选不含该路径，结果会是 ASK。
+    EnvironmentBinding binding = new EnvironmentBinding(new EnvironmentName("env-1"), "repo/sub");
+    ToolSettings settings =
+        new ToolSettings(
+            Map.of(
+                "*",
+                List.of(
+                    new PermissionRule("*", PermissionAction.ASK),
+                    new PermissionRule("repo/sub/**", PermissionAction.DENY))),
+            false);
+    ToolGateway.PreflightResult result =
+        environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", settings);
+    ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
+    assertEquals("PERMISSION_DENIED", deny.error().kind());
+  }
+
+  @Test
+  void platformPreflightKeepsServerDefaultWorkdir() {
+    // PLATFORM 行为不变：权限路径上下文仍使用 server 默认 workdir。
+    ToolGateway.PreflightResult result = preflight(PermissionAction.ASK, false);
+    ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
+    assertTrue(ask.reason().contains("/workspace (default)"), ask.reason());
+  }
+
   private static ToolGateway.PreflightResult preflight(PermissionAction action, boolean yolo) {
     return preflight(
         action, yolo, ToolGatewayTestSupport.WORKDIR, ToolGatewayTestSupport.ENVIRONMENT_ROOT);
+  }
+
+  private static ToolGateway.PreflightResult environmentPreflight(
+      EnvironmentBinding environment, String argumentsJson, PermissionAction action) {
+    return environmentPreflight(
+        environment, argumentsJson, ToolGatewayTestSupport.settings(action));
+  }
+
+  private static ToolGateway.PreflightResult environmentPreflight(
+      EnvironmentBinding environment, String argumentsJson, ToolSettings settings) {
+    ToolDescriptor descriptor = EnvironmentToolCatalog.require("read");
+    CoreToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.factories(),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.ManualExecutor(),
+            settings,
+            ToolGatewayTestSupport.WORKDIR,
+            ToolGatewayTestSupport.ENVIRONMENT_ROOT);
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("call-1", "read", argumentsJson),
+            new ToolBinding(descriptor, ToolType.ENVIRONMENT, environment));
+    return gateway.preflight(request, false);
   }
 
   private static ToolGateway.PreflightResult preflight(

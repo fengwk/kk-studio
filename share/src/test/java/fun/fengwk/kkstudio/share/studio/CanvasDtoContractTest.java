@@ -29,7 +29,7 @@ class CanvasDtoContractTest {
     "CanvasFunctionParameterDefinitionDTO.defaultValue",
     "CanvasFunctionParameterDefinitionDTO.min",
     "CanvasFunctionParameterDefinitionDTO.max",
-    "CanvasThreadBranchSettingsDTO.environmentName"
+    "CanvasThreadBranchSettingsDTO.environment"
   };
 
   private static final String[] VERSION_STRING_FIELDS = {

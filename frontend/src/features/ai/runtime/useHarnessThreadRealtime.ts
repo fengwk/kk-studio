@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useApplicationEvents } from '@/shared/app-events'
 import {
   isRealtimeModelDeltaGap,
   isRealtimeToolStreamActive,
@@ -13,7 +14,6 @@ import {
   type RealtimeToolPartial,
   type RealtimeToolStream,
 } from '@/features/ai/runtime/thread-realtime-state'
-import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type { ModelInvocationDTO, ToolInvocationDTO } from '@/shared/api/contracts/ai-runtime'
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
@@ -41,6 +41,7 @@ export function useHarnessThreadRealtime(
   toolInvocations: ToolInvocationDTO[],
 ): HarnessThreadRealtimeState {
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const [modelStream, setModelStream] = useState<RealtimeModelStream | null>(null)
   const [toolStreams, setToolStreams] = useState<ReadonlyMap<string, RealtimeToolStream>>(
     () => new Map(),
@@ -186,12 +187,11 @@ export function useHarnessThreadRealtime(
   }, [modelInvocation, threadId, toolInvocations])
 
   useEffect(() => {
-    if (
-      !threadId
-      || !subscriptionReady
-      || subscription == null
-      || subscription.threadId !== threadId
-    ) {
+    // 只有 Thread 消失或订阅真正被禁用才清空 overlays；`subscription == null` 或
+    // threadId 暂时不匹配只是订阅状态过渡（同一提交中 seed effect 刚播种、
+    // subscription effect 即将落定）：保留 snapshot-seeded overlay，等下一 render
+    // 的 subscription 就绪后通过应用级 Manager 建立订阅。
+    if (!threadId || !subscriptionReady) {
       clearRecoveryLoop()
       modelStreamRef.current = null
       setModelStream(null)
@@ -200,11 +200,18 @@ export function useHarnessThreadRealtime(
       toolPartialFingerprintsRef.current = new Map()
       return undefined
     }
+    if (subscription == null || subscription.threadId !== threadId) {
+      // 过渡 render：订阅状态尚未就绪（或 threadId 暂不匹配）。保留
+      // snapshot-seeded overlay，等待下一 render 建立订阅后继续消费。
+      return undefined
+    }
 
     const invalidateSnapshot = () =>
       queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
-    const handleRealtime = (event: Event) => {
-      const raw = (event as MessageEvent<string>).data
+    // 协议 data 是 delta envelope 的 JSON 对象；回序列化为同一文本后，
+    // reducer 的严格解析保持不变。
+    const handleRealtime = (data: unknown) => {
+      const raw = JSON.stringify(data)
       const delta = parseRealtimeModelDelta(raw)
       if (delta != null && delta.threadId === threadId) {
         // 持久化终态 fence：终态 ModelInvocation（result/error/已挂接 result
@@ -299,23 +306,31 @@ export function useHarnessThreadRealtime(
       setToolStreams(new Map(streams))
     }
 
-    const eventSource = harnessService.createThreadRealtimeStream(
-      subscription.threadId,
-      subscription.revision,
+    // 应用级 manager 订阅：revision/resync/subscribed/error 都触发 snapshot
+    // 对账（subscribed 在首次订阅与每次重连重订阅后到达，关闭断线窗口）；
+    // realtime 事件走 overlay reducer。连接与重连由单例 Connection 负责。
+    const unsubscribe = applicationEvents.subscribe(
+      { kind: 'thread', id: subscription.threadId },
+      {
+        onSubscribed: invalidateSnapshot,
+        onEvent: (name, data) => {
+          if (name === 'revision') {
+            invalidateSnapshot()
+          } else if (name === 'realtime') {
+            handleRealtime(data)
+          }
+        },
+        onResync: invalidateSnapshot,
+        onError: invalidateSnapshot,
+      },
     )
-    eventSource.addEventListener('revision', invalidateSnapshot as EventListener)
-    eventSource.addEventListener('resync', invalidateSnapshot as EventListener)
-    eventSource.addEventListener('realtime', handleRealtime as EventListener)
-    // EventSource 自己负责重连并保持同一 transport 实例，直到本 effect 清理。
-    eventSource.onerror = () => {
-      void invalidateSnapshot()
-    }
     return () => {
-      eventSource.close()
+      unsubscribe()
       clearRecoveryLoop()
       toolPartialFingerprintsRef.current = new Map()
     }
   }, [
+    applicationEvents,
     clearRecoveryLoop,
     queryClient,
     requestGapRecovery,

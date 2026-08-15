@@ -66,9 +66,9 @@ describe('harnessService', () => {
     expect(service.updateThreadHead).toBeTypeOf('function')
     expect(service.stopThread).toBeTypeOf('function')
     expect(service.decideApproval).toBeTypeOf('function')
-    expect(service.createThreadRealtimeStream).toBeTypeOf('function')
 
     // 旧端点已从契约中完全移除。
+    expect(service).not.toHaveProperty('createThreadRealtimeStream')
     expect(service).not.toHaveProperty('listThreads')
     expect(service).not.toHaveProperty('listSessions')
     expect(service).not.toHaveProperty('listSessionEntries')
@@ -77,12 +77,5 @@ describe('harnessService', () => {
     expect(service).not.toHaveProperty('updateThreadEnvironment')
     expect(service).not.toHaveProperty('getRetryPolicy')
     expect(service).not.toHaveProperty('getRealtimeStreamPolicy')
-  })
-
-  it('uses the durable revision as the SSE resume cursor', () => {
-    const eventSource = vi.fn()
-    vi.stubGlobal('EventSource', eventSource)
-    createHarnessService(createClient()).createThreadRealtimeStream('1', '9007199254740993')
-    expect(eventSource).toHaveBeenCalledWith('/api/ai/runtime/threads/1/events/stream?afterRevision=9007199254740993')
   })
 })

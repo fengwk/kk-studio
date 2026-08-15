@@ -8,11 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,8 +23,8 @@ class ThreadCommandPayloadTest {
 
   private static final ModelSelection MODEL =
       new ModelSelection("anthropic", "claude-sonnet", "default");
-  private static final EnvironmentName ENV =
-      new EnvironmentName("123e4567-e89b-12d3-a456-426614174000");
+  private static final EnvironmentBinding ENV =
+      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174000");
 
   @Test
   void everyPayloadReportsItsCommandType() {
@@ -71,13 +72,13 @@ class ThreadCommandPayloadTest {
     assertEquals(MODEL, new SetModelCommandPayload(MODEL).model());
     assertThrows(IllegalArgumentException.class, () -> new SetAgentCommandPayload(" coding"));
     assertThrows(NullPointerException.class, () -> new SetModelCommandPayload(null));
-    assertNull(new SetEnvironmentCommandPayload(null).environmentName());
-    assertEquals(ENV, new SetEnvironmentCommandPayload(ENV).environmentName());
+    assertNull(new SetEnvironmentCommandPayload(null).environment());
+    assertEquals(ENV, new SetEnvironmentCommandPayload(ENV).environment());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new SetEnvironmentCommandPayload(
-                new EnvironmentName("123E4567-E89B-12D3-A456-426614174000")));
+                EnvironmentBindings.binding("123E4567-E89B-12D3-A456-426614174000")));
   }
 
   @Test

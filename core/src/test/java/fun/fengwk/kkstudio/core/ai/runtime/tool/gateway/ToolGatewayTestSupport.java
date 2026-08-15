@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -20,7 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
@@ -72,8 +73,8 @@ final class ToolGatewayTestSupport {
 
   static final Path WORKDIR = Path.of("/workspace").toAbsolutePath().normalize();
   static final Path ENVIRONMENT_ROOT = Path.of("/environment-root").toAbsolutePath().normalize();
-  static final EnvironmentName ENV_A = new EnvironmentName("env-1");
-  static final EnvironmentName ENV_B = new EnvironmentName("env-2");
+  static final EnvironmentBinding ENV_A = TestEnvironmentBindings.binding("env-1");
+  static final EnvironmentBinding ENV_B = TestEnvironmentBindings.binding("env-2");
   static final UUID INVOCATION_ID = new UUID(0L, 42L);
   static final UUID THREAD_ID = new UUID(0L, 7L);
   static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
@@ -106,11 +107,11 @@ final class ToolGatewayTestSupport {
   }
 
   /** 真实 daemon capability 的 ENVIRONMENT 请求：绑定 {@code bash} 并路由到指定 canonical 环境。 */
-  static ToolInvocationRequest environmentRequest(String callId, EnvironmentName environmentName) {
+  static ToolInvocationRequest environmentRequest(String callId, EnvironmentBinding environment) {
     ToolDescriptor descriptor = EnvironmentToolCatalog.require("bash");
     return new ToolInvocationRequest(
         new ToolCall(callId, "bash", "{\"command\":\"ls\"}"),
-        new ToolBinding(descriptor, ToolType.ENVIRONMENT, environmentName));
+        new ToolBinding(descriptor, ToolType.ENVIRONMENT, environment));
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
@@ -315,16 +316,16 @@ final class ToolGatewayTestSupport {
     }
 
     record InvokeRecord(
-        EnvironmentName environmentName,
+        EnvironmentBinding environment,
         ToolExecutionRequest request,
         ToolExecutionListener listener) {}
 
     @Override
     public ToolExecutionHandle invoke(
-        EnvironmentName environmentName,
+        EnvironmentBinding environment,
         ToolExecutionRequest request,
         ToolExecutionListener listener) {
-      invocations.add(new InvokeRecord(environmentName, request, listener));
+      invocations.add(new InvokeRecord(environment, request, listener));
       switch (action) {
         case SYNC_COMPLETE:
           listener.onComplete(syncResult);

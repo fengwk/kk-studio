@@ -10,8 +10,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoader;
+import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.skill.SkillBodyLoader.SkillBodyLoadResult;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
@@ -19,12 +20,12 @@ import java.util.concurrent.CompletableFuture;
 /** 运行时 skill body loader 直接使用 canonical EnvironmentName 路由。 */
 class EnvironmentSkillBodyLoaderTest {
 
-  private static final EnvironmentName ENVIRONMENT_ID = new EnvironmentName("env-1");
+  private static final EnvironmentBinding ENVIRONMENT_ID = TestEnvironmentBindings.binding("env-1");
 
   @Test
   void delegatesCanonicalEnvironmentNameToEnvironmentSkillLoader() {
     EnvironmentSkillLoader delegate = mock(EnvironmentSkillLoader.class);
-    when(delegate.loadSkill(ENVIRONMENT_ID, "dev", Duration.ofSeconds(5)))
+    when(delegate.loadSkill(ENVIRONMENT_ID.environmentName(), "dev", Duration.ofSeconds(5)))
         .thenReturn(
             CompletableFuture.completedFuture(
                 new EnvironmentSkillLoadResult.Loaded("dev", "skill body")));
@@ -32,7 +33,7 @@ class EnvironmentSkillBodyLoaderTest {
     EnvironmentSkillBodyLoader loader = new EnvironmentSkillBodyLoader(delegate);
     SkillBodyLoadResult result = loader.load(ENVIRONMENT_ID, "dev", Duration.ofSeconds(5)).join();
 
-    verify(delegate).loadSkill(ENVIRONMENT_ID, "dev", Duration.ofSeconds(5));
+    verify(delegate).loadSkill(ENVIRONMENT_ID.environmentName(), "dev", Duration.ofSeconds(5));
     assertTrue(result instanceof SkillBodyLoadResult.Loaded);
     SkillBodyLoadResult.Loaded loaded = (SkillBodyLoadResult.Loaded) result;
     assertEquals("dev", loaded.skillName());

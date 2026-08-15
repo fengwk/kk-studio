@@ -44,7 +44,7 @@ class LiveEnvironmentQueryServiceImplTest {
   private static final Instant NOW = Instant.parse("2026-07-26T00:00:00Z");
   private static final DaemonEnvironmentInfo ENVIRONMENT_INFO =
       new DaemonEnvironmentInfo(
-          DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Internal Linux environment.");
+          DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Internal Linux environment.", "/home/dev");
   private static final Clock CLOCK =
       new Clock() {
         @Override
@@ -110,6 +110,8 @@ class LiveEnvironmentQueryServiceImplTest {
     LiveEnvironmentMcpToolDTO toolDto = serverDto.getTools().get(0);
     assertEquals("read_file", toolDto.getName());
     assertEquals("Read a file", toolDto.getDescription());
+    // rootPath 是 daemon 实际 canonical Environment Root 的只读展示路径（仅 READY 发布）。
+    assertEquals("/home/dev", dto.getRootPath());
   }
 
   @Test

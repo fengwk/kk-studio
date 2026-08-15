@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
+import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -78,6 +79,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -118,9 +120,10 @@ class DatabaseTurnResolverTest {
     return new UUID(0L, value);
   }
 
-  private static final EnvironmentName ENV_A = new EnvironmentName("env-1");
-  private static final EnvironmentName ENV_B = new EnvironmentName("env-2");
-  private static final EnvironmentName ENV_MISSING = new EnvironmentName("env-3");
+  private static final EnvironmentBinding ENV_A =
+      new EnvironmentBinding(new EnvironmentName("env-1"), "projects/web");
+  private static final EnvironmentBinding ENV_B = TestEnvironmentBindings.binding("env-2");
+  private static final EnvironmentBinding ENV_MISSING = TestEnvironmentBindings.binding("env-3");
 
   @Test
   void resolvesExactBranchModelReferencesWithoutFallback() {
@@ -236,7 +239,7 @@ class DatabaseTurnResolverTest {
     ModelInvocationRequest request =
         fixture.resolved(fixture.path(settings(null, "default")), true);
 
-    assertNull(request.environmentName());
+    assertNull(request.environment());
     assertEquals(List.of(), request.toolBindings());
     assertEquals(List.of(), request.skillBindings());
     assertTrue(request.yoloEnabled());
@@ -252,6 +255,7 @@ class DatabaseTurnResolverTest {
         "agent system prompt\n\n"
             + "<current_environment>\n"
             + "- name: none\n"
+            + "- workspace: none\n"
             + "- system: none\n"
             + "- date: 2026-08-02\n"
             + "- note: none\n"
@@ -297,12 +301,16 @@ class DatabaseTurnResolverTest {
         ENV_A,
         List.of(),
         new DaemonEnvironmentInfo(
-            DaemonOperatingSystem.LINUX, "America/Los_Angeles", "Custom <Linux> & tools."));
+            DaemonOperatingSystem.LINUX,
+            "America/Los_Angeles",
+            "Custom <Linux> & tools.",
+            "/home/dev"));
 
     ModelInvocationRequest request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
     String prompt = textOf(request.providerRequest().messages().getFirst());
 
     assertTrue(prompt.contains("- name: env-1"), prompt);
+    assertTrue(prompt.contains("- workspace: projects/web"), prompt);
     assertTrue(prompt.contains("- system: linux"), prompt);
     assertTrue(prompt.contains("- date: 2026-08-01"), prompt);
     assertTrue(prompt.contains("- note: Custom &lt;Linux&gt; &amp; tools."), prompt);
@@ -322,13 +330,14 @@ class DatabaseTurnResolverTest {
                 .messages()
                 .getFirst());
     assertTrue(withoutMetadata.contains("- name: env-1"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("- workspace: projects/web"), withoutMetadata);
     assertTrue(withoutMetadata.contains("- system: none"), withoutMetadata);
     assertTrue(withoutMetadata.contains("- date: 2026-08-02"), withoutMetadata);
     assertTrue(withoutMetadata.contains("- note: none"), withoutMetadata);
 
     DaemonEnvironmentInfo environmentInfo =
         new DaemonEnvironmentInfo(
-            DaemonOperatingSystem.WSL, "Asia/Tokyo", "Stable WSL environment.");
+            DaemonOperatingSystem.WSL, "Asia/Tokyo", "Stable WSL environment.", "/home/dev");
     Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
     readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
     String ready =
@@ -390,12 +399,12 @@ class DatabaseTurnResolverTest {
         fixture.resolved(fixture.path(settings(null, "default", List.of("read"))));
     assertEquals(1, request.toolBindings().size());
     assertEquals(ToolType.ENVIRONMENT, request.toolBindings().getFirst().type());
-    assertNull(request.toolBindings().getFirst().environmentName());
+    assertNull(request.toolBindings().getFirst().environment());
 
     // Agent skills 要求最新选中的 Environment 提供 live descriptors：分支没有名称时精确拒绝。
     fixture = new Fixture(List.of(), List.of("dev"), List.of());
     assertEquals(
-        "agent skills require the latest selected environment but the branch has no environmentName",
+        "agent skills require the latest selected environment but the branch has no environment",
         fixture.rejected(fixture.path(settings(null, "default"))).error().message());
   }
 
@@ -405,13 +414,13 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     ModelInvocationRequest request =
         fixture.resolved(fixture.path(settings(ENV_MISSING, "default", List.of("read"))));
-    assertEquals(ENV_MISSING, request.toolBindings().getFirst().environmentName());
+    assertEquals(ENV_MISSING, request.toolBindings().getFirst().environment());
 
     // 未 READY 的 latest 环境：同样按最新名称绑定，规划成功；绝不回看更旧 branch settings。
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.connectingEnvironment(ENV_A);
     request = fixture.resolved(fixture.path(settings(ENV_A, "default", List.of("read"))));
-    assertEquals(ENV_A, request.toolBindings().getFirst().environmentName());
+    assertEquals(ENV_A, request.toolBindings().getFirst().environment());
   }
 
   @Test
@@ -438,12 +447,12 @@ class DatabaseTurnResolverTest {
 
     ModelInvocationRequest request = fixture.resolved(multiTurnPath(firstTurn, latestTurn));
 
-    assertNull(request.environmentName());
+    assertNull(request.environment());
     assertEquals(
         List.of("read"),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(ToolType.ENVIRONMENT, request.toolBindings().getFirst().type());
-    assertNull(request.toolBindings().getFirst().environmentName());
+    assertNull(request.toolBindings().getFirst().environment());
 
     // 最新为缺失名称：同样只冻结最新名称，绝不回看更旧 live Environment。
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -453,14 +462,14 @@ class DatabaseTurnResolverTest {
             multiTurnPath(
                 settings(ENV_A, "default", List.of("read")),
                 settings(ENV_MISSING, "default", List.of("read"))));
-    assertEquals(ENV_MISSING, request.environmentName());
-    assertEquals(ENV_MISSING, request.toolBindings().getFirst().environmentName());
+    assertEquals(ENV_MISSING, request.environment());
+    assertEquals(ENV_MISSING, request.toolBindings().getFirst().environment());
 
     // Agent skills 同样只认最新快照：历史 turn 有 live Environment + skill，最新 null 时按最新精确拒绝。
     fixture = new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     assertEquals(
-        "agent skills require the latest selected environment but the branch has no environmentName",
+        "agent skills require the latest selected environment but the branch has no environment",
         fixture
             .rejected(
                 multiTurnPath(
@@ -476,7 +485,8 @@ class DatabaseTurnResolverTest {
     Fixture fixture =
         new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
     assertEquals(
-        "agent skills require the latest selected environment which is not live: " + ENV_MISSING,
+        "agent skills require the latest selected environment which is not live: "
+            + ENV_MISSING.environmentName(),
         fixture
             .rejected(fixture.path(settings(ENV_MISSING, "default", List.of("load_skill"))))
             .error()
@@ -486,7 +496,8 @@ class DatabaseTurnResolverTest {
     fixture = new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
     fixture.connectingEnvironment(ENV_A);
     assertEquals(
-        "agent skills require the latest selected environment which is not ready: " + ENV_A,
+        "agent skills require the latest selected environment which is not ready: "
+            + ENV_A.environmentName(),
         fixture
             .rejected(fixture.path(settings(ENV_A, "default", List.of("load_skill"))))
             .error()
@@ -504,12 +515,12 @@ class DatabaseTurnResolverTest {
 
     ModelInvocationRequest request = fixture.resolved(fixture.path(settings));
 
-    assertEquals(ENV_B, request.environmentName());
+    assertEquals(ENV_B, request.environment());
     assertEquals(
         List.of("bash", "load_skill"),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    List<EnvironmentName> boundRoutes =
-        request.toolBindings().stream().map(ToolBinding::environmentName).toList();
+    List<EnvironmentBinding> boundRoutes =
+        request.toolBindings().stream().map(ToolBinding::environment).toList();
     assertEquals(ENV_B, boundRoutes.get(0));
     assertNull(boundRoutes.get(1));
     assertEquals(
@@ -660,7 +671,7 @@ class DatabaseTurnResolverTest {
         List.of("load_skill"),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(ToolType.PLATFORM, request.toolBindings().getFirst().type());
-    assertNull(request.toolBindings().getFirst().environmentName());
+    assertNull(request.toolBindings().getFirst().environment());
     assertEquals(List.of(), request.skillBindings());
   }
 
@@ -975,17 +986,14 @@ class DatabaseTurnResolverTest {
     assertFalse(prompt.contains("time_zone"), prompt);
   }
 
-  private static BranchSettings settings(EnvironmentName environmentName, String variant) {
-    return settings(environmentName, variant, List.of());
+  private static BranchSettings settings(EnvironmentBinding environment, String variant) {
+    return settings(environment, variant, List.of());
   }
 
   private static BranchSettings settings(
-      EnvironmentName environmentName, String variant, List<String> activeTools) {
+      EnvironmentBinding environment, String variant, List<String> activeTools) {
     return new BranchSettings(
-        environmentName,
-        "assistant",
-        new ModelSelection("provider", "model", variant),
-        activeTools);
+        environment, "assistant", new ModelSelection("provider", "model", variant), activeTools);
   }
 
   private static EntryPath rootPath(BranchSettings settings) {
@@ -1170,7 +1178,7 @@ class DatabaseTurnResolverTest {
     assertEquals(id(3), request.compaction().cutEntryId());
     assertNull(request.compaction().turnPrefixStartEntryId());
     assertEquals(4096, request.contextWindow());
-    assertEquals(ENV_A, request.environmentName());
+    assertEquals(ENV_A, request.environment());
     // 解析的 inputModalities 必须随 descriptor 冻结进 compaction ProviderRequest。
     assertEquals(
         Set.of(ModelInputModality.TEXT), request.providerRequest().model().inputModalities());
@@ -1769,30 +1777,32 @@ class DatabaseTurnResolverTest {
       return assertInstanceOf(TurnResolver.Rejected.class, result);
     }
 
-    private void connectingEnvironment(EnvironmentName environmentName) {
+    private void connectingEnvironment(EnvironmentBinding environment) {
       EnvironmentDaemonConnection connection = mock(EnvironmentDaemonConnection.class);
       when(connection.connectionId()).thenReturn("connection");
       when(connection.isOpen()).thenReturn(true);
-      environmentRegistry.tryBind(environmentName, connection, NOW, Duration.ofSeconds(60));
+      environmentRegistry.tryBind(
+          environment.environmentName(), connection, NOW, Duration.ofSeconds(60));
     }
 
-    private void readyEnvironment(EnvironmentName environmentName) {
-      readyEnvironment(environmentName, List.of());
+    private void readyEnvironment(EnvironmentBinding environment) {
+      readyEnvironment(environment, List.of());
     }
 
-    private void readyEnvironment(EnvironmentName environmentName, List<String> skills) {
+    private void readyEnvironment(EnvironmentBinding environment, List<String> skills) {
       readyEnvironment(
-          environmentName,
+          environment,
           skills,
-          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Linux environment."));
+          new DaemonEnvironmentInfo(
+              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"));
     }
 
     private void readyEnvironment(
-        EnvironmentName environmentName,
+        EnvironmentBinding environment,
         List<String> skills,
         DaemonEnvironmentInfo environmentInfo) {
       readyEnvironmentWithSkills(
-          environmentName,
+          environment,
           skills.stream()
               .map(name -> new DaemonSkillDescriptor(name, name + " description"))
               .toList(),
@@ -1801,35 +1811,37 @@ class DatabaseTurnResolverTest {
     }
 
     private void readyEnvironmentWithSkills(
-        EnvironmentName environmentName, List<DaemonSkillDescriptor> skills) {
+        EnvironmentBinding environment, List<DaemonSkillDescriptor> skills) {
       readyEnvironmentWithSkills(
-          environmentName,
+          environment,
           skills,
-          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Linux environment."),
+          new DaemonEnvironmentInfo(
+              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
           NOW);
     }
 
     private void staleEnvironment(
-        EnvironmentName environmentName, DaemonEnvironmentInfo environmentInfo) {
+        EnvironmentBinding environment, DaemonEnvironmentInfo environmentInfo) {
       readyEnvironmentWithSkills(
-          environmentName, List.of(), environmentInfo, NOW.minus(Duration.ofSeconds(61)));
+          environment, List.of(), environmentInfo, NOW.minus(Duration.ofSeconds(61)));
     }
 
     private void readyEnvironmentWithSkills(
-        EnvironmentName environmentName,
+        EnvironmentBinding environment,
         List<DaemonSkillDescriptor> skills,
         DaemonEnvironmentInfo environmentInfo,
         Instant lastSeenAt) {
       EnvironmentDaemonConnection connection = mock(EnvironmentDaemonConnection.class);
       when(connection.connectionId()).thenReturn("connection");
       when(connection.isOpen()).thenReturn(true);
-      environmentRegistry.tryBind(environmentName, connection, lastSeenAt, Duration.ofSeconds(60));
+      environmentRegistry.tryBind(
+          environment.environmentName(), connection, lastSeenAt, Duration.ofSeconds(60));
       environmentRegistry.updateCapabilities(
-          environmentName,
+          environment.environmentName(),
           connection,
           new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, skills, List.of()),
           lastSeenAt);
-      environmentRegistry.markReady(environmentName, connection, lastSeenAt);
+      environmentRegistry.markReady(environment.environmentName(), connection, lastSeenAt);
     }
   }
 }

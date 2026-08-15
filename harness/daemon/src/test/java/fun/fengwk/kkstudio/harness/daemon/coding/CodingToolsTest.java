@@ -270,14 +270,16 @@ class CodingToolsTest {
 
   private CodingToolsConfig config(int lines, int bytes) {
     return new CodingToolsConfig(
-        environmentRoot, environmentRoot, lines, bytes, "bash", new InMemoryResourceStore());
+        environmentRoot, lines, bytes, "bash", new InMemoryResourceStore());
   }
 
   private ToolExecutionRequest request(Tool tool, String arguments) {
     return new ToolExecutionRequest(
         tool.descriptor(),
         new ToolCall("call", tool.descriptor().name(), arguments),
-        Duration.ZERO);
+        Duration.ZERO,
+        null,
+        environmentRoot);
   }
 
   private ToolResult invoke(Tool tool, String arguments) throws Exception {
@@ -294,7 +296,9 @@ class CodingToolsTest {
             new ToolExecutionRequest(
                 tool.descriptor(),
                 new ToolCall("call", tool.descriptor().name(), arguments),
-                timeout),
+                timeout,
+                null,
+                environmentRoot),
             listener);
     return listener;
   }

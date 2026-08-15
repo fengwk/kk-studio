@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.util.LinkedHashSet;
@@ -40,7 +40,7 @@ public final class AgentBranchSettingsMaterializer {
   }
 
   public BranchSettings materialize(
-      String agentName, EnvironmentName environmentName, int depth, SubagentConfig subagentConfig) {
+      String agentName, EnvironmentBinding environment, int depth, SubagentConfig subagentConfig) {
     AgentDefinition agent = agentRepository.getByName(agentName);
     if (agent == null) {
       throw new IllegalArgumentException("subagent not found: " + agentName);
@@ -85,7 +85,7 @@ public final class AgentBranchSettingsMaterializer {
       activeTools.add(TaskTool.NAME);
     }
     return new BranchSettings(
-        environmentName,
+        environment,
         agent.getName(),
         new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variantName),
         List.copyOf(activeTools));

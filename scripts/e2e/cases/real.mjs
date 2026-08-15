@@ -1,9 +1,10 @@
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { assert, envelopeData, sleep, cid } from '../lib/http.mjs'
+import { assert, envelopeData, expectHttpError, sleep, cid } from '../lib/http.mjs'
 import {
   approveToolInvocation,
   branchSettingsOf,
+  canonicalUuid,
   createChat,
   createChatThread,
   createConfiguredChatThread,
@@ -15,7 +16,7 @@ import {
   stopThread,
   updateThreadHead,
   userMessageCommand,
-  waitForModelTextDeltaAfterSseConnected,
+  waitForModelTextDeltaAfterEventSubscribed,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
@@ -162,7 +163,7 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environmentName: null, activeTools: ['task'] },
+          { environment: null, activeTools: ['task'] },
         ),
       })
       const parentThreadId = String(snapshot.thread.threadId)
@@ -200,8 +201,9 @@ registerCase({
         .filter((content) => content?.type === 'text')
         .map((content) => String(content.text || ''))
         .join('')
-      const taskId = /<task id="([1-9]\d*)" state="completed">/.exec(taskText)?.[1]
+      const taskId = /<task id="([^"]+)" state="completed">/.exec(taskText)?.[1]
       assert(taskId, `completed task envelope missing: ${taskText}`)
+      canonicalUuid(taskId, 'task envelope thread id')
       assert(taskText.includes(marker), `subagent report missing marker: ${taskText}`)
 
       const childSnapshot = await getThreadSnapshot(ctx, taskId)
@@ -211,7 +213,7 @@ registerCase({
       assert(
         String(context?.parentThreadId) === parentThreadId
           && String(context?.rootThreadId) === parentThreadId
-          && /^[1-9]\d*$/.test(String(context?.taskInvocationId || ''))
+          && canonicalUuid(context?.taskInvocationId, 'subagentContext.taskInvocationId')
           && context?.depth === 2,
         `invalid child ROOT subagentContext: ${JSON.stringify(context)}`,
       )
@@ -268,7 +270,7 @@ registerCase({
     })
     const tid = String(snapshot.thread.threadId)
     const { signal: firstDelta, startResult } =
-      await waitForModelTextDeltaAfterSseConnected(
+      await waitForModelTextDeltaAfterEventSubscribed(
         ctx,
         tid,
         () =>
@@ -378,7 +380,7 @@ registerCase({
     const tid = String(snapshot.thread.threadId)
 
     const { signal: firstDelta, startResult } =
-      await waitForModelTextDeltaAfterSseConnected(
+      await waitForModelTextDeltaAfterEventSubscribed(
         ctx,
         tid,
         () =>
@@ -405,7 +407,7 @@ registerCase({
     })
     assert(stop.status === 'STOPPED', JSON.stringify(stop))
     assert(
-      stop.stoppedTurnEndEntryId != null && /^[1-9]\d*$/.test(String(stop.stoppedTurnEndEntryId)),
+      stop.stoppedTurnEndEntryId != null,
       JSON.stringify(stop),
     )
     assert(
@@ -583,11 +585,15 @@ registerCase({
   level: 'L4',
   title: 'Environment GET 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 11 个 tools（version=1）+ skills + mcpServers 摘要，且不公开 READY environment metadata',
+  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 11 个 tools（version=1）+ skills + mcpServers 摘要 + rootPath（daemon canonical Environment Root），且不公开 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
     assert(match?.status === 'READY', JSON.stringify(match))
+    assert(
+      typeof match.rootPath === 'string' && match.rootPath.length > 0,
+      JSON.stringify(match),
+    )
     const expectedToolNames = [
       'read',
       'write',
@@ -639,11 +645,74 @@ registerCase({
 })
 
 registerCase({
+  id: 'daemon.directories',
+  level: 'L4',
+  title: 'Environment Root 单层目录浏览 API',
+  requires: ['tools'],
+  docs: 'GET /api/ai/environments/{name}/directories（control-plane 只读）：缺省 path="." 浏览 root——canonical 相对 wire path、displayPath 等于请求 path 的最后一段（root 为 "."，只作展示、绝不暴露 daemon 本地绝对路径）、root 的 parentPath="."、truncated 布尔、gitBranch 可空、entries 只含直属子目录（{name,path}：name 是目录名且等于 path 最后一段，path 是请求目录的直接子路径）；显式 path="." 与缺省一致；".." 段 400 INVALID_PATH、不存在目录 404 NOT_FOUND、非法环境名 400 INVALID_ENVIRONMENT_NAME',
+  async run(ctx) {
+    const name = ctx.vars.daemonEnvironment?.name ?? ctx.daemonEnv
+    const base = `/api/ai/environments/${encodeURIComponent(name)}/directories`
+    const { json } = await ctx.call('GET', base)
+    const dir = envelopeData(json)
+    assert(dir?.path === '.', JSON.stringify(json))
+    assert(dir.displayPath === '.', JSON.stringify(json))
+    assert(dir.parentPath === '.', JSON.stringify(json))
+    assert(typeof dir.truncated === 'boolean', JSON.stringify(json))
+    assert(
+      !Object.hasOwn(dir, 'gitBranch') || dir.gitBranch === null || typeof dir.gitBranch === 'string',
+      JSON.stringify(json),
+    )
+    assert(Array.isArray(dir.entries), JSON.stringify(json))
+    for (const entry of dir.entries) {
+      assert(
+        typeof entry.name === 'string'
+          && entry.name.length > 0
+          && typeof entry.path === 'string'
+          && entry.path.length > 0,
+        JSON.stringify(entry),
+      )
+      // entry 只含 {name,path}：name 等于 path 最后一段，path 是请求目录的直接子路径。
+      assert(!Object.hasOwn(entry, 'displayPath'), JSON.stringify(entry))
+      const prefix = dir.path === '.' ? '' : `${dir.path}/`
+      assert(entry.path.startsWith(prefix), JSON.stringify(entry))
+      assert(!entry.path.slice(prefix.length).includes('/'), JSON.stringify(entry))
+      assert(entry.name === entry.path.split('/').at(-1), JSON.stringify(entry))
+    }
+    // 显式 path="." 与缺省一致。
+    const explicit = envelopeData(
+      (await ctx.call('GET', `${base}?path=${encodeURIComponent('.')}`)).json,
+    )
+    assert(
+      explicit.path === '.' && explicit.displayPath === '.' && explicit.parentPath === '.',
+      JSON.stringify(explicit),
+    )
+    // 非法路径段 => 400 INVALID_PATH（失败响应 path 是请求回显归因）。
+    const invalid = await expectHttpError(
+      () => ctx.call('GET', `${base}?path=${encodeURIComponent('../escape')}`),
+      { status: 400 },
+    )
+    assert(String(invalid.body).includes('INVALID_PATH'), invalid.body)
+    // 不存在目录 => 404 NOT_FOUND。
+    const missing = await expectHttpError(
+      () => ctx.call('GET', `${base}?path=${encodeURIComponent('no-such-dir-zz')}`),
+      { status: 404 },
+    )
+    assert(String(missing.body).includes('NOT_FOUND'), missing.body)
+    // 非法环境名 => 400，不进入 daemon。
+    await expectHttpError(
+      () => ctx.call('GET', '/api/ai/environments/Not-Canonical/directories'),
+      { status: 400 },
+    )
+  },
+})
+
+registerCase({
   id: 'tool.read_turn',
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
   requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（frozen environmentName、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节',
+  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（冻结 EnvironmentBinding、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -675,7 +744,10 @@ registerCase({
           && JSON.stringify(agentConfig.subagents) === JSON.stringify([]),
         `temporary tool Agent config must be exactly tools=[read], skills=[], subagents=[]: ${JSON.stringify(toolAgent)}`,
       )
-      const environmentName = ctx.vars.daemonEnvironment.name
+      const environment = {
+        name: ctx.vars.daemonEnvironment.name,
+        workspacePath: '.',
+      }
       // 固定大文本 fixture（临时 root，不进仓库）：单行 >8KB，core externalizer 内联阈值
       // (INLINE_RESULT_UTF8_BYTES=8KB) 之上、daemon preview 阈值（50KB）之下 => read 返回 Text，
       // Tool Result Entry 写入前由 history materializer 摄入全局 Blob，durable history 不保留 file URI。
@@ -698,12 +770,12 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environmentName, activeTools: ['read'] },
+          { environment, activeTools: ['read'] },
         ),
       })
       const tid = snapshot.thread.threadId
       assert(
-        snapshot.thread.branchSettings.environmentName === environmentName,
+        JSON.stringify(snapshot.thread.branchSettings.environment) === JSON.stringify(environment),
         JSON.stringify(snapshot.thread.branchSettings),
       )
       await enqueueCommands(ctx, tid, {
@@ -737,10 +809,10 @@ registerCase({
       assert(readInvocation, `no WAITING_APPROVAL read invocation: ${JSON.stringify(waiting)}`)
       assert(readInvocation.status === 'WAITING_APPROVAL', JSON.stringify(readInvocation))
       assert(
-        readInvocation.environmentName === environmentName,
-        `read invocation must freeze the Environment route name: ${JSON.stringify({
+        JSON.stringify(readInvocation.environment) === JSON.stringify(environment),
+        `read invocation must freeze the complete Environment binding: ${JSON.stringify({
           readInvocation,
-          environmentName,
+          environment,
         })}`,
       )
       assert(

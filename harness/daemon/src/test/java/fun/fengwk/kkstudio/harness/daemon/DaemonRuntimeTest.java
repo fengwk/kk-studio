@@ -3,6 +3,9 @@ package fun.fengwk.kkstudio.harness.daemon;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.ACK;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.CANCELLED;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.COMPLETED;
+import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.DIRECTORY_LISTED;
+import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.DIRECTORY_LIST_FAILED;
+import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.ERROR;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.HELLO;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.PARTIAL;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.READY;
@@ -47,6 +50,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
@@ -74,10 +79,13 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -94,7 +102,7 @@ class DaemonRuntimeTest {
 
   private static final long ASYNC_TEST_TIMEOUT_SECONDS = 5;
   private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("environment");
-  private static final Path WORKDIR = Path.of(System.getProperty("user.dir"));
+  private static final Path ENVIRONMENT_ROOT = Path.of(System.getProperty("user.dir"));
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private DaemonRuntime runtime;
@@ -119,7 +127,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     transport.receiveRaw(
-        "{\"protocolVersion\":2,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+        "{\"protocolVersion\":3,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
             + "\"sequence\":1,\"payload\":{\"code\":\"ENVIRONMENT_NAME_CONFLICT\","
             + "\"message\":\"environment already bound to another active daemon\"}}");
 
@@ -142,7 +150,7 @@ class DaemonRuntimeTest {
     completeHandshake(0);
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":2,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+        "{\"protocolVersion\":3,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
             + "\"sequence\":1,\"payload\":{\"message\":\"informational\"}}");
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
@@ -161,7 +169,7 @@ class DaemonRuntimeTest {
     JsonNode hello = codec.readPayload(handshake.get(0));
     assertEquals("test-gateway-token", hello.path("gatewayToken").asText());
     assertEquals("daemon", hello.path("daemonId").asText());
-    assertEquals(DaemonProtocol.VERSION_2, hello.path("protocolVersion").asInt());
+    assertEquals(DaemonProtocol.VERSION_3, hello.path("protocolVersion").asInt());
     assertEquals(EnvironmentToolCatalog.version(), hello.path("toolCatalogVersion").asText());
     DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
     DaemonEnvironmentInfo firstEnvironment =
@@ -195,7 +203,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(10),
             "test-gateway-token",
             null,
-            WORKDIR,
+            ENVIRONMENT_ROOT,
             List.of(),
             null);
 
@@ -253,7 +261,7 @@ class DaemonRuntimeTest {
                   Duration.ofSeconds(10),
                   "test-gateway-token",
                   null,
-                  WORKDIR,
+                  ENVIRONMENT_ROOT,
                   List.of(),
                   null)
               .effectiveNote(capabilities.environment().operatingSystem()),
@@ -342,6 +350,131 @@ class DaemonRuntimeTest {
     assertTrue(messages.get(1).payloadJson().contains("unknown environment tool"));
   }
 
+  /** workspacePath 是必填 wire 字段：缺失/非文本/未知字段在协议边界拒绝，不触达 Tool SPI。 */
+  @Test
+  void rejectsMissingOrUnknownInvokeWorkspaceFieldsBeforeSideEffects() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+
+    transport.receiveRaw(
+        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
+            + "\"toolVersion\":\"1.0.0\",\"arguments\":{},\"timeoutMillis\":100}}");
+    assertMessageTypes(transport.takeMessages(1), ERROR);
+
+    transport.receiveRaw(
+        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{\"toolName\":\"test\","
+            + "\"toolVersion\":\"1.0.0\",\"workspacePath\":1,\"arguments\":{},\"timeoutMillis\":100}}");
+    assertMessageTypes(transport.takeMessages(1), ERROR);
+
+    transport.receiveRaw(
+        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":3,\"payload\":{\"toolName\":\"test\","
+            + "\"toolVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100,"
+            + "\"extra\":true}}");
+    assertMessageTypes(transport.takeMessages(1), ERROR);
+    assertEquals(0, tool.executions.get());
+
+    transport.receive(invoke("valid-after-rejected-workspace", 1));
+    transport.takeMessages(2);
+    assertEquals(1, tool.executions.get());
+  }
+
+  /** workspace 必须在 Environment Root 内 canonicalize 为现存目录：形状非法/删除/非目录/symlink 越界都收敛为 FAILED。 */
+  @Test
+  void rejectsWorkspaceThatCannotResolveToDirectoryInsideRoot() throws Exception {
+    Path root = Files.createTempDirectory("daemon-workspace-root");
+    try {
+      Path nested = Files.createDirectories(root.resolve("projects").resolve("web"));
+      Files.writeString(root.resolve("file.txt"), "x");
+      Path outside = Files.createTempDirectory("daemon-workspace-outside");
+      Path escaping = Files.createSymbolicLink(root.resolve("escape"), outside);
+
+      FakeTransport transport = new FakeTransport();
+      TestTool tool = new TestTool();
+      runtime = runtime(transport, tool, root);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      // root 与 nested 现存目录都成功启动，并把 canonical 目录作为 invocation workdir。
+      transport.receive(invokeWithWorkspace("workspace-root", 1, "test", "1.0.0", 100, "."));
+      List<DaemonEnvelope> started = transport.takeMessages(2);
+      assertMessageTypes(started, ACK, STARTED);
+      assertEquals(root.toRealPath(), tool.request.workdir());
+      tool.complete(new ToolResult("workspace-root", List.of(), false, "{}", false));
+      transport.takeMessages(1);
+
+      transport.receive(
+          invokeWithWorkspace("workspace-nested", 2, "test", "1.0.0", 100, "projects/web"));
+      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+      assertEquals(nested.toRealPath(), tool.request.workdir());
+      tool.complete(new ToolResult("workspace-nested", List.of(), false, "{}", false));
+      transport.takeMessages(1);
+
+      // 形状非法（非空但非 canonical）在 workspace canonicalize 层收敛为 FAILED。
+      String[] invalidShapes = {"/abs", "C:\\x", "a\\b", "a/../b", "a\u0007b"};
+      for (int index = 0; index < invalidShapes.length; index++) {
+        transport.receive(
+            invokeWithWorkspace(
+                "invalid-shape-" + index, 3 + index, "test", "1.0.0", 100, invalidShapes[index]));
+        List<DaemonEnvelope> messages = transport.takeMessages(2);
+        assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
+        String payload = messages.get(1).payloadJson();
+        assertTrue(payload.contains("path"), payload);
+      }
+
+      // 空 / 空白 workspacePath 在协议边界（必填非空文本）被拒绝为 ERROR。
+      String[] blankWorkspaces = {"", " "};
+      for (int index = 0; index < blankWorkspaces.length; index++) {
+        transport.receive(
+            invokeWithWorkspace(
+                "blank-workspace-" + index,
+                8 + index,
+                "test",
+                "1.0.0",
+                100,
+                blankWorkspaces[index]));
+        assertMessageTypes(transport.takeMessages(1), ERROR);
+      }
+
+      // 路径删除 / 非目录 / symlink 越界同样是确定性 FAILED，并按原因给出可诊断消息。
+      String[] invalidResolutions = {"deleted", "file.txt", "escape"};
+      String[] expectedMessages = {
+        "does not resolve to an existing directory",
+        "is not a directory",
+        "escapes environment root"
+      };
+      for (int index = 0; index < invalidResolutions.length; index++) {
+        transport.receive(
+            invokeWithWorkspace(
+                "invalid-resolution-" + index,
+                8 + index,
+                "test",
+                "1.0.0",
+                100,
+                invalidResolutions[index]));
+        List<DaemonEnvelope> messages = transport.takeMessages(2);
+        assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
+        assertTrue(
+            messages.get(1).payloadJson().contains(expectedMessages[index]),
+            messages.get(1).payloadJson());
+      }
+      assertEquals(2, tool.executions.get());
+    } finally {
+      deleteRecursively(root);
+    }
+  }
+
   /** 引用错误的 Environment 逻辑名称或非法 INVOKE payload 必须得到明确 ERROR 响应。 */
   @Test
   void rejectsWrongScopeAndMalformedInvocationPayload() throws InterruptedException {
@@ -354,7 +487,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.INVOKE,
             new EnvironmentName("other-environment"),
             "wrong-scope",
@@ -364,7 +497,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.INVOKE,
             ENVIRONMENT_NAME,
             "bad-payload",
@@ -406,13 +539,13 @@ class DaemonRuntimeTest {
     completeHandshake(0);
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":2,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
             + "\"toolVersion\":\"1.0.0\",\"arguments\":{}}}");
 
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     transport.receiveRaw(
-        "{\"protocolVersion\":2,\"messageType\":\"CANCEL\","
+        "{\"protocolVersion\":3,\"messageType\":\"CANCEL\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
@@ -493,6 +626,184 @@ class DaemonRuntimeTest {
     transport.receive(invoke("after-control", 3));
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
     assertEquals(1, tool.executions.get());
+  }
+
+  /** LIST_DIRECTORY 是 control-plane：ACK 后返回 DIRECTORY_LISTED，不进入 journal、不占 active tool slot。 */
+  @Test
+  void listsDirectoryViaControlPlaneWithoutToolInvocation() throws Exception {
+    Path envRoot = Files.createTempDirectory("daemon-dir-listing");
+    Files.createDirectories(envRoot.resolve("src/main"));
+    Files.createDirectories(envRoot.resolve("docs"));
+    Files.writeString(envRoot.resolve("README.md"), "x");
+    try {
+      FakeTransport transport = new FakeTransport();
+      TestTool tool = new TestTool();
+      runtime = runtime(transport, tool, envRoot);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      transport.receive(listDirectory(1, "."));
+      List<DaemonEnvelope> messages = transport.takeMessages(2);
+      assertMessageTypes(messages, ACK, DIRECTORY_LISTED);
+      DaemonDirectoryCodec.DirectoryListed listed =
+          new DaemonDirectoryCodec().decodeListed(messages.get(1).payloadJson());
+      assertEquals(".", listed.path());
+      assertEquals(".", listed.displayPath());
+      assertEquals(
+          List.of("docs", "src"),
+          listed.entries().stream().map(DaemonDirectoryCodec.DirectoryEntry::path).toList());
+      assertEquals(0, tool.executions.get());
+
+      // 与 active invocation 并行：invoke 之后仍可立即浏览，互不阻塞。
+      transport.receive(invoke("parallel-invocation", 2));
+      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+      transport.receive(listDirectory(3, "src"));
+      List<DaemonEnvelope> nestedMessages = transport.takeMessages(2);
+      assertMessageTypes(nestedMessages, ACK, DIRECTORY_LISTED);
+      DaemonDirectoryCodec.DirectoryListed nested =
+          new DaemonDirectoryCodec().decodeListed(nestedMessages.get(1).payloadJson());
+      assertEquals("src", nested.path());
+      assertEquals("src", nested.displayPath());
+      assertEquals(1, tool.executions.get());
+    } finally {
+      deleteRecursively(envRoot);
+    }
+  }
+
+  /** 缺失/非法路径得到确定性的 DIRECTORY_LIST_FAILED 分类（requestId/path 原样回显），而不是协议 ERROR。 */
+  @Test
+  void directoryFailuresAreTypedOnTheWire() throws Exception {
+    Path envRoot = Files.createTempDirectory("daemon-dir-failure");
+    Files.writeString(envRoot.resolve("file.txt"), "x");
+    try {
+      FakeTransport transport = new FakeTransport();
+      runtime = runtime(transport, new TestTool(), envRoot);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      String missingRequestId = UUID.randomUUID().toString();
+      transport.receive(listDirectory(missingRequestId, 1, "missing"));
+      DaemonDirectoryCodec.DirectoryListFailed notFound =
+          new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
+      assertEquals(DaemonDirectoryFailureCode.NOT_FOUND, notFound.code());
+      assertEquals("missing", notFound.path());
+      assertEquals(missingRequestId, notFound.requestId());
+
+      transport.receive(listDirectory(2, "file.txt"));
+      DaemonDirectoryCodec.DirectoryListFailed notDirectory =
+          new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
+      assertEquals(DaemonDirectoryFailureCode.NOT_DIRECTORY, notDirectory.code());
+
+      transport.receive(listDirectory(3, "../escape"));
+      DaemonDirectoryCodec.DirectoryListFailed invalid =
+          new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
+      assertEquals(DaemonDirectoryFailureCode.INVALID_PATH, invalid.code());
+
+      // 目录浏览不进入 journal：每次请求使用独立 canonical UUID requestId 都能正常归因。
+      transport.receive(listDirectory(4, "missing"));
+      DaemonDirectoryCodec.DirectoryListFailed again =
+          new DaemonDirectoryCodec().decodeFailed(transport.takeMessages(2).get(1).payloadJson());
+      assertEquals(DaemonDirectoryFailureCode.NOT_FOUND, again.code());
+    } finally {
+      deleteRecursively(envRoot);
+    }
+  }
+
+  /** LIST_DIRECTORY 的文件系统 IO 不得阻塞 inbound 回调：ACK 先回，后续消息可继续处理，被拦住的目录任务之后才发 DIRECTORY_LISTED。 */
+  @Test
+  void listDirectoryAcknowledgesWithoutBlockingInboundThenListsOnWorker() throws Exception {
+    Path envRoot = Files.createTempDirectory("daemon-dir-async");
+    Files.createDirectories(envRoot.resolve("docs"));
+    CountDownLatch started = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    ExecutorService directoryWorker = Executors.newSingleThreadExecutor();
+    Executor holdingWorker =
+        command ->
+            directoryWorker.execute(
+                () -> {
+                  started.countDown();
+                  try {
+                    if (!release.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                      throw new IllegalStateException("test did not release directory worker");
+                    }
+                  } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(error);
+                  }
+                  command.run();
+                });
+    try {
+      FakeTransport transport = new FakeTransport();
+      TestTool tool = new TestTool();
+      runtime = runtime(transport, tool, envRoot, holdingWorker);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      transport.receive(listDirectory(1, "."));
+      assertMessageTypes(transport.takeMessages(1), ACK);
+      assertTrue(started.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      assertFalse(transport.hasMessages());
+
+      transport.receive(invoke("after-list", 2));
+      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+      assertEquals(1, tool.executions.get());
+
+      release.countDown();
+      List<DaemonEnvelope> listed = transport.takeMessages(1);
+      assertMessageTypes(listed, DIRECTORY_LISTED);
+      assertEquals(
+          "docs",
+          new DaemonDirectoryCodec()
+              .decodeListed(listed.get(0).payloadJson())
+              .entries()
+              .get(0)
+              .path());
+    } finally {
+      release.countDown();
+      directoryWorker.shutdownNow();
+      deleteRecursively(envRoot);
+    }
+  }
+
+  /** 目录 worker 队列拒绝时立即回 correlated DIRECTORY_LIST_FAILED，不悬挂请求。 */
+  @Test
+  void listDirectoryQueueRejectionReturnsTypedFailure() throws Exception {
+    Path envRoot = Files.createTempDirectory("daemon-dir-reject");
+    Files.createDirectories(envRoot.resolve("docs"));
+    Executor directoryWorker =
+        command -> {
+          throw new RejectedExecutionException("directory queue full");
+        };
+    try {
+      FakeTransport transport = new FakeTransport();
+      runtime = runtime(transport, new TestTool(), envRoot, directoryWorker);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      String requestId = UUID.randomUUID().toString();
+      transport.receive(listDirectory(requestId, 1, "."));
+      List<DaemonEnvelope> messages = transport.takeMessages(2);
+      assertMessageTypes(messages, ACK, DIRECTORY_LIST_FAILED);
+      DaemonDirectoryCodec.DirectoryListFailed failed =
+          new DaemonDirectoryCodec().decodeFailed(messages.get(1).payloadJson());
+      assertEquals(requestId, failed.requestId());
+      assertEquals(".", failed.path());
+      assertEquals(DaemonDirectoryFailureCode.IO_ERROR, failed.code());
+    } finally {
+      deleteRecursively(envRoot);
+    }
   }
 
   /** Cloud 声明的工具版本必须匹配本地 descriptor，避免以错误参数契约启动 Tool。 */
@@ -971,9 +1282,10 @@ class DaemonRuntimeTest {
 
       JsonNode payload = codec.readPayload(handshake.get(1));
       assertFalse(payload.has("tools"));
-      assertEquals(3, payload.path("version").asInt());
+      assertEquals(4, payload.path("version").asInt());
       assertTrue(payload.path("environment").path("workingDirectory").isMissingNode());
       assertTrue(payload.path("environment").path("note").isTextual());
+      assertTrue(payload.path("environment").path("rootPath").isTextual());
       assertEquals(1, payload.path("skills").size());
       assertEquals("demo", payload.path("skills").get(0).path("name").asText());
       assertEquals("Demo skill", payload.path("skills").get(0).path("description").asText());
@@ -1014,7 +1326,7 @@ class DaemonRuntimeTest {
       DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
       transport.receive(
           new DaemonEnvelope(
-              DaemonProtocol.VERSION_2,
+              DaemonProtocol.VERSION_3,
               DaemonMessageType.LOAD_SKILL,
               ENVIRONMENT_NAME,
               "skill-1",
@@ -1046,7 +1358,7 @@ class DaemonRuntimeTest {
     DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "skill-missing",
@@ -1161,7 +1473,7 @@ class DaemonRuntimeTest {
     transport.receiveFromConnection(
         0,
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "stale-skill",
@@ -1169,13 +1481,13 @@ class DaemonRuntimeTest {
             skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
     transport.receiveRawFromConnection(
         0,
-        "{\"protocolVersion\":2,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{}}");
     assertFalse(transport.hasMessages());
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "current-skill",
@@ -1230,7 +1542,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2, DaemonMessageType.HELLO, ENVIRONMENT_NAME, null, 1, "{}"));
+            DaemonProtocol.VERSION_3, DaemonMessageType.HELLO, ENVIRONMENT_NAME, null, 1, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
     transport.receive(cancel("unknown-cancel", 1));
@@ -1238,7 +1550,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
+            DaemonProtocol.VERSION_3,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "invalid-skill-payload",
@@ -1384,7 +1696,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(10),
             "test-gateway-token",
             note,
-            WORKDIR,
+            ENVIRONMENT_ROOT,
             List.of(),
             null),
         transport,
@@ -1392,6 +1704,58 @@ class DaemonRuntimeTest {
         DaemonSkillRegistry.empty(),
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor());
+  }
+
+  private DaemonRuntime runtime(FakeTransport transport, Tool tool, Path environmentRoot) {
+    handshakeTransport = transport;
+    DaemonToolRegistry registry = new DaemonToolRegistry();
+    registry.register(tool);
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            new EnvironmentName("environment"),
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            null,
+            environmentRoot,
+            List.of(),
+            null),
+        transport,
+        registry,
+        DaemonSkillRegistry.empty(),
+        new InMemoryDaemonInvocationJournal(),
+        Executors.newSingleThreadScheduledExecutor());
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport, Tool tool, Path environmentRoot, Executor directoryWorker) {
+    handshakeTransport = transport;
+    DaemonToolRegistry registry = new DaemonToolRegistry();
+    registry.register(tool);
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            new EnvironmentName("environment"),
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            null,
+            environmentRoot,
+            List.of(),
+            null),
+        transport,
+        registry,
+        DaemonSkillRegistry.empty(),
+        new InMemoryDaemonInvocationJournal(),
+        Executors.newSingleThreadScheduledExecutor(),
+        directoryWorker);
   }
 
   private DaemonRuntime runtime(FakeTransport transport, Tool tool, ResourceStore resourceStore) {
@@ -1414,7 +1778,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(10),
             "test-gateway-token",
             null,
-            WORKDIR,
+            ENVIRONMENT_ROOT,
             List.of(),
             null),
         transport,
@@ -1440,7 +1804,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(10),
             "test-gateway-token",
             null,
-            WORKDIR,
+            ENVIRONMENT_ROOT,
             List.of(),
             null),
         transport,
@@ -1515,7 +1879,7 @@ class DaemonRuntimeTest {
             defaultToolTimeout,
             "test-gateway-token",
             null,
-            WORKDIR,
+            ENVIRONMENT_ROOT,
             List.of(),
             null),
         transport,
@@ -1627,7 +1991,7 @@ class DaemonRuntimeTest {
   private DaemonEnvelope invoke(
       String invocationId, long sequence, String toolName, String toolVersion, long timeoutMillis) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2,
+        DaemonProtocol.VERSION_3,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
@@ -1636,15 +2000,43 @@ class DaemonRuntimeTest {
             + toolName
             + "\",\"toolVersion\":\""
             + toolVersion
+            + "\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":"
+            + timeoutMillis
+            + "}");
+  }
+
+  private DaemonEnvelope invokeWithWorkspace(
+      String invocationId,
+      long sequence,
+      String toolName,
+      String toolVersion,
+      long timeoutMillis,
+      String workspacePath) {
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION_3,
+        DaemonMessageType.INVOKE,
+        ENVIRONMENT_NAME,
+        invocationId,
+        sequence,
+        "{\"toolName\":\""
+            + toolName
+            + "\",\"toolVersion\":\""
+            + toolVersion
+            + "\",\"workspacePath\":\""
+            + jsonEscape(workspacePath)
             + "\",\"arguments\":{},\"timeoutMillis\":"
             + timeoutMillis
             + "}");
   }
 
+  private static String jsonEscape(String value) {
+    return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\u0007", "\\u0007");
+  }
+
   private DaemonEnvelope invokeWithoutTimeout(
       String invocationId, long sequence, String toolName, String toolVersion) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2,
+        DaemonProtocol.VERSION_3,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
@@ -1653,17 +2045,31 @@ class DaemonRuntimeTest {
             + toolName
             + "\",\"toolVersion\":\""
             + toolVersion
-            + "\",\"arguments\":{}}");
+            + "\",\"workspacePath\":\".\",\"arguments\":{}}");
+  }
+
+  private DaemonEnvelope listDirectory(long sequence, String path) {
+    return listDirectory(UUID.randomUUID().toString(), sequence, path);
+  }
+
+  private DaemonEnvelope listDirectory(String requestId, long sequence, String path) {
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION_3,
+        DaemonMessageType.LIST_DIRECTORY,
+        ENVIRONMENT_NAME,
+        null,
+        sequence,
+        "{\"requestId\":\"" + requestId + "\",\"path\":\"" + path + "\"}");
   }
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2, messageType, ENVIRONMENT_NAME, null, sequence, "{}");
+        DaemonProtocol.VERSION_3, messageType, ENVIRONMENT_NAME, null, sequence, "{}");
   }
 
   private DaemonEnvelope cancel(String invocationId, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2,
+        DaemonProtocol.VERSION_3,
         DaemonMessageType.CANCEL,
         ENVIRONMENT_NAME,
         invocationId,

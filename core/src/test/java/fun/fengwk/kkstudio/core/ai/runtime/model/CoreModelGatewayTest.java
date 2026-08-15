@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -33,7 +34,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -69,7 +69,7 @@ class CoreModelGatewayTest {
   private static final UUID INVOCATION_ID = new UUID(0L, 42L);
   private static final ModelInvocationRequest INVOCATION_REQUEST =
       new ModelInvocationRequest(
-          new EnvironmentName("env-1"),
+          TestEnvironmentBindings.binding("env-1"),
           PROVIDER_REQUEST,
           List.of(),
           List.of(),

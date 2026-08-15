@@ -4,6 +4,7 @@ import { afterEach, beforeEach } from 'vitest'
 import { setLocale } from '@/shared/i18n'
 
 beforeEach(() => {
+  localStorage.clear()
   setLocale('zh-CN')
 })
 

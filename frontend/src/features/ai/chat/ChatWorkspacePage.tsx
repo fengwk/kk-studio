@@ -22,6 +22,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { isConflictError } from '@/shared/api/client'
 import { chatService } from '@/shared/api/chat-service'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
@@ -132,18 +133,18 @@ export function ChatWorkspacePage() {
     mutationFn: ({
       agentName,
       yoloEnabled,
-      environmentName,
+      environment,
       expectedVersion,
     }: {
       agentName?: string
       yoloEnabled?: boolean
-      environmentName?: string | null
+      environment?: EnvironmentBindingDTO | null
       expectedVersion: string
     }) => chatService.updateChat(chatId, {
       ...(agentName === undefined ? {} : { agentName }),
       ...(yoloEnabled === undefined ? {} : { yoloEnabled }),
-      // 显式 null 表示清空默认 Environment（environmentNameProvided 由 DTO setter 置位）。
-      ...(environmentName === undefined ? {} : { environmentName }),
+      // 显式 null 表示清空默认 Environment（environmentProvided 由 DTO setter 置位）。
+      ...(environment === undefined ? {} : { environment }),
       expectedVersion,
     }),
     onSuccess: (updatedChat: ChatDTO) => {
@@ -165,7 +166,7 @@ export function ChatWorkspacePage() {
     patch: {
       agentName?: string
       yoloEnabled?: boolean
-      environmentName?: string | null
+      environment?: EnvironmentBindingDTO | null
     },
   ) {
     const chat = currentChat()
@@ -279,8 +280,8 @@ export function ChatWorkspacePage() {
             onYoloChange={async (yoloEnabled) => {
               await updateChatSettings({ yoloEnabled })
             }}
-            onEnvironmentChange={async (environmentName) => {
-              await updateChatSettings({ environmentName })
+            onEnvironmentChange={async (environment) => {
+              await updateChatSettings({ environment })
             }}
           />
         ))}

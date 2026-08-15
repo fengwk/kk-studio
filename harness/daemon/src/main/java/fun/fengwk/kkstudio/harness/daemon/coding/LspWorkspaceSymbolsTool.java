@@ -25,7 +25,9 @@ public final class LspWorkspaceSymbolsTool extends AbstractCodingTool {
   ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     Path path =
-        boundary.existing(string(args, "path"), boundary.workdir(optionalString(args, "workdir")));
+        boundary.existing(
+            string(args, "path"),
+            boundary.workdir(optionalString(args, "workdir"), request.workdir()));
     String query = string(args, "query");
     if (query.isBlank()) {
       throw new IllegalArgumentException("query must not be blank");

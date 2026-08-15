@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
-import { projectDurableEntry } from '@/features/ai/runtime/thread-timeline/entry-projection'
+import {
+  projectDurableEntry,
+  type EntryProjectionContext,
+} from '@/features/ai/runtime/thread-timeline/entry-projection'
 import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+
+function projectionContext(): EntryProjectionContext {
+  return { pendingTurnSummary: null }
+}
 
 function abortedEntry(
   text: string,
@@ -30,7 +37,7 @@ function abortedEntry(
 describe('ASSISTANT_ABORTED entry projection', () => {
   it('renders aborted assistant text with aborted=true and clears realtime overlay flags', () => {
     const messages: DialogueMessage[] = []
-    projectDurableEntry(abortedEntry('partial answer', 'thinking'), messages, new Map())
+    projectDurableEntry(abortedEntry('partial answer', 'thinking'), messages, new Map(), projectionContext())
     expect(messages).toHaveLength(1)
     const msg = messages[0]
     expect(msg).toMatchObject({
@@ -45,7 +52,7 @@ describe('ASSISTANT_ABORTED entry projection', () => {
 
   it('renders aborted assistant thinking-only content', () => {
     const messages: DialogueMessage[] = []
-    projectDurableEntry(abortedEntry('', 'reasoning'), messages, new Map())
+    projectDurableEntry(abortedEntry('', 'reasoning'), messages, new Map(), projectionContext())
     expect(messages).toHaveLength(1)
     expect(messages[0]).toMatchObject({ text: '', aborted: true })
     expect(messages[0].thinking).toBe('reasoning')

@@ -24,7 +24,9 @@ public final class WriteTool extends AbstractCodingTool {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
     String content = string(args, "content");
-    Path path = boundary.writable(rawPath, boundary.workdir(optionalString(args, "workdir")));
+    Path path =
+        boundary.writable(
+            rawPath, boundary.workdir(optionalString(args, "workdir"), request.workdir()));
     ReentrantLock lock = FileMutations.lock(path);
     try {
       if (execution.isCancelled()) {

@@ -67,6 +67,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
@@ -91,13 +92,14 @@ import java.util.UUID;
  * 生产 Core 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的 {@link
  * ModelInvocationRequest}。
  *
- * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environmentName / agentName / {@link
+ * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environment binding / agentName / {@link
  * ModelSelection} / ordered activeTools）与调用方冻结的 YOLO 开关；实现只按这些精确引用读取最新 catalog / environment
- * 事实，绝不回读 Chat defaults、绝不 fallback agent/model/variant/tools，也绝不静默丢弃缺失能力。 environmentName 是最新
- * branch 的不可变逻辑路由：ENVIRONMENT 工具一律按最新 {@code settings.environmentName()} 绑定（可为 null
- * 或当前不可用，实际执行时失败）；Agent skills 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的
- * branch settings。配置或 Environment 不满足一律返回 {@link Result.Rejected}（稳定 error code {@value
- * #REJECTION_CODE}）；只有 repository / registry 等基础设施异常向上传播，由 ThreadProcessor reschedule。
+ * 事实，绝不回读 Chat defaults、绝不 fallback agent/model/variant/tools，也绝不静默丢弃缺失能力。 environment 是完整
+ * binding（路由名 + workspace path），为最新 branch 的不可变事实：ENVIRONMENT 工具一律按最新 {@code
+ * settings.environment()} 绑定（可为 null 或当前不可用，实际执行时失败）；Agent skills 要求最新 Environment 提供 live
+ * descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch settings。配置或 Environment 不满足一律返回 {@link
+ * Result.Rejected}（稳定 error code {@value #REJECTION_CODE}）；只有 repository / registry 等基础设施异常向上传播，由
+ * ThreadProcessor reschedule。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -221,7 +223,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
     Instant now = clock.instant();
     CurrentEnvironmentContext currentEnvironment =
-        resolveCurrentEnvironment(settings.environmentName(), now);
+        resolveCurrentEnvironment(settings.environment(), now);
     List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), settings, now);
     List<SubagentBinding> subagentBindings =
         resolveSubagents(agentConfig.getSubagents(), settings, path);
@@ -263,7 +265,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             sessionId,
             cachePolicy(providerFactory));
     return new ModelInvocationRequest(
-        settings.environmentName(),
+        settings.environment(),
         providerRequest,
         toolBindings,
         skillBindings,
@@ -359,7 +361,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             preparation.turnPrefixStartEntryId());
     // contextWindow 冻结自触发 invocation 的 preparation（model config 变更不导致触发后解析漂移 / 无限 reschedule）。
     return new ModelInvocationRequest(
-        settings.environmentName(),
+        settings.environment(),
         providerRequest,
         List.of(),
         List.of(),
@@ -424,8 +426,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 按 {@link BranchSettings#activeTools()} 的精确顺序逐一绑定。ENVIRONMENT 工具一律绑定最新 branch 的 {@code
-   * settings.environmentName()}（可为 null 或当前不可用——实际执行时确定性失败）；PLATFORM 工具不携带路由。缺失能力仍立即拒绝， 绝不静默跳过。
+   * 按 {@link BranchSettings#activeTools()} 的精确顺序逐一绑定。ENVIRONMENT 工具一律绑定最新 branch 的完整 {@code
+   * settings.environment()} binding（可为 null 或当前不可用——实际执行时确定性失败）；PLATFORM 工具不携带路由。缺失能力仍立即拒绝， 绝不静默跳过。
    */
   private List<ToolBinding> resolveTools(
       BranchSettings settings, boolean subagentDelegationEnabled) {
@@ -459,7 +461,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       if (environmentTool.isPresent()) {
         bindings.add(
             new ToolBinding(
-                environmentTool.get(), ToolType.ENVIRONMENT, settings.environmentName(), null));
+                environmentTool.get(), ToolType.ENVIRONMENT, settings.environment(), null));
         continue;
       }
       throw rejection("tool not found: " + name);
@@ -493,11 +495,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (skillNames.isEmpty()) {
       return List.of();
     }
-    EnvironmentName environmentName = settings.environmentName();
-    if (environmentName == null) {
+    EnvironmentBinding binding = settings.environment();
+    if (binding == null) {
       throw rejection(
-          "agent skills require the latest selected environment but the branch has no environmentName");
+          "agent skills require the latest selected environment but the branch has no environment");
     }
+    EnvironmentName environmentName = binding.environmentName();
     // skills 需要最新 Environment 提供 live descriptors：按最新名称精确查找并要求 READY（同一可用性规则），
     // 缺失/未 READY 确定性拒绝，绝不回看更旧的 branch settings。
     LiveEnvironment environment = environmentRegistry.find(environmentName).orElse(null);
@@ -522,31 +525,28 @@ public final class DatabaseTurnResolver implements TurnResolver {
               .findFirst()
               .orElse(null);
       if (skill == null) {
-        throw rejection(
-            "skill not found on the latest environment "
-                + settings.environmentName()
-                + ": "
-                + skillName);
+        throw rejection("skill not found on the latest environment " + binding + ": " + skillName);
       }
-      bindings.add(new SkillBinding(skill.name(), skill.description(), settings.environmentName()));
+      bindings.add(new SkillBinding(skill.name(), skill.description(), binding));
     }
     return List.copyOf(bindings);
   }
 
   private CurrentEnvironmentContext resolveCurrentEnvironment(
-      EnvironmentName environmentName, Instant now) {
-    if (environmentName == null) {
+      EnvironmentBinding binding, Instant now) {
+    if (binding == null) {
       return new CurrentEnvironmentContext(
           null, null, now.atZone(clock.getZone()).toLocalDate(), null);
     }
-    LiveEnvironment liveEnvironment = environmentRegistry.find(environmentName).orElse(null);
+    LiveEnvironment liveEnvironment =
+        environmentRegistry.find(binding.environmentName()).orElse(null);
     DaemonEnvironmentInfo environmentInfo =
         liveEnvironment == null || liveEnvironment.capabilities() == null
             ? null
             : liveEnvironment.capabilities().environment();
     ZoneId zone = environmentInfo == null ? clock.getZone() : ZoneId.of(environmentInfo.timeZone());
     return new CurrentEnvironmentContext(
-        environmentName,
+        binding,
         environmentInfo == null ? null : environmentInfo.operatingSystem(),
         now.atZone(zone).toLocalDate(),
         environmentInfo == null ? null : environmentInfo.note());

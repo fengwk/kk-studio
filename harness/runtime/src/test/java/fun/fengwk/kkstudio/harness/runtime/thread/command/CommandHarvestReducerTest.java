@@ -6,12 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.time.Instant;
 import java.util.List;
@@ -21,10 +22,10 @@ import java.util.UUID;
 class CommandHarvestReducerTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
-  private static final EnvironmentName ENV_A =
-      new EnvironmentName("123e4567-e89b-12d3-a456-426614174000");
-  private static final EnvironmentName ENV_B =
-      new EnvironmentName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  private static final EnvironmentBinding ENV_A =
+      EnvironmentBindings.binding("123e4567-e89b-12d3-a456-426614174000");
+  private static final EnvironmentBinding ENV_B =
+      EnvironmentBindings.binding("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   private static final BranchSettings BASE =
       new BranchSettings(
           ENV_A,
@@ -83,7 +84,7 @@ class CommandHarvestReducerTest {
                 queued(id(2L), 2L, new SetModelCommandPayload(replacement)),
                 queued(id(3L), 3L, new CustomMessageCommandPayload(system("system")))));
 
-    assertEquals(ENV_A, result.branchSettings().environmentName());
+    assertEquals(ENV_A, result.branchSettings().environment());
     assertEquals("coding", result.branchSettings().agentName());
     assertEquals(replacement, result.branchSettings().model());
     assertEquals(List.of("read"), result.branchSettings().activeTools());

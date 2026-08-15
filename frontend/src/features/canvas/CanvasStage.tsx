@@ -65,6 +65,7 @@ function StageInner() {
     uploadFiles,
     initialFitPending,
     completeInitialFit,
+    closeContextMenuRef,
   } = runtime
   const snapshot = useMemo(
     () => snapshotDTO ? projectCanvasSnapshot(snapshotDTO) : null,
@@ -107,6 +108,15 @@ function StageInner() {
     contextMenuSelectionRef.current = null
     setContextMenu(null)
   }, [])
+
+  // Canvas surface 的全局 Escape（capture 相位消费）通过 controller 关闭全部
+  // overlay；右键菜单状态在本组件，注册关闭回调供 closeOverlays 调用。
+  useEffect(() => {
+    closeContextMenuRef.current = closeContextMenu
+    return () => {
+      closeContextMenuRef.current = null
+    }
+  }, [closeContextMenu, closeContextMenuRef])
 
   const buildMenuTarget = useCallback((nodeIds: string[]): ContextMenuTarget | null => {
     if (!snapshot) {

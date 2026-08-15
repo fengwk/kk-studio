@@ -18,7 +18,6 @@ class HarnessRuntimePropertiesTest {
     assertEquals(true, properties.isWorkersEnabled());
     assertEquals(16 * 1024 * 1024, properties.getResourceMaxBytes());
     assertEquals("kk-studio:harness:realtime:", properties.getRedisPrefix());
-    assertEquals(5_000L, properties.getRedisMaxLength());
     assertEquals(Duration.ofSeconds(30), properties.getProcessorLeaseDuration());
     assertEquals(Duration.ofSeconds(10), properties.getProcessorHeartbeatInterval());
     assertEquals(16, properties.getThreadStepLimit());

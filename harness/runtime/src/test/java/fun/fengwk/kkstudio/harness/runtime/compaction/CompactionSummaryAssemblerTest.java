@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -35,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -53,7 +53,7 @@ class CompactionSummaryAssemblerTest {
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          new EnvironmentName("env-1"),
+          EnvironmentBindings.binding("env-1"),
           "agent",
           new ModelSelection("provider", "model", "v1"),
           List.of());

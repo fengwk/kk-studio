@@ -10,7 +10,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -38,7 +37,9 @@ import fun.fengwk.kkstudio.core.studio.thread.CanvasThreadService.CanvasFirstSen
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasCommandDTO;
@@ -72,7 +73,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.Executor;
 
 /** Canvas HTTP typed DTO、canonical UUID 字符串、version 与状态码映射。 */
 class StudioCanvasControllerTest {
@@ -95,8 +95,6 @@ class StudioCanvasControllerTest {
   private CanvasRealtimeService realtimeService;
   private CanvasThreadService threadService;
   private StorageBlobManager blobManager;
-  private CanvasVersionEventSource versionEventSource;
-  private Executor eventStreamExecutor;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
@@ -109,7 +107,6 @@ class StudioCanvasControllerTest {
     realtimeService = mock(CanvasRealtimeService.class);
     threadService = mock(CanvasThreadService.class);
     blobManager = mock(StorageBlobManager.class);
-    versionEventSource = mock(CanvasVersionEventSource.class);
     FixedObjectProvider<StorageBlobManager> blobManagers = new FixedObjectProvider<>(blobManager);
     StorageBlob blob = new StorageBlob();
     blob.setId(BLOB_1);
@@ -118,7 +115,6 @@ class StudioCanvasControllerTest {
     blob.setWidth(640L);
     blob.setHeight(480L);
     when(blobManager.getBlob(BLOB_1)).thenReturn(blob);
-    eventStreamExecutor = Runnable::run;
     mockMvc =
         standaloneSetup(
                 new StudioCanvasController(
@@ -126,8 +122,6 @@ class StudioCanvasControllerTest {
                     commandService,
                     realtimeService,
                     threadService,
-                    versionEventSource,
-                    eventStreamExecutor,
                     new StudioWebMapper(blobManagers)))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
@@ -364,9 +358,6 @@ class StudioCanvasControllerTest {
     mockMvc
         .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=9223372036854775808"))
         .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=-1"))
-        .andExpect(status().isBadRequest());
     verify(commandService, never())
         .applyCommands(any(UUID.class), anyLong(), any(UUID.class), anyList());
   }
@@ -448,7 +439,10 @@ class StudioCanvasControllerTest {
     CanvasThreadFirstSendRequestDTO request = new CanvasThreadFirstSendRequestDTO();
     request.setCommandId(COMMAND.toString());
     CanvasThreadBranchSettingsDTO branchSettings = new CanvasThreadBranchSettingsDTO();
-    branchSettings.setEnvironmentName("default");
+    EnvironmentBindingDTO environment = new EnvironmentBindingDTO();
+    environment.setName("default");
+    environment.setWorkspacePath(".");
+    branchSettings.setEnvironment(environment);
     branchSettings.setAgentName("assistant");
     CanvasThreadBranchSettingsDTO.CanvasThreadModelSelectionDTO model =
         new CanvasThreadBranchSettingsDTO.CanvasThreadModelSelectionDTO();
@@ -471,7 +465,7 @@ class StudioCanvasControllerTest {
                 .content(
                     """
                     {"commandId":"%s",
-                     "branchSettings":{"environmentName":"default","agentName":"assistant",
+                     "branchSettings":{"environment":{"name":"default","workspacePath":"."},"agentName":"assistant",
                        "model":{"providerName":"openai","modelName":"gpt-4o","variant":"default"},
                        "activeTools":["read"]},
                      "yoloEnabled":true,
@@ -491,7 +485,7 @@ class StudioCanvasControllerTest {
     assertEquals(true, command.yoloEnabled());
     assertEquals(
         new BranchSettings(
-            new EnvironmentName("default"),
+            new EnvironmentBinding(new EnvironmentName("default"), "."),
             "assistant",
             new ModelSelection("openai", "gpt-4o", "default"),
             List.of("read")),
@@ -500,20 +494,42 @@ class StudioCanvasControllerTest {
   }
 
   @Test
-  void streamEventsRejectsInvalidInputBeforeSubscribing() throws Exception {
+  void firstSendRejectsIncompleteEnvironmentBindingAsBadRequest() throws Exception {
+    // binding 嵌套字段缺失必须稳定 400（IAE），绝不能把 NPE 漏成 500。
+    String missingName =
+        """
+        {"commandId":"%s",
+         "branchSettings":{"environment":{"workspacePath":"."},"agentName":"assistant",
+           "model":{"providerName":"openai","modelName":"gpt-4o","variant":"default"},
+           "activeTools":["read"]},
+         "yoloEnabled":true,
+         "contents":[{"type":"TEXT","text":"hello"}]}
+        """
+            .formatted(COMMAND);
     mockMvc
-        .perform(get("/api/canvases/not-a-uuid/events/stream"))
+        .perform(
+            post("/api/canvases/" + CANVAS + "/thread/messages")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingName))
         .andExpect(status().isBadRequest());
+
+    String missingPath =
+        """
+        {"commandId":"%s",
+         "branchSettings":{"environment":{"name":"default"},"agentName":"assistant",
+           "model":{"providerName":"openai","modelName":"gpt-4o","variant":"default"},
+           "activeTools":["read"]},
+         "yoloEnabled":true,
+         "contents":[{"type":"TEXT","text":"hello"}]}
+        """
+            .formatted(COMMAND);
     mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=abc"))
+        .perform(
+            post("/api/canvases/" + CANVAS + "/thread/messages")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingPath))
         .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=01"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=9223372036854775808"))
-        .andExpect(status().isBadRequest());
-    verifyNoInteractions(versionEventSource);
+    verify(threadService, never()).sendFirstMessage(eq(CANVAS), any(CanvasFirstSendCommand.class));
   }
 
   private String validCommandJson() {

@@ -1,7 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChatPanel,
+  ThreadEventDetail,
+  ThreadEventView,
+  ThreadShortcutsPanel,
+  useThreadPanelViewState,
   type ChatPanelActivityInput,
   type ChatPanelComposerInput,
   type ChatPanelFooterInput,
@@ -9,20 +21,22 @@ import {
   type ChatPanelTranscriptInput,
   type CommandBatchReplay,
   type ThreadCommand,
+  type ThreadPanelMainView,
   useAgentThreadController,
 } from '@/features/ai/runtime'
+import { threadCommandsForActiveView } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
   browserNotificationPermission,
   requestBrowserNotificationPermission,
   useThreadNotifications,
 } from '@/features/ai/runtime/thread-notifications'
-import { useThreadUiPreferences } from '@/features/ai/runtime/thread-ui-preferences'
+import { useApplicationSettings } from '@/features/settings/application-settings'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import {
-  AgentSelectionModal,
-  EnvironmentSelectionModal,
-  SelectionListModal,
-} from '@/features/ai/chat/SelectionListModal'
+  AgentSelectionPanel,
+  ThreadSelectionPanel,
+} from '@/features/ai/chat/SelectionPanel'
+import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import { TaskStatusWidget } from '@/features/ai/runtime/thread-panel/TaskStatusWidget'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { BOUND_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
@@ -42,13 +56,17 @@ import {
 import {
   createTextPart,
   hasMessageContent,
+  slashQueryOf,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
 import { branchTarget } from '@/features/ai/chat/session-entry-tree'
 import { toThreadSelectionItem } from '@/features/ai/chat/thread-selection'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentBindingDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts/ai-environment'
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
@@ -57,6 +75,12 @@ import { isConflictError, isNotFoundError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
+import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
+
+const ConfirmActionModal = lazy(async () => {
+  const module = await import('@/shared/ui/console/ConfirmActionModal')
+  return { default: module.ConfirmActionModal }
+})
 
 /** 409 = 过期 revision 或非 quiescent 的 Thread；绝不能悄悄吞掉。 */
 function rebindErrorMessage(error: unknown): string {
@@ -122,40 +146,58 @@ export function BoundThreadPane({
     draft: BranchDraft
     initialized: boolean
   } | null>(null)
-  const [threadModalOpen, setThreadModalOpen] = useState(false)
-  const [agentModalOpen, setAgentModalOpen] = useState(false)
-  const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
+  const [interaction, setInteraction] = useState<
+    'thread' | 'agent' | 'environment' | 'history' | 'shortcuts' | null
+  >(null)
+  // 互斥主视图与 Event 状态（mode/selected/active + 双 scrollTop）：每个 mounted
+  // Pane 独立；threadId 重绑由 hook 全部重置回 conversation。
+  const {
+    mode,
+    switchMode,
+    selectedEventId,
+    selectEvent,
+    activeEventId,
+    setActiveEventId,
+    eventsBodyRef,
+    initialConversationScrollTop,
+    initialEventsScrollTop,
+  } = useThreadPanelViewState(threadId, controller.bodyRef, controller.events)
+  // detail widget 按最新 records 派生（id 消失时 hook 已清空 selected）。
+  const selectedRecord =
+    selectedEventId == null
+      ? null
+      : (controller.events.find((event) => event.id === selectedEventId) ?? null)
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
+  const [discardConfirm, setDiscardConfirm] = useState<ConfirmModalState | null>(null)
   const queryClient = useQueryClient()
   const boundThreadIdRef = useRef<string | null>(null)
-  const threadUiPreferences = useThreadUiPreferences()
-  const [notificationPermission, setNotificationPermission] = useState(
-    browserNotificationPermission,
-  )
+  // 全局应用设置（AppProviders mount-once）：通知开关是 SettingsPage 与所有
+  // Bound 面板共享的唯一事实源，不再维护面板本地偏好。
+  const { notificationsEnabled, setNotificationsEnabled } = useApplicationSettings()
+  // permission 每次渲染都从当前浏览器状态派生，绝不缓存 mount 时快照：
+  // SettingsPage 可能在别处请求权限后置全局 enabled，已挂载面板必须立即反映
+  // 真实 permission，通知 hook 与 footer 才不会被陈旧快照门控。
+  const notificationPermission = browserNotificationPermission()
   const threadNotifications = useThreadNotifications({
     threadId,
     title: controller.title,
     messages: controller.timeline.messages,
     working: controller.working,
-    enabled:
-      threadUiPreferences.notificationsEnabled
-      && notificationPermission === 'granted',
+    enabled: notificationsEnabled && notificationPermission === 'granted',
   })
 
   // 将面板重新绑定到另一个 Thread 时，会清空所有面板本地状态，并从新 snapshot
-  // 重新初始化 draft（controller 也会重置其 stop/decision replay 状态）。
+  // 重新初始化 draft（controller 也会重置其 stop/decision replay 状态）；
+  // 主视图/Event 状态由 useThreadPanelViewState 在 threadId 变化时重置。
   useEffect(() => {
     if (boundThreadIdRef.current === threadId) {
       return
     }
     boundThreadIdRef.current = threadId
     setBranchState(null)
-    setHistoryOpen(false)
-    setAgentModalOpen(false)
-    setEnvironmentModalOpen(false)
-    setThreadModalOpen(false)
+    setInteraction(null)
     setRebindBlockedReason(null)
+    setDiscardConfirm(null)
   }, [threadId])
 
   const effectiveBase = useMemo(() => {
@@ -240,7 +282,7 @@ export function BoundThreadPane({
       })
     },
     onSuccess: async (updatedThread: HarnessThreadDTO, entry: HarnessSessionEntryDTO) => {
-      setHistoryOpen(false)
+      setInteraction(null)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
@@ -270,7 +312,7 @@ export function BoundThreadPane({
     || controller.approvalPending
     || controller.replayPending
 
-  const threadPicker = useChatThreadPicker(chatId, threadModalOpen, threadSort)
+  const threadPicker = useChatThreadPicker(chatId, interaction === 'thread', threadSort)
   const threadItems = threadPicker.items.map((item) => toThreadSelectionItem(item, threadSort))
 
   function editDraft(patch: Partial<BranchDraft>) {
@@ -292,13 +334,13 @@ export function BoundThreadPane({
     // Draft-local edit：采用新的 agent name + 它的 active tool 集合；冻结的
     // model/environment/yolo 选中值保持不变。
     editDraft({ agentName: selectedAgentName, activeTools: activeToolsFromAgent(agent) })
-    setAgentModalOpen(false)
+    setInteraction(null)
   }
 
-  function selectEnvironment(environmentName: string | null) {
+  function selectEnvironment(environment: EnvironmentBindingDTO | null) {
     setRebindBlockedReason(null)
-    editDraft({ environmentName })
-    setEnvironmentModalOpen(false)
+    editDraft({ environment })
+    setInteraction(null)
   }
 
   function toggleYolo() {
@@ -316,17 +358,16 @@ export function BoundThreadPane({
 
   async function toggleNotifications() {
     setRebindBlockedReason(null)
-    if (threadUiPreferences.notificationsEnabled) {
-      threadUiPreferences.setNotificationsEnabled(false)
+    if (notificationsEnabled) {
+      setNotificationsEnabled(false)
       return
     }
     const permission = await requestBrowserNotificationPermission()
-    setNotificationPermission(permission)
     if (permission === 'granted') {
-      threadUiPreferences.setNotificationsEnabled(true)
+      setNotificationsEnabled(true)
       return
     }
-    threadUiPreferences.setNotificationsEnabled(false)
+    setNotificationsEnabled(false)
     setRebindBlockedReason(
       t(
         permission === 'unsupported'
@@ -337,19 +378,20 @@ export function BoundThreadPane({
   }
 
   function selectThread(selectedThreadId: string) {
-    setThreadModalOpen(false)
     if (selectedThreadId === threadId) {
       // 选中当前已绑定的 Thread 不需要确认，也不会产生任何变化。
+      setInteraction(null)
       return
     }
     if (panePending) {
       setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
       return
     }
-    if (paneDirty && !window.confirm(t('ai.chat.history.confirmDiscardDraft'))) {
-      return
-    }
-    onThreadChange(selectedThreadId)
+    confirmDiscardIfNeeded(() => {
+      setInteraction(null)
+      controller.setDraft([])
+      onThreadChange(selectedThreadId)
+    })
   }
 
   /** 仅逻辑上 quiescent 的 Thread 才接受 head rebind（与服务端分类器一致）。 */
@@ -367,7 +409,7 @@ export function BoundThreadPane({
       return
     }
     setRebindBlockedReason(null)
-    setHistoryOpen(true)
+    setInteraction('history')
   }
 
   function rebindTo(entry: HarnessSessionEntryDTO) {
@@ -375,10 +417,24 @@ export function BoundThreadPane({
       setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
       return
     }
-    if (paneDirty && !window.confirm(t('ai.chat.history.confirmDiscardDraft'))) {
+    confirmDiscardIfNeeded(() => rebindMutation.mutate(entry))
+  }
+
+  function confirmDiscardIfNeeded(action: () => void, confirmationRequired = paneDirty) {
+    if (!confirmationRequired) {
+      action()
       return
     }
-    rebindMutation.mutate(entry)
+    setDiscardConfirm({
+      title: t('ai.chat.history.discardDraftTitle'),
+      description: t('ai.chat.history.confirmDiscardDraft'),
+      confirmLabel: t('ai.chat.history.discardDraftConfirm'),
+      tone: 'danger',
+      onConfirm: () => {
+        setDiscardConfirm(null)
+        action()
+      },
+    })
   }
 
   function handleCommand(command: ThreadCommand) {
@@ -387,21 +443,18 @@ export function BoundThreadPane({
       return
     }
     switch (command.id) {
-      case 'session':
-        // 全局 Session rebind 已不再存在：保持可见但禁用。
-        return
       case 'thread':
         if (panePending) {
           setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
           return
         }
-        setThreadModalOpen(true)
+        setInteraction('thread')
         return
       case 'agent':
-        setAgentModalOpen(true)
+        setInteraction('agent')
         return
       case 'environment':
-        setEnvironmentModalOpen(true)
+        setInteraction('environment')
         return
       case 'yolo':
         toggleYolo()
@@ -409,16 +462,36 @@ export function BoundThreadPane({
       case 'tree':
         openHistory()
         return
+      case 'events':
+        // 互斥主视图切换：Composer 保持挂载，draft/queue/working 状态不受影响。
+        switchMode('events')
+        return
+      case 'conversation':
+        // 切回 conversation 同时关闭 event detail（hook 保留 Event active）。
+        switchMode('conversation')
+        return
+      case 'shortcuts':
+        setInteraction('shortcuts')
+        return
       case 'new':
         if (panePending) {
           setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
           return
         }
-        if (paneDirty && !window.confirm(t('ai.chat.history.confirmDiscardDraft'))) {
-          return
+        {
+          // ThreadComposer 已消费纯 slash 命令，但 React 仍可能在本次事件中暴露旧 parts。
+          // 只有命令之外仍有附件/正文，或 branch 设置已修改时，才需要丢弃确认。
+          const commandInputOnly =
+            slashQueryOf(controller.draft) != null
+            && controller.draft.every((part) => part.type === 'text')
+          confirmDiscardIfNeeded(
+            () => {
+              controller.setDraft([])
+              onThreadChange(null)
+            },
+            dirty || (hasMessageContent(controller.draft) && !commandInputOnly),
+          )
         }
-        controller.setDraft([])
-        onThreadChange(null)
         return
       default:
         controller.runCommand(command)
@@ -442,21 +515,27 @@ export function BoundThreadPane({
       ? `${draft.model.providerName}/${draft.model.modelName}`
       : controller.runtimeLabels.modelName,
     variantName: draft?.model.variant || controller.runtimeLabels.variantName,
-    environmentName:
-      draft?.environmentName != null
-        ? draft.environmentName
-        : (draft?.environmentName == null && draft != null
+    environment:
+      draft?.environment != null
+        ? draft.environment
+        : (draft?.environment == null && draft != null
             ? null
-            : controller.runtimeLabels.environmentName),
+            : controller.runtimeLabels.environment),
     environmentReady:
-      draft?.environmentName != null
-        ? (environmentReadyByName.get(draft.environmentName) ?? false)
+      draft?.environment != null
+        ? (environmentReadyByName.get(draft.environment.name) ?? false)
         : controller.runtimeLabels.environmentReady,
+    usageText: controller.branchUsageText,
     contextWindow: extractContextWindow(draftModel) ?? controller.runtimeLabels.contextWindow,
   }
   const transcript: ChatPanelTranscriptInput = {
     timeline: controller.timeline,
     bodyRef: controller.bodyRef,
+    // conversation 重新挂载时以 initialScrollTop 恢复保存位置（null 首次进入贴底）；
+    // resetKey=threadId：重绑后新线程首次进入重新贴底。
+    initialScrollTop: initialConversationScrollTop,
+    resetKey: threadId,
+    eventCount: controller.entries.length + controller.queuedCommands.length,
     loading: controller.messagesLoading,
     error: controller.messagesError,
     approvalPending: controller.approvalPending,
@@ -470,6 +549,53 @@ export function BoundThreadPane({
       }
     },
   }
+  const interactionPanel =
+    interaction === 'thread' ? (
+      <ThreadSelectionPanel
+        items={threadItems}
+        selectedThreadId={threadId}
+        sort={threadSort}
+        loading={threadPicker.isLoading}
+        onSortChange={onThreadSortChange}
+        onClose={() => setInteraction(null)}
+        onSelect={selectThread}
+      />
+    ) : interaction === 'agent' ? (
+      <AgentSelectionPanel
+        agents={agents.map((agent) => ({
+          name: agent.name,
+          description: agent.description,
+        }))}
+        selectedAgentName={branchState?.draft.agentName}
+        onClose={() => setInteraction(null)}
+        onSelect={selectAgent}
+      />
+    ) : interaction === 'environment' ? (
+      <EnvironmentWorkspacePanel
+        environments={environments}
+        current={branchState?.draft.environment ?? null}
+        onClose={() => setInteraction(null)}
+        onSelect={selectEnvironment}
+      />
+    ) : interaction === 'history' ? (
+      <HistoryBranchPanel
+        entries={controller.entries}
+        currentHeadEntryId={controller.thread?.headEntryId}
+        loading={controller.messagesLoading}
+        queryError={controller.messagesError}
+        pending={rebindMutation.isPending}
+        rebindError={rebindMutation.error ? rebindErrorMessage(rebindMutation.error) : null}
+        onClose={() => {
+          setInteraction(null)
+          rebindMutation.reset()
+        }}
+        onRebind={rebindTo}
+      />
+    ) : interaction === 'shortcuts' ? (
+      <ThreadShortcutsPanel onClose={() => setInteraction(null)} />
+    ) : null
+  // 当前已激活的主视图命令保持可见但禁用（events 激活时 /events 禁用）。
+  const commands = useMemo(() => threadCommandsForActiveView(BOUND_PANE_COMMANDS, mode), [mode])
   const composer: ChatPanelComposerInput = {
     parts: controller.draft,
     // Pending 覆盖 in-flight HTTP 请求（同时禁用发送：canSend 已检查 disabled），
@@ -483,50 +609,73 @@ export function BoundThreadPane({
       || branchState == null
       || effectiveBase == null,
     onPartsChange: controller.setDraft,
+    onHistoryPartsChange: (parts) => controller.setDraft(parts, 'history'),
     onSubmit: (payload, localDraft) => {
       void controller.submitMessage(payload, localDraft)
     },
     onCommand: handleCommand,
-    commands: BOUND_PANE_COMMANDS,
+    commands,
+    focusOnEscape: focused,
+    interactionPanel,
   }
   const footer: ChatPanelFooterInput = {
     yoloEnabled: branchState?.draft.yoloEnabled ?? controller.thread?.yoloEnabled,
     onAgentClick: () => {
       onFocus()
-      setAgentModalOpen(true)
+      setInteraction('agent')
     },
     onModelClick: undefined,
     onVariantClick: undefined,
     onEnvironmentClick: () => {
       onFocus()
-      setEnvironmentModalOpen(true)
+      setInteraction('environment')
     },
-    taskStatusEnabled: threadUiPreferences.taskStatusEnabled,
-    notificationsEnabled: threadUiPreferences.notificationsEnabled,
+    notificationsEnabled,
     notificationPermission,
-    onTaskStatusToggle: () => {
-      threadUiPreferences.setTaskStatusEnabled(!threadUiPreferences.taskStatusEnabled)
-    },
     onNotificationsToggle: () => {
       void toggleNotifications()
     },
+  }
+  // 互斥主视图：events 时替换 transcript 滚动区；detail 是 widget zone 的只读展示，
+  // 不是 InteractionPanel（不隐藏 Composer、不抢焦点）。
+  const mainViewInput: ThreadPanelMainView = {
+    events:
+      mode === 'events' ? (
+        <ThreadEventView
+          events={controller.events}
+          activeEventId={activeEventId}
+          onActiveEventIdChange={setActiveEventId}
+          bodyRef={eventsBodyRef}
+          initialScrollTop={initialEventsScrollTop}
+          detailOpen={selectedEventId != null}
+          onSelect={(event) => selectEvent(event.id)}
+          onCloseDetail={() => selectEvent(null)}
+        />
+      ) : undefined,
   }
   const activity: ChatPanelActivityInput = {
     working: controller.working,
     // 子任务 widget 只读消费 timeline；审批按钮的决策回传目标子 Thread
     // （status.threadId），由 controller 的 targetThreadId 参数转发。
-    widgets: threadUiPreferences.taskStatusEnabled ? (
-      <TaskStatusWidget
-        messages={controller.timeline.messages}
-        approvalPending={controller.approvalPending}
-        onDecideApproval={(targetThreadId, invocationId, decision) => {
-          if (decision === 'DENY') {
-            threadNotifications.markPermissionRejected()
-          }
-          void controller.decideApproval(invocationId, decision, targetThreadId)
-        }}
-      />
-    ) : null,
+    // TaskStatusWidget 永久挂载（无 task 消息时组件自身为空）；Event detail 位于
+    // widget zone 第一项、TaskStatus 之前。
+    widgets: (
+      <>
+        {selectedRecord ? (
+          <ThreadEventDetail record={selectedRecord} onClose={() => selectEvent(null)} />
+        ) : null}
+        <TaskStatusWidget
+          messages={controller.timeline.messages}
+          approvalPending={controller.approvalPending}
+          onDecideApproval={(targetThreadId, invocationId, decision) => {
+            if (decision === 'DENY') {
+              threadNotifications.markPermissionRejected()
+            }
+            void controller.decideApproval(invocationId, decision, targetThreadId)
+          }}
+        />
+      </>
+    ),
     actionError: rebindBlockedReason ?? controller.actionError,
     onDismissActionError: () => {
       setRebindBlockedReason(null)
@@ -543,55 +692,20 @@ export function BoundThreadPane({
       <ChatPanel
         labels={labels}
         transcript={transcript}
+        mainView={mainViewInput}
         composer={composer}
         footer={footer}
         activity={activity}
       />
-      {historyOpen ? (
-        <HistoryBranchPanel
-          entries={controller.entries}
-          currentHeadEntryId={controller.thread?.headEntryId}
-          loading={controller.messagesLoading}
-          queryError={controller.messagesError}
-          pending={rebindMutation.isPending}
-          rebindError={rebindMutation.error ? rebindErrorMessage(rebindMutation.error) : null}
-          onClose={() => {
-            setHistoryOpen(false)
-            rebindMutation.reset()
-          }}
-          onRebind={rebindTo}
-        />
+      {discardConfirm ? (
+        <Suspense fallback={null}>
+          <ConfirmActionModal
+            modal={discardConfirm}
+            pending={false}
+            onClose={() => setDiscardConfirm(null)}
+          />
+        </Suspense>
       ) : null}
-      {/* /thread 切换该面板展示哪个 Chat 作用域 Thread；不会修改任何 Thread。 */}
-      <SelectionListModal
-        open={threadModalOpen}
-        title={t('ai.chat.selectThread')}
-        items={threadItems}
-        sort={threadSort}
-        onSortChange={onThreadSortChange}
-        loading={threadPicker.isLoading}
-        emptyText={t('ai.chat.noThreads')}
-        onClose={() => setThreadModalOpen(false)}
-        onSelect={selectThread}
-      />
-      <AgentSelectionModal
-        open={agentModalOpen}
-        agents={agents.map((agent) => ({
-          name: agent.name,
-          description: agent.description,
-        }))}
-        onClose={() => setAgentModalOpen(false)}
-        onSelect={selectAgent}
-      />
-      <EnvironmentSelectionModal
-        open={environmentModalOpen}
-        environments={environments}
-        selectedEnvironmentName={branchState?.draft.environmentName ?? null}
-        onClose={() => setEnvironmentModalOpen(false)}
-        onSelect={(environmentName) => {
-          selectEnvironment(environmentName)
-        }}
-      />
     </section>
   )
 }

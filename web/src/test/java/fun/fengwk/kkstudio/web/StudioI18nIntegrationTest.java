@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -52,19 +51,6 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
     assertResponseStatusMessage(chatId, "zh-CN", "请求无效。", "请求错误");
     assertResponseStatusMessage(chatId, "en-US", "The request is invalid.", "Bad Request");
     assertResponseStatusMessage(chatId, "fr-FR", "The request is invalid.", "Bad Request");
-  }
-
-  @Test
-  void sseResponseStatusErrorsRemainOutsideTheJsonAdvice() throws Exception {
-    MvcResult result =
-        mockMvc
-            .perform(
-                get("/api/ai/runtime/threads/00000000-0000-0000-0000-000000000999/events/stream")
-                    .param("afterRevision", "0"))
-            .andExpect(status().isNotFound())
-            .andReturn();
-
-    assertEquals("", result.getResponse().getContentAsString());
   }
 
   private void assertDomainMessage(String language, String expectedMessage) throws Exception {

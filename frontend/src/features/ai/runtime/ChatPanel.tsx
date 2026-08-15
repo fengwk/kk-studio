@@ -5,6 +5,7 @@ import {
   ThreadStatusFooter,
   type ThreadPanelActivityInput,
   type ThreadPanelComposerInput,
+  type ThreadPanelMainView,
   type ThreadPanelTranscriptInput,
 } from '@/features/ai/runtime/thread-panel'
 import {
@@ -12,6 +13,7 @@ import {
   type ResourceBlobUrls,
 } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { storageService } from '@/shared/api/storage-service'
+import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
@@ -24,8 +26,11 @@ export interface ChatPanelLabels {
   providerName?: string
   modelName?: string
   variantName?: string
-  environmentName?: string | null
+  /** 完整 Environment binding（name + workspacePath）；null 表示未绑定。 */
+  environment?: EnvironmentBindingDTO | null
   environmentReady?: boolean
+  /** 当前 root-to-head branch 的已关闭 Turn 累计 usage 摘要。 */
+  usageText?: string
   contextWindow?: number
 }
 
@@ -37,6 +42,12 @@ export interface ChatPanelTranscriptInput {
     hasPendingInputs: boolean
   }
   bodyRef: RefObject<HTMLDivElement | null>
+  /** 重新进入 conversation 视图时恢复的 scrollTop；null 表示首次进入（贴底）。 */
+  initialScrollTop?: number | null
+  /** 变化时重置 stick 并重新贴底（Thread 重绑后新线程首次进入）。 */
+  resetKey?: string | number | null
+  /** 非消息内容的变化计数（控制 Entry/queued 等），用于贴底再评估。 */
+  eventCount?: number
   loading: boolean
   error: unknown
   onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
@@ -54,10 +65,8 @@ export interface ChatPanelFooterInput {
   onModelClick?: () => void
   onVariantClick?: () => void
   onEnvironmentClick?: () => void
-  taskStatusEnabled?: boolean
   notificationsEnabled?: boolean
   notificationPermission?: 'default' | 'denied' | 'granted' | 'unsupported'
-  onTaskStatusToggle?: () => void
   onNotificationsToggle?: () => void
 }
 
@@ -77,12 +86,15 @@ export interface ChatPanelActivityInput {
 export function ChatPanel({
   labels,
   transcript,
+  mainView,
   composer,
   footer,
   activity,
 }: {
   labels: ChatPanelLabels
   transcript: ChatPanelTranscriptInput
+  /** 互斥主视图：传入 events 时替换 transcript（Event view）。 */
+  mainView?: ThreadPanelMainView
   composer: ChatPanelComposerInput
   footer: ChatPanelFooterInput
   activity: ChatPanelActivityInput
@@ -116,6 +128,9 @@ export function ChatPanel({
     loading: transcript.loading,
     error: transcript.error,
     bodyRef: transcript.bodyRef,
+    initialScrollTop: transcript.initialScrollTop,
+    resetKey: transcript.resetKey,
+    eventCount: transcript.eventCount,
     onDecideApproval: transcript.onDecideApproval,
     approvalPending: transcript.approvalPending,
   }
@@ -129,6 +144,7 @@ export function ChatPanel({
     <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>
       <ThreadPanel
         transcript={threadPanelTranscript}
+        mainView={mainView}
         composer={composer}
         activity={panelActivity}
         slots={{
@@ -138,17 +154,16 @@ export function ChatPanel({
               providerName={labels.providerName}
               modelName={labels.modelName}
               variantName={labels.variantName}
-              environmentName={labels.environmentName}
+              environment={labels.environment}
               environmentReady={labels.environmentReady}
+              usageText={labels.usageText}
               yoloEnabled={footer.yoloEnabled}
               onAgentClick={footer.onAgentClick}
               onModelClick={footer.onModelClick}
               onVariantClick={footer.onVariantClick}
               onEnvironmentClick={footer.onEnvironmentClick}
-              taskStatusEnabled={footer.taskStatusEnabled}
               notificationsEnabled={footer.notificationsEnabled}
               notificationPermission={footer.notificationPermission}
-              onTaskStatusToggle={footer.onTaskStatusToggle}
               onNotificationsToggle={footer.onNotificationsToggle}
             />
           ),

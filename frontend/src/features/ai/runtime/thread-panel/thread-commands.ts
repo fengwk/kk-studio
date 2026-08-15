@@ -1,7 +1,24 @@
-export type ThreadCommandScene = 'blank' | 'bound'
+export type ThreadCommandScene =
+  | 'chat-blank'
+  | 'chat-bound'
+  | 'canvas-blank'
+  | 'canvas-bound'
+
+export type ThreadCommandId =
+  | 'thread'
+  | 'agent'
+  | 'environment'
+  | 'yolo'
+  | 'tree'
+  | 'stop'
+  | 'new'
+  | 'upload'
+  | 'events'
+  | 'conversation'
+  | 'shortcuts'
 
 export interface ThreadCommand {
-  id: string
+  id: ThreadCommandId
   label: string
   description: string
   labelKey?: string
@@ -14,18 +31,10 @@ export interface ThreadCommand {
 }
 
 /**
- * Slash 命令表（pi 风格）。
+ * 命令菜单（pi 风格）。`+` 是主入口，composer 开头的 `/` 是同一菜单的文本快捷入口。
  * 顺序是稳定的产品顺序，切勿按可用性重新排序。
  */
 export const THREAD_COMMANDS: ThreadCommand[] = [
-  {
-    id: 'session',
-    label: 'session',
-    description: '',
-    labelKey: 'ai.runtime.command.sessionLabel',
-    descriptionKey: 'ai.runtime.command.session',
-    keywords: ['chat', 'switch', 'rebind', 'head'],
-  },
   {
     id: 'thread',
     label: 'thread',
@@ -90,22 +99,56 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
     descriptionKey: 'ai.runtime.command.upload',
     keywords: ['attach', 'file', 'image', 'video', 'audio', 'paste'],
   },
+  {
+    id: 'events',
+    label: 'events',
+    description: '',
+    labelKey: 'ai.runtime.command.eventsLabel',
+    descriptionKey: 'ai.runtime.command.events',
+    keywords: ['log', 'audit', 'activity', 'entry'],
+  },
+  {
+    id: 'conversation',
+    label: 'conversation',
+    description: '',
+    labelKey: 'ai.runtime.command.conversationLabel',
+    descriptionKey: 'ai.runtime.command.conversation',
+    keywords: ['chat', 'messages', 'transcript', 'dialogue'],
+  },
+  {
+    id: 'shortcuts',
+    label: 'shortcuts',
+    description: '',
+    labelKey: 'ai.runtime.command.shortcutsLabel',
+    descriptionKey: 'ai.runtime.command.shortcuts',
+    keywords: ['keys', 'keyboard', 'help', 'hotkeys'],
+  },
 ]
 
 /**
- * 空面板下可用的命令。`/thread` 用于选择一个已存在的 Chat-scoped Thread。
- * `/session`（全局 Session 重绑定）已不再存在：树只属于当前 Session，因此该
- * 命令在所有场景下都保持可见但禁用状态。
+ * 每个命令的可用场景。场景区分 Chat 与 Canvas、Blank 与 Bound：
+ * - Canvas Bound 的 controller 只支持 stop（upload 由 ThreadComposer 自身处理文件选择），
+ *   因此 agent/environment/yolo/tree/new/thread 不会投影给只支持 stop 的 controller。
+ * `/session` 已彻底移除：树只属于当前 Session，不存在可用的全局 Session 重绑定命令。
  */
-const BLANK_SCENE_ENABLED = new Set(['upload', 'thread', 'agent', 'environment', 'yolo'])
-const NEVER_ENABLED = new Set(['session'])
+const SCENE_AVAILABILITY: Record<ThreadCommandId, ThreadCommandScene[]> = {
+  thread: ['chat-blank', 'chat-bound'],
+  agent: ['chat-blank', 'canvas-blank', 'chat-bound'],
+  environment: ['chat-blank', 'canvas-blank', 'chat-bound'],
+  yolo: ['chat-blank', 'canvas-blank', 'chat-bound'],
+  tree: ['chat-bound'],
+  stop: ['chat-bound', 'canvas-bound'],
+  new: ['chat-bound'],
+  upload: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
+  events: ['chat-bound', 'canvas-bound'],
+  conversation: ['chat-bound', 'canvas-bound'],
+  shortcuts: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
+}
 
 /** 投影稳定的 command 列表并附带场景可用性（disabled 仍保留在列表中）。 */
 export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand[] {
   return THREAD_COMMANDS.map((command) => {
-    const disabled =
-      NEVER_ENABLED.has(command.id)
-      || (scene === 'blank' && !BLANK_SCENE_ENABLED.has(command.id))
+    const disabled = !(SCENE_AVAILABILITY[command.id]?.includes(scene) ?? false)
     return {
       ...command,
       disabled,
@@ -113,6 +156,21 @@ export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand
       disabledReasonKey: disabled ? 'ai.runtime.command.disabledReason' : undefined,
     }
   })
+}
+
+/**
+ * Bound 主视图互斥：当前已激活的视图命令保持可见但禁用
+ * （events 激活时 `/events` 禁用，conversation 激活时 `/conversation` 禁用）。
+ */
+export function threadCommandsForActiveView(
+  commands: ThreadCommand[],
+  activeView: 'conversation' | 'events',
+): ThreadCommand[] {
+  return commands.map((command) =>
+    command.id === activeView
+      ? { ...command, disabled: true, disabledReasonKey: 'ai.runtime.command.activeView' }
+      : command,
+  )
 }
 
 export function filterThreadCommands(

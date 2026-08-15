@@ -1,17 +1,13 @@
 package fun.fengwk.kkstudio.web.advice;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import fun.fengwk.convention4j.api.result.Result;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
@@ -91,16 +87,5 @@ class StudioResponseStatusErrorAdviceTest {
             "reason",
             "STALE_COMMAND_CURSOR"),
         response.getBody().getErrors());
-  }
-
-  @Test
-  void rethrowsSseExceptionsForTheDefaultServletResolver() {
-    ResponseStatusException error =
-        new ResponseStatusException(HttpStatus.BAD_REQUEST, "stream detail");
-    MockHttpServletRequest request = new MockHttpServletRequest();
-    request.addHeader(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE);
-
-    assertSame(
-        error, assertThrows(ResponseStatusException.class, () -> advice.handle(error, request)));
   }
 }

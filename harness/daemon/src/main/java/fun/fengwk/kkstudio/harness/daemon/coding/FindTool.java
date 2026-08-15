@@ -29,7 +29,7 @@ public final class FindTool extends AbstractCodingTool {
   @Override
   ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path workdir = boundary.workdir(optionalString(args, "workdir"));
+    Path workdir = boundary.workdir(optionalString(args, "workdir"), request.workdir());
     Path path = boundary.existingWithoutSymlinks(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 1000, 100_000);
     Duration timeout = effectiveSearchTimeout(request.effectiveTimeout(), args);

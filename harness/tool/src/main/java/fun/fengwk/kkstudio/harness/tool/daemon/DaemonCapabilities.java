@@ -16,7 +16,7 @@ public record DaemonCapabilities(
     List<DaemonMcpServerDescriptor> mcpServers) {
 
   /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
-  public static final int VERSION = 3;
+  public static final int VERSION = 4;
 
   public DaemonCapabilities {
     if (version != VERSION) {

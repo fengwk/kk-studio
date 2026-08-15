@@ -17,6 +17,7 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
+import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -50,7 +51,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -66,7 +67,8 @@ class HarnessOneShotServiceTest {
     return new UUID(0L, value);
   }
 
-  private static final EnvironmentName ENVIRONMENT = new EnvironmentName("h3-prompt");
+  private static final EnvironmentBinding ENVIRONMENT =
+      TestEnvironmentBindings.binding("h3-prompt");
   private static final BranchSettings SETTINGS =
       new BranchSettings(
           ENVIRONMENT,
