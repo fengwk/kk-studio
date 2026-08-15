@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -541,6 +542,52 @@ class ApplicationEventHubTest {
           established.get(),
           closedUpstreams.get(),
           "accepted subscriptions must already be retired; release is a no-op");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void closeDoesNotHoldLifecycleFenceWhileClosingUpstreams() throws Exception {
+    // 围栏只设立 closed：排空时外部 close 若回等待，不得再持有围栏，否则并发 subscribe 会死锁。
+    CountDownLatch handleCloseStarted = new CountDownLatch(1);
+    CountDownLatch allowHandleClose = new CountDownLatch(1);
+    when(revisionSource.subscribe(any(), any()))
+        .thenReturn(
+            new SourceSubscribed(
+                5L,
+                () -> {
+                  handleCloseStarted.countDown();
+                  try {
+                    allowHandleClose.await();
+                  } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                  }
+                }));
+
+    hub.subscribe(THREAD_KEY, sink());
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> closing = executor.submit(hub::close);
+      assertTrue(handleCloseStarted.await(5, TimeUnit.SECONDS), "close must reach upstream close");
+
+      Future<?> subscribe =
+          executor.submit(
+              () -> {
+                hub.subscribe(CANVAS_KEY, sink());
+                return null;
+              });
+      ExecutionException error =
+          assertThrows(
+              ExecutionException.class,
+              () -> subscribe.get(5, TimeUnit.SECONDS),
+              "subscribe during drain must not wait on the lifecycle fence");
+      assertTrue(
+          error.getCause() instanceof IllegalStateException,
+          "post-boundary subscribe must be rejected while drain is still in external close");
+
+      allowHandleClose.countDown();
+      closing.get(5, TimeUnit.SECONDS);
     } finally {
       executor.shutdownNow();
     }

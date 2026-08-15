@@ -22,10 +22,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 之前的由客户端随后拉取的 snapshot/changes 覆盖）。
  *
  * <p>同一资源的状态（上游句柄、订阅者集合、early 缓冲）由该状态的监视器串行化；map 只做「生命周期围栏内创建/获取」与「状态锁内的 identity 条件删除」。{@link
- * #lifecycleFence} 把「{@link #closed} 边界」与「向 map 发布新状态」串在同一把锁上，因此 {@link #close()} 一旦进入围栏，之后的 {@link
- * #subscribe} 不能再插入存活状态。被最后释放、建立失败或 {@link #close()} 淘汰的状态先标记 {@link ResourceState#retired} 再移出
- * map，之后的上游回调一律丢弃，绝不向 detached state 累积；订阅者若在锁内发现状态已 retired 则重取新状态，因此不会在 detached state 上重建上游（避免
- * orphan upstream）。
+ * #lifecycleFence} 只把「{@link #closed} 边界」与「向 map 发布新状态」串在同一把锁上：{@link #close()} 一旦设立 closed，之后的
+ * {@link #subscribe} 不能再插入存活状态；排空已发布状态在围栏外进行，避免外部 close 回等待时再抢围栏。被最后释放、建立失败或 {@link #close()}
+ * 淘汰的状态先标记 {@link ResourceState#retired} 再移出 map，之后的上游回调一律丢弃，绝不向 detached state 累积；订阅者若在锁内发现状态已
+ * retired 则重取 新状态，因此不会在 detached state 上重建上游（避免 orphan upstream）。
  *
  * <p>订阅激活前（传输层尚未发出 ack 帧）到达的事件缓冲在订阅内，{@link Subscription#activate()} 后按到达顺序 投递，保证事件帧不先于 ack 帧。
  */
@@ -79,8 +79,8 @@ final class ApplicationEventHub implements AutoCloseable {
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
 
   /**
-   * 生命周期围栏：{@link #subscribe} 的「检查 closed + 发布状态」与 {@link #close()} 的「设立 closed 边界 + 排空 map」共用，避免
-   * compute 内读 closed 与 close 观察空 map 之间的窗口。
+   * 生命周期围栏：只串行化 {@link #subscribe} 的「检查 closed + 发布状态」与 {@link #close()} 的「设立 closed 边界」。
+   * 排空已发布状态不持有此锁。
    */
   private final Object lifecycleFence = new Object();
 
@@ -158,24 +158,27 @@ final class ApplicationEventHub implements AutoCloseable {
   @Override
   public void close() {
     synchronized (lifecycleFence) {
+      if (closed) {
+        return;
+      }
       closed = true;
-      // 围栏内排空：此后 subscribe 不能再发布新状态；已插入、尚未 retired 的条目在状态锁内淘汰。
-      while (!resources.isEmpty()) {
-        for (ResourceState state : resources.values()) {
-          synchronized (state) {
-            if (state.retired) {
-              continue;
-            }
-            state.retired = true;
-            resources.remove(state.key, state);
-            closeQuietly(state.revisionHandle);
-            closeQuietly(state.realtimeHandle);
-            closeQuietly(state.versionHandle);
-            for (LocalSubscription subscription : state.subscribers) {
-              subscription.markClosed();
-            }
-            state.subscribers.clear();
+    }
+    // 边界已设立：此后不能再发布新状态。已发布条目仍可见，在状态锁内淘汰并关闭上游。
+    while (!resources.isEmpty()) {
+      for (ResourceState state : resources.values()) {
+        synchronized (state) {
+          if (state.retired) {
+            continue;
           }
+          state.retired = true;
+          resources.remove(state.key, state);
+          closeQuietly(state.revisionHandle);
+          closeQuietly(state.realtimeHandle);
+          closeQuietly(state.versionHandle);
+          for (LocalSubscription subscription : state.subscribers) {
+            subscription.markClosed();
+          }
+          state.subscribers.clear();
         }
       }
     }
