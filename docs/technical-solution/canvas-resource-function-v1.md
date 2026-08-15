@@ -7,7 +7,7 @@ Canvas 是资源组织与创作界面，不是工作流编排器。当前模型�
 - 图片、视频、音频与 Markdown 文本 `ResourceNode`；
 - GPT Image 2、Seedance 2.0 系列、MiniMax-H3 Ref2VA 与免费 fake Function；
 - Group、Link、结构化 `@` 引用；
-- PostgreSQL durable graph、Redis bounded Patch Cache、PostgreSQL `NOTIFY` + SSE；
+- PostgreSQL durable graph、Redis bounded Patch Cache、PostgreSQL `NOTIFY` + 应用事件通道；
 - 与独立 Chat 共用 Attachment Pill Composer，并在 Canvas 首次发送时绑定真实 Harness 根 Thread。
 
 Link 只声明 source Resource 是 target Function 的候选引用，不表示执行依赖。Link 可以成环；v1 不实现 DAG、自动下游执行、条件、循环、CRDT、Presence 或 WebSocket 协作协议。
@@ -37,7 +37,7 @@ CanvasDocument
 id, title, version, threadId?, createdAt, updatedAt
 ```
 
-- `version` 是 Graph、Patch、SSE 和 `expectedVersion` CAS 共用的单调游标。DTO/SSE 中的
+- `version` 是 Graph、Patch、事件通道和 `expectedVersion` CAS 共用的单调游标。DTO/事件帧中的
   version 一律是 canonical 非负十进制字符串（如 `"0"`、`"42"`），与数据库 `bigint` 一一对应；
   客户端禁止转换为 JS number，比较必须使用十进制字符串长度/字典序（bigint-safe）。
 - 每个成功的 typed command batch 恰好前进一次。
@@ -270,7 +270,7 @@ GET    /api/canvases/{canvasId}
 DELETE /api/canvases/{canvasId}
 POST   /api/canvases/{canvasId}/commands
 GET    /api/canvases/{canvasId}/changes?afterVersion=N
-GET    /api/canvases/{canvasId}/events/stream
+WebSocket /api/events/v1        -> kind=canvas 版本事件订阅（version/resync）
 POST   /api/canvases/{canvasId}/thread/messages
 
 GET    /api/canvas-function-models
@@ -354,9 +354,11 @@ PostgreSQL 实体与 `canvas_document.version` 是唯一事实源。
 - 每个 Canvas 一个 bounded Stream：`kk-studio:canvas:{canvasId}:changes`，默认 exact max length 5000。
 - `/changes?afterVersion=N` 只在缓存覆盖全部连续版本时返回 patches；初次读取、Redis 不可用、损坏或任意 gap 都返回权威 Snapshot。
 - PostgreSQL trigger 只在 document insert/version 变化后 `NOTIFY canvas_version`，不修改 version。
-- SSE 事件为 `version` 或 `resync`；`Last-Event-ID` 覆盖 `afterVersion`，两者都是 canonical
-  非负十进制字符串。客户端收到 version 后拉 `/changes`，收到 resync 后整体替换 Snapshot；
-  数字/前导零/负数/畸形 version 事件一律忽略。
+- 浏览器经应用事件通道（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）
+  订阅 canvas：`version` 事件携带 canonical 非负十进制 graph version（`data {"version":"N"}`，顶层
+  `cursor` 与之相等），收到后按最后已知版本拉 `/changes`；`resync` 要求整体替换 Snapshot；
+  `subscribed`（首次与每次重连重订阅）同样触发 changes 同步，关闭快照 GET 与 wire 建立之间及
+  断线窗口内的版本缺口。数字/前导零/负数/畸形 version 事件一律忽略。
 
 Redis 不是事实源，不建立 consumer group，也不承担恢复。
 
@@ -415,14 +417,14 @@ MiniMax-H3 的 Prompt Agent 也使用 durable Blob Resource：Canvas manifest �
 - Upload checksum、去重、并发 complete、READY 消费、过期恢复；
 - Blob retain/release、ACTIVE/DELETING 与两阶段删除；
 - Resource nullable owner pair、INPUT/OUTPUT pin、成功交换和失败清理；
-- command version CAS/dedup、Link 成环、Patch gap/Snapshot、SSE reconnect；
+- command version CAS/dedup、Link 成环、Patch gap/Snapshot、事件通道重连；
 - Canvas 首发附件物化、raw request hash 重放与 Canvas/Thread/Session/Blob 深删除。
 
 前端覆盖：
 
 - Attachment Pill、IME、光标/Backspace/Delete、同名/重复附件、失败重试；
 - Chat 与 Canvas ordered contents；
-- Patch projection、SSE changes 恢复、Resource URL 渲染；
+- Patch projection、事件通道 changes 恢复、Resource URL 渲染；
 - 节点尺寸、整卡拖拽、Chat 面板与窄屏布局。
 
 默认自动化不得访问付费模型；真实 GPT Image、Seedance 和 H3 提交必须显式人工开关。

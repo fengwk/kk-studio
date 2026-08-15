@@ -332,8 +332,8 @@ record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable b
 ## 11. Realtime
 
 - `RealtimeEventSink.append` 只写 bounded Redis projection；sink 失败不改变 durable terminal。
-- revision SSE 帧使用 durable revision 作为 `Last-Event-ID`/`afterRevision` cursor；Redis delta 事件没有 SSE id。
-- 客户端恢复顺序：REST snapshot → durable revision SSE → Redis realtime overlay；revision 是唯一 durable cursor。
+- 浏览器经应用事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）订阅：`revision`/`version` 事件携带 durable cursor（canonical 非负十进制），`realtime` 事件的 data 是 Redis delta envelope JSON 对象且不携带 cursor。
+- 客户端恢复顺序：REST snapshot → 应用事件通道订阅（`subscribed` ack 携带建立瞬间 cursor）→ Redis realtime overlay；durable revision 是唯一恢复游标。
 - 前端把 `resultJson`/`errorJson` 当作 terminal 边界：durable terminal projection 无条件压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后移除 overlay。
 - snapshot failure 以 `(modelInvocationId, attempt)` fence 同 attempt 的 stale Model overlay；只有 invocation 仍处于相同 attempt 的 READY/DISPATCHING 时该 failure 是 live retry countdown，下一 attempt 已 RUNNING 后转为静态历史。终态 error 将 checkpoint partial 与 `errorJson` 分开投影，刷新后由 `MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR.attempt` 恢复相同可见轨迹。
 - Runtime 不向 RealtimeEventSink 发布 compaction ModelDelta；其 checkpoint 仅作 Stop/恢复 durable fact。前端再按 `TURN_START(COMPACTION)...TURN_END` 状态化抑制该 turn 的 COMPACTION/ERROR/ABORTED Entry，latest turn 是 COMPACTION 时也不渲染 snapshot Model overlay。

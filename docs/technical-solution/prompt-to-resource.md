@@ -21,7 +21,7 @@ flowchart LR
     Blob[GlobalStorageToolResultHistoryMaterializer<br/>storage_blob + session ref]
     Durable[durable resource<br/>blobId/name/preview]
     Entry[TOOL Message Entry]
-    UI[REST snapshot + SSE]
+    UI[REST snapshot + 应用事件 WS]
 
     Command --> Turn
     Turn --> Resolver
@@ -192,4 +192,4 @@ Tool Result 的 Resource 呈现：
 
 task 委派工具（`rendererKey=task`）的呈现契约：call 阶段叠加 `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整快照，含扁平 `descendants` 活动子树 relay，前端按规范化快照整帧替换/语义去重），终态展示 `<task id state>` envelope 的 `<task_result>`/`<task_error>`；任意深度子工具的待决审批都按实际子 ThreadId 复用同一 approval 端点。
 
-恢复来源始终是 PostgreSQL 的 Entry/Command/Invocation/Work；daemon connection、processor 进程与 EventSource 都可以重连或替换。
+恢复来源始终是 PostgreSQL 的 Entry/Command/Invocation/Work；daemon connection、processor 进程与事件通道连接都可以重连或替换。

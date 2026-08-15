@@ -80,7 +80,7 @@ GET /api/ai/environment
 
 ## Environment Root 目录浏览
 
-Environment Root 的单层目录浏览是 **control-plane 只读查询**：不走 Tool Invocation，不经过 Permission，不占用 active tool slot，不写入 invocation journal，也不进入模型上下文。
+Environment Root 的单层目录浏览是 **control-plane 只读查询**：不走 Tool Invocation，不经过 Permission，不占用 active tool slot，不写入 invocation journal，也不进入模型上下文。workspace 绑定的 canonical 路径规则与原子语义见 [environment-workspace-binding.md](environment-workspace-binding.md)。
 
 ```text
 GET /api/ai/environments/{name}/directories?path=.

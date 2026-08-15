@@ -135,7 +135,7 @@ durable mutation
 - realtime event 没有业务恢复语义，也不用于审计；`RealtimeEventSink.append` 失败不改变 durable terminal。
 - `TOOL_PARTIAL` 除普通工具进度外，还承载 task 委派的**完整 JSON 快照心跳**（`details.kind=task.status`，约 1s 一次）：它不是 delta，顶层状态可携带扁平 `descendants` 活动子树 relay，前端按规范化快照整帧替换/语义去重；心跳丢失只影响实时展示，恢复仍来自子 Thread 的 durable snapshot。
 - Stream 长度受配置策略（max length）约束，下一次写入时应用。
-- revision SSE 帧使用 PostgreSQL durable revision；Redis stream id 不暴露为 SSE id；重连只携带 revision，重新读取 snapshot 后从 live edge 接收新 delta。
+- 浏览器订阅经应用事件通道（`/api/events/v1`）：`revision`/`version` 事件携带 PostgreSQL durable cursor，Redis stream id 不暴露为 wire cursor；重连重订阅后重新读取 snapshot，再从 live edge 接收新 delta。
 - Model delta 对应的安全 `stream_checkpoint` 由 Processor **先**持久化，commit 后才 best-effort 发布 Redis delta；terminal `resultJson`/`errorJson` 本身是 durable 边界，不依赖 terminal overlay 事件，客户端据此覆盖并最终移除流式投影。
 
 ## 8. 事务与锁序
@@ -182,4 +182,4 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 
 ## 11. 验证入口
 
-Runtime 单元测试覆盖状态机、classifier、Stop replay、两阶段激活、FIFO 指纹与 fencing；PostgreSQL 集成测试覆盖锁序、CAS、terminal apply、Work claim/wake 与 schema byte-identity；Redis 集成测试覆盖 Stream cursor 与 snapshot-first SSE。E2E 入口见 [e2e-regression.md](e2e-regression.md)。
+Runtime 单元测试覆盖状态机、classifier、Stop replay、两阶段激活、FIFO 指纹与 fencing；PostgreSQL 集成测试覆盖锁序、CAS、terminal apply、Work claim/wake 与 schema byte-identity；Redis 集成测试覆盖 Stream cursor 与事件通道订阅。E2E 入口见 [e2e-regression.md](e2e-regression.md)。
