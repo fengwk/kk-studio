@@ -21,10 +21,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * cursor 读取，且 fan-out 与「读取 cursor + 注册订阅者」在同一把 资源锁内互斥，因此 ack cursor 之后的事件不因注册竞态丢失（cursor
  * 之前的由客户端随后拉取的 snapshot/changes 覆盖）。
  *
- * <p>同一资源的状态（上游句柄、订阅者集合、early 缓冲）由该状态的监视器串行化；map 只做「{@code compute} 原子创建/获取（同时检查 {@link
- * #closed}）」与「状态锁内的 identity 条件删除」。被最后释放、建立失败或 {@link #close()} 淘汰的状态先标记 {@link
- * ResourceState#retired} 再移出 map，之后的上游回调一律丢弃，绝不向 detached state 累积；订阅者若在锁内发现状态已 retired 则重取
- * 新状态，因此不会在 detached state 上重建上游（避免 orphan upstream）。
+ * <p>同一资源的状态（上游句柄、订阅者集合、early 缓冲）由该状态的监视器串行化；map 只做「生命周期围栏内创建/获取」与「状态锁内的 identity 条件删除」。{@link
+ * #lifecycleFence} 把「{@link #closed} 边界」与「向 map 发布新状态」串在同一把锁上，因此 {@link #close()} 一旦进入围栏，之后的 {@link
+ * #subscribe} 不能再插入存活状态。被最后释放、建立失败或 {@link #close()} 淘汰的状态先标记 {@link ResourceState#retired} 再移出
+ * map，之后的上游回调一律丢弃，绝不向 detached state 累积；订阅者若在锁内发现状态已 retired 则重取新状态，因此不会在 detached state 上重建上游（避免
+ * orphan upstream）。
  *
  * <p>订阅激活前（传输层尚未发出 ack 帧）到达的事件缓冲在订阅内，{@link Subscription#activate()} 后按到达顺序 投递，保证事件帧不先于 ack 帧。
  */
@@ -77,7 +78,13 @@ final class ApplicationEventHub implements AutoCloseable {
   private final CanvasVersionEventSource versionSource;
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
 
-  /** 关闭标记：{@link #subscribe} 的 map compute 内原子检查，关闭后不得再建立新订阅。 */
+  /**
+   * 生命周期围栏：{@link #subscribe} 的「检查 closed + 发布状态」与 {@link #close()} 的「设立 closed 边界 + 排空 map」共用，避免
+   * compute 内读 closed 与 close 观察空 map 之间的窗口。
+   */
+  private final Object lifecycleFence = new Object();
+
+  /** 关闭标记：仅在 {@link #lifecycleFence} 内由 false 转为 true；之后不得再发布新状态。 */
   private volatile boolean closed;
 
   /** 单订阅待发缓冲与建立期 early 缓冲的最大信号数；溢出折叠为单个 {@link Signal.Resync}，保证可恢复且内存有界。 */
@@ -95,7 +102,7 @@ final class ApplicationEventHub implements AutoCloseable {
   /**
    * 注册一个本地订阅并建立（或复用）资源上游。
    *
-   * <p>{@code compute} 原子完成「检查 closed + 创建/获取状态」；随后在状态锁内校验状态未被并发淘汰（retired 则重取新状态），再按需建立上游
+   * <p>先在 {@link #lifecycleFence} 内完成「检查 closed + 创建/获取状态」，再在状态锁内校验状态未被并发淘汰（retired 则重取新状态），按需建立上游
    * 并登记订阅者。建立失败会淘汰并移除刚创建的状态，不遗留 detached 状态。
    *
    * @throws IllegalArgumentException 资源不存在
@@ -105,15 +112,15 @@ final class ApplicationEventHub implements AutoCloseable {
     Objects.requireNonNull(resource, "resource");
     Objects.requireNonNull(sink, "sink");
     while (true) {
-      ResourceState state =
-          resources.compute(
-              resource,
-              (key, existing) -> {
-                if (closed) {
-                  throw new IllegalStateException("hub is closed");
-                }
-                return existing != null ? existing : new ResourceState(key);
-              });
+      ResourceState state;
+      synchronized (lifecycleFence) {
+        if (closed) {
+          throw new IllegalStateException("hub is closed");
+        }
+        state =
+            resources.compute(
+                resource, (key, existing) -> existing != null ? existing : new ResourceState(key));
+      }
       synchronized (state) {
         if (state.retired) {
           // 状态已被并发最后释放/hub close 淘汰并移出 map：放弃，重取新状态，绝不在 detached state 上重建上游。
@@ -150,24 +157,25 @@ final class ApplicationEventHub implements AutoCloseable {
    */
   @Override
   public void close() {
-    closed = true;
-    // 逐个状态在锁内 retire + identity 移除；并发 in-flight subscribe 的 compute 已插入的条目由外层循环兜底清空
-    // （closed 检查与插入同处 compute，关闭后不会再有新条目）。
-    while (!resources.isEmpty()) {
-      for (ResourceState state : resources.values()) {
-        synchronized (state) {
-          if (state.retired) {
-            continue;
+    synchronized (lifecycleFence) {
+      closed = true;
+      // 围栏内排空：此后 subscribe 不能再发布新状态；已插入、尚未 retired 的条目在状态锁内淘汰。
+      while (!resources.isEmpty()) {
+        for (ResourceState state : resources.values()) {
+          synchronized (state) {
+            if (state.retired) {
+              continue;
+            }
+            state.retired = true;
+            resources.remove(state.key, state);
+            closeQuietly(state.revisionHandle);
+            closeQuietly(state.realtimeHandle);
+            closeQuietly(state.versionHandle);
+            for (LocalSubscription subscription : state.subscribers) {
+              subscription.markClosed();
+            }
+            state.subscribers.clear();
           }
-          state.retired = true;
-          resources.remove(state.key, state);
-          closeQuietly(state.revisionHandle);
-          closeQuietly(state.realtimeHandle);
-          closeQuietly(state.versionHandle);
-          for (LocalSubscription subscription : state.subscribers) {
-            subscription.markClosed();
-          }
-          state.subscribers.clear();
         }
       }
     }

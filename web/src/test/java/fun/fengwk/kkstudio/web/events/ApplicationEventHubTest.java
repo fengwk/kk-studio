@@ -35,6 +35,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -468,6 +469,81 @@ class ApplicationEventHubTest {
     liveConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
     assertEquals(List.of(new Signal.Revision("6")), received);
     subscription.close();
+  }
+
+  @Test
+  void concurrentSubscribeAndCloseLeavesNoLiveSubscriptionOrUpstream() throws Exception {
+    // 复现 close 与 publish 竞态：closed 检查若只在 compute 内、close 只观察 isEmpty，subscribe 可在
+    // close 排空后插入存活状态并建立上游。围栏把「设立 closed」与「发布状态」串在同一把锁上后，
+    // 并发 subscribe 要么在 close 前完成（随后被 close 淘汰），要么看到 closed 被拒绝。
+    AtomicInteger established = new AtomicInteger();
+    AtomicInteger closedUpstreams = new AtomicInteger();
+    when(revisionSource.subscribe(any(), any()))
+        .thenAnswer(
+            inv -> {
+              established.incrementAndGet();
+              return new SourceSubscribed(5L, closedUpstreams::incrementAndGet);
+            });
+    when(realtimeSource.subscribe(any(), any(), any()))
+        .thenAnswer(
+            inv -> {
+              established.incrementAndGet();
+              return (AutoCloseable) closedUpstreams::incrementAndGet;
+            });
+
+    int workers = 8;
+    ExecutorService executor = Executors.newFixedThreadPool(workers + 1);
+    CountDownLatch start = new CountDownLatch(1);
+    List<Future<?>> tasks = new ArrayList<>();
+    List<Subscription> accepted = Collections.synchronizedList(new ArrayList<>());
+    try {
+      for (int i = 0; i < workers; i++) {
+        ResourceKey key = new ResourceKey(ResourceKind.THREAD, new UUID(0L, 100L + i));
+        tasks.add(
+            executor.submit(
+                () -> {
+                  start.await();
+                  try {
+                    accepted.add(hub.subscribe(key, sink()));
+                  } catch (IllegalStateException ignored) {
+                    // close 已设立边界：拒绝是正确结果。
+                  }
+                  return null;
+                }));
+      }
+      tasks.add(
+          executor.submit(
+              () -> {
+                start.await();
+                hub.close();
+                return null;
+              }));
+      start.countDown();
+      for (Future<?> task : tasks) {
+        task.get(10, TimeUnit.SECONDS);
+      }
+
+      // close() 返回后上游必须已经全部释放：若再先 close 本地订阅，会把泄漏的存活上游误清掉。
+      assertEquals(
+          established.get(),
+          closedUpstreams.get(),
+          "every established upstream must be closed; none may survive hub close");
+      assertThrows(IllegalStateException.class, () -> hub.subscribe(THREAD_KEY, sink()));
+      assertEquals(
+          established.get(),
+          closedUpstreams.get(),
+          "post-close subscribe must not establish another upstream");
+      for (Subscription subscription : accepted) {
+        subscription.activate();
+        subscription.close();
+      }
+      assertEquals(
+          established.get(),
+          closedUpstreams.get(),
+          "accepted subscriptions must already be retired; release is a no-op");
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   @Test

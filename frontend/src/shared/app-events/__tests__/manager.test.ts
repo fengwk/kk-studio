@@ -163,6 +163,58 @@ describe('ApplicationEventManager', () => {
     expect(onError).toHaveBeenCalledTimes(1)
   })
 
+  it('isolates listener callback exceptions so one consumer cannot block the others', () => {
+    const { manager, harness } = setup()
+    harness.openLatest()
+    const socket = harness.latest as NonNullable<typeof harness.latest>
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const failing = {
+      onSubscribed: vi.fn(() => {
+        throw new Error('subscribed boom')
+      }),
+      onEvent: vi.fn(() => {
+        throw new Error('event boom')
+      }),
+      onResync: vi.fn(() => {
+        throw new Error('resync boom')
+      }),
+      onError: vi.fn(() => {
+        throw new Error('error boom')
+      }),
+    }
+    const healthy = {
+      onSubscribed: vi.fn(),
+      onEvent: vi.fn(),
+      onResync: vi.fn(),
+      onError: vi.fn(),
+    }
+    manager.subscribe(THREAD_A, failing)
+    manager.subscribe(THREAD_A, healthy)
+
+    // 四类派发共用同一隔离路径：任一 listener 抛错后同资源其他 listener 仍能收到。
+    socket.emitServer({ type: 'subscribed', resource: THREAD_A, cursor: '1' })
+    socket.emitServer({
+      type: 'event',
+      resource: THREAD_A,
+      name: 'revision',
+      data: { revision: '2' },
+      cursor: '2',
+    })
+    socket.emitServer({ type: 'resync', resource: THREAD_A })
+    socket.emitServer({ type: 'error', resource: THREAD_A, code: 'SUBSCRIBE_FAILED', message: 'boom' })
+
+    expect(healthy.onSubscribed).toHaveBeenCalledWith('1')
+    expect(healthy.onEvent).toHaveBeenCalledWith('revision', { revision: '2' }, '2')
+    expect(healthy.onResync).toHaveBeenCalledTimes(1)
+    expect(healthy.onError).toHaveBeenCalledWith('SUBSCRIBE_FAILED', 'boom')
+    expect(failing.onSubscribed).toHaveBeenCalledTimes(1)
+    expect(failing.onEvent).toHaveBeenCalledTimes(1)
+    expect(failing.onResync).toHaveBeenCalledTimes(1)
+    expect(failing.onError).toHaveBeenCalledTimes(1)
+    expect(consoleError).toHaveBeenCalledTimes(4)
+  })
+
   it('cleans up: released listeners no longer receive dispatch and the entry is removed', () => {
     const { manager, harness } = setup()
     harness.openLatest()
