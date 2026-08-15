@@ -339,16 +339,16 @@ class EnvironmentDaemonGatewayFinalTest {
     LiveEnvironmentRegistry registry =
         new LiveEnvironmentRegistry() {
           @Override
-          public synchronized BindResult tryBind(
+          public BindResult tryBind(
               EnvironmentName environmentName,
               EnvironmentDaemonConnection connection,
               Instant now,
               Duration heartbeatTimeout) {
+            // 必须在 registry monitor 之外等待：否则测试线程的 find() 会和 in-flight HELLO 死锁，
+            // finally 永远无法释放 allowBind。
             bindEntered.countDown();
             try {
-              if (!allowBind.await(5, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("test did not release tryBind");
-              }
+              allowBind.await();
             } catch (InterruptedException error) {
               Thread.currentThread().interrupt();
               throw new IllegalStateException(error);
@@ -365,23 +365,27 @@ class EnvironmentDaemonGatewayFinalTest {
     gateway.open(connection);
     Thread receiveThread =
         new Thread(() -> gateway.receive(connection.connectionId(), hello(0)), "hello-receive");
-    receiveThread.start();
-    assertTrue(bindEntered.await(5, TimeUnit.SECONDS));
     Thread closeThread = new Thread(() -> gateway.close(connection.connectionId()), "close-race");
-    closeThread.start();
-    // close 必须卡在 in-flight receive 上：此时 registry 仍空，连接也尚未被清理关闭。
-    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-    while (!isWaitingForMonitor(closeThread) && System.nanoTime() < deadline) {
-      Thread.yield();
+    try {
+      receiveThread.start();
+      assertTrue(bindEntered.await(5, TimeUnit.SECONDS), "receive must enter tryBind");
+      closeThread.start();
+      // close 必须卡在 receive 持有的 ConnectionState 上（BLOCKED），此时 registry 仍空、连接仍开。
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (closeThread.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+        Thread.onSpinWait();
+      }
+      assertEquals(
+          Thread.State.BLOCKED,
+          closeThread.getState(),
+          "close must contend on ConnectionState held by in-flight receive");
+      assertTrue(registry.find(ENVIRONMENT_NAME).isEmpty());
+      assertTrue(connection.isOpen());
+    } finally {
+      allowBind.countDown();
+      receiveThread.join(TimeUnit.SECONDS.toMillis(5));
+      closeThread.join(TimeUnit.SECONDS.toMillis(5));
     }
-    assertTrue(
-        isWaitingForMonitor(closeThread),
-        "close must wait for in-flight receive, state=" + closeThread.getState());
-    assertTrue(registry.find(ENVIRONMENT_NAME).isEmpty());
-    assertTrue(connection.isOpen());
-    allowBind.countDown();
-    receiveThread.join(TimeUnit.SECONDS.toMillis(5));
-    closeThread.join(TimeUnit.SECONDS.toMillis(5));
     assertFalse(receiveThread.isAlive());
     assertFalse(closeThread.isAlive());
     assertTrue(registry.find(ENVIRONMENT_NAME).isEmpty());
@@ -1410,13 +1414,6 @@ class EnvironmentDaemonGatewayFinalTest {
             invocationId,
             sequence,
             payload));
-  }
-
-  private static boolean isWaitingForMonitor(Thread thread) {
-    Thread.State state = thread.getState();
-    return state == Thread.State.BLOCKED
-        || state == Thread.State.WAITING
-        || state == Thread.State.TIMED_WAITING;
   }
 
   private static List<DaemonMessageType> messageTypes(List<DaemonEnvelope> envelopes) {
