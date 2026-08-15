@@ -12,7 +12,7 @@ export interface EnvironmentBindingShape {
 }
 
 export interface ThreadStatusSegment {
-  key: 'agent' | 'model' | 'environment' | 'task-status' | 'notifications'
+  key: 'agent' | 'model' | 'environment' | 'notifications'
   className: string
   text: string
   title: string
@@ -48,10 +48,8 @@ export interface ThreadStatusModelInput {
   onModelClick?: () => void
   onVariantClick?: () => void
   onEnvironmentClick?: () => void
-  taskStatusEnabled?: boolean
   notificationsEnabled?: boolean
   notificationPermission?: 'default' | 'denied' | 'granted' | 'unsupported'
-  onTaskStatusToggle?: () => void
   onNotificationsToggle?: () => void
 }
 
@@ -129,18 +127,6 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       onClick: input.onEnvironmentClick,
     },
   ]
-  if (input.onTaskStatusToggle || input.taskStatusEnabled != null) {
-    const text = input.taskStatusEnabled
-      ? translate('ai.runtime.status.taskStatusOn')
-      : translate('ai.runtime.status.taskStatusOff')
-    segments.push({
-      key: 'task-status',
-      className: 'thread-status-task-toggle',
-      text,
-      title: translate('ai.runtime.status.taskStatusToggleTitle'),
-      onClick: input.onTaskStatusToggle,
-    })
-  }
   if (input.onNotificationsToggle || input.notificationsEnabled != null) {
     const permission = input.notificationPermission ?? 'default'
     const text =

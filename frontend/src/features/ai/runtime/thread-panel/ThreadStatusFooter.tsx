@@ -25,10 +25,8 @@ export function ThreadStatusFooter({
   onModelClick,
   onVariantClick,
   onEnvironmentClick,
-  taskStatusEnabled,
   notificationsEnabled,
   notificationPermission,
-  onTaskStatusToggle,
   onNotificationsToggle,
 }: ThreadStatusModelInput) {
   const { t, locale } = useI18n()
@@ -47,10 +45,8 @@ export function ThreadStatusFooter({
         onModelClick,
         onVariantClick,
         onEnvironmentClick,
-        taskStatusEnabled,
         notificationsEnabled,
         notificationPermission,
-        onTaskStatusToggle,
         onNotificationsToggle,
       })
     },
@@ -67,10 +63,8 @@ export function ThreadStatusFooter({
       onModelClick,
       onVariantClick,
       onEnvironmentClick,
-      taskStatusEnabled,
       notificationsEnabled,
       notificationPermission,
-      onTaskStatusToggle,
       onNotificationsToggle,
     ],
   )

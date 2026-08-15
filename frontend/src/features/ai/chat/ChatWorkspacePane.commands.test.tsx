@@ -1,11 +1,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import type { ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import { composerDraftStorageKey } from '@/features/ai/composer/composer-draft'
+import {
+  ApplicationSettingsProvider,
+  useApplicationSettings,
+} from '@/features/settings/application-settings'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { chatService } from '@/shared/api/chat-service'
@@ -297,6 +302,8 @@ function renderBoundPane(overrides?: {
   onAgentChange?: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
   paneThreadId?: string
+  /** 与 BoundThreadPane 一起挂进共享 ApplicationSettingsProvider 的额外探针。 */
+  children?: ReactNode
 }) {
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
   const onThreadSortChange = overrides?.onThreadSortChange ?? vi.fn()
@@ -306,18 +313,20 @@ function renderBoundPane(overrides?: {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const element = (
-    <QueryClientProvider client={queryClient}>
-      <ChatWorkspacePane
-        chat={{
-          id: 'chat-1',
-          title: 'C',
-          agentName: 'assistant',
-          yoloEnabled: false,
-          version: '1',
-          createTime: null,
-          updateTime: null,
-        }}
-        agents={agents}
+    <ApplicationSettingsProvider>
+      <QueryClientProvider client={queryClient}>
+        {overrides?.children}
+        <ChatWorkspacePane
+          chat={{
+            id: 'chat-1',
+            title: 'C',
+            agentName: 'assistant',
+            yoloEnabled: false,
+            version: '1',
+            createTime: null,
+            updateTime: null,
+          }}
+          agents={agents}
         environments={[
           { name: 'local', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
           { name: 'remote', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
@@ -339,7 +348,8 @@ function renderBoundPane(overrides?: {
         onAgentChange={onAgentChange}
         onYoloChange={onYoloChange}
       />
-    </QueryClientProvider>
+      </QueryClientProvider>
+    </ApplicationSettingsProvider>
   )
   const view = render(element)
   return {
@@ -350,29 +360,32 @@ function renderBoundPane(overrides?: {
     onYoloChange,
     rerender: (paneThreadId: string) => {
       view.rerender(
-        <QueryClientProvider client={queryClient}>
-          <ChatWorkspacePane
-            chat={{
-              id: 'chat-1',
-              title: 'C',
-              agentName: 'assistant',
-              yoloEnabled: false,
-              version: '1',
-              createTime: null,
-              updateTime: null,
-            }}
-            agents={agents}
-            environments={[]}
-            pane={{ id: 'pane-1', threadId: paneThreadId }}
-            focused
-            threadSort="recent"
-            onFocus={() => undefined}
-            onThreadChange={onThreadChange}
-            onThreadSortChange={onThreadSortChange}
-            onAgentChange={onAgentChange}
-            onYoloChange={onYoloChange}
-          />
-        </QueryClientProvider>,
+        <ApplicationSettingsProvider>
+          <QueryClientProvider client={queryClient}>
+            {overrides?.children}
+            <ChatWorkspacePane
+              chat={{
+                id: 'chat-1',
+                title: 'C',
+                agentName: 'assistant',
+                yoloEnabled: false,
+                version: '1',
+                createTime: null,
+                updateTime: null,
+              }}
+              agents={agents}
+              environments={[]}
+              pane={{ id: 'pane-1', threadId: paneThreadId }}
+              focused
+              threadSort="recent"
+              onFocus={() => undefined}
+              onThreadChange={onThreadChange}
+              onThreadSortChange={onThreadSortChange}
+              onAgentChange={onAgentChange}
+              onYoloChange={onYoloChange}
+            />
+          </QueryClientProvider>
+        </ApplicationSettingsProvider>,
       )
     },
   }
@@ -1514,6 +1527,192 @@ describe('ChatWorkspacePane commands', () => {
       .not.toBe(0)
   })
 
+  it('permanently mounts the task status widget and removes the footer toggle', async () => {
+    const view = renderBoundPane()
+    await screen.findByLabelText('给 AI 发送消息')
+
+    // 无 task 消息：TaskStatusWidget 常驻挂载（自身渲染为空），widget zone 仍存在于
+    // DOM；footer 不再提供 task-status toggle（widget 不可关闭），通知 toggle 保留。
+    const widgetZone = () => document.querySelector<HTMLElement>('.thread-widget-zone')
+    expect(widgetZone()).not.toBeNull()
+    expect(document.querySelector('.task-status-widget')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'task-status:on' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'task-status:off' })).not.toBeInTheDocument()
+    expect(screen.getByTitle('切换浏览器通知')).toBeInTheDocument()
+
+    // 有 task 消息：同一个常驻 widget zone 中出现任务状态，无需任何开关。
+    const heartbeat = JSON.stringify({
+      kind: 'task.status',
+      threadId: '101',
+      subagentType: 'explorer',
+      state: 'running_tool',
+      depth: 0,
+      turns: 3,
+      toolCalls: 5,
+      lastActivity: 'running read',
+      approvals: [],
+      descendants: [],
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), {
+        entries: [...sessionEntries(), toolCallEntry('e-task', 's1-assistant', 'call-task', 'task')],
+        toolInvocations: [
+          toolInvocation({
+            id: 'inv-task',
+            assistantEntryId: 'e-task',
+            toolCallId: 'call-task',
+            toolName: 'task',
+            rendererKey: 'task',
+            resultJson: JSON.stringify({ contents: [{ type: 'text', text: heartbeat }] }),
+          }),
+        ],
+      }),
+    )
+    view.rerender('t2')
+    await waitFor(() =>
+      expect(widgetZone()?.querySelector('.task-status-widget')).not.toBeNull(),
+    )
+    expect(screen.queryByRole('button', { name: 'task-status:on' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'task-status:off' })).not.toBeInTheDocument()
+  })
+
+  it('wires the bound footer notification toggle to the shared global application settings', async () => {
+    const user = userEvent.setup()
+    const notification = {
+      permission: 'default' as NotificationPermission,
+      requestPermission: vi.fn(async () => {
+        notification.permission = 'granted'
+        return 'granted' as const
+      }),
+    }
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: {
+        get permission() {
+          return notification.permission
+        },
+        requestPermission: () => notification.requestPermission(),
+      },
+    })
+    function SettingsProbe() {
+      const { notificationsEnabled } = useApplicationSettings()
+      return (
+        <output data-testid="global-notifications">
+          {notificationsEnabled ? 'on' : 'off'}
+        </output>
+      )
+    }
+    try {
+      renderBoundPane({ children: <SettingsProbe /> })
+      await screen.findByLabelText('给 AI 发送消息')
+
+      // 初始：全局设置为 off，footer 显示 notify:off。
+      expect(screen.getByTestId('global-notifications')).toHaveTextContent('off')
+      expect(screen.getByRole('button', { name: 'notify:off' })).toBeInTheDocument()
+
+      // 开启：请求浏览器权限，granted 后才写入全局设置（SettingsPage 同源状态）。
+      await user.click(screen.getByRole('button', { name: 'notify:off' }))
+      await waitFor(() =>
+        expect(screen.getByTestId('global-notifications')).toHaveTextContent('on'),
+      )
+      expect(notification.requestPermission).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('button', { name: 'notify:on' })).toBeInTheDocument()
+      expect(localStorage.getItem('kkstudio.application-settings.v1')).toBe(
+        '{"notificationsEnabled":true}',
+      )
+
+      // 关闭：直接写 false，不再请求权限。
+      await user.click(screen.getByRole('button', { name: 'notify:on' }))
+      await waitFor(() =>
+        expect(screen.getByTestId('global-notifications')).toHaveTextContent('off'),
+      )
+      expect(notification.requestPermission).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('button', { name: 'notify:off' })).toBeInTheDocument()
+      expect(localStorage.getItem('kkstudio.application-settings.v1')).toBe(
+        '{"notificationsEnabled":false}',
+      )
+    } finally {
+      delete (window as unknown as { Notification?: unknown }).Notification
+      localStorage.removeItem('kkstudio.application-settings.v1')
+    }
+  })
+
+  it('keeps the permission gate when enabling notifications from the bound footer', async () => {
+    const user = userEvent.setup()
+    const notification = {
+      permission: 'default' as NotificationPermission,
+      requestPermission: vi.fn(async () => {
+        notification.permission = 'denied'
+        return 'denied' as const
+      }),
+    }
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: {
+        get permission() {
+          return notification.permission
+        },
+        requestPermission: () => notification.requestPermission(),
+      },
+    })
+    function SettingsProbe() {
+      const { notificationsEnabled } = useApplicationSettings()
+      return (
+        <output data-testid="global-notifications">
+          {notificationsEnabled ? 'on' : 'off'}
+        </output>
+      )
+    }
+    try {
+      renderBoundPane({ children: <SettingsProbe /> })
+      await screen.findByLabelText('给 AI 发送消息')
+
+      // denied：不写入 enabled=true；footer 显示 notify:denied 并给出拒绝错误。
+      await user.click(screen.getByRole('button', { name: 'notify:off' }))
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'notify:denied' })).toBeInTheDocument(),
+      )
+      expect(screen.getByTestId('global-notifications')).toHaveTextContent('off')
+      expect(screen.getByText('浏览器通知权限已被拒绝。')).toBeInTheDocument()
+      expect(localStorage.getItem('kkstudio.application-settings.v1')).toBe(
+        '{"notificationsEnabled":false}',
+      )
+    } finally {
+      delete (window as unknown as { Notification?: unknown }).Notification
+      localStorage.removeItem('kkstudio.application-settings.v1')
+    }
+  })
+
+  it('keeps the unsupported gate when enabling notifications from the bound footer', async () => {
+    const user = userEvent.setup()
+    delete (window as unknown as { Notification?: unknown }).Notification
+    function SettingsProbe() {
+      const { notificationsEnabled } = useApplicationSettings()
+      return (
+        <output data-testid="global-notifications">
+          {notificationsEnabled ? 'on' : 'off'}
+        </output>
+      )
+    }
+    try {
+      renderBoundPane({ children: <SettingsProbe /> })
+      await screen.findByLabelText('给 AI 发送消息')
+
+      // unsupported：footer 显示 notify:unsupported，点击给出错误且不写入 enabled=true。
+      expect(screen.getByRole('button', { name: 'notify:unsupported' })).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'notify:unsupported' }))
+      await waitFor(() =>
+        expect(screen.getByText('当前浏览器不支持通知。')).toBeInTheDocument(),
+      )
+      expect(screen.getByTestId('global-notifications')).toHaveTextContent('off')
+      expect(localStorage.getItem('kkstudio.application-settings.v1')).toBe(
+        '{"notificationsEnabled":false}',
+      )
+    } finally {
+      localStorage.removeItem('kkstudio.application-settings.v1')
+    }
+  })
+
   it('freezes the widget zone height contract at min(36vh, 320px)', () => {
     const css = readFileSync(resolve(process.cwd(), 'src', 'styles.css'), 'utf8')
     const rule = css.match(/\.thread-widget-zone\s*\{[^}]*\}/)
@@ -1553,10 +1752,12 @@ describe('ChatWorkspacePane commands', () => {
       />
     )
     render(
-      <QueryClientProvider client={queryClient}>
-        <div data-testid="pane-A">{pane('pane-A')}</div>
-        <div data-testid="pane-B">{pane('pane-B')}</div>
-      </QueryClientProvider>,
+      <ApplicationSettingsProvider>
+        <QueryClientProvider client={queryClient}>
+          <div data-testid="pane-A">{pane('pane-A')}</div>
+          <div data-testid="pane-B">{pane('pane-B')}</div>
+        </QueryClientProvider>
+      </ApplicationSettingsProvider>,
     )
     const paneA = () => screen.getByTestId('pane-A')
     const paneB = () => screen.getByTestId('pane-B')
