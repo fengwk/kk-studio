@@ -1438,18 +1438,6 @@ export const aiCatalog = {
     'en-US': 'env:{{name}} · ws:{{workspace}}',
     'zh-CN': 'env:{{name}} · ws:{{workspace}}',
   },
-  'ai.runtime.status.taskStatusOn': {
-    'en-US': 'task-status:on',
-    'zh-CN': 'task-status:on',
-  },
-  'ai.runtime.status.taskStatusOff': {
-    'en-US': 'task-status:off',
-    'zh-CN': 'task-status:off',
-  },
-  'ai.runtime.status.taskStatusToggleTitle': {
-    'en-US': 'Toggle the live subagent task widget',
-    'zh-CN': '切换子任务实时状态组件',
-  },
   'ai.runtime.status.notificationsOn': {
     'en-US': 'notify:on',
     'zh-CN': 'notify:on',

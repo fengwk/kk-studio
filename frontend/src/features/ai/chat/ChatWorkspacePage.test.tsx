@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePage } from '@/features/ai/chat/ChatWorkspacePage'
+import { ApplicationSettingsProvider } from '@/features/settings/application-settings'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
@@ -217,14 +218,16 @@ function renderWorkspace(chatId = 'chat-1') {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const utils = render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
-        <Routes>
-          <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
-          <Route path="/chats" element={<div>list</div>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <ApplicationSettingsProvider>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
+          <Routes>
+            <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
+            <Route path="/chats" element={<div>list</div>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ApplicationSettingsProvider>,
   )
   return { queryClient, rerender: utils.rerender }
 }
@@ -309,22 +312,24 @@ describe('ChatWorkspacePage', () => {
     // 跳转到 Chat B（相同的 pane id 'pane-1'）：面板必须以全新的
     // composer 和 frozen draft 重新挂载——不能跨 Chat 复用状态。
     rerender(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/chats/chat-1']}>
-          <Routes>
-            <Route
-              path="/chats/:chatId"
-              element={
-                <>
-                  <NavigateTo to="/chats/chat-2" />
-                  <ChatWorkspacePage />
-                </>
-              }
-            />
-            <Route path="/chats" element={<div>list</div>} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
+      <ApplicationSettingsProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/chats/chat-1']}>
+            <Routes>
+              <Route
+                path="/chats/:chatId"
+                element={
+                  <>
+                    <NavigateTo to="/chats/chat-2" />
+                    <ChatWorkspacePage />
+                  </>
+                }
+              />
+              <Route path="/chats" element={<div>list</div>} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </ApplicationSettingsProvider>,
     )
     const freshComposer = await screen.findByLabelText('给 AI 发送消息')
     // contenteditable composer：空 draft（无跨会话残留文本）。

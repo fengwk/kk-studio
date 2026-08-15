@@ -63,10 +63,8 @@ export interface ChatPanelFooterInput {
   onModelClick?: () => void
   onVariantClick?: () => void
   onEnvironmentClick?: () => void
-  taskStatusEnabled?: boolean
   notificationsEnabled?: boolean
   notificationPermission?: 'default' | 'denied' | 'granted' | 'unsupported'
-  onTaskStatusToggle?: () => void
   onNotificationsToggle?: () => void
 }
 
@@ -161,10 +159,8 @@ export function ChatPanel({
               onModelClick={footer.onModelClick}
               onVariantClick={footer.onVariantClick}
               onEnvironmentClick={footer.onEnvironmentClick}
-              taskStatusEnabled={footer.taskStatusEnabled}
               notificationsEnabled={footer.notificationsEnabled}
               notificationPermission={footer.notificationPermission}
-              onTaskStatusToggle={footer.onTaskStatusToggle}
               onNotificationsToggle={footer.onNotificationsToggle}
             />
           ),

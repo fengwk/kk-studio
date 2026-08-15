@@ -30,7 +30,7 @@ import {
   requestBrowserNotificationPermission,
   useThreadNotifications,
 } from '@/features/ai/runtime/thread-notifications'
-import { useThreadUiPreferences } from '@/features/ai/runtime/thread-ui-preferences'
+import { useApplicationSettings } from '@/features/settings/application-settings'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import {
   AgentSelectionPanel,
@@ -171,7 +171,9 @@ export function BoundThreadPane({
   const [discardConfirm, setDiscardConfirm] = useState<ConfirmModalState | null>(null)
   const queryClient = useQueryClient()
   const boundThreadIdRef = useRef<string | null>(null)
-  const threadUiPreferences = useThreadUiPreferences()
+  // 全局应用设置（AppProviders mount-once）：通知开关是 SettingsPage 与所有
+  // Bound 面板共享的唯一事实源，不再维护面板本地偏好。
+  const { notificationsEnabled, setNotificationsEnabled } = useApplicationSettings()
   const [notificationPermission, setNotificationPermission] = useState(
     browserNotificationPermission,
   )
@@ -180,9 +182,7 @@ export function BoundThreadPane({
     title: controller.title,
     messages: controller.timeline.messages,
     working: controller.working,
-    enabled:
-      threadUiPreferences.notificationsEnabled
-      && notificationPermission === 'granted',
+    enabled: notificationsEnabled && notificationPermission === 'granted',
   })
 
   // 将面板重新绑定到另一个 Thread 时，会清空所有面板本地状态，并从新 snapshot
@@ -357,17 +357,17 @@ export function BoundThreadPane({
 
   async function toggleNotifications() {
     setRebindBlockedReason(null)
-    if (threadUiPreferences.notificationsEnabled) {
-      threadUiPreferences.setNotificationsEnabled(false)
+    if (notificationsEnabled) {
+      setNotificationsEnabled(false)
       return
     }
     const permission = await requestBrowserNotificationPermission()
     setNotificationPermission(permission)
     if (permission === 'granted') {
-      threadUiPreferences.setNotificationsEnabled(true)
+      setNotificationsEnabled(true)
       return
     }
-    threadUiPreferences.setNotificationsEnabled(false)
+    setNotificationsEnabled(false)
     setRebindBlockedReason(
       t(
         permission === 'unsupported'
@@ -629,12 +629,8 @@ export function BoundThreadPane({
       onFocus()
       setInteraction('environment')
     },
-    taskStatusEnabled: threadUiPreferences.taskStatusEnabled,
-    notificationsEnabled: threadUiPreferences.notificationsEnabled,
+    notificationsEnabled,
     notificationPermission,
-    onTaskStatusToggle: () => {
-      threadUiPreferences.setTaskStatusEnabled(!threadUiPreferences.taskStatusEnabled)
-    },
     onNotificationsToggle: () => {
       void toggleNotifications()
     },
@@ -660,24 +656,23 @@ export function BoundThreadPane({
     working: controller.working,
     // 子任务 widget 只读消费 timeline；审批按钮的决策回传目标子 Thread
     // （status.threadId），由 controller 的 targetThreadId 参数转发。
-    // Event detail 位于 widget zone 第一项、TaskStatus 之前。
+    // TaskStatusWidget 永久挂载（无 task 消息时组件自身为空）；Event detail 位于
+    // widget zone 第一项、TaskStatus 之前。
     widgets: (
       <>
         {selectedRecord ? (
           <ThreadEventDetail record={selectedRecord} onClose={() => selectEvent(null)} />
         ) : null}
-        {threadUiPreferences.taskStatusEnabled ? (
-          <TaskStatusWidget
-            messages={controller.timeline.messages}
-            approvalPending={controller.approvalPending}
-            onDecideApproval={(targetThreadId, invocationId, decision) => {
-              if (decision === 'DENY') {
-                threadNotifications.markPermissionRejected()
-              }
-              void controller.decideApproval(invocationId, decision, targetThreadId)
-            }}
-          />
-        ) : null}
+        <TaskStatusWidget
+          messages={controller.timeline.messages}
+          approvalPending={controller.approvalPending}
+          onDecideApproval={(targetThreadId, invocationId, decision) => {
+            if (decision === 'DENY') {
+              threadNotifications.markPermissionRejected()
+            }
+            void controller.decideApproval(invocationId, decision, targetThreadId)
+          }}
+        />
       </>
     ),
     actionError: rebindBlockedReason ?? controller.actionError,

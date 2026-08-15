@@ -105,28 +105,21 @@ describe('ThreadStatusFooter', () => {
     }
   })
 
-  it('renders clickable task-status and browser-notification toggles when supplied', async () => {
+  it('renders the clickable browser-notification toggle when supplied', async () => {
     const user = userEvent.setup()
-    let taskToggles = 0
     let notificationToggles = 0
     render(
       <ThreadStatusFooter
         agentName="assistant"
-        taskStatusEnabled
         notificationsEnabled={false}
         notificationPermission="default"
-        onTaskStatusToggle={() => {
-          taskToggles += 1
-        }}
         onNotificationsToggle={() => {
           notificationToggles += 1
         }}
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'task-status:on' }))
     await user.click(screen.getByRole('button', { name: 'notify:off' }))
-    expect(taskToggles).toBe(1)
     expect(notificationToggles).toBe(1)
   })
 })
