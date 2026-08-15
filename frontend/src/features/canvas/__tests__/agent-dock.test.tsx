@@ -27,9 +27,16 @@ import { setLocale } from '@/shared/i18n'
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const THREAD_ID = 'a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d'
 
-const { sendCanvasThreadFirstSend, createCanvasRealtimeStream } = vi.hoisted(() => ({
+const { sendCanvasThreadFirstSend } = vi.hoisted(() => ({
   sendCanvasThreadFirstSend: vi.fn(),
-  createCanvasRealtimeStream: vi.fn(),
+}))
+
+const { fakeApplicationEvents } = vi.hoisted(() => {
+  const manager = { subscribe: vi.fn(() => () => undefined) }
+  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+})
+vi.mock('@/shared/app-events', () => ({
+  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
 }))
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -42,6 +49,7 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
+    listDirectories: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -51,19 +59,11 @@ vi.mock('@/shared/api/harness-service', () => ({
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
-    createThreadRealtimeStream: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/studio-service', () => ({
   sendCanvasThreadFirstSend,
-  createCanvasRealtimeStream,
 }))
-
-class FakeEventSource {
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
-}
 
 const assistantAgent = {
   name: 'assistant',
@@ -87,7 +87,7 @@ const threadFixture: HarnessThreadDTO = {
   status: 'IDLE',
   processing: false,
   branchSettings: {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     activeTools: [],
@@ -174,8 +174,6 @@ beforeEach(() => {
   })
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(threadSnapshot())
-  vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource())
-  vi.mocked(createCanvasRealtimeStream).mockReturnValue(new FakeEventSource())
 })
 
 describe('Canvas add menu', () => {
@@ -279,7 +277,7 @@ describe('Canvas blank thread', () => {
         commandId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
         yoloEnabled: false,
         branchSettings: {
-          environmentName: null,
+          environment: null,
           agentName: 'assistant',
           model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
           activeTools: [],
@@ -302,11 +300,31 @@ describe('Canvas blank thread', () => {
     expect(screen.getByText('暂无可用 Agent')).toBeInTheDocument()
     expect(screen.queryByText('暂无可解析的 Agent 配置，请先选择一个 Agent。')).not.toBeInTheDocument()
   })
+
+  it('keeps /shortcuts available and /thread disabled in the canvas blank scene', async () => {
+    const user = userEvent.setup()
+    renderHarness(<CanvasAgentThread />, { threadOpen: true })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // canvas-blank 场景：/thread（无 Chat-scoped picker）保持禁用，/shortcuts 可用。
+    await user.click(composer)
+    await user.keyboard('/thread')
+    const threadOption = await screen.findByRole('option', { name: /^thread/ })
+    expect(threadOption.getAttribute('aria-disabled')).toBe('true')
+    await user.keyboard('{Escape}')
+
+    await user.keyboard('/shortcuts{Enter}')
+    expect(await screen.findByRole('region', { name: '键盘快捷键' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('composer-editor')).toBe(true),
+    )
+  })
 })
 
 describe('Canvas bound thread', () => {
   // document.threadId 存在时复用真实 Harness Thread：controller 查询快照、
-  // 订阅实时流并把消息/工作状态渲染到共享 ChatPanel。
+  // 订阅应用事件并把消息/工作状态渲染到共享 ChatPanel。
   it('renders the real thread transcript and composer without an implicit canvas switcher', async () => {
     const user = userEvent.setup()
     renderHarness(<CanvasAgentThread />, {
@@ -318,7 +336,10 @@ describe('Canvas bound thread', () => {
       expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID)
     })
     await waitFor(() => {
-      expect(harnessService.createThreadRealtimeStream).toHaveBeenCalled()
+      expect(fakeApplicationEvents.useApplicationEvents().subscribe).toHaveBeenCalledWith(
+        { kind: 'thread', id: THREAD_ID },
+        expect.any(Object),
+      )
     })
     expect(document.querySelector('.chat-shell.thread-panel')).not.toBeNull()
     expect(screen.getByRole('textbox', { name: /消息|Message/i })).toBeInTheDocument()
@@ -337,6 +358,82 @@ describe('Canvas bound thread', () => {
         }),
       )
     })
+  })
+
+  it('switches between /events and /conversation without losing the composer draft', async () => {
+    const user = userEvent.setup()
+    renderHarness(<CanvasAgentThread />, {
+      threadOpen: true,
+      snapshot: canvasSnapshot(THREAD_ID),
+    })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+
+    await user.type(composer, 'canvas draft')
+    // 非空草稿下通过 + 菜单切换到 events 主视图。
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    await user.click(await screen.findByRole('option', { name: /^events/ }))
+    await screen.findByRole('listbox', { name: '事件' })
+    expect(document.querySelector('.thread-dialogue')).toBeNull()
+    // 切换不丢 Composer draft：composer 保持挂载且内容不变。
+    expect(composer.textContent).toBe('canvas draft')
+    expect(composer.closest('.thread-composer')).not.toHaveAttribute('hidden')
+
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    await user.click(await screen.findByRole('option', { name: /^conversation/ }))
+    await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
+    expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
+    expect(composer.textContent).toBe('canvas draft')
+  })
+
+  it('opens the read-only /shortcuts panel in the canvas bound scene', async () => {
+    const user = userEvent.setup()
+    renderHarness(<CanvasAgentThread />, {
+      threadOpen: true,
+      snapshot: canvasSnapshot(THREAD_ID),
+    })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+
+    await user.click(composer)
+    await user.keyboard('/shortcuts{Enter}')
+    expect(await screen.findByRole('region', { name: '键盘快捷键' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('composer-editor')).toBe(true),
+    )
+  })
+
+  it('projects only controller-supported commands in the canvas bound scene', async () => {
+    const user = userEvent.setup()
+    renderHarness(<CanvasAgentThread />, {
+      threadOpen: true,
+      snapshot: canvasSnapshot(THREAD_ID),
+    })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+
+    // canvas-bound：只把 stop/upload/events/conversation/shortcuts 投影为可用，
+    // agent/environment/yolo/tree/new/thread 一律禁用（controller 只支持 stop）。
+    await user.click(composer)
+    await user.keyboard('/')
+    for (const id of ['thread', 'agent', 'environment', 'yolo', 'tree', 'new']) {
+      expect(screen.getByRole('option', { name: new RegExp(`^${id}`) })).toHaveAttribute(
+        'aria-disabled',
+        'true',
+      )
+    }
+    // conversation 是当前激活视图（active-view 规则禁用），其余 controller 能力可用。
+    for (const id of ['stop', 'upload', 'events', 'shortcuts']) {
+      expect(screen.getByRole('option', { name: new RegExp(`^${id}`) })).toHaveAttribute(
+        'aria-disabled',
+        'false',
+      )
+    }
+    expect(screen.getByRole('option', { name: /^conversation/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
   })
 })
 

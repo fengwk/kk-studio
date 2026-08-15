@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Instant;
@@ -203,6 +204,24 @@ final class InvocationJsonSupport {
     return value == null ? null : new EnvironmentName(value);
   }
 
+  /**
+   * 读取可空的完整 Environment binding 对象：null 表示未绑定；非 null 必须是恰好 {@code name}/{@code workspacePath}
+   * 两字段的严格对象，且两字段分别经 {@link EnvironmentName} 与 workspace path validator 校验。
+   */
+  static EnvironmentBinding nullableEnvironmentBinding(
+      ObjectNode node, String field, String context) {
+    JsonNode value = declared(node, field, context);
+    if (value.isNull()) {
+      return null;
+    }
+    String bindingContext = context + "." + field;
+    ObjectNode binding = object(value, bindingContext);
+    requireFields(binding, bindingContext, "name", "workspacePath");
+    return new EnvironmentBinding(
+        new EnvironmentName(text(binding, "name", bindingContext)),
+        text(binding, "workspacePath", bindingContext));
+  }
+
   static String jsonObjectText(ObjectNode node, String field, String context) {
     return requireJsonObject(text(node, field, context), context + "." + field);
   }
@@ -238,6 +257,17 @@ final class InvocationJsonSupport {
 
   static void putNullable(ObjectNode node, String field, EnvironmentName value) {
     putNullable(node, field, value == null ? null : value.value());
+  }
+
+  /** 编码可空完整 Environment binding：null 输出显式 null；非 null 输出严格 {@code {name, workspacePath}} 对象。 */
+  static void putNullable(ObjectNode node, String field, EnvironmentBinding value) {
+    if (value == null) {
+      node.putNull(field);
+      return;
+    }
+    ObjectNode binding = node.putObject(field);
+    binding.put("name", value.environmentName().value());
+    binding.put("workspacePath", value.workspacePath());
   }
 
   static void putNullable(ObjectNode node, String field, Enum<?> value) {

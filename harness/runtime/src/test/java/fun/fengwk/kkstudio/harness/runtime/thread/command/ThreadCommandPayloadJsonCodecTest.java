@@ -7,13 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.List;
 
@@ -35,7 +35,7 @@ class ThreadCommandPayloadJsonCodecTest {
             new SetModelCommandPayload(MODEL),
             new SetActiveToolsCommandPayload(List.of("read", "grep")),
             new SetYoloCommandPayload(true),
-            new SetEnvironmentCommandPayload(new EnvironmentName(ENV)),
+            new SetEnvironmentCommandPayload(EnvironmentBindings.binding(ENV)),
             new SetEnvironmentCommandPayload(null));
 
     for (ThreadCommandPayload payload : payloads) {
@@ -61,10 +61,9 @@ class ThreadCommandPayloadJsonCodecTest {
         codec.encode(new SetActiveToolsCommandPayload(List.of("read", "grep"))));
     assertEquals("{\"yoloEnabled\":true}", codec.encode(new SetYoloCommandPayload(true)));
     assertEquals(
-        "{\"environmentName\":\"" + ENV + "\"}",
-        codec.encode(new SetEnvironmentCommandPayload(new EnvironmentName(ENV))));
-    assertEquals(
-        "{\"environmentName\":null}", codec.encode(new SetEnvironmentCommandPayload(null)));
+        "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\".\"}}",
+        codec.encode(new SetEnvironmentCommandPayload(EnvironmentBindings.binding(ENV))));
+    assertEquals("{\"environment\":null}", codec.encode(new SetEnvironmentCommandPayload(null)));
   }
 
   @Test
@@ -115,6 +114,7 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.SET_ACTIVE_TOOLS, "{\"activeTools\":[\" read\"]}"));
+    // 旧 wire 的 name-only 字段（environmentName）不再是合法输入，必须拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":5}"));
@@ -123,6 +123,24 @@ class ThreadCommandPayloadJsonCodecTest {
         () ->
             codec.decode(
                 ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"Not-A-Name\"}"));
+    // 新 wire：binding 对象必须恰好 {name, workspacePath} 且两字段都严格校验。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                ThreadCommandType.SET_ENVIRONMENT, "{\"environment\":{\"name\":\"" + ENV + "\"}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                ThreadCommandType.SET_ENVIRONMENT,
+                "{\"environment\":{\"name\":\"Not-A-Name\",\"workspacePath\":\".\"}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                ThreadCommandType.SET_ENVIRONMENT,
+                "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\"/abs\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"message\":[]}"));
@@ -210,13 +228,14 @@ class ThreadCommandPayloadJsonCodecTest {
   void preservesEnvironmentClearSemantics() {
     SetEnvironmentCommandPayload cleared =
         (SetEnvironmentCommandPayload)
-            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":null}");
-    assertNull(cleared.environmentName());
+            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environment\":null}");
+    assertNull(cleared.environment());
     SetEnvironmentCommandPayload bound =
         (SetEnvironmentCommandPayload)
             codec.decode(
-                ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"" + ENV + "\"}");
-    assertEquals(new EnvironmentName(ENV), bound.environmentName());
+                ThreadCommandType.SET_ENVIRONMENT,
+                "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\".\"}}");
+    assertEquals(EnvironmentBindings.binding(ENV), bound.environment());
   }
 
   private static AgentMessage user(String text) {

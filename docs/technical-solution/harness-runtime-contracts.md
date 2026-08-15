@@ -38,11 +38,11 @@ ROOT, TURN_START, MESSAGE, CUSTOM, MODEL_ATTEMPT_FAILURE, CUSTOM_MESSAGE,
 ASSISTANT_ERROR, ASSISTANT_ABORTED, COMPACTION, TURN_END
 ```
 
-Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentName` 是 canonical bounded 小写路由名称或 null，`agentName`/tool 名是 canonical 非空名称）。`ROOT` 额外携带可选的 `subagentContext`（子 Agent Session 冻结委派归属）：
+Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environment` 是完整 `EnvironmentBinding{name, workspacePath}` 对象或 null——name 为 canonical bounded 小写路由名称、workspacePath 为 canonical 相对 wire 路径（`'.'` 表示 root），`agentName`/tool 名是 canonical 非空名称）。`ROOT` 额外携带可选的 `subagentContext`（子 Agent Session 冻结委派归属）：
 
 ```json
 {
-  "settings": { "environmentName": null, "agentName": "...", "model": {...}, "activeTools": [...] },
+  "settings": { "environment": null, "agentName": "...", "model": {...}, "activeTools": [...] },
   "subagentContext": null | { "parentThreadId": "<uuid>", "rootThreadId": "<uuid>", "taskInvocationId": "<uuid>", "depth": 2 }
 }
 ```
@@ -98,7 +98,7 @@ SET_ACTIVE_TOOLS, SET_YOLO
 - `commands` 非空；每个 command 必须有 canonical UUID `clientCommandId`（thread 内唯一，幂等键）；同 batch 内不得重复。
 - `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费物化为 durable `resource(blobId,name,preview)`），未知字段、未知类型、空 `contents` 与非 canonical uploadId 一律拒绝。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝、`content` 对 USER_MESSAGE 禁用。
 - `CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
-- `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentName`（canonical bounded 小写路由名称或 null）。
+- `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environment`（完整 `{name, workspacePath}` 对象或 null）。
 - mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `contents`（`role` 仅 `CUSTOM_MESSAGE` 允许）等不相关字段，未知字段（含 `text`）一律拒绝。
 
 ### Ordered command-set replay
@@ -239,7 +239,7 @@ durable `approval` JSON 使用领域枚举 `ALLOWED` / `DENIED`（不是输入�
 
 ```java
 public record ModelInvocationRequest(
-    EnvironmentName environmentName,  // 本请求的单一 Environment route（可 null）
+    EnvironmentBinding environment,  // 本请求的单一 Environment binding（可 null）
     ProviderRequest providerRequest,  // exact Provider transport payload
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
@@ -253,7 +253,7 @@ public record ModelInvocationRequest(
 - `SubagentBinding(name, description)`：`name` 是 canonical 非空短名（≤64 字符），`description` 是可空展示描述快照（≤512 字符）；随 request 冻结，task 执行绝不依据后续 Agent 配置扩权。
 - `contextWindow` 是创建时冻结的正 int；threshold、retention 与 overflow retry 均使用该值，不受后续 Model config 修改影响。
 - `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent/provider tools 必须全部为空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix。`tokensBefore` 是 JSON number，三个 Entry ID 是 canonical UUID strings。
-- `ToolBinding(descriptor, type, environmentName, plugin)`：`PLATFORM` binding 的 environmentName 为 null，`ENVIRONMENT` binding 指向具体 route（可为 null）；descriptor 的 type 与 binding type 一致。
+- `ToolBinding(descriptor, type, environment, plugin)`：`PLATFORM` binding 的 environment 为 null，`ENVIRONMENT` binding 指向具体 binding（可为 null）；descriptor 的 type 与 binding type 一致。
 - `plugin` 为 null 或 `PluginToolBinding(pluginId, contributionLocalName, stateAccesses)`；仅 `PLATFORM` 可携带 plugin，identifier 必须 canonical，state accesses 按 customType 唯一且 mode 仅 `READ` / `WRITE`。该 provenance 随 request 冻结，retry 不按工具名重新归属。
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
 - retry 重放同一份 frozen request；当前失败 attempt 的 text/thinking/error 不修改该 request。后续 turn 的 `DatabaseTurnResolver` 只白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 ContextProjector，`MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR` 永不进入 Provider messages。ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
@@ -325,15 +325,15 @@ record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable b
 - 同步、无副作用、事务外：`resolve(threadId, candidatePath, yoloEnabled, compactionPreparation)`；调用方在短事务内锁 Thread、捕获 Command 快照与 YOLO、分配 Entry ID 并构造 candidate path 后调用；实现只读最新 Catalog/Environment 事实，不写 Store、不持有行锁、不得按 candidate Entry ID 回查 Store。
 - 抛异常表示临时基础设施失败，由 Processor reschedule；`Rejected` 产生 `AssistantError` barrier（`ASSISTANT_ERROR` + `FAILED` TURN_END），不产生 ModelInvocation。
 - 所有确定性拒绝共用稳定 `AssistantError` code `PLANNING_FAILED`，message 携带具体原因。
-- **Environment route 规则（工具）**：ENVIRONMENT 工具一律按最新 `BranchSettings.environmentName()` 绑定（可为 null/缺失/未 READY），规划阶段**绝不拒绝**；实际 Tool start 时按冻结 route 确定性判定——null route 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 正常收敛。绝不回看更旧的 branch settings。
-- **Environment route 规则（skills）**：Agent skills 只从 Agent config 读取，必须由**最新选中** Environment 精确提供且可用（缺失 → `agent skills require the latest selected environment which is not live: <name>`；未 READY → `...which is not ready: <name>`；分支无名称 → `...but the branch has no environmentName`），且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` 不是 Resolver 隐式追加，也不在 selectable catalog。
+- **Environment route 规则（工具）**：ENVIRONMENT 工具一律按最新 `BranchSettings.environment()` 完整 binding 绑定（可为 null/缺失/未 READY），规划阶段**绝不拒绝**；实际 Tool start 时按冻结 binding 确定性判定——null binding 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 正常收敛。绝不回看更旧的 branch settings。
+- **Environment route 规则（skills）**：Agent skills 只从 Agent config 读取，必须由**最新选中** Environment 精确提供且可用（缺失 → `agent skills require the latest selected environment which is not live: <name>`；未 READY → `...which is not ready: <name>`；分支无 binding → `...but the branch has no environment`），且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` 不是 Resolver 隐式追加，也不在 selectable catalog。
 - **Subagent 规则（task）**：`task` 只在 `activeTools` 显式包含内部 `task`、Agent `subagents` allowlist 非空且当前 Session depth 小于 `maxDepth` 时绑定（depth 由 ROOT `subagentContext` 派生，普通根为 1）；allowlist 为空 → `task requires a non-empty Agent subagents allowlist`，已达最大深度 → `task is unavailable at subagent depth <d> (maxDepth=<m>)`。allowlist 每个名称必须解析到现存 Agent（缺失 → `subagent not found: <name>`），名称 + 描述（可空）冻结为有序 `subagentBindings`；执行绝不重读父 Agent 配置扩权。
 
 ## 11. Realtime
 
 - `RealtimeEventSink.append` 只写 bounded Redis projection；sink 失败不改变 durable terminal。
-- revision SSE 帧使用 durable revision 作为 `Last-Event-ID`/`afterRevision` cursor；Redis delta 事件没有 SSE id。
-- 客户端恢复顺序：REST snapshot → durable revision SSE → Redis realtime overlay；revision 是唯一 durable cursor。
+- 浏览器经应用事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）订阅：`revision`/`version` 事件携带 durable cursor（canonical 非负十进制），`realtime` 事件的 data 是 Redis delta envelope JSON 对象且不携带 cursor。
+- 客户端恢复顺序：REST snapshot → 应用事件通道订阅（`subscribed` ack 携带建立瞬间 cursor）→ Redis realtime overlay；durable revision 是唯一恢复游标。
 - 前端把 `resultJson`/`errorJson` 当作 terminal 边界：durable terminal projection 无条件压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后移除 overlay。
 - snapshot failure 以 `(modelInvocationId, attempt)` fence 同 attempt 的 stale Model overlay；只有 invocation 仍处于相同 attempt 的 READY/DISPATCHING 时该 failure 是 live retry countdown，下一 attempt 已 RUNNING 后转为静态历史。终态 error 将 checkpoint partial 与 `errorJson` 分开投影，刷新后由 `MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR.attempt` 恢复相同可见轨迹。
 - Runtime 不向 RealtimeEventSink 发布 compaction ModelDelta；其 checkpoint 仅作 Stop/恢复 durable fact。前端再按 `TURN_START(COMPACTION)...TURN_END` 状态化抑制该 turn 的 COMPACTION/ERROR/ABORTED Entry，latest turn 是 COMPACTION 时也不渲染 snapshot Model overlay。

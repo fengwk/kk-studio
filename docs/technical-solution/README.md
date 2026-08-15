@@ -20,6 +20,8 @@ flowchart TD
     A --> J[s3-presign.md<br/>S3 预签名直传]
     A --> K[comfyui-workflow-api.md<br/>ComfyUI 工作流与运行 API]
     A --> L[environment-daemon-gateway.md<br/>Environment Daemon Gateway v2]
+    A --> W[environment-workspace-binding.md<br/>Environment Workspace 绑定]
+    A --> V[application-event-channel.md<br/>应用事件通道 /api/events/v1]
     A --> M[prompt-to-resource.md<br/>Prompt 到 Resource 数据流]
     A --> P[e2e-regression.md<br/>E2E 回归矩阵与报告]
     A --> R[docker-reliability-stack.md<br/>Docker Reliability 隔离栈]
@@ -41,10 +43,12 @@ flowchart TD
 | 10 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage/cost 冻结与 metadata |
 | 11 | [s3-presign.md](s3-presign.md) | S3 预签名直传与直下载 |
 | 12 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流与运行 API |
-| 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment registry、Daemon v2 与 Resource 边界 |
-| 14 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
-| 15 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
-| 16 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
+| 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment registry、Daemon v3 与 Resource 边界 |
+| 14 | [environment-workspace-binding.md](environment-workspace-binding.md) | `{name, workspacePath}\|null` 原子绑定、canonical 规则与目录隐私 |
+| 15 | [application-event-channel.md](application-event-channel.md) | `/api/events/v1` WebSocket 事件通道帧协议与恢复 |
+| 16 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
+| 17 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
+| 18 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
 
 ## 贯穿约束
 
@@ -62,7 +66,7 @@ flowchart TD
 - Tool terminal success 的 `effects` 与 `SUCCEEDED` 同行原子持久化且 terminal immutable；唯一 `ToolOutcomeAppender` 按 `CUSTOM effects -> Tool Result` 顺序推进 Entry/head。
 - 普通 Model 的 `TRANSIENT` retry 把已展示的 text/thinking、错误与 retry 时间追加到 Invocation `failedAttempts`；active snapshot 通过 `modelAttemptFailures` 暴露，终态/Stop 时按 attempt 顺序物化为 `MODEL_ATTEMPT_FAILURE` 后再写 Assistant 结果。失败 attempt 与 `ASSISTANT_ERROR` 的 partial/error 只用于 UI/audit，绝不进入立即 retry 或后续 turn 的 Provider Context。
 - Durable compaction 复用 MODEL Work 与现有 processor：阈值或一次 overflow recovery 启动 `TURN_START(COMPACTION) -> COMPACTION -> TURN_END`；split turn 使用 HISTORY/TURN_PREFIX，内部 turn 不进入后续 Provider Context 或前端 transcript。
-- Environment 以 canonical bounded 小写 `environmentName` 作为唯一动态路由身份，不持久化独立环境资源；daemon wire 是 v2。
+- Environment 以 canonical bounded 小写 `environmentName` 作为唯一动态路由身份，不持久化独立环境资源；分支快照冻结完整 `EnvironmentBinding{name, workspacePath}`（workspace path 为 Environment Root 下 canonical 相对 wire 路径，`'.'` 表示 root）；daemon wire 是 v3。
 - Resource 安全边界：Tool 边界的 URI 只属于瞬时 `ResourceRef`；写入 Entry 前统一摄入全局 Blob，durable message 只保存 `resource(blobId,name,preview)`。前端通过 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 在渲染期获取短期 URL，并以原件响应的权威 `mediaType/sizeBytes` 分类；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation `file:`、`s3:` 引用兼容。
 
 ## 维护规则

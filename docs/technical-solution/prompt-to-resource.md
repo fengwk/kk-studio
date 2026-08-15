@@ -21,7 +21,7 @@ flowchart LR
     Blob[GlobalStorageToolResultHistoryMaterializer<br/>storage_blob + session ref]
     Durable[durable resource<br/>blobId/name/preview]
     Entry[TOOL Message Entry]
-    UI[REST snapshot + SSE]
+    UI[REST snapshot + 应用事件 WS]
 
     Command --> Turn
     Turn --> Resolver
@@ -73,16 +73,16 @@ CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/ACTIVE_TOOLS/YOLO）
 
 `TurnResolver.resolve(threadId, candidatePath, yoloEnabled)` 在事务外同步解析，只读最新 Catalog/Environment 事实：
 
-1. 从 candidate path 前缀的最近 TURN_START `BranchSettings`（**latest-snapshot-wins**：只使用最近一个 ROOT/TURN_START 的完整快照，null/缺失/不可用值绝不向更旧快照回退）读取 `environmentName`、`agentName`、`model`、`activeTools`；
+1. 从 candidate path 前缀的最近 TURN_START `BranchSettings`（**latest-snapshot-wins**：只使用最近一个 ROOT/TURN_START 的完整快照，null/缺失/不可用值绝不向更旧快照回退）读取 `environment` binding、`agentName`、`model`、`activeTools`；
 2. 按 `agentName` 读取最新 Agent；按 Model ref 读取最新 Provider/Model/Variant；
-3. 按 `activeTools` 与 `environmentName` 构造 tool set：ENVIRONMENT 工具一律按最新名称绑定（null/缺失/未 READY 规划不拒绝；实际 start 时不可用 → 确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）；Agent skills 只从 Agent config 读取、必须由最新选中且 live 的 Environment 精确提供（缺失/未 READY/无名称精确拒绝，绝不回看更旧 settings）、且 `activeTools` 必须显式包含内部 `load_skill`；
+3. 按 `activeTools` 与 `environment` binding 构造 tool set：ENVIRONMENT 工具一律按最新 binding 绑定（null/缺失/未 READY 规划不拒绝；实际 start 时不可用 → 确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）；Agent skills 只从 Agent config 读取、必须由最新选中且 live 的 Environment 精确提供（缺失/未 READY/无 binding 精确拒绝，绝不回看更旧 settings）、且 `activeTools` 必须显式包含内部 `load_skill`；
 4. 按 Agent `subagents` allowlist 解析委派能力：`task` 只在 `activeTools` 显式含 task、allowlist 非空且当前 Session depth 小于 `maxDepth` 时绑定（depth 由 ROOT `subagentContext` 派生）；allowlist 每个名称必须解析到现存 Agent，名称 + 描述冻结为 `subagentBindings`；
 5. 生成 `ModelInvocationRequest`：
 
 ```text
-environmentName    # 本请求的单一 Environment route（可 null）
+environment         # 本请求的单一 Environment binding（可 null）
 providerRequest    # exact Provider transport payload（model/variant/messages/tools/cacheControl）
-toolBindings       # (descriptor, type, environmentName, plugin provenance/access) 与 providerRequest.tools 一一对应
+toolBindings       # (descriptor, type, environment binding, plugin provenance/access) 与 providerRequest.tools 一一对应
 skillBindings      # 选中 skill（必须显式选中 load_skill，非隐式追加）
 subagentBindings   # task 可委派的 Agent 名称 + 描述 allowlist（activeTools 含 task 且未达最大深度时）
 yoloEnabled        # 冻结运行时策略
@@ -99,10 +99,10 @@ system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合�
 </current_environment>
 ```
 
-所有动态值在进入模板前做 XML escape，日期严格为 `yyyy-MM-dd`；无值统一渲染 `none`。`DatabaseTurnResolver` 每次普通解析只读取一次 `clock.instant()`，构造只携带 `EnvironmentName`、`DaemonOperatingSystem`、`LocalDate` 与 note 的 `CurrentEnvironmentContext`：
+所有动态值在进入模板前做 XML escape，日期严格为 `yyyy-MM-dd`；无值统一渲染 `none`。`DatabaseTurnResolver` 每次普通解析只读取一次 `clock.instant()`，构造只携带 `EnvironmentBinding`、`DaemonOperatingSystem`、`LocalDate` 与 note 的 `CurrentEnvironmentContext`：
 
-- 未选择 Environment：name/system/note 为 `none`，日期按服务端 Clock zone；
-- 已选择且 registry 条目存在 READY metadata（capabilities 非 null，无论当前 status/heartbeat 是否 ready）：name 为 canonical route，system/note 来自 metadata，日期按 metadata timeZone；
+- 未选择 Environment：name/workspace/system/note 为 `none`，日期按服务端 Clock zone；
+- 已选择且 registry 条目存在 READY metadata（capabilities 非 null，无论当前 status/heartbeat 是否 ready）：name/workspace 来自 binding，system/note 来自 metadata，日期按 metadata timeZone；
 - 已选择但无 metadata：保留 name，system/note 为 `none`，日期回退服务端 Clock zone。
 
 运行状态、workdir、时间与 timeZone 都不进入 Prompt；Tool/Skill 的实时 ready 校验保持独立，因此相同 name/system/date/note 下心跳过期不会改变系统提示词。
@@ -141,7 +141,7 @@ ToolBinding.type == PLATFORM
     -> CoreToolGateway -> frozen PluginContribution -> PluginTool(BranchView)
 
 ToolBinding.type == ENVIRONMENT
-  -> CoreToolGateway -> RemoteToolTransport -> EnvironmentDaemonGateway -> Daemon v2 -> Tool
+  -> CoreToolGateway -> RemoteToolTransport -> EnvironmentDaemonGateway -> Daemon v3 -> Tool
 ```
 
 - 外部 I/O 前 `ToolGateway.preflight`：权限判定（Allow/Ask/Deny）与机械校验（未取消/未过期、`name@version` 命中固定目录、arguments 是 JSON object）；plugin Tool 还按 frozen `(pluginId, contributionLocalName)` 恢复贡献并校验 descriptor/state accesses 未漂移；发送结果不确定收敛 `UNKNOWN`，不重放副作用。
@@ -192,4 +192,4 @@ Tool Result 的 Resource 呈现：
 
 task 委派工具（`rendererKey=task`）的呈现契约：call 阶段叠加 `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整快照，含扁平 `descendants` 活动子树 relay，前端按规范化快照整帧替换/语义去重），终态展示 `<task id state>` envelope 的 `<task_result>`/`<task_error>`；任意深度子工具的待决审批都按实际子 ThreadId 复用同一 approval 端点。
 
-恢复来源始终是 PostgreSQL 的 Entry/Command/Invocation/Work；daemon connection、processor 进程与 EventSource 都可以重连或替换。
+恢复来源始终是 PostgreSQL 的 Entry/Command/Invocation/Work；daemon connection、processor 进程与事件通道连接都可以重连或替换。

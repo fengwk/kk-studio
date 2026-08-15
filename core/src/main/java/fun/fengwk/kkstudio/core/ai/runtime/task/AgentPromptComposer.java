@@ -60,7 +60,8 @@ public final class AgentPromptComposer {
   }
 
   private static String currentEnvironment(CurrentEnvironmentContext context) {
-    String name = context.name() == null ? "none" : context.name().value();
+    String name = context.binding() == null ? "none" : context.binding().environmentName().value();
+    String workspace = context.binding() == null ? "none" : context.binding().workspacePath();
     String operatingSystem =
         context.operatingSystem() == null ? "none" : context.operatingSystem().wireValue();
     String note = context.note() == null ? "none" : context.note();
@@ -69,6 +70,7 @@ public final class AgentPromptComposer {
         .render(
             Map.of(
                 "name", escapeXml(name),
+                "workspace", escapeXml(workspace),
                 "system", escapeXml(operatingSystem),
                 "date", escapeXml(DATE_FORMAT.format(context.currentDate())),
                 "note", escapeXml(note)))

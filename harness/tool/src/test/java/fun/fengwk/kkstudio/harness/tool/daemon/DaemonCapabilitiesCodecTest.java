@@ -8,14 +8,16 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-/** READY capabilities v3 codec 的严格版本、environment metadata 与能力摘要契约。 */
+/** READY capabilities v4 codec 的严格版本、environment metadata 与能力摘要契约。 */
 class DaemonCapabilitiesCodecTest {
 
   private static final DaemonEnvironmentInfo ENVIRONMENT =
-      new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Linux environment.");
+      new DaemonEnvironmentInfo(
+          DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Linux environment.", "/home/dev");
   private static final String ENVIRONMENT_JSON =
       "\"environment\":{\"operatingSystem\":\"linux\","
-          + "\"timeZone\":\"Asia/Shanghai\",\"note\":\"Linux environment.\"}";
+          + "\"timeZone\":\"Asia/Shanghai\",\"note\":\"Linux environment.\","
+          + "\"rootPath\":\"/home/dev\"}";
 
   private final DaemonCapabilitiesCodec codec = new DaemonCapabilitiesCodec();
 
@@ -39,7 +41,7 @@ class DaemonCapabilitiesCodecTest {
 
     assertEquals(original, codec.decode(encoded));
     assertEquals(
-        "{\"version\":3,"
+        "{\"version\":4,"
             + ENVIRONMENT_JSON
             + ",\"skills\":[{\"name\":\"dev\",\"description\":\"Developer rules\"}],"
             + "\"mcpServers\":[{\"name\":\"filesystem\",\"status\":\"READY\",\"error\":null,"
@@ -52,7 +54,7 @@ class DaemonCapabilitiesCodecTest {
   @Test
   void encodesEmptyCapabilityLists() {
     assertEquals(
-        "{\"version\":3," + ENVIRONMENT_JSON + ",\"skills\":[],\"mcpServers\":[]}",
+        "{\"version\":4," + ENVIRONMENT_JSON + ",\"skills\":[],\"mcpServers\":[]}",
         codec.encode(
             new DaemonCapabilities(DaemonCapabilities.VERSION, ENVIRONMENT, List.of(), List.of())));
   }
@@ -69,10 +71,10 @@ class DaemonCapabilitiesCodecTest {
                 "{\"version\":2," + ENVIRONMENT_JSON + ",\"skills\":[],\"mcpServers\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":3,\"skills\":[],\"mcpServers\":[]}"));
+        () -> codec.decode("{\"version\":4,\"skills\":[],\"mcpServers\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":3,\"environment\":null,\"skills\":[],\"mcpServers\":[]}"));
+        () -> codec.decode("{\"version\":4,\"environment\":null,\"skills\":[],\"mcpServers\":[]}"));
   }
 
   @Test
@@ -83,7 +85,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,"
+                "{\"version\":4,"
                     + ENVIRONMENT_JSON
                     + ",\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\"},"
@@ -93,21 +95,21 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":4,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\",\"extra\":\"x\"},"
                     + "\"skills\":[],\"mcpServers\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":4,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"workingDirectory\":\"/workspace\",\"timeZone\":\"UTC\","
                     + "\"note\":\"Linux environment.\"},\"skills\":[],\"mcpServers\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":4,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"note\":\"one\",\"note\":\"two\"},"
                     + "\"skills\":[],\"mcpServers\":[]}"));
   }
@@ -118,19 +120,19 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,\"environment\":{\"timeZone\":\"UTC\","
+                "{\"version\":4,\"environment\":{\"timeZone\":\"UTC\","
                     + "\"note\":\"Linux environment.\"},\"skills\":[],\"mcpServers\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":4,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"note\":\"Linux environment.\"},\"skills\":[],\"mcpServers\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3,\"environment\":{\"operatingSystem\":\"linux\","
+                "{\"version\":4,\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\"},\"skills\":[],\"mcpServers\":[]}"));
   }
 
@@ -140,12 +142,12 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":\"3\"," + ENVIRONMENT_JSON + ",\"skills\":[],\"mcpServers\":[]}"));
+                "{\"version\":\"4\"," + ENVIRONMENT_JSON + ",\"skills\":[],\"mcpServers\":[]}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":3," + ENVIRONMENT_JSON + ",\"skills\":{},\"mcpServers\":[]}"));
+                "{\"version\":4," + ENVIRONMENT_JSON + ",\"skills\":{},\"mcpServers\":[]}"));
     assertThrows(DaemonProtocolException.class, () -> codec.decode(payload("", "null", "")));
     assertThrows(
         DaemonProtocolException.class,
@@ -196,7 +198,25 @@ class DaemonCapabilitiesCodecTest {
             new DaemonEnvironmentInfo(
                 DaemonOperatingSystem.LINUX,
                 "UTC",
-                "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1)));
+                "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1),
+                "/home/dev"));
+    assertInvalidRootPath("");
+    assertInvalidRootPath(" ");
+    assertInvalidRootPath(" /home/dev");
+    assertInvalidRootPath("/home/dev ");
+    assertInvalidRootPath("/home/dev\u0000x");
+  }
+
+  /** rootPath 是必填展示字段：缺失或非法 rootPath 都在 wire 边界拒绝。 */
+  @Test
+  void rejectsMissingOrInvalidRootPath() {
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"version\":4,\"environment\":{\"operatingSystem\":\"linux\","
+                    + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\"},"
+                    + "\"skills\":[],\"mcpServers\":[]}"));
   }
 
   @Test
@@ -266,19 +286,30 @@ class DaemonCapabilitiesCodecTest {
                 payloadWithEnvironment(operatingSystem, jsonEscape(timeZone), jsonEscape(note))));
   }
 
+  private void assertInvalidRootPath(String rootPath) {
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decode(
+                "{\"version\":4,\"environment\":{\"operatingSystem\":\"linux\","
+                    + "\"timeZone\":\"UTC\",\"note\":\"Linux environment.\",\"rootPath\":\""
+                    + jsonEscape(rootPath)
+                    + "\"},\"skills\":[],\"mcpServers\":[]}"));
+  }
+
   private static String payloadWithEnvironment(
       String operatingSystem, String timeZoneJson, String noteJson) {
-    return "{\"version\":3,\"environment\":{\"operatingSystem\":\""
+    return "{\"version\":4,\"environment\":{\"operatingSystem\":\""
         + operatingSystem
         + "\",\"timeZone\":\""
         + timeZoneJson
         + "\",\"note\":\""
         + noteJson
-        + "\"},\"skills\":[],\"mcpServers\":[]}";
+        + "\",\"rootPath\":\"/home/dev\"},\"skills\":[],\"mcpServers\":[]}";
   }
 
   private static String payload(String rootPrefix, String skills, String servers) {
-    return "{\"version\":3,"
+    return "{\"version\":4,"
         + rootPrefix
         + ENVIRONMENT_JSON
         + ",\"skills\":["

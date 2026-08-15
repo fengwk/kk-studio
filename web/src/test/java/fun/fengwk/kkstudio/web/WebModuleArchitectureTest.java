@@ -24,9 +24,13 @@ class WebModuleArchitectureTest {
   private static final String HARNESS_TOOL_PREFIX = "fun.fengwk.kkstudio.harness.tool.";
   private static final String CORE_AI_REFERENCE_PREFIX = "fun.fengwk.kkstudio.core.ai.";
 
-  /** Web mapper 直接使用的 canonical tool types (EnvironmentName, ToolResultJsonCodec). */
+  /**
+   * Web mapper 直接使用的 canonical tool types (EnvironmentBinding, EnvironmentName,
+   * ToolResultJsonCodec).
+   */
   private static final List<String> ALLOWED_HARNESS_TOOL_IMPORTS =
       List.of(
+          HARNESS_TOOL_PREFIX + "EnvironmentBinding",
           HARNESS_TOOL_PREFIX + "EnvironmentName",
           HARNESS_TOOL_PREFIX + "codec." + "ToolResultJsonCodec");
 
@@ -34,8 +38,7 @@ class WebModuleArchitectureTest {
       List.of(
           CORE_AI_REFERENCE_PREFIX + "environment.gateway." + "EnvironmentDaemonGateway",
           CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironment",
-          CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry",
-          CORE_AI_REFERENCE_PREFIX + "runtime.redis." + "RedisRealtimeEventTail");
+          CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry");
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
       List.of("kk-studio-harness-tool", "kk-studio-harness-daemon");
   private static final String REQUIRED_POM_ARTIFACT = "kk-studio-harness-runtime-spring";

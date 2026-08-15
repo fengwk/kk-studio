@@ -45,10 +45,6 @@ export function ThreadCommandPalette({
 
   return (
     <div className="thread-command-palette" role="listbox" aria-label={t('ai.runtime.command.palette')}>
-      <div className="thread-command-search">
-        <span>/</span>
-        <span className="thread-command-query">{query || t('ai.runtime.command.search')}</span>
-      </div>
       <ul ref={listRef} className="thread-command-list">
         {commands.length === 0 ? (
           <li className="thread-command-empty">{t('ai.runtime.command.noMatch')}</li>

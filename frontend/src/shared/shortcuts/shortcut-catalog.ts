@@ -1,0 +1,172 @@
+/**
+ * 快捷键展示唯一事实源：扁平 {@link ShortcutDefinition} 列表。
+ *
+ * - 纯展示数据，不做全局 dispatcher；catalog 只声明当前实现实际支持的快捷键。
+ * - 每条定义拥有稳定唯一 id（不随文案/键位展示变化），并按 scope 分组渲染。
+ * - labelKey / descriptionKey 必须存在于 i18n（测试会校验翻译可解析，
+ *   缺失键渲染为 ⟦missing:key⟧ 会被拒绝）。
+ */
+export type ShortcutScope = 'application' | 'thread' | 'events' | 'canvas'
+
+export interface ShortcutDefinition {
+  /** 稳定唯一 id，如 `application.escape`。 */
+  id: string
+  scope: ShortcutScope
+  /** 展示键序，如 `Esc`、`Ctrl/Cmd+K`。 */
+  keys: string
+  /** 动作短标签的 i18n key。 */
+  labelKey: string
+  /** 动作详细说明的 i18n key。 */
+  descriptionKey: string
+}
+
+export const SHORTCUT_SCOPE_ORDER: readonly ShortcutScope[] = [
+  'application',
+  'thread',
+  'events',
+  'canvas',
+]
+
+export const SHORTCUT_SCOPE_TITLE_KEYS: Record<ShortcutScope, string> = {
+  application: 'ai.runtime.shortcuts.group.application',
+  thread: 'ai.runtime.shortcuts.group.thread',
+  events: 'ai.runtime.shortcuts.group.events',
+  canvas: 'ai.runtime.shortcuts.group.canvas',
+}
+
+export const SHORTCUT_CATALOG: ShortcutDefinition[] = [
+  {
+    id: 'application.escape',
+    scope: 'application',
+    keys: 'Esc',
+    labelKey: 'ai.runtime.shortcuts.label.escape',
+    // ThreadComposer 全局 Escape：关闭当前面板/弹层并恢复 Composer 焦点。
+    descriptionKey: 'ai.runtime.shortcuts.escape',
+  },
+  {
+    id: 'thread.send',
+    scope: 'thread',
+    keys: 'Enter',
+    labelKey: 'ai.runtime.shortcuts.label.send',
+    descriptionKey: 'ai.runtime.shortcuts.send',
+  },
+  {
+    id: 'thread.newline',
+    scope: 'thread',
+    keys: 'Shift+Enter',
+    labelKey: 'ai.runtime.shortcuts.label.newline',
+    descriptionKey: 'ai.runtime.shortcuts.newline',
+  },
+  {
+    id: 'thread.history',
+    scope: 'thread',
+    keys: '↑ / ↓',
+    labelKey: 'ai.runtime.shortcuts.label.history',
+    descriptionKey: 'ai.runtime.shortcuts.history',
+  },
+  {
+    id: 'thread.commands',
+    scope: 'thread',
+    keys: '/',
+    labelKey: 'ai.runtime.shortcuts.label.commands',
+    descriptionKey: 'ai.runtime.shortcuts.commands',
+  },
+  {
+    id: 'thread.commandNav',
+    scope: 'thread',
+    keys: '↑↓ · Enter',
+    labelKey: 'ai.runtime.shortcuts.label.commandNav',
+    descriptionKey: 'ai.runtime.shortcuts.commandNav',
+  },
+  {
+    id: 'thread.commandEdges',
+    scope: 'thread',
+    keys: 'Home / End',
+    labelKey: 'ai.runtime.shortcuts.label.commandEdges',
+    descriptionKey: 'ai.runtime.shortcuts.commandEdges',
+  },
+  {
+    id: 'events.nav',
+    scope: 'events',
+    keys: '↑ / ↓',
+    labelKey: 'ai.runtime.shortcuts.label.eventsNav',
+    descriptionKey: 'ai.runtime.shortcuts.eventsNav',
+  },
+  {
+    id: 'events.page',
+    scope: 'events',
+    keys: 'PageUp / PageDown',
+    labelKey: 'ai.runtime.shortcuts.label.eventsPage',
+    descriptionKey: 'ai.runtime.shortcuts.eventsPage',
+  },
+  {
+    id: 'events.edges',
+    scope: 'events',
+    keys: 'Home / End',
+    labelKey: 'ai.runtime.shortcuts.label.eventsEdges',
+    descriptionKey: 'ai.runtime.shortcuts.eventsEdges',
+  },
+  {
+    id: 'events.open',
+    scope: 'events',
+    keys: 'Enter / Space',
+    labelKey: 'ai.runtime.shortcuts.label.eventsOpen',
+    descriptionKey: 'ai.runtime.shortcuts.eventsOpen',
+  },
+  {
+    id: 'events.escape',
+    scope: 'events',
+    keys: 'Esc',
+    labelKey: 'ai.runtime.shortcuts.label.eventsEscape',
+    descriptionKey: 'ai.runtime.shortcuts.eventsEscape',
+  },
+  {
+    id: 'canvas.escape',
+    scope: 'canvas',
+    keys: 'Esc',
+    labelKey: 'ai.runtime.shortcuts.label.canvasEscape',
+    descriptionKey: 'ai.runtime.shortcuts.canvasEscape',
+  },
+  {
+    id: 'canvas.thread',
+    scope: 'canvas',
+    keys: 'Ctrl/Cmd+K',
+    labelKey: 'ai.runtime.shortcuts.label.canvasThread',
+    descriptionKey: 'ai.runtime.shortcuts.canvasThread',
+  },
+  {
+    id: 'canvas.fit',
+    scope: 'canvas',
+    keys: '0',
+    labelKey: 'ai.runtime.shortcuts.label.canvasFit',
+    descriptionKey: 'ai.runtime.shortcuts.canvasFit',
+  },
+  {
+    id: 'canvas.zoom',
+    scope: 'canvas',
+    keys: '1',
+    labelKey: 'ai.runtime.shortcuts.label.canvasZoom',
+    descriptionKey: 'ai.runtime.shortcuts.canvasZoom',
+  },
+  {
+    id: 'canvas.focus',
+    scope: 'canvas',
+    keys: 'F',
+    labelKey: 'ai.runtime.shortcuts.label.canvasFocus',
+    descriptionKey: 'ai.runtime.shortcuts.canvasFocus',
+  },
+  {
+    id: 'canvas.text',
+    scope: 'canvas',
+    keys: 'T',
+    labelKey: 'ai.runtime.shortcuts.label.canvasText',
+    descriptionKey: 'ai.runtime.shortcuts.canvasText',
+  },
+  {
+    id: 'canvas.delete',
+    scope: 'canvas',
+    keys: 'Delete / Backspace',
+    labelKey: 'ai.runtime.shortcuts.label.canvasDelete',
+    descriptionKey: 'ai.runtime.shortcuts.canvasDelete',
+  },
+]

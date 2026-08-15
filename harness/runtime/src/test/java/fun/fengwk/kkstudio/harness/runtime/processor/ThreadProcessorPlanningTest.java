@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -52,7 +53,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -113,7 +113,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetEnvironmentCommandPayload(new EnvironmentName("env-1")));
+            new SetEnvironmentCommandPayload(EnvironmentBindings.binding("env-1")));
     UUID yoloCommand =
         seedCommand(fixture.store, baseline.threadId(), new SetYoloCommandPayload(true));
     requestThreadWork(fixture.store, baseline.threadId());

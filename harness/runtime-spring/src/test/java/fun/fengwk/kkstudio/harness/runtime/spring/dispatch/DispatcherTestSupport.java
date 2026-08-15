@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -88,7 +89,8 @@ final class DispatcherTestSupport {
   static final Duration POLL_INTERVAL = Duration.ofMillis(20);
   static final Duration REJECTION_DELAY = Duration.ofSeconds(2);
   static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
-  static final EnvironmentName ENV_NAME = new EnvironmentName("env-1");
+  static final EnvironmentBinding ENV_NAME =
+      new EnvironmentBinding(new EnvironmentName("env-1"), ".");
 
   private DispatcherTestSupport() {}
 

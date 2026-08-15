@@ -6,7 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 
@@ -15,7 +16,7 @@ import java.util.List;
 /** ToolBinding 的 type/descriptor/environment route 不变式。 */
 class ToolBindingTest {
 
-  private static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
+  private static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
 
   @Test
   void acceptsPlatformAndEnvironmentBindings() {
@@ -23,11 +24,11 @@ class ToolBindingTest {
         new ToolBinding(descriptor("bash", ToolType.PLATFORM), ToolType.PLATFORM, null);
     assertEquals(ToolType.PLATFORM, platform.type());
     assertEquals("bash", platform.descriptor().name());
-    assertNull(platform.environmentName());
+    assertNull(platform.environment());
 
     ToolBinding environment =
         new ToolBinding(descriptor("fs", ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, ENV_ID);
-    assertEquals(ENV_ID, environment.environmentName());
+    assertEquals(ENV_ID, environment.environment());
   }
 
   @Test
@@ -35,7 +36,7 @@ class ToolBindingTest {
     // ENVIRONMENT 携带最新 branch 的 route，可为 null（实际执行时确定性失败）。
     ToolBinding nullRoute =
         new ToolBinding(descriptor("fs", ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, null);
-    assertNull(nullRoute.environmentName());
+    assertNull(nullRoute.environment());
     // PLATFORM 不得携带 route；descriptor.type 必须与 binding type 一致。
     assertThrows(
         IllegalArgumentException.class,

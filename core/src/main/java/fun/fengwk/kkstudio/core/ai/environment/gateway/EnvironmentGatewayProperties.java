@@ -25,6 +25,9 @@ public class EnvironmentGatewayProperties {
    */
   private Duration heartbeatTimeout = Duration.ofSeconds(60);
 
+  /** 目录浏览请求的 daemon 往返超时；默认 10 秒。 */
+  private Duration directoryListTimeout = Duration.ofSeconds(10);
+
   /** 返回心跳过期超时（必须为正）。 */
   public Duration requireHeartbeatTimeout() {
     if (heartbeatTimeout == null || heartbeatTimeout.isZero() || heartbeatTimeout.isNegative()) {
@@ -32,6 +35,17 @@ public class EnvironmentGatewayProperties {
           "kk-studio.harness.environment-gateway.heartbeat-timeout must be positive");
     }
     return heartbeatTimeout;
+  }
+
+  /** 返回目录浏览往返超时（必须为正）。 */
+  public Duration requireDirectoryListTimeout() {
+    if (directoryListTimeout == null
+        || directoryListTimeout.isZero()
+        || directoryListTimeout.isNegative()) {
+      throw new IllegalArgumentException(
+          "kk-studio.harness.environment-gateway.directory-list-timeout must be positive");
+    }
+    return directoryListTimeout;
   }
 
   public long requireMaxResourceBytes() {

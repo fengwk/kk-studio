@@ -90,6 +90,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const zoomRef = useRef<((scale: number) => void) | null>(null)
   const stageElementRef = useRef<HTMLElement | null>(null)
   const dockAddRef = useRef<HTMLButtonElement | null>(null)
+  /** CanvasStage 注册的右键菜单关闭回调：Canvas surface 的 Escape 关闭全部 overlay。 */
+  const closeContextMenuRef = useRef<(() => void) | null>(null)
   const queueRef = useRef<CanvasCommandQueue | null>(null)
   const pendingCommandCountRef = useRef(0)
   const transformTimerRef = useRef<number | null>(null)
@@ -972,8 +974,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     createTextNode,
     closeOverlays: () => {
       closeAddMenu()
-      collapseThread()
       closeTextEditor()
+      closeContextMenuRef.current?.()
     },
   })
 
@@ -987,6 +989,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     zoomRef,
     stageElementRef,
     dockAddRef,
+    closeContextMenuRef,
     snapshotQuery,
     modelsQuery,
     models: modelsQuery.data ?? [],

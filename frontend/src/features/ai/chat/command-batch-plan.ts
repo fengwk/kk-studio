@@ -8,6 +8,7 @@ import type {
 import {
   branchDraftFromThread,
   buildBranchDiffCommands,
+  copyBinding,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
 import {
@@ -84,6 +85,7 @@ function messageIdentity(
 function copyBranchDraft(draft: BranchDraft): BranchDraft {
   return {
     ...draft,
+    environment: copyBinding(draft.environment),
     model: { ...draft.model },
     activeTools: [...draft.activeTools],
   }

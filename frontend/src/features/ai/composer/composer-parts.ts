@@ -38,13 +38,24 @@ export function hasMessageContent(parts: ComposerPart[]): boolean {
   )
 }
 
-/** 首 part 是否为以 '/' 开头的 slash 文本（slash 模式只从 composer 开头进入）。 */
+/**
+ * 是否为以 '/' 开头的纯文本命令草稿。
+ *
+ * Slash 只是打开命令菜单的文本快捷入口；一旦存在附件，就按普通消息处理，绝不让
+ * 命令选择静默清空附件。
+ */
 export function slashQueryOf(parts: ComposerPart[]): string | null {
-  const first = parts[0]
-  if (first?.type !== 'text' || !first.text.startsWith('/')) {
+  if (parts.length === 0) {
     return null
   }
-  return first.text.slice(1)
+  let text = ''
+  for (const part of parts) {
+    if (part.type !== 'text') {
+      return null
+    }
+    text += part.text
+  }
+  return text.startsWith('/') ? text.slice(1) : null
 }
 
 /** 合并相邻 text parts 为规范形态（DOM 提取天然合并，状态侧保持同构）。 */

@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -109,6 +110,30 @@ class ToolContractTest {
                 descriptor(), new ToolCall("call-1", "other", "{}"), Duration.ofSeconds(1)));
   }
 
+  /** 5 参数 workdir 至少必须是 absolute path（canonical 化由 daemon 调用方完成，构造校验不做文件系统 IO）。 */
+  @Test
+  void requiresAbsoluteWorkdirWhenProvided() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolExecutionRequest(
+                descriptor(),
+                new ToolCall("call-1", "search", "{\"query\":\"harness\"}"),
+                Duration.ZERO,
+                null,
+                Path.of("relative/workdir")));
+
+    ToolExecutionRequest request =
+        new ToolExecutionRequest(
+            descriptor(),
+            new ToolCall("call-1", "search", "{\"query\":\"harness\"}"),
+            Duration.ZERO,
+            null,
+            Path.of("/absolute/workdir"));
+    assertEquals(Path.of("/absolute/workdir"), request.workdir());
+    assertEquals(Duration.ofSeconds(10), request.effectiveTimeout());
+  }
+
   /** 结果 details 必须是 JSON object，terminate 只作为 runtime 内存提示保留。 */
   @Test
   void validatesStructuredDetailsAndPreservesTerminateHint() {
@@ -132,7 +157,7 @@ class ToolContractTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION_2,
+                DaemonProtocol.VERSION_3,
                 DaemonMessageType.INVOKE,
                 environmentName,
                 null,
@@ -142,7 +167,7 @@ class ToolContractTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION_2,
+                DaemonProtocol.VERSION_3,
                 DaemonMessageType.LOAD_SKILL,
                 environmentName,
                 null,
@@ -152,7 +177,7 @@ class ToolContractTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION_2,
+                DaemonProtocol.VERSION_3,
                 DaemonMessageType.HELLO,
                 environmentName,
                 null,
@@ -161,7 +186,7 @@ class ToolContractTest {
 
     DaemonEnvelope hello =
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2, DaemonMessageType.HELLO, environmentName, null, 0, "{}");
+            DaemonProtocol.VERSION_3, DaemonMessageType.HELLO, environmentName, null, 0, "{}");
     assertEquals(DaemonMessageType.HELLO, hello.messageType());
     assertEquals("environment", hello.environmentName().value());
   }

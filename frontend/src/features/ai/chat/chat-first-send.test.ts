@@ -13,7 +13,7 @@ import type {
 
 function settings(): HarnessBranchSettingsDTO {
   return {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     activeTools: [],

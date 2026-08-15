@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
@@ -92,6 +93,13 @@ class HarnessRuntimeWebMapperTest {
     return dto;
   }
 
+  private static EnvironmentBindingDTO bindingDto(String name, String workspacePath) {
+    EnvironmentBindingDTO dto = new EnvironmentBindingDTO();
+    dto.setName(name);
+    dto.setWorkspacePath(workspacePath);
+    return dto;
+  }
+
   private static HarnessUserMessageContentDTO content(String type) {
     HarnessUserMessageContentDTO dto = new HarnessUserMessageContentDTO();
     dto.setType(type);
@@ -126,7 +134,7 @@ class HarnessRuntimeWebMapperTest {
     yolo.setYoloEnabled(true);
 
     HarnessThreadCommandCreateDTO environment = command("SET_ENVIRONMENT", "c-env");
-    environment.setEnvironmentName("123e4567-e89b-12d3-a456-426614174000");
+    environment.setEnvironment(bindingDto("123e4567-e89b-12d3-a456-426614174000", "."));
 
     ThreadCommandBatch batch =
         HarnessRuntimeWebMapper.toCommandBatch(
@@ -163,7 +171,7 @@ class HarnessRuntimeWebMapperTest {
         batch,
         6,
         ThreadCommandType.SET_ENVIRONMENT,
-        "{\"environmentName\":\"123e4567-e89b-12d3-a456-426614174000\"}");
+        "{\"environment\":{\"name\":\"123e4567-e89b-12d3-a456-426614174000\",\"workspacePath\":\".\"}}");
   }
 
   @Test
@@ -266,11 +274,70 @@ class HarnessRuntimeWebMapperTest {
   }
 
   @Test
-  void setEnvironmentAcceptsNullToClearAndMapsToNullEnvironmentName() {
+  void setEnvironmentRequiresFieldPresenceAndAcceptsExplicitNullToClear() {
+    // 字段缺省（JSON 中未出现）：SET_ENVIRONMENT 确定性拒绝——null 只能通过显式提供表达解绑。
+    HarnessThreadCommandCreateDTO missing = command("SET_ENVIRONMENT", "c-env-missing");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(missing)));
+
+    // 显式 null：成功映射为 null binding（解绑）。
     HarnessThreadCommandCreateDTO environment = command("SET_ENVIRONMENT", "c-env-clear");
+    environment.setEnvironment(null);
     ThreadCommandBatch batch =
         HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(environment));
-    assertExactPayload(batch, 0, ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":null}");
+    assertExactPayload(batch, 0, ThreadCommandType.SET_ENVIRONMENT, "{\"environment\":null}");
+  }
+
+  @Test
+  void rejectsExplicitNullEnvironmentForOtherDiscriminatorsAsForbidden() {
+    HarnessThreadCommandCreateDTO user = command("USER_MESSAGE", "c-1");
+    HarnessUserMessageContentDTO text = content("TEXT");
+    text.setText("hello");
+    user.setContents(List.of(text));
+    user.setEnvironment(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(user)));
+
+    HarnessThreadCommandCreateDTO yolo = command("SET_YOLO", "c-2");
+    yolo.setYoloEnabled(false);
+    yolo.setEnvironment(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(yolo)));
+  }
+
+  @Test
+  void rejectsIncompleteEnvironmentBindingAsIllegalArgumentInsteadOfNpe() {
+    // 嵌套字段缺失必须抛 IAE（HTTP 400），绝不能把 Objects.requireNonNull 的 NPE 漏成 500。
+    HarnessThreadCommandCreateDTO missingName = command("SET_ENVIRONMENT", "c-env-name");
+    missingName.setEnvironment(bindingDto(null, "."));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(missingName)));
+
+    HarnessThreadCommandCreateDTO missingPath = command("SET_ENVIRONMENT", "c-env-path");
+    missingPath.setEnvironment(bindingDto("env-1", null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(missingPath)));
+
+    // Thread create 入口（branchSettings.environment）同样必须 IAE 而非 NPE。
+    HarnessThreadCreateDTO create = new HarnessThreadCreateDTO();
+    HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
+    settings.setEnvironment(bindingDto(null, "."));
+    settings.setAgentName("default-assistant");
+    HarnessModelSelectionDTO selection = new HarnessModelSelectionDTO();
+    selection.setProviderName("openai");
+    selection.setModelName("gpt-5");
+    selection.setVariant("default");
+    settings.setModel(selection);
+    create.setBranchSettings(settings);
+    create.setYoloEnabled(false);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCreateThreadCommand(create));
   }
 
   @Test
@@ -300,7 +367,7 @@ class HarnessRuntimeWebMapperTest {
 
     HarnessThreadCommandCreateDTO yoloWithEnvironment = command("SET_YOLO", "c-4");
     yoloWithEnvironment.setYoloEnabled(false);
-    yoloWithEnvironment.setEnvironmentName("123e4567-e89b-12d3-a456-426614174000");
+    yoloWithEnvironment.setEnvironment(bindingDto("123e4567-e89b-12d3-a456-426614174000", "."));
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(yoloWithEnvironment)));
@@ -480,7 +547,9 @@ class HarnessRuntimeWebMapperTest {
     assertEquals("3", thread.path("revision").asText());
     assertEquals("TOOL_WAITING_APPROVAL", thread.path("status").asText());
     assertTrue(thread.path("processing").asBoolean());
-    assertEquals("env-1", thread.path("branchSettings").path("environmentName").asText());
+    assertEquals("env-1", thread.path("branchSettings").path("environment").path("name").asText());
+    assertEquals(
+        ".", thread.path("branchSettings").path("environment").path("workspacePath").asText());
     assertEquals("default-assistant", thread.path("branchSettings").path("agentName").asText());
     assertEquals("gpt-5", thread.path("branchSettings").path("model").path("modelName").asText());
     assertEquals("web_search", thread.path("branchSettings").path("activeTools").get(0).asText());
@@ -527,7 +596,7 @@ class HarnessRuntimeWebMapperTest {
     assertEquals("1.0", tool.path("toolVersion").asText());
     assertEquals("web_search", tool.path("rendererKey").asText());
     assertEquals("PLATFORM", tool.path("toolType").asText());
-    assertTrue(tool.path("environmentName").isNull());
+    assertTrue(tool.path("environment").isNull());
     assertEquals("{}", tool.path("argumentsJson").asText());
     assertTrue(tool.path("approvalJson").asText().contains("\"required\":true"));
     assertTrue(tool.path("approvalJson").asText().contains("\"decision\":null"));
@@ -573,11 +642,11 @@ class HarnessRuntimeWebMapperTest {
   void mapsIdleSnapshotWithProcessingFalseAndEmptyLists() throws Exception {
     HarnessThreadSnapshotDTO dto =
         HarnessRuntimeWebMapper.toSnapshotDto(HarnessRuntimeTestFixtures.idleSnapshot());
-    dto.getThread().getBranchSettings().setEnvironmentName(null);
+    dto.getThread().getBranchSettings().setEnvironment(null);
     JsonNode json = MAPPER.readTree(MAPPER.writeValueAsString(dto));
     assertEquals("IDLE", json.path("thread").path("status").asText());
     assertFalse(json.path("thread").path("processing").asBoolean());
-    assertTrue(json.path("thread").path("branchSettings").path("environmentName").isNull());
+    assertTrue(json.path("thread").path("branchSettings").path("environment").isNull());
     assertTrue(json.path("entries").get(0).path("parentEntryId").isNull());
     assertTrue(json.path("modelInvocation").isNull());
     assertTrue(json.path("toolInvocations").isArray());
@@ -589,7 +658,7 @@ class HarnessRuntimeWebMapperTest {
   void mapsCreateHeadStopAndApprovalRequestFields() {
     HarnessThreadCreateDTO create = new HarnessThreadCreateDTO();
     HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
-    settings.setEnvironmentName(null);
+    settings.setEnvironment(null);
     settings.setAgentName("default-assistant");
     HarnessModelSelectionDTO selection = new HarnessModelSelectionDTO();
     selection.setProviderName("openai");
@@ -601,7 +670,7 @@ class HarnessRuntimeWebMapperTest {
     create.setYoloEnabled(false);
 
     CreateThreadCommand created = HarnessRuntimeWebMapper.toCreateThreadCommand(create);
-    assertNull(created.branchSettings().environmentName());
+    assertNull(created.branchSettings().environment());
     assertEquals("default-assistant", created.branchSettings().agentName());
     assertEquals("gpt-5", created.branchSettings().model().modelName());
     assertEquals(List.of("web_search"), created.branchSettings().activeTools());

@@ -23,7 +23,9 @@ public final class LspGotoDefinitionTool extends AbstractCodingTool {
   ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     Path path =
-        boundary.existing(string(args, "path"), boundary.workdir(optionalString(args, "workdir")));
+        boundary.existing(
+            string(args, "path"),
+            boundary.workdir(optionalString(args, "workdir"), request.workdir()));
     if (Files.isDirectory(path)) {
       throw new IllegalArgumentException("path must be a file: " + path);
     }

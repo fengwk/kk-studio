@@ -186,6 +186,7 @@ registerCase({
     assert(snapshot.toolInvocations.length === 0, JSON.stringify(snapshot.toolInvocations))
     for (const hidden of [
       'executionEpoch',
+      'environment',
       'environmentName',
       'activeAgentDefinitionId',
       'activeAgentName',
@@ -209,7 +210,7 @@ registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: '创建时完整 branchSettings 精确投影到 Thread 快照',
-  docs: 'environmentName/agentName/model/activeTools/yoloEnabled 原样持久化并投影；null title 保持 null',
+  docs: 'EnvironmentBinding/agentName/model/activeTools/yoloEnabled 原样持久化并投影；null title 保持 null',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -219,7 +220,7 @@ registerCase({
       yoloEnabled: false,
     })
     const requested = {
-      environmentName: null,
+      environment: null,
       agentName: ctx.vars.agent.name,
       model: modelSelectionOf(ctx),
       activeTools: ['read', 'grep'],
@@ -258,6 +259,7 @@ registerCase({
       agent: ctx.vars.agent,
       model: modelSelectionOf(ctx),
       title: `e2e-user-wire-${cid().slice(0, 8)}`,
+      branchAgentName: `e2e-user-wire-missing-${cid().slice(0, 8)}`,
     })
     const thread = snapshot.thread
     const singleClientCommandId = cid()
@@ -328,112 +330,69 @@ registerCase({
         ),
       `replay must return the existing commands: ${JSON.stringify({ commandsDto, replay })}`,
     )
+    await waitForQuiescentThread(ctx, thread.threadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    const validationThread = (await getThreadSnapshot(ctx, thread.threadId)).thread
 
-    // 文本 shorthand（text / content）已从 USER_MESSAGE wire 移除：text 是未知字段、content 对 USER_MESSAGE 禁用 => 400。
-    // 400 不推进 cursor，可复用原 cursor。
-    await expectHttpError(
-      () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: thread.nextCommandSequence,
-          commands: [
-            { type: 'USER_MESSAGE', clientCommandId: cid(), text: 'x' },
-          ],
-        }),
-      { status: 400, messageIncludes: /unknown|text/i },
-    )
-    await expectHttpError(
-      () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: thread.nextCommandSequence,
-          commands: [
-            { type: 'USER_MESSAGE', clientCommandId: cid(), content: 'x' },
-          ],
-        }),
+    const expectInvalidUserCommand = (command, options = { status: 400 }) =>
+      expectHttpError(
+        () =>
+          enqueueCommands(ctx, thread.threadId, {
+            expectedHeadEntryId: validationThread.headEntryId,
+            expectedNextCommandSequence: validationThread.nextCommandSequence,
+            commands: [command],
+          }),
+        options,
+      )
+
+    // 文本 shorthand（text / content）已从 USER_MESSAGE wire 移除。
+    await expectInvalidUserCommand({ type: 'USER_MESSAGE', clientCommandId: cid(), text: 'x' })
+    await expectInvalidUserCommand(
+      { type: 'USER_MESSAGE', clientCommandId: cid(), content: 'x' },
       { status: 400, messageIncludes: /content|forbidden/i },
     )
-    // 多余字段（role 等）=> 400（mapper requireForbidden）。
-    await expectHttpError(
-      () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: thread.nextCommandSequence,
-          commands: [
-            {
-              type: 'USER_MESSAGE',
-              clientCommandId: cid(),
-              contents: [{ type: 'TEXT', text: 'x' }],
-              role: 'USER',
-            },
-          ],
-        }),
+    // 多余字段（role 等）与缺少 contents 字段均确定性 400。
+    await expectInvalidUserCommand(
+      {
+        type: 'USER_MESSAGE',
+        clientCommandId: cid(),
+        contents: [{ type: 'TEXT', text: 'x' }],
+        role: 'USER',
+      },
       { status: 400, messageIncludes: /role/ },
     )
-    // 缺少 contents 字段 => 400。
-    await expectHttpError(
-      () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: thread.nextCommandSequence,
-          commands: [{ type: 'USER_MESSAGE', clientCommandId: cid() }],
-        }),
+    await expectInvalidUserCommand(
+      { type: 'USER_MESSAGE', clientCommandId: cid() },
       { status: 400, messageIncludes: /contents/i },
     )
-    // IMAGE/AUDIO/VIDEO 内容类型已从 wire 契约移除：确定性 400。
+    // IMAGE/AUDIO/VIDEO 内容类型已从 wire 契约移除。
     for (const [type, mediaType, source] of [
       ['IMAGE', 'image/png', 'https://example.test/image.png'],
       ['AUDIO', 'audio/mpeg', 'https://example.test/audio.mp3'],
       ['VIDEO', 'video/mp4', 'https://example.test/video.mp4'],
     ]) {
-      await expectHttpError(
-        () =>
-          enqueueCommands(ctx, thread.threadId, {
-            expectedHeadEntryId: thread.headEntryId,
-            expectedNextCommandSequence: thread.nextCommandSequence,
-            commands: [
-              {
-                type: 'USER_MESSAGE',
-                clientCommandId: cid(),
-                contents: [{ type, mediaType, source }],
-              },
-            ],
-          }),
-        { status: 400, messageIncludes: /TEXT, ATTACHMENT/i },
-      )
+      await expectInvalidUserCommand({
+        type: 'USER_MESSAGE',
+        clientCommandId: cid(),
+        contents: [{ type, mediaType, source }],
+      })
     }
-    // ATTACHMENT：uploadId 必须是 canonical UUID string；非 UUID => 400。
-    await expectHttpError(
-      () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: thread.nextCommandSequence,
-          commands: [
-            {
-              type: 'USER_MESSAGE',
-              clientCommandId: cid(),
-              contents: [{ type: 'ATTACHMENT', uploadId: 'not-a-uuid' }],
-            },
-          ],
-        }),
+    // ATTACHMENT uploadId 必须是 canonical UUID，且必须指向 READY upload。
+    await expectInvalidUserCommand(
+      {
+        type: 'USER_MESSAGE',
+        clientCommandId: cid(),
+        contents: [{ type: 'ATTACHMENT', uploadId: 'not-a-uuid' }],
+      },
       { status: 400, messageIncludes: /uploadId/i },
     )
-    // ATTACHMENT 携带随机（不存在的）READY uploadId：无论 Storage 是否启用都确定性 400。
-    await expectHttpError(
-      () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: thread.nextCommandSequence,
-          commands: [
-            {
-              type: 'USER_MESSAGE',
-              clientCommandId: cid(),
-              contents: [{ type: 'ATTACHMENT', uploadId: cid() }],
-            },
-          ],
-        }),
-      { status: 400 },
-    )
+    await expectInvalidUserCommand({
+      type: 'USER_MESSAGE',
+      clientCommandId: cid(),
+      contents: [{ type: 'ATTACHMENT', uploadId: cid() }],
+    })
   },
 })
 
@@ -449,6 +408,7 @@ registerCase({
       agent: ctx.vars.agent,
       model: modelSelectionOf(ctx),
       title: `e2e-custom-wire-${cid().slice(0, 8)}`,
+      branchAgentName: `e2e-custom-wire-missing-${cid().slice(0, 8)}`,
     })
     const thread = snapshot.thread
     const systemClientCommandId = cid()
@@ -484,12 +444,17 @@ registerCase({
       isDeepStrictEqual(userPayload, { message: { role: 'USER', contents: [{ type: 'text', text: 'user probe' }] } }),
       JSON.stringify(userPayload),
     )
+    await waitForQuiescentThread(ctx, thread.threadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    const validationThread = (await getThreadSnapshot(ctx, thread.threadId)).thread
     // 非法 role（ASSISTANT）=> 400（mapper requireRole）。
     await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: thread.nextCommandSequence,
+          expectedHeadEntryId: validationThread.headEntryId,
+          expectedNextCommandSequence: validationThread.nextCommandSequence,
           commands: [
             { type: 'CUSTOM_MESSAGE', clientCommandId: cid(), content: 'x', role: 'ASSISTANT' },
           ],
@@ -500,8 +465,8 @@ registerCase({
     await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: thread.nextCommandSequence,
+          expectedHeadEntryId: validationThread.headEntryId,
+          expectedNextCommandSequence: validationThread.nextCommandSequence,
           commands: [{ type: 'USER_MESSAGE', clientCommandId: cid() }],
         }),
       { status: 400, messageIncludes: /contents/i },
@@ -521,6 +486,7 @@ registerCase({
       agent: ctx.vars.agent,
       model: modelSelectionOf(ctx),
       title: `e2e-replay-${cid().slice(0, 8)}`,
+      branchAgentName: `e2e-replay-missing-${cid().slice(0, 8)}`,
     })
     const thread = snapshot.thread
     const clientCommandId = cid()
@@ -644,7 +610,7 @@ registerCase({
       `same-target replay must precede revision CAS: ${JSON.stringify(replayed)}`,
     )
 
-    const differentTargetEntryId = String(BigInt(thread.headEntryId) + 999999999n)
+    const differentTargetEntryId = cid()
     await expectHttpError(
       () =>
         updateThreadHead(ctx, thread.threadId, {
@@ -738,7 +704,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE 一个 batch；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings/yoloEnabled 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；额外字段与非法 environmentName => 400',
+  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE 一个 batch；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings/yoloEnabled 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；额外字段与非法 EnvironmentBinding => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -792,7 +758,7 @@ registerCase({
     assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
     const finalSnapshot = await getThreadSnapshot(ctx, thread.threadId)
     const expectedSettings = {
-      environmentName: null,
+      environment: null,
       agentName: missingAgentName,
       model: {
         providerName: modelSelection.providerName,
@@ -867,15 +833,48 @@ registerCase({
         }),
       { status: 400 },
     )
-    // SET_ENVIRONMENT 只接受 canonical bounded 小写路由名称（mapper EnvironmentName 校验；resolver 运行时才查 registry READY）。
+    // SET_ENVIRONMENT 必须区分字段缺省与显式 null：缺省拒绝，显式 null（上方主 batch）合法解绑。
     await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
           expectedHeadEntryId: fresh.thread.headEntryId,
           expectedNextCommandSequence: fresh.thread.nextCommandSequence,
-          commands: [setEnvironmentCommand('Not-A-Name', cid())],
+          commands: [{ type: 'SET_ENVIRONMENT', clientCommandId: cid() }],
         }),
-      { status: 400, messageIncludes: /environmentName/i },
+      { status: 400, messageIncludes: /environment/i },
+    )
+    // 其他 discriminator 即使显式传 environment:null 也必须按 forbidden 拒绝。
+    await expectHttpError(
+      () =>
+        enqueueCommands(ctx, thread.threadId, {
+          expectedHeadEntryId: fresh.thread.headEntryId,
+          expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          commands: [
+            {
+              type: 'SET_YOLO',
+              clientCommandId: cid(),
+              yoloEnabled: true,
+              environment: null,
+            },
+          ],
+        }),
+      { status: 400, messageIncludes: /environment/i },
+    )
+    // SET_ENVIRONMENT 只接受完整 binding；name/path 在 mapper 处校验，resolver 运行时才查 registry READY。
+    await expectHttpError(
+      () =>
+        enqueueCommands(ctx, thread.threadId, {
+          expectedHeadEntryId: fresh.thread.headEntryId,
+          expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          commands: [
+            {
+              type: 'SET_ENVIRONMENT',
+              clientCommandId: cid(),
+              environment: { name: 'Not-A-Name', workspacePath: '.' },
+            },
+          ],
+        }),
+      { status: 400, messageIncludes: /environment|name/i },
     )
   },
 })
@@ -884,11 +883,12 @@ registerCase({
   id: 'thread_snapshot.unknown_thread_404',
   level: 'L1',
   title: '未知 Thread snapshot 404',
-  docs: 'GET /api/ai/runtime/threads/999999999/snapshot => 404 unknown thread',
+  docs: 'GET /api/ai/runtime/threads/{canonical unknown UUID}/snapshot => 404 unknown thread',
   async run(ctx) {
+    const unknownThreadId = '00000000-0000-0000-0000-000000000999'
     await expectHttpError(
-      () => ctx.call('GET', '/api/ai/runtime/threads/999999999/snapshot'),
-      { status: 404, messageIncludes: /thread 999999999 does not exist/ },
+      () => ctx.call('GET', `/api/ai/runtime/threads/${unknownThreadId}/snapshot`),
+      { status: 404, messageIncludes: new RegExp(`thread ${unknownThreadId} does not exist`) },
     )
   },
 })

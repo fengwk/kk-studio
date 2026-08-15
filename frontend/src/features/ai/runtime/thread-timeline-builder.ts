@@ -17,7 +17,10 @@ import type {
   ToolApprovalState,
   ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
-import { projectDurableEntry } from '@/features/ai/runtime/thread-timeline/entry-projection'
+import {
+  projectDurableEntry,
+  type EntryProjectionContext,
+} from '@/features/ai/runtime/thread-timeline/entry-projection'
 import { contentText } from '@/features/ai/runtime/thread-timeline/content-utils'
 import { createModelAttemptFailureMessage } from '@/features/ai/runtime/thread-timeline/model-attempt-failure'
 import { translate } from '@/shared/i18n'
@@ -41,6 +44,8 @@ export function buildThreadTimeline(
   const messages: DialogueMessage[] = []
   const queuedMessages: QueuedThreadMessage[] = []
   const durableToolArguments = new Map<string, string[]>()
+  // Turn usage 挂起上下文：summary 在相应 TURN_END 之后投影。
+  const projectionContext: EntryProjectionContext = { pendingTurnSummary: null }
   let hasPendingInputs = false
   let inCompactionTurn = false
   let latestTurnIsCompaction = false
@@ -50,7 +55,7 @@ export function buildThreadTimeline(
       const payload = asRecord(parsePayload(entry.payloadJson))
       latestTurnIsCompaction = getString(payload.reason) === 'COMPACTION'
       inCompactionTurn = latestTurnIsCompaction
-      projectDurableEntry(entry, messages, durableToolArguments)
+      projectDurableEntry(entry, messages, durableToolArguments, projectionContext)
       continue
     }
     if (inCompactionTurn) {
@@ -59,7 +64,7 @@ export function buildThreadTimeline(
       }
       continue
     }
-    projectDurableEntry(entry, messages, durableToolArguments)
+    projectDurableEntry(entry, messages, durableToolArguments, projectionContext)
   }
 
   for (const command of queuedCommands) {

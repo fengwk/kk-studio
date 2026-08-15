@@ -4,6 +4,7 @@ import { createApplicationExtensionHost } from '@/app/extension-host'
 import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import { comfyuiExtension } from '@/features/comfyui/extensions/comfyui-extension.definition'
+import { settingsExtension } from '@/features/settings/settings-extension'
 
 describe('AI extension composition architecture', () => {
   it('registers default and lazy feature routes through independent extensions', () => {
@@ -34,6 +35,10 @@ describe('AI extension composition architecture', () => {
       'ai.comfyui-editor',
       'ai.comfyui-delete',
     ])
+    // Settings 是独立 extension，不塞进 aiExtension。
+    expect(settingsExtension.pages?.map((page) => [page.id, page.path])).toEqual([
+      ['settings.page', 'settings'],
+    ])
 
     const host = createApplicationExtensionHost()
     expect(host.pages.list().map((page) => page.id)).toEqual([
@@ -44,6 +49,7 @@ describe('AI extension composition architecture', () => {
       'ai.providers',
       'ai.environments',
       'ai.comfyui',
+      'settings.page',
       'canvas.home',
       'canvas.editor',
     ])
@@ -56,6 +62,9 @@ describe('AI extension composition architecture', () => {
     )
     expect(host.pages.get('canvas.editor')?.component).toBe(
       canvasExtension.pages?.[1].component,
+    )
+    expect(host.pages.get('settings.page')?.component).toBe(
+      settingsExtension.pages?.[0].component,
     )
   })
 

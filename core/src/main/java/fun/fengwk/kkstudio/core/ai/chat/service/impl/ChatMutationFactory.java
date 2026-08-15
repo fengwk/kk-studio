@@ -6,9 +6,11 @@ import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 
 import java.util.UUID;
 
@@ -46,7 +48,7 @@ public class ChatMutationFactory {
     editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
     chat.setAgentName(parseRequiredAgentName(createDTO.getAgentName()));
-    chat.setEnvironmentName(parseNullableEnvironmentName(createDTO.getEnvironmentName()));
+    chat.setEnvironment(parseNullableEnvironmentBinding(createDTO.getEnvironment()));
     chat.setYoloEnabled(
         createDTO.getYoloEnabled() == null
             ? toolSettingsProvider.get().defaultYolo()
@@ -72,8 +74,8 @@ public class ChatMutationFactory {
     if (updateDTO.getAgentName() != null) {
       chat.setAgentName(parseRequiredAgentName(updateDTO.getAgentName()));
     }
-    if (updateDTO.isEnvironmentNameProvided()) {
-      chat.setEnvironmentName(parseNullableEnvironmentName(updateDTO.getEnvironmentName()));
+    if (updateDTO.isEnvironmentProvided()) {
+      chat.setEnvironment(parseNullableEnvironmentBinding(updateDTO.getEnvironment()));
     }
     if (updateDTO.isYoloEnabledProvided()) {
       if (updateDTO.getYoloEnabled() == null) {
@@ -84,17 +86,25 @@ public class ChatMutationFactory {
   }
 
   /**
-   * 规范化可空的 Environment 逻辑路由名称：null 表示 clear（无默认环境）；提供时必须为规范 {@link EnvironmentName}，非法文本按 Chat
+   * 规范化可空的完整 Environment binding：null 表示 clear（无默认环境）；提供时必须为完整 {@code {name, workspacePath}}
+   * 对象（同存同空由对象存在性保证），两字段分别经 {@link EnvironmentName} 与 workspace path validator 严格校验，非法文本按 Chat
    * 资源契约翻译为 {@link AiValidationException}（HTTP 400）。
    */
-  private String parseNullableEnvironmentName(String raw) {
-    if (raw == null) {
+  private EnvironmentBinding parseNullableEnvironmentBinding(EnvironmentBindingDTO dto) {
+    if (dto == null) {
       return null;
     }
+    if (dto.getName() == null) {
+      throw new AiValidationException(RESOURCE, "invalid environment: name must not be null");
+    }
+    if (dto.getWorkspacePath() == null) {
+      throw new AiValidationException(
+          RESOURCE, "invalid environment: workspacePath must not be null");
+    }
     try {
-      return new EnvironmentName(raw).value();
+      return new EnvironmentBinding(new EnvironmentName(dto.getName()), dto.getWorkspacePath());
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, "invalid environmentName: " + error.getMessage());
+      throw new AiValidationException(RESOURCE, "invalid environment: " + error.getMessage());
     }
   }
 

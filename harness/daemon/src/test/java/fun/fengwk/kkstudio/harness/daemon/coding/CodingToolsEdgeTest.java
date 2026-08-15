@@ -101,15 +101,17 @@ class CodingToolsEdgeTest {
     Files.writeString(nested.resolve("file.txt"), "x");
     EnvironmentPathBoundary boundary = new EnvironmentPathBoundary(config());
 
-    assertEquals(nested.toRealPath(), boundary.workdir("@nested"));
+    assertEquals(nested.toRealPath(), boundary.workdir("@nested", environmentRoot));
     assertEquals(nested.resolve("file.txt").toRealPath(), boundary.existing("@file.txt", nested));
     assertEquals(nested.resolve("future/file.txt"), boundary.writable("future/file.txt", nested));
-    assertEquals(environmentRoot.toRealPath(), boundary.workdir(null));
-    assertThrows(IllegalArgumentException.class, () -> boundary.workdir("missing"));
-    assertThrows(IllegalArgumentException.class, () -> boundary.workdir("file.txt"));
+    assertEquals(environmentRoot.toRealPath(), boundary.workdir(null, environmentRoot));
+    assertThrows(
+        IllegalArgumentException.class, () -> boundary.workdir("missing", environmentRoot));
+    assertThrows(
+        IllegalArgumentException.class, () -> boundary.workdir("file.txt", environmentRoot));
     assertThrows(
         IllegalArgumentException.class,
-        () -> boundary.workdir(environmentRoot.getParent().toString()));
+        () -> boundary.workdir(environmentRoot.getParent().toString(), environmentRoot));
     assertThrows(IllegalArgumentException.class, () -> boundary.existing("", nested));
     assertThrows(IllegalArgumentException.class, () -> boundary.existing("missing", nested));
     assertEquals(
@@ -229,7 +231,6 @@ class CodingToolsEdgeTest {
       System.setProperty(names[4], "custom-bash");
       CodingToolsConfig properties = CodingToolsConfig.fromSystemProperties(environmentRoot);
       assertEquals(environmentRoot.toRealPath(), properties.environmentRoot());
-      assertEquals(environmentRoot.toRealPath(), properties.defaultWorkdir());
       assertEquals("custom-bash", properties.bashExecutable());
       assertTrue(properties.resourceStore() instanceof LocalFileResourceStore);
       // 配置的 max-resource-bytes 必须落到 store：超限字节在写入前拒绝。
@@ -255,34 +256,18 @@ class CodingToolsEdgeTest {
     }
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new CodingToolsConfig(
-                environmentRoot, environmentRoot, 0, 1, "bash", new InMemoryResourceStore()));
+        () -> new CodingToolsConfig(environmentRoot, 0, 1, "bash", new InMemoryResourceStore()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CodingToolsConfig(environmentRoot, 1, 1, "", new InMemoryResourceStore()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                environmentRoot,
-                environmentRoot.resolve("missing"),
-                1,
-                1,
-                "bash",
-                new InMemoryResourceStore()));
+                environmentRoot.resolve("missing"), 1, 1, "bash", new InMemoryResourceStore()));
     assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CodingToolsConfig(
-                environmentRoot, environmentRoot, 1, 1, "", new InMemoryResourceStore()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CodingToolsConfig(
-                environmentRoot.resolve("missing"),
-                environmentRoot,
-                1,
-                1,
-                "bash",
-                new InMemoryResourceStore()));
+        NullPointerException.class,
+        () -> new CodingToolsConfig(environmentRoot, 1, 1, "bash", null));
   }
 
   @Test
@@ -318,12 +303,7 @@ class CodingToolsEdgeTest {
     BashTool missing =
         new BashTool(
             new CodingToolsConfig(
-                environmentRoot,
-                environmentRoot,
-                10,
-                100,
-                "missing-bash",
-                new InMemoryResourceStore()));
+                environmentRoot, 10, 100, "missing-bash", new InMemoryResourceStore()));
     assertTrue(text(invoke(missing, "{\"command\":\"echo x\"}")).contains("missing-bash"));
     BashTool bash = new BashTool(config());
     ToolResult nonZero = invoke(bash, "{\"command\":\"echo failure; exit 7\"}");
@@ -365,7 +345,7 @@ class CodingToolsEdgeTest {
   }
 
   private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
-    return new CodingToolsConfig(environmentRoot, environmentRoot, lines, bytes, "bash", store);
+    return new CodingToolsConfig(environmentRoot, lines, bytes, "bash", store);
   }
 
   private ToolResult invoke(Tool tool, String arguments) throws Exception {
@@ -381,7 +361,9 @@ class CodingToolsEdgeTest {
             new ToolExecutionRequest(
                 tool.descriptor(),
                 new ToolCall("edge", tool.descriptor().name(), arguments),
-                timeout),
+                timeout,
+                null,
+                environmentRoot),
             listener);
     return listener;
   }

@@ -107,7 +107,7 @@ class StudioChatControllerTest {
         """
         {
           "branchSettings": {
-            "environmentName": "123e4567-e89b-12d3-a456-426614174000",
+            "environment": {"name": "123e4567-e89b-12d3-a456-426614174000", "workspacePath": "."},
             "agentName": "default-assistant",
             "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
             "activeTools": ["web_search"]
@@ -142,7 +142,7 @@ class StudioChatControllerTest {
               dtoOut.setId("1");
               dtoOut.setTitle(dto.getTitle());
               dtoOut.setAgentName(dto.getAgentName());
-              dtoOut.setEnvironmentName(dto.getEnvironmentName());
+              dtoOut.setEnvironment(dto.getEnvironment());
               return dtoOut;
             });
 
@@ -152,13 +152,13 @@ class StudioChatControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"title\":\"t\",\"agentName\":\"default-assistant\","
-                        + "\"environmentName\":\"env-dev\"}"))
+                        + "\"environment\":{\"name\":\"env-dev\",\"workspacePath\":\".\"}}"))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.environmentName").value("env-dev"));
+        .andExpect(jsonPath("$.data.environment.name").value("env-dev"));
 
     ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
     verify(chatService).createChat(captor.capture());
-    assertEquals("env-dev", captor.getValue().getEnvironmentName());
+    assertEquals("env-dev", captor.getValue().getEnvironment().getName());
   }
 
   @Test
@@ -172,7 +172,7 @@ class StudioChatControllerTest {
         .andExpect(status().isCreated());
     ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
     verify(chatService).createChat(captor.capture());
-    assertNull(captor.getValue().getEnvironmentName());
+    assertNull(captor.getValue().getEnvironment());
   }
 
   @Test
@@ -182,7 +182,7 @@ class StudioChatControllerTest {
     nullEnv.setId("7");
     nullEnv.setTitle("t");
     nullEnv.setAgentName("default-assistant");
-    nullEnv.setEnvironmentName(null);
+    nullEnv.setEnvironment(null);
     nullEnv.setYoloEnabled(false);
     nullEnv.setVersion("2");
     when(chatService.updateChat(eq("7"), any(ChatUpdateDTO.class))).thenReturn(nullEnv);
@@ -197,7 +197,7 @@ class StudioChatControllerTest {
             .andReturn();
     // @JsonInclude(ALWAYS)：null 必须显式出现在 wire JSON 中（可区分缺省与显式 null）。
     String body = result.getResponse().getContentAsString();
-    assertTrue(body.contains("\"environmentName\":null"), body);
+    assertTrue(body.contains("\"environment\":null"), body);
   }
 
   @Test
@@ -209,12 +209,12 @@ class StudioChatControllerTest {
         .perform(
             put("/api/ai/chat/7")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"environmentName\":null,\"expectedVersion\":\"2\"}"))
+                .content("{\"environment\":null,\"expectedVersion\":\"2\"}"))
         .andExpect(status().isOk());
     ArgumentCaptor<ChatUpdateDTO> clearCaptor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
     verify(chatService).updateChat(eq("7"), clearCaptor.capture());
-    assertTrue(clearCaptor.getValue().isEnvironmentNameProvided());
-    assertNull(clearCaptor.getValue().getEnvironmentName());
+    assertTrue(clearCaptor.getValue().isEnvironmentProvided());
+    assertNull(clearCaptor.getValue().getEnvironment());
 
     // 缺省字段：provided 标记保持 false，服务端保留当前值。
     mockMvc
@@ -225,7 +225,7 @@ class StudioChatControllerTest {
         .andExpect(status().isOk());
     ArgumentCaptor<ChatUpdateDTO> omitCaptor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
     verify(chatService, times(2)).updateChat(eq("7"), omitCaptor.capture());
-    assertFalse(omitCaptor.getValue().isEnvironmentNameProvided());
+    assertFalse(omitCaptor.getValue().isEnvironmentProvided());
   }
 
   @Test
@@ -265,7 +265,7 @@ class StudioChatControllerTest {
         """
         {
           "branchSettings": {
-            "environmentName": null,
+            "environment": null,
             "agentName": "default-assistant",
             "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
             "activeTools": [],

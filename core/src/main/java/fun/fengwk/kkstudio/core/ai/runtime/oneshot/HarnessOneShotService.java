@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPa
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -70,11 +70,10 @@ public final class HarnessOneShotService {
 
   public UUID submit(
       String agentName,
-      EnvironmentName environmentName,
+      EnvironmentBinding environment,
       String systemMessage,
       AgentMessage userMessage) {
-    return submit(
-        agentName, environmentName, systemMessage, userMessage, NewCommandPreflight.IDENTITY);
+    return submit(agentName, environment, systemMessage, userMessage, NewCommandPreflight.IDENTITY);
   }
 
   /**
@@ -84,7 +83,7 @@ public final class HarnessOneShotService {
    */
   public UUID submit(
       String agentName,
-      EnvironmentName environmentName,
+      EnvironmentBinding environment,
       String systemMessage,
       AgentMessage userMessage,
       NewCommandPreflight preflight) {
@@ -96,7 +95,7 @@ public final class HarnessOneShotService {
     HarnessRuntime runtime = requireRuntime();
     var settings =
         settingsMaterializer
-            .materialize(agentName, environmentName, 1, subagentConfig)
+            .materialize(agentName, environment, 1, subagentConfig)
             .withActiveTools(List.of());
     CreatedThread created = runtime.createThread(new CreateThreadCommand(settings, false));
     runtime.enqueueCommands(

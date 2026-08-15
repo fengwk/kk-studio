@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   extractContextWindow,
@@ -7,9 +7,11 @@ import {
   type AgentModelView,
 } from '@/features/ai/catalog'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
+import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
+import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
+import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
 import type { ThreadCommand } from '@/features/ai/runtime'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
-import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
 import { useThreadCommandBatchMutation } from '@/features/ai/runtime/useThreadCommandBatchMutation'
 import {
@@ -29,6 +31,12 @@ import {
   trimMessageParts,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
+import {
+  clearStoredComposerDraft,
+  restoreComposerDraft,
+  storeComposerDraft,
+  type ComposerDraftChangeSource,
+} from '@/features/ai/composer/composer-draft'
 import { isConflictError, isConflictReason } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
@@ -134,8 +142,11 @@ export function useAgentThreadController(
   environmentReadyByName: ReadonlyMap<string, boolean> | null = null,
 ) {
   const { t } = useI18n()
-  const [draft, setDraftState] = useState<ComposerPart[]>(initialParts)
-  const draftRef = useRef<ComposerPart[]>(initialParts)
+  const draftStorageScope = `thread:${threadId}`
+  const [draft, setDraftState] = useState<ComposerPart[]>(
+    () => restoreComposerDraft(draftStorageScope, initialParts),
+  )
+  const draftRef = useRef<ComposerPart[]>(draft)
   const [actionError, setActionError] = useState<string | null>(null)
   // 维护局部的 in-flight 计数，保证重叠 mutateAsync 调用下 pending 状态依旧准确。
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
@@ -182,21 +193,34 @@ export function useAgentThreadController(
     modelAttemptFailures,
     modelInvocation,
   )
+  const branchUsage = aggregateBranchUsage(timeline.messages)
+  const branchUsageText = branchUsage == null
+    ? undefined
+    : formatTurnUsageText(branchUsage)
+  // Event 投影独立于 DialogueMessage：durable Entry 全类型 + 活跃 model/tool overlay。
+  // useMemo 保证快照未变化时 events 引用稳定（Pane 的 selected/active 跟随 effect 依赖它）。
+  const events = useMemo(
+    () => buildThreadEventTimeline({
+      entries,
+      modelInvocation,
+      toolInvocations,
+      modelAttemptFailures,
+      modelStream: realtime.modelStream,
+      toolStreams: realtime.toolStreams,
+    }),
+    [entries, modelAttemptFailures, modelInvocation, realtime.modelStream, realtime.toolStreams, toolInvocations],
+  )
   const working = isThreadWorking(thread, timeline)
   const runtimeLabels = resolveRuntimeLabels(thread, agents, models, environmentReadyByName)
-
-  useChatTranscriptAutoScroll(
-    bodyRef,
-    timeline.messages.length,
-    entries.length + queuedCommands.length,
-  )
 
   useEffect(() => {
     if (initializedReplayThreadRef.current === threadId) {
       return
     }
-    setDraftState(initialParts)
-    draftRef.current = initialParts
+    const restoredDraft = restoreComposerDraft(draftStorageScope, initialParts)
+    setDraftState(restoredDraft)
+    draftRef.current = restoredDraft
+    storeComposerDraft(draftStorageScope, restoredDraft)
     replayRef.current = initialReplay ?? null
     setReplayPending(initialReplay != null)
     initializedReplayThreadRef.current = threadId
@@ -204,7 +228,7 @@ export function useAgentThreadController(
     pendingStopRef.current = null
     setStopReplayPending(false)
     decisionIdByInvocation.current.clear()
-  }, [initialParts, initialReplay, threadId])
+  }, [draftStorageScope, initialParts, initialReplay, threadId])
 
   const approvalMutation = useMutation({
     mutationFn: ({
@@ -290,11 +314,21 @@ export function useAgentThreadController(
     setActionError(errorMessage(error))
   }
 
-  function setDraft(next: ComposerPart[]) {
+  function setDraft(
+    next: ComposerPart[],
+    source: ComposerDraftChangeSource = 'edit',
+  ) {
     // 把恢复的 draft 编辑为不同内容会重置请求回放身份。
-    if (replayRef.current != null && partsKey(next) !== partsKey(replayRef.current.parts)) {
+    if (
+      source === 'edit'
+      && replayRef.current != null
+      && partsKey(next) !== partsKey(replayRef.current.parts)
+    ) {
       replayRef.current = null
       setReplayPending(false)
+    }
+    if (source === 'edit') {
+      storeComposerDraft(draftStorageScope, next)
     }
     draftRef.current = next
     setDraftState(next)
@@ -333,6 +367,7 @@ export function useAgentThreadController(
     replayRef.current = { plan: submittedPlan, parts: localDraft }
     setReplayPending(true)
     // 先捕获 parts + id，随后立即清空 draft，以便输入下一条消息。
+    clearStoredComposerDraft(draftStorageScope)
     draftRef.current = []
     setDraftState([])
     setInFlightSubmissions((count) => count + 1)
@@ -360,6 +395,7 @@ export function useAgentThreadController(
             setReplayPending(true)
           }
           // 恢复本地草稿（客户端 localId），与提交 payload 分开。
+          storeComposerDraft(draftStorageScope, localDraft)
           draftRef.current = localDraft
           setDraftState(localDraft)
         }
@@ -511,7 +547,10 @@ export function useAgentThreadController(
     bound,
     title: thread?.threadId || t('ai.chat.chatLabel'),
     timeline,
+    events,
     runtimeLabels,
+    branchUsage,
+    branchUsageText,
     working,
     entries,
     messagesLoading: snapshotQuery.isLoading,
@@ -548,18 +587,21 @@ function resolveRuntimeLabels(
   const agent = agents.find((item) => item.name === settings?.agentName)
   const model = models.find((item) => modelRef(item) === agent?.model)
   const contextWindow = extractContextWindow(model)
-  const environmentName = settings?.environmentName ?? null
+  const environment = settings?.environment
+    ? { name: settings.environment.name, workspacePath: settings.environment.workspacePath }
+    : null
   return {
     agentName: settings?.agentName || translate('ai.runtime.action.blankAgent'),
     providerName: settings?.model.providerName || undefined,
     // 规范的展示身份是 provider/model。
     modelName: formatModelRef(settings?.model.providerName, settings?.model.modelName),
     variantName: settings?.model.variant || undefined,
-    // canonical 名称即展示身份；ready 标记来自 live 列表，缺失/未知 => 不可用。
-    environmentName,
-    environmentReady: environmentName == null
+    // 完整 binding 即展示身份（name + workspacePath）；ready 标记仍按 name 查询
+    // live 列表，缺失/未知 => 不可用。
+    environment,
+    environmentReady: environment == null
       ? undefined
-      : (environmentReadyByName?.get(environmentName) ?? false),
+      : (environmentReadyByName?.get(environment.name) ?? false),
     contextWindow,
   }
 }

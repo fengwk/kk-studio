@@ -11,7 +11,7 @@ import { assert, envelopeData, sleep } from './http.mjs'
  * - PUT  /api/ai/runtime/threads/{id}/head             {targetEntryId,expectedRevision}
  * - POST /api/ai/runtime/threads/{id}/stop             {stopRequestId,expectedRevision}（同 id 幂等 replay）
  * - POST /api/ai/runtime/threads/{id}/tool-invocations/{toolInvocationId}/approval
- * - GET  /api/ai/runtime/threads/{id}/events/stream    快照优先 SSE
+ * - WS   /api/events/v1                               应用级 Thread/Canvas 事件订阅
  * - GET  /api/ai/environment                           只读 Environment 注册表（name = canonical 路由身份）
  */
 
@@ -22,7 +22,7 @@ function positiveDecimal(value, field) {
 }
 
 /** 实体标识统一为 canonical UUID 字符串（Chat/Thread/Entry/Session/Invocation/Command 均如此）。 */
-function canonicalUuid(value, field) {
+export function canonicalUuid(value, field) {
   const raw = String(value ?? '')
   assert(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(raw),
@@ -35,6 +35,33 @@ function nonNegativeDecimal(value, field) {
   const raw = String(value ?? '')
   assert(/^(0|[1-9]\d*)$/.test(raw), `expected non-negative decimal ${field}: ${JSON.stringify(value)}`)
   return raw
+}
+
+function isEnvironmentBindingOrNull(binding) {
+  if (binding === null) return true
+  if (typeof binding !== 'object' || binding == null || Array.isArray(binding)) return false
+  if (Object.keys(binding).sort().join(',') !== 'name,workspacePath') return false
+  if (
+    typeof binding.name !== 'string'
+    || binding.name.length > 64
+    || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(binding.name)
+  ) {
+    return false
+  }
+  const workspacePath = binding.workspacePath
+  if (
+    typeof workspacePath !== 'string'
+    || workspacePath.length === 0
+    || workspacePath.length > 2048
+    || workspacePath.includes('\\')
+    || workspacePath.startsWith('/')
+    || /^[A-Za-z]:/.test(workspacePath)
+    || /[\u0000-\u001f\u007f-\u009f]/.test(workspacePath)
+  ) {
+    return false
+  }
+  return workspacePath === '.'
+    || workspacePath.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..')
 }
 
 /** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段并返回 threadId。 */
@@ -50,27 +77,31 @@ export function threadIdOf(thread) {
   return threadId
 }
 
-/** 创建 Chat（name-based Agent 引用；可选默认 Environment 名称；Thread 的 branchSettings 与 Chat 默认值独立）。 */
-export async function createChat(ctx, { title, agentName, yoloEnabled = false, environmentName = null }) {
+/** 创建 Chat（name-based Agent 引用；可选完整 Environment binding；Thread branchSettings 独立）。 */
+export async function createChat(
+  ctx,
+  { title, agentName, yoloEnabled = false, environment = null },
+) {
   const { status, json } = await ctx.call('POST', '/api/ai/chat', {
     title,
     agentName,
     yoloEnabled,
-    environmentName,
+    environment,
   })
   assert(status === 201, `create Chat status ${status}: ${JSON.stringify(json)}`)
   const chat = envelopeData(json)
   assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
   assert(
-    chat.environmentName === null || typeof chat.environmentName === 'string',
-    `Chat environmentName must be null or string: ${JSON.stringify(chat)}`,
+    isEnvironmentBindingOrNull(chat.environment),
+    `Chat environment must be null or a complete binding: ${JSON.stringify(chat)}`,
   )
+  assert(!Object.hasOwn(chat, 'environmentName'), `Chat leaked environmentName: ${JSON.stringify(chat)}`)
   return chat
 }
 
 /**
  * 以完整 branchSettings 原子创建 Thread（201 返回 HarnessThreadSnapshotDTO）。
- * branchSettings: {environmentName, agentName, model:{providerName,modelName,variant}, activeTools}
+ * branchSettings: {environment, agentName, model:{providerName,modelName,variant}, activeTools}
  */
 export async function createChatThread(ctx, chatId, { title = null, branchSettings, yoloEnabled = false }) {
   const { status, json } = await ctx.call(
@@ -95,9 +126,18 @@ export async function createChatThread(ctx, chatId, { title = null, branchSettin
 /** 创建 Chat + Thread，返回 {chat, snapshot}（snapshot.thread 即新 Thread 投影）。 */
 export async function createConfiguredChatThread(
   ctx,
-  { agent, model, title, yoloEnabled = false, environmentName = null, activeTools = [] } = {},
+  {
+    agent,
+    model,
+    title,
+    yoloEnabled = false,
+    environment = null,
+    activeTools = [],
+    branchAgentName = agent?.name,
+  } = {},
 ) {
   assert(agent?.name, `agent required: ${JSON.stringify(agent)}`)
+  assert(branchAgentName && typeof branchAgentName === 'string', 'branchAgentName required')
   const chat = await createChat(ctx, {
     title: title ?? `e2e-${Math.random().toString(36).slice(2, 10)}`,
     agentName: agent.name,
@@ -106,24 +146,28 @@ export async function createConfiguredChatThread(
   const snapshot = await createChatThread(ctx, chat.id, {
     title: null,
     yoloEnabled,
-    branchSettings: branchSettingsOf(agent, model, {
-      environmentName,
+    branchSettings: branchSettingsOf({ name: branchAgentName }, model, {
+      environment,
       activeTools,
     }),
   })
   return { chat, snapshot }
 }
 
-/** 由 Agent + Model 引用构造完整 branchSettings（environmentName 是 canonical 路由名称，可 null）。 */
+/** 由 Agent + Model 引用构造完整 branchSettings（environment 是完整 binding，可 null）。 */
 export function branchSettingsOf(
   agent,
   model,
-  { environmentName = null, activeTools = [] } = {},
+  { environment = null, activeTools = [] } = {},
 ) {
   assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
+  assert(
+    isEnvironmentBindingOrNull(environment),
+    `environment must be null or a complete binding: ${JSON.stringify(environment)}`,
+  )
   return {
-    environmentName: environmentName ?? null,
+    environment,
     agentName: agent.name,
     model: {
       providerName: model.providerName,
@@ -198,9 +242,13 @@ export function customMessageCommand(role, content, clientCommandId) {
   return { type: 'CUSTOM_MESSAGE', role, clientCommandId, content }
 }
 
-export function setEnvironmentCommand(environmentName, clientCommandId) {
+export function setEnvironmentCommand(environment, clientCommandId) {
   assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  return { type: 'SET_ENVIRONMENT', clientCommandId, environmentName }
+  assert(
+    isEnvironmentBindingOrNull(environment),
+    `environment must be null or a complete binding: ${JSON.stringify(environment)}`,
+  )
+  return { type: 'SET_ENVIRONMENT', clientCommandId, environment }
 }
 
 export function setAgentCommand(agentName, clientCommandId) {
@@ -355,11 +403,10 @@ export async function waitForQuiescentThread(
 }
 
 /**
- * 先建立 Thread realtime SSE 连接，再执行 startWork，并等待当前 Thread 第一条非空模型文本增量。
- *
- * SSE 只提供调用 /stop 的时机，不是 durable 断言来源。无论成功、失败或超时，都会取消 reader 并中止连接。
+ * 先建立应用级 Thread 订阅并收到 subscribed ack，再执行 startWork，随后等待当前 Thread
+ * 第一条非空模型文本增量。事件通道只提供调用 /stop 的时机，不是 durable 断言来源。
  */
-export async function waitForModelTextDeltaAfterSseConnected(
+export async function waitForModelTextDeltaAfterEventSubscribed(
   ctx,
   threadId,
   startWork,
@@ -371,106 +418,176 @@ export async function waitForModelTextDeltaAfterSseConnected(
     typeof ctx?.baseUrl === 'string' && ctx.baseUrl.trim(),
     'E2E context must expose a non-blank baseUrl',
   )
-  assert(Number.isFinite(timeoutMs) && timeoutMs > 0, `invalid SSE timeout: ${timeoutMs}`)
+  assert(Number.isFinite(timeoutMs) && timeoutMs > 0, `invalid event timeout: ${timeoutMs}`)
+  assert(typeof WebSocket === 'function', 'Node runtime must provide WebSocket')
 
+  const deadline = Date.now() + timeoutMs
   const controller = new AbortController()
-  let timedOut = false
-  const timer = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, timeoutMs)
-  let reader = null
+  const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
   try {
-    const baseUrl = ctx.baseUrl.replace(/\/$/, '')
-    const requestPath =
-      `/api/ai/runtime/threads/${encodeURIComponent(expectedThreadId)}/events/stream?afterRevision=0`
-    const response = await fetch(`${baseUrl}${requestPath}`, {
-      method: 'GET',
-      headers: {
-        Accept: 'text/event-stream',
-        'Cache-Control': 'no-cache',
+    await waitForSocketOpen(socket, deadline, controller.signal)
+    socket.send(JSON.stringify({
+      version: 1,
+      type: 'subscribe',
+      resource: { kind: 'thread', id: expectedThreadId },
+    }))
+    await waitForApplicationEvent(
+      socket,
+      deadline,
+      controller.signal,
+      (frame) => {
+        if (
+          frame?.version === 1
+          && frame.type === 'subscribed'
+          && sameThreadResource(frame.resource, expectedThreadId)
+          && /^(0|[1-9]\d*)$/.test(String(frame.cursor ?? ''))
+        ) {
+          return { matched: true, value: frame }
+        }
+        return { matched: false }
       },
-      signal: controller.signal,
-    })
-    assert(response.ok, `SSE open status ${response.status} for ${requestPath}`)
-    assert(
-      String(response.headers.get('content-type') || '').toLowerCase().includes('text/event-stream'),
-      `expected text/event-stream, got ${response.headers.get('content-type')}`,
+      `subscribed ack for thread ${expectedThreadId}`,
     )
-    assert(response.body, 'SSE response has no readable body')
 
-    reader = response.body.getReader()
-    const startResult = await startWork()
-    const signal = await readModelTextDelta(reader, expectedThreadId)
-    return { signal, startResult }
-  } catch (error) {
-    if (timedOut || error?.name === 'AbortError') {
-      throw new Error(
-        `timed out after ${timeoutMs}ms waiting for MODEL_DELTA/TEXT_DELTA on thread ${expectedThreadId}`,
-      )
+    const deltaWait = waitForApplicationEvent(
+      socket,
+      deadline,
+      controller.signal,
+      (frame) => {
+        if (
+          frame?.version === 1
+          && frame.type === 'event'
+          && frame.name === 'realtime'
+          && sameThreadResource(frame.resource, expectedThreadId)
+        ) {
+          const signal = parseModelTextDelta(frame.data, expectedThreadId)
+          if (signal != null) {
+            return { matched: true, value: signal }
+          }
+        }
+        return { matched: false }
+      },
+      `MODEL_DELTA/TEXT_DELTA on thread ${expectedThreadId}`,
+    )
+    let startResult
+    try {
+      startResult = await startWork()
+    } catch (error) {
+      controller.abort()
+      await deltaWait.catch(() => undefined)
+      throw error
     }
-    throw error
+    const signal = await deltaWait
+    return { signal, startResult }
   } finally {
-    clearTimeout(timer)
-    if (reader != null) {
+    controller.abort()
+    try {
+      socket.close()
+    } catch {
+      // Connection may already be closed by the remote endpoint.
+    }
+  }
+}
+
+function applicationEventUrl(baseUrl) {
+  const url = new URL(baseUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = '/api/events/v1'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function waitForSocketOpen(socket, deadline, signal) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      socket.removeEventListener('open', onOpen)
+      socket.removeEventListener('error', onError)
+      socket.removeEventListener('close', onClose)
+      signal.removeEventListener('abort', onAbort)
+      clearTimeout(timer)
+    }
+    const finish = (callback, value) => {
+      cleanup()
+      callback(value)
+    }
+    const onOpen = () => finish(resolve)
+    const onError = () => finish(reject, new Error('application event WebSocket failed to open'))
+    const onClose = (event) => finish(
+      reject,
+      new Error(`application event WebSocket closed before open: ${event.code}`),
+    )
+    const onAbort = () => finish(reject, new Error('application event WebSocket open aborted'))
+    const timer = setTimeout(
+      () => finish(reject, new Error('timed out opening application event WebSocket')),
+      remainingMillis(deadline),
+    )
+    socket.addEventListener('open', onOpen)
+    socket.addEventListener('error', onError)
+    socket.addEventListener('close', onClose)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function waitForApplicationEvent(socket, deadline, signal, matcher, description) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      socket.removeEventListener('message', onMessage)
+      socket.removeEventListener('error', onError)
+      socket.removeEventListener('close', onClose)
+      signal.removeEventListener('abort', onAbort)
+      clearTimeout(timer)
+    }
+    const finish = (callback, value) => {
+      cleanup()
+      callback(value)
+    }
+    const onMessage = (event) => {
+      let frame
       try {
-        await reader.cancel()
+        frame = JSON.parse(String(event.data))
       } catch {
-        // The timeout/remote close path may have already released the reader.
+        finish(reject, new Error(`malformed application event frame: ${String(event.data)}`))
+        return
+      }
+      if (frame?.version === 1 && frame.type === 'error') {
+        finish(
+          reject,
+          new Error(`application event error ${frame.code}: ${frame.message}`),
+        )
+        return
+      }
+      const result = matcher(frame)
+      if (result.matched) {
+        finish(resolve, result.value)
       }
     }
-    controller.abort()
-  }
+    const onError = () => finish(reject, new Error(`application event WebSocket error before ${description}`))
+    const onClose = (event) => finish(
+      reject,
+      new Error(`application event WebSocket closed before ${description}: ${event.code}`),
+    )
+    const onAbort = () => finish(reject, new Error(`application event wait aborted: ${description}`))
+    const timer = setTimeout(
+      () => finish(reject, new Error(`timed out waiting for ${description}`)),
+      remainingMillis(deadline),
+    )
+    socket.addEventListener('message', onMessage)
+    socket.addEventListener('error', onError)
+    socket.addEventListener('close', onClose)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
-async function readModelTextDelta(reader, expectedThreadId) {
-  const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      throw new Error(
-        `SSE ended before MODEL_DELTA/TEXT_DELTA arrived for thread ${expectedThreadId}`,
-      )
-    }
-    buffer += decoder.decode(value, { stream: true })
-    while (true) {
-      const boundary = /\r?\n\r?\n/.exec(buffer)
-      if (boundary == null) break
-      const frame = buffer.slice(0, boundary.index)
-      buffer = buffer.slice(boundary.index + boundary[0].length)
-      const record = parseSseFrame(frame)
-      const signal = parseModelTextDelta(record, expectedThreadId)
-      if (signal != null) return signal
-    }
-  }
+function remainingMillis(deadline) {
+  return Math.max(1, deadline - Date.now())
 }
 
-function parseSseFrame(frame) {
-  let id = null
-  let event = 'message'
-  const data = []
-  for (const line of frame.split(/\r?\n/)) {
-    if (!line || line.startsWith(':')) continue
-    const separator = line.indexOf(':')
-    const field = separator < 0 ? line : line.slice(0, separator)
-    let value = separator < 0 ? '' : line.slice(separator + 1)
-    if (value.startsWith(' ')) value = value.slice(1)
-    if (field === 'id') id = value
-    else if (field === 'event') event = value
-    else if (field === 'data') data.push(value)
-  }
-  return { id, event, data: data.join('\n') }
+function sameThreadResource(resource, expectedThreadId) {
+  return resource?.kind === 'thread' && resource.id === expectedThreadId
 }
 
-function parseModelTextDelta(record, expectedThreadId) {
-  if (record.event !== 'realtime' || !record.data) return null
-  let envelope
-  try {
-    envelope = JSON.parse(record.data)
-  } catch {
-    return null
-  }
+function parseModelTextDelta(envelope, expectedThreadId) {
   if (!isRecord(envelope) || !isRecord(envelope.payload)) return null
   if (
     envelope.type !== 'MODEL_DELTA'
@@ -491,7 +608,6 @@ function parseModelTextDelta(record, expectedThreadId) {
     return null
   }
   return {
-    eventId: record.id,
     threadId: envelope.threadId,
     invocationId: envelope.subjectId,
     attempt: envelope.attempt,

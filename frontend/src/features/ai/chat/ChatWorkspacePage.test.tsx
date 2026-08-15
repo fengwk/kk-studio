@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePage } from '@/features/ai/chat/ChatWorkspacePage'
+import { ApplicationSettingsProvider } from '@/features/settings/application-settings'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
@@ -23,6 +24,15 @@ import type {
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import { setLocale } from '@/shared/i18n'
+
+const { fakeApplicationEvents } = vi.hoisted(() => {
+  const manager = { subscribe: () => () => undefined }
+  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+})
+
+vi.mock('@/shared/app-events', () => ({
+  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
+}))
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -46,6 +56,7 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
+    listDirectories: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -55,7 +66,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
-    createThreadRealtimeStream: vi.fn(),
   },
 }))
 
@@ -116,17 +126,11 @@ const readyEnvironments = [
   { name: 'remote', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
 ]
 
-class FakeEventSource {
-  close = vi.fn()
-  addEventListener = vi.fn()
-  removeEventListener = vi.fn()
-}
-
 function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    environmentName: null,
+    environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     activeTools: [],
@@ -167,6 +171,40 @@ function snapshot(
   }
 }
 
+/** ROOT -> USER -> ASSISTANT 的持久 Entry 路径（事件视图需要可点击的 Entry）。 */
+function sessionEntries(): HarnessSessionEntryDTO[] {
+  return [
+    {
+      entryId: 'root-1',
+      sessionId: 's1',
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payloadJson: '{}',
+      createTime: null,
+    },
+    {
+      entryId: 'user-1',
+      sessionId: 's1',
+      parentEntryId: 'root-1',
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({
+        message: { role: 'USER', contents: [{ type: 'text', text: 's1 prompt' }] },
+      }),
+      createTime: null,
+    },
+    {
+      entryId: 'assistant-1',
+      sessionId: 's1',
+      parentEntryId: 'user-1',
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({
+        message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 's1 reply' }] },
+      }),
+      createTime: null,
+    },
+  ]
+}
+
 function NavigateTo({ to }: { to: string }) {
   const navigate = useNavigate()
   useEffect(() => {
@@ -180,14 +218,16 @@ function renderWorkspace(chatId = 'chat-1') {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const utils = render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
-        <Routes>
-          <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
-          <Route path="/chats" element={<div>list</div>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <ApplicationSettingsProvider>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
+          <Routes>
+            <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
+            <Route path="/chats" element={<div>list</div>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ApplicationSettingsProvider>,
   )
   return { queryClient, rerender: utils.rerender }
 }
@@ -202,6 +242,14 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(agentService.listModels).mockResolvedValue(page([miniMaxModel]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
     vi.mocked(environmentService.listEnvironments).mockResolvedValue(readyEnvironments)
+    vi.mocked(environmentService.listDirectories).mockResolvedValue({
+      path: '.',
+      displayPath: '.',
+      parentPath: '.',
+      truncated: false,
+      gitBranch: null,
+      entries: [{ name: 'proj', path: 'proj' }],
+    })
     vi.mocked(chatService.getChat).mockResolvedValue({
       id: 'chat-1',
       title: 'Workspace',
@@ -223,9 +271,6 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(chatService.listChatThreads).mockResolvedValue([])
     vi.mocked(chatService.createChatThread).mockResolvedValue(
       snapshot(thread({ threadId: 't-new' })),
-    )
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(
-      new FakeEventSource() as unknown as EventSource,
     )
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({})))
     vi.mocked(harnessService.enqueueCommands).mockResolvedValue([] as HarnessThreadCommandDTO[])
@@ -267,22 +312,24 @@ describe('ChatWorkspacePage', () => {
     // 跳转到 Chat B（相同的 pane id 'pane-1'）：面板必须以全新的
     // composer 和 frozen draft 重新挂载——不能跨 Chat 复用状态。
     rerender(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/chats/chat-1']}>
-          <Routes>
-            <Route
-              path="/chats/:chatId"
-              element={
-                <>
-                  <NavigateTo to="/chats/chat-2" />
-                  <ChatWorkspacePage />
-                </>
-              }
-            />
-            <Route path="/chats" element={<div>list</div>} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
+      <ApplicationSettingsProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/chats/chat-1']}>
+            <Routes>
+              <Route
+                path="/chats/:chatId"
+                element={
+                  <>
+                    <NavigateTo to="/chats/chat-2" />
+                    <ChatWorkspacePage />
+                  </>
+                }
+              />
+              <Route path="/chats" element={<div>list</div>} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </ApplicationSettingsProvider>,
     )
     const freshComposer = await screen.findByLabelText('给 AI 发送消息')
     // contenteditable composer：空 draft（无跨会话残留文本）。
@@ -311,6 +358,47 @@ describe('ChatWorkspacePage', () => {
     expect(document.querySelector('.chat-pane-grid.layout-single')).toBeTruthy()
   })
 
+  it('keeps the events main view independent per mounted Pane', async () => {
+    const user = userEvent.setup()
+    const seeded = applyChatLayout(loadChatPaneState('chat-1'), 'split-2')
+    seeded.panes[0].threadId = 't1'
+    seeded.panes[1].threadId = 't1'
+    saveChatPaneState('chat-1', seeded)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({ threadId: 't1' }), { entries: sessionEntries() }),
+    )
+
+    renderWorkspace()
+    const composers = await screen.findAllByLabelText('给 AI 发送消息')
+    expect(composers).toHaveLength(2)
+
+    const paneEvents = (paneId: string) =>
+      document.querySelector(`[data-pane-id="${paneId}"] .thread-events`)
+    const paneTranscript = (paneId: string) =>
+      document.querySelector(`[data-pane-id="${paneId}"] .thread-dialogue`)
+
+    // Pane 1 切到 events：只有 Pane 1 的主滚动区被替换。
+    await user.click(composers[0]!)
+    await user.keyboard('/events{Enter}')
+    await waitFor(() => expect(paneEvents('pane-1')).not.toBeNull())
+    expect(paneTranscript('pane-1')).toBeNull()
+    expect(paneEvents('pane-2')).toBeNull()
+    expect(paneTranscript('pane-2')).not.toBeNull()
+
+    // Pane 2 独立切到 events：两个 Pane 互不影响。
+    await user.click(composers[1]!)
+    await user.keyboard('/events{Enter}')
+    await waitFor(() => expect(paneEvents('pane-2')).not.toBeNull())
+    expect(paneEvents('pane-1')).not.toBeNull()
+    expect(paneTranscript('pane-2')).toBeNull()
+
+    // Pane 2 单独回到 conversation：Pane 1 仍停留在 events 视图。
+    await user.click(composers[1]!)
+    await user.keyboard('/conversation{Enter}')
+    await waitFor(() => expect(paneTranscript('pane-2')).not.toBeNull())
+    expect(paneEvents('pane-1')).not.toBeNull()
+  })
+
   it('opens the Agent selector when the blank pane references a missing Agent', async () => {
     const user = userEvent.setup()
     vi.mocked(chatService.getChat).mockResolvedValue({
@@ -327,7 +415,7 @@ describe('ChatWorkspacePage', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'hello world')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
-    expect(await screen.findByRole('button', { name: /^assistant$/ })).toBeInTheDocument()
+    expect(await screen.findByRole('option', { name: /^assistant$/ })).toBeInTheDocument()
   })
 
   it('blank-pane Environment selection syncs the Chat default with version serialization', async () => {
@@ -339,7 +427,7 @@ describe('ChatWorkspacePage', () => {
         id: 'chat-1',
         title: 'Workspace',
         agentName: 'assistant',
-        environmentName: data.environmentName ?? null,
+        environment: data.environment ?? null,
         yoloEnabled: false,
         version: String(1 + updateCalls),
         createTime: null,
@@ -351,27 +439,31 @@ describe('ChatWorkspacePage', () => {
     await screen.findByLabelText('给 AI 发送消息')
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     const envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
+    const dirPanel = await screen.findByLabelText('local 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
     expect(
       screen.getByRole('button', { name: /env:local/ }),
     ).toBeInTheDocument()
-    // 选中的名称异步同步为 Chat 默认值（版本化 CAS）；footer 使用面板本地草稿。
+    // 选中的完整 binding 异步同步为 Chat 默认值（版本化 CAS）；footer 使用面板本地草稿。
     await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(1))
     expect(chatService.updateChat).toHaveBeenNthCalledWith(1, 'chat-1', {
-      environmentName: 'local',
+      environment: { name: 'local', workspacePath: '.' },
       expectedVersion: '1',
     })
 
     // 显式清空（无）同步为 Chat 默认 null。
     await user.click(screen.getByRole('button', { name: /env:local/ }))
+    const dirAgain = await screen.findByLabelText('local 目录')
+    await user.click(within(dirAgain).getByRole('button', { name: '返回 Environment 列表' }))
     const envModalAgain = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModalAgain).getByRole('button', { name: /\uff08\u65e0\uff09/ }))
+    await user.click(within(envModalAgain).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
     expect(
       screen.getByRole('button', { name: /env:none/ }),
     ).toBeInTheDocument()
     await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(2))
     expect(chatService.updateChat).toHaveBeenNthCalledWith(2, 'chat-1', {
-      environmentName: null,
+      environment: null,
       expectedVersion: '2',
     })
   })
@@ -388,7 +480,10 @@ describe('ChatWorkspacePage', () => {
           sessionId: `session-${threadId}`,
           headEntryId: `head-${threadId}`,
           branchSettings: branchSettings({
-            environmentName: threadId === 't-local' ? 'local' : 'remote',
+            environment: {
+              name: threadId === 't-local' ? 'local' : 'remote',
+              workspacePath: '.',
+            },
           }),
         }),
       ),
@@ -398,7 +493,9 @@ describe('ChatWorkspacePage', () => {
     await waitFor(() => {
       const environmentButtons = screen.getAllByRole('button', { name: /env:/ })
       const labels = environmentButtons.map((button) => button.textContent)
-      expect(labels).toEqual(expect.arrayContaining(['env:local', 'env:remote']))
+      expect(labels).toEqual(
+        expect.arrayContaining(['env:local · ws:.', 'env:remote · ws:.']),
+      )
     })
     expect(chatService.updateChat).not.toHaveBeenCalled()
   })
@@ -428,7 +525,7 @@ describe('ChatWorkspacePage', () => {
     const agentButtons = screen.getAllByRole('button', { name: 'agent:assistant' })
     await user.click(agentButtons[0])
     await user.click(agentButtons[1])
-    const selectionButtons = await screen.findAllByRole('button', { name: 'coder' })
+    const selectionButtons = await screen.findAllByRole('option', { name: 'coder' })
     await user.click(selectionButtons[0])
     await user.click(selectionButtons[1])
 
@@ -485,7 +582,7 @@ describe('ChatWorkspacePage', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'hello after Agent deletion')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
-    await user.click(await screen.findByRole('button', { name: /^assistant$/ }))
+    await user.click(await screen.findByRole('option', { name: /^assistant$/ }))
 
     // react-query 的 mutateAsync 会把 mutationFn 推迟到 microtask，因此空白面板的
     // 首次发送路径（create-thread）会在延迟的 updateChat mutation 触发前运行。
@@ -522,7 +619,9 @@ describe('ChatWorkspacePage', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     const envModal = await screen.findByLabelText('选择 Environment')
-    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    await user.click(within(envModal).getByRole('option', { name: /^local/ }))
+    const dirPanel = await screen.findByLabelText('local 目录')
+    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
     expect(
       screen.getByRole('button', { name: /env:local/ }),
     ).toBeInTheDocument()
@@ -533,7 +632,7 @@ describe('ChatWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalled())
     const createArg = vi.mocked(chatService.createChatThread).mock.calls.at(-1)![1]!
-    expect(createArg.branchSettings.environmentName).toBe('local')
+    expect(createArg.branchSettings.environment).toEqual({ name: 'local', workspacePath: '.' })
   })
 
   it('detaches a stale persisted thread when its snapshot is not found', async () => {
@@ -593,7 +692,7 @@ describe('ChatWorkspacePage', () => {
         title: 'Workspace',
         branchSettings: expect.objectContaining({
           agentName: 'assistant',
-          environmentName: null,
+          environment: null,
         }),
         yoloEnabled: false,
       }),

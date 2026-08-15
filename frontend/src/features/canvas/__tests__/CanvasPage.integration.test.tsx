@@ -23,6 +23,8 @@ import type {
   CanvasSnapshotDTO,
 } from '@/shared/api/contracts/studio'
 import { setLocale } from '@/shared/i18n'
+import { ApplicationEventProvider, createApplicationEventUrl } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 
 const CANVAS_ID = 'd1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d'
 const CREATED_CANVAS_ID = 'e2f3a4b5-6c7d-4e8f-9a0b-1c2d3e4f5a6b'
@@ -43,51 +45,10 @@ const flowHarness = vi.hoisted(() => ({
   zoomTo: vi.fn(async () => undefined),
 }))
 
-/** 记录每个被创建的 EventSource，测试可向实例派发 'version'/'resync' 事件。 */
-const eventSourceHarness = vi.hoisted(() => ({
-  instances: [] as Array<{
-    url: string
-    dispatch: (type: string, data?: string) => void
-    close: () => void
-  }>,
+/** 记录每个被创建的 WebSocket；测试可打开连接并派发 server 帧。 */
+const socketHarness = vi.hoisted(() => ({
+  harness: null as unknown as import('@/shared/app-events/__tests__/fake-websocket').FakeWebSocketHarness,
 }))
-
-class FakeEventSource {
-  private readonly listeners = new Map<string, Set<EventListener>>()
-  onerror: ((event: Event) => void) | null = null
-  private closed = false
-
-  constructor(readonly url: string) {
-    eventSourceHarness.instances.push({
-      url,
-      dispatch: (type, data) => this.dispatch(type, data),
-      close: () => this.close(),
-    })
-  }
-
-  addEventListener(type: string, listener: EventListener): void {
-    let set = this.listeners.get(type)
-    if (!set) {
-      set = new Set()
-      this.listeners.set(type, set)
-    }
-    set.add(listener)
-  }
-
-  removeEventListener(type: string, listener: EventListener): void {
-    this.listeners.get(type)?.delete(listener)
-  }
-
-  close(): void {
-    this.closed = true
-  }
-
-  private dispatch(type: string, data?: string): void {
-    for (const listener of [...(this.listeners.get(type) ?? [])]) {
-      listener(new MessageEvent(type, { data }))
-    }
-  }
-}
 
 vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -585,13 +546,18 @@ function PathnameProbe() {
 
 function renderCanvasPage(initialEntries = ['/canvas']) {
   return render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <PathnameProbe />
-      <Routes>
-        <Route path="/canvas" element={<CanvasPage />} />
-        <Route path="/canvas/:canvasId" element={<CanvasPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <ApplicationEventProvider
+      url={createApplicationEventUrl()}
+      socketFactory={socketHarness.harness.factory}
+    >
+      <MemoryRouter initialEntries={initialEntries}>
+        <PathnameProbe />
+        <Routes>
+          <Route path="/canvas" element={<CanvasPage />} />
+          <Route path="/canvas/:canvasId" element={<CanvasPage />} />
+        </Routes>
+      </MemoryRouter>
+    </ApplicationEventProvider>,
   )
 }
 
@@ -608,8 +574,7 @@ describe('CanvasPage real list/create/load integration', () => {
     flowHarness.setViewport.mockResolvedValue(undefined)
     flowHarness.zoomTo.mockReset()
     flowHarness.zoomTo.mockResolvedValue(undefined)
-    eventSourceHarness.instances.length = 0
-    vi.stubGlobal('EventSource', FakeEventSource)
+    socketHarness.harness = new FakeWebSocketHarness()
   })
 
   afterEach(() => {
@@ -801,30 +766,48 @@ describe('CanvasPage real list/create/load integration', () => {
     }).defaultViewport).toEqual({ x: 30, y: -20, zoom: 0.7 })
   })
 
-  it('subscribes the version SSE with the last known version and fetches changes on version events', async () => {
-    // SSE 连接建立即按当前版本同步一次 changes；'version' 事件再触发一次，
-    // 但重复/旧版本事件不产生额外请求。
+  it('subscribes the canvas resource over the shared WebSocket and fetches changes on version events', async () => {
+    // subscribed ack（首次订阅建立）即按当前版本同步一次 changes；'version'
+    // 事件再触发一次，但重复/旧版本事件不产生额外请求。
     const { changesQueries } = installBackend()
     renderCanvasPage([`/canvas/${CANVAS_ID}`])
 
     await screen.findByLabelText(/无限画布/)
-    await waitFor(() => {
-      expect(changesQueries).toContainEqual({ canvasId: CANVAS_ID, afterVersion: '0' })
-    })
-    expect(eventSourceHarness.instances).toHaveLength(1)
-    expect(eventSourceHarness.instances[0]?.url).toBe(
-      `/api/canvases/${CANVAS_ID}/events/stream?afterVersion=0`,
-    )
+    const socket = socketHarness.harness.latest as NonNullable<
+      typeof socketHarness.harness.latest
+    >
+    // 生产 URL 构造：ws(s)://<origin>/api/events/v1。
+    expect(socket.url).toBe(createApplicationEventUrl())
 
-    const source = eventSourceHarness.instances[0] as {
-      dispatch: (type: string, data?: string) => void
-    }
-    act(() => {
-      source.dispatch('version', JSON.stringify({ version: '2' }))
+    act(() => socket.open())
+    expect(socket.sentMessages()).toEqual([
+      { version: 1, type: 'subscribe', resource: { kind: 'canvas', id: CANVAS_ID } },
+    ])
+    // subscribed ack 关闭「快照 GET 与 wire 建立之间」的版本缺口。
+    act(() => socket.emitServer({ type: 'subscribed', resource: { kind: 'canvas', id: CANVAS_ID }, cursor: '0' }))
+    await waitFor(() => {
+      expect(changesQueries).toHaveLength(1)
     })
-    act(() => {
-      source.dispatch('version', JSON.stringify({ version: '0' }))
-    })
+    expect(changesQueries[0]).toEqual({ canvasId: CANVAS_ID, afterVersion: '0' })
+
+    act(() =>
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'canvas', id: CANVAS_ID },
+        name: 'version',
+        data: { version: '2' },
+        cursor: '2',
+      }),
+    )
+    act(() =>
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'canvas', id: CANVAS_ID },
+        name: 'version',
+        data: { version: '0' },
+        cursor: '0',
+      }),
+    )
     await waitFor(() => {
       expect(changesQueries).toHaveLength(2)
     })
@@ -1382,6 +1365,98 @@ describe('CanvasPage real list/create/load integration', () => {
     })
   })
 
+  it('defers every canvas global shortcut to a blocking overlay', async () => {
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [{
+          id: RESOURCE_ID,
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_A,
+          resourceIndex: 0,
+          blobId: '00000000-0000-4000-8000-0000000000bb',
+          name: 'image.png',
+          textContent: null,
+          kind: 'IMAGE',
+          mediaType: 'image/png',
+          sizeBytes: '3',
+          width: null,
+          height: null,
+          durationMs: null,
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }, {
+        id: NODE_B,
+        canvasId: CANVAS_ID,
+        name: 'Generator',
+        transform: { x: 400, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: {
+          modelKey: 'fake-image',
+          configJson: JSON.stringify({
+            prompt: { segments: [{ type: 'TEXT', text: 'generate' }] },
+            parameters: { ratio: 'AUTO' },
+          }),
+        },
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+    const flow = flowHarness.current as {
+      onConnect: (connection: { source: string; target: string }) => void
+    }
+    act(() => flow.onConnect({ source: NODE_A, target: NODE_B }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'CREATE_LINK'
+    ))).toBe(true))
+    act(() => flow.onSelectionChange({
+      nodes: [],
+      edges: [{ source: NODE_A, target: NODE_B }],
+    }))
+
+    const overlay = document.createElement('div')
+    overlay.className = 'modal-backdrop'
+    document.body.appendChild(overlay)
+    try {
+      const before = commandBodies.filter((body) => (
+        body.commands[0]?.type === 'DELETE_LINK'
+      )).length
+      // blocking overlay 存在时所有全局快捷键让路：Delete、T、Escape 全部不生效。
+      fireEvent.keyDown(window, { key: 'Delete' })
+      fireEvent.keyDown(window, { key: 't' })
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(commandBodies.filter((body) => (
+        body.commands[0]?.type === 'DELETE_LINK'
+      ))).toHaveLength(before)
+      expect(commandBodies.some((body) => (
+        body.commands[0]?.type === 'CREATE_RESOURCE_NODE'
+      ))).toBe(false)
+      // Escape 被让路：link 选择未被清空（overlay 移除后 Delete 仍能删除该 link）。
+      expect(commandBodies.filter((body) => (
+        body.commands[0]?.type === 'DELETE_LINK'
+      ))).toHaveLength(before)
+    } finally {
+      overlay.remove()
+    }
+    fireEvent.keyDown(window, { key: 'Delete' })
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'DELETE_LINK'
+    ))).toBe(true))
+  })
+
   it('renames, ungroups, and deletes a group from its right-click menu', async () => {
     const { commandBodies, snapshots } = installBackend()
     const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
@@ -1743,6 +1818,150 @@ describe('CanvasPage real list/create/load integration', () => {
       }).onPaneClick()
     })
     expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+  })
+
+  it('consumes Escape on the stage surface and keeps focus on the stage instead of the agent composer', async () => {
+    const { snapshots, commandBodies } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    // 打开 Agent 面板：ThreadComposer 挂载且 focusOnEscape=true（存在异步焦点恢复）。
+    await user.click(screen.getByRole('button', { name: '切换对话面板' }))
+    expect(await screen.findByLabelText('给 AI 发送消息')).toBeInTheDocument()
+
+    // 选中节点并聚焦 stage。
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionChange: (params: { nodes: Array<{ id: string }>; edges: unknown[] }) => void
+      }).onSelectionChange({ nodes: [{ id: NODE_A }], edges: [] })
+    })
+    const stage = screen.getByLabelText(/无限画布/)
+    stage.focus()
+    expect(document.activeElement).toBe(stage)
+
+    await user.keyboard('{Escape}')
+
+    // Canvas 消费：清选 + 焦点留在 stage；Agent panel 是侧栏而非 overlay，保持打开。
+    expect(document.activeElement).toBe(stage)
+    expect(document.querySelector('.agent-panel')).not.toBeNull()
+    expect((flowHarness.current as { nodes: Array<{ selected?: boolean }> }).nodes.some((node) => node.selected)).toBe(false)
+    // ThreadComposer 的焦点恢复是异步重试（setTimeout）；等待其窗口期后焦点仍必须在 stage。
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    expect(document.activeElement).toBe(stage)
+
+    // 选区已清空：随后 Delete 不再产生删除命令。
+    fireEvent.keyDown(window, { key: 'Delete' })
+    expect(commandBodies.some((body) => body.commands[0]?.type === 'DELETE_NODE')).toBe(false)
+  })
+
+  it.each([
+    { name: 'body', dispatchTarget: () => document.body },
+    { name: 'no concrete focus', dispatchTarget: () => window },
+  ])('treats Escape from $name as canvas surface without collapsing the agent panel', async ({ dispatchTarget }) => {
+    const { snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+    await user.click(screen.getByRole('button', { name: '切换对话面板' }))
+    expect(await screen.findByLabelText('给 AI 发送消息')).toBeInTheDocument()
+
+    act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 220, clientY: 180, preventDefault: vi.fn() },
+        { id: NODE_A, selected: true },
+      )
+    })
+    expect(await screen.findByRole('menu', { name: '画布节点操作' })).toBeInTheDocument()
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionChange: (params: { nodes: Array<{ id: string }>; edges: unknown[] }) => void
+      }).onSelectionChange({ nodes: [{ id: NODE_A }], edges: [] })
+    })
+
+    if (dispatchTarget() === document.body) {
+      document.body.focus()
+    } else if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
+    fireEvent.keyDown(dispatchTarget(), { key: 'Escape' })
+
+    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+    expect(document.querySelector('.agent-panel')).not.toBeNull()
+    expect((flowHarness.current as { nodes: Array<{ selected?: boolean }> }).nodes.some((node) => node.selected)).toBe(false)
+    expect(document.activeElement).toBe(screen.getByLabelText(/无限画布/))
+  })
+
+  it('leaves Escape inside the agent panel to the composer and keeps the canvas selection', async () => {
+    const { snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+    await user.click(screen.getByRole('button', { name: '切换对话面板' }))
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionChange: (params: { nodes: Array<{ id: string }>; edges: unknown[] }) => void
+      }).onSelectionChange({ nodes: [{ id: NODE_A }], edges: [] })
+    })
+    await user.click(composer)
+    await user.keyboard('{Escape}')
+
+    // Canvas 全局 handler 不抢：panel 保持打开、选区保持、焦点留在 composer。
+    expect(document.querySelector('.agent-panel')).not.toBeNull()
+    expect(document.activeElement).toBe(composer)
+    expect((flowHarness.current as { nodes: Array<{ selected?: boolean }> }).nodes.some((node) => node.selected)).toBe(true)
   })
 
   it('offers only applicable resource actions and confirms node deletion in the menu', async () => {

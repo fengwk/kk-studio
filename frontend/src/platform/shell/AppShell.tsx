@@ -1,7 +1,8 @@
-import { Bot, Grid2X2, Menu, UserRound, Wrench, X } from 'lucide-react'
+import { Bot, Grid2X2, Menu, Settings, UserRound, Wrench, X } from 'lucide-react'
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react'
 import { Link, useLocation } from 'react-router'
 import { isCanonicalUuid } from '@/features/canvas/uuid'
+import { hasBlockingModal, isEditableKeyboardTarget } from '@/shared/ui/blocking-overlay'
 import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 
@@ -13,7 +14,6 @@ function isAiRoute(pathname: string) {
     || pathname.startsWith('/models')
     || pathname.startsWith('/providers')
     || pathname.startsWith('/environments')
-    || pathname.startsWith('/settings')
   )
 }
 
@@ -21,9 +21,14 @@ function isToolsRoute(pathname: string) {
   return pathname.startsWith('/comfyui') || pathname.startsWith('/tools')
 }
 
-/** Chat 工作区沉浸页：`/chats/:chatId`，不含列表 `/chats`。 */
+/** Chat 工作区沉浸页：仅 `/chats/:chatId`（可带尾斜杠），不含列表与更深子路径。 */
 function isChatWorkspaceRoute(pathname: string) {
-  return /^\/chats\/[^/]+/.test(pathname)
+  return /^\/chats\/[^/]+\/?$/.test(pathname)
+}
+
+/** 焦点位于已打开的内层交互作用域（listbox/menu）时返回 true：其 Escape 语义由内层消费。 */
+function isInsideOpenMenuTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[role="listbox"], [role="menu"]') != null
 }
 
 /** Canvas 编辑器沉浸页：仅合法 `/canvas/:canvasId`（canonical UUID），`/canvas` Library 保留全局顶栏。 */
@@ -37,10 +42,11 @@ export function AppShell({ children }: PropsWithChildren) {
   const { t } = useI18n()
   const canvasMode = location.pathname.startsWith('/canvas')
   const toolsMode = isToolsRoute(location.pathname)
+  const settingsMode = location.pathname.startsWith('/settings')
   const chatWorkspaceMode = isChatWorkspaceRoute(location.pathname)
   const canvasWorkspaceMode = isCanvasWorkspaceRoute(location.pathname)
   const immersive = chatWorkspaceMode || canvasWorkspaceMode
-  const aiActive = !canvasMode && !toolsMode && isAiRoute(location.pathname)
+  const aiActive = !canvasMode && !toolsMode && !settingsMode && isAiRoute(location.pathname)
   const [navOpen, setNavOpen] = useState(false)
   const navToggleRef = useRef<HTMLButtonElement>(null)
 
@@ -53,10 +59,27 @@ export function AppShell({ children }: PropsWithChildren) {
       return
     }
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setNavOpen(false)
-        navToggleRef.current?.focus()
+      if (event.key !== 'Escape' || event.defaultPrevented) {
+        return
       }
+      // 优先级守卫：Modal/Lightbox/alertdialog 拥有自己的 Escape 语义，
+      // 输入控件中的 Escape 交给输入自身；导航都不抢。
+      if (hasBlockingModal()) {
+        return
+      }
+      if (isEditableKeyboardTarget(event.target)) {
+        return
+      }
+      // 焦点位于已打开的内层 listbox/menu（如 LocaleSelector）时，第一次
+      // Escape 只由内层交互消费（关闭自身并保留导航），第二次才关闭导航。
+      if (isInsideOpenMenuTarget(event.target)) {
+        return
+      }
+      // 关闭时消费事件（至少 preventDefault），确保低优先级的 ThreadComposer
+      // window handler 依赖 defaultPrevented 让路，不会随后把焦点抢走。
+      event.preventDefault()
+      setNavOpen(false)
+      navToggleRef.current?.focus()
     }
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
@@ -124,6 +147,16 @@ export function AppShell({ children }: PropsWithChildren) {
                 <Wrench aria-hidden="true" />
                 <span>{t('platform.nav.tools')}</span>
                 <small aria-hidden="true">Tools</small>
+              </Link>
+              <Link
+                className={settingsMode ? 'active' : undefined}
+                to="/settings"
+                aria-label={t('platform.nav.settingsAria')}
+                onClick={() => setNavOpen(false)}
+              >
+                <Settings aria-hidden="true" />
+                <span>{t('platform.nav.settings')}</span>
+                <small aria-hidden="true">Settings</small>
               </Link>
               <LocaleSelector />
               {/* 移动端收起后并入汉堡面板；桌面由 .topbar-right 展示 */}

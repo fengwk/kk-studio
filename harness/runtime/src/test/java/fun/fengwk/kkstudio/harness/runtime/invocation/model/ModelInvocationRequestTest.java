@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.ArrayList;
@@ -29,7 +31,7 @@ class ModelInvocationRequestTest {
         new ModelInvocationRequest(
             ENV_ID, providerRequest(bindings), bindings, List.of(), true, 100_000, null);
 
-    assertEquals(ENV_ID, request.environmentName());
+    assertEquals(ENV_ID, request.environment());
     assertTrue(request.yoloEnabled());
     assertEquals(List.of("bash", "fs"), names(request.toolBindings()));
     assertEquals(List.of("bash", "fs"), providerNames(request));
@@ -41,7 +43,7 @@ class ModelInvocationRequestTest {
         new ModelInvocationRequest(
             null, providerRequest(List.of()), List.of(), List.of(), false, 100_000, null);
 
-    assertNull(request.environmentName());
+    assertNull(request.environment());
     assertFalse(request.yoloEnabled());
     assertTrue(request.toolBindings().isEmpty());
     assertTrue(request.skillBindings().isEmpty());
@@ -128,7 +130,8 @@ class ModelInvocationRequestTest {
 
   @Test
   void requiresMatchingEnvironmentRoutes() {
-    EnvironmentName otherEnv = new EnvironmentName("env-2");
+    EnvironmentBinding otherEnv = EnvironmentBindings.binding("env-2");
+    EnvironmentName otherName = otherEnv.environmentName();
     List<ToolBinding> envMismatch = List.of(environment("fs", otherEnv));
     assertThrows(
         IllegalArgumentException.class,

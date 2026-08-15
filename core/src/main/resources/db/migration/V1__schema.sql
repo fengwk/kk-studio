@@ -22,7 +22,7 @@
 -- application (client for node/group/request/command ids, server for
 -- document/resource/run-target ids) and inserted explicitly; there are no
 -- id sequences. `canvas_document.version` is the single graph version cursor;
--- version changes are hinted to the Canvas SSE hub via the `canvas_version`
+-- version changes are hinted to the Canvas version/application event hub via the `canvas_version`
 -- NOTIFY trigger (section 5). Resource blobs are owned by the global
 -- `storage_blob` refcount lifecycle; Canvas rows only reference them (RESTRICT).
 --
@@ -335,8 +335,10 @@ create table chat (
     -- agent_name 故意不加 FK：它只按名称引用 Agent。Agent 硬删除期间该引用失效
     -- （turn/attempt fail closed），同名重建后既有 Chat 引用解析到当前 AgentDefinition。
     agent_name          varchar(64)   not null,
-    -- 新空面板/线程草稿的默认分支 Environment 逻辑路由名称（可空；用户发送前可显式更改或清空）。
+    -- 新空面板/线程草稿的默认分支完整 Environment binding（可空；用户发送前可显式更改或清空）。
+    -- 两列必须同存同空（ck_chat_environment_pair），workspace_path 是 Environment Root 下 canonical 相对 wire 路径。
     environment_name    varchar(64),
+    workspace_path      varchar(2048),
     yolo_enabled        boolean       not null default false,
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
@@ -354,6 +356,10 @@ create table chat (
             environment_name ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
             and char_length(environment_name) <= 64
         )
+    ),
+    constraint ck_chat_environment_pair check (
+        (environment_name is null and workspace_path is null)
+        or (environment_name is not null and workspace_path is not null)
     )
 );
 
@@ -792,7 +798,7 @@ alter table canvas_function_resource_ref
 -- Canvas document version NOTIFY hint.
 --
 -- version is owned by the application; PostgreSQL never bumps it. This trigger
--- is only a wake-up hint for the in-process Canvas SSE hub: it notifies when a
+-- is only a wake-up hint for the in-process Canvas version/application event hub: it notifies when a
 -- canvas_document row is inserted or its version column actually changed, and
 -- never mutates the row. The NOTIFY payload is the parsable text
 -- `{canvasId}:{version}`.

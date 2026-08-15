@@ -67,7 +67,8 @@ public final class BashTool implements Tool {
     try {
       JsonNode args = AbstractCodingTool.arguments(request);
       String command = AbstractCodingTool.string(args, "command");
-      Path workdir = boundary.workdir(AbstractCodingTool.optionalString(args, "workdir"));
+      Path workdir =
+          boundary.workdir(AbstractCodingTool.optionalString(args, "workdir"), request.workdir());
       int timeoutSeconds = requestedTimeoutSeconds(args);
       Duration processTimeout =
           effectiveProcessTimeout(request.effectiveTimeout(), Duration.ofSeconds(timeoutSeconds));

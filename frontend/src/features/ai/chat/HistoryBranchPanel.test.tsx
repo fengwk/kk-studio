@@ -21,7 +21,8 @@ describe('HistoryBranchPanel', () => {
     const onRebind = vi.fn()
     renderPanel({ onRebind, currentHeadEntryId: 'follow-up' })
 
-    expect(screen.getByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '历史分支' })).toBeInTheDocument()
+    expect(document.querySelector('.modal-backdrop')).toBeNull()
     expect(screen.queryByText('选择历史位置后开启新的 Thread，当前 Thread 不会改变。')).not.toBeInTheDocument()
     // 确认会重定位*当前* Thread；不再保留创建新 Thread 的文案。
     expect(screen.queryByRole('button', { name: /开启新 Thread/ })).not.toBeInTheDocument()
@@ -120,6 +121,21 @@ describe('HistoryBranchPanel', () => {
     expect(screen.getByText('没有匹配 “missing” 的记录')).toBeInTheDocument()
   })
 
+  it('focuses search and supports Arrow navigation, Enter confirm, and Escape exit', async () => {
+    const user = userEvent.setup()
+    const onRebind = vi.fn()
+    const onClose = vi.fn()
+    renderPanel({ currentHeadEntryId: 'assistant', onRebind, onClose })
+    expect(screen.getByLabelText('搜索记录')).toHaveFocus()
+
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(onRebind).toHaveBeenCalledWith(
+      expect.objectContaining({ entryId: 'follow-up' }),
+    )
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
   it('disables rebind while pending and shows loading, empty, query-error and rebind-failure states', () => {
     const { rerender } = renderPanel({ loading: true })
     expect(screen.getByText('正在加载历史分支…')).toBeInTheDocument()
@@ -144,7 +160,9 @@ describe('HistoryBranchPanel', () => {
     expect(screen.getByLabelText('显示记录')).toBeDisabled()
     expect(screen.getByLabelText('搜索记录')).toBeDisabled()
     await user.click(screen.getByRole('button', { name: '关闭' }))
-    fireEvent.mouseDown(screen.getByRole('presentation'))
+    fireEvent.keyDown(screen.getByRole('region', { name: '历史分支' }), {
+      key: 'Escape',
+    })
     expect(onClose).not.toHaveBeenCalled()
   })
 })

@@ -19,12 +19,15 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
@@ -41,18 +44,28 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.NotDirectoryException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -63,8 +76,15 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>Invocation journal 是进程内去重事实源；WebSocket 仅传递消息。连接断开后 Daemon 会重新握手；若 gateway 再次发送相同
  * invocationId，RUNNING/terminal journal 条目分别重放 STARTED/terminal。
+ *
+ * <p>目录浏览在 inbound 回调里只做解析、校验与 ACK；阻塞的文件系统 IO 提交到 daemon 级共享的有界单 worker（队列容量 {@link
+ * #DIRECTORY_WORKER_QUEUE_CAPACITY}）。队列满或 worker 已关闭时立即回 {@link
+ * DaemonMessageType#DIRECTORY_LIST_FAILED}（{@code IO_ERROR}），不悬挂请求。
  */
 public final class DaemonRuntime implements AutoCloseable {
+
+  /** 共享目录 worker 的有界队列容量；超出时拒绝并回 typed DIRECTORY_LIST_FAILED。 */
+  static final int DIRECTORY_WORKER_QUEUE_CAPACITY = 32;
 
   private final DaemonConfig config;
   private final EnvironmentName environmentName;
@@ -74,12 +94,16 @@ public final class DaemonRuntime implements AutoCloseable {
   private final McpServerRegistry mcpRegistry;
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
+  private final Executor directoryWorker;
+  private final boolean ownsDirectoryWorker;
   private final ResourceStore resourceStore;
   private final DaemonEnvironmentInfo environmentInfo;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
+  private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
+  private final EnvironmentDirectoryBrowser directoryBrowser;
   private final AtomicLong outboundSequence = new AtomicLong();
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
   private final AtomicLong connectionGeneration = new AtomicLong();
@@ -111,6 +135,7 @@ public final class DaemonRuntime implements AutoCloseable {
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         null,
+        null,
         true);
   }
 
@@ -135,6 +160,7 @@ public final class DaemonRuntime implements AutoCloseable {
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         resourceStore,
+        null,
         true);
   }
 
@@ -154,6 +180,7 @@ public final class DaemonRuntime implements AutoCloseable {
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         resourceStore,
+        null,
         true);
   }
 
@@ -173,6 +200,7 @@ public final class DaemonRuntime implements AutoCloseable {
         McpServerRegistry.empty(),
         journal,
         scheduler,
+        null,
         null,
         false);
   }
@@ -195,6 +223,7 @@ public final class DaemonRuntime implements AutoCloseable {
         journal,
         scheduler,
         resourceStore,
+        null,
         false);
   }
 
@@ -217,6 +246,29 @@ public final class DaemonRuntime implements AutoCloseable {
         journal,
         scheduler,
         resourceStore,
+        null,
+        false);
+  }
+
+  /** 测试注入可控目录 worker；生产路径传入 {@code null} 使用默认有界单线程池。 */
+  DaemonRuntime(
+      DaemonConfig config,
+      DaemonTransport transport,
+      DaemonToolRegistry toolRegistry,
+      DaemonSkillRegistry skillRegistry,
+      DaemonInvocationJournal journal,
+      ScheduledExecutorService scheduler,
+      Executor directoryWorker) {
+    this(
+        config,
+        transport,
+        toolRegistry,
+        skillRegistry,
+        McpServerRegistry.empty(),
+        journal,
+        scheduler,
+        null,
+        directoryWorker,
         false);
   }
 
@@ -229,6 +281,7 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ResourceStore resourceStore,
+      Executor directoryWorker,
       boolean requireFixedToolCatalog) {
     this.config = Objects.requireNonNull(config, "config");
     this.environmentName = Objects.requireNonNull(config.environmentName(), "environmentName");
@@ -238,17 +291,38 @@ public final class DaemonRuntime implements AutoCloseable {
     this.mcpRegistry = Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.ownsDirectoryWorker = directoryWorker == null;
+    this.directoryWorker = directoryWorker != null ? directoryWorker : newBoundedDirectoryWorker();
     this.resourceStore = resourceStore;
     DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
     this.environmentInfo =
         new DaemonEnvironmentInfo(
-            operatingSystem, ZoneId.systemDefault().getId(), config.effectiveNote(operatingSystem));
+            operatingSystem,
+            ZoneId.systemDefault().getId(),
+            config.effectiveNote(operatingSystem),
+            config.environmentRoot().toString());
+    this.directoryBrowser = new EnvironmentDirectoryBrowser(config.environmentRoot());
     this.nextReconnectDelay = config.initialReconnectDelay();
     if (requireFixedToolCatalog
         && !List.copyOf(toolRegistry.descriptors()).equals(EnvironmentToolCatalog.descriptors())) {
       throw new IllegalStateException("daemon tool registry does not match EnvironmentToolCatalog");
     }
     toolRegistry.freeze();
+  }
+
+  private static ExecutorService newBoundedDirectoryWorker() {
+    return new ThreadPoolExecutor(
+        1,
+        1,
+        0L,
+        TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(DIRECTORY_WORKER_QUEUE_CAPACITY),
+        runnable -> {
+          Thread thread = new Thread(runnable, "daemon-directory-worker");
+          thread.setDaemon(true);
+          return thread;
+        },
+        new ThreadPoolExecutor.AbortPolicy());
   }
 
   /** 启动连接生命周期并立即尝试建立 WebSocket。重复调用无副作用。 */
@@ -371,7 +445,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private boolean sendHello(ActiveConnection connection) {
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("daemonId", config.daemonId());
-    payload.put("protocolVersion", DaemonProtocol.VERSION_2);
+    payload.put("protocolVersion", DaemonProtocol.VERSION_3);
     payload.put("toolCatalogVersion", EnvironmentToolCatalog.version());
     payload.put("gatewayToken", config.gatewayToken());
     return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
@@ -420,6 +494,11 @@ public final class DaemonRuntime implements AutoCloseable {
           requireInvocationId(envelope);
           connection.acceptInboundEnvelope(identity);
           processLoadSkill(connection, envelope);
+        }
+        case LIST_DIRECTORY -> {
+          requireNoInvocationId(envelope);
+          connection.acceptInboundEnvelope(identity);
+          processListDirectory(connection, envelope);
         }
         case WELCOME -> {
           connection.acceptInboundEnvelope(identity);
@@ -513,6 +592,9 @@ public final class DaemonRuntime implements AutoCloseable {
     }
 
     try {
+      // workspace 必须在发送 STARTED / 执行工具之前 canonicalize 为 Environment Root 内现存目录；
+      // 形状非法、symlink 越界、路径删除或非目录都是确定性 FAILED，绝不产生 STARTED。
+      Path workdir = canonicalWorkspace(payload.workspacePath());
       Tool tool =
           toolRegistry
               .find(payload.toolName())
@@ -530,7 +612,9 @@ public final class DaemonRuntime implements AutoCloseable {
           new ToolExecutionRequest(
               descriptor,
               new ToolCall(envelope.invocationId(), payload.toolName(), payload.argumentsJson()),
-              timeout);
+              timeout,
+              null,
+              workdir);
       RunningInvocation invocation = new RunningInvocation(envelope.invocationId());
       running.put(envelope.invocationId(), invocation);
       if (!started.get() || !isRunning(envelope.invocationId()) || !invocation.begin()) {
@@ -563,6 +647,97 @@ public final class DaemonRuntime implements AutoCloseable {
   private void processLoadSkill(ActiveConnection connection, DaemonEnvelope envelope) {
     sendAck(connection, envelope.sequence());
     handleLoadSkill(connection, envelope);
+  }
+
+  private void processListDirectory(ActiveConnection connection, DaemonEnvelope envelope) {
+    sendAck(connection, envelope.sequence());
+    handleListDirectory(connection, envelope);
+  }
+
+  /** control-plane 目录浏览：与 invocation 并行，不进入 journal，不占 active tool slot。以 payload requestId 关联。 */
+  private void handleListDirectory(ActiveConnection connection, DaemonEnvelope envelope) {
+    DaemonDirectoryCodec.RawListDirectoryRequest raw;
+    try {
+      raw = directoryCodec.readRequest(envelope.payloadJson());
+    } catch (DaemonProtocolException error) {
+      sendOn(connection, DaemonMessageType.ERROR, envelope.invocationId(), errorPayload(error));
+      return;
+    }
+    DaemonDirectoryCodec.ListDirectoryRequest request;
+    try {
+      request = new DaemonDirectoryCodec.ListDirectoryRequest(raw.requestId(), raw.path());
+    } catch (IllegalArgumentException error) {
+      // 形状非法是确定性业务失败（INVALID_PATH），不是协议 ERROR；requestId 原样回显。
+      sendDirectoryListFailed(
+          connection,
+          envelope,
+          new DaemonDirectoryCodec.DirectoryListFailed(
+              raw.requestId(),
+              raw.path(),
+              DaemonDirectoryFailureCode.INVALID_PATH,
+              error.getMessage()));
+      return;
+    }
+    try {
+      directoryWorker.execute(() -> listDirectoryOnWorker(connection, envelope, request));
+    } catch (RejectedExecutionException error) {
+      sendDirectoryListFailed(
+          connection,
+          envelope,
+          new DaemonDirectoryCodec.DirectoryListFailed(
+              request.requestId(),
+              request.path(),
+              DaemonDirectoryFailureCode.IO_ERROR,
+              "directory listing queue is full"));
+    }
+  }
+
+  private void listDirectoryOnWorker(
+      ActiveConnection connection,
+      DaemonEnvelope envelope,
+      DaemonDirectoryCodec.ListDirectoryRequest request) {
+    try {
+      DaemonDirectoryCodec.DirectoryListed listed =
+          directoryBrowser.list(request.requestId(), request.path());
+      sendOn(
+          connection,
+          DaemonMessageType.DIRECTORY_LISTED,
+          envelope.invocationId(),
+          directoryCodec.encodeListed(listed));
+    } catch (RuntimeException | IOException error) {
+      sendDirectoryListFailed(
+          connection, envelope, directoryFailure(request.requestId(), request.path(), error));
+    }
+  }
+
+  private void sendDirectoryListFailed(
+      ActiveConnection connection,
+      DaemonEnvelope envelope,
+      DaemonDirectoryCodec.DirectoryListFailed failed) {
+    sendOn(
+        connection,
+        DaemonMessageType.DIRECTORY_LIST_FAILED,
+        envelope.invocationId(),
+        directoryCodec.encodeFailed(failed));
+  }
+
+  private static DaemonDirectoryCodec.DirectoryListFailed directoryFailure(
+      String requestId, String path, Exception error) {
+    DaemonDirectoryFailureCode code;
+    if (error instanceof IllegalArgumentException) {
+      code = DaemonDirectoryFailureCode.INVALID_PATH;
+    } else if (error instanceof NoSuchFileException) {
+      code = DaemonDirectoryFailureCode.NOT_FOUND;
+    } else if (error instanceof NotDirectoryException) {
+      code = DaemonDirectoryFailureCode.NOT_DIRECTORY;
+    } else {
+      code = DaemonDirectoryFailureCode.IO_ERROR;
+    }
+    String message = error.getMessage();
+    if (message == null || message.isBlank()) {
+      message = error.getClass().getSimpleName();
+    }
+    return new DaemonDirectoryCodec.DirectoryListFailed(requestId, path, code, message);
   }
 
   private void handleLoadSkill(ActiveConnection connection, DaemonEnvelope envelope) {
@@ -666,8 +841,53 @@ public final class DaemonRuntime implements AutoCloseable {
     return descriptor.timeout().isZero() ? config.defaultToolTimeout() : descriptor.timeout();
   }
 
+  /**
+   * INVOKE payload 是严格字段集：toolName/toolVersion/workspacePath/arguments 必填，timeoutMillis 可选（缺省时按
+   * descriptor/daemon 默认收敛）；未知字段一律协议拒绝。workspacePath 的形状（canonical 相对 wire 路径）在 {@link
+   * #handleInvoke} 中与本地解析一起确定性收敛为 FAILED。
+   */
+  private static final Set<String> INVOKE_PAYLOAD_FIELDS =
+      Set.of("toolName", "toolVersion", "workspacePath", "arguments", "timeoutMillis");
+
+  private static final Set<String> REQUIRED_INVOKE_PAYLOAD_FIELDS =
+      Set.of("toolName", "toolVersion", "workspacePath", "arguments");
+
+  /**
+   * 把 INVOKE 的 canonical 相对 wire workspace path 解析为 Environment Root 内的 canonical 现存目录。
+   *
+   * <p>先经共享 workspace validator 做形状校验（{@code '.'} 表示 root、仅 {@code '/'} 分隔、拒绝 absolute/Windows
+   * drive/反斜杠/空段/{@code '.'}/{@code '..'} 段/控制字符），再相对 environment root 解析并 {@code toRealPath}：
+   * symlink 越界（real path 不在 root 内）、路径删除、非目录都是确定性 {@link IllegalArgumentException}（由调用方收敛为
+   * FAILED）；root 内 symlink alias 的 real path 仍在 root 内时允许。
+   */
+  private Path canonicalWorkspace(String workspacePath) {
+    EnvironmentWorkspacePath.requireCanonicalRelativePath(workspacePath);
+    Path candidate = config.environmentRoot().resolve(Path.of(workspacePath)).normalize();
+    Path canonical;
+    try {
+      canonical = candidate.toRealPath();
+    } catch (IOException error) {
+      throw new IllegalArgumentException(
+          "workspace does not resolve to an existing directory: " + workspacePath, error);
+    }
+    if (!canonical.startsWith(config.environmentRoot())) {
+      throw new IllegalArgumentException("workspace escapes environment root: " + workspacePath);
+    }
+    if (!Files.isDirectory(canonical)) {
+      throw new IllegalArgumentException("workspace is not a directory: " + workspacePath);
+    }
+    return canonical;
+  }
+
   private InvokePayload readInvokePayload(DaemonEnvelope envelope) {
     ObjectNode payload = envelopeCodec.readPayload(envelope);
+    Set<String> actual = new LinkedHashSet<>();
+    payload.fieldNames().forEachRemaining(actual::add);
+    if (!actual.containsAll(REQUIRED_INVOKE_PAYLOAD_FIELDS)
+        || !INVOKE_PAYLOAD_FIELDS.containsAll(actual)) {
+      throw new DaemonProtocolException(
+          "INVOKE payload must declare exactly " + INVOKE_PAYLOAD_FIELDS + ": " + actual);
+    }
     JsonNode arguments = payload.get("arguments");
     if (arguments == null || !arguments.isObject()) {
       throw new DaemonProtocolException("INVOKE payload.arguments must be a JSON object");
@@ -676,6 +896,7 @@ public final class DaemonRuntime implements AutoCloseable {
     return new InvokePayload(
         requiredPayloadText(payload, "toolName"),
         requiredPayloadText(payload, "toolVersion"),
+        requiredPayloadText(payload, "workspacePath"),
         envelopeCodec.writeJson(arguments),
         Duration.ofMillis(timeoutMillis));
   }
@@ -696,6 +917,12 @@ public final class DaemonRuntime implements AutoCloseable {
     if (envelope.invocationId() == null || envelope.invocationId().isBlank()) {
       throw new DaemonProtocolException(
           envelope.messageType() + " requires a non-blank invocationId");
+    }
+  }
+
+  private void requireNoInvocationId(DaemonEnvelope envelope) {
+    if (envelope.invocationId() != null) {
+      throw new DaemonProtocolException(envelope.messageType() + " must not declare invocationId");
     }
   }
 
@@ -748,7 +975,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private DaemonEnvelope envelope(
       DaemonMessageType messageType, String invocationId, String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2,
+        DaemonProtocol.VERSION_3,
         messageType,
         environmentName,
         invocationId,
@@ -833,6 +1060,13 @@ public final class DaemonRuntime implements AutoCloseable {
         scheduler.shutdownNow();
       } catch (RuntimeException ignored) {
         // scheduler 清理失败不影响 transport/MCP 清理。
+      }
+      if (ownsDirectoryWorker && directoryWorker instanceof ExecutorService ownedWorker) {
+        try {
+          ownedWorker.shutdownNow();
+        } catch (RuntimeException ignored) {
+          // 目录 worker 清理失败不得跳过 transport/MCP 清理。
+        }
       }
       try {
         transport.close();
@@ -1117,5 +1351,9 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private record InvokePayload(
-      String toolName, String toolVersion, String argumentsJson, Duration timeout) {}
+      String toolName,
+      String toolVersion,
+      String workspacePath,
+      String argumentsJson,
+      Duration timeout) {}
 }

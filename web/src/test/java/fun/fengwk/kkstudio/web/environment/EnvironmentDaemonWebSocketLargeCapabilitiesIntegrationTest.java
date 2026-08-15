@@ -155,21 +155,22 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     return CAPABILITIES_CODEC.encode(
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
-            new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Linux environment."),
+            new DaemonEnvironmentInfo(
+                DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
             List.of(fat),
             List.of()));
   }
 
   private static DaemonEnvelope helloEnvelope(long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2,
+        DaemonProtocol.VERSION_3,
         DaemonMessageType.HELLO,
         ENVIRONMENT_NAME,
         null,
         sequence,
         "{"
             + "\"daemonId\":\"daemon-large-caps\","
-            + "\"protocolVersion\":2,"
+            + "\"protocolVersion\":3,"
             + "\"toolCatalogVersion\":\""
             + EnvironmentToolCatalog.version()
             + "\","
@@ -180,7 +181,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private static DaemonEnvelope readyEnvelope(String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2, DaemonMessageType.READY, ENVIRONMENT_NAME, null, 1, payloadJson);
+        DaemonProtocol.VERSION_3, DaemonMessageType.READY, ENVIRONMENT_NAME, null, 1, payloadJson);
   }
 
   private static final class FrameListener implements WebSocket.Listener {

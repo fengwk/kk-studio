@@ -5,7 +5,7 @@
 | 域 | 职责 |
 | --- | --- |
 | Harness / AI | Chat、Session Entry Tree、Thread 执行、Model/Tool Invocation、命令 batch 与实时投影 |
-| Studio / Canvas | Canvas document、Resource/Function、Blob 生命周期、Patch/SSE 与 Harness Thread 绑定 |
+| Studio / Canvas | Canvas document、Resource/Function、Blob 生命周期、Patch/事件通道与 Harness Thread 绑定 |
 
 浏览器把当前语言通过 `Accept-Language` 发送给 Web；后端只本地化用户可见错误，不改变稳定字段和领域事实。
 
@@ -56,14 +56,14 @@ flowchart LR
 
 | 模块 | 职责 |
 | --- | --- |
-| `harness-tool` | `Tool`、descriptor、schema、`ResourceRef`、`RemoteTool` 与 Daemon v2 wire |
+| `harness-tool` | `Tool`、descriptor、schema、`ResourceRef`、`RemoteTool` 与 Daemon v3 wire |
 | `harness-runtime` | **纯 Java 领域模块**：Session/Entry/Thread/Command/Invocation/Work 状态机、Thread/Model/Tool processor、Stop/Approval/fencing；不依赖 Spring、数据库、Redis、HTTP 或 Provider SDK |
 | `harness-plugin` | **纯 Java 受信任插件 API**：构建期注册、启动时冻结的 `PluginCatalog`，以及 `BranchView`、同步 `PluginTool`、声明式 `AppendCustomEntry` 与 context projector |
 | `plugins/goal` | Goal 插件：`create_goal` / `get_goal` / `update_goal` v2、branch-scoped `goal/state` 快照与 active goal 上下文投影 |
 | `harness-runtime-spring` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、Redis realtime overlay、本地 Resource store |
 | `harness-daemon` | 独立 Environment 进程适配器，只依赖 `harness-tool` |
 | `core` | Catalog、全局 Blob Storage、`DatabaseTurnResolver`、Model/Tool Gateway、Environment、Chat 与 Canvas 应用服务；装配并执行受信任插件；Harness 执行表只经 Runtime/Store 端口写入 |
-| `web` | **生产组合根**：装配 Runtime、runtime-spring 与 Core ports，管理 dispatcher/listener 生命周期，并提供 HTTP、SSE、WebSocket v2 与静态资源适配 |
+| `web` | **生产组合根**：装配 Runtime、runtime-spring 与 Core ports，管理 dispatcher/listener 生命周期，并提供 HTTP、WebSocket（浏览器事件通道与 daemon v2）与静态资源适配 |
 | `share` | HTTP DTO 与公开 JSON 结构 |
 | `frontend` | React 页面、Pane、本地状态与 API client |
 
@@ -100,7 +100,7 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 
 | 事实 | 当前职责 |
 | --- | --- |
-| Chat | 保存 `agentName`、可空默认 `environmentName`、`yoloEnabled` 三个可见发送设置，以及标题、版本和时间 |
+| Chat | 保存 `agentName`、可空默认 `EnvironmentBinding{name, workspacePath}`、`yoloEnabled` 三个可见发送设置，以及标题、版本和时间 |
 | Pane | 浏览器 `localStorage` 中的八个固定槽位、布局、焦点和每个槽位的 `threadId` |
 | Session | 一棵 append-only Entry Tree 的边界；由 Chat-scoped Thread 创建事务产生 |
 | Entry | 对话与运行审计事实，只允许十种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
@@ -156,11 +156,12 @@ command use-case 物化为 durable `resource(blobId,name,preview)`。
 ## 7. Realtime 与恢复
 
 PostgreSQL 是唯一 durable truth，`harness_work` 是 Harness 唯一调度 mailbox（NOTIFY 只是可用性
-提示）。Harness Redis Streams 只保存有界 realtime overlay；浏览器先读取 REST snapshot，再以 durable
-`revision` 打开 SSE。
+提示）。Harness Redis Streams 只保存有界 realtime overlay；浏览器先读取 REST snapshot，再经应用
+事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）
+订阅 durable `revision` 与 realtime delta。
 
 Canvas 使用同一原则：PostgreSQL 实体与 `canvas_document.version` 是事实源，Redis Stream 只保存事务
-提交后的 bounded Patch Cache，PostgreSQL `NOTIFY canvas_version` 只唤醒 SSE hub。`/changes` 仅在
+提交后的 bounded Patch Cache，PostgreSQL `NOTIFY canvas_version` 只唤醒事件通道的 version source。`/changes` 仅在
 cache 覆盖连续版本时返回 Patch；任何 gap、损坏或 Redis 不可用都回退权威 Snapshot。
 
 ## 8. Subagent 委派（task）

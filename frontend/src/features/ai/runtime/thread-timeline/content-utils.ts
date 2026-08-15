@@ -1,5 +1,9 @@
-import { getString } from '@/features/ai/runtime/payload-json'
-import type { ToolAttachment, ToolAttachmentType } from '@/features/ai/runtime/thread-timeline-types'
+import { asRecord, getString } from '@/features/ai/runtime/payload-json'
+import type {
+  ToolAttachment,
+  ToolAttachmentType,
+  TurnUsage,
+} from '@/features/ai/runtime/thread-timeline-types'
 import { apiBaseUrl } from '@/shared/api/client'
 
 const MANAGED_RESOURCE_URI_PATTERN = /^(file:|s3:)/i
@@ -157,4 +161,81 @@ export function formatCompactTokens(count: number): string {
     return `${Math.round(count / 1000)}k`
   }
   return `${(count / 1_000_000).toFixed(1)}M`
+}
+
+/**
+ * 从持久 ASSISTANT Entry 的 `assistantMetadata` 提取完整 usage/cost。
+ * 字段名以 harness 持久 codec 为准（camelCase），并容忍常见别名。
+ */
+export function parseAssistantUsage(metadata: Record<string, unknown>): TurnUsage | null {
+  const usage = asRecord(metadata.usage)
+  const costNode = metadata.cost
+  const input = numberField(usage, 'inputTokens', 'input_tokens', 'promptTokens')
+  const output = numberField(usage, 'outputTokens', 'output_tokens', 'completionTokens')
+  const cacheRead = numberField(
+    usage,
+    'cacheReadTokens',
+    'cache_read_tokens',
+    'cacheRead',
+    'cachedTokens',
+  )
+  const cacheWrite =
+    numberField(usage, 'cacheWriteTokens', 'cache_write_tokens', 'cacheWrite')
+    + numberField(usage, 'cacheWriteLongTokens', 'cache_write_long_tokens', 'cacheWriteLong')
+  const reasoning = numberField(usage, 'reasoningTokens', 'reasoning_tokens')
+  const providerTotal = numberField(
+    usage,
+    'providerTotalTokens',
+    'provider_total_tokens',
+    'totalTokens',
+  )
+  let cost = 0
+  if (typeof costNode === 'number' && Number.isFinite(costNode)) {
+    cost = costNode
+  } else if (typeof costNode === 'string' && costNode.trim()) {
+    const parsed = Number(costNode)
+    if (Number.isFinite(parsed)) {
+      cost = parsed
+    }
+  } else if (costNode && typeof costNode === 'object') {
+    cost = numberField(asRecord(costNode), 'total', 'amount', 'usd')
+  }
+  if (
+    input <= 0
+    && output <= 0
+    && cacheRead <= 0
+    && cacheWrite <= 0
+    && reasoning <= 0
+    && providerTotal <= 0
+    && cost <= 0
+  ) {
+    return null
+  }
+  return { input, output, cacheRead, cacheWrite, reasoning, providerTotal, cost }
+}
+
+/**
+ * Turn usage 摘要文本（Conversation TurnSummary 与 Event TURN_END 共用）：
+ * `↑input · ↓output · RcacheRead · WcacheWrite · $cost`；不附加 reasoning `T`
+ * 或 cache hit `CH`；缺失/为零的 cache 段省略，input/output 按现有事实显示。
+ */
+export function formatTurnUsageText(usage: {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  cost: number
+}): string {
+  const parts = [
+    `↑${formatCompactTokens(usage.input)}`,
+    `↓${formatCompactTokens(usage.output)}`,
+  ]
+  if (usage.cacheRead > 0) {
+    parts.push(`R${formatCompactTokens(usage.cacheRead)}`)
+  }
+  if (usage.cacheWrite > 0) {
+    parts.push(`W${formatCompactTokens(usage.cacheWrite)}`)
+  }
+  parts.push(`$${usage.cost.toFixed(3)}`)
+  return parts.join(' · ')
 }

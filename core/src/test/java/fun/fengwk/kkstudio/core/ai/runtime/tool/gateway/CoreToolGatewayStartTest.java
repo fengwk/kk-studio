@@ -103,8 +103,8 @@ class CoreToolGatewayStartTest {
       assertInstanceOf(ToolGateway.Started.class, startedA);
       assertInstanceOf(ToolGateway.Started.class, startedB);
       awaitSize(transport.invocations, 2);
-      assertEquals(ToolGatewayTestSupport.ENV_A, transport.invocations.get(0).environmentName());
-      assertEquals(ToolGatewayTestSupport.ENV_B, transport.invocations.get(1).environmentName());
+      assertEquals(ToolGatewayTestSupport.ENV_A, transport.invocations.get(0).environment());
+      assertEquals(ToolGatewayTestSupport.ENV_B, transport.invocations.get(1).environment());
       // 冻结 call 原样发送，携带与 PLATFORM 相同的 durable 上下文（daemon gateway 需要 invocationId）。
       assertSame(requestA.call(), transport.invocations.get(0).request().call());
       assertEquals(

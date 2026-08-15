@@ -12,7 +12,6 @@ import type {
 } from '@/shared/api/contracts/studio'
 import {
   cancelCanvasFunctionRun,
-  createCanvasRealtimeStream,
   getCanvas,
   getCanvasChanges,
   getCanvasFunctionRun,
@@ -36,6 +35,14 @@ const REQUEST_CURRENT = 'eeeeeeee-0000-4000-8000-000000000002'
 const REQUEST_OLD = 'eeeeeeee-0000-4000-8000-000000000003'
 const { FAKE_SHA256 } = vi.hoisted(() => ({ FAKE_SHA256: 'a'.repeat(64) }))
 
+const { fakeApplicationEvents } = vi.hoisted(() => {
+  const manager = { subscribe: () => () => undefined }
+  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+})
+vi.mock('@/shared/app-events', () => ({
+  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
+}))
+
 vi.mock('@/shared/api/studio-service', () => ({
   postCanvasCommands: vi.fn(),
   cancelCanvasFunctionRun: vi.fn(),
@@ -44,7 +51,6 @@ vi.mock('@/shared/api/studio-service', () => ({
   getCanvasFunctionRun: vi.fn(),
   listCanvasFunctionModels: vi.fn(),
   startCanvasFunctionRun: vi.fn(),
-  createCanvasRealtimeStream: vi.fn(),
 }))
 
 vi.mock('@/shared/api/storage-service', () => ({
@@ -62,28 +68,6 @@ vi.mock('@/features/ai/composer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/features/ai/composer')>()
   return { ...actual, createWorkerHasher: () => async () => FAKE_SHA256 }
 })
-
-class FakeEventSource {
-  private readonly listeners = new Map<string, EventListener[]>()
-
-  addEventListener(type: string, listener: EventListener): void {
-    const existing = this.listeners.get(type) ?? []
-    existing.push(listener)
-    this.listeners.set(type, existing)
-  }
-
-  removeEventListener(type: string, listener: EventListener): void {
-    const existing = this.listeners.get(type) ?? []
-    this.listeners.set(
-      type,
-      existing.filter((value) => value !== listener),
-    )
-  }
-
-  close(): void {
-    this.listeners.clear()
-  }
-}
 
 function snapshot(version: number | string = 0): CanvasSnapshotDTO {
   return {
@@ -268,7 +252,6 @@ describe('useCanvasController real snapshot runtime', () => {
     commands = []
     vi.mocked(getCanvas).mockImplementation(async () => current)
     vi.mocked(getCanvasChanges).mockResolvedValue({ patches: [], snapshot: null })
-    vi.mocked(createCanvasRealtimeStream).mockImplementation(() => new FakeEventSource())
     vi.mocked(listCanvasFunctionModels).mockResolvedValue([{
       key: 'fake-image',
       label: 'Fake Image',

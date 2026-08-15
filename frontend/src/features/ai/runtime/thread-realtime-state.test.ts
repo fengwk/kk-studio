@@ -106,7 +106,7 @@ describe('thread realtime state', () => {
       toolVersion: null,
       rendererKey: 'web-search',
       toolType: 'PLATFORM',
-      environmentName: null,
+      environment: null,
       argumentsJson: '{}',
       approvalJson: null,
       resultJson: null,
