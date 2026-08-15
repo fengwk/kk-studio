@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
@@ -157,6 +157,30 @@ describe('EnvironmentWorkspacePanel', () => {
     expect(environmentService.listDirectories).not.toHaveBeenCalledWith('local', 'proj/a')
   })
 
+  it('restores the current environment as active when a directory path matches another name', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listDirectories).mockResolvedValue(directory('proj'))
+    renderPanel({
+      environments: [
+        ...readyEnvironments,
+        { name: 'proj', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
+      ],
+      current: { name: 'local', workspacePath: 'proj' },
+    })
+
+    const dirPanel = await screen.findByRole('region', { name: 'local 目录' })
+    await user.click(within(dirPanel).getByRole('button', { name: '返回 Environment 列表' }))
+    const listPanel = await screen.findByRole('region', { name: '选择 Environment' })
+    expect(within(listPanel).getByRole('option', { name: /local/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(within(listPanel).getByRole('option', { name: /^proj$/ })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
+  })
+
   it('closing with Escape only cancels and never selects', async () => {
     const user = userEvent.setup()
     const { onSelect, onClose } = renderPanel({ current: { name: 'local', workspacePath: '.' } })
@@ -174,7 +198,7 @@ describe('EnvironmentWorkspacePanel', () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listDirectories)
       .mockRejectedValueOnce(new Error('directory gone'))
-      .mockResolvedValueOnce(directory('.'))
+      .mockResolvedValueOnce(directory('proj'))
     renderPanel({ current: { name: 'local', workspacePath: 'proj/missing' } })
 
     const dirPanel = await screen.findByRole('region', { name: 'local 目录' })
@@ -188,9 +212,52 @@ describe('EnvironmentWorkspacePanel', () => {
       expect(environmentService.listDirectories).toHaveBeenCalledWith('local', 'proj'),
     )
     await waitFor(() =>
-      expect(within(dirPanel).getByText('当前：.')).toBeInTheDocument(),
+      expect(within(dirPanel).getByText('当前：proj')).toBeInTheDocument(),
     )
     expect(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' })).toBeEnabled()
+  })
+
+  it('rejects a directory response whose path does not match the request', async () => {
+    vi.mocked(environmentService.listDirectories).mockResolvedValue(directory('other'))
+    renderPanel({ current: { name: 'local', workspacePath: 'proj' } })
+
+    const dirPanel = await screen.findByRole('region', { name: 'local 目录' })
+    expect(await within(dirPanel).findByRole('alert')).toHaveTextContent('目录加载失败')
+    expect(within(dirPanel).getByText('当前：proj')).toBeInTheDocument()
+    expect(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' })).toBeDisabled()
+  })
+
+  it('disables stale directory actions while refreshing and after refresh failure', async () => {
+    const user = userEvent.setup()
+    let rejectRefresh: ((reason?: unknown) => void) | undefined
+    vi.mocked(environmentService.listDirectories)
+      .mockResolvedValueOnce(directory('.', [{ name: 'proj', path: 'proj' }]))
+      .mockImplementationOnce(
+        () => new Promise<EnvironmentDirectoryDTO>((_resolve, reject) => {
+          rejectRefresh = reject
+        }),
+      )
+    renderPanel({ current: { name: 'local', workspacePath: '.' } })
+    const dirPanel = await screen.findByRole('region', { name: 'local 目录' })
+    const confirm = within(dirPanel).getByRole('button', { name: '使用当前 Workspace' })
+    const refresh = within(dirPanel).getByRole('button', { name: '刷新' })
+    const child = await within(dirPanel).findByRole('option', { name: '进入 proj' })
+    expect(confirm).toBeEnabled()
+
+    await user.click(refresh)
+    await waitFor(() =>
+      expect(environmentService.listDirectories).toHaveBeenCalledTimes(2),
+    )
+    expect(refresh).toBeDisabled()
+    expect(child).toBeDisabled()
+    expect(confirm).toBeDisabled()
+
+    await act(async () => {
+      rejectRefresh?.(new Error('refresh failed'))
+    })
+    expect(await within(dirPanel).findByRole('alert')).toHaveTextContent('目录加载失败')
+    // React Query 保留上一次成功数据；失败后也绝不能确认该陈旧结果。
+    expect(confirm).toBeDisabled()
   })
 
   it('disables every interaction while pending', async () => {

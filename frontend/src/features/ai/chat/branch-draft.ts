@@ -88,13 +88,15 @@ export function materializeAgentBranchDraft(
   models: AgentModelView[],
   existing: BranchDraft | null,
   fallbackYoloEnabled?: boolean,
+  fallbackEnvironment: EnvironmentBindingDTO | null = null,
 ): BranchDraft | null {
   // 完整 materialization（没有有效的已有 draft，例如 Chat agent 已过期）必须保留
-  // Chat 默认值：`?? false` 会悄悄丢弃用户设置的 yolo=true 偏好。
+  // Chat 默认值：不能悄悄丢弃用户设置的 yolo=true 或完整 Environment binding。
   const materialized = materializeBlankBranchDraft(
     agent,
     existing?.yoloEnabled ?? fallbackYoloEnabled ?? false,
     models,
+    existing == null ? fallbackEnvironment : existing.environment,
   )
   if (materialized == null) {
     return null
