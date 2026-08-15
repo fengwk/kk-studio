@@ -21,6 +21,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
+  HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
@@ -1163,6 +1164,60 @@ describe('useAgentThreadController', () => {
     expect(result.current.thread?.headEntryId).toBe('h1')
     expect(result.current.thread?.nextCommandSequence).toBe('1')
   })
+
+  it('derives Branch Usage from completed TURN_END summaries in the current snapshot', async () => {
+    const currentThread = threadFixture()
+    const entry = (
+      entryId: string,
+      entryType: HarnessSessionEntryDTO['entryType'],
+      payload: Record<string, unknown>,
+    ): HarnessSessionEntryDTO => ({
+      entryId,
+      sessionId: 's1',
+      parentEntryId: null,
+      entryType,
+      payloadJson: JSON.stringify(payload),
+      createTime: null,
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(currentThread, {
+        entries: [
+          entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+          entry('assistant-1', 'MESSAGE', {
+            message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'done' }] },
+            assistantMetadata: {
+              usage: {
+                inputTokens: 1_200,
+                outputTokens: 80,
+                cacheReadTokens: 300,
+                cacheWriteTokens: 40,
+                reasoningTokens: 20,
+                providerTotalTokens: 1_640,
+              },
+              cost: { total: 0.25 },
+            },
+          }),
+          entry('end-1', 'TURN_END', { outcome: 'COMPLETED', continueModel: false }),
+        ],
+      }),
+    )
+
+    const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
+      wrapper,
+    })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    expect(result.current.branchUsage).toEqual({
+      input: 1_200,
+      output: 80,
+      cacheRead: 300,
+      cacheWrite: 40,
+      reasoning: 20,
+      providerTotal: 1_640,
+      cost: 0.25,
+    })
+    expect(result.current.branchUsageText).toBe('↑1.2k · ↓80 · R300 · W40 · $0.250')
+  })
+
   it('clears the exact replay on 409 so the retry mints fresh command ids and cursors', async () => {
     const currentThread = threadFixture({
       revision: '1',

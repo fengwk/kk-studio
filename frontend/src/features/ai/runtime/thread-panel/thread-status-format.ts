@@ -12,7 +12,7 @@ export interface EnvironmentBindingShape {
 }
 
 export interface ThreadStatusSegment {
-  key: 'agent' | 'model' | 'environment' | 'notifications'
+  key: 'agent' | 'model' | 'environment' | 'usage' | 'notifications'
   className: string
   text: string
   title: string
@@ -31,6 +31,7 @@ export interface ThreadStatusModel {
   agentText: string
   modelText: string
   environmentText: string
+  usageText: string
   segments: ThreadStatusSegment[]
 }
 
@@ -43,6 +44,8 @@ export interface ThreadStatusModelInput {
   environment?: EnvironmentBindingShape | null
   /** 该 binding name 的实时可用标记（统一可用性规则）；false/未知 => `env:<name> · ws:<path> (unavailable)`。 */
   environmentReady?: boolean
+  /** 当前 branch 已关闭 Turn 的累计 usage；为空时不显示。 */
+  usageText?: string
   yoloEnabled?: boolean
   onAgentClick?: () => void
   onModelClick?: () => void
@@ -71,6 +74,7 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   const binding = input.environment
   const environmentName = binding ? clean(binding.name) : ''
   const environmentWorkspacePath = binding ? clean(binding.workspacePath) : ''
+  const usageText = clean(input.usageText)
   const yoloOn = Boolean(input.yoloEnabled)
 
   // 调用方传入的 modelName 可能已是规范的 provider/model 引用。
@@ -127,6 +131,14 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       onClick: input.onEnvironmentClick,
     },
   ]
+  if (usageText) {
+    segments.push({
+      key: 'usage',
+      className: 'thread-status-usage',
+      text: usageText,
+      title: translate('ai.runtime.status.branchUsageTitle', { usage: usageText }),
+    })
+  }
   if (input.onNotificationsToggle || input.notificationsEnabled != null) {
     const permission = input.notificationPermission ?? 'default'
     const text =
@@ -157,6 +169,7 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     agentText,
     modelText,
     environmentText,
+    usageText,
     segments,
   }
 }

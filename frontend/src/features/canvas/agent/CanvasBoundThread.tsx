@@ -109,6 +109,7 @@ export function CanvasBoundThread({
     variantName: controller.runtimeLabels.variantName,
     environment: controller.runtimeLabels.environment,
     environmentReady: controller.runtimeLabels.environmentReady,
+    usageText: controller.branchUsageText,
     contextWindow: controller.runtimeLabels.contextWindow,
   }
   const transcript: ChatPanelTranscriptInput = {
