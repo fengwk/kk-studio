@@ -48,7 +48,7 @@ import java.util.function.Consumer;
  * 跨节点时钟偏差，而 Work request 始终使用未抬升的本地调度时钟。
  *
  * <p>本切片实现 {@link #createThread}、{@link #enqueueCommands}、{@link #moveHead}、{@link #stop}、 {@link
- * #decideToolApproval} 与 {@link #getThreadSnapshot}。
+ * #decideToolApproval}、{@link #getThreadSnapshot} 与 {@link #getThreadSessionEntries}。
  */
 @Slf4j
 public final class HarnessRuntime {
@@ -455,6 +455,27 @@ public final class HarnessRuntime {
             case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
                 thread, locked.path(), queued, pending.model(), pending.siblings(), List.of());
           };
+        });
+  }
+
+  /**
+   * 读取 Thread 所属 Session 的全部不可变 Entry（含非当前 head 路径上的历史分支）。锁定 Thread 后从 {@code
+   * loadEntryPath(thread.headEntryId()).root().sessionId()} 推导 session，再加载全表；不改变 revision。
+   *
+   * <p>Thread 不存在抛 {@link HarnessRuntimeNotFoundException}。
+   */
+  public List<Entry> getThreadSessionEntries(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return store.transaction(
+        tx -> {
+          ThreadState thread =
+              tx.lockThread(threadId)
+                  .orElseThrow(
+                      () ->
+                          new HarnessRuntimeNotFoundException(
+                              "thread " + threadId + " does not exist"));
+          UUID sessionId = tx.loadEntryPath(thread.headEntryId()).root().sessionId();
+          return tx.loadEntriesBySessionId(sessionId);
         });
   }
 

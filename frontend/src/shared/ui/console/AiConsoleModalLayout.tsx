@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useI18n } from '@/shared/i18n'
 
@@ -23,8 +24,14 @@ export function ModalHeader({
   return (
     <div className="modal-header">
       <h2>{title}</h2>
-      <button type="button" className="ghost-btn" onClick={onClose} disabled={closeDisabled}>
-        {t('shared.close')}
+      <button
+        type="button"
+        className="modal-close-button"
+        aria-label={t('shared.close')}
+        onClick={onClose}
+        disabled={closeDisabled}
+      >
+        <X aria-hidden="true" />
       </button>
     </div>
   )

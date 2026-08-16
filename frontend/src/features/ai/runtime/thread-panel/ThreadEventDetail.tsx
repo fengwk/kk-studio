@@ -31,20 +31,7 @@ export function ThreadEventDetail({
           <X aria-hidden="true" />
         </button>
       </header>
-      <p className="thread-event-detail-text">{record.summary}</p>
-      {record.details.length > 0 ? (
-        <dl className="thread-event-detail-rows">
-          {record.details.map((row) => (
-            <div key={row.label} className="thread-event-detail-row">
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-      {record.rawJson != null ? (
-        <pre className="thread-event-detail-payload">{record.rawJson}</pre>
-      ) : null}
+      <pre className="thread-event-detail-payload">{record.rawJson ?? record.summary}</pre>
     </section>
   )
 }

@@ -7,18 +7,24 @@ function source(relativePath: string) {
 }
 
 describe('Thread snapshot architecture', () => {
-  it('has one snapshot query and no Thread business polling or fragmented API consumption', () => {
+  it('keeps current Thread state snapshot-only and loads the full Entry Tree on demand', () => {
     const queries = source('features/ai/runtime/useAgentThreadQueries.ts')
+    const boundPane = source('features/ai/chat/chat-workspace-pane/BoundThreadPane.tsx')
     const service = source('shared/api/harness-service.ts')
     const keys = source('shared/lib/query-keys.ts')
 
     expect(queries).toContain('queryKeys.threads.snapshot(threadId)')
     expect(queries).not.toContain('refetchInterval')
     expect(service).not.toMatch(
-      /getThread:|listThreadEntries:|listThreadInputs:|listThreadToolInvocations:|getThreadUsage:/,
+      /getThread:|listThreadInputs:|listThreadToolInvocations:|getThreadUsage:/,
     )
-    const threadKeys = keys.slice(keys.indexOf('threads:'), keys.indexOf('sessions:'))
-    expect(threadKeys).not.toMatch(/detail:|entries:|inputs:|events:|toolInvocations:/)
+    expect(service).toContain('listThreadEntries:')
+    expect(queries).not.toContain('queryKeys.threads.entries(threadId)')
+    expect(boundPane).toContain('queryKeys.threads.entries(threadId)')
+    expect(boundPane).toContain("enabled: interaction === 'history'")
+    const threadKeys = keys.slice(keys.indexOf('threads:'), keys.indexOf('comfyui:'))
+    expect(threadKeys).toContain('entries:')
+    expect(threadKeys).not.toMatch(/detail:|inputs:|events:|toolInvocations:/)
   })
 
   it('keeps durable and lossy realtime paths causally separate', () => {

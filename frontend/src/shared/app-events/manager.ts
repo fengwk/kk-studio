@@ -105,6 +105,9 @@ export class ApplicationEventManager {
   }
 
   private dispatch(message: ApplicationEventServerMessage): void {
+    if (message.type === 'heartbeat') {
+      return
+    }
     if (message.type === 'error') {
       if (message.resource == null) {
         return

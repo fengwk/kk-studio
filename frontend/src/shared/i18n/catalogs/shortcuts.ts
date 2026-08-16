@@ -50,24 +50,12 @@ export const shortcutsCatalog = {
     'zh-CN': '画布',
   },
   'ai.runtime.shortcuts.eventsNav': {
-    'en-US': 'Move the active event',
-    'zh-CN': '移动选中事件',
-  },
-  'ai.runtime.shortcuts.eventsPage': {
-    'en-US': 'Page through the event list',
-    'zh-CN': '事件列表翻页',
-  },
-  'ai.runtime.shortcuts.eventsEdges': {
-    'en-US': 'Jump to the first / last event',
-    'zh-CN': '跳到第一个/最后一个事件',
-  },
-  'ai.runtime.shortcuts.eventsOpen': {
-    'en-US': 'Open the event detail',
-    'zh-CN': '打开事件详情',
+    'en-US': 'Move the selected event',
+    'zh-CN': '切换选中事件',
   },
   'ai.runtime.shortcuts.eventsEscape': {
-    'en-US': 'Close the event detail',
-    'zh-CN': '关闭事件详情',
+    'en-US': 'Clear the event selection',
+    'zh-CN': '取消选中事件',
   },
   'ai.runtime.shortcuts.canvasEscape': {
     'en-US': 'Clear the selection and focus the stage',
@@ -129,21 +117,9 @@ export const shortcutsCatalog = {
     'en-US': 'Event navigation',
     'zh-CN': '事件导航',
   },
-  'ai.runtime.shortcuts.label.eventsPage': {
-    'en-US': 'Page events',
-    'zh-CN': '事件翻页',
-  },
-  'ai.runtime.shortcuts.label.eventsEdges': {
-    'en-US': 'Event edges',
-    'zh-CN': '事件边界',
-  },
-  'ai.runtime.shortcuts.label.eventsOpen': {
-    'en-US': 'Open event',
-    'zh-CN': '打开事件',
-  },
   'ai.runtime.shortcuts.label.eventsEscape': {
-    'en-US': 'Close detail',
-    'zh-CN': '关闭详情',
+    'en-US': 'Clear selection',
+    'zh-CN': '取消选中',
   },
   'ai.runtime.shortcuts.label.canvasEscape': {
     'en-US': 'Clear & focus',

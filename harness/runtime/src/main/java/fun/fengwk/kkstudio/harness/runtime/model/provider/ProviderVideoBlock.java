@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider;
 
-/** 视频内容；source 保存不经 Provider SDK 解释的 URI 或内联编码。 */
+/** 视频内容；source 保存 URI（包括合法 data URI），由 Provider adapter 按 URI 解释。 */
 public record ProviderVideoBlock(String mediaType, String source) implements ProviderContentBlock {
 
   public ProviderVideoBlock {

@@ -62,6 +62,8 @@ vi.mock('@/shared/api/environment-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
+    listThreadEntries: vi.fn(),
+    getSystemPromptPreview: vi.fn(),
     enqueueCommands: vi.fn(),
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
@@ -242,6 +244,7 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(agentService.listModels).mockResolvedValue(page([miniMaxModel]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
     vi.mocked(environmentService.listEnvironments).mockResolvedValue(readyEnvironments)
+    vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({ text: '' })
     vi.mocked(environmentService.listDirectories).mockResolvedValue({
       path: '.',
       displayPath: '.',
@@ -394,7 +397,7 @@ describe('ChatWorkspacePage', () => {
 
     // Pane 2 单独回到 conversation：Pane 1 仍停留在 events 视图。
     await user.click(composers[1]!)
-    await user.keyboard('/conversation{Enter}')
+    await user.keyboard('/events{Enter}')
     await waitFor(() => expect(paneTranscript('pane-2')).not.toBeNull())
     expect(paneEvents('pane-1')).not.toBeNull()
   })
@@ -436,16 +439,15 @@ describe('ChatWorkspacePage', () => {
     })
     renderWorkspace()
 
-    await screen.findByLabelText('给 AI 发送消息')
-    await user.click(screen.getByRole('button', { name: /env:none/ }))
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     const dirPanel = await screen.findByLabelText('local 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
-    expect(
-      screen.getByRole('button', { name: /env:local/ }),
-    ).toBeInTheDocument()
-    // 选中的完整 binding 异步同步为 Chat 默认值（版本化 CAS）；footer 使用面板本地草稿。
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
+    expect(screen.getByText('env:local · @/')).toBeInTheDocument()
+    // 选中的完整 binding 异步同步为 Chat 默认值（版本化 CAS）；Footer 使用面板本地草稿。
     await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(1))
     expect(chatService.updateChat).toHaveBeenNthCalledWith(1, 'chat-1', {
       environment: { name: 'local', workspacePath: '.' },
@@ -453,14 +455,13 @@ describe('ChatWorkspacePage', () => {
     })
 
     // 显式清空（无）同步为 Chat 默认 null。
-    await user.click(screen.getByRole('button', { name: /env:local/ }))
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
     const dirAgain = await screen.findByLabelText('local 目录')
     await user.click(within(dirAgain).getByRole('button', { name: '返回 Environment 列表' }))
     const envModalAgain = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModalAgain).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
-    expect(
-      screen.getByRole('button', { name: /env:none/ }),
-    ).toBeInTheDocument()
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('none env')
     await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(2))
     expect(chatService.updateChat).toHaveBeenNthCalledWith(2, 'chat-1', {
       environment: null,
@@ -491,10 +492,9 @@ describe('ChatWorkspacePage', () => {
 
     renderWorkspace()
     await waitFor(() => {
-      const environmentButtons = screen.getAllByRole('button', { name: /env:/ })
-      const labels = environmentButtons.map((button) => button.textContent)
+      const labels = screen.getAllByText(/env:(local|remote)/).map((item) => item.textContent)
       expect(labels).toEqual(
-        expect.arrayContaining(['env:local · ws:.', 'env:remote · ws:.']),
+        expect.arrayContaining(['env:local · @/', 'env:remote · @/']),
       )
     })
     expect(chatService.updateChat).not.toHaveBeenCalled()
@@ -520,11 +520,11 @@ describe('ChatWorkspacePage', () => {
     })
 
     renderWorkspace()
-    await screen.findAllByLabelText('给 AI 发送消息')
-
-    const agentButtons = screen.getAllByRole('button', { name: 'agent:assistant' })
-    await user.click(agentButtons[0])
-    await user.click(agentButtons[1])
+    const composers = await screen.findAllByLabelText('给 AI 发送消息')
+    await user.click(composers[0]!)
+    await user.keyboard('/agent{Enter}')
+    await user.click(composers[1]!)
+    await user.keyboard('/agent{Enter}')
     const selectionButtons = await screen.findAllByRole('option', { name: 'coder' })
     await user.click(selectionButtons[0])
     await user.click(selectionButtons[1])
@@ -617,14 +617,13 @@ describe('ChatWorkspacePage', () => {
     renderWorkspace()
 
     const composer = await screen.findByLabelText('给 AI 发送消息')
-    await user.click(screen.getByRole('button', { name: /env:none/ }))
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     const dirPanel = await screen.findByLabelText('local 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
-    expect(
-      screen.getByRole('button', { name: /env:local/ }),
-    ).toBeInTheDocument()
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
+    expect(screen.getByText('env:local · @/')).toBeInTheDocument()
 
     // Chat 默认更新失败不影响本面板草稿与首次发送：ROOT branchSettings 使用面板本地值。
     await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(1))

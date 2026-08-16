@@ -39,6 +39,7 @@ import {
   ThreadSelectionPanel,
 } from '@/features/ai/chat/SelectionPanel'
 import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
+import { useEnvironmentWorkspaceMetadata } from '@/features/ai/environment/useEnvironmentWorkspaceMetadata'
 import {
   toAgentModelViews,
   type AgentModelView,
@@ -257,7 +258,7 @@ export function BlankComposerPane({
         setInteraction('environment')
         return
       case 'yolo':
-        void toggleYolo()
+        setYoloEnabled(!(frozenDraft?.yoloEnabled ?? chat?.yoloEnabled ?? false))
         return
       case 'shortcuts':
         setInteraction('shortcuts')
@@ -288,9 +289,18 @@ export function BlankComposerPane({
       action()
       return
     }
+    const contentKey =
+      hasUnsentMessage && hasUnsentSettings
+        ? 'ai.chat.history.discardContentMessageAndSettings'
+        : hasUnsentMessage
+          ? 'ai.chat.history.discardContentMessage'
+          : 'ai.chat.history.discardContentSettings'
     setDiscardConfirm({
       title: t('ai.chat.history.discardDraftTitle'),
-      description: t('ai.chat.history.confirmDiscardDraft'),
+      description: t('ai.chat.history.confirmDiscardDraft', {
+        target: t('ai.chat.history.discardTargetThread'),
+        content: t(contentKey),
+      }),
       confirmLabel: t('ai.chat.history.discardDraftConfirm'),
       tone: 'danger',
       onConfirm: () => {
@@ -348,7 +358,7 @@ export function BlankComposerPane({
     })
   }
 
-  async function toggleYolo() {
+  function setYoloEnabled(enabled: boolean) {
     if (pending) {
       return
     }
@@ -356,8 +366,8 @@ export function BlankComposerPane({
       if (!current) {
         return current
       }
-      const next = { ...current, yoloEnabled: !current.yoloEnabled }
-      void onYoloChange(next.yoloEnabled).catch((error: unknown) => {
+      const next = { ...current, yoloEnabled: enabled }
+      void onYoloChange(enabled).catch((error: unknown) => {
         setActionError(errorMessage(error, t('ai.runtime.action.updateYoloFailed')))
       })
       return next
@@ -368,21 +378,36 @@ export function BlankComposerPane({
   // 面板切换门控：first-send HTTP pending 阻塞 /thread；非空 composer、pending first-send
   // payload 或面板本地 draft 编辑都需要确认后才能丢弃。
   const panePending = pending
-  const paneDirty =
-    hasMessageContent(parts)
-    || pendingContent != null
-    || (
-      frozenDraft != null
-      && initialFrozenDraft != null
-      && !branchDraftsEqual(initialFrozenDraft, frozenDraft)
-    )
+  const hasUnsentMessage = hasMessageContent(parts) || pendingContent != null
+  const hasUnsentSettings =
+    frozenDraft != null
+    && initialFrozenDraft != null
+    && !branchDraftsEqual(initialFrozenDraft, frozenDraft)
+  const paneDirty = hasUnsentMessage || hasUnsentSettings
 
-  const footerAgentName =
-    frozenDraft?.agentName
-    || (chat?.agentName
-      ? t('ai.runtime.action.agentMissing')
-      : t('ai.runtime.action.blankAgent'))
   const environment = frozenDraft?.environment ?? null
+  const environmentReady =
+    environment == null
+      ? undefined
+      : (environmentReadyByName.get(environment.name) ?? false)
+  const { gitBranch } = useEnvironmentWorkspaceMetadata(environment, environmentReady)
+  const draftResolutionError =
+    actionError == null
+    && chat != null
+    && !modelsQuery.isLoading
+    && frozenDraft == null
+    && materializeBlankBranchDraft(
+      chatAgent,
+      chat.yoloEnabled,
+      models,
+      chat.environment ?? null,
+    ) == null
+      ? (
+          chat.agentName
+            ? t('ai.runtime.action.agentMissing')
+            : t('ai.runtime.action.blankAgent')
+        )
+      : null
   const interactionPanel =
     interaction === 'agent' ? (
       <AgentSelectionPanel
@@ -426,7 +451,9 @@ export function BlankComposerPane({
           <div className="blank-pane-body">
             <h2>{t('ai.chat.blankTitle')}</h2>
             <p>{t('ai.chat.blankDescription')}</p>
-            {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
+            {actionError || draftResolutionError ? (
+              <div className="thread-error-panel">{actionError ?? draftResolutionError}</div>
+            ) : null}
           </div>
           <ThreadComposer
             parts={parts}
@@ -440,28 +467,22 @@ export function BlankComposerPane({
             commands={BLANK_PANE_COMMANDS}
             focusOnEscape={focused && interactionPanel == null}
             active={interactionPanel == null}
+            settings={frozenDraft == null ? undefined : {
+              model: frozenDraft.model,
+              models,
+              yoloEnabled: frozenDraft.yoloEnabled,
+              onModelChange: (model) => {
+                setFrozenDraft((current) => current ? { ...current, model } : current)
+                setActionError(null)
+              },
+              onYoloChange: setYoloEnabled,
+            }}
           />
           {interactionPanel}
           <ThreadStatusFooter
-            agentName={footerAgentName}
-            providerName={frozenDraft?.model.providerName || undefined}
-            modelName={
-              frozenDraft?.model.providerName && frozenDraft.model.modelName
-                ? `${frozenDraft.model.providerName}/${frozenDraft.model.modelName}`
-                : undefined
-            }
-            variantName={frozenDraft?.model.variant || undefined}
             environment={environment}
-            environmentReady={environment == null ? undefined : (environmentReadyByName.get(environment.name) ?? false)}
-            yoloEnabled={frozenDraft?.yoloEnabled ?? chat?.yoloEnabled}
-            onAgentClick={() => {
-              onFocus()
-              setInteraction('agent')
-            }}
-            onEnvironmentClick={() => {
-              onFocus()
-              setInteraction('environment')
-            }}
+            environmentReady={environmentReady}
+            gitBranch={gitBranch}
           />
         </main>
       </section>

@@ -178,7 +178,7 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
   `storage_blob`，写入 `resource(blobId,name,preview)`，并通过
   `harness_session_blob_ref` 为 Session 持有 Blob。没有 materializer 时，含 Resource 的成功结果
   fail closed，瞬时 URI 绝不进入 durable message。
-- Provider attempt 从 `storage_blob` 读取权威媒体事实，为所选模型支持的 image/audio/video 生成新鲜预签名 HTTPS URL；durable invocation request 只保存 `blobId/name/preview`。前端 durable 渲染走 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview`；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation file/s3 引用兼容。
+- Provider attempt 从 `storage_blob` 读取权威媒体事实：支持的图片从原始 Blob 受限读取（30 MiB）并生成 attempt-only `data:<mediaType>;base64,...`，避免远端 Provider 访问本地/私网预签名 URL；audio/video 暂使用新鲜预签名 URL。Provider adapter 把 source 统一作为 URI 交给 SDK 的 URI 重载，禁止误走 raw Base64 重载。durable invocation request 只保存 `blobId/name/preview`。前端 durable 渲染走 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview`；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation file/s3 引用兼容。
 
 ## 11. 验证入口
 

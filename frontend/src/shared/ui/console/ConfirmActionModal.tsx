@@ -69,7 +69,7 @@ export function ConfirmActionModal({
         aria-label={modal.title}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <ModalHeader title={modal.title} onClose={effectiveClose} />
+        <ModalHeader title={modal.title} onClose={effectiveClose} closeDisabled={pending} />
         <div className="modal-body confirm-modal-body">
           <div className={`confirm-modal-icon ${modal.tone === 'danger' ? 'danger' : ''}`} aria-hidden="true">
             <Trash2 />

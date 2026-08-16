@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.ai.runtime.model;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -11,6 +12,9 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.storage.S3ObjectContent;
+import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.core.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlobState;
@@ -28,7 +32,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-/** Provider attempt 的 Resource 物化契约：模态匹配生成新鲜 URL 的 media 块，否则确定性文本回退。 */
+/** Provider attempt 的 Resource 物化契约：图片内联、其它媒体签名，模态不匹配时确定性文本回退。 */
 class ProviderResourceMaterializerTest {
 
   private static final UUID BLOB_ID = new UUID(0L, 1L);
@@ -36,18 +40,17 @@ class ProviderResourceMaterializerTest {
       new ProviderResourceBlock(BLOB_ID, "scan.png", "tiny preview");
 
   @Test
-  void imageResourceWithImageModalityProducesFreshPresignedUrl() {
+  void imageResourceWithImageModalityProducesInlineDataUri() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    S3StorageService storageService = mock(S3StorageService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", 42L));
-    StoragePresignedUrlDTO signed =
-        StoragePresignedUrlDTO.builder()
-            .method("GET")
-            .url("https://cdn.example.com/blobs/" + BLOB_ID + "/original?X-Amz-Signature=abc")
-            .build();
-    when(blobManager.presignOriginalUrl(BLOB_ID)).thenReturn(signed);
+    when(storageService.download(
+            StorageObjectKeys.blobOriginal(BLOB_ID),
+            ProviderResourceMaterializer.MAX_INLINE_IMAGE_BYTES))
+        .thenReturn(new S3ObjectContent(new byte[] {0, 1, 2}, "image/png"));
 
     ProviderResourceMaterializer materializer =
-        ProviderResourceMaterializer.withStorage(blobManager);
+        ProviderResourceMaterializer.withStorage(blobManager, storageService);
     List<ProviderMessage> materialized =
         materializer.materialize(
             List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(RESOURCE))),
@@ -56,17 +59,22 @@ class ProviderResourceMaterializerTest {
     ProviderImageBlock image =
         assertInstanceOf(ProviderImageBlock.class, materialized.get(0).contents().get(0));
     assertEquals("image/png", image.mediaType());
-    assertEquals(signed.getUrl(), image.source());
-    verify(blobManager).presignOriginalUrl(BLOB_ID);
+    assertEquals("data:image/png;base64,AAEC", image.source());
+    verify(storageService)
+        .download(
+            StorageObjectKeys.blobOriginal(BLOB_ID),
+            ProviderResourceMaterializer.MAX_INLINE_IMAGE_BYTES);
+    verify(blobManager, never()).presignOriginalUrl(BLOB_ID);
   }
 
   @Test
   void audioAndVideoModalitiesMatchTheirMediaTypes() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    S3StorageService storageService = mock(S3StorageService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("audio/mpeg", 7L));
     when(blobManager.presignOriginalUrl(BLOB_ID)).thenReturn(url("https://cdn.example.com/audio"));
     ProviderResourceMaterializer audioMaterializer =
-        ProviderResourceMaterializer.withStorage(blobManager);
+        ProviderResourceMaterializer.withStorage(blobManager, storageService);
     List<ProviderMessage> audio =
         audioMaterializer.materialize(
             List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(RESOURCE))),
@@ -76,7 +84,7 @@ class ProviderResourceMaterializerTest {
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("video/mp4", 7L));
     when(blobManager.presignOriginalUrl(BLOB_ID)).thenReturn(url("https://cdn.example.com/video"));
     List<ProviderMessage> video =
-        ProviderResourceMaterializer.withStorage(blobManager)
+        ProviderResourceMaterializer.withStorage(blobManager, storageService)
             .materialize(
                 List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(RESOURCE))),
                 Set.of(ModelInputModality.VIDEO));
@@ -84,11 +92,37 @@ class ProviderResourceMaterializerTest {
   }
 
   @Test
+  void oversizedImageIsRejectedBeforeStorageDownload() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    S3StorageService storageService = mock(S3StorageService.class);
+    when(blobManager.getBlob(BLOB_ID))
+        .thenReturn(
+            activeBlob("image/png", ProviderResourceMaterializer.MAX_INLINE_IMAGE_BYTES + 1));
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ProviderResourceMaterializer.withStorage(blobManager, storageService)
+                    .materialize(
+                        List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(RESOURCE))),
+                        Set.of(ModelInputModality.IMAGE)));
+
+    assertTrue(error.getMessage().contains("must not exceed"), error.getMessage());
+    verify(storageService, never())
+        .download(
+            StorageObjectKeys.blobOriginal(BLOB_ID),
+            ProviderResourceMaterializer.MAX_INLINE_IMAGE_BYTES);
+    verify(blobManager, never()).presignOriginalUrl(BLOB_ID);
+  }
+
+  @Test
   void imageWithoutImageModalityFallsBackToTextWithStorageFacts() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    S3StorageService storageService = mock(S3StorageService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", 42L));
     List<ProviderMessage> materialized =
-        ProviderResourceMaterializer.withStorage(blobManager)
+        ProviderResourceMaterializer.withStorage(blobManager, storageService)
             .materialize(
                 List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(RESOURCE))),
                 Set.of(ModelInputModality.TEXT));
@@ -107,9 +141,10 @@ class ProviderResourceMaterializerTest {
   @Test
   void documentModalityNeverProducesMediaBlock() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    S3StorageService storageService = mock(S3StorageService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", 42L));
     List<ProviderMessage> materialized =
-        ProviderResourceMaterializer.withStorage(blobManager)
+        ProviderResourceMaterializer.withStorage(blobManager, storageService)
             .materialize(
                 List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(RESOURCE))),
                 Set.of(ModelInputModality.DOCUMENT));
@@ -123,9 +158,10 @@ class ProviderResourceMaterializerTest {
   @Test
   void missingOrDeletingBlobFallsBackWithoutMediaFacts() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    S3StorageService storageService = mock(S3StorageService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(null);
     ProviderResourceMaterializer materializer =
-        ProviderResourceMaterializer.withStorage(blobManager);
+        ProviderResourceMaterializer.withStorage(blobManager, storageService);
 
     List<ProviderMessage> missing =
         materializer.materialize(

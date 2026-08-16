@@ -93,8 +93,8 @@ import java.util.UUID;
  * ModelInvocationRequest}。
  *
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environment binding / agentName / {@link
- * ModelSelection} / ordered activeTools）与调用方冻结的 YOLO 开关；实现只按这些精确引用读取最新 catalog / environment
- * 事实，绝不回读 Chat defaults、绝不 fallback agent/model/variant/tools，也绝不静默丢弃缺失能力。 environment 是完整
+ * ModelSelection}）与调用方冻结的 YOLO 开关；实现按这些精确引用读取最新 catalog / environment 事实，Agent 的
+ * tools/skills/subagents 每个新 turn 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。 environment 是完整
  * binding（路由名 + workspace path），为最新 branch 的不可变事实：ENVIRONMENT 工具一律按最新 {@code
  * settings.environment()} 绑定（可为 null 或当前不可用，实际执行时失败）；Agent skills 要求最新 Environment 提供 live
  * descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch settings。配置或 Environment 不满足一律返回 {@link
@@ -224,10 +224,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Instant now = clock.instant();
     CurrentEnvironmentContext currentEnvironment =
         resolveCurrentEnvironment(settings.environment(), now);
+    List<String> activeTools = activeTools(agentConfig, path);
     List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), settings, now);
-    List<SubagentBinding> subagentBindings =
-        resolveSubagents(agentConfig.getSubagents(), settings, path);
-    List<ToolBinding> toolBindings = resolveTools(settings, !subagentBindings.isEmpty());
+    List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents(), path);
+    List<ToolBinding> toolBindings =
+        resolveTools(settings, activeTools, !subagentBindings.isEmpty());
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
       throw rejection(
@@ -425,14 +426,28 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
   }
 
+  /** 从最新 Agent 配置派生本 turn 的工具集合；内部工具只在对应能力当前可用时追加。 */
+  private List<String> activeTools(AgentDefinitionConfigDTO config, EntryPath path) {
+    List<String> activeTools = new ArrayList<>(config.getTools());
+    if (!config.getSkills().isEmpty() && !activeTools.contains(LoadSkillTool.NAME)) {
+      activeTools.add(LoadSkillTool.NAME);
+    }
+    if (!config.getSubagents().isEmpty()
+        && sessionDepth(path) < subagentConfig.maxDepth()
+        && !activeTools.contains(TaskTool.NAME)) {
+      activeTools.add(TaskTool.NAME);
+    }
+    return List.copyOf(activeTools);
+  }
+
   /**
-   * 按 {@link BranchSettings#activeTools()} 的精确顺序逐一绑定。ENVIRONMENT 工具一律绑定最新 branch 的完整 {@code
-   * settings.environment()} binding（可为 null 或当前不可用——实际执行时确定性失败）；PLATFORM 工具不携带路由。缺失能力仍立即拒绝， 绝不静默跳过。
+   * 按最新 Agent 配置派生的精确顺序逐一绑定。ENVIRONMENT 工具一律绑定最新 branch 的完整 {@code settings.environment()}
+   * binding（可为 null 或当前不可用——实际执行时确定性失败）；PLATFORM 工具不携带路由。缺失能力仍立即拒绝，绝不静默跳过。
    */
   private List<ToolBinding> resolveTools(
-      BranchSettings settings, boolean subagentDelegationEnabled) {
-    List<ToolBinding> bindings = new ArrayList<>(settings.activeTools().size());
-    for (String name : settings.activeTools()) {
+      BranchSettings settings, List<String> activeTools, boolean subagentDelegationEnabled) {
+    List<ToolBinding> bindings = new ArrayList<>(activeTools.size());
+    for (String name : activeTools) {
       if (name.equals(TaskTool.NAME)) {
         if (!subagentDelegationEnabled) {
           throw rejection(
@@ -486,10 +501,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return new ToolBinding(descriptor, ToolType.PLATFORM, null, plugin);
   }
 
-  /**
-   * Agent skills 只从 Agent config 读取，且必须由最新选中的 Environment 精确提供（live descriptors）； load_skill
-   * 必须显式出现在 activeTools 中。
-   */
+  /** Agent skills 只从最新 Agent config 读取，且必须由最新选中的 Environment 精确提供。 */
   private List<SkillBinding> resolveSkills(
       List<String> skillNames, BranchSettings settings, Instant now) {
     if (skillNames.isEmpty()) {
@@ -513,9 +525,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
       throw rejection(
           "agent skills require the latest selected environment which is not ready: "
               + environmentName);
-    }
-    if (!settings.activeTools().contains(LoadSkillTool.NAME)) {
-      throw rejection("agent has skills but activeTools must include " + LoadSkillTool.NAME);
     }
     List<SkillBinding> bindings = new ArrayList<>(skillNames.size());
     for (String skillName : skillNames) {
@@ -553,26 +562,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * task 只有在 branch 明确激活内部工具、Agent allowlist 非空且当前 Session depth 小于部署上限时才绑定。 名称与描述在
-   * ModelInvocationRequest 中冻结，Tool 执行绝不依据后续 Agent 配置扩权。
+   * task 由最新 Agent allowlist 且当前 Session depth 小于部署上限时绑定。名称与描述在 ModelInvocationRequest 中冻结， Tool
+   * 执行绝不依据后续 Agent 配置扩权。
    */
-  private List<SubagentBinding> resolveSubagents(
-      List<String> names, BranchSettings settings, EntryPath path) {
-    if (!settings.activeTools().contains(TaskTool.NAME)) {
+  private List<SubagentBinding> resolveSubagents(List<String> names, EntryPath path) {
+    if (names.isEmpty() || sessionDepth(path) >= subagentConfig.maxDepth()) {
       return List.of();
-    }
-    RootPayload root = (RootPayload) path.root().payload();
-    int depth = root.subagentContext() == null ? 1 : root.subagentContext().depth();
-    if (depth >= subagentConfig.maxDepth()) {
-      throw rejection(
-          "task is unavailable at subagent depth "
-              + depth
-              + " (maxDepth="
-              + subagentConfig.maxDepth()
-              + ")");
-    }
-    if (names.isEmpty()) {
-      throw rejection("task requires a non-empty Agent subagents allowlist");
     }
     List<SubagentBinding> bindings = new ArrayList<>(names.size());
     for (String name : names) {
@@ -584,6 +579,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
               subagent.getDescription() == null ? "" : subagent.getDescription()));
     }
     return List.copyOf(bindings);
+  }
+
+  private static int sessionDepth(EntryPath path) {
+    RootPayload root = (RootPayload) path.root().payload();
+    return root.subagentContext() == null ? 1 : root.subagentContext().depth();
   }
 
   private static ModelVariant findVariant(ParsedAgentModelConfig model, String name) {

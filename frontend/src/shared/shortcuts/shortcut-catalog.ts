@@ -93,27 +93,6 @@ export const SHORTCUT_CATALOG: ShortcutDefinition[] = [
     descriptionKey: 'ai.runtime.shortcuts.eventsNav',
   },
   {
-    id: 'events.page',
-    scope: 'events',
-    keys: 'PageUp / PageDown',
-    labelKey: 'ai.runtime.shortcuts.label.eventsPage',
-    descriptionKey: 'ai.runtime.shortcuts.eventsPage',
-  },
-  {
-    id: 'events.edges',
-    scope: 'events',
-    keys: 'Home / End',
-    labelKey: 'ai.runtime.shortcuts.label.eventsEdges',
-    descriptionKey: 'ai.runtime.shortcuts.eventsEdges',
-  },
-  {
-    id: 'events.open',
-    scope: 'events',
-    keys: 'Enter / Space',
-    labelKey: 'ai.runtime.shortcuts.label.eventsOpen',
-    descriptionKey: 'ai.runtime.shortcuts.eventsOpen',
-  },
-  {
     id: 'events.escape',
     scope: 'events',
     keys: 'Esc',

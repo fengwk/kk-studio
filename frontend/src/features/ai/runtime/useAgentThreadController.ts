@@ -2,13 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   extractContextWindow,
-  formatModelRef,
-  modelRef,
   type AgentModelView,
 } from '@/features/ai/catalog'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
 import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
-import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
 import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
 import type { ThreadCommand } from '@/features/ai/runtime'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
@@ -39,7 +36,6 @@ import {
 } from '@/features/ai/composer/composer-draft'
 import { isConflictError, isConflictReason } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { HarnessThreadSnapshotDTO } from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
@@ -139,7 +135,6 @@ export function useAgentThreadController(
   initialParts: ComposerPart[] = [],
   initialReplay?: CommandBatchReplay,
   buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
-  environmentReadyByName: ReadonlyMap<string, boolean> | null = null,
 ) {
   const { t } = useI18n()
   const draftStorageScope = `thread:${threadId}`
@@ -194,9 +189,6 @@ export function useAgentThreadController(
     modelInvocation,
   )
   const branchUsage = aggregateBranchUsage(timeline.messages)
-  const branchUsageText = branchUsage == null
-    ? undefined
-    : formatTurnUsageText(branchUsage)
   // Event 投影独立于 DialogueMessage：durable Entry 全类型 + 活跃 model/tool overlay。
   // useMemo 保证快照未变化时 events 引用稳定（Pane 的 selected/active 跟随 effect 依赖它）。
   const events = useMemo(
@@ -211,7 +203,7 @@ export function useAgentThreadController(
     [entries, modelAttemptFailures, modelInvocation, realtime.modelStream, realtime.toolStreams, toolInvocations],
   )
   const working = isThreadWorking(thread, timeline)
-  const runtimeLabels = resolveRuntimeLabels(thread, agents, models, environmentReadyByName)
+  const runtimeLabels = resolveRuntimeLabels(thread, models)
 
   useEffect(() => {
     if (initializedReplayThreadRef.current === threadId) {
@@ -550,7 +542,6 @@ export function useAgentThreadController(
     events,
     runtimeLabels,
     branchUsage,
-    branchUsageText,
     working,
     entries,
     messagesLoading: snapshotQuery.isLoading,
@@ -579,29 +570,21 @@ export function useAgentThreadController(
 
 function resolveRuntimeLabels(
   thread: ReturnType<typeof useAgentThreadQueries>['thread'],
-  agents: AgentDefinitionDTO[],
   models: AgentModelView[],
-  environmentReadyByName: ReadonlyMap<string, boolean> | null,
 ) {
   const settings = thread?.branchSettings
-  const agent = agents.find((item) => item.name === settings?.agentName)
-  const model = models.find((item) => modelRef(item) === agent?.model)
+  const model = models.find(
+    (item) =>
+      item.providerName === settings?.model.providerName
+      && item.name === settings?.model.modelName,
+  )
   const contextWindow = extractContextWindow(model)
   const environment = settings?.environment
     ? { name: settings.environment.name, workspacePath: settings.environment.workspacePath }
     : null
   return {
-    agentName: settings?.agentName || translate('ai.runtime.action.blankAgent'),
-    providerName: settings?.model.providerName || undefined,
-    // 规范的展示身份是 provider/model。
-    modelName: formatModelRef(settings?.model.providerName, settings?.model.modelName),
-    variantName: settings?.model.variant || undefined,
-    // 完整 binding 即展示身份（name + workspacePath）；ready 标记仍按 name 查询
-    // live 列表，缺失/未知 => 不可用。
+    // 完整 binding 即展示身份（name + workspacePath）。
     environment,
-    environmentReady: environment == null
-      ? undefined
-      : (environmentReadyByName?.get(environment.name) ?? false),
     contextWindow,
   }
 }

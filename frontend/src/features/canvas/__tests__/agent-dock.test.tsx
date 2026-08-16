@@ -55,6 +55,7 @@ vi.mock('@/shared/api/environment-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
+    getSystemPromptPreview: vi.fn(),
     enqueueCommands: vi.fn(),
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
@@ -174,6 +175,7 @@ beforeEach(() => {
   })
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(threadSnapshot())
+  vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({ text: '' })
 })
 
 describe('Canvas add menu', () => {
@@ -264,9 +266,11 @@ describe('Canvas blank thread', () => {
     })
     const harness = renderHarness(<CanvasAgentThread />, { threadOpen: true })
 
-    // compact footer 展示 agent/model 选择；composer 为共享 Attachment Pill Composer。
-    await waitFor(() => expect(screen.getByRole('button', { name: 'agent:assistant' })).toBeInTheDocument())
-    expect(screen.getByText('minimax/MiniMax · default')).toBeInTheDocument()
+    // 双层 Composer 常驻展示 Permission 与 Model/Variant；Agent 通过命令面板编辑。
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: 'Model 与 Variant' }),
+    ).toHaveTextContent('minimax/MiniMax · default'))
+    expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('Default')
     expect(screen.getByRole('textbox', { name: /消息|Message/i })).toBeInTheDocument()
 
     await user.type(screen.getByRole('textbox', { name: /消息|Message/i }), '请检查这张画布')
@@ -293,12 +297,13 @@ describe('Canvas blank thread', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue({ results: [], total: 0 })
     renderHarness(<CanvasAgentThread />, { threadOpen: true })
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'agent:（无 Agent）' })).toBeInTheDocument()
-    })
-    await user.click(screen.getByRole('button', { name: 'agent:（无 Agent）' }))
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    expect(
+      await screen.findByText('暂无可解析的 Agent 配置，请先选择一个 Agent。'),
+    ).toBeInTheDocument()
+    await user.click(composer)
+    await user.keyboard('/agent{Enter}')
     expect(screen.getByText('暂无可用 Agent')).toBeInTheDocument()
-    expect(screen.queryByText('暂无可解析的 Agent 配置，请先选择一个 Agent。')).not.toBeInTheDocument()
   })
 
   it('keeps /shortcuts available and /thread disabled in the canvas blank scene', async () => {
@@ -360,7 +365,96 @@ describe('Canvas bound thread', () => {
     })
   })
 
-  it('switches between /events and /conversation without losing the composer draft', async () => {
+  it('restores queued model and permission settings without reversing them on the next send', async () => {
+    const user = userEvent.setup()
+    const currentModel = (await agentService.listModels()).results[0]!
+    vi.mocked(agentService.listModels).mockResolvedValue({
+      results: [
+        currentModel,
+        {
+          providerName: 'local',
+          name: 'Alternate',
+          description: null,
+          config: {
+            limit: { context: 4096, output: 128 },
+            abilities: { tools: false, reasoning: false, inputModalities: ['TEXT'] },
+            pricing: {
+              currency: 'CNY',
+              pricingTier: 't1',
+              serviceTier: 'standard',
+              serviceTierMultiplier: 1,
+              inputPerMillionTokens: 1,
+              outputPerMillionTokens: 2,
+              cacheReadPerMillionTokens: 0,
+              cacheWritePerMillionTokens: 0,
+              cacheWriteLongPerMillionTokens: 0,
+              reasoningPerMillionTokens: 0,
+              version: '0',
+            },
+            defaultVariant: 'review',
+            variants: [{ id: 'default' }, { id: 'review' }],
+          },
+          version: '0',
+          createTime: null,
+          updateTime: null,
+        },
+      ],
+      total: 2,
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue({
+      ...threadSnapshot(),
+      queuedCommands: [
+        {
+          threadId: THREAD_ID,
+          sequence: '1',
+          type: 'SET_MODEL',
+          state: 'QUEUED',
+          clientCommandId: 'queued-model',
+          requestHash: '0123456789abcdef'.repeat(4),
+          payloadJson: JSON.stringify({
+            model: { providerName: 'local', modelName: 'Alternate', variant: 'review' },
+          }),
+          consumedTurnStartEntryId: null,
+          cancelledAt: null,
+          createTime: null,
+        },
+        {
+          threadId: THREAD_ID,
+          sequence: '2',
+          type: 'SET_YOLO',
+          state: 'QUEUED',
+          clientCommandId: 'queued-yolo',
+          requestHash: '0123456789abcdef'.repeat(4),
+          payloadJson: JSON.stringify({ yoloEnabled: true }),
+          consumedTurnStartEntryId: null,
+          cancelledAt: null,
+          createTime: null,
+        },
+      ],
+    })
+    vi.mocked(harnessService.enqueueCommands).mockResolvedValue([])
+    renderHarness(<CanvasAgentThread />, {
+      threadOpen: true,
+      snapshot: canvasSnapshot(THREAD_ID),
+    })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    expect(await screen.findByRole('button', { name: 'Model 与 Variant' })).toHaveTextContent(
+      'local/Alternate · review',
+    )
+    expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('YOLO')
+
+    await user.type(composer, 'continue queued settings')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalled())
+    expect(
+      vi.mocked(harnessService.enqueueCommands).mock.calls[0]![1].commands.map(
+        (command) => command.type,
+      ),
+    ).toEqual(['USER_MESSAGE'])
+  })
+
+  it('toggles /events without losing the composer draft', async () => {
     const user = userEvent.setup()
     renderHarness(<CanvasAgentThread />, {
       threadOpen: true,
@@ -380,7 +474,7 @@ describe('Canvas bound thread', () => {
     expect(composer.closest('.thread-composer')).not.toHaveAttribute('hidden')
 
     await user.click(screen.getByRole('button', { name: '打开命令表' }))
-    await user.click(await screen.findByRole('option', { name: /^conversation/ }))
+    await user.click(await screen.findByRole('option', { name: /^events/ }))
     await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
     expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
     expect(composer.textContent).toBe('canvas draft')
@@ -413,27 +507,22 @@ describe('Canvas bound thread', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
 
-    // canvas-bound：只把 stop/upload/events/conversation/shortcuts 投影为可用，
-    // agent/environment/yolo/tree/new/thread 一律禁用（controller 只支持 stop）。
+    // canvas-bound：支持面板本地 BranchDraft 的 agent/environment/yolo 设置，
+    // thread/tree/new 仍无 Canvas 场景能力。
     await user.click(composer)
     await user.keyboard('/')
-    for (const id of ['thread', 'agent', 'environment', 'yolo', 'tree', 'new']) {
+    for (const id of ['thread', 'tree', 'new']) {
       expect(screen.getByRole('option', { name: new RegExp(`^${id}`) })).toHaveAttribute(
         'aria-disabled',
         'true',
       )
     }
-    // conversation 是当前激活视图（active-view 规则禁用），其余 controller 能力可用。
-    for (const id of ['stop', 'upload', 'events', 'shortcuts']) {
+    for (const id of ['agent', 'environment', 'yolo', 'models', 'stop', 'upload', 'events', 'shortcuts']) {
       expect(screen.getByRole('option', { name: new RegExp(`^${id}`) })).toHaveAttribute(
         'aria-disabled',
         'false',
       )
     }
-    expect(screen.getByRole('option', { name: /^conversation/ })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    )
   })
 })
 

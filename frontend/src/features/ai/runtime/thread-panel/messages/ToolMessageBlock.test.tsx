@@ -28,7 +28,7 @@ describe('ToolMessageBlock', () => {
     render(<ToolMessageBlock message={message({ phase: 'call', toolName: '', status: 'streaming' })} />)
 
     expect(screen.getByText(/Tool/)).toBeInTheDocument()
-    expect(screen.getByText('running')).toBeInTheDocument()
+    expect(screen.getByText('WORKING')).toBeInTheDocument()
     expect(screen.getByText('（无参数）')).toBeInTheDocument()
     expect(screen.queryByText('等待工具结果…')).not.toBeInTheDocument()
   })
@@ -46,7 +46,7 @@ describe('ToolMessageBlock', () => {
     )
 
     expect(container.firstElementChild).toHaveClass('error')
-    expect(screen.getByText('error')).toBeInTheDocument()
+    expect(screen.getByText('FAILED')).toBeInTheDocument()
     expect(screen.queryByText('{"path":"missing"}')).not.toBeInTheDocument()
     expect(screen.getByText('read failed')).toBeInTheDocument()
     expect(screen.getByText('file not found')).toBeInTheDocument()
@@ -77,17 +77,90 @@ describe('ToolMessageBlock', () => {
         message={message({ phase: 'call', status: undefined, partial: 'streaming text' })}
       />,
     )
-    expect(screen.getAllByText('done')).toHaveLength(2)
+    expect(screen.getByText('DONE')).toBeInTheDocument()
     expect(screen.getByText('streaming text')).toBeInTheDocument()
 
     rerender(<ToolMessageBlock message={message({ phase: 'result', status: undefined })} />)
-    expect(screen.getByText('done')).toBeInTheDocument()
+    expect(screen.getByText('DONE')).toBeInTheDocument()
     expect(screen.getByText('无文本输出')).toBeInTheDocument()
   })
 
   it('shows the failed placeholder for an empty error result', () => {
     render(<ToolMessageBlock message={message({ status: 'error' })} />)
     expect(screen.getByText('工具执行失败。')).toBeInTheDocument()
+  })
+
+  it('renders write content and edit diffs instead of raw JSON, and pairs result into the same card', () => {
+    const { rerender } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'write',
+          rendererKey: 'write',
+          arguments: JSON.stringify({
+            path: 'App.java',
+            content: 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight',
+          }),
+        })}
+      />,
+    )
+    expect(screen.getByText('App.java')).toBeInTheDocument()
+    expect(screen.getByText('one')).toBeInTheDocument()
+    expect(screen.getByText('eight')).toBeInTheDocument()
+    expect(screen.queryByText(/"content"/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/还有/)).not.toBeInTheDocument()
+    expect(document.querySelector('.thread-tool-preview-body')).toHaveClass('is-write')
+    expect(document.querySelector('.thread-tool-preview-body')).not.toHaveClass('is-expanded')
+
+    rerender(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'edit',
+          rendererKey: 'edit',
+          arguments: JSON.stringify({
+            path: 'App.java',
+            old_string: 'alpha\nbeta',
+            new_string: 'alpha\nBETA',
+          }),
+        })}
+        result={message({
+          phase: 'result',
+          toolName: 'edit',
+          rendererKey: 'edit',
+          text: 'Edited App.java successfully.',
+        })}
+      />,
+    )
+    expect(screen.getByText('-beta')).toBeInTheDocument()
+    expect(screen.getByText('+BETA')).toBeInTheDocument()
+    expect(screen.getByText('Edited App.java successfully.')).toBeInTheDocument()
+    expect(screen.queryByText('工具结果 ·')).not.toBeInTheDocument()
+  })
+
+  it('keeps the original path case and expands the 5-line preview on toggle', async () => {
+    const user = userEvent.setup()
+    render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'write',
+          rendererKey: 'write',
+          arguments: JSON.stringify({
+            path: 'src/SortingAlgorithms.java',
+            content: 'one\ntwo\nthree\nfour\nfive\nsix',
+          }),
+        })}
+      />,
+    )
+
+    expect(screen.getByText('src/SortingAlgorithms.java')).toBeInTheDocument()
+    expect(screen.queryByText('SRC/SORTINGALGORITHMS.JAVA')).not.toBeInTheDocument()
+    expect(screen.getByText('DONE')).toBeInTheDocument()
+    expect(document.querySelector('.thread-tool-preview-body')).not.toHaveClass('is-expanded')
+
+    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
+    expect(document.querySelector('.thread-tool-preview-body')).toHaveClass('is-expanded')
   })
 
   it('renders image, markdown-style linked file, and attachment fallbacks', async () => {

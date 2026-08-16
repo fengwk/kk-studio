@@ -91,6 +91,8 @@ digest 使用 `(type, nameLen:4B, name, valueLen:4B, value)` 长度前缀帧（�
 
 前六项是互斥计费类别；负值在归一化边界失败。`rawUsageJson` 只保存 Provider usage metadata（缺失为 `{}`，必须是 JSON object 或 array）。
 
+OpenAI Responses 兼容端点可能省略 `input_tokens_details` / `output_tokens_details` 或其中的计数字段，而 OpenAI Java SDK 将这些字段建模为必填。Adapter 在 SDK 反序列化边界仅把缺失或 `null` 的 breakdown count 补为 `0`，保留 input/output/total 与扩展字段；非 object 等畸形值仍按无效 Provider 响应失败。
+
 ## 4. Cost
 
 `ModelCost` 是金额快照：
@@ -114,7 +116,7 @@ total
 
 Model config 写入时严格校验：`limit.context`/`limit.output` 为正整数且 output 不超过 context；`abilities.tools`/`abilities.reasoning` 为 boolean；`inputModalities` 非空且只包含受支持 enum；`variants` 非空、variant id 唯一且命中 `defaultVariant`；pricing 字段完整、单价非负、multiplier 为正。Agent config 写入时校验可选择 Tool 名与 Skill 字段结构。
 
-每次 turn 由 `DatabaseTurnResolver` 从 `BranchSettings` 重新读取最新 Agent、Provider、Model、Variant、ToolCatalog 与 Environment route，并把结果冻结进 `ModelInvocationRequest`（Agent/Model 修改下一 turn 生效）。缺失 Agent/Provider/Model/Variant 或未知可选择 Tool → `ASSISTANT_ERROR` barrier；非 null Environment route 无论 activeTools 都必须存在且 READY，null route 只允许 platform-only 且无 skills 的 turn。违反这些 fail-closed 规则时不创建 Provider 调用。每次 Model attempt 再由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。effective cache control 按 attempt 时当前 capability 规范化。
+每次 turn 由 `DatabaseTurnResolver` 从 `BranchSettings` 读取 agent/model/environment 引用，再读取最新 Agent、Provider、Model、Variant 与 ToolCatalog，并从最新 Agent config 派生 tools/skills/subagents，结果冻结进 `ModelInvocationRequest`（Agent/Model 修改下一 turn 生效；历史 activeTools 不限制或扩张能力）。缺失 Agent/Provider/Model/Variant、未知可选择 Tool，或 skills 所需 Environment 不可用 → `ASSISTANT_ERROR` barrier；普通 ENVIRONMENT 工具允许冻结 null/未 READY binding，在实际 start 时产生模型可见的失败 ToolResult。每次 Model attempt 再由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。effective cache control 按 attempt 时当前 capability 规范化。
 
 ## 7. 实现与测试入口
 

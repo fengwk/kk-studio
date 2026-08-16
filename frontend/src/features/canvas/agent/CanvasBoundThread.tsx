@@ -7,35 +7,44 @@ import {
   useThreadPanelViewState,
   type ChatPanelActivityInput,
   type ChatPanelComposerInput,
-  type ChatPanelFooterInput,
   type ChatPanelLabels,
   type ChatPanelTranscriptInput,
   type ThreadCommand,
   type ThreadPanelMainView,
   useAgentThreadController,
 } from '@/features/ai/runtime'
+import { useSystemPromptPreview } from '@/features/ai/runtime/useSystemPromptPreview'
 import {
-  threadCommandsForActiveView,
   threadCommandsForScene,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
   buildMessageBatchPlan,
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
-import { branchDraftFromThread } from '@/features/ai/chat/branch-draft'
+import {
+  activeToolsFromAgent,
+  branchDraftFromThread,
+  projectPendingTarget,
+  type BranchDraft,
+} from '@/features/ai/chat/branch-draft'
+import { AgentSelectionPanel } from '@/features/ai/chat/SelectionPanel'
+import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
+import { useEnvironmentWorkspaceMetadata } from '@/features/ai/environment/useEnvironmentWorkspaceMetadata'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentBindingDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts/ai-environment'
 import type { UUIDString } from '@/shared/api/contracts/studio'
 
 /**
- * Canvas 绑定 Thread：复用共享 useAgentThreadController + ChatPanel。
- * buildBatch 只发送 USER_MESSAGE（branch settings 已在 Thread 创建时烘焙）；
- * footer 展示持久化 label，agent/environment/yolo 的选择只属于 blank 流程。
- * 不携带任何隐式 Canvas 上下文 —— 绑定只来自 document.threadId。
+ * Canvas 绑定 Thread：复用共享 useAgentThreadController + ChatPanel。Branch settings
+ * 与 Chat Bound 一样是 pane-local draft：下一条消息把最小 SET_* diff 与
+ * USER_MESSAGE 作为同一 batch 原子发送。不携带任何隐式 Canvas 上下文——绑定
+ * 只来自 document.threadId。
  *
- * 命令能力（canvas-bound）：controller 只支持 stop（upload 由 ThreadComposer 处理
- * 文件选择），因此 agent/environment/yolo/tree/new/thread 全部禁用，
- * 只启用 stop/upload/events/conversation/shortcuts。
+ * 命令能力（canvas-bound）：agent/environment/yolo 可编辑 pane draft；stop 由
+ * controller 处理，upload 由 ThreadComposer 处理；tree/new/thread 仍禁用。
  */
 const CANVAS_BOUND_COMMANDS: ThreadCommand[] = threadCommandsForScene('canvas-bound')
 
@@ -58,25 +67,32 @@ export function CanvasBoundThread({
     [],
     undefined,
     (parts) => buildBatchRef.current?.(parts) ?? null,
-    environmentReadyByName,
   )
+  const [branchState, setBranchState] = useState<{
+    base: BranchDraft
+    draft: BranchDraft
+  } | null>(null)
   const {
     mode,
     switchMode,
     selectedEventId,
     selectEvent,
-    activeEventId,
-    setActiveEventId,
     eventsBodyRef,
     initialConversationScrollTop,
     initialEventsScrollTop,
   } = useThreadPanelViewState(threadId, controller.bodyRef, controller.events)
-  // detail widget 按最新 records 派生（id 消失时 hook 已清空 selected）。
+  const systemPrompt = useSystemPromptPreview(
+    threadId,
+    mode === 'events',
+    controller.working,
+  )
   const selectedRecord =
     selectedEventId == null
       ? null
       : (controller.events.find((event) => event.id === selectedEventId) ?? null)
-  const [interaction, setInteraction] = useState<'shortcuts' | null>(null)
+  const [interaction, setInteraction] = useState<
+    'agent' | 'environment' | 'shortcuts' | null
+  >(null)
   const boundThreadIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (boundThreadIdRef.current === threadId) {
@@ -84,32 +100,66 @@ export function CanvasBoundThread({
     }
     boundThreadIdRef.current = threadId
     // 主视图/Event 状态由 useThreadPanelViewState 在 threadId 变化时重置。
+    setBranchState(null)
     setInteraction(null)
   }, [threadId])
+
+  useEffect(() => {
+    const thread = controller.thread
+    if (!thread) {
+      return
+    }
+    setBranchState((current) => {
+      const snapshotDraft = branchDraftFromThread(thread)
+      if (current == null) {
+        return {
+          base: snapshotDraft,
+          draft: projectPendingTarget(snapshotDraft, controller.queuedCommands),
+        }
+      }
+      return { ...current, base: snapshotDraft }
+    })
+  }, [controller.queuedCommands, controller.thread])
+
+  const effectiveBase = useMemo(
+    () => branchState == null
+      ? null
+      : projectPendingTarget(branchState.base, controller.queuedCommands),
+    [branchState, controller.queuedCommands],
+  )
 
   const buildBatch = useCallback(
     (parts: ComposerPart[]): CommandBatchPlan | null => {
       const thread = controller.thread
-      if (!thread) {
+      if (!thread || branchState == null || effectiveBase == null) {
         return null
       }
-      const base = branchDraftFromThread(thread)
-      return buildMessageBatchPlan({ thread, effectiveBase: base, draft: base, parts })
+      return buildMessageBatchPlan({
+        thread,
+        effectiveBase,
+        draft: branchState.draft,
+        parts,
+      })
     },
-    [controller.thread],
+    [branchState, controller.thread, effectiveBase],
   )
   useEffect(() => {
     buildBatchRef.current = buildBatch
   })
 
+  const draft = branchState?.draft
+  // Footer 只投影已生效的 snapshot facts；pane-local draft 仅属于下一条 batch。
+  const environment = controller.runtimeLabels.environment
+  const environmentReady =
+    environment != null
+      ? (environmentReadyByName.get(environment.name) ?? false)
+      : undefined
+  const { gitBranch } = useEnvironmentWorkspaceMetadata(environment, environmentReady)
   const labels: ChatPanelLabels = {
-    agentName: controller.runtimeLabels.agentName,
-    providerName: controller.runtimeLabels.providerName,
-    modelName: controller.runtimeLabels.modelName,
-    variantName: controller.runtimeLabels.variantName,
-    environment: controller.runtimeLabels.environment,
-    environmentReady: controller.runtimeLabels.environmentReady,
-    usageText: controller.branchUsageText,
+    environment,
+    environmentReady,
+    gitBranch,
+    branchUsage: controller.branchUsage,
     contextWindow: controller.runtimeLabels.contextWindow,
   }
   const transcript: ChatPanelTranscriptInput = {
@@ -134,47 +184,97 @@ export function CanvasBoundThread({
       return
     }
     switch (command.id) {
-      case 'events':
-        switchMode('events')
+      case 'agent':
+        setInteraction('agent')
         return
-      case 'conversation':
-        // 切回 conversation 同时关闭 event detail（hook 保留 Event active）。
-        switchMode('conversation')
+      case 'environment':
+        setInteraction('environment')
+        return
+      case 'yolo':
+        setYoloEnabled(!(branchState?.draft.yoloEnabled ?? false))
+        return
+      case 'events':
+        switchMode(mode === 'events' ? 'conversation' : 'events')
         return
       case 'shortcuts':
         setInteraction('shortcuts')
         return
       default:
-        // canvas-bound 只投影 stop/upload/events/conversation/shortcuts；
-        // upload 由 ThreadComposer 拦截，到达这里的只有 stop。
+        // upload 由 ThreadComposer 拦截；到达这里的其它可用命令只有 stop。
         controller.runCommand(command)
     }
   }
+
+  function editDraft(patch: Partial<BranchDraft>) {
+    setBranchState((current) =>
+      current == null
+        ? current
+        : { ...current, draft: { ...current.draft, ...patch } },
+    )
+  }
+
+  function selectAgent(agentName: string) {
+    const agent = controller.agents.find((candidate) => candidate.name === agentName)
+    if (agent == null) {
+      return
+    }
+    editDraft({ agentName, activeTools: activeToolsFromAgent(agent) })
+    setInteraction(null)
+  }
+
+  function selectEnvironment(environment: EnvironmentBindingDTO | null) {
+    editDraft({ environment })
+    setInteraction(null)
+  }
+
+  function setYoloEnabled(enabled: boolean) {
+    editDraft({ yoloEnabled: enabled })
+  }
+  const interactionPanel =
+    interaction === 'agent' ? (
+      <AgentSelectionPanel
+        agents={controller.agents.map((agent) => ({
+          name: agent.name,
+          description: agent.description,
+        }))}
+        selectedAgentName={draft?.agentName}
+        onSelect={selectAgent}
+        onClose={() => setInteraction(null)}
+      />
+    ) : interaction === 'environment' ? (
+      <EnvironmentWorkspacePanel
+        environments={environments}
+        current={draft?.environment ?? null}
+        onSelect={selectEnvironment}
+        onClose={() => setInteraction(null)}
+      />
+    ) : interaction === 'shortcuts' ? (
+      <ThreadShortcutsPanel onClose={() => setInteraction(null)} />
+    ) : undefined
+
   // 互斥主视图：events 时替换 transcript 滚动区；detail 是 widget zone 的只读展示。
   const mainViewInput: ThreadPanelMainView = {
     events:
       mode === 'events' ? (
         <ThreadEventView
           events={controller.events}
-          activeEventId={activeEventId}
-          onActiveEventIdChange={setActiveEventId}
+          selectedEventId={selectedEventId}
+          onSelectedEventIdChange={selectEvent}
           bodyRef={eventsBodyRef}
           initialScrollTop={initialEventsScrollTop}
-          detailOpen={selectedEventId != null}
-          onSelect={(event) => selectEvent(event.id)}
-          onCloseDetail={() => selectEvent(null)}
+          systemPrompt={systemPrompt}
         />
       ) : undefined,
   }
-  // 当前已激活的主视图命令保持可见但禁用（events 激活时 /events 禁用）。
-  const commands = useMemo(
-    () => threadCommandsForActiveView(CANVAS_BOUND_COMMANDS, mode),
-    [mode],
-  )
+  const commands = CANVAS_BOUND_COMMANDS
   const composer: ChatPanelComposerInput = {
     parts: controller.draft,
     pending: controller.pending,
-    disabled: controller.pending || controller.disabled,
+    disabled:
+      controller.pending
+      || controller.disabled
+      || branchState == null
+      || effectiveBase == null,
     onPartsChange: controller.setDraft,
     onSubmit: (payload, localDraft) => {
       void controller.submitMessage(payload, localDraft)
@@ -182,19 +282,23 @@ export function CanvasBoundThread({
     onCommand: handleCommand,
     commands,
     focusOnEscape: true,
-    interactionPanel:
-      interaction === 'shortcuts' ? (
-        <ThreadShortcutsPanel onClose={() => setInteraction(null)} />
-      ) : undefined,
-  }
-  const footer: ChatPanelFooterInput = {
-    yoloEnabled: controller.thread?.yoloEnabled,
+    interactionPanel,
+    settings: draft == null ? undefined : {
+      model: draft.model,
+      models: controller.models,
+      yoloEnabled: draft.yoloEnabled,
+      onModelChange: (model) => editDraft({ model }),
+      onYoloChange: setYoloEnabled,
+    },
   }
   const activity: ChatPanelActivityInput = {
     working: controller.working,
     widgets: selectedRecord ? (
       <ThreadEventDetail record={selectedRecord} onClose={() => selectEvent(null)} />
     ) : null,
+    onDecideTaskApproval: (targetThreadId, invocationId, decision) => {
+      void controller.decideApproval(invocationId, decision, targetThreadId)
+    },
     actionError: controller.actionError,
     onDismissActionError: controller.dismissActionError,
   }
@@ -205,7 +309,6 @@ export function CanvasBoundThread({
       transcript={transcript}
       mainView={mainViewInput}
       composer={composer}
-      footer={footer}
       activity={activity}
     />
   )

@@ -66,8 +66,32 @@ export const aiCatalog = {
     'zh-CN': '运行中',
   },
   'ai.chat.history.confirmDiscardDraft': {
-    'en-US': 'The pane has unsent changes. Continue and discard them?',
-    'zh-CN': '面板有未发送的修改，是否继续并丢弃这些修改？',
+    'en-US': '{{target}} will discard {{content}}. Continue?',
+    'zh-CN': '{{target}}会丢弃{{content}}，是否继续？',
+  },
+  'ai.chat.history.discardTargetThread': {
+    'en-US': 'Switching to the selected Thread',
+    'zh-CN': '切换到所选 Thread 后',
+  },
+  'ai.chat.history.discardTargetHistory': {
+    'en-US': 'Switching to the selected history position',
+    'zh-CN': '切换到所选历史位置后',
+  },
+  'ai.chat.history.discardTargetNew': {
+    'en-US': 'Switching to a new conversation',
+    'zh-CN': '切换到新对话后',
+  },
+  'ai.chat.history.discardContentMessage': {
+    'en-US': 'the unsent message in the Composer',
+    'zh-CN': '输入框中未发送的消息',
+  },
+  'ai.chat.history.discardContentSettings': {
+    'en-US': 'the Agent, Environment, Model, or Permission settings not yet submitted with a message',
+    'zh-CN': '尚未随消息提交的 Agent、Environment、Model 或 Permission 设置',
+  },
+  'ai.chat.history.discardContentMessageAndSettings': {
+    'en-US': 'the unsent message and settings not yet submitted with it',
+    'zh-CN': '输入框中未发送的消息及尚未随消息提交的设置',
   },
   'ai.chat.history.discardDraftTitle': {
     'en-US': 'Discard unsent changes?',
@@ -947,12 +971,12 @@ export const aiCatalog = {
     'zh-CN': '目录条目',
   },
   'ai.chat.workspace.up': {
-    'en-US': 'Up',
-    'zh-CN': '上一级',
+    'en-US': 'Up (Backspace)',
+    'zh-CN': '上一级 (Backspace)',
   },
   'ai.chat.workspace.upTitle': {
-    'en-US': 'Go to parent directory',
-    'zh-CN': '进入父目录',
+    'en-US': 'Go to parent directory (Backspace)',
+    'zh-CN': '进入父目录 (Backspace)',
   },
   'ai.chat.workspace.refresh': {
     'en-US': 'Refresh',
@@ -963,8 +987,8 @@ export const aiCatalog = {
     'zh-CN': '返回 Environment 列表',
   },
   'ai.chat.workspace.confirm': {
-    'en-US': 'Use current Workspace',
-    'zh-CN': '使用当前 Workspace',
+    'en-US': 'Use current Workspace (Ctrl+Enter)',
+    'zh-CN': '使用当前 Workspace (Ctrl+Enter)',
   },
   'ai.chat.workspace.confirmDisabled': {
     'en-US': 'Choose a directory before confirming',
@@ -1070,6 +1094,10 @@ export const aiCatalog = {
     'en-US': '{{kind}} · {{preview}}{{path}}{{head}}',
     'zh-CN': '{{kind}} · {{preview}}{{path}}{{head}}',
   },
+  'ai.chat.history.hint': {
+    'en-US': '{{current}} / {{total}} · ↑↓ select · Enter confirm · Esc back',
+    'zh-CN': '{{current}} / {{total}} · ↑↓ 选择 · Enter 确认 · Esc 返回',
+  },
   'ai.chat.history.cancel': {
     'en-US': 'Cancel',
     'zh-CN': '取消',
@@ -1097,6 +1125,46 @@ export const aiCatalog = {
   'ai.runtime.composer.openCommands': {
     'en-US': 'Open commands',
     'zh-CN': '打开命令表',
+  },
+  'ai.runtime.composer.permission': {
+    'en-US': 'Permission mode',
+    'zh-CN': '权限模式',
+  },
+  'ai.runtime.composer.permissionOptions': {
+    'en-US': 'Permission options',
+    'zh-CN': '权限选项',
+  },
+  'ai.runtime.composer.permissionDefault': {
+    'en-US': 'Default',
+    'zh-CN': 'Default',
+  },
+  'ai.runtime.composer.permissionYolo': {
+    'en-US': 'YOLO',
+    'zh-CN': 'YOLO',
+  },
+  'ai.runtime.composer.model': {
+    'en-US': 'Model',
+    'zh-CN': 'Model',
+  },
+  'ai.runtime.composer.modelVariant': {
+    'en-US': 'Model and Variant',
+    'zh-CN': 'Model 与 Variant',
+  },
+  'ai.runtime.composer.modelOptions': {
+    'en-US': 'Model options',
+    'zh-CN': 'Model 选项',
+  },
+  'ai.runtime.composer.modelSearch': {
+    'en-US': 'Search models',
+    'zh-CN': '搜索模型',
+  },
+  'ai.runtime.composer.modelSearchPlaceholder': {
+    'en-US': 'Search models',
+    'zh-CN': '搜索模型',
+  },
+  'ai.runtime.composer.variantOptions': {
+    'en-US': 'Variant options',
+    'zh-CN': 'Variant 选项',
   },
   'ai.runtime.composer.strip': {
     'en-US': 'Attachments',
@@ -1150,10 +1218,6 @@ export const aiCatalog = {
     'en-US': 'Select or create a Thread first',
     'zh-CN': '选择或创建 Thread 后可用',
   },
-  'ai.runtime.command.activeView': {
-    'en-US': 'This view is already active',
-    'zh-CN': '当前已激活该视图',
-  },
   'ai.runtime.command.upload': {
     'en-US': 'Upload files and insert ordered attachment references',
     'zh-CN': '上传文件并插入有序附件引用',
@@ -1187,12 +1251,8 @@ export const aiCatalog = {
     'zh-CN': '回到空面板；发送后创建新的 Session / Thread',
   },
   'ai.runtime.command.events': {
-    'en-US': 'Inspect the durable Entry log and live model / tool invocations',
-    'zh-CN': '查看持久 Entry 日志与活跃 model / tool 调用',
-  },
-  'ai.runtime.command.conversation': {
-    'en-US': 'Return to the conversation transcript',
-    'zh-CN': '返回对话时间线',
+    'en-US': 'Toggle the durable Entry log and live model / tool invocations',
+    'zh-CN': '切换持久 Entry 日志与活跃 model / tool 调用',
   },
   'ai.runtime.command.shortcuts': {
     'en-US': 'Show the keyboard shortcut catalog',
@@ -1214,9 +1274,17 @@ export const aiCatalog = {
     'en-US': 'environment',
     'zh-CN': 'environment',
   },
+  'ai.runtime.command.models': {
+    'en-US': 'Choose the model and variant for the next message',
+    'zh-CN': '选择下一条消息使用的模型与 Variant',
+  },
   'ai.runtime.command.yoloLabel': {
     'en-US': 'yolo',
     'zh-CN': 'yolo',
+  },
+  'ai.runtime.command.modelsLabel': {
+    'en-US': 'models',
+    'zh-CN': 'models',
   },
   'ai.runtime.command.treeLabel': {
     'en-US': 'tree',
@@ -1233,10 +1301,6 @@ export const aiCatalog = {
   'ai.runtime.command.eventsLabel': {
     'en-US': 'events',
     'zh-CN': 'events',
-  },
-  'ai.runtime.command.conversationLabel': {
-    'en-US': 'conversation',
-    'zh-CN': 'conversation',
   },
   'ai.runtime.command.shortcutsLabel': {
     'en-US': 'shortcuts',
@@ -1306,21 +1370,25 @@ export const aiCatalog = {
     'en-US': 'Assistant response failed',
     'zh-CN': '助手回复失败',
   },
-  'ai.runtime.message.attemptFailed': {
-    'en-US': 'Attempt {{attempt}} failed',
-    'zh-CN': '第 {{attempt}} 次尝试失败',
+  'ai.runtime.message.modelRequestFailed': {
+    'en-US': 'Model request failed',
+    'zh-CN': '模型请求失败',
+  },
+  'ai.runtime.message.attemptNumber': {
+    'en-US': 'Request #{{attempt}}',
+    'zh-CN': '请求 #{{attempt}}',
   },
   'ai.runtime.message.retryScheduled': {
-    'en-US': 'Retry {{nextAttempt}} scheduled in {{seconds}}s',
-    'zh-CN': '已安排第 {{nextAttempt}} 次重试，还剩 {{seconds}} 秒',
+    'en-US': 'Retry in {{seconds}}s (request #{{nextAttempt}})',
+    'zh-CN': '{{seconds}} 秒后重试（请求 #{{nextAttempt}}）',
   },
   'ai.runtime.message.retryScheduledHistory': {
-    'en-US': 'Retry {{nextAttempt}} was scheduled',
-    'zh-CN': '已安排第 {{nextAttempt}} 次重试',
+    'en-US': 'Retry scheduled (request #{{nextAttempt}})',
+    'zh-CN': '已安排重试（请求 #{{nextAttempt}}）',
   },
   'ai.runtime.message.retryingNow': {
-    'en-US': 'Retrying now as attempt {{nextAttempt}}',
-    'zh-CN': '正在进行第 {{nextAttempt}} 次重试',
+    'en-US': 'Retrying (request #{{nextAttempt}})',
+    'zh-CN': '正在重试（请求 #{{nextAttempt}}）',
   },
   'ai.runtime.message.noArguments': {
     'en-US': '(no arguments)',
@@ -1334,17 +1402,17 @@ export const aiCatalog = {
     'en-US': 'Tool result ·',
     'zh-CN': '工具结果 ·',
   },
-  'ai.runtime.message.running': {
-    'en-US': 'running',
-    'zh-CN': 'running',
+  'ai.runtime.message.expandTool': {
+    'en-US': 'Expand tool preview',
+    'zh-CN': '展开工具预览',
   },
-  'ai.runtime.message.done': {
-    'en-US': 'done',
-    'zh-CN': 'done',
+  'ai.runtime.message.collapseTool': {
+    'en-US': 'Collapse tool preview',
+    'zh-CN': '收起工具预览',
   },
-  'ai.runtime.message.error': {
-    'en-US': 'error',
-    'zh-CN': 'error',
+  'ai.runtime.message.copyTool': {
+    'en-US': 'Copy tool preview',
+    'zh-CN': '复制工具预览',
   },
   'ai.runtime.message.toolFailed': {
     'en-US': 'Tool execution failed.',
@@ -1390,85 +1458,45 @@ export const aiCatalog = {
     'en-US': 'Open original {{name}}',
     'zh-CN': '打开原件 {{name}}',
   },
-  'ai.runtime.status.agentFallback': {
-    'en-US': 'agent',
-    'zh-CN': 'agent',
-  },
-  'ai.runtime.status.modelFallback': {
-    'en-US': 'unknown-model',
-    'zh-CN': 'unknown-model',
-  },
-  'ai.runtime.status.variantFallback': {
-    'en-US': 'unknown-variant',
-    'zh-CN': 'unknown-variant',
-  },
-  'ai.runtime.status.environmentNoneText': {
-    'en-US': 'env:none',
-    'zh-CN': 'env:none',
-  },
   'ai.runtime.status.environmentUnavailableText': {
-    'en-US': 'env:{{name}} · ws:{{workspace}} (unavailable)',
-    'zh-CN': 'env:{{name}} · ws:{{workspace}} (unavailable)',
-  },
-  'ai.runtime.status.agentSwitchTitle': {
-    'en-US': 'Click to switch Agent',
-    'zh-CN': '点击切换 Agent',
-  },
-  'ai.runtime.status.modelSwitchTitle': {
-    'en-US': 'Click to switch Model; right-click to switch Variant',
-    'zh-CN': '点击切换 Model，右键切换 Variant',
-  },
-  'ai.runtime.status.environmentSwitchTitle': {
-    'en-US': 'Click to switch Environment',
-    'zh-CN': '点击切换 Environment',
-  },
-  'ai.runtime.status.agentText': {
-    'en-US': 'agent:{{name}}',
-    'zh-CN': 'agent:{{name}}',
-  },
-  'ai.runtime.status.agentYoloText': {
-    'en-US': 'agent:{{name}} · YOLO',
-    'zh-CN': 'agent:{{name}} · YOLO',
-  },
-  'ai.runtime.status.modelText': {
-    'en-US': '{{model}} · {{variant}}',
-    'zh-CN': '{{model}} · {{variant}}',
+    'en-US': 'env:{{name}} · {{workspace}} (unavailable)',
+    'zh-CN': 'env:{{name}} · {{workspace}} (unavailable)',
   },
   'ai.runtime.status.environmentText': {
-    'en-US': 'env:{{name}} · ws:{{workspace}}',
-    'zh-CN': 'env:{{name}} · ws:{{workspace}}',
+    'en-US': 'env:{{name}} · {{workspace}}',
+    'zh-CN': 'env:{{name}} · {{workspace}}',
+  },
+  'ai.runtime.status.environmentNoneText': {
+    'en-US': 'none env',
+    'zh-CN': 'none env',
   },
   'ai.runtime.status.branchUsageTitle': {
     'en-US': 'Branch usage: {{usage}}',
     'zh-CN': '分支用量：{{usage}}',
   },
-  'ai.runtime.status.notificationsOn': {
-    'en-US': 'notify:on',
-    'zh-CN': 'notify:on',
+  'ai.runtime.status.gitBranchText': {
+    'en-US': 'git:{{branch}}',
+    'zh-CN': 'git:{{branch}}',
   },
-  'ai.runtime.status.notificationsOff': {
-    'en-US': 'notify:off',
-    'zh-CN': 'notify:off',
+  'ai.runtime.status.gitBranchTitle': {
+    'en-US': 'Git branch: {{branch}}',
+    'zh-CN': 'Git 分支：{{branch}}',
   },
-  'ai.runtime.status.notificationsDenied': {
-    'en-US': 'notify:denied',
-    'zh-CN': 'notify:denied',
+  'ai.runtime.status.contextText': {
+    'en-US': 'ctx {{used}}/{{total}}',
+    'zh-CN': 'ctx {{used}}/{{total}}',
   },
-  'ai.runtime.status.notificationsUnsupported': {
-    'en-US': 'notify:unsupported',
-    'zh-CN': 'notify:unsupported',
+  'ai.runtime.status.contextTitle': {
+    'en-US': 'Estimated context usage: {{used}} / {{total}} tokens',
+    'zh-CN': '估算上下文用量：{{used}} / {{total}} tokens',
   },
-  'ai.runtime.status.notificationsToggleTitle': {
-    'en-US': 'Toggle browser notifications',
-    'zh-CN': '切换浏览器通知',
+  'ai.runtime.status.cacheHitText': {
+    'en-US': 'cache {{percent}}%',
+    'zh-CN': 'cache {{percent}}%',
   },
-  'ai.runtime.notification.unsupported': {
-    'en-US': 'This browser does not support notifications.',
-    'zh-CN': '当前浏览器不支持通知。',
-  },
-  'ai.runtime.notification.denied': {
-    'en-US': 'Browser notification permission was denied.',
-    'zh-CN': '浏览器通知权限已被拒绝。',
+  'ai.runtime.status.cacheHitTitle': {
+    'en-US': 'Estimated cache hit rate: {{percent}}%',
+    'zh-CN': '估算缓存命中率：{{percent}}%',
   },
   'ai.runtime.notification.permissionTitle': {
     'en-US': 'Approval requested',
@@ -1622,6 +1650,10 @@ export const aiCatalog = {
     'en-US': 'Events',
     'zh-CN': '事件',
   },
+  'ai.runtime.event.systemPrompt': {
+    'en-US': 'System prompt',
+    'zh-CN': '系统提示词',
+  },
   'ai.runtime.event.empty': {
     'en-US': 'No events yet',
     'zh-CN': '暂无事件',
@@ -1641,66 +1673,6 @@ export const aiCatalog = {
   'ai.runtime.event.unknownTool': {
     'en-US': 'unknown tool',
     'zh-CN': '未知工具',
-  },
-  'ai.runtime.event.kind.ROOT': {
-    'en-US': 'Root',
-    'zh-CN': '根节点',
-  },
-  'ai.runtime.event.kind.TURN_START': {
-    'en-US': 'Turn start',
-    'zh-CN': '回合开始',
-  },
-  'ai.runtime.event.kind.USER_MESSAGE': {
-    'en-US': 'User message',
-    'zh-CN': '用户消息',
-  },
-  'ai.runtime.event.kind.ASSISTANT_MESSAGE': {
-    'en-US': 'Assistant message',
-    'zh-CN': '助手消息',
-  },
-  'ai.runtime.event.kind.TOOL_CALL': {
-    'en-US': 'Tool call',
-    'zh-CN': '工具调用',
-  },
-  'ai.runtime.event.kind.TOOL_RESULT': {
-    'en-US': 'Tool result',
-    'zh-CN': '工具结果',
-  },
-  'ai.runtime.event.kind.MODEL_ATTEMPT_FAILURE': {
-    'en-US': 'Model attempt failure',
-    'zh-CN': '模型尝试失败',
-  },
-  'ai.runtime.event.kind.ASSISTANT_ERROR': {
-    'en-US': 'Assistant error',
-    'zh-CN': '助手错误',
-  },
-  'ai.runtime.event.kind.ASSISTANT_ABORTED': {
-    'en-US': 'Assistant aborted',
-    'zh-CN': '助手已停止',
-  },
-  'ai.runtime.event.kind.CUSTOM': {
-    'en-US': 'Custom',
-    'zh-CN': '自定义',
-  },
-  'ai.runtime.event.kind.CUSTOM_MESSAGE': {
-    'en-US': 'Custom message',
-    'zh-CN': '自定义消息',
-  },
-  'ai.runtime.event.kind.COMPACTION': {
-    'en-US': 'Compaction',
-    'zh-CN': '上下文压缩',
-  },
-  'ai.runtime.event.kind.TURN_END': {
-    'en-US': 'Turn end',
-    'zh-CN': '回合结束',
-  },
-  'ai.runtime.event.kind.ACTIVE_MODEL_INVOCATION': {
-    'en-US': 'Active model invocation',
-    'zh-CN': '活跃模型调用',
-  },
-  'ai.runtime.event.kind.ACTIVE_TOOL_INVOCATION': {
-    'en-US': 'Active tool invocation',
-    'zh-CN': '活跃工具调用',
   },
   'ai.runtime.event.detailTitle': {
     'en-US': 'Event details',

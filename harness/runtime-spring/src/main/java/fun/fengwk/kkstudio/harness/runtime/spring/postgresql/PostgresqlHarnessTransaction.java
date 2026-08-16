@@ -213,6 +213,24 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public List<Entry> loadEntriesBySessionId(UUID sessionId) {
+    checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    if (findSession(sessionId).isEmpty()) {
+      throw new IllegalArgumentException("session " + sessionId + " does not exist");
+    }
+    return queryList(
+        """
+        select *
+        from harness_entry
+        where session_id = ?
+        order by created_at, id
+        """,
+        PostgresqlHarnessRows.ENTRY,
+        sessionId);
+  }
+
+  @Override
   public void insertThread(ThreadState thread) {
     checkOpen();
     Objects.requireNonNull(thread, "thread");

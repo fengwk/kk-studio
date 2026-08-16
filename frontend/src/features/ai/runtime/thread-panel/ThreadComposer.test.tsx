@@ -11,7 +11,6 @@ import {
 } from '@/features/ai/composer/composer-parts'
 import {
   filterThreadCommands,
-  threadCommandsForActiveView,
   threadCommandsForScene,
   THREAD_COMMANDS,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
@@ -38,32 +37,32 @@ describe('ThreadComposer and commands', () => {
       'agent',
       'environment',
       'yolo',
+      'models',
       'tree',
       'stop',
       'new',
       'upload',
       'events',
-      'conversation',
       'shortcuts',
     ])
     // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
     expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
     const blank = threadCommandsForScene('chat-blank')
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/events`/`/conversation`
+    // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/events`
     // 不可用，而 `/thread`（仅切换面板）与 `/shortcuts` 保持可用。
     expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
       'thread',
       'agent',
       'environment',
       'yolo',
+      'models',
       'upload',
       'shortcuts',
     ])
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'tree')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'events')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'conversation')?.disabled).toBe(true)
     expect(threadCommandsForScene('chat-bound').every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
@@ -76,41 +75,32 @@ describe('ThreadComposer and commands', () => {
     expect(filterThreadCommands('missing')).toEqual([])
   })
 
-  it('projects canvas-bound to only the capabilities the controller supports', () => {
-    // Canvas Bound 的 controller 只支持 stop；upload 由 ThreadComposer 处理文件选择。
-    // agent/environment/yolo/tree/new/thread 绝不投影为可用，避免传给只支持 stop 的 controller。
+  it('projects canvas-bound branch settings while keeping Chat-only navigation disabled', () => {
+    // Canvas Bound 与 Chat Bound 共享 pane-local branch settings；tree/new/thread 仍是 Chat 专属。
     const canvasBound = threadCommandsForScene('canvas-bound')
     expect(canvasBound.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
+      'agent',
+      'environment',
+      'yolo',
+      'models',
       'stop',
       'upload',
       'events',
-      'conversation',
       'shortcuts',
     ])
-    for (const id of ['thread', 'agent', 'environment', 'yolo', 'tree', 'new']) {
+    for (const id of ['thread', 'tree', 'new']) {
       expect(canvasBound.find((c) => c.id === id)?.disabled).toBe(true)
     }
-    // canvas-blank 仍支持 agent/environment/yolo/upload/shortcuts，但没有 /thread。
+    // canvas-blank 仍支持 agent/environment/yolo/models/upload/shortcuts，但没有 /thread。
     const canvasBlank = threadCommandsForScene('canvas-blank')
     expect(canvasBlank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
       'agent',
       'environment',
       'yolo',
+      'models',
       'upload',
       'shortcuts',
     ])
-  })
-
-  it('disables the already-active main-view command while keeping it visible', () => {
-    const bound = threadCommandsForScene('chat-bound')
-    const withEvents = threadCommandsForActiveView(bound, 'events')
-    expect(withEvents.find((c) => c.id === 'events')?.disabled).toBe(true)
-    expect(withEvents.find((c) => c.id === 'events')?.disabledReasonKey).toBe('ai.runtime.command.activeView')
-    expect(withEvents.find((c) => c.id === 'conversation')?.disabled).toBe(false)
-    expect(withEvents.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    const withConversation = threadCommandsForActiveView(bound, 'conversation')
-    expect(withConversation.find((c) => c.id === 'conversation')?.disabled).toBe(true)
-    expect(withConversation.find((c) => c.id === 'events')?.disabled).toBe(false)
   })
 
   it('uses slash as a text-only shortcut without consuming attachments', () => {
@@ -289,5 +279,135 @@ describe('ThreadComposer and commands', () => {
 
     rerender(<ThreadComposer {...props} parts={[createTextPart('message')]} />)
     expect(editor).toHaveAttribute('data-placeholder-visible', 'false')
+  })
+
+  it('renders a two-level composer with Permission and Model/Variant controls', () => {
+    const { container } = render(
+      <ThreadComposer
+        parts={[]}
+        pending={false}
+        disabled={false}
+        onPartsChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+        settings={{
+          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'high' },
+          models: [
+            {
+              providerName: 'minimax',
+              name: 'MiniMax',
+              config: {
+                defaultVariant: 'default',
+                variants: [{ id: 'default' }, { id: 'high' }],
+              },
+            },
+          ],
+          yoloEnabled: false,
+          onModelChange: vi.fn(),
+          onYoloChange: vi.fn(),
+        }}
+      />,
+    )
+
+    const dock = container.querySelector('.thread-dock')
+    expect(dock).not.toBeNull()
+    expect(dock?.querySelector('.composer-editor')).not.toBeNull()
+    expect(dock?.querySelector('.thread-dock-controls')).not.toBeNull()
+    expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('Default')
+    expect(screen.getByRole('button', { name: 'Model 与 Variant' })).toHaveTextContent(
+      'minimax/MiniMax · high',
+    )
+  })
+
+  it('selects Permission and a two-level Model/Variant through anchored listboxes', async () => {
+    const user = userEvent.setup()
+    const onModelChange = vi.fn()
+    const onYoloChange = vi.fn()
+    render(
+      <ThreadComposer
+        parts={[]}
+        pending={false}
+        disabled={false}
+        onPartsChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+        settings={{
+          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+          models: [
+            {
+              providerName: 'minimax',
+              name: 'MiniMax',
+              config: {
+                defaultVariant: 'default',
+                variants: [{ id: 'default' }, { id: 'high' }],
+              },
+            },
+            {
+              providerName: 'openai',
+              name: 'gpt',
+              config: {
+                defaultVariant: 'fast',
+                variants: [{ id: 'fast' }, { id: 'quality' }],
+              },
+            },
+          ],
+          yoloEnabled: false,
+          onModelChange,
+          onYoloChange,
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '权限模式' }))
+    await user.click(screen.getByRole('option', { name: 'YOLO' }))
+    expect(onYoloChange).toHaveBeenCalledWith(true)
+
+    await user.click(screen.getByRole('button', { name: 'Model 与 Variant' }))
+    const search = screen.getByRole('searchbox', { name: '搜索模型' })
+    expect(search).toHaveFocus()
+    await user.type(search, 'gpt')
+    expect(screen.queryByRole('option', { name: 'minimax/MiniMax' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: 'openai/gpt' }))
+    expect(screen.getByRole('listbox', { name: 'Variant 选项' })).toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: 'quality' }))
+    expect(onModelChange).toHaveBeenCalledWith({
+      providerName: 'openai',
+      modelName: 'gpt',
+      variant: 'quality',
+    })
+  })
+
+  it('opens the model menu from /models', async () => {
+    const user = userEvent.setup()
+    render(
+      <ThreadComposer
+        parts={[createTextPart('/models')]}
+        pending={false}
+        disabled={false}
+        onPartsChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+        settings={{
+          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+          models: [
+            {
+              providerName: 'minimax',
+              name: 'MiniMax',
+              config: {
+                defaultVariant: 'default',
+                variants: [{ id: 'default' }],
+              },
+            },
+          ],
+          yoloEnabled: false,
+          onModelChange: vi.fn(),
+          onYoloChange: vi.fn(),
+        }}
+      />,
+    )
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: /^models/ }))
+    expect(screen.getByRole('searchbox', { name: '搜索模型' })).toHaveFocus()
+    expect(screen.getByRole('listbox', { name: 'Model 选项' })).toBeInTheDocument()
   })
 })
