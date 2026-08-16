@@ -69,8 +69,9 @@ public interface ProviderFactory {
 - selectable Platform：
   - 冻结 `PluginCatalog` 的 SELECTABLE contributions；当前包括 Goal 插件 `create_goal` / `get_goal` / `update_goal` v2；
   - Core 提供的其他 Platform `ToolFactory`；
-- 固定的十一个 `ENVIRONMENT` Tool descriptor：
-  `read, write, edit, bash, grep, find, lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile, mcp_list_tools, mcp_call_tool`；
+- 固定的十一个 `ENVIRONMENT` Tool descriptor：9 个 pi-base coding 能力的本地 Java 实现
+  `read, write, edit, bash, grep, find, lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile`，
+  加上 2 个固定 MCP 桥接工具 `mcp_list_tools, mcp_call_tool`；它们与 `PLATFORM`/动态 MCP 工具互不进入对方目录；
 - **`load_skill` 与 `task` 是两个 internal Platform Tool**（`ToolCatalog(descriptors, internalNames)` 的 internal 集合 = `{load_skill, task}` + 插件 INTERNAL 贡献），从 selectable 集合移出，不出现在 Agent 可选择目录中。`task` 由 `RuntimeToolsConfiguration` 装配（`TaskTool` + `SubagentConfig` + `SubagentRunRegistry`），被 `activeTools` 显式选择后由 Resolver 绑定。
 
 `GET /api/ai/catalog/tools` 只返回 Agent 可选择的 Platform/Environment 目录。Agent config 保存可选择 Tool 名称集合，不保存 Tool 实例或 Environment 连接。
