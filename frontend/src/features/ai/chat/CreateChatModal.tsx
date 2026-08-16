@@ -1,10 +1,13 @@
-import type { FormEventHandler } from 'react'
+import { useEffect, useState, type FormEventHandler } from 'react'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { FormSelect } from '@/shared/ui/console/FormSelect'
-import { filterReadyEnvironments } from '@/features/ai/environment/environment-utils'
+import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentBindingDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 
 export function CreateChatModal({
@@ -12,7 +15,7 @@ export function CreateChatModal({
   agents,
   environments = [],
   selectedAgentName,
-  selectedEnvironmentName = '',
+  selectedEnvironment = null,
   title,
   pending,
   formError = '',
@@ -27,18 +30,24 @@ export function CreateChatModal({
   agents: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
   selectedAgentName: string
-  selectedEnvironmentName?: string
+  selectedEnvironment?: EnvironmentBindingDTO | null
   title: string
   pending: boolean
   formError?: string
   nameError?: string
   onClose: () => void
   onSelectAgent: (agentName: string) => void
-  onSelectEnvironment?: (environmentName: string) => void
+  onSelectEnvironment?: (environment: EnvironmentBindingDTO | null) => void
   onTitleChange: (title: string) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
   const { t } = useI18n()
+  const [environmentPanelOpen, setEnvironmentPanelOpen] = useState(false)
+  useEffect(() => {
+    if (!open) {
+      setEnvironmentPanelOpen(false)
+    }
+  }, [open])
   if (!open) {
     return null
   }
@@ -46,7 +55,7 @@ export function CreateChatModal({
   return (
     <ModalBackdrop onClose={onClose}>
       <form
-        className="modal-card"
+        className="modal-card create-chat-modal-card"
         aria-label={t('ai.chat.create')}
         onSubmit={onSubmit}
         onMouseDown={(event) => event.stopPropagation()}
@@ -78,22 +87,33 @@ export function CreateChatModal({
               onChange={onSelectAgent}
             />
           </label>
-          <label className="form-group">
+          <div className="form-group">
             <FieldLabel>{t('ai.chat.environment')}</FieldLabel>
-            <FormSelect
+            <button
+              type="button"
+              className="environment-binding-trigger"
               aria-label={t('ai.chat.environment')}
-              value={selectedEnvironmentName}
-              placeholder={t('ai.chat.noneEnvironment')}
-              options={[
-                { value: '', label: t('ai.chat.noneEnvironment') },
-                ...filterReadyEnvironments(environments).map((environment) => ({
-                  value: environment.name,
-                  label: environment.name,
-                })),
-              ]}
-              onChange={(environmentName) => onSelectEnvironment?.(environmentName)}
+              aria-expanded={environmentPanelOpen}
+              disabled={pending}
+              onClick={() => setEnvironmentPanelOpen((current) => !current)}
+            >
+              {selectedEnvironment == null
+                ? t('ai.chat.noneEnvironment')
+                : `${selectedEnvironment.name} · ${workspaceDisplayPath(selectedEnvironment.workspacePath)}`}
+            </button>
+          </div>
+          {environmentPanelOpen ? (
+            <EnvironmentWorkspacePanel
+              environments={environments}
+              current={selectedEnvironment}
+              pending={pending}
+              onClose={() => setEnvironmentPanelOpen(false)}
+              onSelect={(environment) => {
+                onSelectEnvironment?.(environment)
+                setEnvironmentPanelOpen(false)
+              }}
             />
-          </label>
+          ) : null}
         </div>
         <div className="modal-footer">
           <button type="submit" className="btn-primary" disabled={pending}>
@@ -103,4 +123,8 @@ export function CreateChatModal({
       </form>
     </ModalBackdrop>
   )
+}
+
+function workspaceDisplayPath(path: string): string {
+  return path === '.' ? '@/' : `@/${path}`
 }

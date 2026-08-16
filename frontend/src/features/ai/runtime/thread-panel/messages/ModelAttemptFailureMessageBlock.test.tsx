@@ -40,11 +40,13 @@ describe('ModelAttemptFailureMessageBlock', () => {
   it('renders partial content normally and error in a separate block with countdown', () => {
     const { container } = render(<ModelAttemptFailureMessageBlock message={message()} />)
 
-    expect(screen.getByText('第 1 次尝试失败')).toBeInTheDocument()
-    expect(screen.getByText('已安排第 2 次重试，还剩 3 秒')).toBeInTheDocument()
+    expect(screen.getByText('模型请求失败')).toBeInTheDocument()
+    expect(screen.getByText('请求 #1')).toBeInTheDocument()
+    expect(screen.getByText('3 秒后重试（请求 #2）')).toBeInTheDocument()
     expect(screen.getByText('partial output')).toBeInTheDocument()
     expect(screen.getByText('partial thinking')).toBeInTheDocument()
-    expect(screen.getByText('TRANSIENT: provider is busy')).toBeInTheDocument()
+    expect(screen.getByText('TRANSIENT')).toBeInTheDocument()
+    expect(screen.getByText('provider is busy')).toBeInTheDocument()
     expect(container.querySelector('.thread-block-model-attempt-failure-error')).toBeInTheDocument()
     expect(container.querySelector('.thread-error-raw')).toBeInTheDocument()
   })
@@ -55,7 +57,7 @@ describe('ModelAttemptFailureMessageBlock', () => {
     act(() => {
       vi.advanceTimersByTime(3000)
     })
-    expect(screen.getByText('正在进行第 2 次重试')).toBeInTheDocument()
+    expect(screen.getByText('正在重试（请求 #2）')).toBeInTheDocument()
 
     unmount()
     expect(vi.getTimerCount()).toBe(0)
@@ -68,7 +70,8 @@ describe('ModelAttemptFailureMessageBlock', () => {
       />,
     )
 
-    expect(screen.getByText('第 1 次尝试失败')).toBeInTheDocument()
+    expect(screen.getByText('模型请求失败')).toBeInTheDocument()
+    expect(screen.getByText('请求 #1')).toBeInTheDocument()
     expect(screen.queryByText(/重试/u)).not.toBeInTheDocument()
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -83,7 +86,7 @@ describe('ModelAttemptFailureMessageBlock', () => {
       />,
     )
 
-    expect(screen.getByText('已安排第 2 次重试')).toBeInTheDocument()
+    expect(screen.getByText('已安排重试（请求 #2）')).toBeInTheDocument()
     expect(screen.queryByText(/还剩/u)).not.toBeInTheDocument()
     expect(screen.queryByText(/正在进行/u)).not.toBeInTheDocument()
     expect(vi.getTimerCount()).toBe(0)

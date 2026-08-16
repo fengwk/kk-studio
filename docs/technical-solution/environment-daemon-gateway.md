@@ -137,7 +137,7 @@ Daemon 可选的 `--mcp-config` 指向严格 UTF-8 JSON（`{"servers":[...]}`；
   - `mcp_list_tools`（READ_ONLY）：确定性 JSON 报告全部/单个 server 的状态与 READY server 的工具（name/description/完整输入 schema）；
   - `mcp_call_tool`（NON_IDEMPOTENT）：按精确 `server`/`tool`/JSON 对象 `arguments` 调用，保留上游 isError 与文本/结构化 JSON 结果；未知/未 READY server 或未知工具是确定性错误。
 
-Skill 通过 `LOAD_SKILL` / `SKILL_LOADED` / `SKILL_LOAD_FAILED` 按需加载；`load_skill` 是内部 `PLATFORM` Tool（与委派工具 `task` 一样不在 Agent 可选择目录中），必须由 Agent 的 `activeTools` 显式选择（Resolver 不做隐式追加）。Environment 固定目录始终是 11 个工具，不因 Agent 能力或任务委派变化。
+Skill 通过 `LOAD_SKILL` / `SKILL_LOADED` / `SKILL_LOAD_FAILED` 按需加载；`load_skill` 是内部 `PLATFORM` Tool（与委派工具 `task` 一样不在 Agent 可选择目录中）。每个新 turn 由 Resolver 从最新 Agent config 派生工具集合：skills 非空时追加 `load_skill`，subagents 非空且未达最大深度时追加 `task`；历史 `BranchSettings.activeTools` 只作投影，不限制或扩张当前能力。Environment 固定目录始终是 11 个工具，不因 Agent 能力或任务委派变化。
 
 ## Invocation 分发
 

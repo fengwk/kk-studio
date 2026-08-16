@@ -22,6 +22,7 @@ import {
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createDurationTimer } from './lib/time.mjs'
+import { assertReadOnlyZeroFooter } from './ui/assertions.mjs'
 import { runComposerMatrix } from './ui/composer-matrix.mjs'
 
 // Playwright 安装在 frontend/node_modules，从仓库根/scripts 直接 import 会找不到包。
@@ -45,8 +46,10 @@ function parseArgs(argv) {
     baseUrl: process.env.FRONTEND_URL || 'http://127.0.0.1:5173',
     backendUrl: process.env.BACKEND_URL || 'http://127.0.0.1:18081',
     reportDir: process.env.E2E_UI_REPORT_DIR || path.resolve('reports/e2e/ui-standalone'),
+    daemonEnv: process.env.DAEMON_ENV_NAME || 'e2e-local',
     headed: false,
     real: false,
+    withTools: false,
     only: [],
   }
   for (let i = 0; i < argv.length; i++) {
@@ -54,8 +57,10 @@ function parseArgs(argv) {
     if (a === '--base-url') args.baseUrl = argv[++i]
     else if (a === '--backend-url') args.backendUrl = argv[++i]
     else if (a === '--report-dir') args.reportDir = path.resolve(argv[++i])
+    else if (a === '--daemon-env') args.daemonEnv = argv[++i]
     else if (a === '--headed') args.headed = true
     else if (a === '--real') args.real = true
+    else if (a === '--with-tools') args.withTools = true
     else if (a === '--only') args.only.push(argv[++i])
     else if (a === '-h' || a === '--help') args.help = true
     else throw new Error(`unknown arg: ${a}`)
@@ -129,6 +134,10 @@ async function requireRealMiniMaxM27(backendUrl) {
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assertion failed')
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function normalizeBox(box) {
@@ -208,7 +217,7 @@ async function main(argv) {
   if (args.help) {
     console.log(
       'Usage: node scripts/e2e/ui-smoke.mjs --base-url URL --report-dir DIR'
-        + ' [--headed] [--real] [--only CASE_ID]...',
+        + ' [--headed] [--real] [--with-tools] [--daemon-env NAME] [--only CASE_ID]...',
     )
     return 0
   }
@@ -542,6 +551,27 @@ async function main(argv) {
     })
     await threadToggle.click()
     await page.locator('#agentPanel').waitFor({ state: 'visible', timeout: 10_000 })
+    const canvasComposer = page.locator('#agentPanel').getByLabel('给 AI 发送消息')
+    await canvasComposer.waitFor({ state: 'visible', timeout: 15_000 })
+    await page.locator('#agentPanel').getByRole('button', { name: '权限模式' })
+      .waitFor({ state: 'visible', timeout: 15_000 })
+    await page.locator('#agentPanel').getByRole('button', { name: 'Model 与 Variant' })
+      .waitFor({ state: 'visible', timeout: 15_000 })
+    const canvasEditorBox = await canvasComposer.boundingBox()
+    const canvasControlsBox = await page.locator('#agentPanel .thread-dock-controls').boundingBox()
+    assert(
+      canvasEditorBox
+      && canvasControlsBox
+      && canvasEditorBox.y + canvasEditorBox.height <= canvasControlsBox.y + 2,
+      `Canvas blank Composer is not rendered as input + control rows: ${JSON.stringify({
+        canvasEditorBox,
+        canvasControlsBox,
+      })}`,
+    )
+    await assertReadOnlyZeroFooter(
+      page.locator('#agentPanel'),
+      'Canvas blank Footer',
+    )
     assert(
       (await threadToggle.getAttribute('aria-expanded')) === 'true',
       'thread toggle must report aria-expanded=true when the panel is open',
@@ -777,12 +807,74 @@ async function main(argv) {
     await shot(caseArt, 'blank-workspace')
     expectNoFatal(pageErrors, consoleErrors)
 
-    // 仅断言 blank shell；真正发消息走可选 real case
+    // Blank 场景也必须使用共享双层 Composer。
     const composer = page.getByLabel('给 AI 发送消息')
+    const dock = composer.locator('xpath=ancestor::*[contains(@class,"thread-dock")]')
+    const editorBox = await composer.boundingBox()
+    const controlsBox = await dock.locator('.thread-dock-controls').boundingBox()
+    assert(
+      editorBox && controlsBox && editorBox.y + editorBox.height <= controlsBox.y + 2,
+      `blank Composer is not rendered as input + control rows: ${JSON.stringify({
+        editorBox,
+        controlsBox,
+      })}`,
+    )
+    await page.getByRole('button', { name: '权限模式' }).waitFor({ state: 'visible' })
+    await page.getByRole('button', { name: 'Model 与 Variant' }).waitFor({ state: 'visible' })
+    await assertReadOnlyZeroFooter(page, 'blank Footer')
     await composer.fill('e2e blank shell probe (not sent if empty then clear)')
     await composer.fill('')
     await apiDeleteByName(args.backendUrl, 'chats', title)
   })
+
+  if (args.withTools) {
+    await run(
+      'ui.chat.create_environment_workspace',
+      'Create Chat 使用 Environment → Workspace 两阶段 picker 提交完整 binding',
+      async (caseArt) => {
+        const title = `e2e-ui-create-env-${stamp}`
+        await goto('/chats')
+        await page.getByText('新建 Chat', { exact: true }).click()
+        await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
+        const agentSelect = page.getByLabel('Agent')
+        await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
+          await agentSelect.selectOption({ index: 1 })
+        })
+
+        const environmentTrigger = page.getByRole('button', { name: 'Environment', exact: true })
+        await environmentTrigger.click()
+        const environments = page.getByRole('region', { name: '选择 Environment' })
+        await environments.waitFor({ state: 'visible', timeout: 10_000 })
+        await environments.getByRole('option', {
+          name: new RegExp(`^${escapeRegExp(args.daemonEnv)}(?:\\s|$)`),
+        }).click()
+        const directory = page.getByRole('region', { name: `${args.daemonEnv} 目录` })
+        await directory.waitFor({ state: 'visible', timeout: 10_000 })
+        assert(
+          (await environmentTrigger.innerText()).includes('（无）'),
+          'selecting an Environment silently committed workspacePath="." before confirmation',
+        )
+        await directory.getByRole('button', { name: '使用当前 Workspace' }).click()
+        assert(
+          (await environmentTrigger.innerText()).includes(`${args.daemonEnv} · @/`),
+          `complete Environment binding was not shown: ${await environmentTrigger.innerText()}`,
+        )
+        await page.getByRole('button', { name: '确认创建' }).click()
+        await page.getByText('新对话').first().waitFor({ state: 'visible', timeout: 15_000 })
+
+        const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chat')
+        const created = (json?.data || []).find((chat) => chat.title === title)
+        assert(
+          created?.environment?.name === args.daemonEnv
+          && created?.environment?.workspacePath === '.',
+          `Create Chat did not persist the confirmed binding: ${JSON.stringify(created)}`,
+        )
+        await shot(caseArt, 'create-chat-environment-workspace')
+        expectNoFatal(pageErrors, consoleErrors)
+        await apiDeleteByName(args.backendUrl, 'chats', title)
+      },
+    )
+  }
 
   await runComposerMatrix({
     apiCtx,
@@ -813,9 +905,18 @@ async function main(argv) {
       await page.getByRole('button', { name: '发送消息' }).click()
       // 用户消息应进入 timeline；assistant 成功与否取决于 Provider
       await page.getByText('只回复单词 OK，不要调用工具。').first().waitFor({ state: 'visible', timeout: 30_000 })
+      await page.getByRole('button', { name: '权限模式' }).waitFor({ state: 'visible', timeout: 30_000 })
+      await page.getByRole('button', { name: 'Model 与 Variant' })
+        .filter({ hasText: 'minimax/MiniMax-M2.7 · high' })
+        .waitFor({ state: 'visible', timeout: 30_000 })
       const status = page.getByLabel('会话状态')
-      await status.getByText('agent:default-assistant', { exact: true }).waitFor({ state: 'visible', timeout: 30_000 })
-      await status.getByText('minimax/MiniMax-M2.7 · high', { exact: true }).waitFor({ state: 'visible', timeout: 30_000 })
+      if (await status.count() > 0) {
+        assert(await status.getByRole('button').count() === 0, 'Footer must remain readonly')
+        const statusText = await status.innerText()
+        assert(!statusText.includes('agent:'), `Footer leaked Agent: ${statusText}`)
+        assert(!statusText.includes('MiniMax-M2.7'), `Footer leaked Model: ${statusText}`)
+        assert(!statusText.includes('notify:'), `Footer leaked Notification: ${statusText}`)
+      }
       await shot(caseArt, 'first-send-user')
       // 等待一轮结束（最长 90s）
       let assistantText = ''

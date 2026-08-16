@@ -110,7 +110,21 @@ export function useHarnessThreadRealtime(
       || current.attempt !== snapshot.attempt
       || snapshot.sequence >= current.sequence
     ) {
-      next = snapshot.sequence > 0 || snapshot.text || snapshot.thinking ? snapshot : null
+      const hasVisibleOverlay =
+        snapshot.sequence > 0
+        || Boolean(snapshot.text)
+        || Boolean(snapshot.thinking)
+        || snapshot.toolCalls.length > 0
+        || (
+          current != null
+          && current.threadId === snapshot.threadId
+          && current.invocationId === snapshot.invocationId
+          && current.attempt === snapshot.attempt
+          && current.toolCalls.length > 0
+        )
+      next = hasVisibleOverlay
+        ? mergeSnapshotToolCalls(snapshot, current)
+        : null
       const gap = gapRef.current
       if (
         gap != null
@@ -400,12 +414,47 @@ function sameAttachments(
   )
 }
 
+function mergeSnapshotToolCalls(
+  snapshot: RealtimeModelStream,
+  current: RealtimeModelStream | null,
+): RealtimeModelStream {
+  if (
+    snapshot.toolCalls.length > 0
+    || current == null
+    || current.threadId !== snapshot.threadId
+    || current.invocationId !== snapshot.invocationId
+    || current.attempt !== snapshot.attempt
+    || current.toolCalls.length === 0
+  ) {
+    return snapshot
+  }
+  return { ...snapshot, toolCalls: current.toolCalls }
+}
+
+function sameToolCallDrafts(
+  left: RealtimeModelStream['toolCalls'],
+  right: RealtimeModelStream['toolCalls'],
+): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left.every((item, index) => {
+    const other = right[index]
+    return other != null
+      && item.index === other.index
+      && item.id === other.id
+      && item.name === other.name
+      && item.argumentsJson === other.argumentsJson
+  })
+}
+
 function sameModelStream(left: RealtimeModelStream, right: RealtimeModelStream): boolean {
   return left.threadId === right.threadId
     && left.invocationId === right.invocationId
     && left.attempt === right.attempt
     && left.text === right.text
     && left.thinking === right.thinking
+    && sameToolCallDrafts(left.toolCalls, right.toolCalls)
     && left.sequence === right.sequence
     && left.status === right.status
     && left.errorCode === right.errorCode

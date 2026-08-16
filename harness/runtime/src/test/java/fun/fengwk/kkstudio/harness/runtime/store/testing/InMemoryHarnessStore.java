@@ -435,6 +435,24 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public List<Entry> loadEntriesBySessionId(UUID sessionId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      if (!state.sessions.containsKey(sessionId)) {
+        throw new IllegalArgumentException("session " + sessionId + " does not exist");
+      }
+      List<Entry> entries = new ArrayList<>();
+      for (Entry entry : state.entries.values()) {
+        if (entry.sessionId().equals(sessionId)) {
+          entries.add(entry);
+        }
+      }
+      entries.sort(
+          Comparator.comparing(Entry::createdAt).thenComparing(Entry::id, UuidOrder.COMPARATOR));
+      return List.copyOf(entries);
+    }
+
+    @Override
     public void insertThread(ThreadState thread) {
       checkOpen();
       Objects.requireNonNull(thread, "thread");

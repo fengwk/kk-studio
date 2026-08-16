@@ -23,6 +23,15 @@ describe('encodeClientMessage', () => {
 })
 
 describe('decodeServerMessage', () => {
+  it('decodes the connection-level heartbeat with an exact field set', () => {
+    expect(
+      decodeServerMessage(JSON.stringify({ version: 1, type: 'heartbeat' })),
+    ).toEqual({ type: 'heartbeat' })
+    expect(
+      decodeServerMessage(JSON.stringify({ version: 1, type: 'heartbeat', extra: true })),
+    ).toBeNull()
+  })
+
   it('decodes subscribed frames with the resource and canonical cursor', () => {
     expect(
       decodeServerMessage(

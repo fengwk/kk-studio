@@ -65,6 +65,7 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
+    getSystemPromptPreview: vi.fn(),
     enqueueCommands: vi.fn(),
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
@@ -256,6 +257,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       thread({ threadId: 't-idle' }),
       thread({ threadId: 't-running', status: 'RUNNING', processing: true }),
     ])
+    vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({ text: '' })
     vi.mocked(harnessService.enqueueCommands).mockResolvedValue([] as HarnessThreadCommandDTO[])
   })
 
@@ -270,21 +272,22 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       'agent',
       'environment',
       'yolo',
+      'models',
       'tree',
       'stop',
       'new',
       'upload',
       'events',
-      'conversation',
       'shortcuts',
     ])
-    // /thread 仅切换面板，因此在任何 Thread 存在之前就能生效；/tree、/events 与
-    // /conversation 依赖已绑定的 Thread，因此在空面板上保持禁用。/session 已彻底移除。
+    // /thread 仅切换面板，因此在任何 Thread 存在之前就能生效；/tree 与 /events
+    // 依赖已绑定的 Thread，因此在空面板上保持禁用。/session 已彻底移除。
     expect(BLANK_PANE_COMMANDS.filter((command) => !command.disabled).map((command) => command.id)).toEqual([
       'thread',
       'agent',
       'environment',
       'yolo',
+      'models',
       'upload',
       'shortcuts',
     ])
@@ -292,7 +295,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'tree')?.disabled).toBe(true)
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'new')?.disabled).toBe(true)
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'events')?.disabled).toBe(true)
-    expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'conversation')?.disabled).toBe(true)
   })
 
   it('restores the pane-scoped browser draft before the first Thread exists', async () => {
@@ -323,18 +325,19 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     const dirPanel = await screen.findByLabelText('local 目录')
     expect(within(dirPanel).getByText('当前：.')).toBeInTheDocument()
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
 
-    // 空面板 footer 立即反映 draft（binding name + workspacePath）。
-    expect(await screen.findByRole('button', { name: /env:local · ws:\./ })).toBeInTheDocument()
+    // 只读 Footer 立即反映完整 binding；交互入口仍是 Plus/Slash。
+    expect(await screen.findByText('env:local · @/')).toBeInTheDocument()
 
     // 已有 binding：再次打开直接进入目录模式；返回列表后选择“无环境”提交 null。
-    await user.click(screen.getByRole('button', { name: /env:local/ }))
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
     const dirAgain = await screen.findByLabelText('local 目录')
     await user.click(within(dirAgain).getByRole('button', { name: '返回 Environment 列表' }))
     const listAgain = await screen.findByLabelText('选择 Environment')
     await user.click(within(listAgain).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
-    expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('none env')
   })
 
   it('closing the workspace picker cancels without mutating the blank pane draft', async () => {
@@ -348,25 +351,24 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     await screen.findByLabelText('local 目录')
-    // Escape 只取消：不调用 onSelect，footer 保持 env:none，Chat 默认值未同步。
+    // Escape 只取消：不调用 onSelect；未绑定 Environment 时 Footer 只读展示 none。
     await user.keyboard('{Escape}')
     expect(screen.queryByLabelText('local 目录')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /env:none/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('none env')
     expect(onEnvironmentChange).not.toHaveBeenCalled()
     expect(chatService.createChatThread).not.toHaveBeenCalled()
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
 
-  it('materializes the blank pane frozen draft from the catalog (footer shows agent/model)', async () => {
+  it('materializes the blank pane frozen draft into Composer controls', async () => {
     renderBlankPane()
 
-    // Footer 应反映 catalog 派生的 frozen draft：agent=assistant，model 来自
-    // minimax/MiniMax，使用 default variant。Catalog 查询立即解析完成。
-    expect(await screen.findByRole('button', { name: /agent:assistant/ })).toBeInTheDocument()
-    expect(screen.getByText(/minimax\/MiniMax · default/)).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: /env:none/ }),
-    ).toBeInTheDocument()
+    // Model/Variant 与 Permission 属于双层 Composer；无 Environment 时 Footer 只读展示 none。
+    expect(await screen.findByRole('button', { name: 'Model 与 Variant' })).toHaveTextContent(
+      'minimax/MiniMax · default',
+    )
+    expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('Default')
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('none env')
     expect(agentService.listModels).toHaveBeenCalled()
     // draft 编辑没有触发任何 service 调用。
     expect(chatService.createChatThread).not.toHaveBeenCalled()
@@ -378,26 +380,28 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     renderBlankPane({ environment: { name: 'local', workspacePath: '.' } })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // Chat 默认 binding 是空面板草稿的起点：footer 立即反映 env:local · ws:.。
-    expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
+    // Chat 默认 binding 是空面板草稿的起点；Footer 只读展示安全 wire path。
+    expect(await screen.findByText('env:local · @/')).toBeInTheDocument()
 
     // 已有 binding：初次打开直接浏览该 environment/path（root '.'）。
-    await user.click(screen.getByRole('button', { name: /env:local/ }))
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
     let dirPanel = await screen.findByLabelText('local 目录')
     expect(within(dirPanel).getByText('当前：.')).toBeInTheDocument()
 
-    // 发送前可清空：返回列表选择（无）=> env:none。
+    // 发送前可清空：返回列表选择（无），Footer 只读展示 none。
     await user.click(within(dirPanel).getByRole('button', { name: '返回 Environment 列表' }))
     let envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
-    expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('none env')
 
     // 发送前可重新更改：选回 local 并确认 root workspace，首次发送携带完整 binding。
-    await user.click(screen.getByRole('button', { name: /env:none/ }))
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
     envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     dirPanel = await screen.findByLabelText('local 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
     const createdThread = thread({ threadId: 't-created' })
     vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
     await user.click(composer)
@@ -412,22 +416,25 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const user = userEvent.setup()
     const onEnvironmentChange = vi.fn(async () => undefined)
     renderBlankPane({ onEnvironmentChange })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    await user.click(screen.getByRole('button', { name: /env:none/ }))
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
     let envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     const dirPanel = await screen.findByLabelText('local 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
-    expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
+    expect(await screen.findByText('env:local · @/')).toBeInTheDocument()
     expect(onEnvironmentChange).toHaveBeenCalledWith({ name: 'local', workspacePath: '.' })
 
     // 显式清空：null 同步为 Chat 默认（清空语义，绝不能被当作缺省忽略）。
-    await user.click(screen.getByRole('button', { name: /env:local/ }))
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
     const dirAgain = await screen.findByLabelText('local 目录')
     await user.click(within(dirAgain).getByRole('button', { name: '返回 Environment 列表' }))
     envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /\uff08\u65e0\uff09/ }))
-    expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('none env')
     expect(onEnvironmentChange).toHaveBeenCalledWith(null)
     expect(chatService.createChatThread).not.toHaveBeenCalled()
   })
@@ -440,12 +447,13 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     renderBlankPane({ onEnvironmentChange })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    await user.click(screen.getByRole('button', { name: /env:none/ }))
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     const dirPanel = await screen.findByLabelText('local 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
-    expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
+    expect(await screen.findByText('env:local · @/')).toBeInTheDocument()
     // 更新失败仅提示（错误 banner）；不阻塞发送。
     expect(await screen.findByText('update failed')).toBeInTheDocument()
 
@@ -819,7 +827,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('option', { name: /^local/ }))
     const dirPanel = await screen.findByLabelText('local 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/thread{Enter}')
@@ -852,7 +860,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
     await user.click(within(screen.getByLabelText('选择 Environment')).getByRole('option', { name: /^local/ }))
     const dirPanel = await screen.findByLabelText('local 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/thread{Enter}')
@@ -865,6 +873,9 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const discardDialog = await screen.findByRole(
       'alertdialog',
       { name: '丢弃未发送的修改？' },
+    )
+    expect(discardDialog).toHaveTextContent(
+      '切换到所选 Thread 后会丢弃尚未随消息提交的 Agent、Environment、Model 或 Permission 设置，是否继续？',
     )
     await waitFor(() =>
       expect(within(discardDialog).getByRole('button', { name: '取消' })).toHaveFocus(),

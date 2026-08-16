@@ -35,20 +35,17 @@ class AgentPromptComposerTest {
     return new SkillBinding(name, description, null);
   }
 
-  /** 空正文 + 无 Environment 仍输出严格、稳定且只有四个字段的 current environment 块。 */
+  /** 空正文 + 无 Environment 只保留有值的 date，不输出 none 字段。 */
   @Test
-  void alwaysComposesExactCurrentEnvironmentBlock() {
-    String expected =
-        "<current_environment>\n"
-            + "- name: none\n"
-            + "- workspace: none\n"
-            + "- system: none\n"
-            + "- date: 2026-08-09\n"
-            + "- note: none\n"
-            + "</current_environment>";
+  void omitsNoneCurrentEnvironmentFields() {
+    String expected = "<current_environment>\n" + "- date: 2026-08-09\n" + "</current_environment>";
 
     assertEquals(expected, composer.compose(null, none(), List.of(), List.of()));
     assertEquals(expected, composer.compose("   ", none(), List.of(), List.of()));
+    assertFalse(expected.contains("- name:"));
+    assertFalse(expected.contains("- workspace:"));
+    assertFalse(expected.contains("- system:"));
+    assertFalse(expected.contains("- note:"));
     assertNoLegacyFields(expected);
   }
 

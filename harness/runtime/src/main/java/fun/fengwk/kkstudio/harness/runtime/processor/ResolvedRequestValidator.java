@@ -4,19 +4,16 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 
 /**
  * Resolved 请求与 candidate branch 事实的机械一致性校验（Harness 边界）。
  *
  * <p>Resolver 返回的 {@link ModelInvocationRequest} 中可以直接对照 candidate {@link TurnPlan#candidatePath()}
- * 最新 {@link BranchSettings} 的字段只有：{@code yoloEnabled}、完整 Environment binding （{@code
- * environment}）、provider/model/variant 选择与有序 tool bindings（request 构造器已保证 provider tools 与 bindings
- * 一一对应，只需对照名称序列）。agentName 在 request 中没有直接的 canonical 字段，不做校验。
+ * 最新 {@link BranchSettings} 的字段只有：{@code yoloEnabled}、完整 Environment binding （{@code environment}）与
+ * provider/model/variant 选择。Agent tools/skills/subagents 每个新 turn 从最新 Agent catalog 派生，不再与 branch
+ * 中的历史 activeTools 快照机械比较；agentName 在 request 中没有直接的 canonical 字段，不做校验。
  *
  * <p>压缩 turn（{@code plan.preparation()} 非空）必须携带与 preparation 逐字段一致的 {@link CompactionRequest}
  * 元数据与相同 {@code contextWindow}，且 tool/skill binding 必须为空（正常 turn 的 tool 名称序列校验不适用于压缩请求）； 正常 turn
@@ -65,19 +62,6 @@ final class ResolvedRequestValidator {
               + request.providerRequest().variant().id()
               + " does not match candidate branch variant "
               + settings.model().variant());
-    }
-    if (plan.preparation() == null) {
-      List<String> boundToolNames = new ArrayList<>(request.toolBindings().size());
-      for (ToolBinding binding : request.toolBindings()) {
-        boundToolNames.add(binding.descriptor().name());
-      }
-      if (!boundToolNames.equals(settings.activeTools())) {
-        throw new IllegalStateException(
-            "resolved request tool bindings "
-                + boundToolNames
-                + " do not match candidate branch activeTools "
-                + settings.activeTools());
-      }
     }
   }
 

@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.core.ai.runtime.model.provider;
 
+import com.openai.client.OpenAIClient;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openaiofficial.OpenAiOfficialResponsesStreamingChatModel;
+import dev.langchain4j.model.openaiofficial.setup.OpenAiOfficialSetup;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
@@ -32,12 +34,28 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
       @Override
       protected StreamingChatModel chatModel(ProviderRequest request) {
         String key = CacheRequestValidator.requireOpenAiAffinity(request.cacheControl());
+        // LangChain4j 会直接读取 SDK 标为必填的 usage breakdown；兼容端点可能省略这些字段。
+        OpenAIClient client =
+            OpenAiOfficialSetup.setupSyncClient(
+                    descriptor.endpoint(),
+                    apiKey,
+                    null,
+                    null,
+                    null,
+                    null,
+                    false,
+                    false,
+                    request.model().modelName(),
+                    descriptor.modelCallTimeoutPolicy().modelCallTimeout(),
+                    null,
+                    null,
+                    null)
+                .withOptions(
+                    options -> options.jsonMapper(OpenAiResponsesUsageJsonMapper.instance()));
         OpenAiOfficialResponsesStreamingChatModel.Builder builder =
             OpenAiOfficialResponsesStreamingChatModel.builder()
-                .baseUrl(descriptor.endpoint())
-                .apiKey(apiKey)
-                .modelName(request.model().modelName())
-                .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout());
+                .client(client)
+                .modelName(request.model().modelName());
         String reasoningEffort =
             request.model().reasoning() ? request.variant().reasoningEffort() : null;
         if (reasoningEffort != null) {

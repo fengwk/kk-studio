@@ -73,37 +73,38 @@ CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/ACTIVE_TOOLS/YOLO）
 
 `TurnResolver.resolve(threadId, candidatePath, yoloEnabled)` 在事务外同步解析，只读最新 Catalog/Environment 事实：
 
-1. 从 candidate path 前缀的最近 TURN_START `BranchSettings`（**latest-snapshot-wins**：只使用最近一个 ROOT/TURN_START 的完整快照，null/缺失/不可用值绝不向更旧快照回退）读取 `environment` binding、`agentName`、`model`、`activeTools`；
+1. 从 candidate path 前缀的最近 TURN_START `BranchSettings`（**latest-snapshot-wins**：只使用最近一个 ROOT/TURN_START 的完整快照，null/缺失/不可用值绝不向更旧快照回退）读取 `environment` binding、`agentName`、`model`；历史 `activeTools` 不参与新 turn 能力计算；
 2. 按 `agentName` 读取最新 Agent；按 Model ref 读取最新 Provider/Model/Variant；
-3. 按 `activeTools` 与 `environment` binding 构造 tool set：ENVIRONMENT 工具一律按最新 binding 绑定（null/缺失/未 READY 规划不拒绝；实际 start 时不可用 → 确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）；Agent skills 只从 Agent config 读取、必须由最新选中且 live 的 Environment 精确提供（缺失/未 READY/无 binding 精确拒绝，绝不回看更旧 settings）、且 `activeTools` 必须显式包含内部 `load_skill`；
-4. 按 Agent `subagents` allowlist 解析委派能力：`task` 只在 `activeTools` 显式含 task、allowlist 非空且当前 Session depth 小于 `maxDepth` 时绑定（depth 由 ROOT `subagentContext` 派生）；allowlist 每个名称必须解析到现存 Agent，名称 + 描述冻结为 `subagentBindings`；
+3. 从最新 Agent config 派生 tool set：直接工具按 `config.tools` 顺序绑定；skills 非空时追加内部 `load_skill`；subagents 非空且当前 Session depth 小于 `maxDepth` 时追加内部 `task`。ENVIRONMENT 工具一律按最新 binding 绑定（null/缺失/未 READY 规划不拒绝；实际 start 时不可用 → 确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）；
+4. Agent skills 必须由最新选中且 live 的 Environment 精确提供；subagent allowlist 每个名称必须解析到现存 Agent，名称 + 描述冻结为 `subagentBindings`；
 5. 生成 `ModelInvocationRequest`：
 
 ```text
 environment         # 本请求的单一 Environment binding（可 null）
 providerRequest    # exact Provider transport payload（model/variant/messages/tools/cacheControl）
 toolBindings       # (descriptor, type, environment binding, plugin provenance/access) 与 providerRequest.tools 一一对应
-skillBindings      # 选中 skill（必须显式选中 load_skill，非隐式追加）
-subagentBindings   # task 可委派的 Agent 名称 + 描述 allowlist（activeTools 含 task 且未达最大深度时）
+skillBindings      # 最新 Agent skills（非空时自动派生内部 load_skill）
+subagentBindings   # 最新 Agent subagents 的名称 + 描述 allowlist（未达最大深度时）
 yoloEnabled        # 冻结运行时策略
 ```
 
-system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合，固定顺序为：Agent 正文（非空时）→ `<current_environment>`（始终存在）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。current_environment 模板精确为：
+system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合，固定顺序为：Agent 正文（非空时）→ `<current_environment>`（至少有一个有值字段时）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。Events 顶部只读预览通过 `GET /api/ai/runtime/threads/{threadId}/system-prompt` 按当前 branch 最新状态现算同一组合；进入 `/events` 拉一次，turn 结束后再拉一次。current_environment 只输出有值字段：
 
 ```text
 <current_environment>
 - name: ${name}
+- workspace: ${workspace}
 - system: ${system}
 - date: ${date}
 - note: ${note}
 </current_environment>
 ```
 
-所有动态值在进入模板前做 XML escape，日期严格为 `yyyy-MM-dd`；无值统一渲染 `none`。`DatabaseTurnResolver` 每次普通解析只读取一次 `clock.instant()`，构造只携带 `EnvironmentBinding`、`DaemonOperatingSystem`、`LocalDate` 与 note 的 `CurrentEnvironmentContext`：
+所有动态值在进入模板前做 XML escape，日期严格为 `yyyy-MM-dd`；`null` / 空白 / `none` 字段整行省略。`DatabaseTurnResolver` 每次普通解析只读取一次 `clock.instant()`，构造只携带 `EnvironmentBinding`、`DaemonOperatingSystem`、`LocalDate` 与 note 的 `CurrentEnvironmentContext`：
 
-- 未选择 Environment：name/workspace/system/note 为 `none`，日期按服务端 Clock zone；
+- 未选择 Environment：只输出 date（服务端 Clock zone）；
 - 已选择且 registry 条目存在 READY metadata（capabilities 非 null，无论当前 status/heartbeat 是否 ready）：name/workspace 来自 binding，system/note 来自 metadata，日期按 metadata timeZone；
-- 已选择但无 metadata：保留 name，system/note 为 `none`，日期回退服务端 Clock zone。
+- 已选择但无 metadata：只输出 name/workspace/date，日期回退服务端 Clock zone。
 
 运行状态、workdir、时间与 timeZone 都不进入 Prompt；Tool/Skill 的实时 ready 校验保持独立，因此相同 name/system/date/note 下心跳过期不会改变系统提示词。
 

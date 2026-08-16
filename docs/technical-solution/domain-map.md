@@ -45,7 +45,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Chat | 保存可见发送设置 `agentName`、可空默认 `EnvironmentBinding{name, workspacePath}`（两列同存同空）、`yoloEnabled` 的持久对象 |
 | Session | append-only Entry Tree 的边界 |
 | Entry | 语义持久事实：`ROOT`、`TURN_START`、`MESSAGE`、`CUSTOM`、`MODEL_ATTEMPT_FAILURE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`、`COMPACTION`、`TURN_END` |
-| BranchSettings | Entry 分支的完整不可变设置快照（environment binding/agentName/model/activeTools） |
+| BranchSettings | Entry 分支的完整不可变设置快照（environment binding/agentName/model；历史 activeTools 只作投影，不是新 turn 的能力事实） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，七类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO` |
 | ModelInvocation | 一次冻结 `ModelInvocationRequest`（route/provider/tools/skills/subagentBindings/YOLO）的 Provider 调用；`failedAttempts` 保存尚未物化的连续瞬态失败审计 |
@@ -59,7 +59,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentName`（bounded 小写路由名称）唯一，状态为 CONNECTING/READY；可用性 = READY + 连接打开 + 心跳未过期 |
 | Realtime projection | Redis Streams 中有界、可丢失的输出覆盖层（非 durable） |
 
-Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `DatabaseTurnResolver` 从 `BranchSettings` 读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route，并把插件 `ContextProjector` 基于当前 candidate branch 产生的消息注入 Provider context（Agent/Model 修改下一 turn 生效）。每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。立即 retry 重放 Invocation 冻结的同一 request；后续 turn 的上下文只白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 projector，`MODEL_ATTEMPT_FAILURE`、`ASSISTANT_ERROR` 及其中的 partial/error 永不进入 Provider context。ENVIRONMENT 工具按最新 `EnvironmentBinding` 绑定（route 用 binding 的 `environmentName`）、规划不拒绝（实际 start 不可用 → 确定性 Rejected，模型可见的 durable FAILED ToolResult）；Agent skills 必须由最新选中且 live 的 Environment 精确提供且 `activeTools` 显式包含 `load_skill`（缺失/未 READY/无名称精确拒绝，绝不回看更旧 settings）。`task` 只在 branch `activeTools` 含 task、Agent subagents allowlist 非空且 Session depth 小于 `maxDepth` 时绑定，名称 + 描述冻结进 `subagentBindings`；执行绝不重读父 Agent 配置扩权。所有确定性 planning 拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
+Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`DatabaseTurnResolver` 从 `BranchSettings` 读取 agent/model/environment 引用，再读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route，并把插件 `ContextProjector` 基于当前 candidate branch 产生的消息注入 Provider context（Agent/Model 修改下一 turn 生效）。直接工具按最新 `Agent.config.tools` 的顺序绑定；skills 非空时追加内部 `load_skill`；subagents 非空且 Session depth 小于 `maxDepth` 时追加内部 `task`。历史 `BranchSettings.activeTools` 不得限制或扩张新 turn。每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。立即 retry 重放 Invocation 冻结的同一 request；后续 turn 的上下文只白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 projector，`MODEL_ATTEMPT_FAILURE`、`ASSISTANT_ERROR` 及其中的 partial/error 永不进入 Provider context。ENVIRONMENT 工具按最新 `EnvironmentBinding` 绑定、规划不拒绝；Agent skills 必须由最新选中且 live 的 Environment 精确提供。subagent 名称 + 描述冻结进 `subagentBindings`，执行绝不重读父 Agent 配置扩权。所有确定性 planning 拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
 
 ## 4. Chat、Thread 与前端映射
 
@@ -70,10 +70,10 @@ Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `
 | Pane | 本地 `threadId` 绑定；服务端通过 Chat↔Thread 历史关系聚合 |
 | Blank pane | 本地 `BranchDraft`（frozenDraft）物化自 Chat defaults + Catalog |
 | Bound pane | `branchState` 从 snapshot `branchSettings` 初始化；queued SET_* 投影 `effectiveBase` |
-| Composer | 每次发送构造 SET_* diff batch + `USER_MESSAGE`（不携带 role） |
+| Composer | 双层输入与控制栏；Permission 仅 Default/YOLO，Model/Variant 使用 anchored 两级菜单；每次发送构造 SET_* diff batch + `USER_MESSAGE`（不携带 role） |
 | Thread transcript | `HarnessThreadSnapshotDTO` 的 entries（root-to-head）、queuedCommands、活跃 Invocation 与尚未物化的 `modelAttemptFailures` |
-| `/tree` | 选择历史 Entry 后调用 `PUT /api/ai/runtime/threads/{threadId}/head`（同 Session） |
-| Footer | 依据 pane 本地 draft 与 Catalog 展示 agent/model/environment 标签 |
+| `/tree` | 按需读取 `GET /api/ai/runtime/threads/{threadId}/entries` 的完整 Session Tree，选择历史 Entry 后调用 `PUT /api/ai/runtime/threads/{threadId}/head`（同 Session） |
+| Footer | 纯只读展示真实 Environment/Workspace、Git branch、Branch usage、context 与 cache hit；未绑定 Environment 时展示 `none env`，Git 缺失整段省略，usage/cache 缺失按 0 展示，不承载设置或通知入口 |
 | Approval | `POST /tool-invocations/{id}/approval`，输入 `ALLOW`/`DENY` |
 | Stop | `POST /stop`，`stopRequestId` + `expectedRevision`，三态结果 |
 
@@ -103,6 +103,7 @@ Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `
 | `GET /api/ai/chat/{chatId}/threads` | Chat-scoped Thread 全量列表（按关联时间从新到旧） |
 | `POST /api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT、Thread 并关联 Chat |
 | `GET /api/ai/runtime/threads/{threadId}/snapshot` | 单一 Thread 一致投影 |
+| `GET /api/ai/runtime/threads/{threadId}/entries` | Thread 所属 Session 的完整 immutable Entry Tree |
 | `POST /api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（七类），202 |
 | `PUT /api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
 | `POST /api/ai/runtime/threads/{threadId}/stop` | stopRequestId + revision CAS |

@@ -168,12 +168,12 @@ public class S3StorageConfiguration {
         blobRepository, blobManager, refManager, s3StorageService);
   }
 
-  /** Provider attempt 的 Resource 物化端口（每次 attempt 生成新鲜预签名 URL，绝不持久化）。 */
+  /** Provider attempt 的 Resource 物化端口（图片内联、其它媒体按需签名，瞬时 source 绝不持久化）。 */
   @Bean
   @ConditionalOnMissingBean(ProviderResourceMaterializer.class)
   public ProviderResourceMaterializer providerResourceMaterializer(
-      StorageBlobManager storageBlobManager) {
-    return ProviderResourceMaterializer.withStorage(storageBlobManager);
+      StorageBlobManager storageBlobManager, S3StorageService s3StorageService) {
+    return ProviderResourceMaterializer.withStorage(storageBlobManager, s3StorageService);
   }
 
   /** Tool outcome 的 durable history 物化端口：瞬时 Resource 引用外部化为全局 blob 后进入 history。 */

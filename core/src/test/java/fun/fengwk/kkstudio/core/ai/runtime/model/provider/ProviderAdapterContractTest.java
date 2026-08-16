@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Timeout;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -27,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -137,6 +139,103 @@ class ProviderAdapterContractTest {
     JsonNode thinking = google.path("generationConfig").path("thinkingConfig");
     assertTrue(thinking.path("includeThoughts").asBoolean());
     assertEquals("high", thinking.path("thinkingLevel").asText());
+  }
+
+  @Test
+  @Timeout(30)
+  void openAiResponsesAcceptsMissingUsageBreakdowns() throws Exception {
+    String response =
+        """
+        event: response.completed
+        data: {"type":"response.completed","sequence_number":1,"response":{"id":"resp-usage","created_at":1.0,"model":"MiniMax-M2.7","object":"response","output":[],"parallel_tool_calls":true,"status":"completed","tool_choice":"auto","usage":{"input_tokens":10,"output_tokens":20,"total_tokens":30}}}
+
+        """;
+    try (ProbeServer server = new ProbeServer(response, 200, "text/event-stream")) {
+      server.start();
+      ModelProvider provider =
+          new OpenAiResponsesProviderAdapter("test-api-key")
+              .create(
+                  new ProviderDescriptor(
+                      "provider",
+                      ProviderType.OPENAI_RESPONSES,
+                      server.endpoint("/v1"),
+                      timeoutPolicy(Duration.ofSeconds(5))));
+      CountDownLatch done = new CountDownLatch(1);
+      AtomicReference<ProviderResponse> complete = new AtomicReference<>();
+      AtomicReference<ProviderException> error = new AtomicReference<>();
+
+      provider.stream(
+          request(ProviderCacheControl.none()),
+          new ProviderStreamHandler() {
+            @Override
+            public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+            @Override
+            public void onComplete(ProviderResponse providerResponse, ProviderStream stream) {
+              complete.set(providerResponse);
+              done.countDown();
+            }
+
+            @Override
+            public void onError(ProviderException providerError, ProviderStream stream) {
+              error.set(providerError);
+              done.countDown();
+            }
+          });
+
+      assertTrue(done.await(20, TimeUnit.SECONDS));
+      assertNull(error.get(), () -> String.valueOf(error.get()));
+      ProviderResponse providerResponse = complete.get();
+      assertNotNull(providerResponse);
+      assertEquals(new ModelUsage(10, 20, 0, 0, 0, 0, 30), providerResponse.usage());
+      JsonNode rawUsage = OBJECT_MAPPER.readTree(providerResponse.rawUsageJson());
+      assertEquals(0, rawUsage.path("input_tokens_details").path("cached_tokens").asInt());
+      assertEquals(0, rawUsage.path("output_tokens_details").path("reasoning_tokens").asInt());
+      assertEquals("/v1/responses", server.awaitRequest().path());
+    }
+  }
+
+  /**
+   * Provider media source 是 URI 字符串。LangChain4j 的 {@code ImageContent.from(base64, mimeType)} 会把预签名
+   * HTTPS URL 误包成 {@code data:image/png;base64,https://...}，进而触发 illegal base64。本测试钉死 OpenAI Chat 与
+   * Responses（MiniMax-M3 协议）发出的 HTTP JSON 必须把该 URL 作为独立字符串值原样发出。
+   */
+  @Test
+  @Timeout(30)
+  void emitsPresignedImageUrlAsUriForOpenAiProtocols() throws Exception {
+    String imageUrl =
+        "https://cdn.example.test/blobs/abc.png?X-Amz-Signature=sig&X-Amz-Expires=600";
+    assertPresignedImageUrlContract(
+        ProviderType.OPENAI,
+        new OpenAiProviderAdapter("test-api-key"),
+        "/v1",
+        "{\"error\":{\"message\":\"probe\",\"type\":\"invalid_request_error\"}}",
+        imageUrl);
+    assertPresignedImageUrlContract(
+        ProviderType.OPENAI_RESPONSES,
+        new OpenAiResponsesProviderAdapter("test-api-key"),
+        "/v1",
+        "{\"error\":{\"message\":\"probe\",\"type\":\"invalid_request_error\"}}",
+        imageUrl);
+  }
+
+  /** MiniMax-M3 等远端 Provider 无法访问本地 Blob URL；标准 data URI 必须作为完整图片 source 原样发送。 */
+  @Test
+  @Timeout(30)
+  void emitsInlineImageDataUriForOpenAiProtocols() throws Exception {
+    String imageDataUri = "data:image/png;base64,AAEC";
+    assertImageSourceContract(
+        ProviderType.OPENAI,
+        new OpenAiProviderAdapter("test-api-key"),
+        "/v1",
+        "{\"error\":{\"message\":\"probe\",\"type\":\"invalid_request_error\"}}",
+        imageDataUri);
+    assertImageSourceContract(
+        ProviderType.OPENAI_RESPONSES,
+        new OpenAiResponsesProviderAdapter("test-api-key"),
+        "/v1",
+        "{\"error\":{\"message\":\"probe\",\"type\":\"invalid_request_error\"}}",
+        imageDataUri);
   }
 
   /**
@@ -293,6 +392,50 @@ class ProviderAdapterContractTest {
               server,
               error -> {});
       assertNoExplicitGoogleCache(ignoredAffinity);
+    }
+  }
+
+  private static void assertPresignedImageUrlContract(
+      ProviderType type,
+      ProviderAdapter adapter,
+      String endpointPath,
+      String response,
+      String imageUrl)
+      throws Exception {
+    RecordedRequest recorded =
+        assertImageSourceContract(type, adapter, endpointPath, response, imageUrl);
+    assertFalse(
+        recorded.body().contains("data:image/png;base64,"),
+        () -> "image URL must not be wrapped as a data URL, body=" + recorded.body());
+  }
+
+  private static RecordedRequest assertImageSourceContract(
+      ProviderType type,
+      ProviderAdapter adapter,
+      String endpointPath,
+      String response,
+      String imageSource)
+      throws Exception {
+    try (ProbeServer server = new ProbeServer(response)) {
+      server.start();
+      ModelProvider provider =
+          adapter.create(
+              new ProviderDescriptor(
+                  "provider",
+                  type,
+                  server.endpoint(endpointPath),
+                  timeoutPolicy(Duration.ofSeconds(5))));
+      RecordedRequest recorded =
+          runAndAwait(
+              provider,
+              imageRequest(ProviderCacheControl.none(), imageSource),
+              server,
+              error -> {});
+      JsonNode body = jsonBody(recorded);
+      assertTrue(
+          hasStringValue(body, imageSource),
+          () -> "image source must appear as a JSON string value, body=" + recorded.body());
+      return recorded;
     }
   }
 
@@ -542,6 +685,27 @@ class ProviderAdapterContractTest {
     }
   }
 
+  private static boolean hasStringValue(JsonNode node, String expected) {
+    if (node.isTextual()) {
+      return expected.equals(node.asText());
+    }
+    if (node.isObject()) {
+      var fields = node.fields();
+      while (fields.hasNext()) {
+        if (hasStringValue(fields.next().getValue(), expected)) {
+          return true;
+        }
+      }
+    } else if (node.isArray()) {
+      for (JsonNode element : node) {
+        if (hasStringValue(element, expected)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   private static boolean hasField(JsonNode node, String fieldName) {
     if (node.isObject()) {
       if (node.has(fieldName)) {
@@ -568,13 +732,42 @@ class ProviderAdapterContractTest {
   }
 
   private static ProviderRequest request(ProviderCacheControl control, String reasoningEffort) {
+    return request(
+        control,
+        reasoningEffort,
+        Set.of(ModelInputModality.TEXT),
+        List.of(
+            new ProviderMessage(
+                ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("contract-system"))),
+            new ProviderMessage(
+                ProviderMessageRole.USER, List.of(new ProviderTextBlock("contract-prompt")))));
+  }
+
+  private static ProviderRequest imageRequest(ProviderCacheControl control, String imageUrl) {
+    return request(
+        control,
+        null,
+        Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
+        List.of(
+            new ProviderMessage(
+                ProviderMessageRole.USER,
+                List.of(
+                    new ProviderTextBlock("contract-prompt"),
+                    new ProviderImageBlock("image/png", imageUrl)))));
+  }
+
+  private static ProviderRequest request(
+      ProviderCacheControl control,
+      String reasoningEffort,
+      Set<ModelInputModality> inputModalities,
+      List<ProviderMessage> messages) {
     ModelVariant variant =
         new ModelVariant("default", 256, 0.0, null, null, null, null, List.of(), reasoningEffort);
     ModelDescriptor model =
         new ModelDescriptor(
             "provider",
             "MiniMax-M2.7",
-            Set.of(ModelInputModality.TEXT),
+            inputModalities,
             true,
             true,
             new ModelPricing(
@@ -592,11 +785,7 @@ class ProviderAdapterContractTest {
     return new ProviderRequest(
         model,
         variant,
-        List.of(
-            new ProviderMessage(
-                ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("contract-system"))),
-            new ProviderMessage(
-                ProviderMessageRole.USER, List.of(new ProviderTextBlock("contract-prompt")))),
+        messages,
         List.of(
             new ProviderToolDefinition(
                 "echo",
@@ -609,10 +798,19 @@ class ProviderAdapterContractTest {
 
     private final HttpServer server;
     private final String response;
+    private final int responseStatus;
+    private final String responseContentType;
     private final BlockingQueue<RecordedRequest> requests = new LinkedBlockingQueue<>();
 
     private ProbeServer(String response) throws IOException {
+      this(response, 400, "application/json");
+    }
+
+    private ProbeServer(String response, int responseStatus, String responseContentType)
+        throws IOException {
       this.response = response;
+      this.responseStatus = responseStatus;
+      this.responseContentType = responseContentType;
       server = HttpServer.create(new InetSocketAddress(0), 0);
       server.createContext("/", this::handle);
     }
@@ -647,8 +845,8 @@ class ProviderAdapterContractTest {
                             entry -> entry.getKey().toLowerCase(),
                             entry -> entry.getValue().get(0))),
                 new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)));
-        exchange.getResponseHeaders().set("Content-Type", "application/json");
-        exchange.sendResponseHeaders(400, responseBytes.length);
+        exchange.getResponseHeaders().set("Content-Type", responseContentType);
+        exchange.sendResponseHeaders(responseStatus, responseBytes.length);
         exchange.getResponseBody().write(responseBytes);
       } finally {
         exchange.close();

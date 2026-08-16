@@ -49,4 +49,25 @@ describe('MessageList tool renderer dispatch', () => {
     )
     expect(screen.getByText('full result')).toBeInTheDocument()
   })
+
+  it('pairs a durable tool call and result into one card', () => {
+    const call: ToolDialogueMessage = {
+      ...message,
+      id: 'tool-call',
+      phase: 'call',
+      text: '',
+      arguments: '{"path":"README.md"}',
+    }
+    const result: ToolDialogueMessage = {
+      ...message,
+      id: 'tool-result',
+      phase: 'result',
+      text: 'ok',
+    }
+    render(<MessageList messages={[call, result]} />)
+    expect(screen.getAllByText('read')).toHaveLength(1)
+    expect(screen.getByText('ok')).toBeInTheDocument()
+    expect(screen.queryByText('工具调用 ·')).not.toBeInTheDocument()
+    expect(screen.queryByText('工具结果 ·')).not.toBeInTheDocument()
+  })
 })

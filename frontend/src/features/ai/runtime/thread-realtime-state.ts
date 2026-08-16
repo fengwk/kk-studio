@@ -3,6 +3,20 @@ import { taskStatusFingerprint } from '@/features/ai/runtime/task-status'
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
 import { toResourceAttachment } from '@/features/ai/runtime/thread-timeline/content-utils'
 
+export interface RealtimeToolCallDraft {
+  index: number
+  id: string
+  name: string
+  argumentsJson: string
+}
+
+export interface RealtimeToolCallDelta {
+  index: number
+  id: string | null
+  name: string | null
+  argumentsJson: string | null
+}
+
 export interface RealtimeModelDelta {
   threadId: string
   invocationId: string
@@ -10,6 +24,7 @@ export interface RealtimeModelDelta {
   sequence: number
   kind: 'TEXT_DELTA' | 'THINKING_DELTA' | 'TOOL_CALL_DELTA'
   text: string
+  toolCall?: RealtimeToolCallDelta
   createdAt: string
 }
 
@@ -20,6 +35,7 @@ export interface RealtimeModelStream {
   sequence: number
   text: string
   thinking: string
+  toolCalls: RealtimeToolCallDraft[]
   createdAt: string
   /**
    * 'streaming' 表示 RUNNING/checkpoint/delta overlay；'done' 表示持久终止态 resultJson
@@ -98,14 +114,26 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
     return null
   }
   const kind = envelope.payload.kind
-  if (
-    kind !== 'TEXT_DELTA'
-    && kind !== 'THINKING_DELTA'
-    && kind !== 'TOOL_CALL_DELTA'
-  ) {
+  if (kind === 'TOOL_CALL_DELTA') {
+    const toolCall = parseToolCallDeltaPayload(envelope.payload)
+    if (toolCall === undefined) {
+      return null
+    }
+    return {
+      threadId: envelope.threadId,
+      invocationId: envelope.subjectId,
+      attempt: envelope.attempt,
+      sequence: envelope.sequence,
+      kind,
+      text: '',
+      toolCall: toolCall ?? undefined,
+      createdAt: envelope.createdAt,
+    }
+  }
+  if (kind !== 'TEXT_DELTA' && kind !== 'THINKING_DELTA') {
     return null
   }
-  const text = kind === 'TOOL_CALL_DELTA' ? '' : envelope.payload.text
+  const text = envelope.payload.text
   if (typeof text !== 'string') {
     return null
   }
@@ -118,6 +146,35 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
     text,
     createdAt: envelope.createdAt,
   }
+}
+
+function parseToolCallDeltaPayload(
+  payload: Record<string, unknown>,
+): RealtimeToolCallDelta | null | undefined {
+  if (!isNonNegativeInteger(payload.index)) {
+    return undefined
+  }
+  const id = nullableIdentifier(payload.id)
+  const name = nullableIdentifier(payload.name)
+  const argumentsJson = nullableString(payload.argumentsJson)
+  if (id === undefined || name === undefined || argumentsJson === undefined) {
+    return undefined
+  }
+  if (id == null && name == null && argumentsJson == null) {
+    // 仅推进 sequence 的空 fragment，不创建 draft。
+    return null
+  }
+  return { index: payload.index, id, name, argumentsJson }
+}
+
+function nullableIdentifier(value: unknown): string | null | undefined {
+  if (value == null) {
+    return null
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return undefined
+  }
+  return value
 }
 
 /** 将 TOOL_PARTIAL realtime 事件解析为它的规范 payload（严格 shape）。 */
@@ -176,6 +233,7 @@ export function reduceRealtimeModelStream(
       sequence: delta.sequence,
       text: delta.kind === 'TEXT_DELTA' ? delta.text : '',
       thinking: delta.kind === 'THINKING_DELTA' ? delta.text : '',
+      toolCalls: applyToolCallDelta([], delta.toolCall),
       createdAt: delta.createdAt,
       status: 'streaming',
     }
@@ -188,8 +246,40 @@ export function reduceRealtimeModelStream(
     sequence: delta.sequence,
     text: delta.kind === 'TEXT_DELTA' ? current.text + delta.text : current.text,
     thinking: delta.kind === 'THINKING_DELTA' ? current.thinking + delta.text : current.thinking,
+    toolCalls: applyToolCallDelta(current.toolCalls, delta.toolCall),
     status: 'streaming',
   }
+}
+
+function applyToolCallDelta(
+  current: RealtimeToolCallDraft[],
+  delta: RealtimeToolCallDelta | undefined,
+): RealtimeToolCallDraft[] {
+  if (delta == null) {
+    return current
+  }
+  const next = current.map((item) => ({ ...item }))
+  const existing = next.find((item) => item.index === delta.index)
+  if (existing == null) {
+    next.push({
+      index: delta.index,
+      id: delta.id ?? '',
+      name: delta.name ?? '',
+      argumentsJson: delta.argumentsJson ?? '',
+    })
+    next.sort((left, right) => left.index - right.index)
+    return next
+  }
+  if (delta.id != null) {
+    existing.id += delta.id
+  }
+  if (delta.name != null) {
+    existing.name += delta.name
+  }
+  if (delta.argumentsJson != null) {
+    existing.argumentsJson += delta.argumentsJson
+  }
+  return next
 }
 
 export function isRealtimeModelDeltaGap(
@@ -276,6 +366,7 @@ export function snapshotModelStream(
     sequence: checkpoint?.attempt === invocation.attempt ? checkpoint.sequence : 0,
     text: '',
     thinking: '',
+    toolCalls: [],
     createdAt: timestampString(invocation.updateTime) || timestampString(invocation.createTime),
   }
   const resultJson = invocation.resultJson
@@ -288,6 +379,7 @@ export function snapshotModelStream(
       ...base,
       text: result?.text ?? checkpoint?.text ?? '',
       thinking: result?.thinking ?? checkpoint?.thinking ?? '',
+      toolCalls: result?.toolCalls ?? [],
       status: 'done',
     }
   }
@@ -324,18 +416,44 @@ export function snapshotModelStream(
  * usage, cost}）解析为完整的终止态投影。仅在 JSON 格式不合法时返回 null；
  * 空 text/thinking 视为有效（Java codec 会无条件写入这两个键）。
  */
-function parseModelResultPayload(json: string): { text: string; thinking: string } | null {
+function parseModelResultPayload(json: string): {
+  text: string
+  thinking: string
+  toolCalls: RealtimeToolCallDraft[]
+} | null {
   try {
     const value: unknown = JSON.parse(json)
     if (!isRecord(value)) {
       return null
     }
-    const text = getString(value.text)
-    const thinking = getString(value.thinking)
-    return { text, thinking }
+    return {
+      text: getString(value.text),
+      thinking: getString(value.thinking),
+      toolCalls: parseCompletedToolCalls(value.toolCalls),
+    }
   } catch {
     return null
   }
+}
+
+function parseCompletedToolCalls(value: unknown): RealtimeToolCallDraft[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const calls: RealtimeToolCallDraft[] = []
+  for (const [index, item] of value.entries()) {
+    if (!isRecord(item)) {
+      continue
+    }
+    const id = getString(item.id)
+    const name = getString(item.name)
+    const argumentsJson = getString(item.argumentsJson)
+    if (!id && !name && !argumentsJson) {
+      continue
+    }
+    calls.push({ index, id, name, argumentsJson })
+  }
+  return calls
 }
 
 function parseModelErrorPayload(json: string): { code: string; message: string } | null {

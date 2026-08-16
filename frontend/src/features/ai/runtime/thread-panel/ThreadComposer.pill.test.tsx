@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect, useState } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import {
   createAttachmentPart,
@@ -201,6 +201,10 @@ describe('ThreadComposer attachment pills', () => {
     vi.mocked(hashFile).mockClear()
   })
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('serializes ordered text -> pill -> text parts from typing and paste', async () => {
     const { service } = fakeStorage()
     render(<Harness service={service} />)
@@ -218,8 +222,7 @@ describe('ThreadComposer attachment pills', () => {
     expect(pill?.getAttribute('data-part-id')).toBeTruthy()
     expect(pill?.getAttribute('data-upload-id')).toBeTruthy()
     expect((pill as HTMLElement).contentEditable).toBe('false')
-    expect(pill).toHaveTextContent('[photo.png](upload)')
-    expect(document.querySelector('.attachment-tile')).toBeNull()
+    expect(pill).toHaveTextContent('[photo.png]')
     expect(document.querySelector('.attachment-reference')).not.toBeNull()
 
     // 继续在 pill 之后输入文本：ordered parts 保持 text -> attachment -> text。
@@ -237,6 +240,80 @@ describe('ThreadComposer attachment pills', () => {
       { type: 'text', text: 'after@report.pdf' },
     ])
     expect(document.querySelectorAll('.composer-pill')).toHaveLength(1)
+  })
+
+  it('renders local image/video thumbnails and type-specific icons without upload syntax', async () => {
+    const user = userEvent.setup()
+    const createObjectUrl = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockImplementation((file) => `blob:${(file as File).name}`)
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL')
+    const { service } = fakeStorage()
+    const { unmount } = render(<Harness service={service} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+
+    await pasteFiles(
+      editor,
+      fileOf('scene.png', 'image/png'),
+      fileOf('clip.mp4', 'video/mp4'),
+      fileOf('voice.mp3', 'audio/mpeg'),
+      fileOf('bundle.zip', 'application/zip'),
+      fileOf('table.csv', 'text/csv'),
+      fileOf('script.ts', 'text/typescript'),
+      fileOf('brief.pdf', 'application/pdf'),
+      fileOf('payload.bin', 'application/octet-stream'),
+    )
+
+    const imageItem = screen.getByTitle('scene.png').closest('.attachment-reference')
+    const videoItem = screen.getByTitle('clip.mp4').closest('.attachment-reference')
+    const audioItem = screen.getByTitle('voice.mp3').closest('.attachment-reference')
+    const archiveItem = screen.getByTitle('bundle.zip').closest('.attachment-reference')
+    const spreadsheetItem = screen.getByTitle('table.csv').closest('.attachment-reference')
+    const codeItem = screen.getByTitle('script.ts').closest('.attachment-reference')
+    const pdfItem = screen.getByTitle('brief.pdf').closest('.attachment-reference')
+    const genericItem = screen.getByTitle('payload.bin').closest('.attachment-reference')
+    expect(imageItem?.querySelector('img')).toHaveAttribute('src', 'blob:scene.png')
+    expect(videoItem?.querySelector('video')).toHaveAttribute('src', 'blob:clip.mp4')
+    expect(videoItem?.querySelector('video')).toHaveAttribute('preload', 'auto')
+    expect(audioItem?.querySelector('[data-file-icon="audio"]')).not.toBeNull()
+    expect(archiveItem?.querySelector('[data-file-icon="archive"]')).not.toBeNull()
+    expect(spreadsheetItem?.querySelector('[data-file-icon="spreadsheet"]')).not.toBeNull()
+    expect(codeItem?.querySelector('[data-file-icon="code"]')).not.toBeNull()
+    expect(pdfItem?.querySelector('[data-file-icon="text"]')).not.toBeNull()
+    expect(genericItem?.querySelector('[data-file-icon="file"]')).not.toBeNull()
+    expect(screen.getAllByText('[scene.png]')).toHaveLength(2)
+    expect(screen.getAllByText('[clip.mp4]')).toHaveLength(2)
+    const editorPills = [...document.querySelectorAll('.composer-pill')]
+    expect(editorPills.map((pill) => pill.textContent)).toEqual([
+      '[scene.png]',
+      '[clip.mp4]',
+      '[voice.mp3]',
+      '[bundle.zip]',
+      '[table.csv]',
+      '[script.ts]',
+      '[brief.pdf]',
+      '[payload.bin]',
+    ])
+    expect(imageItem?.querySelector('.attachment-reference-name')).toHaveTextContent('[scene.png]')
+    expect(document.querySelector('.thread-composer-strip')).not.toHaveTextContent('(upload)')
+    expect(document.querySelector('.composer-editor')).not.toHaveTextContent('(upload)')
+    expect(createObjectUrl).toHaveBeenCalledTimes(2)
+
+    await user.click(screen.getByRole('button', { name: '预览 scene.png' }))
+    const imageDialog = screen.getByRole('dialog', { name: '预览 scene.png' })
+    expect(imageDialog.querySelector('img')).toHaveAttribute('src', 'blob:scene.png')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '预览 clip.mp4' }))
+    const videoDialog = screen.getByRole('dialog', { name: '预览 clip.mp4' })
+    expect(videoDialog.querySelector('video')).toHaveAttribute('src', 'blob:clip.mp4')
+    await user.click(screen.getByRole('button', { name: '关闭媒体预览' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    unmount()
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:scene.png')
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:clip.mp4')
   })
 
   it('inserts pasted pills at the caret between text', async () => {
@@ -269,8 +346,8 @@ describe('ThreadComposer attachment pills', () => {
     const uploadIds = partsSnapshot().map((part) => part.uploadId)
     expect(new Set(uploadIds).size).toBe(2)
     // 同名文件的展示后缀按顺序派生。
-    expect(screen.getByText('[report.pdf (1)](upload)')).toBeInTheDocument()
-    expect(screen.getByText('[report.pdf (2)](upload)')).toBeInTheDocument()
+    expect(screen.getByText('[report.pdf (1)]')).toBeInTheDocument()
+    expect(screen.getByText('[report.pdf (2)]')).toBeInTheDocument()
     // 提交 payload 中解析为互不相同的服务端 upload 句柄。
     await waitForIdleUploads()
     placeCaretAtEndOf(editor)

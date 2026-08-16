@@ -117,6 +117,7 @@ class InMemoryHarnessStoreTransactionTest {
     assertThrows(IllegalStateException.class, () -> escaped.insertSession(session(sessionId)));
     assertThrows(IllegalStateException.class, () -> escaped.findSession(sessionId));
     assertThrows(IllegalStateException.class, () -> escaped.loadEntryPath(sessionId));
+    assertThrows(IllegalStateException.class, () -> escaped.loadEntriesBySessionId(sessionId));
   }
 
   @Test

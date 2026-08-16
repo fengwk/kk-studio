@@ -1,6 +1,13 @@
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { assert, envelopeData, expectHttpError, sleep, cid } from '../lib/http.mjs'
+import {
+  assert,
+  assertDecimalVersion,
+  envelopeData,
+  expectHttpError,
+  sleep,
+  cid,
+} from '../lib/http.mjs'
 import {
   approveToolInvocation,
   branchSettingsOf,
@@ -112,7 +119,8 @@ registerCase({
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     const suffix = cid().slice(0, 8)
-    const marker = `SUBAGENT-E2E-${suffix}`
+    // 只使用数字，避免模型对十六进制字母做大小写规范化后产生无意义的 exact-marker 失败。
+    const marker = `SUBAGENT-E2E-${process.hrtime.bigint()}`
     let childAgent = null
     let parentAgent = null
     let chat = null
@@ -748,12 +756,25 @@ registerCase({
         name: ctx.vars.daemonEnvironment.name,
         workspacePath: '.',
       }
-      // 固定大文本 fixture（临时 root，不进仓库）：单行 >8KB，core externalizer 内联阈值
-      // (INLINE_RESULT_UTF8_BYTES=8KB) 之上、daemon preview 阈值（50KB）之下 => read 返回 Text，
-      // Tool Result Entry 写入前由 history materializer 摄入全局 Blob，durable history 不保留 file URI。
+      // 固定大文本 fixture（临时 root，不进仓库）：总量 >8KB、每行低于 read 单行截断阈值，
+      // 且整体低于 daemon preview 阈值（50KB）=> read 返回完整 Text，Tool Result Entry 写入前
+      // 由 history materializer 摄入全局 Blob，durable history 不保留 file URI。
       const envRoot = process.env.DAEMON_ENV_ROOT || '/tmp/kk-studio-e2e-env'
       const fixturePath = path.join(envRoot, 'e2e-resource.txt')
-      const fixtureContent = `E2E-RESOURCE-FIXTURE ${'x'.repeat(16 * 1024)}\n`
+      const fixtureLines = Array.from(
+        { length: 32 },
+        (_, index) => `E2E-RESOURCE-FIXTURE-${String(index).padStart(2, '0')} ${'x'.repeat(512)}`,
+      )
+      const fixtureContent = `${fixtureLines.join('\n')}\n`
+      const expectedReadOutput = [
+        'path: e2e-resource.txt',
+        'ends_with_newline: yes',
+        'lsp: unsupported',
+        '',
+        ...fixtureLines.map(
+          (line, index) => `${String(index + 1).padStart(2, ' ')}|${line}`,
+        ),
+      ].join('\n')
       writeFileSync(fixturePath, fixtureContent)
       chat = await createChat(ctx, {
         title: `e2e-tool-chat-${suffix}`,
@@ -791,18 +812,29 @@ registerCase({
       })
       // 非 YOLO：等待 durable TOOL_WAITING_APPROVAL 状态（快照 classifier 投影）。
       let waiting = null
+      let terminal = null
       for (let i = 0; i < 120; i++) {
         const current = await getThreadSnapshot(ctx, tid)
         if (current.thread.status === 'TOOL_WAITING_APPROVAL') {
           waiting = current
           break
         }
-        if (current.thread.status === 'IDLE' || current.thread.status === 'FAILED') {
+        if (
+          current.thread.status === 'FAILED'
+          || (
+            current.thread.status === 'IDLE'
+            && (current.entries || []).some((entry) => entryType(entry) === 'TURN_END')
+          )
+        ) {
+          terminal = current
           break
         }
         await sleep(1000)
       }
-      assert(waiting, `never reached TOOL_WAITING_APPROVAL on thread ${tid}`)
+      assert(
+        waiting,
+        `never reached TOOL_WAITING_APPROVAL on thread ${tid}: ${JSON.stringify(terminal)}`,
+      )
       const readInvocation = waiting.toolInvocations.find(
         (invocation) => invocation.toolName === 'read',
       )
@@ -820,7 +852,9 @@ registerCase({
         `ToolInvocationDTO must not expose location: ${JSON.stringify(readInvocation)}`,
       )
       assert(
-        readInvocation.toolCallId && Number.isSafeInteger(readInvocation.attempt) && readInvocation.attempt >= 1,
+        readInvocation.toolCallId
+          && Number.isSafeInteger(readInvocation.attempt)
+          && readInvocation.attempt === 0,
         JSON.stringify(readInvocation),
       )
       const approvalJson = JSON.parse(readInvocation.approvalJson || '{}')
@@ -936,9 +970,15 @@ registerCase({
         /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(String(signed.mediaType || '')),
         `blob mediaType must be canonical: ${JSON.stringify(signed)}`,
       )
+      assertDecimalVersion(signed.sizeBytes, 'blob.sizeBytes')
+      const signedSizeBytes = Number(signed.sizeBytes)
       assert(
-        typeof signed.sizeBytes === 'number' && signed.sizeBytes > 0,
-        `blob sizeBytes must be present: ${JSON.stringify(signed)}`,
+        Number.isSafeInteger(signedSizeBytes) && signedSizeBytes > 0,
+        `blob sizeBytes must be a positive safe decimal: ${JSON.stringify(signed)}`,
+      )
+      assert(
+        signedSizeBytes === Buffer.byteLength(expectedReadOutput),
+        `blob size ${signedSizeBytes} != formatted read output ${Buffer.byteLength(expectedReadOutput)}`,
       )
       const download = await fetch(signed.url, { headers: signed.headers || {} })
       assert(download.status === 200, `blob resource download status ${download.status}`)
@@ -948,12 +988,12 @@ registerCase({
       )
       const bytes = Buffer.from(await download.arrayBuffer())
       assert(
-        bytes.length === signed.sizeBytes,
-        `download size ${bytes.length} != ${signed.sizeBytes}`,
+        bytes.length === signedSizeBytes,
+        `download size ${bytes.length} != ${signedSizeBytes}`,
       )
       assert(
-        bytes.equals(Buffer.from(fixtureContent)),
-        'blob resource download bytes differ from the fixture',
+        bytes.equals(Buffer.from(expectedReadOutput)),
+        'blob resource download bytes differ from the formatted read result',
       )
       ctx.writeArtifact(
         'tool-turn-final.json',

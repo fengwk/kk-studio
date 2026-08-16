@@ -42,6 +42,7 @@ describe('thread timeline', () => {
       sequence: 1,
       text: '正在输出',
       thinking: '正在思考',
+      toolCalls: [],
       createdAt: '2026-07-28T10:00:00Z',
       status: 'streaming',
     }
@@ -71,6 +72,40 @@ describe('thread timeline', () => {
     expect(durable.messages).toHaveLength(1)
   })
 
+  it('projects streaming tool-call argument fragments before durable assistant tool_call entries exist', () => {
+    const stream: RealtimeModelStream = {
+      threadId: 'thread-1',
+      invocationId: 'model-1',
+      attempt: 1,
+      sequence: 4,
+      text: '',
+      thinking: '',
+      toolCalls: [
+        {
+          index: 0,
+          id: 'call-write',
+          name: 'write',
+          argumentsJson: '{"path":"App.java","content":"class App {}"}',
+        },
+      ],
+      createdAt: '2026-07-28T10:00:00Z',
+      status: 'streaming',
+    }
+
+    const timeline = buildThreadTimeline([], [], [], stream)
+
+    expect(timeline.messages).toMatchObject([
+      {
+        role: 'tool',
+        phase: 'call',
+        toolName: 'write',
+        rendererKey: 'write',
+        arguments: '{"path":"App.java","content":"class App {}"}',
+        status: 'streaming',
+      },
+    ])
+  })
+
   it('projects active failed attempts before the current realtime attempt', () => {
     const stream: RealtimeModelStream = {
       threadId: 'thread-1',
@@ -79,6 +114,7 @@ describe('thread timeline', () => {
       sequence: 1,
       text: 'current output',
       thinking: 'current plan',
+      toolCalls: [],
       createdAt: '2026-07-28T10:00:03Z',
       status: 'streaming',
     }
@@ -128,6 +164,7 @@ describe('thread timeline', () => {
       sequence: 3,
       text: 'partial answer',
       thinking: 'partial thinking',
+      toolCalls: [],
       createdAt: '2026-07-28T10:00:00Z',
       status: 'streaming',
     }
@@ -160,6 +197,7 @@ describe('thread timeline', () => {
       sequence: 3,
       text: 'current output',
       thinking: '',
+      toolCalls: [],
       createdAt: '2026-07-28T10:00:00Z',
       status: 'streaming',
     }
@@ -219,6 +257,7 @@ describe('thread timeline', () => {
       sequence: 7,
       text: 'terminal partial',
       thinking: 'terminal thinking',
+      toolCalls: [],
       createdAt: '2026-07-28T10:00:00Z',
       status: 'error',
       errorCode: 'INVALID_REQUEST',
@@ -258,6 +297,7 @@ describe('thread timeline', () => {
       sequence: 0,
       text: '',
       thinking: '',
+      toolCalls: [],
       createdAt: '2026-07-28T10:00:06Z',
       status: 'error',
       errorCode: 'INVALID_REQUEST',
@@ -293,6 +333,7 @@ describe('thread timeline', () => {
       sequence: 4,
       text: 'stopped partial',
       thinking: 'stopped thinking',
+      toolCalls: [],
       createdAt: '2026-07-28T10:00:00Z',
       status: 'error',
       errorCode: 'CANCELLED',

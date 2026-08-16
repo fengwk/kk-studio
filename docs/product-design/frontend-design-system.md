@@ -257,8 +257,7 @@ Shell 约定：
 | 类型 | 规则 |
 | --- | --- |
 | 搜索框 / 表单输入 | surface 底 + border，focus 用 green-border |
-| Chat Composer | 独立容器，focus-within 用 green 边 |
-| Canvas Chat Composer textarea | 自适应高度，最小约 `37px`，最大约 `104px`；单行使用对称垂直 padding 居中，仅在右侧 Chat panel 内展示 |
+| Chat / Canvas Composer | 共享两行容器：上层输入/附件默认单行且垂直居中，内容增加时向上增长；输入中的附件 pill 完整显示 `[文件名]`；上方注册表使用固定 200px 卡片，长名称 `…`，图片/视频缩略图可点击打开 Lightbox，其它文件使用类型图标；下层为 `+`、Default/YOLO、Model/Variant、发送；focus-within 用 green 边 |
 | placeholder | `--fg-dim` / `--dim` |
 
 ### 5.3 卡片与列表
@@ -268,12 +267,13 @@ Shell 约定：
 | 资源卡 / 会话卡 | surface + border + radius-lg |
 | 选中态 | green border 或 green soft 底，避免高对比反色大面积填充 |
 | 空态 | `.state-block` / empty block，居中弱提示 |
+| Thread 历史树 | 内联并横向铺满 Pane；单行记录使用 `›` 选择光标、`•` 当前路径和 `│ / ├─ / └─` 分叉连接符，列表内部滚动 |
 
 ### 5.4 模态与侧栏
 
 | 类型 | 规则 |
 | --- | --- |
-| Modal | backdrop 遮罩 + surface 卡片；标题区与操作区分层 |
+| Modal | backdrop 遮罩 + surface 卡片；标题区与操作区分层，右上角使用 icon-only `X` 关闭；确认框采用紧凑 padding |
 | Side panel | 右/侧滑，surface-raised，边框 line |
 | Native dialog | Canvas Help 使用真实 `<dialog>.showModal()`，关闭后恢复 opener 焦点 |
 
@@ -297,8 +297,7 @@ Canvas Chat 现有模块：
 CanvasAgentDock（threadOpen 时右侧可调宽 aside）
 ├── agent-panel-resize-handle
 ├── agent-panel-head（标题 + collapse）
-├── CanvasAgentThread（普通消息流，不隐式绑定选区）
-└── CanvasAgentComposer
+└── CanvasAgentThread（复用 ChatPanel / ThreadComposer，不隐式绑定选区）
 
 CanvasToolRail（左侧垂直居中的功能轨）
 ├── dock-add launcher（dockAddRef / aria-controls / toggleAddMenu）
@@ -318,12 +317,10 @@ CanvasTextEditor（非模态，编辑态锚定文本节点下方）
 规则：
 
 1. **容器只组合，不内联多类型渲染逻辑。**
-2. **消息按 kind / role 分型组件渲染**（对齐 pi：`AssistantMessageComponent` / `UserMessageComponent` / `ToolExecutionComponent`）。
+2. **消息按 kind / role 分型组件渲染**（对齐 pi：`AssistantMessageComponent` / `UserMessageComponent` / `ToolExecutionComponent`）。Tool 是单卡片：工具名 + 参数摘要 + preview + result，write 显示代码预览，edit 显示 diff，不把 call/result 拆成两张卡。
 3. **Composer 与 Transcript 分离。**
-4. **AI 与 Canvas 可共享视觉 token；在数据契约未统一前，不硬共享 DTO。**
-   - AI：`DialogueMessage`（Harness 时间线）
-   - Canvas demo：`ThreadMessage`（本地演示）
-5. 后续若建立共享 Agent UI，应放在 `platform/` 或 `shared/ui/agent/`，由两边 adapter 适配，而不是互相 import feature 内部文件。
+4. **Bound Chat 与 Canvas 共用 ChatPanel/ThreadComposer；Canvas 只负责 document.threadId 绑定与 pane-local BranchDraft adapter。**
+5. **Footer 只读。**仅展示真实 Environment/Workspace、Git、usage/context/cache facts，不放 Agent/Model/Permission/Notification 控件。
 
 ### 5.6 Canvas 专属
 

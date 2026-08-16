@@ -1,7 +1,15 @@
-import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/ai/chat/CreateChatModal'
+import { environmentService } from '@/shared/api/environment-service'
+
+vi.mock('@/shared/api/environment-service', () => ({
+  environmentService: {
+    listDirectories: vi.fn(),
+  },
+}))
 
 const agent = {
   name: 'assistant',
@@ -67,10 +75,60 @@ describe('CreateChatModal', () => {
     expect(onTitleChange).toHaveBeenCalled()
     await user.selectOptions(screen.getByLabelText('Agent'), 'assistant')
     expect(onSelectAgent).toHaveBeenCalledWith('assistant')
-    // 可选的默认 Environment（可空）：未提供 live 环境时只有 (None) 选项。
-    expect(screen.getByLabelText('Environment')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '（无）' })).toBeInTheDocument()
+    // 可选的默认 Environment（可空）由完整 Environment/Workspace picker 选择。
+    expect(screen.getByRole('button', { name: 'Environment' })).toHaveTextContent('（无）')
     await user.click(screen.getByRole('button', { name: '确认创建' }))
     expect(onSubmit).toHaveBeenCalled()
+  })
+
+  it('selects a complete Environment binding instead of silently forcing root', async () => {
+    const user = userEvent.setup()
+    const onSelectEnvironment = vi.fn()
+    vi.mocked(environmentService.listDirectories).mockResolvedValue({
+      path: '.',
+      displayPath: '.',
+      parentPath: '.',
+      truncated: false,
+      gitBranch: 'main',
+      entries: [],
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CreateChatModal
+          open
+          agents={[agent]}
+          environments={[
+            {
+              name: 'dev',
+              status: 'READY',
+              ready: true,
+              lastSeen: null,
+              tools: [],
+              skills: [],
+              mcpServers: [],
+            },
+          ]}
+          selectedAgentName="assistant"
+          title="Chat"
+          pending={false}
+          onClose={() => undefined}
+          onSelectAgent={() => undefined}
+          onSelectEnvironment={onSelectEnvironment}
+          onTitleChange={() => undefined}
+          onSubmit={(event) => event.preventDefault()}
+        />
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Environment' }))
+    const environments = await screen.findByRole('region', { name: '选择 Environment' })
+    await user.click(within(environments).getByRole('option', { name: 'dev' }))
+    const directory = await screen.findByRole('region', { name: 'dev 目录' })
+    await user.click(within(directory).getByRole('button', { name: /^使用当前 Workspace/ }))
+
+    expect(onSelectEnvironment).toHaveBeenCalledWith({ name: 'dev', workspacePath: '.' })
   })
 })

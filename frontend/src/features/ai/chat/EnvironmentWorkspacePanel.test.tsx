@@ -84,7 +84,7 @@ describe('EnvironmentWorkspacePanel', () => {
     expect(within(dirPanel).getByText('当前：proj/a')).toBeInTheDocument()
 
     // 确认提交完整 binding（以 wire 返回的权威 path 为准）。
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
     expect(onSelect).toHaveBeenCalledWith({ name: 'local', workspacePath: 'proj/a' })
   })
 
@@ -129,10 +129,10 @@ describe('EnvironmentWorkspacePanel', () => {
     expect(await within(dirPanel).findByRole('option', { name: '进入 app' })).toBeInTheDocument()
 
     // 上一级：lexical 回退到 '.'（root），此时 Up 禁用。
-    await user.click(within(dirPanel).getByRole('button', { name: '上一级' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^上一级/ }))
     await waitFor(() => expect(environmentService.listDirectories).toHaveBeenCalledWith('local', '.'))
     expect(await within(dirPanel).findByText('当前：.')).toBeInTheDocument()
-    expect(within(dirPanel).getByRole('button', { name: '上一级' })).toBeDisabled()
+    expect(within(dirPanel).getByRole('button', { name: /^上一级/ })).toBeDisabled()
 
     // 刷新：再次请求当前 path。
     const callsBefore = vi.mocked(environmentService.listDirectories).mock.calls.length
@@ -204,17 +204,17 @@ describe('EnvironmentWorkspacePanel', () => {
     const dirPanel = await screen.findByRole('region', { name: 'local 目录' })
     // 加载失败：提示错误、确认禁用，但 Up 仍可按安全 wire path 向上恢复。
     expect(await screen.findByRole('alert')).toHaveTextContent('目录加载失败')
-    expect(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' })).toBeDisabled()
-    expect(within(dirPanel).getByRole('button', { name: '上一级' })).toBeEnabled()
+    expect(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ })).toBeDisabled()
+    expect(within(dirPanel).getByRole('button', { name: /^上一级/ })).toBeEnabled()
 
-    await user.click(within(dirPanel).getByRole('button', { name: '上一级' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^上一级/ }))
     await waitFor(() =>
       expect(environmentService.listDirectories).toHaveBeenCalledWith('local', 'proj'),
     )
     await waitFor(() =>
       expect(within(dirPanel).getByText('当前：proj')).toBeInTheDocument(),
     )
-    expect(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' })).toBeEnabled()
+    expect(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ })).toBeEnabled()
   })
 
   it('rejects a directory response whose path does not match the request', async () => {
@@ -224,7 +224,7 @@ describe('EnvironmentWorkspacePanel', () => {
     const dirPanel = await screen.findByRole('region', { name: 'local 目录' })
     expect(await within(dirPanel).findByRole('alert')).toHaveTextContent('目录加载失败')
     expect(within(dirPanel).getByText('当前：proj')).toBeInTheDocument()
-    expect(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' })).toBeDisabled()
+    expect(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ })).toBeDisabled()
   })
 
   it('disables stale directory actions while refreshing and after refresh failure', async () => {
@@ -239,7 +239,7 @@ describe('EnvironmentWorkspacePanel', () => {
       )
     renderPanel({ current: { name: 'local', workspacePath: '.' } })
     const dirPanel = await screen.findByRole('region', { name: 'local 目录' })
-    const confirm = within(dirPanel).getByRole('button', { name: '使用当前 Workspace' })
+    const confirm = within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ })
     const refresh = within(dirPanel).getByRole('button', { name: '刷新' })
     const child = await within(dirPanel).findByRole('option', { name: '进入 proj' })
     expect(confirm).toBeEnabled()
@@ -272,14 +272,14 @@ describe('EnvironmentWorkspacePanel', () => {
     const dirPanel = await screen.findByRole('region', { name: 'local 目录' })
 
     expect(await within(dirPanel).findByRole('option', { name: '进入 proj' })).toBeDisabled()
-    expect(within(dirPanel).getByRole('button', { name: '上一级' })).toBeDisabled()
+    expect(within(dirPanel).getByRole('button', { name: /^上一级/ })).toBeDisabled()
     expect(within(dirPanel).getByRole('button', { name: '刷新' })).toBeDisabled()
     expect(within(dirPanel).getByRole('button', { name: '返回 Environment 列表' })).toBeDisabled()
-    expect(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' })).toBeDisabled()
+    expect(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ })).toBeDisabled()
 
     await user.click(within(dirPanel).getByRole('option', { name: '进入 proj' }))
     expect(environmentService.listDirectories).not.toHaveBeenCalledWith('local', 'proj')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
     expect(onSelect).not.toHaveBeenCalled()
   })
 
@@ -313,5 +313,37 @@ describe('EnvironmentWorkspacePanel', () => {
       expect(environmentService.listDirectories).toHaveBeenCalledWith('local', 'proj'),
     )
     expect(await within(dirPanel).findByText('当前：proj')).toBeInTheDocument()
+  })
+
+  it('uses Backspace to go up and Ctrl+Enter to confirm the highlighted or current directory', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listDirectories).mockImplementation(async (_name, path) => {
+      if (path === '.') {
+        return directory('.', [{ name: 'proj', path: 'proj' }])
+      }
+      if (path === 'proj') {
+        return directory('proj')
+      }
+      return directory(path)
+    })
+    const { onSelect } = renderPanel({ current: { name: 'local', workspacePath: 'proj' } })
+    const dirPanel = await screen.findByRole('region', { name: 'local 目录' })
+    await waitFor(() => expect(within(dirPanel).getByText('当前：proj')).toBeInTheDocument())
+    expect(within(dirPanel).getByRole('button', { name: /^上一级/ })).toHaveTextContent('(Backspace)')
+    expect(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ })).toHaveTextContent('(Ctrl+Enter)')
+
+    await user.keyboard('{Backspace}')
+    await waitFor(() => expect(environmentService.listDirectories).toHaveBeenCalledWith('local', '.'))
+    expect(await within(dirPanel).findByText('当前：.')).toBeInTheDocument()
+
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    expect(onSelect).toHaveBeenCalledWith({ name: 'local', workspacePath: 'proj' })
+
+    onSelect.mockClear()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(environmentService.listDirectories).toHaveBeenCalledWith('local', 'proj'))
+    expect(await within(dirPanel).findByText('当前：proj')).toBeInTheDocument()
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    expect(onSelect).toHaveBeenCalledWith({ name: 'local', workspacePath: 'proj' })
   })
 })

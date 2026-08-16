@@ -217,19 +217,54 @@ function projectModelStream(
     )
     return
   }
-  if (attemptAlreadyFailed || (!stream.text && !stream.thinking)) {
+  if (attemptAlreadyFailed || (!stream.text && !stream.thinking && stream.toolCalls.length === 0)) {
     return
   }
-  messages.push({
-    id,
-    role: 'assistant',
-    subjectEntryId: null,
-    text: stream.text,
-    thinking: stream.thinking || undefined,
-    createdAt: stream.createdAt,
-    // 持久终止态 success 投影绝不会以 streaming 形式渲染。
-    status: stream.status,
-  })
+  if (stream.text || stream.thinking) {
+    messages.push({
+      id,
+      role: 'assistant',
+      subjectEntryId: null,
+      text: stream.text,
+      thinking: stream.thinking || undefined,
+      createdAt: stream.createdAt,
+      // 持久终止态 success 投影绝不会以 streaming 形式渲染。
+      status: stream.status,
+    })
+  }
+  projectStreamingToolCalls(messages, stream)
+}
+
+function projectStreamingToolCalls(messages: DialogueMessage[], stream: RealtimeModelStream): void {
+  if (stream.toolCalls.length === 0) {
+    return
+  }
+  const existing = new Set(
+    messages
+      .filter((message): message is ToolDialogueMessage => message.role === 'tool')
+      .map((message) => message.toolCallId)
+      .filter(Boolean),
+  )
+  for (const draft of stream.toolCalls) {
+    if (draft.id && existing.has(draft.id)) {
+      continue
+    }
+    const toolName = draft.name.trim() || 'Tool'
+    messages.push({
+      id: `realtime:model:${stream.invocationId}:${stream.attempt}:tool:${draft.index}`,
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: null,
+      toolCallId: draft.id,
+      toolName,
+      rendererKey: draft.name.trim(),
+      arguments: draft.argumentsJson,
+      text: '',
+      attachments: [],
+      createdAt: stream.createdAt,
+      status: stream.status === 'streaming' ? 'streaming' : 'done',
+    })
+  }
 }
 
 function isProjectableModelAttemptFailure(failure: ModelAttemptFailureDTO): boolean {

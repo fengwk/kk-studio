@@ -1,6 +1,6 @@
-import { ExternalLink, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
+import { MediaLightbox } from '@/shared/ui/media/MediaLightbox'
 
 type MediaKind = 'image' | 'video'
 type PreviewMode = 'image' | 'video'
@@ -25,23 +25,21 @@ export function AttachmentMediaPreview({
   const { t } = useI18n()
   const [expanded, setExpanded] = useState(false)
   const [media, setMedia] = useState({ url: previewUrl, mode: previewMode })
+  const mediaSource = useRef({ kind, originalUrl, previewMode, previewUrl })
 
   useEffect(() => {
-    setMedia({ url: previewUrl, mode: previewMode })
-  }, [previewMode, previewUrl])
-
-  useEffect(() => {
-    if (!expanded) {
+    const previous = mediaSource.current
+    if (
+      previous.kind === kind
+      && previous.originalUrl === originalUrl
+      && previous.previewMode === previewMode
+      && previous.previewUrl === previewUrl
+    ) {
       return
     }
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setExpanded(false)
-      }
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [expanded])
+    mediaSource.current = { kind, originalUrl, previewMode, previewUrl }
+    setMedia({ url: previewUrl, mode: previewMode })
+  }, [kind, originalUrl, previewMode, previewUrl])
 
   function fallbackToOriginal() {
     if (!originalUrl || media.url === originalUrl) {
@@ -85,45 +83,15 @@ export function AttachmentMediaPreview({
         </button>
       </figure>
       {expanded && originalUrl ? (
-        <div
-          className="resource-media-lightbox"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('ai.runtime.message.previewResource', { name: label })}
-          onMouseDown={() => setExpanded(false)}
-        >
-          <div
-            className="resource-media-lightbox-panel"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="resource-media-lightbox-close"
-              aria-label={t('ai.runtime.message.closeResourcePreview')}
-              onClick={() => setExpanded(false)}
-            >
-              <X aria-hidden="true" />
-            </button>
-            <div className="resource-media-lightbox-content">
-              {kind === 'video' ? (
-                <video src={originalUrl} controls autoPlay playsInline />
-              ) : (
-                <img src={originalUrl} alt={label} />
-              )}
-            </div>
-            <div className="resource-media-lightbox-footer">
-              <span>{label}</span>
-              <a
-                href={originalUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                aria-label={t('ai.runtime.message.openResource', { name: label })}
-              >
-                <ExternalLink aria-hidden="true" />
-              </a>
-            </div>
-          </div>
-        </div>
+        <MediaLightbox
+          kind={kind}
+          label={label}
+          url={originalUrl}
+          ariaLabel={t('ai.runtime.message.previewResource', { name: label })}
+          closeLabel={t('ai.runtime.message.closeResourcePreview')}
+          openLabel={t('ai.runtime.message.openResource', { name: label })}
+          onClose={() => setExpanded(false)}
+        />
       ) : null}
     </>
   )

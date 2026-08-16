@@ -30,6 +30,8 @@ const NONE_ID = ''
  *
  * 键盘约定：Arrow/Enter 导航只挂在 listbox（{@code <ul role="listbox">}）作用域上；action
  * buttons（Up/Refresh/Back/Confirm）保留各自的 Enter/Space 语义，不会被 section 级 handler 劫持。
+ * 目录模式额外支持 Backspace 回退上一级，以及 Ctrl/Cmd+Enter：有高亮子目录时选中该目录，
+ * 空目录则确认当前路径。
  */
 export function EnvironmentWorkspacePanel({
   environments,
@@ -228,12 +230,50 @@ export function EnvironmentWorkspacePanel({
     void onSelect({ name: browse.name, workspacePath: data.path })
   }
 
-  /** section 级只处理 Escape；Arrow/Enter 由 listbox 自身处理，action buttons 语义不被劫持。 */
+  /** Ctrl/Cmd+Enter：高亮子目录则选中该路径；空目录或无高亮则确认当前路径。 */
+  function confirmActiveOrCurrent() {
+    if (!canConfirm() || browse == null || data == null) {
+      return
+    }
+    if (data.entries.length === 0) {
+      confirmDirectory()
+      return
+    }
+    if (activeId != null && data.entries.some((entry) => entry.path === activeId)) {
+      void onSelect({ name: browse.name, workspacePath: activeId })
+      return
+    }
+    confirmDirectory()
+  }
+
+  function isConfirmShortcut(event: React.KeyboardEvent<HTMLElement>): boolean {
+    return event.key === 'Enter' && (event.ctrlKey || event.metaKey)
+  }
+
+  /** section 级处理 Escape、目录模式 Backspace / Ctrl+Enter；Arrow/Enter 仍由 listbox 处理。 */
   function handleSectionKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+      return
+    }
     if (event.key === 'Escape') {
       event.preventDefault()
       event.stopPropagation()
       onClose()
+      return
+    }
+    if (browse == null) {
+      return
+    }
+    if (event.key === 'Backspace') {
+      event.preventDefault()
+      event.stopPropagation()
+      goUp()
+      return
+    }
+    if (isConfirmShortcut(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      confirmActiveOrCurrent()
     }
   }
 
@@ -264,12 +304,24 @@ export function EnvironmentWorkspacePanel({
       moveDirectoryActive(event.key === 'ArrowDown' ? 1 : -1)
       return
     }
+    if (isConfirmShortcut(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      confirmActiveOrCurrent()
+      return
+    }
     if (event.key === 'Enter') {
       event.preventDefault()
       event.stopPropagation()
       if (activeId != null && data?.entries.some((entry) => entry.path === activeId)) {
         enterDirectory(activeId)
       }
+      return
+    }
+    if (event.key === 'Backspace') {
+      event.preventDefault()
+      event.stopPropagation()
+      goUp()
     }
   }
 

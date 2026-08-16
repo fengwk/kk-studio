@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 
 import { baseModelConfig } from '../lib/fixtures.mjs'
 import {
@@ -7,6 +8,8 @@ import {
   envelopeData,
   sleep,
 } from '../lib/http.mjs'
+import { assertReadOnlyZeroFooter } from './assertions.mjs'
+import { runRefactorContractMatrix } from './refactor-contracts.mjs'
 import {
   branchSettingsOf,
   createChat,
@@ -15,12 +18,20 @@ import {
   getThreadSnapshot,
   setAgentCommand,
   stopThread,
+  updateThreadHead,
   userMessageCommand,
+  waitForDurableMessages,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
 const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v1:'
+const TINY_IMAGE = readFileSync(
+  new URL('../../../core/src/main/resources/fun/fengwk/kkstudio/core/studio/function/fake/tiny.png', import.meta.url),
+)
+const TINY_VIDEO = readFileSync(
+  new URL('../../../core/src/main/resources/fun/fengwk/kkstudio/core/studio/function/fake/tiny.mp4', import.meta.url),
+)
 
 export async function runComposerMatrix(ui) {
   const {
@@ -349,9 +360,14 @@ export async function runComposerMatrix(ui) {
       const draft = `selection panel draft ${stamp}`
       await withUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createBranchedHistoryFixture(apiCtx, {
           title: `e2e-ui-selection-panel-${stamp}`,
-          messages: [`selection baseline ${stamp}`],
+          trunkMessage: `selection baseline ${stamp}`,
+          originalMessages: [
+            `selection original branch ${stamp}`,
+            `selection original descendant ${stamp}`,
+          ],
+          alternateMessage: `selection alternate branch ${stamp}`,
           extraThreadCount: 1,
         }),
         async (fixture) => {
@@ -371,7 +387,7 @@ export async function runComposerMatrix(ui) {
             await page.locator('.thread-composer').getAttribute('hidden') !== null,
             'Composer remained visible while the selection panel was active',
           )
-          await page.getByLabel('会话状态').waitFor({ state: 'visible', timeout: 10_000 })
+          await assertReadOnlyZeroFooter(page, 'selection panel Footer')
 
           const search = panel.getByRole('searchbox', { name: '搜索' })
           await page.waitForFunction(
@@ -443,6 +459,19 @@ export async function runComposerMatrix(ui) {
             name: '丢弃未发送的修改？',
           })
           await discardDialog.waitFor({ state: 'visible', timeout: 10_000 })
+          assert(
+            (await discardDialog.innerText()).includes(
+              '切换到所选 Thread 后会丢弃输入框中未发送的消息，是否继续？',
+            ),
+            `discard confirmation does not explain the unsent content: ${await discardDialog.innerText()}`,
+          )
+          const modalClose = discardDialog.getByRole('button', { name: '关闭' })
+          assert(
+            (await modalClose.textContent())?.trim() === ''
+            && (await modalClose.getAttribute('class'))?.includes('modal-close-button'),
+            'discard confirmation did not use the compact icon-only close control',
+          )
+          await shot(caseArt, 'discard-unsent-message-confirmation')
           const cancelDiscard = discardDialog.getByRole('button', { name: '取消' })
           await page.waitForFunction(
             (element) => document.activeElement === element,
@@ -481,6 +510,70 @@ export async function runComposerMatrix(ui) {
             'Composer remained visible while the history panel was active',
           )
           const historySearch = historyPanel.getByRole('searchbox', { name: '搜索记录' })
+          const historyBox = await historyPanel.boundingBox()
+          const viewport = page.viewportSize()
+          assert(
+            historyBox
+            && viewport
+            && historyBox.width >= viewport.width - 40,
+            `history panel no longer fills the inline pane width: ${JSON.stringify({
+              historyBox,
+              viewport,
+            })}`,
+          )
+          const selectedHistoryRow = historyPanel.locator('.history-branch-entry[aria-pressed="true"]')
+          const selectedPrefix = await selectedHistoryRow.evaluate((element) => ({
+            classes: [...element.children].slice(0, 3).map((child) => child.className),
+            path: element.querySelector('.history-branch-entry-path')?.textContent ?? '',
+            cursor: element.querySelector('.history-branch-entry-cursor')?.textContent ?? '',
+          }))
+          assert(
+            selectedPrefix.classes[0] === 'history-branch-entry-cursor'
+            && selectedPrefix.classes.includes('history-branch-entry-path')
+            && selectedPrefix.path === '•'
+            && selectedPrefix.cursor === '›',
+            `history row does not use the pi tree cursor/path grammar: ${JSON.stringify(selectedPrefix)}`,
+          )
+          const treeRows = historyPanel.locator('.history-branch-entry')
+          assert(await treeRows.count() === 4, `branched history row count: ${await treeRows.count()}`)
+          const originalBranchRow = historyPanel.getByRole('button', {
+            name: new RegExp(`selection original branch ${stamp}`),
+          })
+          const originalDescendantRow = historyPanel.getByRole('button', {
+            name: new RegExp(`selection original descendant ${stamp}`),
+          })
+          const alternateBranchRow = historyPanel.getByRole('button', {
+            name: new RegExp(`selection alternate branch ${stamp}`),
+          })
+          assert(
+            (await originalBranchRow.locator('.history-branch-entry-glyphs').textContent()) === '├─ ',
+            'first branch did not render a fork connector',
+          )
+          assert(
+            (await originalDescendantRow.locator('.history-branch-entry-glyphs').textContent())?.startsWith('│  '),
+            'branch descendant did not preserve the vertical ancestor gutter',
+          )
+          assert(
+            (await alternateBranchRow.locator('.history-branch-entry-glyphs').textContent()) === '└─ ',
+            'last branch did not render an elbow connector',
+          )
+          const selectedBeforeTreeMove = await selectedHistoryRow.getAttribute('aria-label')
+          await historySearch.press('ArrowUp')
+          await page.waitForFunction(
+            ({ panelLabel, previous }) => {
+              const region = [...document.querySelectorAll('[role="region"]')]
+                .find((element) => element.getAttribute('aria-label') === panelLabel)
+              const selected = region?.querySelector('.history-branch-entry[aria-pressed="true"]')
+              return selected?.getAttribute('aria-label') !== previous
+            },
+            { panelLabel: '历史分支', previous: selectedBeforeTreeMove },
+            { timeout: 10_000 },
+          )
+          assert(
+            await originalDescendantRow.getAttribute('aria-pressed') === 'true',
+            'ArrowUp did not move the tree selection to the previous visible row',
+          )
+          await shot(caseArt, 'history-panel-keyboard-mode')
           await page.waitForFunction(
             (element) => document.activeElement === element,
             await historySearch.elementHandle(),
@@ -592,6 +685,100 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
+    'ui.chat.composer.attachment_previews',
+    'Composer 附件只显示文件名，并按图片、视频和通用文件类型展示缩略图或图标',
+    async (caseArt) => {
+      const uploadRoute = createReadyUploadRoute()
+      await page.route('**/api/storage/uploads**', uploadRoute)
+      try {
+        await withUiFixture(
+          page,
+          () => createDurableHistoryFixture(apiCtx, {
+            title: `e2e-ui-composer-attachments-${stamp}`,
+            messages: [`attachment baseline ${stamp}`],
+          }),
+          async (fixture) => {
+            await bindThreadComposer(page, goto, fixture)
+            const imageName = `scene-${stamp}.png`
+            const videoName = `clip-${stamp}.mp4`
+            const fileName = `notes-${stamp}.pdf`
+            await page.locator('input[type="file"]').setInputFiles([
+              { name: imageName, mimeType: 'image/png', buffer: TINY_IMAGE },
+              { name: videoName, mimeType: 'video/mp4', buffer: TINY_VIDEO },
+              {
+                name: fileName,
+                mimeType: 'application/pdf',
+                buffer: Buffer.from('%PDF-1.4\n% attachment preview fixture\n'),
+              },
+            ])
+
+            const strip = page.getByRole('list', { name: '附件' })
+            await strip.waitFor({ state: 'visible', timeout: 10_000 })
+            await page.waitForFunction(
+              () => document.querySelectorAll('.attachment-reference').length === 3,
+              undefined,
+              { timeout: 10_000 },
+            )
+            const imageItem = strip.locator(`[data-filename="${imageName}"]`)
+            const videoItem = strip.locator(`[data-filename="${videoName}"]`)
+            const fileItem = strip.locator(`[data-filename="${fileName}"]`)
+            assert(await imageItem.locator('img').count() === 1, 'image attachment lacks a thumbnail')
+            assert(await videoItem.locator('video').count() === 1, 'video attachment lacks a first-frame preview')
+            assert(
+              await fileItem.locator('[data-file-icon="text"]').count() === 1,
+              'PDF attachment lacks a type-specific file icon',
+            )
+            const pillTexts = await page.locator('.composer-pill').allTextContents()
+            assert(
+              JSON.stringify(pillTexts) === JSON.stringify([
+                `[${imageName}]`,
+                `[${videoName}]`,
+                `[${fileName}]`,
+              ]),
+              `attachment pill labels are not filename-only: ${JSON.stringify(pillTexts)}`,
+            )
+            const pillsUnclipped = await page.locator('.composer-pill').evaluateAll(
+              (elements) => elements.every((element) => element.scrollWidth <= element.clientWidth),
+            )
+            assert(pillsUnclipped, 'composer input pills visually truncate filenames')
+            assert(
+              !(await page.locator('.thread-dock').innerText()).includes('(upload)'),
+              'attachment UI still exposes the internal upload syntax',
+            )
+            const imageBox = await imageItem.boundingBox()
+            assert(
+              imageBox && imageBox.width >= 198 && imageBox.width <= 202,
+              `attachment card width is not fixed at 200px: ${JSON.stringify(imageBox)}`,
+            )
+            const imageNameOverflow = await imageItem.locator('.attachment-reference-name').evaluate(
+              (element) => element.scrollWidth > element.clientWidth,
+            )
+            assert(
+              imageNameOverflow,
+              'long attachment filename is not ellipsized inside the fixed-width card',
+            )
+
+            await shot(caseArt, 'composer-attachment-previews')
+            await imageItem.locator('button.attachment-reference-preview').click()
+            const lightbox = page.locator('.resource-media-lightbox')
+            await lightbox.waitFor({ state: 'visible', timeout: 5_000 })
+            assert(
+              await lightbox.locator('.resource-media-lightbox-content img').count() === 1,
+              'image attachment lightbox lacks the full image',
+            )
+            await shot(caseArt, 'composer-attachment-lightbox')
+            await page.keyboard.press('Escape')
+            await lightbox.waitFor({ state: 'hidden', timeout: 5_000 })
+            expectNoFatal(pageErrors, consoleErrors)
+          },
+        )
+      } finally {
+        await page.unroute('**/api/storage/uploads**', uploadRoute)
+      }
+    },
+  )
+
+  await run(
     'ui.chat.events.conversation_switch',
     '事件主视图唯一滚动区、只读详情与返回 Conversation 不丢草稿',
     async (caseArt) => {
@@ -638,7 +825,7 @@ export async function runComposerMatrix(ui) {
 
           // + 菜单返回 Conversation：事件视图卸载，草稿与存储保持。
           await page.getByRole('button', { name: '打开命令表' }).click()
-          await page.getByRole('option', { name: /^conversation/ }).click()
+          await page.getByRole('option', { name: /^events/ }).click()
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           assert(
             (await page.locator('.thread-events').count()) === 0,
@@ -656,7 +843,7 @@ export async function runComposerMatrix(ui) {
 
   await run(
     'ui.chat.events.keyboard_nav',
-    '事件列表键盘导航、mousemove 激活与 Enter/Esc 详情开关',
+    '事件列表点击选中、上下切换与 Esc 取消选中',
     async (caseArt) => {
       const historicalMessage = `events keyboard ${stamp}`
       await withUiFixture(
@@ -675,36 +862,32 @@ export async function runComposerMatrix(ui) {
           assert(optionCount > 1, `too few events: ${optionCount}`)
           await listbox.focus()
 
-          const activeOption = () =>
+          const selectedOption = () =>
             listbox.locator('[role="option"][aria-selected="true"]')
-          const activeText = async () => (await activeOption().innerText()).trim()
+          const selectedText = async () => (await selectedOption().innerText()).trim()
 
-          // 初始 active 是最新事件（末尾）；ArrowUp 上移一位。
-          const initialText = await activeText()
+          assert((await selectedOption().count()) === 0, 'events started with a selection')
           await listbox.press('ArrowUp')
-          const afterUp = await activeText()
-          assert(afterUp !== initialText, 'ArrowUp did not move the active option')
+          assert((await selectedOption().count()) === 0, 'ArrowUp selected a row before click')
 
-          // mousemove（hover）驱动 active 到首项。
-          await listbox.getByRole('option').first().hover()
-          const afterHover = await activeText()
-          assert(afterHover !== afterUp, 'hover did not move the active option')
-
-          // 键盘重新接管：ArrowDown 离开首项；Home/End 边界。
-          await listbox.press('ArrowDown')
-          const afterDown = await activeText()
-          assert(afterDown !== afterHover, 'ArrowDown did not move the active option')
-          await listbox.press('Home')
-          assert((await activeText()) === afterHover, 'Home did not move to the first option')
-          await listbox.press('End')
-          assert((await activeText()) === initialText, 'End did not move to the last option')
-
-          // Enter 打开详情，Esc 关闭详情（不落回全局 Escape）。
-          await listbox.press('Enter')
+          const firstOption = listbox.getByRole('option').nth(0)
+          const secondOption = listbox.getByRole('option').nth(1)
+          await firstOption.click()
+          const firstText = await selectedText()
           const detail = page.getByLabel('事件详情', { exact: true })
           await detail.waitFor({ state: 'visible', timeout: 10_000 })
+
+          await secondOption.hover()
+          assert((await selectedText()) === firstText, 'hover changed the selected event')
+
+          await listbox.focus()
+          await listbox.press('ArrowDown')
+          const afterDown = await selectedText()
+          assert(afterDown !== firstText, 'ArrowDown did not move the selected event')
+
           await listbox.press('Escape')
           await detail.waitFor({ state: 'hidden', timeout: 10_000 })
+          assert((await selectedOption().count()) === 0, 'Escape did not clear the selection')
 
           await shot(caseArt, 'events-keyboard-nav')
           expectNoFatal(pageErrors, consoleErrors)
@@ -782,14 +965,16 @@ export async function runComposerMatrix(ui) {
             }))
           // headless Chromium 的 mouse.wheel 是 no-op：用真实 DOM 属性向上滚动
           // 600px，并派发原生 scroll 事件让自动贴底的 stick 状态跟随。
-          const scrollUp = (selector) =>
+          const scrollAwayFromBottom = (selector) =>
             page.locator(selector).evaluate((element) => {
-              element.scrollTop = Math.min(
-                element.scrollHeight - element.clientHeight,
-                element.scrollTop + 600,
-              )
+              const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+              element.scrollTop = Math.max(1, maxScrollTop - 260)
               element.dispatchEvent(new Event('scroll', { bubbles: false }))
-              return element.scrollTop
+              return {
+                scrollTop: element.scrollTop,
+                distanceFromBottom: maxScrollTop - element.scrollTop,
+                maxScrollTop,
+              }
             })
 
           // /events：真实溢出后向上滚动到非底部位置。
@@ -802,19 +987,27 @@ export async function runComposerMatrix(ui) {
             eventsMetrics.scrollHeight > eventsMetrics.clientHeight,
             `events list does not overflow: ${JSON.stringify(eventsMetrics)}`,
           )
-          const eventsScrollTop = await scrollUp('.thread-events')
-          assert(eventsScrollTop > 0, `events scroll did not move: ${eventsScrollTop}`)
+          const eventsScroll = await scrollAwayFromBottom('.thread-events')
+          assert(
+            eventsScroll.scrollTop > 0 && eventsScroll.distanceFromBottom > 210,
+            `events scroll did not leave the stick-to-bottom threshold: ${JSON.stringify(eventsScroll)}`,
+          )
+          const eventsScrollTop = eventsScroll.scrollTop
 
           // 切到 conversation：真实溢出后向上滚动。
-          await openMenuOption('conversation')
+          await openMenuOption('events')
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           const dialogueMetrics = await overflow('.thread-dialogue')
           assert(
             dialogueMetrics.scrollHeight > dialogueMetrics.clientHeight,
             `transcript does not overflow: ${JSON.stringify(dialogueMetrics)}`,
           )
-          const dialogueScrollTop = await scrollUp('.thread-dialogue')
-          assert(dialogueScrollTop > 0, `transcript scroll did not move: ${dialogueScrollTop}`)
+          const dialogueScroll = await scrollAwayFromBottom('.thread-dialogue')
+          assert(
+            dialogueScroll.scrollTop > 0 && dialogueScroll.distanceFromBottom > 210,
+            `transcript scroll did not leave the stick-to-bottom threshold: ${JSON.stringify(dialogueScroll)}`,
+          )
+          const dialogueScrollTop = dialogueScroll.scrollTop
 
           // 再进 events：恢复上次的 scrollTop（不是贴底）。
           await openMenuOption('events')
@@ -827,7 +1020,7 @@ export async function runComposerMatrix(ui) {
           )
 
           // 切回 conversation：恢复 transcript 的 scrollTop。
-          await openMenuOption('conversation')
+          await openMenuOption('events')
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           await page.waitForTimeout(200)
           const restoredDialogue = await scrollTopOf('.thread-dialogue')
@@ -842,6 +1035,14 @@ export async function runComposerMatrix(ui) {
       )
     },
   )
+
+  await runRefactorContractMatrix({
+    ...ui,
+    bindThreadComposer,
+    createDurableHistoryFixture,
+    createHoldingQueueFixture,
+    withUiFixture,
+  })
 }
 
 async function createBlankChatFixture(apiCtx, { title }) {
@@ -923,6 +1124,97 @@ async function createDurableHistoryFixture(
   }
 }
 
+async function createBranchedHistoryFixture(
+  apiCtx,
+  {
+    title,
+    trunkMessage,
+    originalMessages,
+    alternateMessage,
+    extraThreadCount = 0,
+  },
+) {
+  assert(typeof trunkMessage === 'string' && trunkMessage, 'tree trunk message required')
+  assert(
+    Array.isArray(originalMessages) && originalMessages.length > 0,
+    'original tree branch messages required',
+  )
+  assert(typeof alternateMessage === 'string' && alternateMessage, 'alternate tree branch message required')
+  const target = await resolveCatalogTarget(apiCtx)
+  const state = {
+    apiCtx,
+    chat: null,
+    extraThreadIds: [],
+    threadId: null,
+  }
+  try {
+    state.chat = await createChat(apiCtx, {
+      title,
+      agentName: target.agent.name,
+      yoloEnabled: false,
+    })
+    const branchSettings = branchSettingsOf(target.agent, target.model)
+    const created = await createChatThread(apiCtx, state.chat.id, {
+      title: null,
+      yoloEnabled: false,
+      branchSettings,
+    })
+    state.threadId = created.thread.threadId
+    for (let index = 0; index < extraThreadCount; index += 1) {
+      const extra = await createChatThread(apiCtx, state.chat.id, {
+        title: null,
+        yoloEnabled: false,
+        branchSettings,
+      })
+      state.extraThreadIds.push(extra.thread.threadId)
+    }
+
+    await enqueueCommands(apiCtx, state.threadId, {
+      expectedHeadEntryId: created.thread.headEntryId,
+      expectedNextCommandSequence: created.thread.nextCommandSequence,
+      commands: [
+        setAgentCommand(`e2e-ui-missing-${cid().slice(0, 8)}`, cid()),
+        userMessageCommand(trunkMessage, cid()),
+      ],
+    })
+    const { snapshot: trunk } = await waitForDurableMessages(
+      apiCtx,
+      state.threadId,
+      [trunkMessage],
+    )
+    const branchPointEntryId = trunk.thread.headEntryId
+
+    await enqueueCommands(apiCtx, state.threadId, {
+      expectedHeadEntryId: trunk.thread.headEntryId,
+      expectedNextCommandSequence: trunk.thread.nextCommandSequence,
+      commands: originalMessages.map((message) => userMessageCommand(message, cid())),
+    })
+    const { snapshot: original } = await waitForDurableMessages(
+      apiCtx,
+      state.threadId,
+      [trunkMessage, ...originalMessages],
+    )
+    const moved = await updateThreadHead(apiCtx, state.threadId, {
+      targetEntryId: branchPointEntryId,
+      expectedRevision: original.thread.revision,
+    })
+    await enqueueCommands(apiCtx, state.threadId, {
+      expectedHeadEntryId: moved.headEntryId,
+      expectedNextCommandSequence: moved.nextCommandSequence,
+      commands: [userMessageCommand(alternateMessage, cid())],
+    })
+    await waitForDurableMessages(
+      apiCtx,
+      state.threadId,
+      [trunkMessage, ...originalMessages, alternateMessage],
+    )
+    return fixtureOf(state)
+  } catch (error) {
+    await cleanupFixture(state).catch(() => undefined)
+    throw error
+  }
+}
+
 async function createHoldingQueueFixture(
   apiCtx,
   { title, historicalMessage, queuedMessages },
@@ -977,7 +1269,10 @@ async function createHoldingQueueFixture(
             reasoning: false,
             inputModalities: ['TEXT'],
           },
-          variants: [{ id: 'default', temperature: 0 }],
+          variants: [
+            { id: 'default', temperature: 0 },
+            { id: 'review', temperature: 0 },
+          ],
         }),
       },
     )
@@ -1305,6 +1600,65 @@ async function expectStorage(page, key, expected) {
         + ` got ${JSON.stringify(actual)}`,
     )
   }
+}
+
+function createReadyUploadRoute() {
+  let sequence = 0
+  const blobs = new Map()
+  return async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    const completeMatch = pathname.match(/\/api\/storage\/uploads\/([^/]+)\/complete$/u)
+    const deleteMatch = pathname.match(/\/api\/storage\/uploads\/([^/]+)$/u)
+    if (request.method() === 'POST' && pathname.endsWith('/api/storage/uploads')) {
+      sequence += 1
+      const suffix = String(sequence).padStart(12, '0')
+      const id = `00000000-0000-4000-8000-${suffix}`
+      const blobId = `00000000-0000-4000-9000-${suffix}`
+      blobs.set(id, blobId)
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(okEnvelope({
+          id,
+          state: 'READY',
+          blobId,
+          presignedPut: null,
+          expiresAt: null,
+        })),
+      })
+      return
+    }
+    if (request.method() === 'POST' && completeMatch) {
+      const id = decodeURIComponent(completeMatch[1])
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(okEnvelope({
+          id,
+          state: 'READY',
+          blobId: blobs.get(id) ?? null,
+          presignedPut: null,
+          expiresAt: null,
+        })),
+      })
+      return
+    }
+    if (request.method() === 'DELETE' && deleteMatch) {
+      blobs.delete(decodeURIComponent(deleteMatch[1]))
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(okEnvelope(null)),
+      })
+      return
+    }
+    await route.fallback()
+  }
+}
+
+function okEnvelope(data) {
+  return { status: 200, code: 'OK', message: 'OK', data }
 }
 
 async function waitForPlaceholder(composer, visible) {

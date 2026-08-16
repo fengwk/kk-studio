@@ -1,0 +1,104 @@
+package fun.fengwk.kkstudio.core.ai.runtime.task;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.core.ai.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.core.ai.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.UUID;
+
+/** 只读预览按最新 Agent 正文与始终存在的 current_environment 组合。 */
+class SystemPromptPreviewServiceTest {
+
+  private static final Instant NOW = Instant.parse("2026-08-17T00:00:00Z");
+  private static final UUID THREAD_ID = new UUID(0L, 1L);
+  private static final UUID SESSION_ID = new UUID(0L, 2L);
+
+  @Test
+  void composesLatestAgentBodyAndCurrentEnvironmentWhenAgentExists() {
+    HarnessRuntime runtime = mock(HarnessRuntime.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
+    AgentDefinition agent = new AgentDefinition();
+    agent.setName("assistant");
+    agent.setSystemPrompt("You are the planner.");
+    agent.setConfigJson("agent-config");
+    when(agents.getByName("assistant")).thenReturn(agent);
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of());
+    config.setSubagents(List.of());
+    when(codec.decode("agent-config")).thenReturn(config);
+
+    String preview = service(runtime, agents, codec).preview(THREAD_ID);
+
+    assertTrue(preview.startsWith("You are the planner."), preview);
+    assertTrue(preview.contains("<current_environment>"), preview);
+    assertFalse(preview.contains("- name:"), preview);
+    assertTrue(preview.contains("- date: 2026-08-17"), preview);
+    assertFalse(preview.contains("<available_skills>"), preview);
+  }
+
+  @Test
+  void stillRendersCurrentEnvironmentWhenAgentIsMissing() {
+    HarnessRuntime runtime = mock(HarnessRuntime.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
+    when(agents.getByName("assistant")).thenReturn(null);
+
+    String preview = service(runtime, agents, codec).preview(THREAD_ID);
+
+    assertTrue(preview.startsWith("<current_environment>"), preview);
+    assertFalse(preview.contains("- name:"), preview);
+    assertTrue(preview.contains("- date: 2026-08-17"), preview);
+    assertFalse(preview.contains("You are the planner."), preview);
+  }
+
+  private static SystemPromptPreviewService service(
+      HarnessRuntime runtime, AgentDefinitionRepository agents, AgentDefinitionConfigCodec codec) {
+    SubagentConfig subagentConfig =
+        new SubagentConfig(2, 10, null, Duration.ZERO, 7, Duration.ofMillis(100));
+    return new SystemPromptPreviewServiceFactory(
+            agents,
+            codec,
+            mock(LiveEnvironmentRegistry.class),
+            subagentConfig,
+            new AgentPromptComposer(subagentConfig),
+            Clock.fixed(NOW, ZoneOffset.UTC))
+        .create(runtime);
+  }
+
+  private static ThreadSnapshot snapshot() {
+    BranchSettings settings =
+        new BranchSettings(
+            null, "assistant", new ModelSelection("provider", "model", "default"), List.of());
+    EntryPath path =
+        new EntryPath(
+            List.of(new Entry(SESSION_ID, SESSION_ID, null, new RootPayload(settings), NOW)));
+    ThreadState thread = new ThreadState(THREAD_ID, SESSION_ID, false, 1, 0, NOW, NOW);
+    return new ThreadSnapshot(thread, path, List.of(), null, List.of(), List.of());
+  }
+}

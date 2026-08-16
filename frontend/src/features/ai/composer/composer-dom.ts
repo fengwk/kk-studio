@@ -81,7 +81,7 @@ function createPillElement(root: HTMLElement, part: ComposerPart & { type: 'atta
   pill.dataset.partId = part.partId
   pill.dataset.uploadId = part.uploadId
   pill.dataset.filename = part.filename
-  pill.textContent = `[${part.filename}](upload)`
+  pill.textContent = `[${part.filename}]`
   return pill
 }
 
