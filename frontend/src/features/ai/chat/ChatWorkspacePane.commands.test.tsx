@@ -1431,8 +1431,13 @@ describe('ChatWorkspacePane commands', () => {
 
   it('restores independent scroll positions per main view and clears them on Thread rebind', async () => {
     const user = userEvent.setup()
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(thread({}), { entries: sessionEntries() }),
+    // 重绑后按 threadId 返回各自 snapshot（新 Thread 的 snapshot 到达前 composer fail-closed）。
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(
+        threadId === 't2'
+          ? snapshot(thread({ threadId: 't2' }), { entries: sessionEntries() })
+          : snapshot(thread({}), { entries: sessionEntries() }),
+      ),
     )
     // 真实 DOM 属性：jsdom 不计算布局，用 getter spy 提供可滚动的容器尺寸。
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
@@ -1566,8 +1571,13 @@ describe('ChatWorkspacePane commands', () => {
 
   it('resets the events active row and detail when the pane rebinds to another Thread', async () => {
     const user = userEvent.setup()
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(thread({}), { entries: sessionEntries() }),
+    // 重绑后按 threadId 返回各自 snapshot（新 Thread 的 snapshot 到达前 composer fail-closed）。
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(
+        threadId === 't2'
+          ? snapshot(thread({ threadId: 't2' }), { entries: sessionEntries() })
+          : snapshot(thread({}), { entries: sessionEntries() }),
+      ),
     )
     const view = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
