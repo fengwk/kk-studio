@@ -9,10 +9,12 @@ function createClient(): HttpClient {
 describe('harnessService', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('exposes the snapshot-first Thread command surface', async () => {
+  it('exposes the snapshot, full Entry Tree, and Thread command surface', async () => {
     const client = createClient()
     const service = createHarnessService(client)
     await service.getThreadSnapshot('thread /1')
+    await service.listThreadEntries('thread /1')
+    await service.getSystemPromptPreview('thread /1')
     await service.enqueueCommands('thread /1', {
       expectedHeadEntryId: '1',
       expectedNextCommandSequence: '0',
@@ -34,6 +36,8 @@ describe('harnessService', () => {
     })
 
     expect(client.get).toHaveBeenCalledWith('/ai/runtime/threads/thread%20%2F1/snapshot')
+    expect(client.get).toHaveBeenCalledWith('/ai/runtime/threads/thread%20%2F1/entries')
+    expect(client.get).toHaveBeenCalledWith('/ai/runtime/threads/thread%20%2F1/system-prompt')
     expect(client.post).toHaveBeenNthCalledWith(1, '/ai/runtime/threads/thread%20%2F1/commands', {
       expectedHeadEntryId: '1',
       expectedNextCommandSequence: '0',
@@ -58,10 +62,12 @@ describe('harnessService', () => {
     })
   })
 
-  it('exposes only the snapshot-first Thread command surface', async () => {
+  it('exposes only the current Thread control and query surface', async () => {
     const client = createClient()
     const service = createHarnessService(client)
     expect(service.getThreadSnapshot).toBeTypeOf('function')
+    expect(service.listThreadEntries).toBeTypeOf('function')
+    expect(service.getSystemPromptPreview).toBeTypeOf('function')
     expect(service.enqueueCommands).toBeTypeOf('function')
     expect(service.updateThreadHead).toBeTypeOf('function')
     expect(service.stopThread).toBeTypeOf('function')

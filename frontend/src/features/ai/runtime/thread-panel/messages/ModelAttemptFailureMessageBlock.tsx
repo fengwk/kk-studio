@@ -20,19 +20,20 @@ export function ModelAttemptFailureMessageBlock({
   const terminal = message.nextAttempt == null
   const liveRetry = message.modelInvocationId != null
   const retry = useRetryCountdown(liveRetry ? message.retryAt : null)
-  const errorLabel = message.errorCode.trim()
-    ? `${message.errorCode}: ${message.errorMessage}`
-    : message.errorMessage
+  const errorCode = message.errorCode.trim()
 
   return (
     <div className="thread-turn thread-turn-model-attempt-failure">
       <section className="thread-block thread-block-model-attempt-failure-status">
         <div className="thread-block-body">
-          <strong>
-            {t('ai.runtime.message.attemptFailed', {
+          <strong className="thread-attempt-failure-title">
+            {t('ai.runtime.message.modelRequestFailed')}
+          </strong>
+          <span className="thread-attempt-failure-number">
+            {t('ai.runtime.message.attemptNumber', {
               attempt: message.attempt,
             })}
-          </strong>
+          </span>
           {!terminal ? (
             <span className="thread-attempt-failure-retry">
               {!liveRetry
@@ -65,7 +66,8 @@ export function ModelAttemptFailureMessageBlock({
         </section>
       ) : null}
       <section className="thread-block thread-block-model-attempt-failure-error">
-        <pre className="thread-error-raw">{errorLabel}</pre>
+        {errorCode ? <code>{errorCode}</code> : null}
+        <pre className="thread-error-raw">{message.errorMessage}</pre>
       </section>
     </div>
   )

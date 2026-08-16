@@ -4,6 +4,7 @@ import { ThreadConversationView } from '@/features/ai/runtime/thread-panel/Threa
 import { ThreadErrorPanel } from '@/features/ai/runtime/thread-panel/ThreadErrorPanel'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
+import type { ThreadComposerSettingsInput } from '@/features/ai/runtime/thread-panel/ThreadComposerControls'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import type {
   DialogueMessage,
@@ -59,6 +60,8 @@ export interface ThreadPanelComposerInput {
   focusOnEscape?: boolean
   /** 与 Composer 互斥的轻量选择/操作面板；Composer 保持挂载以保留草稿上传状态。 */
   interactionPanel?: ReactNode
+  /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
+  settings?: ThreadComposerSettingsInput
 }
 
 /**
@@ -147,6 +150,7 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots }:
           active={!interactionOpen}
           historicalUserMessages={historicalUserMessages}
           queuedUserMessages={queuedUserMessages}
+          settings={composer.settings}
         />
         {composer.interactionPanel}
         {slots?.footer}

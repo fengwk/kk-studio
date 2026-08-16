@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
@@ -59,14 +60,17 @@ class StudioHarnessThreadControllerTest {
 
   private HarnessRuntime runtime;
   private ChatThreadCommandService chatThreadCommandService;
+  private SystemPromptPreviewService systemPromptPreviewService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     runtime = mock(HarnessRuntime.class);
     chatThreadCommandService = mock(ChatThreadCommandService.class);
+    systemPromptPreviewService = mock(SystemPromptPreviewService.class);
     StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(runtime, chatThreadCommandService);
+        new StudioHarnessThreadController(
+            runtime, chatThreadCommandService, systemPromptPreviewService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -93,6 +97,39 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.queuedCommands.length()").value(0))
         .andExpect(jsonPath("$.data.modelInvocation").value(nullValue()))
         .andExpect(jsonPath("$.data.toolInvocations.length()").value(0));
+  }
+
+  @Test
+  void getEntriesMapsFullSessionListAndPreservesEntryShape() throws Exception {
+    when(runtime.getThreadSessionEntries(id(1)))
+        .thenReturn(
+            List.of(
+                HarnessRuntimeTestFixtures.rootEntry(),
+                HarnessRuntimeTestFixtures.turnStartEntry()));
+
+    mockMvc
+        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/entries"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(2))
+        .andExpect(jsonPath("$.data[0].entryId").value(idText(1)))
+        .andExpect(jsonPath("$.data[0].sessionId").value(idText(1)))
+        .andExpect(jsonPath("$.data[0].parentEntryId").value(nullValue()))
+        .andExpect(jsonPath("$.data[0].entryType").value("ROOT"))
+        .andExpect(jsonPath("$.data[0].payloadJson").isString())
+        .andExpect(jsonPath("$.data[0].createTime").value(1767225600.000000000))
+        .andExpect(jsonPath("$.data[1].entryId").value(idText(2)))
+        .andExpect(jsonPath("$.data[1].parentEntryId").value(idText(1)))
+        .andExpect(jsonPath("$.data[1].entryType").value("TURN_START"));
+  }
+
+  @Test
+  void getSystemPromptMapsLatestPreviewText() throws Exception {
+    when(systemPromptPreviewService.preview(id(1))).thenReturn("You are the planner.");
+
+    mockMvc
+        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/system-prompt"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.text").value("You are the planner."));
   }
 
   @Test
@@ -400,6 +437,16 @@ class StudioHarnessThreadControllerTest {
     mockMvc.perform(get("/api/ai/runtime/threads/0/snapshot")).andExpect(status().isBadRequest());
     mockMvc
         .perform(get("/api/ai/runtime/threads/not-a-number/snapshot"))
+        .andExpect(status().isBadRequest());
+
+    when(runtime.getThreadSessionEntries(id(1)))
+        .thenThrow(new HarnessRuntimeNotFoundException("thread 1 does not exist"));
+    mockMvc
+        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/entries"))
+        .andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/ai/runtime/threads/0/entries")).andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/ai/runtime/threads/not-a-number/entries"))
         .andExpect(status().isBadRequest());
   }
 

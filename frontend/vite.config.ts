@@ -24,6 +24,8 @@ export default defineConfig({
       '/api': {
         target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080',
         changeOrigin: true,
+        // 本地 dev 代理必须把 WS Origin 改为 backend target，否则 Spring 同源校验返回 403。
+        rewriteWsOrigin: true,
         // 应用事件 WebSocket（/api/events/v1）经同一代理转发。
         ws: true,
       },

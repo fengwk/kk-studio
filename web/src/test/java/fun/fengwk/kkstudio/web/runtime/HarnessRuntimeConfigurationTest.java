@@ -21,6 +21,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
@@ -85,6 +86,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private ModelProcessor modelProcessor;
   @Autowired private ToolProcessor toolProcessor;
   @Autowired private HarnessRuntime harnessRuntime;
+  @Autowired private SystemPromptPreviewService systemPromptPreviewService;
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
   @Autowired private PostgresqlWorkListener postgresqlWorkListener;
   @Autowired private EnvironmentReadyListener environmentReadyListener;
@@ -111,6 +113,7 @@ class HarnessRuntimeConfigurationTest {
     assertNotNull(modelProcessor);
     assertNotNull(toolProcessor);
     assertNotNull(harnessRuntime);
+    assertNotNull(systemPromptPreviewService);
     assertNotNull(harnessWorkDispatcher);
     assertNotNull(postgresqlWorkListener);
     assertNotNull(environmentReadyListener);

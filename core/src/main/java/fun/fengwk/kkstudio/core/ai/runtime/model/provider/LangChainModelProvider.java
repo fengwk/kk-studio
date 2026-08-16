@@ -318,11 +318,13 @@ abstract class LangChainModelProvider implements ModelProvider {
       if (block instanceof ProviderTextBlock text) {
         result.add(TextContent.from(text.text()));
       } else if (block instanceof ProviderImageBlock image) {
-        result.add(ImageContent.from(image.source(), image.mediaType()));
+        // source 是 URI 字符串（含合法 data: URI）。LangChain4j 的 from(base64, mimeType)
+        // 会把 https://... 误包成 data:image/...;base64,https://...。
+        result.add(ImageContent.from(image.source()));
       } else if (block instanceof ProviderAudioBlock audio) {
-        result.add(AudioContent.from(audio.source(), audio.mediaType()));
+        result.add(AudioContent.from(audio.source()));
       } else if (block instanceof ProviderVideoBlock video) {
-        result.add(VideoContent.from(video.source(), video.mediaType()));
+        result.add(VideoContent.from(video.source()));
       } else if (block instanceof ProviderJsonBlock json) {
         result.add(TextContent.from(json.json()));
       } else {

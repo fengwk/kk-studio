@@ -13,13 +13,17 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSystemPromptPreviewDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
@@ -49,13 +53,18 @@ import java.util.function.Supplier;
 public class StudioHarnessThreadController {
   private final HarnessRuntime runtime;
   private final ChatThreadCommandService chatThreadCommandService;
+  private final SystemPromptPreviewService systemPromptPreviewService;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
-      HarnessRuntime runtime, ChatThreadCommandService chatThreadCommandService) {
+      HarnessRuntime runtime,
+      ChatThreadCommandService chatThreadCommandService,
+      SystemPromptPreviewService systemPromptPreviewService) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.chatThreadCommandService =
         Objects.requireNonNull(chatThreadCommandService, "chatThreadCommandService");
+    this.systemPromptPreviewService =
+        Objects.requireNonNull(systemPromptPreviewService, "systemPromptPreviewService");
   }
 
   /** 查询一个一致性的 Thread 快照（单事务）。 */
@@ -66,6 +75,39 @@ public class StudioHarnessThreadController {
             () -> {
               UUID id = HarnessRuntimeWebMapper.parseUuid(threadId, "threadId");
               return HarnessRuntimeWebMapper.toSnapshotDto(runtime.getThreadSnapshot(id));
+            }));
+  }
+
+  /**
+   * 查询 Thread 所属 Session 的全部不可变 Entry（含非当前 head 路径上的历史分支）。
+   *
+   * <p>{@code GET /snapshot} 仍只返回当前 root-to-head；本接口返回 Session 全树。
+   */
+  @GetMapping("/{threadId}/entries")
+  public Result<List<HarnessSessionEntryDTO>> getEntries(@PathVariable String threadId) {
+    return Results.ok(
+        withRuntimeTranslation(
+            () -> {
+              UUID id = HarnessRuntimeWebMapper.parseUuid(threadId, "threadId");
+              List<Entry> entries = runtime.getThreadSessionEntries(id);
+              List<HarnessSessionEntryDTO> mapped = new ArrayList<>(entries.size());
+              for (Entry entry : entries) {
+                mapped.add(HarnessRuntimeWebMapper.toEntryDto(entry));
+              }
+              return List.copyOf(mapped);
+            }));
+  }
+
+  /** 按当前 branch 最新 Agent / Environment 现算系统提示词预览。进入 Events 与 turn 结束后由前端按需读取。 */
+  @GetMapping("/{threadId}/system-prompt")
+  public Result<HarnessSystemPromptPreviewDTO> getSystemPrompt(@PathVariable String threadId) {
+    return Results.ok(
+        withRuntimeTranslation(
+            () -> {
+              UUID id = HarnessRuntimeWebMapper.parseUuid(threadId, "threadId");
+              HarnessSystemPromptPreviewDTO dto = new HarnessSystemPromptPreviewDTO();
+              dto.setText(systemPromptPreviewService.preview(id));
+              return dto;
             }));
   }
 

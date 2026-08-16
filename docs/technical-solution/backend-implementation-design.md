@@ -85,6 +85,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | POST | `/api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT（BranchSettings）、Thread 并关联 Chat；返回 snapshot |
 | PUT | `/api/ai/chat/{chatId}/threads/{threadId}` | 幂等建立历史关联 |
 | GET | `/api/ai/runtime/threads/{threadId}/snapshot` | revision、entries（root-to-head）、queuedCommands、活跃 Invocation 与尚未物化的 Model attempt failures |
+| GET | `/api/ai/runtime/threads/{threadId}/entries` | Thread 所属 Session 的完整 immutable Entry Tree，包含非当前 head 的历史分支 |
 | POST | `/api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（7 类命令），202 |
 | PUT | `/api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
 | POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedRevision}`；STOPPED/IDLE/REPLAYED |
@@ -112,7 +113,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | 情况 | HTTP |
 | --- | --- |
 | DTO、名称格式、Model config、Model ref、id/sequence/revision 格式非法（实体 id 非 canonical UUID、sequence/revision 非 decimal string）或请求体中的 Catalog 引用非法 | 400 |
-| 作为请求目标的 Thread/Entry/Catalog 名称不存在（snapshot/commands/head/stop 路径） | 404 |
+| 作为请求目标的 Thread/Entry/Catalog 名称不存在（snapshot/entries/commands/head/stop 路径） | 404 |
 | 命令 cursor / revision CAS 过期、Thread 非 quiescent、terminal apply pending、跨 Session move、ordered replay 冲突 | 409 |
 | approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`）、已决定但请求不匹配（`APPROVAL_DECISION_MISMATCH`） | 409（approval 路径的 Thread/target 缺失不是 404） |
 | 命令 batch 被接受进入 mailbox | 202 |
@@ -130,8 +131,8 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | `ThreadProcessor` | Agent Loop：Model terminal apply 前按序物化失败 attempt、continuation、INPUT turn、QUIESCENT |
 | `ModelProcessor` | 两阶段激活、checkpoint/failedAttempts/terminal 持久化、terminal-once、Thread revision touch、Work/realtime 与 reschedule；不写 Entry/head |
 | `ToolProcessor` | 两阶段激活、preflight、接收已验证/外部化的 terminal `ToolSuccess(result, effects)`、领域校验与严格 terminal CAS，并维护 Thread revision/Work/realtime；不写 Entry/head |
-| `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`（含 `subagentBindings`）；冻结插件 contribution/state accesses，并注入插件 context projection；普通解析按单一 Clock instant 构造 `CurrentEnvironmentContext`；ENVIRONMENT 工具按最新 `EnvironmentBinding` 绑定、规划不拒绝；skills 需最新选中 Environment live + 显式 `load_skill`；`task` 只在 activeTools 含 task、allowlist 非空、depth < maxDepth 时绑定；planning 拒绝共用 `PLANNING_FAILED` |
-| `AgentPromptComposer` | 组合 system prompt 的唯一边界：Agent 正文 → 始终存在且只含 name/workspace/system/date/note 的 `<current_environment>`（未选中时 name/workspace 均为 none）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令）；动态字段 XML escape，日期严格为 yyyy-MM-dd；prompt 模板是 strict classpath resource（Pi 派生资源同目录保留 MIT `NOTICE`） |
+| `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`（含 `subagentBindings`）；每个新 turn 从最新 Agent config 派生 tools/skills/subagents，历史 activeTools 不参与能力计算；冻结插件 contribution/state accesses，并注入插件 context projection；普通解析按单一 Clock instant 构造 `CurrentEnvironmentContext`；ENVIRONMENT 工具按最新 binding 绑定、规划不拒绝；skills 非空时派生 `load_skill` 且要求 Environment live；subagents 非空且 depth < maxDepth 时派生 `task`；planning 拒绝共用 `PLANNING_FAILED` |
+| `AgentPromptComposer` | 组合 system prompt 的唯一边界：Agent 正文 → `<current_environment>`（只输出有值的 name/workspace/system/date/note，`none` 整行省略）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令）；动态字段 XML escape，日期严格为 yyyy-MM-dd；prompt 模板是 strict classpath resource（Pi 派生资源同目录保留 MIT `NOTICE`） |
 | `TaskTool` | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：校验冻结 allowlist、以 `createThread(SubagentContext)` 创建/恢复子 Thread、物化子 Agent branch settings、入队 task prompt、轮询等待并发布 `task.status` 心跳、以 `<task id state>` envelope 结束 |
 | `AgentBranchSettingsMaterializer` | 按最新 Agent/Model catalog 物化子 Agent 完整 `BranchSettings`：`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且 depth < maxDepth 时 task` |
 | `SubagentRunRegistry` | 进程内并发 reservation（每父/每根上限、resume 单飞）；不是 durable truth，durable 子 Session 仍是 Thread/Entry |

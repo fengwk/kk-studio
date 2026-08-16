@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -60,11 +59,6 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
   void variantMismatchIsContractErrorWithZeroMutation() {
     assertMismatchRollsBack(
         branchSettings().withModel(new ModelSelection("provider", "model", "v9")));
-  }
-
-  @Test
-  void toolBindingsMismatchIsContractErrorWithZeroMutation() {
-    assertMismatchRollsBack(branchSettings().withActiveTools(List.of("bash")));
   }
 
   /** candidate 默认 branch 事实下（settings = branchSettings()，yolo = false）请求与事实不一致。 */

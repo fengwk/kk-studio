@@ -72,9 +72,6 @@ describe('SHORTCUT_CATALOG', () => {
     // Events：ThreadEventView 键盘语义。
     expect(keysByScope('events')).toEqual([
       '↑ / ↓',
-      'PageUp / PageDown',
-      'Home / End',
-      'Enter / Space',
       'Esc',
     ])
     // Canvas：useCanvasKeyboard 实际绑定的快捷键。

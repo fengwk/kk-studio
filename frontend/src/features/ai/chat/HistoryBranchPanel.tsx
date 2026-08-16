@@ -74,6 +74,7 @@ export function HistoryBranchPanel({
   const selectedEntryRef = useRef<HTMLButtonElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const selectedEntryId = selectedEntry?.entryId
+  const selectedIndex = rows.findIndex((row) => row.entry.entryId === selectedEntryId)
 
   // 默认选中当前 head；每当行集合发生变化（filter、search 或异步加载的 entries）时，
   // 重新挂接到最近的可见祖先。
@@ -186,17 +187,25 @@ export function HistoryBranchPanel({
       )}
       footer={(
         <div className="history-branch-footer">
-          <button type="button" className="ghost-btn" onClick={effectiveClose} disabled={pending}>
-            {t('ai.chat.history.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={!canRebind}
-            onClick={() => selectedEntry && onRebind(selectedEntry)}
-          >
-            {t('ai.chat.history.continue')}
-          </button>
+          <span className="history-branch-hint">
+            {t('ai.chat.history.hint', {
+              current: selectedIndex < 0 ? 0 : selectedIndex + 1,
+              total: rows.length,
+            })}
+          </span>
+          <div className="history-branch-actions">
+            <button type="button" className="ghost-btn" onClick={effectiveClose} disabled={pending}>
+              {t('ai.chat.history.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!canRebind}
+              onClick={() => selectedEntry && onRebind(selectedEntry)}
+            >
+              {t('ai.chat.history.continue')}
+            </button>
+          </div>
         </div>
       )}
     >
@@ -277,11 +286,14 @@ function HistoryBranchRow({
         ref={selected ? selectedEntryRef : undefined}
         onClick={() => onSelect(row.entry)}
       >
+        <span className="history-branch-entry-cursor" aria-hidden="true">
+          {selected ? '›' : ''}
+        </span>
         {connectorText ? <span className="history-branch-entry-glyphs" aria-hidden="true">{connectorText}</span> : null}
+        {isOnPath ? <span className="history-branch-entry-path" aria-hidden="true">•</span> : null}
         <span className="history-branch-entry-kind">{t(ENTRY_KIND_LABEL_KEYS[row.kind])}</span>
         <span className="history-branch-entry-sep" aria-hidden="true">·</span>
         <span className="history-branch-entry-preview">{row.preview}</span>
-        {isOnPath ? <span className="history-branch-entry-path" aria-hidden="true">•</span> : null}
         {isHead ? (
           <span className="history-branch-entry-head">
             {t('ai.chat.history.currentPosition')}

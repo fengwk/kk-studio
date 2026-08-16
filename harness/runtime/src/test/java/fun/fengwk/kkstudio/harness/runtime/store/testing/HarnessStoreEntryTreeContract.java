@@ -219,6 +219,55 @@ public abstract class HarnessStoreEntryTreeContract {
   }
 
   @Test
+  void loadEntriesBySessionIdReturnsImmutableStableOrderAndRejectsMissingSession() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID otherSessionId =
+        store.transaction(
+            tx -> {
+              UUID sessionId = tx.nextId();
+              UUID rootId = tx.nextId();
+              tx.insertSession(session(sessionId));
+              tx.insertEntry(rootEntry(rootId, sessionId));
+              return sessionId;
+            });
+    UUID sameTimeLarge = new UUID(0x8000000000000000L, 2L);
+    UUID sameTimeSmall = new UUID(0x8000000000000000L, 1L);
+    UUID laterTurnStartId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              return id;
+            });
+    inTransaction(
+        store,
+        tx -> {
+          // 同 createdAt 先写入较大 UUID，再写入较小 UUID，证明排序不是插入序。
+          tx.insertEntry(
+              new Entry(
+                  sameTimeLarge, baseline.sessionId(), laterTurnStartId, userMessagePayload(), T2));
+          tx.insertEntry(
+              new Entry(
+                  sameTimeSmall, baseline.sessionId(), laterTurnStartId, userMessagePayload(), T2));
+        });
+
+    store.transaction(
+        tx -> {
+          List<Entry> entries = tx.loadEntriesBySessionId(baseline.sessionId());
+          assertEquals(
+              List.of(baseline.rootEntryId(), laterTurnStartId, sameTimeSmall, sameTimeLarge),
+              entries.stream().map(Entry::id).toList());
+          assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
+          assertEquals(
+              1, tx.loadEntriesBySessionId(otherSessionId).size(), "must filter by session");
+          return null;
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> inTransaction(store, tx -> tx.loadEntriesBySessionId(TestIds.id(999))));
+  }
+
+  @Test
   void insertThreadRequiresExistingHeadEntry() {
     assertThrows(
         IllegalArgumentException.class,

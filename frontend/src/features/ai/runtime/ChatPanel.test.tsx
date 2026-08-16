@@ -17,15 +17,21 @@ describe('ChatPanel', () => {
     vi.clearAllMocks()
   })
 
-  it('renders thread transcript footer without sidebar or tool-approval UX', () => {
+  it('renders transcript and readonly branch facts without sidebar or tool-approval UX', () => {
     render(
       <ChatPanel
         labels={{
-          agentName: 'assistant',
-          providerName: 'minimax',
-          modelName: 'MiniMax',
-          variantName: 'default',
-          usageText: '↑10 · ↓2 · $0.125',
+          environment: { name: 'local', workspacePath: '.' },
+          environmentReady: true,
+          branchUsage: {
+            input: 10,
+            output: 2,
+            cacheRead: 0,
+            cacheWrite: 0,
+            reasoning: 0,
+            providerTotal: 12,
+            cost: 0.125,
+          },
         }}
         transcript={{
           timeline: {
@@ -45,21 +51,79 @@ describe('ChatPanel', () => {
           onSubmit: vi.fn(),
           onCommand: vi.fn(),
         }}
-        footer={{ yoloEnabled: true }}
         activity={{ working: false }}
       />,
     )
     expect(screen.getByText('hello')).toBeInTheDocument()
-    expect(screen.getByText(/assistant/)).toBeInTheDocument()
+    expect(screen.getByText('env:local · @/')).toBeInTheDocument()
     expect(screen.getByText('↑10 · ↓2 · $0.125')).toBeInTheDocument()
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
   })
 
+  it('always projects active task status through the shared Bound ChatPanel', () => {
+    render(
+      <ChatPanel
+        labels={{}}
+        transcript={{
+          timeline: {
+            messages: [
+              {
+                id: 'task-call',
+                role: 'tool',
+                subjectEntryId: 'e1',
+                createdAt: null,
+                status: 'streaming',
+                phase: 'call',
+                text: '',
+                toolCallId: 'call-task',
+                toolName: 'task',
+                rendererKey: 'task',
+                arguments: '{"subagent_type":"explorer","prompt":"inspect"}',
+                attachments: [],
+                invocationId: 'inv-parent',
+                partial: JSON.stringify({
+                  kind: 'task.status',
+                  threadId: 'child-thread',
+                  subagentType: 'explorer',
+                  state: 'running_model',
+                  depth: 2,
+                  turns: 1,
+                  toolCalls: 0,
+                  lastActivity: 'planning',
+                  approvals: [],
+                  descendants: [],
+                }),
+              },
+            ],
+            queuedMessages: [],
+            hasPendingInputs: false,
+          },
+          bodyRef: createRef<HTMLDivElement>(),
+          loading: false,
+          error: null,
+        }}
+        composer={{
+          parts: [],
+          pending: false,
+          disabled: false,
+          onPartsChange: vi.fn(),
+          onSubmit: vi.fn(),
+          onCommand: vi.fn(),
+        }}
+        activity={{ working: true }}
+      />,
+    )
+
+    expect(screen.getByText('1 个运行中')).toBeInTheDocument()
+    expect(screen.getByText('explorer')).toBeInTheDocument()
+    expect(screen.getByText('模型运行中')).toBeInTheDocument()
+  })
+
   it('keeps working visible while an interaction panel hides Composer, queue, and widgets', () => {
     const { container } = render(
       <ChatPanel
-        labels={{ agentName: 'assistant' }}
+        labels={{}}
         transcript={{
           timeline: {
             messages: [],
@@ -86,7 +150,6 @@ describe('ChatPanel', () => {
           onCommand: vi.fn(),
           interactionPanel: <section aria-label="Inline picker">picker</section>,
         }}
-        footer={{}}
         activity={{
           working: true,
           widgets: <div>task widget</div>,
@@ -100,7 +163,7 @@ describe('ChatPanel', () => {
     expect(screen.queryByText('task widget')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Inline picker')).toBeInTheDocument()
     expect(container.querySelector('.thread-composer')).toHaveAttribute('hidden')
-    expect(screen.getByLabelText('会话状态')).toBeInTheDocument()
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('none env')
   })
 
   it('treats a missing authoritative original response as an unavailable resource', async () => {
@@ -112,7 +175,7 @@ describe('ChatPanel', () => {
 
     render(
       <ChatPanel
-        labels={{ agentName: 'assistant' }}
+        labels={{}}
         transcript={{
           timeline: {
             messages: [
@@ -148,7 +211,6 @@ describe('ChatPanel', () => {
           onSubmit: vi.fn(),
           onCommand: vi.fn(),
         }}
-        footer={{}}
         activity={{ working: false }}
       />,
     )
@@ -169,7 +231,7 @@ describe('ChatPanel', () => {
 
     render(
       <ChatPanel
-        labels={{ agentName: 'assistant' }}
+        labels={{}}
         transcript={{
           timeline: {
             messages: [
@@ -205,7 +267,6 @@ describe('ChatPanel', () => {
           onSubmit: vi.fn(),
           onCommand: vi.fn(),
         }}
-        footer={{}}
         activity={{ working: false }}
       />,
     )
@@ -221,7 +282,7 @@ describe('ChatPanel', () => {
   it('renders the events main view exclusively: transcript is unmounted, composer/queue stay', () => {
     const { container } = render(
       <ChatPanel
-        labels={{ agentName: 'assistant' }}
+        labels={{}}
         transcript={{
           timeline: {
             messages: [{ id: 'm1', role: 'user', text: 'conversation text', subjectEntryId: 'e1', createdAt: null }],
@@ -254,7 +315,6 @@ describe('ChatPanel', () => {
           onSubmit: vi.fn(),
           onCommand: vi.fn(),
         }}
-        footer={{}}
         activity={{ working: true }}
       />,
     )

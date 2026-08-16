@@ -15,6 +15,11 @@ import {
   ThreadCommandPalette,
 } from '@/features/ai/runtime/thread-panel/ThreadCommandPalette'
 import {
+  ThreadComposerControls,
+  type ThreadComposerControlMenu,
+  type ThreadComposerSettingsInput,
+} from '@/features/ai/runtime/thread-panel/ThreadComposerControls'
+import {
   firstEnabledCommandIndex,
   stepEnabledCommandIndex,
   useFilteredThreadCommands,
@@ -81,6 +86,7 @@ export function ThreadComposer({
   hashFile,
   focusOnEscape = false,
   active = true,
+  settings,
 }: {
   parts: ComposerPart[]
   pending: boolean
@@ -105,6 +111,8 @@ export function ThreadComposer({
   focusOnEscape?: boolean
   /** false 时由同一 Composer 区域的 interaction panel 接管；组件保持挂载以保留上传状态。 */
   active?: boolean
+  /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
+  settings?: ThreadComposerSettingsInput
 }) {
   const { t } = useI18n()
   const editorRef = useRef<HTMLDivElement>(null)
@@ -140,6 +148,7 @@ export function ThreadComposer({
   const slashQuery = slashQueryOf(parts)
   const slashMode = slashQuery != null
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const [controlMenu, setControlMenu] = useState<ThreadComposerControlMenu>(null)
   const paletteMode = plusMenuOpen ? 'menu' : slashMode ? 'slash' : null
   const paletteOpen = paletteMode != null
   const query = paletteMode === 'slash' ? slashQuery ?? '' : ''
@@ -209,10 +218,22 @@ export function ThreadComposer({
     focusComposer(forceCaretAtEnd)
   }, [changeDraft, focusComposer, paletteMode])
 
+  const changeControlMenu = useCallback((
+    next: ThreadComposerControlMenu,
+    restoreComposerFocus = false,
+  ) => {
+    setPlusMenuOpen(false)
+    setControlMenu(next)
+    if (restoreComposerFocus) {
+      focusComposer(true)
+    }
+  }, [focusComposer])
+
   useEffect(() => {
     if (!active) {
       restoreFocusRef.current = true
       clearFocusTimer()
+      setControlMenu(null)
       return
     }
     if (restoreFocusRef.current && !disabled) {
@@ -242,6 +263,10 @@ export function ThreadComposer({
         return
       }
       event.preventDefault()
+      if (controlMenu != null) {
+        changeControlMenu(null, true)
+        return
+      }
       if (paletteOpen) {
         closeCommandPalette(true)
         return
@@ -250,7 +275,24 @@ export function ThreadComposer({
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
-  }, [active, closeCommandPalette, focusComposer, focusOnEscape, paletteOpen])
+  }, [
+    active,
+    changeControlMenu,
+    closeCommandPalette,
+    controlMenu,
+    focusComposer,
+    focusOnEscape,
+    paletteOpen,
+  ])
+
+  const slashModeRef = useRef(slashMode)
+  useEffect(() => {
+    const startedSlash = !slashModeRef.current && slashMode
+    slashModeRef.current = slashMode
+    if (startedSlash && controlMenu != null) {
+      setControlMenu(null)
+    }
+  }, [controlMenu, slashMode])
 
   useEffect(() => {
     if (!paletteOpen) {
@@ -367,6 +409,9 @@ export function ThreadComposer({
     if (plusMenuOpen) {
       setPlusMenuOpen(false)
     }
+    if (controlMenu != null) {
+      setControlMenu(null)
+    }
     normalizeEditorDom(el)
     const next = mergeTextParts(extractPartsFromEditor(el))
     if (partsKey(next) !== partsKey(parts)) {
@@ -440,6 +485,12 @@ export function ThreadComposer({
     }
     if (command.id === 'upload') {
       fileInputRef.current?.click()
+      return
+    }
+    if (command.id === 'models') {
+      if (settings) {
+        changeControlMenu('model')
+      }
       return
     }
     focusComposer()
@@ -597,35 +648,14 @@ export function ThreadComposer({
         onActiveIndexChange={setActiveIndex}
         onSelect={handleSelect}
       />
-      <AttachmentStrip
-        uploads={uploads}
-        parts={parts}
-        disabled={disabled}
-        onRemove={handleRemoveUpload}
-        onRetry={(upload) => retryUpload(upload.localId)}
-      />
       <div className="thread-dock">
-        <button
-          type="button"
-          className="thread-dock-add"
-          aria-label={t('ai.runtime.composer.openCommands')}
-          aria-expanded={paletteOpen}
+        <AttachmentStrip
+          uploads={uploads}
+          parts={parts}
           disabled={disabled}
-          onMouseDown={(event) => {
-            // 鼠标打开菜单时保留 editor 的 focus、caret 与 selection。
-            event.preventDefault()
-          }}
-          onClick={() => {
-            if (paletteOpen) {
-              closeCommandPalette()
-              return
-            }
-            setPlusMenuOpen(true)
-            focusComposer()
-          }}
-        >
-          <Plus aria-hidden="true" />
-        </button>
+          onRemove={handleRemoveUpload}
+          onRetry={(upload) => retryUpload(upload.localId)}
+        />
         <div
           ref={editorRef}
           className="composer-editor"
@@ -641,19 +671,56 @@ export function ThreadComposer({
           onBeforeInput={handleBeforeInput}
           onPaste={handlePaste}
           onDrop={handleDrop}
-        />
-        <button
-          className="thread-dock-send"
-          type="button"
-          aria-label={t('ai.runtime.composer.send')}
-          onClick={() => {
-            handleSubmit()
-            focusComposer()
+          onMouseDown={() => {
+            if (controlMenu != null) {
+              setControlMenu(null)
+            }
           }}
-          disabled={!canSend}
-        >
-          <ArrowUp className="send-icon" aria-hidden="true" />
-        </button>
+        />
+        <div className="thread-dock-controls">
+          <button
+            type="button"
+            className="thread-dock-add"
+            aria-label={t('ai.runtime.composer.openCommands')}
+            aria-expanded={paletteOpen}
+            disabled={disabled}
+            onMouseDown={(event) => {
+              // 鼠标打开菜单时保留 editor 的 focus、caret 与 selection。
+              event.preventDefault()
+            }}
+            onClick={() => {
+              if (paletteOpen) {
+                closeCommandPalette()
+                return
+              }
+              setControlMenu(null)
+              setPlusMenuOpen(true)
+              focusComposer()
+            }}
+          >
+            <Plus aria-hidden="true" />
+          </button>
+          {settings ? (
+            <ThreadComposerControls
+              settings={settings}
+              menu={controlMenu}
+              disabled={disabled}
+              onMenuChange={changeControlMenu}
+            />
+          ) : <span className="thread-dock-controls-spacer" />}
+          <button
+            className="thread-dock-send"
+            type="button"
+            aria-label={t('ai.runtime.composer.send')}
+            onClick={() => {
+              handleSubmit()
+              focusComposer()
+            }}
+            disabled={!canSend}
+          >
+            <ArrowUp className="send-icon" aria-hidden="true" />
+          </button>
+        </div>
       </div>
       <input
         ref={fileInputRef}

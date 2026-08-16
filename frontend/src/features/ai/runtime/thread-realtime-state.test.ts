@@ -45,8 +45,32 @@ describe('thread realtime state', () => {
     const afterToolCall = reduceRealtimeModelStream(afterText, toolCall)
     const complete = reduceRealtimeModelStream(afterToolCall, thinking)
 
-    expect(afterToolCall).toMatchObject({ sequence: 2, text: 'one', thinking: '' })
-    expect(complete).toMatchObject({ sequence: 3, text: 'one', thinking: 'plan' })
+    expect(afterToolCall).toMatchObject({ sequence: 2, text: 'one', thinking: '', toolCalls: [] })
+    expect(complete).toMatchObject({ sequence: 3, text: 'one', thinking: 'plan', toolCalls: [] })
+  })
+
+  it('accumulates TOOL_CALL_DELTA fragments into a streaming write preview draft', () => {
+    const first = parseRealtimeModelDelta(toolCallEvent(1, {
+      index: 0,
+      id: 'call-',
+      name: 'wri',
+      argumentsJson: '{"path":',
+    }))!
+    const second = parseRealtimeModelDelta(toolCallEvent(2, {
+      index: 0,
+      id: '1',
+      name: 'te',
+      argumentsJson: '"App.java","content":"class App {}"}',
+    }))!
+    const stream = reduceRealtimeModelStream(reduceRealtimeModelStream(null, first), second)
+    expect(stream.toolCalls).toEqual([
+      {
+        index: 0,
+        id: 'call-1',
+        name: 'write',
+        argumentsJson: '{"path":"App.java","content":"class App {}"}',
+      },
+    ])
   })
 
   it('mirrors the Java checkpoint codec: nullable string-only text/thinking with one non-empty', () => {
@@ -331,7 +355,25 @@ function event(
     attempt: 1,
     sequence,
     type: 'MODEL_DELTA',
-    payload: kind === 'TOOL_CALL_DELTA' ? { kind, index: 0 } : { kind, text },
+    payload: kind === 'TOOL_CALL_DELTA'
+      ? { kind, index: 0, id: null, name: null, argumentsJson: null }
+      : { kind, text },
+    createdAt: '2026-07-28T10:00:00Z',
+  })
+}
+
+function toolCallEvent(
+  sequence: number,
+  payload: { index: number; id: string | null; name: string | null; argumentsJson: string | null },
+): string {
+  return JSON.stringify({
+    threadId: '7',
+    subjectKind: 'MODEL_INVOCATION',
+    subjectId: '9',
+    attempt: 1,
+    sequence,
+    type: 'MODEL_DELTA',
+    payload: { kind: 'TOOL_CALL_DELTA', ...payload },
     createdAt: '2026-07-28T10:00:00Z',
   })
 }

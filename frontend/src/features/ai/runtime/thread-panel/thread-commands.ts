@@ -9,12 +9,12 @@ export type ThreadCommandId =
   | 'agent'
   | 'environment'
   | 'yolo'
+  | 'models'
   | 'tree'
   | 'stop'
   | 'new'
   | 'upload'
   | 'events'
-  | 'conversation'
   | 'shortcuts'
 
 export interface ThreadCommand {
@@ -68,6 +68,14 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
     keywords: ['auto', 'approve', 'tool'],
   },
   {
+    id: 'models',
+    label: 'models',
+    description: '',
+    labelKey: 'ai.runtime.command.modelsLabel',
+    descriptionKey: 'ai.runtime.command.models',
+    keywords: ['model', 'variant', 'provider', 'switch'],
+  },
+  {
     id: 'tree',
     label: 'tree',
     description: '',
@@ -105,15 +113,7 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
     description: '',
     labelKey: 'ai.runtime.command.eventsLabel',
     descriptionKey: 'ai.runtime.command.events',
-    keywords: ['log', 'audit', 'activity', 'entry'],
-  },
-  {
-    id: 'conversation',
-    label: 'conversation',
-    description: '',
-    labelKey: 'ai.runtime.command.conversationLabel',
-    descriptionKey: 'ai.runtime.command.conversation',
-    keywords: ['chat', 'messages', 'transcript', 'dialogue'],
+    keywords: ['log', 'audit', 'activity', 'entry', 'conversation', 'toggle'],
   },
   {
     id: 'shortcuts',
@@ -127,21 +127,21 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
 
 /**
  * 每个命令的可用场景。场景区分 Chat 与 Canvas、Blank 与 Bound：
- * - Canvas Bound 的 controller 只支持 stop（upload 由 ThreadComposer 自身处理文件选择），
- *   因此 agent/environment/yolo/tree/new/thread 不会投影给只支持 stop 的 controller。
+ * - Canvas Bound 与 Chat Bound 都允许编辑下一条消息的 agent/environment/yolo 草稿；
+ *   tree/new/thread 仍是 Chat 专属。
  * `/session` 已彻底移除：树只属于当前 Session，不存在可用的全局 Session 重绑定命令。
  */
 const SCENE_AVAILABILITY: Record<ThreadCommandId, ThreadCommandScene[]> = {
   thread: ['chat-blank', 'chat-bound'],
-  agent: ['chat-blank', 'canvas-blank', 'chat-bound'],
-  environment: ['chat-blank', 'canvas-blank', 'chat-bound'],
-  yolo: ['chat-blank', 'canvas-blank', 'chat-bound'],
+  agent: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
+  environment: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
+  yolo: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
+  models: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
   tree: ['chat-bound'],
   stop: ['chat-bound', 'canvas-bound'],
   new: ['chat-bound'],
   upload: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
   events: ['chat-bound', 'canvas-bound'],
-  conversation: ['chat-bound', 'canvas-bound'],
   shortcuts: ['chat-blank', 'canvas-blank', 'chat-bound', 'canvas-bound'],
 }
 
@@ -156,21 +156,6 @@ export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand
       disabledReasonKey: disabled ? 'ai.runtime.command.disabledReason' : undefined,
     }
   })
-}
-
-/**
- * Bound 主视图互斥：当前已激活的视图命令保持可见但禁用
- * （events 激活时 `/events` 禁用，conversation 激活时 `/conversation` 禁用）。
- */
-export function threadCommandsForActiveView(
-  commands: ThreadCommand[],
-  activeView: 'conversation' | 'events',
-): ThreadCommand[] {
-  return commands.map((command) =>
-    command.id === activeView
-      ? { ...command, disabled: true, disabledReasonKey: 'ai.runtime.command.activeView' }
-      : command,
-  )
 }
 
 export function filterThreadCommands(

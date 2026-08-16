@@ -23,6 +23,7 @@ RuntimeToolsConfiguration
 
 DatabaseTurnResolver
   -> Agent/Provider/Model/Variant Catalog 查询（按名称读最新行）
+  -> 最新 Agent tools/skills/subagents 派生本 turn 工具集合
   -> ToolCatalog + PluginCatalog + LiveEnvironmentRegistry
   -> ContextProjector(candidate BranchView)
   -> ProviderFactory（由当前行 providerType 解析，派生 cache policy）
@@ -101,7 +102,7 @@ public record BranchSettings(
     EnvironmentBinding environment, // 完整 binding{name, workspacePath}，null 表示未选择
     String agentName,
     ModelSelection model,          // providerName/modelName/variant
-    List<String> activeTools) {}
+    List<String> activeTools) {}    // 历史投影；新 turn 从最新 Agent config 派生能力
 ```
 
 `DatabaseTurnResolver.resolve(threadId, candidatePath, yoloEnabled, compactionPreparation)` 分为正常 turn 与 compaction turn。正常解析顺序：
@@ -110,11 +111,11 @@ public record BranchSettings(
 candidate path 最近 TURN_START 的 BranchSettings
   -> AgentDefinition（agentName）
   -> Provider / (providerName, modelName) Model / effective Variant
-  -> ToolCatalog + PluginCatalog + activeTools（必须命中可选择目录或内部 load_skill/task）
+  -> ToolCatalog + PluginCatalog + 最新 Agent config.tools
   -> EnvironmentBinding 路由（binding.environmentName）+ LiveEnvironmentRegistry（READY + 心跳未过期才可用）
   -> CurrentEnvironmentContext（单一 instant；capabilities metadata 或服务端 Clock zone）
-  -> skills（Agent config；最新选中 Environment 精确提供 + 显式 load_skill）
-  -> subagents（Agent config allowlist；activeTools 含 task + depth < maxDepth 才绑定）
+  -> skills（最新 Agent config；非空时派生 load_skill，最新选中 Environment 精确提供）
+  -> subagents（最新 Agent config allowlist；非空且 depth < maxDepth 时派生 task）
   -> AgentPromptComposer（Agent 正文 -> 始终存在的 current_environment -> available_skills -> available_subagents）
   -> 插件 ContextProjector(candidate BranchView)
   -> compaction-aware 白名单历史投影（MESSAGE / CUSTOM_MESSAGE / ASSISTANT_ABORTED；失败 attempt/error 不投影）
@@ -127,15 +128,16 @@ candidate path 最近 TURN_START 的 BranchSettings
 - **latest-snapshot-wins**：解析只使用 candidate path 最近一个 ROOT/TURN_START 的**完整** `BranchSettings` 快照（`EntryPath.baseSettings()` 逐项取最新）；快照中的 null/缺失/不可用值（如 `environment` binding 为 null、agent/Environment 已不存在）**绝不触发向更旧 ROOT/TURN_START 快照回退**——更旧快照中的非 null environment 或仍有效的 agent 不再参与解析；
 - **ENVIRONMENT 工具规划不拒绝**：一律按最新 `BranchSettings.environment()` 完整 binding 绑定（null/缺失/未 READY 都放行）；实际 start 时 null binding 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 收敛；
 - **Agent skills 规划要求最新选中 Environment live**：缺失/未 READY/分支无名称都是确定性拒绝（精确 message），绝不回看更旧 settings；
-- **current_environment prompt 不改变路由语义**：块始终只含 name/workspace/system/date/note（未选中时 name/workspace 为 none）；选中条目只要 capabilities 非 null 就使用 READY OS/note/timeZone 计算上下文，无 metadata 时 OS/note 为 `none` 并回退服务端 Clock zone。status、heartbeat、workdir、时间与 timeZone 不进入 Prompt；它只冻结模型上下文，不参与 Tool/Skill 的实时 ready 校验；
-- **task/subagent 规划规则**：`task` 只在 activeTools 显式含 task、allowlist 非空且 depth < maxDepth 时绑定；allowlist 名称必须解析到现存 Agent（名称 + 描述冻结为 `subagentBindings`），执行绝不重读父 Agent 配置扩权；
-- Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 拒绝；内部 Platform Tool（load_skill/task）必须显式出现在 activeTools 才能绑定，不是隐式追加。
+- **current_environment prompt 不改变路由语义**：块只输出有值的 name/workspace/system/date/note（`none` 整行省略）；选中条目只要 capabilities 非 null 就使用 READY OS/note/timeZone 计算上下文，无 metadata 时省略 OS/note 并回退服务端 Clock zone。status、heartbeat、workdir、时间与 timeZone 不进入 Prompt；它只冻结模型上下文，不参与 Tool/Skill 的实时 ready 校验；
+- **最新 Agent 能力规则**：每个新 turn 按最新 `config.tools` 顺序绑定直接工具；skills 非空时派生内部 `load_skill`；subagents allowlist 非空且 depth < maxDepth 时派生内部 `task`。历史 branch activeTools 不限制也不扩张本次能力；
+- **task/subagent 规划规则**：allowlist 名称必须解析到现存 Agent（名称 + 描述冻结为 `subagentBindings`），执行绝不重读父 Agent 配置扩权；达到最大 depth 时不暴露 `task`；
+- Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 拒绝；内部 Platform Tool（load_skill/task）不在 selectable catalog，由 Resolver 按最新 skills/subagents 自动派生。
 
 **确定性拒绝**：所有 planning rejection 共用稳定 `AssistantError` code **`PLANNING_FAILED`**（`DatabaseTurnResolver.REJECTION_CODE`），message 携带具体原因（缺失 Agent/Provider/Model/Variant、未知 Tool、Environment 不可用等）——不存在按类别区分的独立拒绝码列表。
 
 `Rejected` 由 Processor 写成 `ASSISTANT_ERROR` barrier（+ `FAILED` TURN_END），不产生 ModelInvocation，也不切换到其他 Agent/Provider/Model/Environment/Tool/Skill。Resolver 抛异常表示临时基础设施失败，由 Processor reschedule。
 
-**Skills**：只从 Agent config 读取，必须由选中 READY Environment 精确提供，且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` **不是** Resolver 隐式追加，也不在 selectable catalog。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败，Agent Loop 写入 `ASSISTANT_ERROR` 并关闭该 Turn，不物化 ToolInvocation。
+**Skills**：只从最新 Agent config 读取，必须由选中 READY Environment 精确提供；skills 非空时 Resolver 自动派生内部 `load_skill`，该工具不在 selectable catalog。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败，Agent Loop 写入 `ASSISTANT_ERROR` 并关闭该 Turn，不物化 ToolInvocation。
 
 Compaction resolver 不读取 Agent prompt、plugin projector、Environment live 能力或 prompt cache，不调用 `AgentPromptComposer`，因此不注入 `<current_environment>`，也不绑定 tool/skill/subagent；它只使用 branch 引用的 provider/model/catalog Variant 与 planner 冻结事实，构造一个 summarization SYSTEM + 一个 USER request。Variant 是唯一模型请求预设，其 reasoning effort 与其余请求参数一并生效；contextWindow 沿用触发 invocation 冻结值，输出上限取有效 model/variant max output 与 phase reserve budget 的较小值。
 

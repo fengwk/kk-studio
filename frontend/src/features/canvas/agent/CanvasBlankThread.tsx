@@ -11,6 +11,7 @@ import {
   AgentSelectionPanel,
 } from '@/features/ai/chat/SelectionPanel'
 import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
+import { useEnvironmentWorkspaceMetadata } from '@/features/ai/environment/useEnvironmentWorkspaceMetadata'
 import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors'
 import {
   materializeAgentBranchDraft,
@@ -52,7 +53,8 @@ const CANVAS_BLANK_COMMANDS: ThreadCommand[] = threadCommandsForScene('canvas-bl
 
 /**
  * Canvas 空 Thread（document.threadId == null）：
- * 提供 compact 的 Agent/Environment/YOLO 选择（ThreadStatusFooter + 内联选择面板），
+ * 提供共享双层 Composer 的 Model/Variant/Permission 控件，以及 Agent/Environment 内联选择面板；
+ * ThreadStatusFooter 只展示真实 Environment/Workspace/Git facts。
  * 首次发送走 canvas-scoped 原子端点 POST /canvases/{id}/thread/messages
  * （branch settings + 有序 USER_MESSAGE contents），成功后把携带 threadId 的
  * document 交还 controller，由绑定 Thread 接管面板。
@@ -171,7 +173,7 @@ export function CanvasBlankThread({
         return
       case 'yolo':
         if (!pending) {
-          setFrozenDraft((current) => current ? { ...current, yoloEnabled: !current.yoloEnabled } : current)
+          setYoloEnabled(!(frozenDraft?.yoloEnabled ?? false))
         }
         return
       default:
@@ -203,7 +205,27 @@ export function CanvasBlankThread({
     setActionError(null)
   }
 
+  function setYoloEnabled(enabled: boolean) {
+    if (pending) {
+      return
+    }
+    setFrozenDraft((current) => current ? { ...current, yoloEnabled: enabled } : current)
+    setActionError(null)
+  }
+
   const environment = frozenDraft?.environment ?? null
+  const environmentReady =
+    environment == null
+      ? undefined
+      : (environmentReadyByName.get(environment.name) ?? false)
+  const { gitBranch } = useEnvironmentWorkspaceMetadata(environment, environmentReady)
+  const draftResolutionError =
+    actionError == null
+    && !modelsQuery.isLoading
+    && frozenDraft == null
+    && !agents.some((agent) => materializeBlankBranchDraft(agent, false, models) != null)
+      ? t('canvas.agent.agentMissing')
+      : null
   const interactionPanel =
     interaction === 'agent' ? (
       <AgentSelectionPanel
@@ -234,7 +256,9 @@ export function CanvasBlankThread({
         <div className="blank-pane-body">
           <h2>{t('canvas.agent.blankTitle')}</h2>
           <p>{t('canvas.agent.blankDescription')}</p>
-          {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
+          {actionError || draftResolutionError ? (
+            <div className="thread-error-panel">{actionError ?? draftResolutionError}</div>
+          ) : null}
         </div>
         <ThreadComposer
           parts={parts}
@@ -248,26 +272,22 @@ export function CanvasBlankThread({
           commands={CANVAS_BLANK_COMMANDS}
           focusOnEscape={interactionPanel == null}
           active={interactionPanel == null}
+          settings={frozenDraft == null ? undefined : {
+            model: frozenDraft.model,
+            models,
+            yoloEnabled: frozenDraft.yoloEnabled,
+            onModelChange: (model) => {
+              setFrozenDraft((current) => current ? { ...current, model } : current)
+              setActionError(null)
+            },
+            onYoloChange: setYoloEnabled,
+          }}
         />
         {interactionPanel}
         <ThreadStatusFooter
-          agentName={frozenDraft?.agentName || t('ai.runtime.action.blankAgent')}
-          providerName={frozenDraft?.model.providerName || undefined}
-          modelName={
-            frozenDraft?.model.providerName && frozenDraft.model.modelName
-              ? `${frozenDraft.model.providerName}/${frozenDraft.model.modelName}`
-              : undefined
-          }
-          variantName={frozenDraft?.model.variant || undefined}
           environment={environment}
-          environmentReady={
-            environment == null
-              ? undefined
-              : (environmentReadyByName.get(environment.name) ?? false)
-          }
-          yoloEnabled={frozenDraft?.yoloEnabled ?? false}
-          onAgentClick={() => setInteraction('agent')}
-          onEnvironmentClick={() => setInteraction('environment')}
+          environmentReady={environmentReady}
+          gitBranch={gitBranch}
         />
       </main>
     </section>

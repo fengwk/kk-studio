@@ -16,6 +16,7 @@ import {
   createConfiguredChatThread,
   customMessageCommand,
   enqueueCommands,
+  getThreadEntries,
   getThreadSnapshot,
   listChatThreads,
   setActiveToolsCommand,
@@ -27,6 +28,7 @@ import {
   threadIdOf,
   updateThreadHead,
   userMessageCommand,
+  waitForDurableMessages,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
@@ -618,6 +620,97 @@ registerCase({
           expectedRevision: '999999999',
         }),
       { status: 409, messageIncludes: /revision/i },
+    )
+  },
+})
+
+registerCase({
+  id: 'thread.session_entry_tree',
+  level: 'L1',
+  title: '完整 Session Entry Tree 保留非当前历史分支',
+  docs: 'GET /api/ai/runtime/threads/{threadId}/entries 返回 Thread 所属 Session 的全部 immutable Entries；head 回退后新建分支，snapshot 仍仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
+    const suffix = cid().slice(0, 8)
+    const trunkMessage = `entry tree trunk ${suffix}`
+    const originalMessage = `entry tree original ${suffix}`
+    const alternateMessage = `entry tree alternate ${suffix}`
+    const { snapshot: created } = await createConfiguredChatThread(ctx, {
+      agent: ctx.vars.agent,
+      model: modelSelectionOf(ctx),
+      title: `e2e-entry-tree-${suffix}`,
+      branchAgentName: `e2e-entry-tree-missing-${suffix}`,
+    })
+    const threadId = created.thread.threadId
+
+    await enqueueCommands(ctx, threadId, {
+      expectedHeadEntryId: created.thread.headEntryId,
+      expectedNextCommandSequence: created.thread.nextCommandSequence,
+      commands: [userMessageCommand(trunkMessage, cid())],
+    })
+    const { snapshot: trunk } = await waitForDurableMessages(ctx, threadId, [trunkMessage])
+    const branchPointEntryId = trunk.thread.headEntryId
+
+    await enqueueCommands(ctx, threadId, {
+      expectedHeadEntryId: trunk.thread.headEntryId,
+      expectedNextCommandSequence: trunk.thread.nextCommandSequence,
+      commands: [userMessageCommand(originalMessage, cid())],
+    })
+    const { snapshot: original } = await waitForDurableMessages(
+      ctx,
+      threadId,
+      [trunkMessage, originalMessage],
+    )
+    const moved = await updateThreadHead(ctx, threadId, {
+      targetEntryId: branchPointEntryId,
+      expectedRevision: original.thread.revision,
+    })
+    await enqueueCommands(ctx, threadId, {
+      expectedHeadEntryId: moved.headEntryId,
+      expectedNextCommandSequence: moved.nextCommandSequence,
+      commands: [userMessageCommand(alternateMessage, cid())],
+    })
+    const { snapshot: active, entries } = await waitForDurableMessages(
+      ctx,
+      threadId,
+      [trunkMessage, originalMessage, alternateMessage],
+    )
+
+    const entryText = (entry) => {
+      if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return ''
+      const message = JSON.parse(entry.payloadJson).message
+      return (message?.contents || [])
+        .filter((content) => content?.type === 'text')
+        .map((content) => content.text)
+        .join('\n')
+    }
+    const originalUser = entries.find((entry) => entryText(entry) === originalMessage)
+    const alternateUser = entries.find((entry) => entryText(entry) === alternateMessage)
+    assert(originalUser && alternateUser, `full Entry Tree lost a branch: ${JSON.stringify(entries)}`)
+    assert(
+      !active.entries.some((entry) => entryText(entry) === originalMessage)
+        && active.entries.some((entry) => entryText(entry) === alternateMessage),
+      `snapshot must remain current root-to-head only: ${JSON.stringify(active.entries)}`,
+    )
+    const byId = new Map(entries.map((entry) => [entry.entryId, entry]))
+    const originalTurnStart = byId.get(originalUser.parentEntryId)
+    const alternateTurnStart = byId.get(alternateUser.parentEntryId)
+    assert(
+      originalTurnStart?.entryType === 'TURN_START'
+        && alternateTurnStart?.entryType === 'TURN_START'
+        && originalTurnStart.entryId !== alternateTurnStart.entryId
+        && originalTurnStart.parentEntryId === branchPointEntryId
+        && alternateTurnStart.parentEntryId === branchPointEntryId,
+      `historical branches do not share the expected parent: ${JSON.stringify({
+        branchPointEntryId,
+        originalTurnStart,
+        alternateTurnStart,
+      })}`,
+    )
+    assert(
+      JSON.stringify(await getThreadEntries(ctx, threadId)) === JSON.stringify(entries),
+      'full Entry Tree ordering must be stable across reads',
     )
   },
 })

@@ -7,6 +7,7 @@ import { assert, envelopeData, sleep } from './http.mjs'
  * - GET  /api/ai/chat/{chatId}/threads                 Chat-scoped Thread 数组（新到旧）
  * - POST /api/ai/chat/{chatId}/threads                 {title,branchSettings,yoloEnabled} → 201 snapshot
  * - GET  /api/ai/runtime/threads/{id}/snapshot         一致快照（单事务）
+ * - GET  /api/ai/runtime/threads/{id}/entries          Session 完整不可变 Entry Tree
  * - POST /api/ai/runtime/threads/{id}/commands         命令 batch（202；clientCommandId 幂等 replay）
  * - PUT  /api/ai/runtime/threads/{id}/head             {targetEntryId,expectedRevision}
  * - POST /api/ai/runtime/threads/{id}/stop             {stopRequestId,expectedRevision}（同 id 幂等 replay）
@@ -187,6 +188,52 @@ export async function getThreadSnapshot(ctx, threadId) {
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
   threadIdOf(snapshot.thread)
   return snapshot
+}
+
+/** 读取 Thread 所属 Session 的完整不可变 Entry Tree，包含当前 head 之外的历史分支。 */
+export async function getThreadEntries(ctx, threadId) {
+  const { status, json } = await ctx.call(
+    'GET',
+    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/entries`,
+  )
+  assert(status === 200, `get thread entries status ${status}: ${JSON.stringify(json)}`)
+  const entries = envelopeData(json)
+  assert(Array.isArray(entries), `thread entries must be an array: ${JSON.stringify(json)}`)
+  return entries
+}
+
+/** 等待指定消息进入完整 Session Entry Tree，并同时确认 Thread 已真正 quiescent。 */
+export async function waitForDurableMessages(
+  ctx,
+  threadId,
+  expectedTexts,
+  { timeoutMs = 60_000, intervalMs = 100 } = {},
+) {
+  const deadline = Date.now() + timeoutMs
+  let last = null
+  while (Date.now() <= deadline) {
+    const snapshot = await getThreadSnapshot(ctx, threadId)
+    const entries = await getThreadEntries(ctx, threadId)
+    last = { snapshot, entries }
+    const payloads = entries.map((entry) => entry.payloadJson)
+    const hasExpectedMessages = expectedTexts.every(
+      (text) => payloads.some((payload) => payload.includes(text)),
+    )
+    if (
+      hasExpectedMessages
+      && snapshot.thread.status === 'IDLE'
+      && !snapshot.thread.processing
+      && snapshot.queuedCommands.length === 0
+      && snapshot.modelInvocation === null
+      && snapshot.toolInvocations.length === 0
+    ) {
+      return last
+    }
+    await sleep(intervalMs)
+  }
+  throw new Error(
+    `durable messages did not stabilize: ${JSON.stringify({ expectedTexts, last })}`,
+  )
 }
 
 export async function getThread(ctx, threadId) {

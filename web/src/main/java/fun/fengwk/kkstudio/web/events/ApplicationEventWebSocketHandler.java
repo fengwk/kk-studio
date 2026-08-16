@@ -4,6 +4,7 @@ import jakarta.annotation.PreDestroy;
 import jakarta.websocket.CloseReason;
 import jakarta.websocket.Session;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -18,6 +19,9 @@ import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Subscription;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 浏览器事件通道 {@code /api/events/v1} 的 Spring WebSocket 适配器。
@@ -32,23 +36,45 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler {
 
   public static final String PATH = "/api/events/v1";
+  static final long HEARTBEAT_INTERVAL_MILLIS = 20_000L;
 
   private final ApplicationEventHub hub;
   private final EventFrameCodec codec;
   private final int senderCapacity;
   private final Map<String, ConnectionState> connections = new ConcurrentHashMap<>();
+  private final ScheduledFuture<?> heartbeatTask;
 
   @Autowired
-  public ApplicationEventWebSocketHandler(ApplicationEventHub hub, EventFrameCodec codec) {
-    this(hub, codec, AsyncTextSender.DEFAULT_CAPACITY);
+  public ApplicationEventWebSocketHandler(
+      ApplicationEventHub hub,
+      EventFrameCodec codec,
+      @Qualifier("applicationEventHeartbeatScheduler")
+          ScheduledExecutorService heartbeatScheduler) {
+    this(hub, codec, AsyncTextSender.DEFAULT_CAPACITY, heartbeatScheduler);
   }
 
   /** 测试可注入发送队列容量。 */
   ApplicationEventWebSocketHandler(
       ApplicationEventHub hub, EventFrameCodec codec, int senderCapacity) {
+    this(hub, codec, senderCapacity, null);
+  }
+
+  private ApplicationEventWebSocketHandler(
+      ApplicationEventHub hub,
+      EventFrameCodec codec,
+      int senderCapacity,
+      ScheduledExecutorService heartbeatScheduler) {
     this.hub = Objects.requireNonNull(hub, "hub");
     this.codec = Objects.requireNonNull(codec, "codec");
     this.senderCapacity = senderCapacity;
+    this.heartbeatTask =
+        heartbeatScheduler == null
+            ? null
+            : heartbeatScheduler.scheduleAtFixedRate(
+                this::heartbeat,
+                HEARTBEAT_INTERVAL_MILLIS,
+                HEARTBEAT_INTERVAL_MILLIS,
+                TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -83,8 +109,18 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
    */
   @PreDestroy
   public void shutdown() {
+    if (heartbeatTask != null) {
+      heartbeatTask.cancel(false);
+    }
     for (ConnectionState state : connections.values()) {
       state.shutdown();
+    }
+  }
+
+  /** 单次共享 heartbeat tick；只向每连接的 AsyncTextSender 非阻塞入队。 */
+  void heartbeat() {
+    for (ConnectionState state : connections.values()) {
+      state.heartbeat();
     }
   }
 
@@ -193,6 +229,20 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
             EventFrameCodec.BACKPRESSURE,
             "event queue is full",
             CloseReason.CloseCodes.TRY_AGAIN_LATER);
+      }
+    }
+
+    private void heartbeat() {
+      synchronized (closeLock) {
+        if (closed) {
+          return;
+        }
+        if (!sender.enqueue(codec.heartbeat())) {
+          fail(
+              EventFrameCodec.BACKPRESSURE,
+              "event queue is full",
+              CloseReason.CloseCodes.TRY_AGAIN_LATER);
+        }
       }
     }
 

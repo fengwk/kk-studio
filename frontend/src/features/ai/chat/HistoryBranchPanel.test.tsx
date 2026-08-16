@@ -35,6 +35,17 @@ describe('HistoryBranchPanel', () => {
     const headButton = screen.getByRole('button', { name: '助手 · follow up · 当前路径 · 当前线程位置' })
     expect(within(headButton).getByText('当前线程位置')).toBeInTheDocument()
     expect(headButton).toHaveAttribute('aria-pressed', 'true')
+    expect(
+      Array.from(headButton.children).slice(0, 4).map((element) => element.className),
+    ).toEqual([
+      'history-branch-entry-cursor',
+      'history-branch-entry-glyphs',
+      'history-branch-entry-path',
+      'history-branch-entry-kind',
+    ])
+    expect(headButton.querySelector('.history-branch-entry-cursor')).toHaveTextContent('›')
+    expect(headButton.querySelector('.history-branch-entry-path')).toHaveTextContent('•')
+    expect(screen.getByText('3 / 4 · ↑↓ 选择 · Enter 确认 · Esc 返回')).toBeInTheDocument()
     expect(onRebind).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
     expect(onRebind).toHaveBeenCalledTimes(1)

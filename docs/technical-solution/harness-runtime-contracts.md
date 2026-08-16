@@ -326,8 +326,9 @@ record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable b
 - 抛异常表示临时基础设施失败，由 Processor reschedule；`Rejected` 产生 `AssistantError` barrier（`ASSISTANT_ERROR` + `FAILED` TURN_END），不产生 ModelInvocation。
 - 所有确定性拒绝共用稳定 `AssistantError` code `PLANNING_FAILED`，message 携带具体原因。
 - **Environment route 规则（工具）**：ENVIRONMENT 工具一律按最新 `BranchSettings.environment()` 完整 binding 绑定（可为 null/缺失/未 READY），规划阶段**绝不拒绝**；实际 Tool start 时按冻结 binding 确定性判定——null binding 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 正常收敛。绝不回看更旧的 branch settings。
-- **Environment route 规则（skills）**：Agent skills 只从 Agent config 读取，必须由**最新选中** Environment 精确提供且可用（缺失 → `agent skills require the latest selected environment which is not live: <name>`；未 READY → `...which is not ready: <name>`；分支无 binding → `...but the branch has no environment`），且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` 不是 Resolver 隐式追加，也不在 selectable catalog。
-- **Subagent 规则（task）**：`task` 只在 `activeTools` 显式包含内部 `task`、Agent `subagents` allowlist 非空且当前 Session depth 小于 `maxDepth` 时绑定（depth 由 ROOT `subagentContext` 派生，普通根为 1）；allowlist 为空 → `task requires a non-empty Agent subagents allowlist`，已达最大深度 → `task is unavailable at subagent depth <d> (maxDepth=<m>)`。allowlist 每个名称必须解析到现存 Agent（缺失 → `subagent not found: <name>`），名称 + 描述（可空）冻结为有序 `subagentBindings`；执行绝不重读父 Agent 配置扩权。
+- **最新 Agent 工具规则**：每个新 turn 从最新 Agent config 派生工具集合；`config.tools` 按原顺序绑定，skills 非空时追加内部 `load_skill`，subagents 非空且当前 Session depth 小于 `maxDepth` 时追加内部 `task`。历史 `BranchSettings.activeTools` 不限制也不扩张本 turn。
+- **Environment route 规则（skills）**：Agent skills 必须由**最新选中** Environment 精确提供且可用（缺失 → `agent skills require the latest selected environment which is not live: <name>`；未 READY → `...which is not ready: <name>`；分支无 binding → `...but the branch has no environment`）；`load_skill` 不在 selectable catalog。
+- **Subagent 规则（task）**：allowlist 每个名称必须解析到现存 Agent（缺失 → `subagent not found: <name>`），名称 + 描述（可空）冻结为有序 `subagentBindings`；达到最大深度时不暴露 `task`；执行绝不重读父 Agent 配置扩权。
 
 ## 11. Realtime
 

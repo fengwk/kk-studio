@@ -18,19 +18,21 @@ import type {
   DialogueMessage,
   QueuedThreadMessage,
   ToolDialogueMessage,
+  TurnUsage,
 } from '@/features/ai/runtime/thread-timeline-types'
+import {
+  TaskStatusWidget,
+  type TaskApprovalDecision,
+} from '@/features/ai/runtime/thread-panel/TaskStatusWidget'
 
-/** 在 footer 中展示的稳定 runtime/model 标识；当面板为空时部分字段可能缺失。 */
+/** Bound ChatPanel 的只读 Footer facts；缺失字段整段省略。 */
 export interface ChatPanelLabels {
-  agentName?: string
-  providerName?: string
-  modelName?: string
-  variantName?: string
   /** 完整 Environment binding（name + workspacePath）；null 表示未绑定。 */
   environment?: EnvironmentBindingDTO | null
   environmentReady?: boolean
-  /** 当前 root-to-head branch 的已关闭 Turn 累计 usage 摘要。 */
-  usageText?: string
+  gitBranch?: string | null
+  /** 当前 root-to-head branch 的已关闭 Turn 累计 usage。 */
+  branchUsage?: TurnUsage | null
   contextWindow?: number
 }
 
@@ -58,23 +60,17 @@ export interface ChatPanelTranscriptInput {
 /** Composer 的调用点与转发的回调函数。 */
 export type ChatPanelComposerInput = ThreadPanelComposerInput
 
-/** 精简的 footer 数据：runtime 标识 + 可点击目标。snapshot 中不包含汇总用量。 */
-export interface ChatPanelFooterInput {
-  yoloEnabled?: boolean
-  onAgentClick?: () => void
-  onModelClick?: () => void
-  onVariantClick?: () => void
-  onEnvironmentClick?: () => void
-  notificationsEnabled?: boolean
-  notificationPermission?: 'default' | 'denied' | 'granted' | 'unsupported'
-  onNotificationsToggle?: () => void
-}
-
-/** Composer 上方展示的工作状态与可关闭的反馈信息。 */
+/** Composer 上方展示的工作状态、永久 TaskStatus 与可关闭反馈。 */
 export interface ChatPanelActivityInput {
   working: boolean
   /** 追加到 ThreadWidgetStack.children 的自定义 widget（如子任务状态）。 */
   widgets?: ReactNode
+  /** TaskStatusWidget 的子 Thread 审批转发；所有 Bound ChatPanel 永久挂载该 widget。 */
+  onDecideTaskApproval?: (
+    threadId: string,
+    invocationId: string,
+    decision: TaskApprovalDecision,
+  ) => void
   actionError?: string | null
   onDismissActionError?: () => void
 }
@@ -88,7 +84,6 @@ export function ChatPanel({
   transcript,
   mainView,
   composer,
-  footer,
   activity,
 }: {
   labels: ChatPanelLabels
@@ -96,7 +91,6 @@ export function ChatPanel({
   /** 互斥主视图：传入 events 时替换 transcript（Event view）。 */
   mainView?: ThreadPanelMainView
   composer: ChatPanelComposerInput
-  footer: ChatPanelFooterInput
   activity: ChatPanelActivityInput
 }) {
   // 面板保持 API 无关：RESOURCE blob URL 由本适配层在渲染期解析。
@@ -136,7 +130,16 @@ export function ChatPanel({
   }
   const panelActivity: ThreadPanelActivityInput = {
     working: activity.working,
-    widgets: activity.widgets,
+    widgets: (
+      <>
+        {activity.widgets}
+        <TaskStatusWidget
+          messages={transcript.timeline.messages}
+          approvalPending={transcript.approvalPending}
+          onDecideApproval={activity.onDecideTaskApproval}
+        />
+      </>
+    ),
     actionError: activity.actionError ?? null,
     onDismissActionError: activity.onDismissActionError,
   }
@@ -150,21 +153,11 @@ export function ChatPanel({
         slots={{
           footer: (
             <ThreadStatusFooter
-              agentName={labels.agentName}
-              providerName={labels.providerName}
-              modelName={labels.modelName}
-              variantName={labels.variantName}
               environment={labels.environment}
               environmentReady={labels.environmentReady}
-              usageText={labels.usageText}
-              yoloEnabled={footer.yoloEnabled}
-              onAgentClick={footer.onAgentClick}
-              onModelClick={footer.onModelClick}
-              onVariantClick={footer.onVariantClick}
-              onEnvironmentClick={footer.onEnvironmentClick}
-              notificationsEnabled={footer.notificationsEnabled}
-              notificationPermission={footer.notificationPermission}
-              onNotificationsToggle={footer.onNotificationsToggle}
+              gitBranch={labels.gitBranch}
+              branchUsage={labels.branchUsage}
+              contextWindow={labels.contextWindow}
             />
           ),
         }}

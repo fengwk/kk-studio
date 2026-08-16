@@ -42,6 +42,7 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
+    getSystemPromptPreview: vi.fn(),
     enqueueCommands: vi.fn(),
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
@@ -1138,9 +1139,7 @@ describe('useAgentThreadController', () => {
     )
   })
 
-  it('exposes runtimeLabels from the snapshot branch settings and environment map', async () => {
-    // name -> ready（统一可用性标记）；display name 已不存在。
-    const environments = new Map<string, boolean>([['env-local', true]])
+  it('exposes runtime facts from the snapshot branch settings', async () => {
     const currentThread = threadFixture({
       branchSettings: branchSettings({
         environment: { name: 'env-local', workspacePath: 'proj/a' },
@@ -1148,19 +1147,16 @@ describe('useAgentThreadController', () => {
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
 
-    const { result } = renderHook(
-      () => useAgentThreadController(currentThread.threadId, [], undefined, null, environments),
-      { wrapper },
-    )
+    const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
+      wrapper,
+    })
     await waitFor(() => expect(result.current.disabled).toBe(false))
-    expect(result.current.runtimeLabels.agentName).toBe('assistant')
-    // runtime label 是完整 binding（name + workspacePath）；ready 仍按 name 查询。
+    // runtime fact 是完整 binding（name + workspacePath）；可用性由调用方 live map 计算。
     expect(result.current.runtimeLabels.environment).toEqual({
       name: 'env-local',
       workspacePath: 'proj/a',
     })
-    expect(result.current.runtimeLabels.environmentReady).toBe(true)
-    expect(result.current.runtimeLabels.modelName).toBe('minimax/MiniMax')
+    expect(result.current.runtimeLabels.contextWindow).toBe(128000)
     expect(result.current.thread?.headEntryId).toBe('h1')
     expect(result.current.thread?.nextCommandSequence).toBe('1')
   })
@@ -1215,7 +1211,6 @@ describe('useAgentThreadController', () => {
       providerTotal: 1_640,
       cost: 0.25,
     })
-    expect(result.current.branchUsageText).toBe('↑1.2k · ↓80 · R300 · W40 · $0.250')
   })
 
   it('clears the exact replay on 409 so the retry mints fresh command ids and cursors', async () => {

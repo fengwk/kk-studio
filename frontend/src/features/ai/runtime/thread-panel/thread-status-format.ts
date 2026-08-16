@@ -1,10 +1,11 @@
+import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
 
 /**
  * Environment binding 的只读形状（{name, workspacePath}）。
  *
- * thread-panel 是可移植包，只允许依赖 thread-timeline-types 与本地模块（no-restricted-imports），
- * 因此不直接引用 API contract 类型；调用方传入的结构与该形状结构兼容。
+ * thread-panel 是可移植包，只依赖 thread-timeline-types 与本地模块；调用方传入
+ * 的 API contract 结构与该形状兼容。
  */
 export interface EnvironmentBindingShape {
   name: string
@@ -12,48 +13,25 @@ export interface EnvironmentBindingShape {
 }
 
 export interface ThreadStatusSegment {
-  key: 'agent' | 'model' | 'environment' | 'usage' | 'notifications'
+  key: 'environment' | 'git' | 'usage' | 'context' | 'cache'
   className: string
   text: string
   title: string
-  onClick?: () => void
-  onSecondaryClick?: () => void
 }
 
 export interface ThreadStatusModel {
-  agentLabel: string
-  provider: string
-  model: string
-  variant: string
-  environment: string
-  environmentWorkspacePath: string
-  yoloOn: boolean
-  agentText: string
-  modelText: string
-  environmentText: string
-  usageText: string
   segments: ThreadStatusSegment[]
 }
 
 export interface ThreadStatusModelInput {
-  agentName?: string
-  providerName?: string
-  modelName?: string
-  variantName?: string
-  /** 完整 Environment binding（可 null）：null => `env:none`；非 null 时展示 name + workspacePath。 */
+  /** 完整 Environment binding；null 时只读展示 `none env`。 */
   environment?: EnvironmentBindingShape | null
-  /** 该 binding name 的实时可用标记（统一可用性规则）；false/未知 => `env:<name> · ws:<path> (unavailable)`。 */
+  /** 该 binding name 的实时可用标记；false 时展示 unavailable 事实。 */
   environmentReady?: boolean
-  /** 当前 branch 已关闭 Turn 的累计 usage；为空时不显示。 */
-  usageText?: string
-  yoloEnabled?: boolean
-  onAgentClick?: () => void
-  onModelClick?: () => void
-  onVariantClick?: () => void
-  onEnvironmentClick?: () => void
-  notificationsEnabled?: boolean
-  notificationPermission?: 'default' | 'denied' | 'granted' | 'unsupported'
-  onNotificationsToggle?: () => void
+  gitBranch?: string | null
+  /** 当前 root-to-head 已关闭 Turn 的累计 usage；缺失时按 0 展示。 */
+  branchUsage?: TurnUsage | null
+  contextWindow?: number
 }
 
 /** 规范化空白占位字符串；对 null/undefined/'undefined'/'null'/'-' 返回 ""。 */
@@ -65,111 +43,148 @@ function clean(value?: string | null): string {
   return text
 }
 
-/** 由面板输入构建稳定的纯文本状态模型，不涉及布局与 DOM。 */
+/** 由真实存在的 facts 构建稳定只读状态模型；缺失事实整段省略。 */
 export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadStatusModel {
-  const agentLabel = clean(input.agentName) || translate('ai.runtime.status.agentFallback')
-  const provider = clean(input.providerName)
-  const model = clean(input.modelName) || translate('ai.runtime.status.modelFallback')
-  const variant = clean(input.variantName) || translate('ai.runtime.status.variantFallback')
+  const segments: ThreadStatusSegment[] = []
   const binding = input.environment
   const environmentName = binding ? clean(binding.name) : ''
   const environmentWorkspacePath = binding ? clean(binding.workspacePath) : ''
-  const usageText = clean(input.usageText)
-  const yoloOn = Boolean(input.yoloEnabled)
-
-  // 调用方传入的 modelName 可能已是规范的 provider/model 引用。
-  const composedModelRef =
-    provider && model && !model.startsWith(`${provider}/`) ? `${provider}/${model}` : model
-  const modelText = translate('ai.runtime.status.modelText', {
-    model: composedModelRef,
-    variant,
-  })
-  const agentText = yoloOn
-    ? translate('ai.runtime.status.agentYoloText', { name: agentLabel })
-    : translate('ai.runtime.status.agentText', { name: agentLabel })
-  const environmentText =
-    environmentName === ''
-      ? translate('ai.runtime.status.environmentNoneText')
-      : input.environmentReady === false
-        ? translate('ai.runtime.status.environmentUnavailableText', {
-          name: environmentName,
-          workspace: environmentWorkspacePath,
-        })
-        : translate('ai.runtime.status.environmentText', {
-          name: environmentName,
-          workspace: environmentWorkspacePath,
-        })
-
-  const segments: ThreadStatusSegment[] = [
-    {
-      key: 'agent',
-      className: 'thread-status-agent',
-      text: agentText,
-      title: input.onAgentClick
-        ? `${agentText} · ${translate('ai.runtime.status.agentSwitchTitle')}`
-        : agentText,
-      onClick: input.onAgentClick,
-    },
-    {
-      key: 'model',
-      className: 'thread-status-model',
-      text: modelText,
-      title:
-        input.onModelClick || input.onVariantClick
-          ? `${modelText} · ${translate('ai.runtime.status.modelSwitchTitle')}`
-          : modelText,
-      onClick: input.onModelClick,
-      onSecondaryClick: input.onVariantClick,
-    },
-    {
+  if (environmentName && environmentWorkspacePath) {
+    const fullWorkspace = workspaceDisplayPath(environmentWorkspacePath)
+    const compactWorkspace = middleEllipsis(fullWorkspace, 42)
+    const text = input.environmentReady === false
+      ? translate('ai.runtime.status.environmentUnavailableText', {
+        name: environmentName,
+        workspace: compactWorkspace,
+      })
+      : translate('ai.runtime.status.environmentText', {
+        name: environmentName,
+        workspace: compactWorkspace,
+      })
+    const title = input.environmentReady === false
+      ? translate('ai.runtime.status.environmentUnavailableText', {
+        name: environmentName,
+        workspace: fullWorkspace,
+      })
+      : translate('ai.runtime.status.environmentText', {
+        name: environmentName,
+        workspace: fullWorkspace,
+      })
+    segments.push({
       key: 'environment',
       className: 'thread-status-environment',
-      text: environmentText,
-      title: input.onEnvironmentClick
-        ? `${environmentText} · ${translate('ai.runtime.status.environmentSwitchTitle')}`
-        : environmentText,
-      onClick: input.onEnvironmentClick,
-    },
-  ]
-  if (usageText) {
-    segments.push({
-      key: 'usage',
-      className: 'thread-status-usage',
-      text: usageText,
-      title: translate('ai.runtime.status.branchUsageTitle', { usage: usageText }),
-    })
-  }
-  if (input.onNotificationsToggle || input.notificationsEnabled != null) {
-    const permission = input.notificationPermission ?? 'default'
-    const text =
-      permission === 'unsupported'
-        ? translate('ai.runtime.status.notificationsUnsupported')
-        : permission === 'denied'
-          ? translate('ai.runtime.status.notificationsDenied')
-          : input.notificationsEnabled
-            ? translate('ai.runtime.status.notificationsOn')
-            : translate('ai.runtime.status.notificationsOff')
-    segments.push({
-      key: 'notifications',
-      className: 'thread-status-notification-toggle',
       text,
-      title: translate('ai.runtime.status.notificationsToggleTitle'),
-      onClick: input.onNotificationsToggle,
+      title,
+    })
+  } else {
+    const noneText = translate('ai.runtime.status.environmentNoneText')
+    segments.push({
+      key: 'environment',
+      className: 'thread-status-environment',
+      text: noneText,
+      title: noneText,
     })
   }
 
-  return {
-    agentLabel,
-    provider,
-    model,
-    variant,
-    environment: environmentName,
-    environmentWorkspacePath,
-    yoloOn,
-    agentText,
-    modelText,
-    environmentText,
-    usageText,
-    segments,
+  const gitBranch = clean(input.gitBranch)
+  if (gitBranch) {
+    segments.push({
+      key: 'git',
+      className: 'thread-status-git',
+      text: translate('ai.runtime.status.gitBranchText', { branch: gitBranch }),
+      title: translate('ai.runtime.status.gitBranchTitle', { branch: gitBranch }),
+    })
   }
+
+  const usage = input.branchUsage ?? EMPTY_USAGE
+  const usageText = formatBranchUsage(usage)
+  segments.push({
+    key: 'usage',
+    className: 'thread-status-usage',
+    text: usageText,
+    title: translate('ai.runtime.status.branchUsageTitle', { usage: usageText }),
+  })
+  const used = usage.input + usage.cacheRead + usage.cacheWrite
+  const contextWindow = positiveFinite(input.contextWindow)
+  if (contextWindow != null) {
+    const text = translate('ai.runtime.status.contextText', {
+      used: formatCompactNumber(used),
+      total: formatCompactNumber(contextWindow),
+    })
+    segments.push({
+      key: 'context',
+      className: 'thread-status-context',
+      text,
+      title: translate('ai.runtime.status.contextTitle', {
+        used: String(used),
+        total: String(contextWindow),
+      }),
+    })
+  }
+  const percent = used > 0 ? Math.round((usage.cacheRead / used) * 100) : 0
+  const cacheText = translate('ai.runtime.status.cacheHitText', { percent })
+  segments.push({
+    key: 'cache',
+    className: 'thread-status-cache',
+    text: cacheText,
+    title: translate('ai.runtime.status.cacheHitTitle', { percent }),
+  })
+  return { segments }
+}
+
+function workspaceDisplayPath(path: string): string {
+  return path === '.' ? '@/' : `@/${path}`
+}
+
+/** 中间省略保留路径首尾，title 始终携带完整安全 wire path。 */
+export function middleEllipsis(value: string, maxLength: number): string {
+  if (value.length <= maxLength || maxLength < 5) {
+    return value
+  }
+  const remaining = maxLength - 1
+  const head = Math.ceil(remaining / 2)
+  const tail = Math.floor(remaining / 2)
+  return `${value.slice(0, head)}…${value.slice(value.length - tail)}`
+}
+
+const EMPTY_USAGE: TurnUsage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  reasoning: 0,
+  providerTotal: 0,
+  cost: 0,
+}
+
+function formatBranchUsage(usage: TurnUsage): string {
+  const parts = [
+    `↑${formatCompactNumber(usage.input)}`,
+    `↓${formatCompactNumber(usage.output)}`,
+  ]
+  if (usage.cacheRead > 0) {
+    parts.push(`R${formatCompactNumber(usage.cacheRead)}`)
+  }
+  if (usage.cacheWrite > 0) {
+    parts.push(`W${formatCompactNumber(usage.cacheWrite)}`)
+  }
+  parts.push(`$${usage.cost.toFixed(3)}`)
+  return parts.join(' · ')
+}
+
+function formatCompactNumber(value: number): string {
+  if (value < 1_000) {
+    return String(Math.round(value))
+  }
+  if (value < 10_000) {
+    return `${(value / 1_000).toFixed(1)}k`
+  }
+  if (value < 1_000_000) {
+    return `${Math.round(value / 1_000)}k`
+  }
+  return `${(value / 1_000_000).toFixed(1)}M`
+}
+
+function positiveFinite(value: number | undefined): number | null {
+  return value != null && Number.isFinite(value) && value > 0 ? value : null
 }

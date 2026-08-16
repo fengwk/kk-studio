@@ -8,8 +8,11 @@ import {
 import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
 import { AttachmentMediaPreview } from '@/features/ai/runtime/thread-panel/messages/AttachmentMediaPreview'
 import { ResourceAttachmentChip } from '@/features/ai/runtime/thread-panel/messages/ResourceAttachmentChip'
+import { previewForToolCall } from '@/features/ai/runtime/thread-panel/messages/tool-previews'
 import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import type { ComponentType } from 'react'
+import { useState } from 'react'
+import { ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import type { ToolRendererProps } from '@/platform/extensions/types'
 import { translate, useI18n } from '@/shared/i18n'
 
@@ -30,71 +33,93 @@ interface ToolRenderContext {
   approvalPending?: boolean
 }
 
-/** Tool 回合以独立的全宽 call/result 块展示。 */
+/** Tool 回合以一张卡片同时展示 call preview 与 result。 */
 export function ToolMessageBlock({
   message,
+  result,
   renderer: Renderer,
   onDecideApproval,
   approvalPending = false,
 }: {
   message: ToolDialogueMessage
+  result?: ToolDialogueMessage
   renderer?: ComponentType<ToolRendererProps>
   onDecideApproval?: (message: ToolDialogueMessage, decision: ApprovalDecision) => void
   approvalPending?: boolean
 }) {
   const { t } = useI18n()
+  const [expanded, setExpanded] = useState(false)
+  const callMessage = message.phase === 'call' ? message : undefined
+  const resultMessage = result ?? (message.phase === 'result' ? message : undefined)
+  const status = resultMessage?.status ?? message.status
   const context: ToolRenderContext = {
     toolName: message.toolName || 'Tool',
     toolCallId: message.toolCallId,
-    arguments: message.arguments,
-    text: message.text,
-    attachments: message.attachments,
-    status: message.status,
-    errorMessage: message.errorMessage,
-    partial: message.partial,
-    partialErrorText: message.partialErrorText,
-    partialAttachments: message.partialAttachments,
-    approval: message.approval,
+    arguments: callMessage?.arguments || resultMessage?.arguments || message.arguments,
+    text: resultMessage?.text ?? message.text,
+    attachments: resultMessage?.attachments ?? message.attachments,
+    status,
+    errorMessage: resultMessage?.errorMessage ?? message.errorMessage,
+    partial: callMessage?.partial ?? resultMessage?.partial ?? message.partial,
+    partialErrorText: callMessage?.partialErrorText ?? resultMessage?.partialErrorText,
+    partialAttachments: callMessage?.partialAttachments ?? resultMessage?.partialAttachments,
+    approval: callMessage?.approval ?? resultMessage?.approval ?? message.approval,
     approvalPending,
   }
-  const call = message.phase === 'call'
+  const preview = previewForToolCall(context.toolName, context.arguments)
 
   return (
-    <div className={`thread-turn thread-turn-tool ${message.status === 'error' ? 'error' : ''}`}>
-      {call ? (
-        <section className="thread-block thread-block-tool-call">
-          <div className="thread-block-label">
-            {t('ai.runtime.message.toolCall')}
-            {' '}
-            {context.toolName}
-            <span className={`thread-tool-status ${message.status ?? 'done'}`}>
-              {formatToolStatus(message.status)}
-            </span>
-          </div>
-          <div className="thread-block-body">
-            {Renderer ? <Renderer message={message} /> : <DefaultToolCall context={context} />}
-          </div>
-          {/* 活动 call 下方的瞬态结果块：TOOL_PARTIAL / 终态结果 /
-              资源附件 / 错误都会渲染在这里，直到持久的 Tool result Entry
-              到达并由持久的 result 阶段接管。 */}
-          {Renderer ? null : <TransientToolResult context={context} />}
-          <ToolApprovalBar context={context} onDecideApproval={onDecideApproval} message={message} />
-        </section>
-      ) : (
-        <section className="thread-block thread-block-tool-result">
-          <div className="thread-block-label">
-            {t('ai.runtime.message.toolResult')}
-            {' '}
-            {context.toolName}
-            <span className={`thread-tool-status ${message.status ?? 'done'}`}>
-              {formatToolStatus(message.status)}
-            </span>
-          </div>
-          <div className="thread-block-body">
-            {Renderer ? <Renderer message={message} /> : <DefaultToolResult context={context} />}
-          </div>
-        </section>
-      )}
+    <div className={`thread-turn thread-turn-tool ${status === 'error' ? 'error' : ''}`}>
+      <section className="thread-block thread-block-tool">
+        <div className="thread-block-label">
+          <button
+            type="button"
+            className="thread-tool-toggle"
+            aria-expanded={expanded}
+            aria-label={expanded ? t('ai.runtime.message.collapseTool') : t('ai.runtime.message.expandTool')}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+          </button>
+          <span className="thread-tool-name">{context.toolName}</span>
+          {preview?.path ? <span className="thread-tool-path">{preview.path}</span> : null}
+          {preview && 'replaceAll' in preview && preview.replaceAll ? (
+            <span className="thread-tool-flag">replace_all</span>
+          ) : null}
+          <button
+            type="button"
+            className="thread-tool-copy"
+            aria-label={t('ai.runtime.message.copyTool')}
+            onClick={() => {
+              void navigator.clipboard?.writeText(copyText(context, preview))
+            }}
+          >
+            <Copy aria-hidden="true" />
+          </button>
+          <span className={`thread-tool-status ${status ?? 'done'}`}>
+            {formatToolStatus(status)}
+          </span>
+        </div>
+        <div className="thread-block-body">
+          {Renderer ? (
+            <>
+              {callMessage ? <Renderer message={callMessage} /> : null}
+              {resultMessage ? <Renderer message={resultMessage} /> : null}
+            </>
+          ) : (
+            <>
+              {callMessage || preview
+                ? <DefaultToolCall context={context} preview={preview} expanded={expanded} />
+                : null}
+              <DefaultToolResult
+                context={context}
+                hideEmpty={callMessage != null && resultMessage == null}
+              />
+            </>
+          )}
+        </div>
+        <ToolApprovalBar context={context} onDecideApproval={onDecideApproval} message={callMessage ?? message} />
+      </section>
     </div>
   )
 }
@@ -155,63 +180,66 @@ function ToolApprovalBar({
   )
 }
 
-/** 活动 call 下的 streaming/终态 overlay；持久的 Entry 存在后即隐藏。 */
-function TransientToolResult({ context }: { context: ToolRenderContext }) {
-  const hasText = Boolean(context.partial?.trim())
-  const hasError = Boolean(context.partialErrorText?.trim())
-  const attachments = context.partialAttachments ?? []
-  const hasAttachments = attachments.length > 0
-  if (!hasText && !hasError && !hasAttachments) {
-    return null
-  }
-  return (
-    <div className="thread-block thread-block-tool-result is-transient">
-      <div className="thread-block-label">
-        {translate('ai.runtime.message.toolResult')}
-        {' '}
-        {context.toolName}
-        <span className={`thread-tool-status ${context.status ?? 'done'}`}>
-          {formatToolStatus(context.status)}
-        </span>
-      </div>
-      <div className="thread-block-body">
-        {hasText ? <ToolOutputViewport text={context.partial ?? ''} /> : null}
-        {hasError ? <p className="thread-tool-error">{context.partialErrorText}</p> : null}
-        {hasAttachments ? (
-          <div className="thread-tool-attachments">
-            {attachments.map((attachment, index) => (
-              <AttachmentPreview
-                key={`${attachment.type}-${attachment.name}-${index}`}
-                attachment={attachment}
-              />
+function DefaultToolCall({
+  context,
+  preview,
+  expanded,
+}: {
+  context: ToolRenderContext
+  preview: ReturnType<typeof previewForToolCall>
+  expanded: boolean
+}) {
+  if (preview != null) {
+    return (
+      <div className="thread-tool-preview">
+        {preview.lines.length > 0 ? (
+          <pre className={`thread-tool-pre thread-tool-input thread-tool-preview-body is-${preview.kind}${expanded ? ' is-expanded' : ''}`}>
+            {preview.lines.map((line, index) => (
+              <span
+                key={`${preview.kind}-${index}`}
+                className={diffLineClass(line)}
+              >
+                {line}
+                {index < preview.lines.length - 1 ? '\n' : ''}
+              </span>
             ))}
-          </div>
+          </pre>
         ) : null}
       </div>
-    </div>
-  )
-}
-
-function DefaultToolCall({ context }: { context: ToolRenderContext }) {
+    )
+  }
   if (!context.arguments.trim()) {
     return <span className="thread-tool-placeholder">{translate('ai.runtime.message.noArguments')}</span>
   }
   return <pre className="thread-tool-pre thread-tool-input">{context.arguments}</pre>
 }
 
-function DefaultToolResult({ context }: { context: ToolRenderContext }) {
+function DefaultToolResult({
+  context,
+  hideEmpty = false,
+}: {
+  context: ToolRenderContext
+  hideEmpty?: boolean
+}) {
   // 瞬态 TOOL_PARTIAL overlay 优先于持久的（可能仍为空的）结果文本。
   const hasPartial = Boolean(context.partial?.trim())
   const text = hasPartial ? (context.partial ?? '') : context.text
   const hasText = text.trim().length > 0
-  const hasAttachments = context.attachments.length > 0
+  const attachments = context.partialAttachments?.length
+    ? context.partialAttachments
+    : context.attachments
+  const hasAttachments = attachments.length > 0
+  const hasError = Boolean(context.partialErrorText?.trim())
+  if (hideEmpty && !hasText && !hasAttachments && !hasError && !context.errorMessage) {
+    return null
+  }
   return (
     <>
       {hasText ? <ToolOutputViewport text={text} /> : null}
       {!hasText && !hasAttachments ? <p className="thread-tool-placeholder">{placeholder(context)}</p> : null}
       {hasAttachments ? (
         <div className="thread-tool-attachments">
-          {context.attachments.map((attachment, index) => (
+          {attachments.map((attachment, index) => (
             <AttachmentPreview
               key={`${attachment.type}-${attachment.name}-${index}`}
               attachment={attachment}
@@ -219,6 +247,7 @@ function DefaultToolResult({ context }: { context: ToolRenderContext }) {
           ))}
         </div>
       ) : null}
+      {hasError ? <p className="thread-tool-error">{context.partialErrorText}</p> : null}
       {context.errorMessage && context.errorMessage !== context.text ? (
         <p className="thread-tool-error">{context.errorMessage}</p>
       ) : null}
@@ -293,12 +322,34 @@ function AttachmentPreview({ attachment }: { attachment: ToolAttachment }) {
 
 function formatToolStatus(status?: ToolDialogueMessage['status']): string {
   if (status === 'streaming') {
-    return translate('ai.runtime.message.running')
+    return 'WORKING'
   }
   if (status === 'error') {
-    return translate('ai.runtime.message.error')
+    return 'FAILED'
   }
-  return translate('ai.runtime.message.done')
+  return 'DONE'
+}
+
+function copyText(
+  context: ToolRenderContext,
+  preview: ReturnType<typeof previewForToolCall>,
+): string {
+  const parts = [
+    preview?.path ? `${context.toolName} ${preview.path}` : context.toolName,
+    preview?.lines.length ? preview.lines.join('\n') : context.arguments,
+    context.partial || context.text,
+  ]
+  return parts.filter((part) => part.trim()).join('\n\n')
+}
+
+function diffLineClass(line: string): string {
+  if (line.startsWith('+')) {
+    return 'is-added'
+  }
+  if (line.startsWith('-')) {
+    return 'is-removed'
+  }
+  return 'is-context'
 }
 
 function placeholder(context: ToolRenderContext): string {
