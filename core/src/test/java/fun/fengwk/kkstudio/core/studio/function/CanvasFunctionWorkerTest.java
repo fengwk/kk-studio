@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.studio.function;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -27,9 +28,7 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -84,8 +83,7 @@ class CanvasFunctionWorkerTest {
             transactions,
             storageServices,
             blobManagers,
-            materializers,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            materializers);
     frozen =
         new CanvasFunctionFrozenRun(
             NODE,
@@ -140,9 +138,14 @@ class CanvasFunctionWorkerTest {
   void checkpointCasCancellationDoesNotBecomeFailure() {
     when(repository.findByNodeId(frozen.nodeId())).thenReturn(Optional.of(running));
     when(adapter.enabled()).thenReturn(true);
-    when(repository.checkpoint(
-            eq(frozen.nodeId()), eq(frozen.requestId()), any(), eq("SUBMITTED"), eq(NOW)))
-        .thenReturn(false);
+    doThrow(new CanvasFunctionInternalCancellation("no longer RUNNING"))
+        .when(transactions)
+        .checkpoint(
+            eq(frozen.canvasId()),
+            eq(frozen.nodeId()),
+            eq(frozen.requestId().toString()),
+            eq("SUBMITTED"),
+            eq(Map.of("jobId", "job")));
     when(adapter.execute(any(), any()))
         .thenAnswer(
             invocation -> {

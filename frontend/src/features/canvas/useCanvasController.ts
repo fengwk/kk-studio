@@ -1,4 +1,4 @@
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { canvasFileDescriptor } from '@/features/canvas/canvas-file'
 import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
@@ -8,6 +8,8 @@ import {
   type ResourceNode,
 } from '@/features/canvas/domain'
 import { createDefaultFunctionConfig } from '@/features/canvas/generation'
+import { useFunctionConfigSync } from '@/features/canvas/function-config'
+import { useCanvasFunctionRun } from '@/features/canvas/function-run'
 import { isNodeCompletelyOutsideGroup } from '@/features/canvas/group-membership'
 import {
   normalizeNodeAlias,
@@ -22,7 +24,6 @@ import type {
   CanvasLocalState,
   CanvasNodeCallbacks,
   CanvasPositionUpdate,
-  PendingFunctionConfig,
   StageMetrics,
 } from '@/features/canvas/types'
 import {
@@ -36,18 +37,13 @@ import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
 import type {
   CanvasCommandDTO,
   CanvasDocumentDTO,
-  CanvasFunctionConfigDTO,
-  CanvasFunctionRunDTO,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
 import {
-  cancelCanvasFunctionRun,
   getCanvas,
-  getCanvasFunctionRun,
   listCanvasFunctionModels,
-  startCanvasFunctionRun,
 } from '@/shared/api/studio-service'
 import { storageService } from '@/shared/api/storage-service'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -98,9 +94,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const pendingNodeTransformsRef = useRef(new Map<UUIDString, CanvasTransformDTO>())
   const pendingGroupMovesRef = useRef(new Map<UUIDString, { x: number; y: number }>())
   const pendingUngroupsRef = useRef(new Map<UUIDString, UUIDString>())
-  const pendingFunctionConfigsRef = useRef(new Map<UUIDString, PendingFunctionConfig>())
-  const functionConfigTimersRef = useRef(new Map<UUIDString, number>())
-  const functionConfigFlushesRef = useRef(new Map<UUIDString, Promise<void>>())
   const reservedNodeAliasesRef = useRef(new Set<string>())
 
   const snapshotQuery = useQuery({
@@ -113,57 +106,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     queryFn: ({ signal }) => listCanvasFunctionModels({ signal }),
     enabled: state.view === 'editor',
   })
-  const runningNodeIds = useMemo(
-    () => snapshotQuery.data?.nodes
-      .filter((node) => node.run?.status === 'RUNNING')
-      .map((node) => node.id) ?? [],
-    [snapshotQuery.data?.nodes],
-  )
-  const runQueries = useQueries({
-    queries: runningNodeIds.map((nodeId) => ({
-      queryKey: state.canvasId
-        ? queryKeys.studio.canvasRun(state.canvasId, nodeId)
-        : ['studio', 'canvas-run', 'none', nodeId],
-      queryFn: ({ signal }: { signal: AbortSignal }) => (
-        getCanvasFunctionRun(state.canvasId as UUIDString, nodeId, { signal })
-      ),
-      enabled: state.view === 'editor' && Boolean(state.canvasId),
-      refetchInterval: 800,
-      retry: false,
-    })),
-  })
-  const polledRuns = runQueries
-    .map((query) => query.data)
-    .filter((run): run is CanvasFunctionRunDTO => Boolean(run))
-  const polledRunSignature = polledRuns
-    .map((run) => (
-      `${run.nodeId}:${run.requestId}:${run.status}:${run.stage}:${run.error ?? ''}:${run.updatedAt}`
-    ))
-    .join('|')
-
-  useEffect(() => {
-    if (!state.canvasId || polledRuns.length === 0) {
-      return
-    }
-    const canvasId = state.canvasId
-    let succeeded = false
-    queryClient.setQueryData<CanvasSnapshotDTO>(
-      queryKeys.studio.canvas(canvasId),
-      (current) => {
-        let next = current
-        for (const run of polledRuns) {
-          next = patchSnapshotRun(next, run, true)
-          succeeded ||= run.status === 'SUCCEEDED'
-        }
-        return next
-      },
-    )
-    if (succeeded) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvas(canvasId) })
-    }
-    // The signature tracks endpoint state without making the query result array an effect dependency.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [polledRunSignature, queryClient, state.canvasId])
 
   useEffect(() => {
     if (!snapshotQuery.data || !state.canvasId) {
@@ -228,70 +170,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     return () => window.clearTimeout(timer)
   }, [state.toast])
 
-  useEffect(() => () => {
-    if (transformTimerRef.current !== null) {
-      window.clearTimeout(transformTimerRef.current)
-    }
-    for (const timer of functionConfigTimersRef.current.values()) {
-      window.clearTimeout(timer)
-    }
-    functionConfigTimersRef.current.clear()
-  }, [])
-
   const setToast = useCallback((toast: string) => {
     setState((current) => ({ ...current, toast }))
-  }, [])
-
-  const openEditor = useCallback((canvasId: UUIDString) => {
-    if (transformTimerRef.current !== null) {
-      window.clearTimeout(transformTimerRef.current)
-      transformTimerRef.current = null
-    }
-    pendingNodeTransformsRef.current.clear()
-    pendingGroupMovesRef.current.clear()
-    pendingUngroupsRef.current.clear()
-    for (const timer of functionConfigTimersRef.current.values()) {
-      window.clearTimeout(timer)
-    }
-    functionConfigTimersRef.current.clear()
-    pendingFunctionConfigsRef.current.clear()
-    reservedNodeAliasesRef.current.clear()
-    queueRef.current = null
-    setInitialFitPending(!hasStoredCanvasViewport(canvasId))
-    setState((current) => ({
-      ...current,
-      view: 'editor',
-      canvasId,
-      selectedIds: [],
-      selectedLinks: [],
-      positionDrafts: {},
-      viewport: loadCanvasViewport(canvasId),
-      conflictMessage: null,
-      textEditor: null,
-    }))
-  }, [])
-
-  const openLibrary = useCallback(() => {
-    if (transformTimerRef.current !== null) {
-      window.clearTimeout(transformTimerRef.current)
-      transformTimerRef.current = null
-    }
-    pendingNodeTransformsRef.current.clear()
-    pendingGroupMovesRef.current.clear()
-    pendingUngroupsRef.current.clear()
-    reservedNodeAliasesRef.current.clear()
-    setInitialFitPending(false)
-    setState((current) => ({
-      ...current,
-      view: 'library',
-      canvasId: null,
-      selectedIds: [],
-      selectedLinks: [],
-      positionDrafts: {},
-      addMenuOpen: false,
-      threadOpen: false,
-      textEditor: null,
-    }))
   }, [])
 
   const executeCommands = useCallback(async (commands: CanvasCommandDTO[]) => {
@@ -323,6 +203,70 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         setState((current) => ({ ...current, commandPending: false }))
       }
     }
+  }, [])
+
+  const { scheduleFunctionConfig, flushFunctionConfig, resetPending: resetFunctionConfigDrafts } =
+    useFunctionConfigSync(executeCommands)
+  const { startFunctionRun, cancelFunctionRun } = useCanvasFunctionRun({
+    canvasId: state.canvasId,
+    queryClient,
+    setToast,
+    flushFunctionConfig,
+  })
+
+  useEffect(() => () => {
+    if (transformTimerRef.current !== null) {
+      window.clearTimeout(transformTimerRef.current)
+    }
+    resetFunctionConfigDrafts()
+  }, [resetFunctionConfigDrafts])
+
+  const openEditor = useCallback((canvasId: UUIDString) => {
+    if (transformTimerRef.current !== null) {
+      window.clearTimeout(transformTimerRef.current)
+      transformTimerRef.current = null
+    }
+    pendingNodeTransformsRef.current.clear()
+    pendingGroupMovesRef.current.clear()
+    pendingUngroupsRef.current.clear()
+    resetFunctionConfigDrafts()
+    reservedNodeAliasesRef.current.clear()
+    queueRef.current = null
+    setInitialFitPending(!hasStoredCanvasViewport(canvasId))
+    setState((current) => ({
+      ...current,
+      view: 'editor',
+      canvasId,
+      selectedIds: [],
+      selectedLinks: [],
+      positionDrafts: {},
+      viewport: loadCanvasViewport(canvasId),
+      conflictMessage: null,
+      textEditor: null,
+    }))
+  }, [resetFunctionConfigDrafts])
+
+  const openLibrary = useCallback(() => {
+    if (transformTimerRef.current !== null) {
+      window.clearTimeout(transformTimerRef.current)
+      transformTimerRef.current = null
+    }
+    pendingNodeTransformsRef.current.clear()
+    pendingGroupMovesRef.current.clear()
+    pendingUngroupsRef.current.clear()
+    reservedNodeAliasesRef.current.clear()
+    setInitialFitPending(false)
+    setState((current) => ({
+      ...current,
+      view: 'library',
+      canvasId: null,
+      selectedIds: [],
+      selectedLinks: [],
+      positionDrafts: {},
+      addMenuOpen: false,
+      threadOpen: false,
+      textEditor: null,
+    }))
   }, [])
 
   const flushTransforms = useCallback(() => {
@@ -798,41 +742,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     void executeCommands([{ type: 'DELETE_LINK', sourceNodeId, targetNodeId }]).catch(() => undefined)
   }, [executeCommands])
 
-  const flushFunctionConfig = useCallback((nodeId: UUIDString): Promise<void> => {
-    const timer = functionConfigTimersRef.current.get(nodeId)
-    if (timer !== undefined) {
-      window.clearTimeout(timer)
-      functionConfigTimersRef.current.delete(nodeId)
-    }
-    const existing = functionConfigFlushesRef.current.get(nodeId)
-    if (existing) {
-      return existing
-    }
-    const trackedFlush = (async () => {
-      while (true) {
-        const pending = pendingFunctionConfigsRef.current.get(nodeId)
-        if (!pending) {
-          return
-        }
-        await executeCommands([{
-          type: 'UPDATE_FUNCTION',
-          nodeId: pending.nodeId,
-          modelKey: pending.modelKey,
-          configJson: JSON.stringify(pending.config),
-        }])
-        if (pendingFunctionConfigsRef.current.get(nodeId) === pending) {
-          pendingFunctionConfigsRef.current.delete(nodeId)
-        }
-      }
-    })().finally(() => {
-      if (functionConfigFlushesRef.current.get(nodeId) === trackedFlush) {
-        functionConfigFlushesRef.current.delete(nodeId)
-      }
-    })
-    functionConfigFlushesRef.current.set(nodeId, trackedFlush)
-    return trackedFlush
-  }, [executeCommands])
-
   const deleteNode = useCallback((nodeId: UUIDString) => {
     void flushFunctionConfig(nodeId)
       .catch(() => undefined)
@@ -852,87 +761,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const nodeCallbacks: CanvasNodeCallbacks = useMemo(() => ({
     editTextNode,
   }), [editTextNode])
-
-  const scheduleFunctionConfig = useCallback((
-    nodeId: UUIDString,
-    modelKey: string,
-    config: CanvasFunctionConfigDTO,
-  ) => {
-    pendingFunctionConfigsRef.current.set(nodeId, { nodeId, modelKey, config })
-    const existing = functionConfigTimersRef.current.get(nodeId)
-    if (existing !== undefined) {
-      window.clearTimeout(existing)
-    }
-    const timer = window.setTimeout(() => {
-      functionConfigTimersRef.current.delete(nodeId)
-      void flushFunctionConfig(nodeId).catch(() => undefined)
-    }, 320)
-    functionConfigTimersRef.current.set(nodeId, timer)
-  }, [flushFunctionConfig])
-
-  const publishRun = useCallback((run: CanvasFunctionRunDTO) => {
-    if (!state.canvasId) {
-      return
-    }
-    const canvasId = state.canvasId
-    queryClient.setQueryData<CanvasFunctionRunDTO>(
-      queryKeys.studio.canvasRun(canvasId, run.nodeId),
-      run,
-    )
-    queryClient.setQueryData<CanvasSnapshotDTO>(
-      queryKeys.studio.canvas(canvasId),
-      (current) => patchSnapshotRun(current, run),
-    )
-    if (run.status === 'SUCCEEDED') {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvas(canvasId) })
-    }
-  }, [queryClient, state.canvasId])
-
-  const startFunctionRun = useCallback(async (nodeId: UUIDString) => {
-    if (!state.canvasId) {
-      return
-    }
-    try {
-      await flushFunctionConfig(nodeId)
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : '启动生成失败')
-      return
-    }
-    const canvasId = state.canvasId
-    const requestId = crypto.randomUUID()
-    try {
-      const run = await startCanvasFunctionRun(canvasId, nodeId, {
-        requestId,
-      })
-      publishRun(run)
-    } catch (error) {
-      try {
-        const current = await getCanvasFunctionRun(canvasId, nodeId)
-        if (current.requestId === requestId) {
-          publishRun(current)
-          return
-        }
-      } catch {
-        // Preserve the original start error when reconciliation is unavailable.
-      }
-      setToast(error instanceof Error ? error.message : '启动生成失败')
-    }
-  }, [flushFunctionConfig, publishRun, setToast, state.canvasId])
-
-  const cancelFunctionRun = useCallback(async (
-    nodeId: UUIDString,
-    requestId: UUIDString,
-  ) => {
-    if (!state.canvasId || !requestId) {
-      return
-    }
-    try {
-      const run = await cancelCanvasFunctionRun(state.canvasId, nodeId, { requestId })
-      publishRun(run)
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : '取消生成失败')
-    }
-  }, [publishRun, setToast, state.canvasId])
 
   const toggleAddMenu = useCallback(() => {
     setState((current) => ({
@@ -1061,36 +889,6 @@ function sameSelection(
       link.sourceNodeId === nextLinks[index]?.sourceNodeId
       && link.targetNodeId === nextLinks[index]?.targetNodeId
     ))
-}
-
-function patchSnapshotRun(
-  snapshot: CanvasSnapshotDTO | undefined,
-  run: CanvasFunctionRunDTO,
-  requireSameRequest = false,
-): CanvasSnapshotDTO | undefined {
-  if (!snapshot) {
-    return snapshot
-  }
-  const nodeIndex = snapshot.nodes.findIndex((node) => node.id === run.nodeId)
-  if (nodeIndex < 0) {
-    return snapshot
-  }
-  const currentRun = snapshot.nodes[nodeIndex]?.run
-  if (requireSameRequest && currentRun?.requestId !== run.requestId) {
-    return snapshot
-  }
-  if (
-    currentRun?.requestId === run.requestId
-    && currentRun.status === run.status
-    && currentRun.stage === run.stage
-    && currentRun.error === run.error
-    && currentRun.updatedAt === run.updatedAt
-  ) {
-    return snapshot
-  }
-  const nodes = [...snapshot.nodes]
-  nodes[nodeIndex] = { ...nodes[nodeIndex], run }
-  return { ...snapshot, nodes }
 }
 
 export type CanvasController = ReturnType<typeof useCanvasController>

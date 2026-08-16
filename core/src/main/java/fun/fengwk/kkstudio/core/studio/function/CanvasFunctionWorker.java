@@ -13,11 +13,10 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
 
-import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
 
-/** 执行一个 frozen run，并只通过 CAS terminal apply 收敛。 */
+/** 执行一个 frozen run，checkpoint 与 terminal 都通过短事务 CAS + canvas version/patch 收敛。 */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -32,7 +31,6 @@ public class CanvasFunctionWorker {
   private final ObjectProvider<S3StorageService> storageServices;
   private final ObjectProvider<StorageBlobManager> blobManagers;
   private final ObjectProvider<CanvasResourceMaterializer> materializers;
-  private final Clock clock;
 
   public void run(UUID nodeId, UUID requestId) {
     CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElse(null);
@@ -50,13 +48,7 @@ public class CanvasFunctionWorker {
       CanvasFunctionFrozenRun frozen = stateCodec.decode(current.stateJson(), registered.model());
       CanvasFunctionExecutionContextImpl context =
           new CanvasFunctionExecutionContextImpl(
-              runRepository,
-              stateCodec,
-              storageServices,
-              blobManagers,
-              materializers,
-              clock,
-              frozen);
+              runRepository, transactions, storageServices, blobManagers, materializers, frozen);
       List<UUID> result = List.copyOf(registered.adapter().execute(context, frozen));
       if (!result.equals(List.of(frozen.targetResourceId()))) {
         throw new IllegalArgumentException(

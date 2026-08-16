@@ -85,7 +85,7 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | ResourceNode | 唯一业务节点；包含 name/world transform/groupId、当前有序 `Resource[]` 与可选 Function |
 | Resource | Canvas 内内容事实；可见资源直接 owner 到 Node，Function target/pinned orphan 可暂时无 owner；媒体只引用全局 Blob，TEXT 内联 |
 | Function | ResourceNode 上可选的 `modelKey + configJson` 资源生产能力 |
-| FunctionRun | Function 节点当前或最后一次运行；start/terminal 前进 Canvas version，checkpoint 不前进 |
+| FunctionRun | Function 节点当前或最后一次运行；start/checkpoint/terminal 都会前进 Canvas version |
 | CanvasGroup | 不嵌套、使用 world 绝对坐标的节点分组 |
 | CanvasLink | 以 `(canvasId, sourceNodeId, targetNodeId)` 标识；target 必须有 Function；只表示候选引用并允许成环 |
 | CanvasCommand | `expectedVersion + commandId + typed commands[]` 原子批次；成功批次前进一次 version 并返回实体 Patch |
