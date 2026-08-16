@@ -4,7 +4,10 @@ import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { chatService } from '@/shared/api/chat-service'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentBindingDTO,
+  LiveEnvironmentDTO,
+} from '@/shared/api/contracts/ai-environment'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { mergeChatList } from '@/features/ai/chat/chat-utils'
@@ -34,7 +37,7 @@ export function useChatListController(
   const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedAgentName, setSelectedAgentName] = useState('')
-  const [selectedEnvironmentName, setSelectedEnvironmentName] = useState('')
+  const [selectedEnvironment, setSelectedEnvironment] = useState<EnvironmentBindingDTO | null>(null)
   const [title, setTitle] = useState('')
   const [formError, setFormError] = useState('')
   const [nameError, setNameError] = useState('')
@@ -54,11 +57,7 @@ export function useChatListController(
       chatService.createChat({
         title: title.trim(),
         agentName: selectedAgentName,
-        // 可选默认 Environment：Modal 不承载目录浏览，选择某 Environment 时
-        // 明确映射为 root binding {name, workspacePath:'.'}；未选择为 null。
-        environment: selectedEnvironmentName.trim()
-          ? { name: selectedEnvironmentName.trim(), workspacePath: '.' }
-          : null,
+        environment: selectedEnvironment,
       }),
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {
@@ -72,7 +71,7 @@ export function useChatListController(
 
   function openCreateChat(agentName?: string) {
     setSelectedAgentName(resolveChatAgentName(agentName, selectedAgentName, agents))
-    setSelectedEnvironmentName('')
+    setSelectedEnvironment(null)
     setTitle('')
     setFormError('')
     setNameError('')
@@ -91,8 +90,8 @@ export function useChatListController(
     setSelectedAgentName(agentName)
   }
 
-  function handleSelectEnvironment(environmentName: string) {
-    setSelectedEnvironmentName(environmentName)
+  function handleSelectEnvironment(environment: EnvironmentBindingDTO | null) {
+    setSelectedEnvironment(environment)
   }
 
   const submitCreateChat: FormEventHandler<HTMLFormElement> = (event) => {
@@ -122,7 +121,7 @@ export function useChatListController(
       agents,
       environments,
       selectedAgentName,
-      selectedEnvironmentName,
+      selectedEnvironment,
       title,
       pending: createChatMutation.isPending,
       formError: formError || (createChatMutation.error ? String(createChatMutation.error.message || createChatMutation.error) : ''),

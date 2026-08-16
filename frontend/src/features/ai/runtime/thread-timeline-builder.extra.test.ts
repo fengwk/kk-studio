@@ -304,6 +304,7 @@ describe('thread timeline edge branches', () => {
         sequence: 1,
         text: 'internal realtime summary',
         thinking: '',
+        toolCalls: [],
         createdAt: '2026-01-01T00:00:00',
         status: 'streaming',
       },

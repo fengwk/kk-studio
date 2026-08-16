@@ -39,6 +39,11 @@ export type EntryType =
   | 'COMPACTION'
   | 'TURN_END'
 
+/** 按当前 branch 最新状态现算的系统提示词预览。 */
+export interface HarnessSystemPromptPreviewDTO {
+  text: string
+}
+
 /** Session Entry 查询投影；id 均为 canonical UUID string。 */
 export interface HarnessSessionEntryDTO {
   entryId: string

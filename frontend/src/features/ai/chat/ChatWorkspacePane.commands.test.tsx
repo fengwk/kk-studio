@@ -57,6 +57,8 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
+    listThreadEntries: vi.fn(),
+    getSystemPromptPreview: vi.fn(),
     enqueueCommands: vi.fn(),
     updateThreadHead: vi.fn(),
     stopThread: vi.fn(),
@@ -406,6 +408,10 @@ describe('ChatWorkspacePane commands', () => {
       entries: [{ name: 'proj', path: 'proj' }],
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({})))
+    vi.mocked(harnessService.listThreadEntries).mockResolvedValue(sessionEntries())
+    vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({
+      text: 'You are the planner.\n\n<current_environment>\n- date: 2026-08-17\n</current_environment>',
+    })
     vi.mocked(chatService.listChatThreads).mockResolvedValue([
       thread({}),
       thread({
@@ -443,7 +449,7 @@ describe('ChatWorkspacePane commands', () => {
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
     await user.click(within(screen.getByLabelText('选择 Environment')).getByRole('option', { name: /^remote/ }))
     const dirPanel = await screen.findByLabelText('remote 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
     await waitFor(() => expect(harnessService.updateThreadHead).not.toHaveBeenCalled())
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
@@ -456,11 +462,25 @@ describe('ChatWorkspacePane commands', () => {
 
   it('keeps the Environment selector open and only filters READY environments by id', async () => {
     const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(
+        thread({
+          branchSettings: branchSettings({
+            environment: { name: 'local', workspacePath: '.' },
+          }),
+        }),
+      ),
+    )
     renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
+    expect(await screen.findByLabelText('会话状态')).toHaveTextContent('env:local · @/')
 
     await user.click(composer)
     await user.keyboard('/environment{Enter}')
+    const currentDirectory = await screen.findByLabelText('local 目录')
+    await user.click(
+      within(currentDirectory).getByRole('button', { name: '返回 Environment 列表' }),
+    )
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
     // 仅显示 READY 的 environment；CONNECTING 状态的会按 status 被过滤掉。
     const envModal = screen.getByLabelText('选择 Environment')
@@ -469,10 +489,12 @@ describe('ChatWorkspacePane commands', () => {
     expect(within(envModal).queryByRole('option', { name: /connecting/ })).not.toBeInTheDocument()
     await user.click(within(envModal).getByRole('option', { name: /^remote/ }))
     const dirPanel = await screen.findByLabelText('remote 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
 
     // 绑定面板仅更新 draft；发送之前 footer 仍反映 thread snapshot，
     // 暂时不会发起 harness 调用。
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('env:local · @/')
+    expect(screen.getByLabelText('会话状态')).not.toHaveTextContent('env:remote')
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
@@ -500,7 +522,7 @@ describe('ChatWorkspacePane commands', () => {
     await user.keyboard('/environment{Enter}')
     await user.click(within(await screen.findByLabelText('选择 Environment')).getByRole('option', { name: /^remote/ }))
     const dirPanel = await screen.findByLabelText('remote 目录')
-    await user.click(within(dirPanel).getByRole('button', { name: '使用当前 Workspace' }))
+    await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.type(composer, 'hello world')
@@ -660,7 +682,7 @@ describe('ChatWorkspacePane commands', () => {
     )
   })
 
-  it('switches to the events main view, opens a read-only detail, and returns via /conversation', async () => {
+  it('switches to the events main view, opens a read-only detail, and returns via /events toggle', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(thread({}), { entries: sessionEntries() }),
@@ -672,6 +694,7 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(composer)
     await user.keyboard('/events{Enter}')
     const list = await screen.findByRole('listbox', { name: '事件' })
+    expect(await screen.findByLabelText('系统提示词')).toHaveTextContent('You are the planner.')
     expect(document.querySelector('.thread-dialogue')).toBeNull()
     const options = within(list).getAllByRole('option')
     expect(options.length).toBeGreaterThanOrEqual(3)
@@ -683,20 +706,43 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(userOption)
     await screen.findByLabelText('事件详情')
     const payloadPre = document.querySelector<HTMLElement>('.thread-event-detail-payload')
-    expect(payloadPre?.textContent).toContain('"role":"USER"')
+    expect(payloadPre?.textContent).toMatch(/"role":\s*"USER"/)
     expect(payloadPre?.textContent).toContain('s1 prompt')
     expect(() => JSON.parse(payloadPre?.textContent ?? '')).not.toThrow()
     // detail 不是 InteractionPanel：不隐藏 Composer、不抢焦点。
     expect(composer.closest('.thread-composer')).not.toHaveAttribute('hidden')
     expect(document.querySelector('.thread-interaction-panel')).toBeNull()
 
-    // /conversation：回到 transcript，事件视图卸载。
+    // 再次 /events：toggle 回 transcript，事件视图卸载。
     await user.click(composer)
-    await user.keyboard('/conversation{Enter}')
+    await user.keyboard('/events{Enter}')
     await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
     expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
     // 草稿保持：切换不丢 Composer 状态。
     expect(composer.textContent).toBe('')
+  })
+
+  it('keeps the open event detail on the currently selected row when navigating with arrows', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), { entries: sessionEntries() }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    const list = await screen.findByRole('listbox', { name: '事件' })
+    await user.click(within(list).getByRole('option', { name: /s1 prompt/ }))
+    await screen.findByLabelText('事件详情', { exact: true })
+    expect(document.querySelector('.thread-event-detail-payload')?.textContent).toContain('s1 prompt')
+
+    fireEvent.click(list)
+    await user.keyboard('{ArrowDown}')
+    await waitFor(() => {
+      expect(list.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-assistant')
+      expect(document.querySelector('.thread-event-detail-header h3')?.textContent).toBe('MESSAGE')
+      expect(document.querySelector('.thread-event-detail-payload')?.textContent).toContain('s1 reply')
+    })
   })
 
   it('resets the main view back to conversation when the pane rebinds to another Thread', async () => {
@@ -720,15 +766,26 @@ describe('ChatWorkspacePane commands', () => {
 
   it('rebinds via /tree PUT /head with the snapshot revision as the CAS cursor', async () => {
     const user = userEvent.setup()
+    const fullSessionEntries = [
+      ...sessionEntries(),
+      entry('s1-inactive-branch', 's1-user', 'ASSISTANT', 'inactive branch reply'),
+    ]
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(thread({ revision: '3' }), { entries: sessionEntries() }),
+      snapshot(thread({ headEntryId: 's1-assistant', revision: '3' }), {
+        entries: sessionEntries(),
+      }),
     )
+    vi.mocked(harnessService.listThreadEntries).mockResolvedValue(fullSessionEntries)
     renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
+    expect(harnessService.listThreadEntries).not.toHaveBeenCalled()
 
     await user.click(composer)
     await user.keyboard('/tree{Enter}')
     expect(await screen.findByRole('region', { name: '历史分支' })).toBeInTheDocument()
+    expect(harnessService.listThreadEntries).toHaveBeenCalledWith('t1')
+    const inactiveBranch = await screen.findByRole('button', { name: /inactive branch reply/ })
+    expect(inactiveBranch.querySelector('.history-branch-entry-glyphs')).toHaveTextContent('└─')
 
     await user.click(await screen.findByRole('button', { name: /用户 · s1 prompt/ }))
     await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
@@ -762,6 +819,9 @@ describe('ChatWorkspacePane commands', () => {
     const discardDialog = await screen.findByRole(
       'alertdialog',
       { name: '丢弃未发送的修改？' },
+    )
+    expect(discardDialog).toHaveTextContent(
+      '切换到所选历史位置后会丢弃尚未随消息提交的 Agent、Environment、Model 或 Permission 设置，是否继续？',
     )
     await user.click(within(discardDialog).getByRole('button', { name: '取消' }))
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
@@ -825,9 +885,11 @@ describe('ChatWorkspacePane commands', () => {
     await user.keyboard('/agent{Enter}')
     await user.click(await screen.findByRole('option', { name: /coder/ }))
 
-    // Footer 标签立即跟随面板 draft（不需要 service 往返）。
-    expect(await screen.findByRole('button', { name: /agent:coder/ })).toBeInTheDocument()
-    expect(screen.getByText(/minimax\/MiniMax · default/)).toBeInTheDocument()
+    // Model/Variant 常驻于 Composer；Agent 只通过轻量选择面板编辑，不再放进 Footer。
+    expect(screen.getByRole('button', { name: 'Model 与 Variant' })).toHaveTextContent(
+      'minimax/MiniMax · default',
+    )
+    expect(screen.queryByText(/agent:coder/)).not.toBeInTheDocument()
 
     await user.type(composer, 'run')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -844,6 +906,63 @@ describe('ChatWorkspacePane commands', () => {
       'SET_ACTIVE_TOOLS',
       'USER_MESSAGE',
     ])
+  })
+
+  it('initializes Composer controls from queued settings without sending a reversal diff', async () => {
+    const user = userEvent.setup()
+    const alternateModel = {
+      ...modelEntry(),
+      providerName: 'local',
+      name: 'Alternate',
+      config: {
+        ...modelEntry().config,
+        defaultVariant: 'review',
+        variants: [{ id: 'default' }, { id: 'review' }],
+      },
+    }
+    vi.mocked(agentService.listModels).mockResolvedValue(page([modelEntry(), alternateModel]))
+    const queuedSetting = (
+      sequence: string,
+      type: HarnessThreadCommandDTO['type'],
+      payload: Record<string, unknown>,
+    ): HarnessThreadCommandDTO => ({
+      threadId: 't1',
+      sequence,
+      type,
+      state: 'QUEUED',
+      clientCommandId: `queued-${sequence}`,
+      requestHash: '0123456789abcdef'.repeat(4),
+      payloadJson: JSON.stringify(payload),
+      consumedTurnStartEntryId: null,
+      cancelledAt: null,
+      createTime: null,
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), {
+        queuedCommands: [
+          queuedSetting('1', 'SET_MODEL', {
+            model: { providerName: 'local', modelName: 'Alternate', variant: 'review' },
+          }),
+          queuedSetting('2', 'SET_YOLO', { yoloEnabled: true }),
+        ],
+      }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    expect(await screen.findByRole('button', { name: 'Model 与 Variant' })).toHaveTextContent(
+      'local/Alternate · review',
+    )
+    expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('YOLO')
+
+    await user.type(composer, 'continue queued settings')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
+    expect(
+      vi.mocked(harnessService.enqueueCommands).mock.calls[0]![1].commands.map(
+        (command) => command.type,
+      ),
+    ).toEqual(['USER_MESSAGE'])
   })
 
   it('blocks /thread while queued commands are pending and never opens the picker', async () => {
@@ -985,6 +1104,9 @@ describe('ChatWorkspacePane commands', () => {
     const discardDialog = await screen.findByRole(
       'alertdialog',
       { name: '丢弃未发送的修改？' },
+    )
+    expect(discardDialog).toHaveTextContent(
+      '切换到所选历史位置后会丢弃输入框中未发送的消息，是否继续？',
     )
     await user.click(within(discardDialog).getByRole('button', { name: '取消' }))
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
@@ -1214,7 +1336,7 @@ describe('ChatWorkspacePane commands', () => {
     await waitFor(() => expect(composer).toHaveTextContent('will collide'))
   })
 
-  it('disables the already-active main-view command and enables the other', async () => {
+  it('keeps /events enabled as a toggle in both main views', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(thread({}), { entries: sessionEntries() }),
@@ -1222,17 +1344,15 @@ describe('ChatWorkspacePane commands', () => {
     renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // conversation 激活时：/conversation 禁用、/events 可用。
     await user.click(composer)
     await user.keyboard('/')
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: /^conversation/ })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: /^events/ })).toBeInTheDocument()
     })
-    expect(screen.getByRole('option', { name: /^conversation/ })).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByRole('option', { name: /^events/ })).toHaveAttribute('aria-disabled', 'false')
+    expect(screen.queryByRole('option', { name: /^conversation/ })).not.toBeInTheDocument()
     await user.keyboard('{Escape}')
 
-    // 切到 events 后：/events 禁用、/conversation 可用。
     await user.keyboard('/events{Enter}')
     await screen.findByRole('listbox', { name: '事件' })
     await user.click(composer)
@@ -1240,8 +1360,8 @@ describe('ChatWorkspacePane commands', () => {
     await waitFor(() => {
       expect(screen.getByRole('option', { name: /^events/ })).toBeInTheDocument()
     })
-    expect(screen.getByRole('option', { name: /^events/ })).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByRole('option', { name: /^conversation/ })).toHaveAttribute('aria-disabled', 'false')
+    expect(screen.getByRole('option', { name: /^events/ })).toHaveAttribute('aria-disabled', 'false')
+    expect(screen.queryByRole('option', { name: /^conversation/ })).not.toBeInTheDocument()
   })
 
   it('closes the event detail when switching back to conversation', async () => {
@@ -1259,7 +1379,7 @@ describe('ChatWorkspacePane commands', () => {
     await screen.findByLabelText('事件详情', { exact: true })
 
     await user.click(composer)
-    await user.keyboard('/conversation{Enter}')
+    await user.keyboard('/events{Enter}')
     await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
     expect(screen.queryByLabelText('事件详情', { exact: true })).not.toBeInTheDocument()
   })
@@ -1338,7 +1458,7 @@ describe('ChatWorkspacePane commands', () => {
 
       // 切回 conversation：恢复 100（不是贴底）。
       await user.click(composer)
-      await user.keyboard('/conversation{Enter}')
+      await user.keyboard('/events{Enter}')
       await waitFor(() => expect(dialogue().scrollTop).toBe(100))
 
       // 再进 events：恢复 120（不是贴底）。
@@ -1391,7 +1511,7 @@ describe('ChatWorkspacePane commands', () => {
 
       // 切回 conversation：恢复 450（阈值内 → stick 跟随自己的恢复位置，而不是 events 的 stick=false）。
       await user.click(composer)
-      await user.keyboard('/conversation{Enter}')
+      await user.keyboard('/events{Enter}')
       await waitFor(() => expect(dialogue().scrollTop).toBe(450))
 
       // 内容增长：conversation 仍贴底 —— events 的 stick=false 绝不泄漏到 conversation。
@@ -1417,7 +1537,7 @@ describe('ChatWorkspacePane commands', () => {
     }
   })
 
-  it('keeps the events active row across conversation/events switches', async () => {
+  it('clears the events selection when switching back to conversation', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(thread({}), { entries: sessionEntries() }),
@@ -1428,20 +1548,20 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(composer)
     await user.keyboard('/events{Enter}')
     const list = await screen.findByRole('listbox', { name: '事件' })
-    // mousemove 到 USER 行：active 从最新（s1-assistant）改为 s1-user。
-    fireEvent.mouseMove(within(list).getByRole('option', { name: /s1 prompt/ }))
+    await user.click(within(list).getByRole('option', { name: /s1 prompt/ }))
     await waitFor(() =>
       expect(list.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-user'),
     )
+    await screen.findByLabelText('事件详情', { exact: true })
 
-    // 切回 conversation 再进 events：active 行保留（跨视图恢复）。
     await user.click(composer)
-    await user.keyboard('/conversation{Enter}')
+    await user.keyboard('/events{Enter}')
     await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
     await user.click(composer)
     await user.keyboard('/events{Enter}')
     const list2 = await screen.findByRole('listbox', { name: '事件' })
-    expect(list2.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-user')
+    expect(list2.getAttribute('aria-activedescendant')).toBeNull()
+    expect(screen.queryByLabelText('事件详情', { exact: true })).not.toBeInTheDocument()
   })
 
   it('resets the events active row and detail when the pane rebinds to another Thread', async () => {
@@ -1455,23 +1575,21 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(composer)
     await user.keyboard('/events{Enter}')
     const list = await screen.findByRole('listbox', { name: '事件' })
-    fireEvent.mouseMove(within(list).getByRole('option', { name: /s1 prompt/ }))
+    await user.click(within(list).getByRole('option', { name: /s1 prompt/ }))
     await waitFor(() =>
       expect(list.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-user'),
     )
-    await user.click(within(list).getByRole('option', { name: /s1 prompt/ }))
     await screen.findByLabelText('事件详情', { exact: true })
 
-    // threadId 重绑：回到 conversation 且 detail 关闭。
+    // threadId 重绑：回到 conversation 且选中清空。
     view.rerender('t2')
     await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
     expect(screen.queryByLabelText('事件详情', { exact: true })).not.toBeInTheDocument()
 
-    // 再进 events：active 回到最新（旧 s1-user 选择不残留）。
     await user.click(composer)
     await user.keyboard('/events{Enter}')
     const list2 = await screen.findByRole('listbox', { name: '事件' })
-    expect(list2.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-assistant')
+    expect(list2.getAttribute('aria-activedescendant')).toBeNull()
   })
 
   it('places the event detail first in the widget zone, before the task status widget', async () => {
@@ -1532,13 +1650,13 @@ describe('ChatWorkspacePane commands', () => {
     await screen.findByLabelText('给 AI 发送消息')
 
     // 无 task 消息：TaskStatusWidget 常驻挂载（自身渲染为空），widget zone 仍存在于
-    // DOM；footer 不再提供 task-status toggle（widget 不可关闭），通知 toggle 保留。
+    // DOM；Footer 不提供 Task/Notification toggle。
     const widgetZone = () => document.querySelector<HTMLElement>('.thread-widget-zone')
     expect(widgetZone()).not.toBeNull()
     expect(document.querySelector('.task-status-widget')).toBeNull()
     expect(screen.queryByRole('button', { name: 'task-status:on' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'task-status:off' })).not.toBeInTheDocument()
-    expect(screen.getByTitle('切换浏览器通知')).toBeInTheDocument()
+    expect(screen.queryByText(/notify:/)).not.toBeInTheDocument()
 
     // 有 task 消息：同一个常驻 widget zone 中出现任务状态，无需任何开关。
     const heartbeat = JSON.stringify({
@@ -1574,143 +1692,6 @@ describe('ChatWorkspacePane commands', () => {
     )
     expect(screen.queryByRole('button', { name: 'task-status:on' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'task-status:off' })).not.toBeInTheDocument()
-  })
-
-  it('wires the bound footer notification toggle to the shared global application settings', async () => {
-    const user = userEvent.setup()
-    const notification = {
-      permission: 'default' as NotificationPermission,
-      requestPermission: vi.fn(async () => {
-        notification.permission = 'granted'
-        return 'granted' as const
-      }),
-    }
-    Object.defineProperty(window, 'Notification', {
-      configurable: true,
-      value: {
-        get permission() {
-          return notification.permission
-        },
-        requestPermission: () => notification.requestPermission(),
-      },
-    })
-    function SettingsProbe() {
-      const { notificationsEnabled } = useApplicationSettings()
-      return (
-        <output data-testid="global-notifications">
-          {notificationsEnabled ? 'on' : 'off'}
-        </output>
-      )
-    }
-    try {
-      renderBoundPane({ children: <SettingsProbe /> })
-      await screen.findByLabelText('给 AI 发送消息')
-
-      // 初始：全局设置为 off，footer 显示 notify:off。
-      expect(screen.getByTestId('global-notifications')).toHaveTextContent('off')
-      expect(screen.getByRole('button', { name: 'notify:off' })).toBeInTheDocument()
-
-      // 开启：请求浏览器权限，granted 后才写入全局设置（SettingsPage 同源状态）。
-      await user.click(screen.getByRole('button', { name: 'notify:off' }))
-      await waitFor(() =>
-        expect(screen.getByTestId('global-notifications')).toHaveTextContent('on'),
-      )
-      expect(notification.requestPermission).toHaveBeenCalledTimes(1)
-      expect(screen.getByRole('button', { name: 'notify:on' })).toBeInTheDocument()
-      expect(localStorage.getItem('kkstudio.application-settings.v1')).toBe(
-        '{"notificationsEnabled":true}',
-      )
-
-      // 关闭：直接写 false，不再请求权限。
-      await user.click(screen.getByRole('button', { name: 'notify:on' }))
-      await waitFor(() =>
-        expect(screen.getByTestId('global-notifications')).toHaveTextContent('off'),
-      )
-      expect(notification.requestPermission).toHaveBeenCalledTimes(1)
-      expect(screen.getByRole('button', { name: 'notify:off' })).toBeInTheDocument()
-      expect(localStorage.getItem('kkstudio.application-settings.v1')).toBe(
-        '{"notificationsEnabled":false}',
-      )
-    } finally {
-      delete (window as unknown as { Notification?: unknown }).Notification
-      localStorage.removeItem('kkstudio.application-settings.v1')
-    }
-  })
-
-  it('keeps the permission gate when enabling notifications from the bound footer', async () => {
-    const user = userEvent.setup()
-    const notification = {
-      permission: 'default' as NotificationPermission,
-      requestPermission: vi.fn(async () => {
-        notification.permission = 'denied'
-        return 'denied' as const
-      }),
-    }
-    Object.defineProperty(window, 'Notification', {
-      configurable: true,
-      value: {
-        get permission() {
-          return notification.permission
-        },
-        requestPermission: () => notification.requestPermission(),
-      },
-    })
-    function SettingsProbe() {
-      const { notificationsEnabled } = useApplicationSettings()
-      return (
-        <output data-testid="global-notifications">
-          {notificationsEnabled ? 'on' : 'off'}
-        </output>
-      )
-    }
-    try {
-      renderBoundPane({ children: <SettingsProbe /> })
-      await screen.findByLabelText('给 AI 发送消息')
-
-      // denied：不写入 enabled=true；footer 显示 notify:denied 并给出拒绝错误。
-      await user.click(screen.getByRole('button', { name: 'notify:off' }))
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: 'notify:denied' })).toBeInTheDocument(),
-      )
-      expect(screen.getByTestId('global-notifications')).toHaveTextContent('off')
-      expect(screen.getByText('浏览器通知权限已被拒绝。')).toBeInTheDocument()
-      expect(localStorage.getItem('kkstudio.application-settings.v1')).toBe(
-        '{"notificationsEnabled":false}',
-      )
-    } finally {
-      delete (window as unknown as { Notification?: unknown }).Notification
-      localStorage.removeItem('kkstudio.application-settings.v1')
-    }
-  })
-
-  it('keeps the unsupported gate when enabling notifications from the bound footer', async () => {
-    const user = userEvent.setup()
-    delete (window as unknown as { Notification?: unknown }).Notification
-    function SettingsProbe() {
-      const { notificationsEnabled } = useApplicationSettings()
-      return (
-        <output data-testid="global-notifications">
-          {notificationsEnabled ? 'on' : 'off'}
-        </output>
-      )
-    }
-    try {
-      renderBoundPane({ children: <SettingsProbe /> })
-      await screen.findByLabelText('给 AI 发送消息')
-
-      // unsupported：footer 显示 notify:unsupported，点击给出错误且不写入 enabled=true。
-      expect(screen.getByRole('button', { name: 'notify:unsupported' })).toBeInTheDocument()
-      await user.click(screen.getByRole('button', { name: 'notify:unsupported' }))
-      await waitFor(() =>
-        expect(screen.getByText('当前浏览器不支持通知。')).toBeInTheDocument(),
-      )
-      expect(screen.getByTestId('global-notifications')).toHaveTextContent('off')
-      expect(localStorage.getItem('kkstudio.application-settings.v1')).toBe(
-        '{"notificationsEnabled":false}',
-      )
-    } finally {
-      localStorage.removeItem('kkstudio.application-settings.v1')
-    }
   })
 
   it('derives the notification permission live when settings change from an external consumer', async () => {
@@ -1761,19 +1742,16 @@ describe('ChatWorkspacePane commands', () => {
       renderBoundPane({ children: <SettingsPageProbe /> })
       await screen.findByLabelText('给 AI 发送消息')
 
-      // mount 时浏览器 permission=default 且全局 off：hook 禁用、footer 显示 off。
+      // mount 时浏览器 permission=default 且全局 off：通知 hook 禁用。
       expect(screen.getByRole('button', { name: /^(on|off)$/ })).toHaveTextContent('off')
-      expect(screen.getByRole('button', { name: 'notify:off' })).toBeInTheDocument()
+      expect(screen.queryByText(/notify:/)).not.toBeInTheDocument()
       expect(notificationSpy).not.toHaveBeenCalled()
 
       // 模拟 SettingsPage：先获得浏览器权限，再通过全局设置启用通知。
       permission = 'granted'
       await user.click(screen.getByRole('button', { name: /^(on|off)$/ }))
 
-      // footer 与通知 hook 都基于当前浏览器 permission 生效，而非 mount 时快照。
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: 'notify:on' })).toBeInTheDocument(),
-      )
+      // 通知 hook 基于当前浏览器 permission 生效，而非 mount 时快照。
       await waitFor(() => expect(notificationSpy).toHaveBeenCalled())
       expect(notificationSpy).toHaveBeenCalledWith(
         '等待审批',
@@ -1853,12 +1831,11 @@ describe('ChatWorkspacePane commands', () => {
     const listB = await within(paneB()).findByRole('listbox', { name: '事件' })
     expect(within(paneA()).getByRole('listbox', { name: '事件' })).toBeInTheDocument()
     expect(listA.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-user')
-    // Pane B 初始 active 是自己的最新事件（未被 Pane A 影响）。
-    expect(listB.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-assistant')
+    expect(listB.getAttribute('aria-activedescendant')).toBeNull()
 
     // Pane A 切回 conversation：Pane B 的 events 视图不受影响。
     await user.click(composerA)
-    await user.keyboard('/conversation{Enter}')
+    await user.keyboard('/events{Enter}')
     await waitFor(() =>
       expect(within(paneA()).queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument(),
     )

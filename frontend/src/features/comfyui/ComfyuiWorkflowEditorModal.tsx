@@ -46,7 +46,11 @@ export function ComfyuiWorkflowEditorModal({
         onSubmit={onSubmit}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <ModalHeader title={title} onClose={pending ? () => undefined : onClose} />
+        <ModalHeader
+          title={title}
+          onClose={pending ? () => undefined : onClose}
+          closeDisabled={pending}
+        />
         <div className="modal-body comfyui-modal-scroll">
           {error && <StateBlock title={error} tone="danger" />}
           <div className="metadata-grid metadata-grid-two">

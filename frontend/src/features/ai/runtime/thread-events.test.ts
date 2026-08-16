@@ -112,6 +112,7 @@ function modelStream(overrides: Partial<RealtimeModelStream> = {}): RealtimeMode
     sequence: 9,
     text: 'hello',
     thinking: '',
+    toolCalls: [],
     createdAt: '2026-07-28T10:00:06Z',
     status: 'streaming',
     ...overrides,
@@ -204,13 +205,24 @@ describe('buildThreadEventTimeline', () => {
       expect(event.turnNumber).toBe(1)
       expect(event.turnStartEntryId).toBe('turn-1')
     }
-    // rawJson 只供详情：durable 记录保留原始 payload，synthetic 为 null。
-    expect(events[2]!.rawJson).toBe(JSON.stringify(messagePayload('USER', [{ type: 'text', text: 'hi' }])))
+    expect(events.map((event) => event.title)).toEqual([
+      'ROOT',
+      'TURN_START',
+      'MESSAGE',
+      'CUSTOM_MESSAGE',
+      'MODEL_ATTEMPT_FAILURE',
+      'ASSISTANT_ERROR',
+      'ASSISTANT_ABORTED',
+      'COMPACTION',
+      'TURN_END',
+      'CUSTOM',
+      'UNKNOWN_TYPE',
+    ])
+    expect(events[2]!.summary).toBe(JSON.stringify(messagePayload('USER', [{ type: 'text', text: 'hi' }])))
+    expect(JSON.parse(events[2]!.rawJson!)).toEqual(messagePayload('USER', [{ type: 'text', text: 'hi' }]))
     for (const event of events) {
       expect(() => JSON.parse(event.rawJson!)).not.toThrow()
     }
-    // 未知 Entry 类型：标题原样保留类型名（审计不丢信息）。
-    expect(events[10]!.title).toContain('UNKNOWN_TYPE')
   })
 
   it('classifies MESSAGE roles into USER_MESSAGE / ASSISTANT_MESSAGE / TOOL_CALL / TOOL_RESULT / CUSTOM_MESSAGE', () => {
@@ -238,15 +250,19 @@ describe('buildThreadEventTimeline', () => {
       'CUSTOM_MESSAGE',
       'CUSTOM_MESSAGE',
     ])
-    // 摘要单行截断：TOOL_CALL 带文本 + 工具名；TOOL_RESULT 取内层结果文本。
-    expect(events[3]!.summary).toContain('running')
+    expect(events.map((event) => event.title)).toEqual([
+      'TURN_START',
+      'MESSAGE',
+      'MESSAGE',
+      'MESSAGE',
+      'MESSAGE',
+      'MESSAGE',
+      'MESSAGE',
+    ])
+    expect(events[3]!.summary).toContain('"tool_call"')
     expect(events[3]!.summary).toContain('bash')
-    expect(events[4]!.summary).toBe('ok')
-    expect(events[4]!.details).toEqual(
-      expect.arrayContaining([
-        { label: '工具调用 ID', value: 'call-1' },
-      ]),
-    )
+    expect(events[4]!.summary).toContain('"tool_result"')
+    expect(events[4]!.summary).toContain('call-1')
   })
 
   it('tracks turnNumber/turnStartEntryId across multiple turns', () => {
@@ -293,22 +309,9 @@ describe('buildThreadEventTimeline', () => {
     const events = build(entries)
     const turnEnd = events[3]!
     expect(turnEnd.kind).toBe('TURN_END')
-    // summary = outcome + 冻结 usage 文本（无 T/CH 段）。
-    expect(turnEnd.summary).toBe('COMPLETED · ↑10 · ↓20 · R5 · W5 · $0.001')
-    expect(turnEnd.summary).not.toContain('T7')
-    expect(turnEnd.summary).not.toContain('CH')
-    expect(turnEnd.details).toEqual(
-      expect.arrayContaining([
-        { label: '结果', value: 'COMPLETED' },
-        { label: '输入 tokens', value: '10' },
-        { label: '输出 tokens', value: '20' },
-        { label: '缓存读 tokens', value: '5' },
-        { label: '缓存写 tokens', value: '5' },
-        { label: '推理 tokens', value: '7' },
-        { label: 'Provider 总 tokens', value: '44' },
-        { label: '费用', value: '0.001' },
-      ]),
-    )
+    expect(turnEnd.title).toBe('TURN_END')
+    expect(turnEnd.summary).toBe(JSON.stringify({ outcome: 'COMPLETED' }))
+    expect(JSON.parse(turnEnd.rawJson!)).toEqual({ outcome: 'COMPLETED' })
   })
 
   it('omits zero cache segments from the TURN_END summary but keeps input/output', () => {
@@ -322,7 +325,8 @@ describe('buildThreadEventTimeline', () => {
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
     ]
     const events = build(entries)
-    expect(events[2]!.summary).toBe('COMPLETED · ↑100 · ↓200 · $0.005')
+    expect(events[2]!.title).toBe('TURN_END')
+    expect(events[2]!.summary).toBe(JSON.stringify({ outcome: 'COMPLETED' }))
   })
 
   it('keeps TURN_END summary as the bare outcome when the turn has no usage', () => {
@@ -333,10 +337,8 @@ describe('buildThreadEventTimeline', () => {
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
     ]
     const events = build(entries)
-    expect(events[3]!.summary).toBe('COMPLETED')
-    expect(events[3]!.details).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ label: '输入 tokens' })]),
-    )
+    expect(events[3]!.title).toBe('TURN_END')
+    expect(events[3]!.summary).toBe(JSON.stringify({ outcome: 'COMPLETED' }))
   })
 
   it('anchors the active model invocation as a single synthetic record with mapped status', () => {
@@ -649,16 +651,16 @@ describe('buildThreadEventTimeline', () => {
     expect(events[1]!.turnStartEntryId).toBeNull()
   })
 
-  it('truncates single-line summaries at 140 chars', () => {
+  it('keeps the full compact payload JSON in the summary and leaves overflow to CSS', () => {
     const long = 'x'.repeat(300)
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: long }])),
     ]
     const events = build(entries)
-    const summary = events[1]!.summary
-    expect(summary).toHaveLength(141)
-    expect(summary.endsWith('…')).toBe(true)
+    expect(events[1]!.summary).toContain(long)
+    expect(events[1]!.summary.endsWith('…')).toBe(false)
+    expect(JSON.parse(events[1]!.summary)).toEqual(messagePayload('USER', [{ type: 'text', text: long }]))
   })
 })
 

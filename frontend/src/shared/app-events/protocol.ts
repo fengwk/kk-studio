@@ -13,6 +13,7 @@
  *   - thread realtime：data 为 Redis delta envelope 的 JSON 对象（如 MODEL_DELTA），绝不携带 cursor。
  *   - canvas version：data {"version":"N"}，cursor 必带且与 data.version 完全相等。
  * - {"version":1,"type":"resync","resource":{...}}：需要整体替换为全量快照。
+ * - {"version":1,"type":"heartbeat"}：连接级保活；客户端严格解码后静默消费。
  * - {"version":1,"type":"error","resource"?:{...},"code":"<string>","message":"<string>"}
  *
  * 解码是真正严格的：version 必须为 1、每种 type/name 只接受精确字段集、
@@ -66,6 +67,7 @@ type ApplicationEventCanvasVersionEvent = {
 }
 
 export type ApplicationEventServerMessage =
+  | { type: 'heartbeat' }
   | { type: 'subscribed'; resource: ApplicationEventResource; cursor: ApplicationEventCursor }
   | ApplicationEventThreadRevisionEvent
   | ApplicationEventThreadRealtimeEvent
@@ -92,6 +94,12 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
     return null
   }
   switch (parsed.type) {
+    case 'heartbeat': {
+      if (!hasOnlyFields(parsed, ['version', 'type'])) {
+        return null
+      }
+      return { type: 'heartbeat' }
+    }
     case 'subscribed': {
       if (!hasOnlyFields(parsed, ['version', 'type', 'resource', 'cursor'])) {
         return null

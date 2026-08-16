@@ -222,6 +222,39 @@ class ApplicationEventWebSocketHandlerTest {
   }
 
   @Test
+  void heartbeatUsesTheExistingAsyncQueueAndStopsAfterConnectionClose() {
+    handler.afterConnectionEstablished(springSession);
+
+    handler.heartbeat();
+
+    assertEquals(List.of("{\"version\":1,\"type\":\"heartbeat\"}"), recorder.sent);
+    handler.afterConnectionClosed(springSession, CloseStatus.NORMAL);
+    handler.heartbeat();
+    assertEquals(1, recorder.sent.size());
+  }
+
+  @Test
+  void heartbeatBackpressureClosesTheConnection() throws Exception {
+    rebuildHandler(1);
+    handler.afterConnectionEstablished(springSession);
+
+    handler.heartbeat(); // heartbeat 在途，占满容量
+    handler.heartbeat(); // 入队失败，error 排在在途 heartbeat 后
+
+    assertEquals(List.of("{\"version\":1,\"type\":\"heartbeat\"}"), recorder.sent);
+    recorder.handlers.get(0).onResult(new SendResult());
+    assertEquals(2, recorder.sent.size());
+    assertEquals(
+        "{\"version\":1,\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
+        recorder.sent.get(1));
+    recorder.handlers.get(1).onResult(new SendResult());
+    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
+    verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
+        .close(reasonCaptor.capture());
+    assertEquals(CloseReason.CloseCodes.TRY_AGAIN_LATER, reasonCaptor.getValue().getCloseCode());
+  }
+
+  @Test
   void ackEnqueueFailureClosesFreshSubscriptionWithoutKeepingIt() throws Exception {
     AutoCloseable revisionHandle = mock(AutoCloseable.class);
     AutoCloseable versionHandle = mock(AutoCloseable.class);

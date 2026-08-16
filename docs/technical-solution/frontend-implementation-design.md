@@ -11,7 +11,7 @@
 | 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位、全局 Locale 与应用设置（`kkstudio.application-settings.v1`） |
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
-| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `commands` / `head` / `stop` / `tool-invocations/{id}/approval`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
+| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `entries` / `commands` / `head` / `stop` / `tool-invocations/{id}/approval`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
 | Realtime | REST snapshot first；应用事件 WebSocket（durable `revision`/`resync` + 无 cursor 的 Redis realtime overlay） |
 | 浏览器路由 | `BrowserRouter`，服务端对 SPA 路径回退 `index.html` |
 | 视觉规范 | [前端设计规范](../product-design/frontend-design-system.md) |
@@ -43,8 +43,8 @@ interface BranchDraft {
 }
 ```
 
-- **Blank pane**：`frozenDraft` 是 Chat defaults 经 Catalog 首次可解析值物化的不可变副本（`initialFrozenDraft` 基线）；agent/env/yolo 编辑标记 dirty，后续 Chat/Catalog refetch 不静默改写。**activeTools 由 Agent 能力配置派生**（`activeToolsFromAgent`）：`config.tools` + skills 非空时的内部 `load_skill` + subagents 非空时的内部 `task`——内部工具不可直接选择，但作为派生值进入 branch settings。
-- **Bound pane**：`branchState` 从 Thread snapshot 的 `branchSettings` 初始化（base）；queued SET_* 命令投影出 `effectiveBase`，dirty = `effectiveBase` 与用户 `draft` 不等；durable base 跟随 snapshot，用户 draft 不被覆盖。
+- **Blank pane**：`frozenDraft` 是 Chat defaults 经 Catalog 首次可解析值物化的不可变副本（`initialFrozenDraft` 基线）；agent/environment/model/variant/yolo 编辑标记 dirty，后续 Chat/Catalog refetch 不静默改写。**activeTools 由 Agent 能力配置派生**（`activeToolsFromAgent`）：`config.tools` + skills 非空时的内部 `load_skill` + subagents 非空时的内部 `task`——内部工具不可直接选择，但作为派生值进入 branch settings。
+- **Bound pane**：`branchState` 从 Thread snapshot 的 `branchSettings` 初始化（base）；queued SET_* 命令投影出 `effectiveBase`，首次挂载时 draft 采用该 pending target，避免刷新后反向发送设置；后续 dirty = `effectiveBase` 与用户 `draft` 不等，durable base 跟随 snapshot，用户 draft 不被覆盖。Chat 与 Canvas Bound 共用该语义。
 
 ## 3. Blank first send
 
@@ -65,6 +65,8 @@ POST /api/ai/runtime/threads/{threadId}/commands
 
 `ChatWorkspacePane` 的 recovery state 为 `{threadId, content, replay?}`；BoundThreadPane 接收独立 `initialDraft` 与可选 `initialReplay`，controller 以 `initialDraft` 恢复文本、仅在 `initialReplay` 存在时设置 `replayRef`；Chat 切换/Thread 切换清理 recovery。
 
+Create Chat 的默认 Environment 使用 `EnvironmentWorkspacePanel` 两阶段选择：先选 READY Environment，再浏览并明确确认当前 Workspace；只有确认后才保存完整 `{name, workspacePath}`，不把选择 Environment 静默折叠为 `workspacePath:'.'`。
+
 ## 4. Bound 发送：固定 diff 顺序与 CAS
 
 每次发送由 `buildMessageBatchPlan` 构造：
@@ -83,14 +85,17 @@ SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
 
 Blank Chat、Bound Thread 与 Canvas Chat 共用唯一 `ThreadComposer`：
 
+- DOM 固定分为上层输入/附件行与下层控制栏：`[+] [Default|YOLO] ... [provider/model · variant] [发送]`；空草稿输入行默认单行且文字垂直居中，内容增长后在上限内滚动；Permission 与 Model/Variant 常驻可见，Footer 不承担设置入口；
+- Permission 是 anchored listbox，仅有 `Default` / `YOLO`；Model 使用 anchored 两级 listbox（provider/model → Variant），不创建 modal/backdrop；选择只修改 pane-local draft，随下一条消息进入同一 SET_* batch；
 - 草稿是 ordered `TEXT/ATTACHMENT` parts；`contenteditable=false` pill 在 DOM 仅保存
-  `data-part-id`、`data-upload-id`、`data-filename`，展示为 `[name](upload)`；
+  `data-part-id`、`data-upload-id`、`data-filename`，展示为完整 `[name]`，不省略且不暴露内部 upload 语法；
 - 左侧 `+` 直接打开命令表，不向草稿写入 `/`；slash 输入仍复用同一命令过滤与执行状态机；
   `/upload` 由 Composer 本地消费并点击 `display:none` 的原生 file input；
 - editor 收到含文件的 paste 时从 `clipboardData.files` 或 `items[].getAsFile()` 取文件并走同一上传链路；
   纯文本 paste 仍只插入 `text/plain`；
-- 上传状态只用紧凑 Markdown 引用显示，不创建独立媒体 tile；发送前必须全部 READY，
-  payload 中 attachment 的客户端 localId 才解析为服务端 uploadId。
+- Composer 上方的上传注册表使用固定 200px 卡片，长文件名单行省略且 `title` 保留完整名称；图片展示可点击缩略图并复用媒体 Lightbox，视频展示可点击的暂停首帧，
+  其它文件按 audio/archive/spreadsheet/code/text/file 类型展示通用图标；发送前必须全部 READY，
+  payload 中 attachment 的客户端 localId 才解析为服务端 uploadId，移除或卸载时释放 object URL。
 
 ### Composer interaction slot
 
@@ -105,26 +110,31 @@ Composer(active, focus + caret restored)
 ```
 
 - Agent、Environment、Chat-scoped Thread 使用统一 `SelectionPanel`；面板挂在 transcript 与
-  footer 之间，不创建 backdrop，不使用 modal。
+  只读 Footer 之间，不创建 backdrop，不使用 modal。
 - 面板打开后搜索框立即获得焦点；普通字符直接过滤，`↑/↓` 移动高亮项，`Enter` 确认，
   `Esc` 返回 Composer。Thread picker 的控制行提供“最近更新/创建时间”，`Tab` 可循环切换。
-- `/tree` 使用同一 `ThreadInteractionPanel` shell，保留记录过滤、搜索、树列表和确认区；
-  搜索框自动聚焦，方向键移动分支，Enter 重定位，Esc 返回。
+- `/tree` 使用同一 `ThreadInteractionPanel` shell，保留记录过滤、搜索、紧凑单行树列表和确认区；
+  面板按 Pane 横向铺满；行前缀对齐 pi Session Tree，使用 `›` 当前选择、`•` 当前路径以及
+  `│ / ├─ / └─` 真实分叉连接符，footer 展示当前位置与键盘提示。打开时才查询
+  `threads.entries(threadId)`，读取完整 Session Entry Tree；普通 transcript 继续使用 snapshot 的当前 root-to-head，
+  历史分支不会进入 Provider 上下文。搜索框自动聚焦，方向键移动分支，Enter 重定位，Esc 返回。
+- Thread 切换、创建新对话或历史重定位需要丢弃草稿时，确认框必须明确区分“输入框中未发送的消息”和“尚未随消息提交的 Agent/Environment/Model/Permission 设置”，并说明目标动作，不使用含义不明的统一提示。
+- 确认 Modal 使用紧凑布局与右上角 icon-only `X`；pending 时关闭、取消与确认控件全部禁用。
 - Composer 与 interaction panel 在视觉、焦点和键盘事件上互斥；Composer 仅设置
   `hidden` 而不卸载，因此本地 draft、附件上传注册表与失败恢复身份不会丢失。
 - interaction panel 打开时仅保留全局 Working 状态；queued 输入与 Task widgets 暂时隐藏，
-  footer 继续展示。破坏性丢弃确认仍使用 alertdialog，取消后返回原 interaction panel。
+  已存在的 Footer facts 继续展示。破坏性丢弃确认仍使用 alertdialog，取消后返回原 interaction panel。
 
 ### Conversation/Event 互斥主视图与只读面板
 
-Bound 场景提供 `/events`、`/conversation`；全部 4 个 Composer 场景（`chat-blank` /
+Bound 场景提供 `/events` toggle（再执行一次切回 conversation）；全部 4 个 Composer 场景（`chat-blank` /
 `chat-bound` / `canvas-blank` / `canvas-bound`）提供 `/shortcuts`；不再提供始终禁用的
-`/session`。命令表由单一 `threadCommandsForScene(scene)` 投影
+`/session`，也不再提供独立 `/conversation` 命令。命令表由单一 `threadCommandsForScene(scene)` 投影
 （`THREAD_COMMANDS` + `SCENE_AVAILABILITY: Record<ThreadCommandId, ThreadCommandScene[]>`，
 `ThreadCommandId` 为字面量联合类型），Chat Bound / Canvas Bound / Blank / Canvas Blank
-不再各自维护命令表副本；Canvas Bound 只投影 `stop/upload/events/conversation/shortcuts`
-（controller 仅支持 stop，其余经 Composer 处理）。当前激活视图的切换命令由
-`threadCommandsForActiveView(commands, mode)` 置为 `disabled`（保持可见）。
+不再各自维护命令表副本；Canvas Bound 额外支持 pane-local `agent/environment/yolo`
+编辑，并投影 `stop/upload/models/events/shortcuts`；`tree/new/thread` 保持禁用。`/events` 与 `/yolo`
+一样始终保持可用，作为当前主视图 toggle。`/models` 与点击 Composer 模型按钮相同，打开后自动聚焦搜索框。
 
 ```text
 ThreadPanelMainMode = 'conversation' | 'events'
@@ -132,11 +142,11 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
 ```
 
 - Pane/Thread 级共享状态统一由 `useThreadPanelViewState(threadId, transcriptBodyRef, events)`
-  持有：`mode` / `selectedEventId` / `activeEventId` / `eventsBodyRef` / 双 scrollTop
+  持有：`mode` / `selectedEventId` / `eventsBodyRef` / 双 scrollTop
   （conversation + events 各一份，内存保存，不用 localStorage），每 Pane 一个实例，
   Chat Bound 与 Canvas Bound 复用。threadId 重绑全部重置回 conversation
-  （mode/selected/active/scroll 清零）；切回 conversation 关闭 detail，Event active
-  保留（跨视图恢复）；selected id 从列表消失即清空，active id 消失回到最新事件。
+  （mode/selected/scroll 清零）；切回 conversation 清空选中；`selectedEventId`
+  就是当前选中行，详情只在有选中时展示；id 从列表消失即清空。
 - 切换只替换主滚动区：Composer、queue、working、widgets 保持挂载，本地 draft 不丢。
   切换前捕获当前主视图位置，目标视图**把保存位置作为 mount `initialScrollTop` 传入**
   （conversation 经 `ThreadConversationView`、events 经 `ThreadEventView`），由视图内部
@@ -145,26 +155,24 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
   拥有独立的 stick 生命周期：视图卸载即销毁 scroll listener/ResizeObserver，重新挂载时
   重新绑定（`useAgentThreadController` 不常驻自动贴底 hook）。
 - `/events` 打开 `ThreadEventView`（listbox/option，紧凑行布局：固定时间列 + kind badge +
-  单行 summary ellipsis；failed 行 danger 色、running 行 pulse dot）：`↑/↓`、`Home/End`、
-  `PageUp/PageDown` 移动 active（初始为最新事件，Page 步长 8），`Enter/Space` 打开详情，
-  `Esc` 在详情打开时关闭详情、否则透传给全局 Escape（恢复 Composer 焦点）；鼠标只有
-  `mousemove` 改变 active，click 同时设为 active 并选择详情。
+  单行 summary ellipsis；failed 行 danger 色、running 行 pulse dot）：初始无选中；
+  点击选中并打开详情；`↑/↓` 只在已选中时切换相邻行；hover / Home / End / Page /
+  Enter 不改选中；`Esc` 与详情 X 取消选中。顶部固定一块最新系统提示词预览（10 行，
+  超出独立滚动）；进入 `/events` 拉一次，turn 从 working 回到 idle 后再拉一次。
 - 事件详情是**只读 widget**（`ThreadEventDetail`，位于 widget zone 第一项、TaskStatus
   之前，ThreadWidgetStack、Composer 上方），不是 InteractionPanel：不隐藏 Composer、
-  不抢焦点、无 backdrop、无 auto focus、无 Copy；展示结构化 label/value 与 durable
-  Entry 原始 payload JSON；X 按钮与详情内 `Esc` 关闭。详情内容按事件 id 跟随最新投影
-  （同 id 更新内容、id 消失关闭详情）。widget zone 高度契约冻结为
+  不抢焦点、无 backdrop、无 auto focus、无 Copy；展示当前选中 event 的 pretty JSON；
+  X 按钮与详情内 `Esc` 关闭。同 id 更新内容、id 消失关闭详情。widget zone 高度契约冻结为
   `max-height: min(36vh, 320px)`（styles.css，有契约测试）。
 - 事件投影是独立模型 `ThreadEventRecord { id, source, entryId, turnStartEntryId,
   turnNumber, kind, status, title, summary, createdAt, details, rawJson }`：
   `buildThreadEventTimeline({entries, modelInvocation, toolInvocations,
-  modelAttemptFailures, modelStream, toolStreams})` 线性扫描 entries 计算
-  turnNumber/turnStartEntryId（TURN_START 之前为 0/null），15 个 kind 与 5 态 status
-  （`pending/running/completed/failed/stopped`）精确映射，i18n 用 `kind.*` / `status.*`
-  key；每个 durable Entry **恰好一条记录**（不隐藏 TURN_START/TURN_END/COMPACTION；
-  MESSAGE 按 role 分类：USER→USER_MESSAGE，ASSISTANT 含 tool_call→TOOL_CALL 否则
-  ASSISTANT_MESSAGE，TOOL→TOOL_RESULT，SYSTEM/未知→CUSTOM_MESSAGE，CUSTOM→CUSTOM，
-  未知 entryType→CUSTOM 且标题携带原类型）；活跃 model/tool invocation 与 attempt
+  modelAttemptFailures, modelStream, toolStreams})` 按当前 root-to-head branch 的
+  Entry 顺序线性扫描。Events 是调试视图：durable 行标签使用真实 `entryType`
+  枚举（`ROOT` / `TURN_START` / `MESSAGE` / `TURN_END` …），摘要是压缩后的
+  Entry payload JSON（超出单行 `…`），点击详情展示 pretty JSON。kind 仍保留内部
+  分类（MESSAGE 按 role 分成 USER_MESSAGE / TOOL_CALL 等），但不作为行标签。
+  每个 durable Entry **恰好一条记录**；活跃 model/tool invocation 与 attempt
   failure 是单条 synthetic 记录（Provider delta token 绝不逐条成行），锚定在所属
   durable Entry 之后，找不到锚点追加到末尾（synthetic 的 rawJson 为 null）。
   活跃 overlay 与 durable Entry 重叠窗口（`ModelTerminalPending`/`ToolTerminalPending`）
@@ -223,7 +231,8 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
 
 ## 9. Snapshot-first realtime / gap / terminal / duplicate
 
-`useHarnessThreadRealtime`（`threads.snapshot(threadId)` 是唯一业务 query key）：
+`useHarnessThreadRealtime`（`threads.snapshot(threadId)` 是唯一 realtime 驱动的 query key；
+`threads.entries(threadId)` 仅在 `/tree` 打开时按需查询）：
 
 1. 读取 snapshot；经 `useApplicationEvents().subscribe({kind:'thread', id})` 订阅：`subscribed`
    （首次订阅与每次重连重订阅后都会到达）、`revision`、`resync` 与资源级 `error` 都只
@@ -231,9 +240,9 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
    snapshot-seeded overlay：只有 Thread 消失或订阅真正禁用（`!threadId || !subscriptionReady`）
    才清空，因此 snapshot 首次就含 terminal-pending tool result 时，overlay 在
    事件通道订阅建立前后都保持可见（有回归测试）。
-2. Redis `realtime` 事件叠加流式 overlay：MODEL_DELTA 按 invocation+attempt+sequence 严格推进，TOOL_PARTIAL 按 `createdAt|canonical payload` 指纹去重（FIFO 有界，attempt 变化/terminal/resultEntryId/消失时清空）。
+2. Redis `realtime` 事件叠加流式 overlay：MODEL_DELTA 按 invocation+attempt+sequence 严格推进；`TOOL_CALL_DELTA` 按 index 累积 `id/name/argumentsJson`，在 durable assistant `tool_call` 到达前投影为 streaming tool call；TOOL_PARTIAL 按 `createdAt|canonical payload` 指纹去重（FIFO 有界，attempt 变化/terminal/resultEntryId/消失时清空）。Transcript 把同一 `toolCallId` 的 call/result 收成一张卡片：header 展示工具名、Agent 原样给出的路径和 `WORKING/DONE/FAILED` 三态，长路径允许换行且不与状态争抢空间；body 上半是 write/edit 等自定义 preview，下半是 result。折叠 preview 固定五行并可滚动，不展示剩余行数文案；展开后显示完整高度；复制只作用于这一张卡。
 3. **Attempt visibility**：snapshot `modelAttemptFailures` 按 attempt 排序并以 `(modelInvocationId,attempt)` 去重，先于当前 Model overlay 投影；`sequence` 必须是 canonical 非负 `DecimalLong`，malformed item fail closed 且不能 fence 当前输出。同 identity 的 durable failure 到达后抑制 stale realtime overlay；只有 invocation 仍处于同 attempt 的 READY/DISPATCHING 时显示活动倒计时，下一 attempt 已 RUNNING 后改为静态“已安排重试”。
-4. **Durable recovery**：root-to-head `MODEL_ATTEMPT_FAILURE` 与 terminal `ASSISTANT_ERROR.attempt` 都投影为同一 failure block，保留原始 text/thinking、具体 error 与 retry 状态；error 与 partial 分开渲染。纯空白 text/thinking 是合法用户可见内容，解析、渲染与复制都不得 trim。retryable failure 仍是 pending，不触发错误/完成浏览器通知。
+4. **Durable recovery**：root-to-head `MODEL_ATTEMPT_FAILURE` 与 terminal `ASSISTANT_ERROR.attempt` 都投影为同一 failure block，保留原始 text/thinking、具体 error 与 retry 状态；状态标题使用“模型请求失败”并把 attempt 显示为次级“请求 #N”，错误码与正文分离，避免整块警告/危险色高亮；error 与 partial 分开渲染。纯空白 text/thinking 是合法用户可见内容，解析、渲染与复制都不得 trim。retryable failure 仍是 pending，不触发错误/完成浏览器通知。
 5. **Gap recovery**：缺失 sequence 触发 `useGapRecoveryLoop`——单飞、指数退避（200→2000ms、最多 8 次）refetch snapshot；immutable per-recovery token 防旧 Thread tick 干扰新 Thread；refetch 失败继续退避不冻结；caught-up/stale/terminal 停止。
 6. **Terminal fence**：`resultJson`/`errorJson`/`resultEntryId` 是 durable 边界——late MODEL_DELTA 被拒绝；snapshot reconcile 中 `status:'done'|'error'` 的 durable projection **无条件**压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后 overlay 移除。terminal error 从 checkpoint 提取 partial、从 `errorJson` 提取 code/message；CANCELLED + partial 与 durable `ASSISTANT_ABORTED` 一致，timeline 绝不把 terminal projection 标为 streaming。
 7. TOOL_PARTIAL 永不携带 Resource；Tool overlay 投影按 `(assistantEntryId, ordinal)` durable identity + toolCallId 一致性匹配，禁止 first-candidate fallback；`task.status` 心跳是**完整 JSON 快照**（非 delta），顶层状态与扁平 `descendants` 一起进入规范化指纹并整帧替换、语义去重，绝不追加/合并——同一子 Thread 只保留最新一帧。
@@ -280,12 +289,9 @@ Agent 表单的 Tools/Skills/Subagents 只保存**名称集合**（DTO 三个必
   回退默认）。开启后汇总父 Thread、直接子 task 与 descendant relay 的**全部待决审批**（身份含实际目标
   Thread）；父/子 Agent 完成与错误通知在 working 结束后触发，deny 后 5 秒内抑制 completion；不建立第二套
   Session 状态。
-- **TaskStatusWidget 永久挂载**（`BoundThreadPane` 的 widget zone 第二项、事件详情之后）：无活动 task
-  消息时组件自身返回 null，不占位；不再存在任何偏好开关控制它。
-- **Footer 段顺序**固定为 agent → model → Environment binding → Branch Usage → Notifications（`ThreadStatusFooter`
-  → `buildThreadStatusModel`）：Environment 段展示完整 binding（null 为 `env:none`，不可用时标注 unavailable）；
-  Branch Usage 段聚合**当前 root-to-head 已关闭** `turn_usage`（未关闭 Turn、compaction 与失败残留不计入，
-  见 `thread-timeline/turn-usage.ts`），为空时不显示；Notifications 段展示全局开关状态并可点击切换。
+- **TaskStatusWidget 永久挂载**在共享 `ChatPanel` 的 widget zone（事件详情之后），因此 Chat Bound 与 Canvas Bound 无需调用方手工拼装；无活动 task 消息时组件自身返回 null，不占位，也不存在偏好开关。
+- **Footer 是纯只读事实视图**（`ThreadStatusFooter` → `buildThreadStatusModel`），顺序固定为 Environment/Workspace → Git branch → Branch Usage → `used/contextWindow` → cache hit。Bound Pane 只读取当前 Thread snapshot 已生效的 Environment/context，不把尚未随下一条 batch 提交的 Composer BranchDraft 伪装成当前事实。Environment 使用完整安全 wire binding；未绑定只读展示 `none env`，已绑定展示 `env:名称 · 路径`；路径文本中间省略但 title 保留完整相对路径；不可用时只标记 unavailable，不暴露 daemon 绝对路径。Branch Usage 只聚合当前 root-to-head 已关闭 `turn_usage`（未关闭 Turn、compaction 与失败残留不计入）；usage / cache 缺失时按 `0` 展示，context 在已知 contextWindow 时按 `0/total` 展示。Footer 不含 button、右键行为、Agent、Model、Permission 或 Notification。
+- **Notification 唯一设置入口**是 `/settings` 的全局开关；Bound Thread 只消费 `ApplicationSettingsProvider` 状态执行 best-effort 通知，Footer 不再提供第二个入口。
 
 ## 13. 前端目录
 

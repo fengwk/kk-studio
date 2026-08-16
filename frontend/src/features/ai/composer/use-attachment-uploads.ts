@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createAttachmentPart,
   createPartId,
@@ -23,6 +23,8 @@ export interface AttachmentUpload {
   status: AttachmentUploadStatus
   progress: number
   error: string | null
+  /** 本地图片/视频预览 URL；只在 Composer 生命周期内存在。 */
+  previewUrl: string | null
   /** 提交后等待发送结果期间隐藏（发送失败恢复时重新挂载）。 */
   detached: boolean
 }
@@ -120,6 +122,7 @@ export function useAttachmentUploads(options?: {
   const [uploads, setUploads] = useState<AttachmentUpload[]>([])
   const uploadsRef = useRef<AttachmentUpload[]>([])
   const filesRef = useRef(new Map<string, File>())
+  const previewUrlsRef = useRef(new Map<string, string>())
   const activeRef = useRef(new Set<string>())
 
   const updateUploads = useCallback(
@@ -157,10 +160,11 @@ export function useAttachmentUploads(options?: {
     (localId: string) => {
       activeRef.current.delete(localId)
       const record = uploadsRef.current.find((upload) => upload.localId === localId)
+      filesRef.current.delete(localId)
+      revokePreviewUrl(localId, previewUrlsRef.current)
       if (!record) {
         return
       }
-      filesRef.current.delete(localId)
       const uploadId = record.uploadId
       if (uploadId) {
         void service.deleteUpload(uploadId).catch(() => undefined)
@@ -168,6 +172,17 @@ export function useAttachmentUploads(options?: {
       dropUpload(localId)
     },
     [dropUpload, service],
+  )
+
+  useEffect(
+    () => () => {
+      activeRef.current.clear()
+      filesRef.current.clear()
+      for (const localId of previewUrlsRef.current.keys()) {
+        revokePreviewUrl(localId, previewUrlsRef.current)
+      }
+    },
+    [],
   )
 
   const runPipeline = useCallback(
@@ -239,6 +254,10 @@ export function useAttachmentUploads(options?: {
       for (const file of files) {
         const localId = createPartId()
         const validationError = validateUploadFile(file)
+        const previewUrl = createPreviewUrl(file)
+        if (previewUrl) {
+          previewUrlsRef.current.set(localId, previewUrl)
+        }
         const record: AttachmentUpload = {
           localId,
           uploadId: null,
@@ -249,6 +268,7 @@ export function useAttachmentUploads(options?: {
           status: validationError ? 'error' : 'uploading',
           progress: 0,
           error: validationError,
+          previewUrl,
           detached: false,
         }
         created.push(record)
@@ -305,6 +325,37 @@ export function useAttachmentUploads(options?: {
   }
 }
 
+function createPreviewUrl(file: File): string | null {
+  const kind = mediaKindOf(file.type)
+  if (
+    (kind !== 'image' && kind !== 'video')
+    || typeof URL === 'undefined'
+    || typeof URL.createObjectURL !== 'function'
+  ) {
+    return null
+  }
+  try {
+    return URL.createObjectURL(file)
+  } catch {
+    return null
+  }
+}
+
+function revokePreviewUrl(localId: string, urls: Map<string, string>): void {
+  const url = urls.get(localId)
+  if (!url) {
+    return
+  }
+  urls.delete(localId)
+  if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+    try {
+      URL.revokeObjectURL(url)
+    } catch {
+      // 预览释放失败不影响上传句柄清理。
+    }
+  }
+}
+
 /** 记录在 parts 中的出现次数（localId 或服务端 upload 句柄均可匹配）。 */
 export function uploadOccurrence(upload: AttachmentUpload, parts: ComposerPart[]): number {
   return parts.reduce(
@@ -322,7 +373,7 @@ export function partForUpload(upload: AttachmentUpload): ComposerPart {
   return createAttachmentPart(upload.localId, upload.filename)
 }
 
-/** 移除引用指定上传的全部 attachment parts（tile X）。 */
+/** 移除引用指定上传的全部 attachment parts（上传注册表 X）。 */
 export function removePartsForUpload(
   upload: AttachmentUpload,
   parts: ComposerPart[],

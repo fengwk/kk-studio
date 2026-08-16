@@ -86,7 +86,7 @@ describe('useChatListController', () => {
     )
   })
 
-  it('creates a Chat with the selected default Environment name', async () => {
+  it('creates a Chat with the selected complete Environment binding', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>
@@ -108,9 +108,15 @@ describe('useChatListController', () => {
     act(() => result.current.openCreateChat('assistant'))
     act(() => {
       result.current.createChatModal.onTitleChange('Chat')
-      result.current.createChatModal.onSelectEnvironment('dev')
+      result.current.createChatModal.onSelectEnvironment({
+        name: 'dev',
+        workspacePath: 'projects/kk-studio',
+      })
     })
-    expect(result.current.createChatModal.selectedEnvironmentName).toBe('dev')
+    expect(result.current.createChatModal.selectedEnvironment).toEqual({
+      name: 'dev',
+      workspacePath: 'projects/kk-studio',
+    })
     await act(async () => {
       result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
     })
@@ -119,8 +125,7 @@ describe('useChatListController', () => {
       expect(lastCall[0]).toEqual({
         title: 'Chat',
         agentName: 'assistant',
-        // Modal 语义：选择某 Environment 映射为 root binding；绝不发送裸名称。
-        environment: { name: 'dev', workspacePath: '.' },
+        environment: { name: 'dev', workspacePath: 'projects/kk-studio' },
       })
     })
   })

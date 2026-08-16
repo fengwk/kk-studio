@@ -154,6 +154,9 @@ if [ "$WITH_UI" = "true" ]; then
   if [ "$REAL" = "true" ]; then
     UI_ARGS+=(--real)
   fi
+  if [ "$WITH_TOOLS" = "true" ]; then
+    UI_ARGS+=(--with-tools --daemon-env "$DAEMON_ENV_NAME")
+  fi
   node "$SCRIPT_DIR/e2e/ui-smoke.mjs" "${UI_ARGS[@]}"
   UI_RC=$?
   set -e

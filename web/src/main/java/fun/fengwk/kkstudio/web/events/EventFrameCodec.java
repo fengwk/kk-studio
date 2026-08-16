@@ -26,8 +26,9 @@ import java.util.UUID;
  *
  * <p>客户端帧 {@code {version:1, type:'subscribe'|'unsubscribe', resource:{kind:'thread'|'canvas',
  * id}}} 字段集精确；服务端帧 {@code subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code
- * resync{resource}} / {@code error{code,message[,resource]}}。资源 id 必须是 canonical UUID （{@code
- * UUID.fromString} 往返一致）；游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）。
+ * resync{resource}} / {@code heartbeat} / {@code error{code,message[,resource]}}。资源 id 必须是
+ * canonical UUID （{@code UUID.fromString} 往返一致）；游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超
+ * bigint）。
  */
 final class EventFrameCodec {
 
@@ -136,6 +137,14 @@ final class EventFrameCodec {
     node.put("version", 1);
     node.put("type", "resync");
     node.set("resource", resourceNode(resource));
+    return write(node);
+  }
+
+  /** 编码连接级 {@code heartbeat} 帧；不绑定资源、不携带游标。 */
+  String heartbeat() {
+    ObjectNode node = NODES.objectNode();
+    node.put("version", 1);
+    node.put("type", "heartbeat");
     return write(node);
   }
 

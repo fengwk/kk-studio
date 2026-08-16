@@ -40,7 +40,10 @@ public final class AgentPromptComposer {
     if (systemPrompt != null && !systemPrompt.isBlank()) {
       sections.add(systemPrompt);
     }
-    sections.add(currentEnvironment(currentEnvironment));
+    String environment = currentEnvironment(currentEnvironment);
+    if (!environment.isBlank()) {
+      sections.add(environment);
+    }
     if (!skills.isEmpty()) {
       sections.add(
           LOADER.load(ROOT + "agent-skills.md").render(Map.of("skills", skillEntries(skills))));
@@ -60,21 +63,27 @@ public final class AgentPromptComposer {
   }
 
   private static String currentEnvironment(CurrentEnvironmentContext context) {
-    String name = context.binding() == null ? "none" : context.binding().environmentName().value();
-    String workspace = context.binding() == null ? "none" : context.binding().workspacePath();
-    String operatingSystem =
-        context.operatingSystem() == null ? "none" : context.operatingSystem().wireValue();
-    String note = context.note() == null ? "none" : context.note();
-    return LOADER
-        .load(ROOT + "agent-current-environment.md")
-        .render(
-            Map.of(
-                "name", escapeXml(name),
-                "workspace", escapeXml(workspace),
-                "system", escapeXml(operatingSystem),
-                "date", escapeXml(DATE_FORMAT.format(context.currentDate())),
-                "note", escapeXml(note)))
-        .stripTrailing();
+    List<String> fields = new ArrayList<>();
+    if (context.binding() != null) {
+      addEnvironmentField(fields, "name", context.binding().environmentName().value());
+      addEnvironmentField(fields, "workspace", context.binding().workspacePath());
+    }
+    if (context.operatingSystem() != null) {
+      addEnvironmentField(fields, "system", context.operatingSystem().wireValue());
+    }
+    addEnvironmentField(fields, "date", DATE_FORMAT.format(context.currentDate()));
+    addEnvironmentField(fields, "note", context.note());
+    if (fields.isEmpty()) {
+      return "";
+    }
+    return "<current_environment>\n" + String.join("\n", fields) + "\n</current_environment>";
+  }
+
+  private static void addEnvironmentField(List<String> fields, String name, String value) {
+    if (value == null || value.isBlank() || "none".equals(value)) {
+      return;
+    }
+    fields.add("- " + name + ": " + escapeXml(value));
   }
 
   private static String skillEntries(List<SkillBinding> skills) {

@@ -66,9 +66,9 @@ export interface ThreadEventRecord {
   turnNumber: number
   kind: ThreadEventKind
   status: ThreadEventStatus
-  /** 类型标签（本地化，kind badge 文案）。 */
+  /** 调试标签：durable Entry 使用真实 entryType 枚举；synthetic 使用内部 kind 名。 */
   title: string
-  /** 单行摘要（首行 + 140 字符上限）。 */
+  /** 单行摘要：durable Entry 使用压缩后的 payload JSON。 */
   summary: string
   createdAt: DialogueTimestamp
   /** 结构化详情行（detail widget 渲染为 label/value）。 */
@@ -86,24 +86,6 @@ export interface ThreadEventTimelineInput {
   toolStreams?: ReadonlyMap<string, RealtimeToolStream> | null
 }
 
-const KIND_TITLE_KEY: Record<ThreadEventKind, string> = {
-  ROOT: 'ai.runtime.event.kind.ROOT',
-  TURN_START: 'ai.runtime.event.kind.TURN_START',
-  USER_MESSAGE: 'ai.runtime.event.kind.USER_MESSAGE',
-  ASSISTANT_MESSAGE: 'ai.runtime.event.kind.ASSISTANT_MESSAGE',
-  TOOL_CALL: 'ai.runtime.event.kind.TOOL_CALL',
-  TOOL_RESULT: 'ai.runtime.event.kind.TOOL_RESULT',
-  MODEL_ATTEMPT_FAILURE: 'ai.runtime.event.kind.MODEL_ATTEMPT_FAILURE',
-  ASSISTANT_ERROR: 'ai.runtime.event.kind.ASSISTANT_ERROR',
-  ASSISTANT_ABORTED: 'ai.runtime.event.kind.ASSISTANT_ABORTED',
-  CUSTOM: 'ai.runtime.event.kind.CUSTOM',
-  CUSTOM_MESSAGE: 'ai.runtime.event.kind.CUSTOM_MESSAGE',
-  COMPACTION: 'ai.runtime.event.kind.COMPACTION',
-  TURN_END: 'ai.runtime.event.kind.TURN_END',
-  ACTIVE_MODEL_INVOCATION: 'ai.runtime.event.kind.ACTIVE_MODEL_INVOCATION',
-  ACTIVE_TOOL_INVOCATION: 'ai.runtime.event.kind.ACTIVE_TOOL_INVOCATION',
-}
-
 const STATUS_TEXT_KEY: Record<ThreadEventStatus, string> = {
   pending: 'ai.runtime.event.status.PENDING',
   running: 'ai.runtime.event.status.RUNNING',
@@ -118,7 +100,35 @@ export function eventStatusText(status: ThreadEventStatus): string {
 }
 
 function kindTitle(kind: ThreadEventKind): string {
-  return translate(KIND_TITLE_KEY[kind])
+  return kind
+}
+
+function asBranchDebugRecord(
+  record: ThreadEventRecord,
+  entry: HarnessSessionEntryDTO,
+): ThreadEventRecord {
+  return {
+    ...record,
+    title: entry.entryType || record.kind,
+    summary: compactJson(entry.payloadJson || '{}'),
+    rawJson: prettyJson(entry.payloadJson || '{}'),
+  }
+}
+
+function compactJson(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw))
+  } catch {
+    return raw.replace(/\s+/g, ' ').trim() || '{}'
+  }
+}
+
+function prettyJson(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
 }
 
 /**
@@ -175,11 +185,14 @@ export function buildThreadEventTimeline(
     turnStartByEntryId.set(entry.entryId, currentTurnStartEntryId)
     const payload = parsePayload(entry.payloadJson)
     records.push(
-      projectEntryRecord(entry, payload, {
-        turnStartEntryId: currentTurnStartEntryId,
-        turnNumber: currentTurnNumber,
-        pendingUsage,
-      }),
+      asBranchDebugRecord(
+        projectEntryRecord(entry, payload, {
+          turnStartEntryId: currentTurnStartEntryId,
+          turnNumber: currentTurnNumber,
+          pendingUsage,
+        }),
+        entry,
+      ),
     )
     if (entry.entryType === 'MODEL_ATTEMPT_FAILURE') {
       const attempt = asRecord(payload.attempt)

@@ -85,6 +85,12 @@ public interface HarnessStore {
      */
     EntryPath loadEntryPath(UUID headEntryId);
 
+    /**
+     * 读取指定 Session 的全部不可变 Entry，包含非当前 head 路径上的历史分支。按 {@code createdAt} 升序，相同时按 PostgreSQL 兼容的无符号
+     * UUID 序（{@link UuidOrder}）。Session 不存在抛 {@link IllegalArgumentException}；返回不可变列表。
+     */
+    List<Entry> loadEntriesBySessionId(UUID sessionId);
+
     /** 插入新 Thread；head Entry 必须存在，id 冲突抛 {@link IllegalArgumentException}。插入后本事务内可更新。 */
     void insertThread(ThreadState thread);
 

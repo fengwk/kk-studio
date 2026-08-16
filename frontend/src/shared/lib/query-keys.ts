@@ -29,6 +29,8 @@ export const queryKeys = {
   threads: {
     all: ['threads'] as const,
     snapshot: (threadId: string) => ['threads', 'snapshot', threadId] as const,
+    entries: (threadId: string) => ['threads', 'entries', threadId] as const,
+    systemPrompt: (threadId: string) => ['threads', 'system-prompt', threadId] as const,
   },
   comfyui: {
     workflows: ['comfyui', 'workflows'] as const,

@@ -6,13 +6,13 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **70** 个 API case；标准入口默认执行免费的 **L1 59** 个 case（其中
+当前注册 **73** 个 API case；标准入口默认执行免费的 **L1 61** 个 case（其中
 `canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约）。Canvas
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI E2E
-由 `scripts/e2e.sh --ui` 另行附加，默认注册 29 个免费 UI case，不计入这 70 个 Node API case。
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 35 个免费 UI case；`--with-tools --ui` 再追加 1 个 Environment/Workspace 创建 case。这些 UI case 不计入 73 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -61,7 +61,7 @@ node scripts/e2e/ui-smoke.mjs \
 --no-report
 ```
 
-默认 backend URL 是 `http://127.0.0.1:18081`，默认 frontend URL 由 `scripts/e2e.sh` 传入 `http://127.0.0.1:5173`。真实 Provider 使用 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`，默认测试模型是 `minimax/MiniMax-M2.7`。
+默认 backend URL 是 `http://127.0.0.1:18081`，默认 frontend URL 由 `scripts/e2e.sh` 传入 `http://127.0.0.1:5173`。真实 Provider 使用 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`；所有付费 API/UI case 都在执行前硬校验 Provider/Model 为 `minimax/MiniMax-M2.7`，不得静默切换到其它付费 Provider。
 
 本地完整免费 Canvas 回归使用 `deploy/test` 提供 PostgreSQL、Redis 与 MinIO，只连接本机
 Redis/S3-compatible endpoint：
@@ -87,7 +87,7 @@ env \
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 ```
 
-该命令选择 62 个免费 API case 和 29 个免费 UI case，不启用真实 Provider、Tool 或
+该命令选择 65 个免费 API case 和 35 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
 rebuild；不得为这条回归追加 `--real`。
 
@@ -120,7 +120,7 @@ FunctionRun，不下载或导入视频。它只准备页面，不触发生成；
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（注册 62，默认 59）
+### L1（注册 65，默认 61）
 
 ```text
 seed.structured_model_config
@@ -133,6 +133,7 @@ thread.custom_message_strict_wire
 thread.command_idempotent_replay
 thread.stale_command_cas_rejected
 thread.rebind_same_session
+thread.session_entry_tree
 thread.rebind_cross_session_rejected
 thread.stop_idle_noop
 thread.branch_settings_diff_commands
@@ -181,9 +182,11 @@ config.agent.invalid.unknown_subagent
 config.agent.invalid.unknown_field_rejected
 matrix.agent.teardown_model
 model.attempt_failure_visibility
+events.heartbeat_keepalive
 canvas.storage_upload_contract
 canvas.function_fake_runtime
 chat.attachment_upload_contract
+chat.attachment_inline_image_latest_agent_tools
 canvas.api_version_contract
 ```
 
@@ -204,6 +207,7 @@ L1 的关键语义断言：
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
 - `model.attempt_failure_visibility` 免费 L1：先通过 `/api/events/v1` 建立 Thread 订阅并收到 `subscribed` ack；case 内 `node:http` OpenAI-compatible SSE mock 的首次 Provider attempt 随后流出确定性 text partial，再通过断连触发 LangChain4j `TRANSIENT`。事件通道必须观测到该 partial；活跃期轮询同一快照精确断言 `modelAttemptFailures`（`attempt=1`、HTTP decimal-string `sequence`、text/thinking、error、合法 `failedAt/retryAt`），立即 retry 的 Provider `messages` 必须与失败前完全一致且不含失败 partial/error；quiescent 后断言 `MODEL_ATTEMPT_FAILURE` 位于成功 assistant 之前且 payload 保留 partial/error/retryAt、未物化列表清空；第二 turn 的 mock request `messages` 同样不含失败 attempt 的 partial/thinking/error，两个 turn 均 `COMPLETED`，成功 assistant 不拼接失败 partial；
+- `events.heartbeat_keepalive` 使用 Node 原生 WebSocket 直连 `/api/events/v1`，不建立资源订阅，在 25 秒上限内等待严格 `{version:1,type:"heartbeat"}`；收到后连接必须仍为 OPEN。服务端所有连接共享单个 scheduler，case 不创建客户端 ping 协议或第三方 WS 依赖；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
 - `canvas.api_version_contract` 免费 L1：create/list/get/commands 使用 canonical UUID id 与
   十进制字符串 graph `version`（数据库 `canvas_document.version` 仍是 bigint，wire 是 canonical
@@ -230,6 +234,10 @@ L1 的关键语义断言：
   原子消费；入队响应 `requestHash` 为 64 位小写 hex、durable payload 为
   `resource(blobId,name,preview)`；整批重放幂等不二次消费；已消费/未 READY upload 与
   `IMAGE/AUDIO/VIDEO` 内容类型确定性 400。
+- `chat.attachment_inline_image_latest_agent_tools` 仅在 `--with-canvas-storage` 下执行：本地
+  OpenAI Responses mock 捕获真实 Provider 请求；Thread 创建后更新同名 Agent 的工具集合，下一
+  turn 必须忽略历史 `branchSettings.activeTools` 并发送最新 `read/grep`；本地 MinIO 图片必须作为
+  精确 `data:image/png;base64,...` source 发送，请求不得包含 `127.0.0.1`/`localhost` 预签名 URL。
 
 ### L2/L3/L4（8）
 
@@ -253,9 +261,9 @@ tool.read_turn
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；`rootPath` 存在；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `daemon.directories` | `--with-tools` | `GET /api/ai/environments/{name}/directories` 缺省 `path="."` 浏览 root（canonical 相对 wire path；`displayPath` 等于请求 `path` 的最后一段，root 为 `'.'`，只作展示、绝不暴露 daemon 本地绝对路径；root `parentPath="."`；`truncated` 布尔；`gitBranch` 可空；entries 只含直属子目录 `{name,path}`：`name` 等于 `path` 最后一段、`path` 是请求目录的直接子路径）；显式 `path="."` 与缺省一致；`..` 段 400 `INVALID_PATH`、不存在目录 404 `NOT_FOUND`、非法环境名 400 `INVALID_ENVIRONMENT_NAME` |
-| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/sizeBytes 与 fixture 字节一致 |
+| `tool.read_turn` | `--real --with-tools` | e2e profile 固定 `read: ask`；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
 
-### L5 UI（默认 29，`--real` 追加 1）
+### L5 UI（默认 35，`--with-tools` / `--real` 各追加 1）
 
 `scripts/e2e.sh --ui` 的免费 UI E2E 矩阵包含：
 
@@ -285,10 +293,16 @@ ui.chat.composer.palette_precedence
 ui.chat.selection_panel.keyboard_mode
 ui.chat.composer.escape_refocus
 ui.chat.composer.submit_clears_draft
+ui.chat.composer.attachment_previews
 ui.chat.events.conversation_switch
 ui.chat.events.keyboard_nav
 ui.chat.events.scroll_restore
 ui.chat.shortcuts.escape_restores_focus
+ui.chat.composer.settings_controls_batch
+ui.chat.composer.multi_pane_settings_isolation
+ui.chat.footer.readonly_facts
+ui.chat.task_status.bound_widget
+ui.settings.notifications_single_entry
 ```
 
 其中 `ui.canvas.page_loads` 验证 `/canvas` library 保留全局顶栏，点击或创建后进入
@@ -296,10 +310,11 @@ canonical UUID 形式 `/canvas/:canvasId`：编辑器无全局顶栏且挂 `canv
 composer，点击 header「Chat / 对话」toggle 展开/收起；默认面板宽于 360px，左边缘拖拽调宽后 zoom
 保持不变；add launcher（左侧中部功能轨）仍可打开菜单，V/H 按钮不展示，缩放控制位于左下；首屏 fit
 产生的动态缩放值位于合法区间，Chat 面板展开/收起不改变该缩放值，点击缩放值可重置为 `100%`
-且刷新后恢复该持久化视口，浏览器 back 返回 library、forward 再进入编辑器；
+且刷新后恢复该持久化视口；展开的 Canvas Blank Thread 使用共享双层 Composer，常驻 Permission 与
+Model/Variant 控件且不制造 Footer fallback；浏览器 back 返回 library、forward 再进入编辑器；
 Function 生成的付费路径不进入默认 UI E2E，前端组件测试使用 fake Function runtime
 隔离。
-`--real` 额外执行 `ui.chat.blank_first_send_real`。Headless 模式只对 Chromium 子进程移除
+`--with-tools` 额外执行 `ui.chat.create_environment_workspace`：Create Chat 必须先选 READY Environment，再进入目录模式并明确确认 Workspace，提交后 HTTP Chat DTO 精确保存完整 binding；不得在 Environment 点击时静默写入 `workspacePath:'.'`。`--real` 额外执行 `ui.chat.blank_first_send_real`。Headless 模式只对 Chromium 子进程移除
 宿主 `DISPLAY` 与 `WAYLAND_DISPLAY`，避免混合桌面环境导致 compositor 停帧；`--headed`
 保留宿主显示环境。
 
@@ -314,13 +329,19 @@ Composer 矩阵的维度与边界如下：
 | `ui.chat.composer.edit_recalled` | durable 历史 + 当前草稿 | 编辑召回内容后提升为新草稿，二次导航与刷新恢复一致 |
 | `ui.chat.composer.draft_persistence_boundaries` | 空 Pane | 精确空白/换行持久化、刷新恢复、纯空白清理、无历史时上键 no-op |
 | `ui.chat.composer.palette_precedence` | durable 历史 + plus/slash palette | palette 打开时方向键只移动命令，不召回消息；菜单模式保留草稿，slash Escape 清理；命令表不重复渲染 Composer 查询行 |
-| `ui.chat.selection_panel.keyboard_mode` | Chat-scoped Thread picker + `/tree` history panel + 两条真实 Thread | 无 modal backdrop；Composer 与 interaction panel 互斥；搜索自动聚焦；Tab 切换排序；方向键移动；丢弃确认优先于 picker 且取消后恢复搜索；Esc 返回 Composer 并保留草稿 |
+| `ui.chat.selection_panel.keyboard_mode` | Chat-scoped Thread picker + head 回退后形成的真实分叉 Session + 两条真实 Thread | 无 modal backdrop；Composer 与 interaction panel 互斥；搜索自动聚焦；Tab 切换排序；方向键移动；Tree 面板横向铺满，并在完整 Session Tree 上验证 pi 风格 `›` 选择光标、`•` 当前路径、`├─ / │ / └─` 分叉连续性；丢弃确认明确指出未发送内容且使用 icon-only 关闭按钮，取消后恢复搜索；Esc 返回 Composer 并保留草稿 |
 | `ui.chat.composer.escape_refocus` | transcript 文字选区 + 当前 Pane 草稿 | 全局 Escape 恢复当前 Pane Composer 的焦点与末尾 caret，草稿/localStorage 不变 |
 | `ui.chat.composer.submit_clears_draft` | durable Thread + 新提交 | 提交后 composer/localStorage 立即清空，用户消息进入 timeline |
-| `ui.chat.events.conversation_switch` | durable Thread（真实 USER 条目） | `/events` 唯一主滚动区替换 transcript；点击 USER 事件打开只读 detail 且原始 payload JSON 含 `"role"` 与正文；Composer 保持挂载可编辑；`+` 菜单回 `/conversation` 卸载事件视图且草稿/localStorage 不变 |
-| `ui.chat.events.keyboard_nav` | durable Thread | listbox 初始 active 为最新事件；`ArrowUp` 移动；hover（mousemove）驱动 active；`ArrowDown` 离开首项；`Home`/`End` 边界；`Enter` 开详情、`Esc` 关详情不落回全局 Escape |
+| `ui.chat.composer.attachment_previews` | 浏览器路由内的免费 READY upload stub + 本地 PNG/MP4/PDF | editor pill 完整显示 `[文件名]` 且不做省略；上方注册表固定 200px，长文件名单行 `…`；图片展示可点击缩略图并打开 Lightbox，视频展示首帧 preview，PDF 展示 text 类型图标；只验证草稿 UI，不发送模型请求 |
+| `ui.chat.events.conversation_switch` | durable Thread（真实 USER 条目） | `/events` 顶部展示 10 行最新系统提示词预览，下方按当前 branch Entry 顺序展示调试列表；标签为真实 `entryType`，摘要为压缩 payload JSON；点击打开只读 pretty JSON 详情且含 `"role"` 与正文；Composer 保持挂载可编辑；再次 `/events` 或 `+` 菜单 toggle 卸载事件视图且草稿/localStorage 不变 |
+| `ui.chat.events.keyboard_nav` | durable Thread | listbox 初始无选中；点击选中并打开详情；hover 不改选中；`↑/↓` 只在已选中时切换相邻行；`Esc` 取消选中并关闭详情 |
 | `ui.chat.shortcuts.escape_restores_focus` | 空 Pane + 草稿 | `+` 菜单打开只读快捷键面板（region `键盘快捷键`）；`Esc` 关闭并恢复 Composer 焦点，草稿/localStorage 不变 |
-| `ui.chat.events.scroll_restore` | 30 条 durable Thread（两类主视图均真实 overflow；事件行紧凑布局后需更多条目） | headless 下以 DOM 属性 + 原生 `scroll` 事件向上滚动 600px；`/events` 与 `/conversation` 往返后各自的 `scrollTop` 原样恢复（容差 ±2），不贴底；重绑清零由单元测试覆盖 |
+| `ui.chat.events.scroll_restore` | 30 条 durable Thread（两类主视图均真实 overflow；事件行紧凑布局后需更多条目） | headless 下以 DOM 属性 + 原生 `scroll` 事件向上滚动 600px；`/events` toggle 往返后各自的 `scrollTop` 原样恢复（容差 ±2），不贴底；重绑清零由单元测试覆盖 |
+| `ui.chat.composer.settings_controls_batch` | 本地 hold-provider + 两 Variant Model + 活跃 Thread | 浏览器几何确认默认单行输入与控制栏组成紧凑两行布局；Permission 菜单只有 Default/YOLO；Model→Variant 两级 anchored listbox；选择 review+YOLO 后与 USER_MESSAGE 按 `SET_MODEL→SET_YOLO→USER_MESSAGE` 同批入队 |
+| `ui.chat.composer.multi_pane_settings_isolation` | split-2 绑定两条真实 Thread | pane-1 YOLO 不污染 pane-2 Default；一次只存在一个 settings listbox；打开 pane-2 自动关闭 pane-1 菜单，Escape 只恢复 pane-2 Composer 焦点 |
+| `ui.chat.footer.readonly_facts` | 本地 completion-provider 冻结 usage，再切换到 unavailable 长 Workspace path | Footer 中间省略安全 wire path，完整 title 不含 daemon 绝对路径；展示 usage、used/contextWindow、cache hit；缺失 usage 时按 0 展示；缺失 Git 整段省略；无 button，且不含 Agent/Model/Permission/Notification |
+| `ui.chat.task_status.bound_widget` | 先绑定共享 Bound ChatPanel，再由本地 parent Provider 产生真实 `task` tool call，child Provider 保持运行 | 通过 `/api/events/v1` 后续 `task.status` heartbeat 渲染 TaskStatusWidget，不把 lossy realtime 误当作可重放快照；无需真实模型费用 |
+| `ui.settings.notifications_single_entry` | Settings + 免费 durable Thread | `/settings` 恰好一个浏览器通知 switch；Thread panel/Footer 无 switch、button 或 `notify:*` 旧入口 |
 
 durable fixture 使用不存在的 Agent，使 USER_MESSAGE 在 Provider 调用前确定性物化；queued
 fixture 使用 case 内本地 hold-provider 保持真实 Model invocation 活跃，再通过真实命令 API
@@ -515,11 +536,11 @@ WebSocket /api/ai/environment/daemon/v2
 - daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会先外部化为瞬时 ResourceRef（`file:///` URI，携带 mediaType/size/sha256）；Entry 写入前再摄入全局 Blob，durable message 为 `resource(blobId,name,preview)`；daemon preview 阈值默认 2000 行 / 50KB；
 - durable Blob Resource 经 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 渲染，原件响应提供权威 mediaType/sizeBytes；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation file/s3 ResourceRef 兼容，未知或不完整内容身份不产生链接。
 
-默认 L1 不覆盖 task 心跳与 UI 呈现：`task.status` 心跳、renderer 分发、TaskStatusWidget 与浏览器通知等呈现契约由前端单测覆盖，真实 task 委派只由显式 `--real` 的 `real.task_delegation` 覆盖。
+默认 L1 API 不执行 task Tool；前端单测覆盖 `task.status` 解析、renderer 分发、TaskStatusWidget 与审批转发，免费 UI case `ui.chat.task_status.bound_widget` 使用本地 parent/child OpenAI-compatible mock 验证真实 task heartbeat 的浏览器呈现。完整 durable 子 Thread 与终态 envelope 仍由显式 `--real` 的 `real.task_delegation` 覆盖。
 
 WebSocket `/api/events/v1`：Thread 订阅 ack cursor 是 canonical decimal durable revision，Redis
 realtime delta 经 `event{name:'realtime'}` 投递；revision/version 事件只携带 ack 之后的前进值
-（`event{name,cursor,data}`，十进制字符串，客户端随后拉 snapshot/changes），`resync` 要求整体快照。
+（`event{name,cursor,data}`，十进制字符串，客户端随后拉 snapshot/changes），`resync` 要求整体快照；连接级 `{version:1,type:'heartbeat'}` 每 20 秒保活，由 `events.heartbeat_keepalive` 覆盖。
 
 ## 5. MiniMax-H3 手工 smoke
 

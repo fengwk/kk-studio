@@ -16,6 +16,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.resource.ManagedResourceDownloadService;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewServiceFactory;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
@@ -235,6 +237,12 @@ public class HarnessRuntimeConfiguration {
       ObjectProvider<ToolResultHistoryMaterializer> materializerProvider) {
     return new HarnessRuntime(
         store, clock, materializerProvider.getIfAvailable(), modelProcessor, toolProcessor);
+  }
+
+  @Bean
+  public SystemPromptPreviewService systemPromptPreviewService(
+      HarnessRuntime runtime, SystemPromptPreviewServiceFactory factory) {
+    return factory.create(runtime);
   }
 
   /** fail-fast 单线程 drain executor：串行执行 drain，拒绝时同步抛错。 */

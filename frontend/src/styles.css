@@ -892,6 +892,23 @@ textarea::placeholder {
   overflow: hidden;
 }
 
+.create-chat-modal-card {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.create-chat-modal-card .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.create-chat-modal-card .environment-workspace-panel {
+  flex: 0 1 min(440px, 52vh);
+  margin: 0;
+}
+
 .history-branch-body {
   display: flex;
   flex-direction: column;
@@ -993,10 +1010,19 @@ textarea::placeholder {
   opacity: 0.5;
 }
 
+.history-branch-entry-cursor {
+  width: 10px;
+  flex: 0 0 10px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
 .history-branch-entry-glyphs {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  overflow: hidden;
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.5;
@@ -1060,7 +1086,22 @@ textarea::placeholder {
 .history-branch-footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-branch-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-branch-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
   gap: 10px;
 }
 
@@ -1151,7 +1192,7 @@ div.is-error {
 }
 
 .confirm-modal-card {
-  width: min(420px, 100%);
+  width: min(480px, 100%);
 }
 
 .modal-header,
@@ -1169,6 +1210,35 @@ div.is-error {
   font-weight: 600;
 }
 
+.modal-close-button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.modal-close-button:hover:not(:disabled) {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.modal-close-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.modal-close-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 .modal-body {
   display: flex;
   flex-direction: column;
@@ -1179,12 +1249,13 @@ div.is-error {
 .confirm-modal-body {
   flex-direction: row;
   align-items: flex-start;
-  gap: 16px;
+  gap: 12px;
 }
 
 .confirm-modal-icon {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
   border-radius: var(--radius-md);
   display: inline-flex;
   align-items: center;
@@ -1201,6 +1272,22 @@ div.is-error {
 .confirm-modal-icon svg {
   width: 18px;
   height: 18px;
+}
+
+.confirm-modal-card .modal-header {
+  padding: 14px 16px;
+}
+
+.confirm-modal-card .modal-header h2 {
+  font-size: 14px;
+}
+
+.confirm-modal-card .modal-body {
+  padding: 18px 16px;
+}
+
+.confirm-modal-card .modal-footer {
+  padding: 12px 16px;
 }
 
 .confirm-modal-description {
@@ -1308,6 +1395,33 @@ div.is-error {
 .form-select.is-disabled .form-select-chevron {
   color: var(--fg-dim);
   opacity: 0.78;
+}
+
+.environment-binding-trigger {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.environment-binding-trigger:hover:not(:disabled),
+.environment-binding-trigger[aria-expanded='true'] {
+  border-color: var(--border-hover);
+}
+
+.environment-binding-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .form-group textarea {
@@ -1783,15 +1897,46 @@ div.is-error {
   gap: 14px;
 }
 
+.thread-events-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.thread-system-prompt {
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 8px 12px 0;
+}
+
+.thread-system-prompt-body {
+  max-height: calc(10 * 1.45em);
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-active);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Event 主视图：与 Conversation 互斥的滚动区，listbox/option 语义 */
 .thread-events {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 8px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 58px max-content minmax(0, 1fr) 8px;
+  align-content: start;
+  column-gap: 8px;
+  row-gap: 2px;
   outline: none;
 }
 
@@ -1801,9 +1946,9 @@ div.is-error {
   border-radius: 8px;
   cursor: pointer;
   display: grid;
-  grid-template-columns: 58px auto minmax(0, 1fr) auto;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: center;
-  gap: 8px;
   min-width: 0;
 }
 
@@ -1824,10 +1969,12 @@ div.is-error {
 }
 
 .thread-event-badge {
+  justify-self: start;
   padding: 1px 7px;
   border-radius: 999px;
   background: var(--surface-active);
   color: var(--fg);
+  font-family: var(--mono);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.5;
@@ -1838,6 +1985,7 @@ div.is-error {
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
+  font-family: var(--mono);
   font-size: 12px;
   line-height: 1.45;
   text-overflow: ellipsis;
@@ -2478,12 +2626,95 @@ div.is-error {
   font-style: normal;
 }
 
+.thread-block-tool,
 .thread-block-tool-call,
 .thread-block-tool-result {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
+}
+
+.thread-block-tool .thread-block-label,
+.thread-block-tool-call .thread-block-label,
+.thread-block-tool-result .thread-block-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.thread-tool-name {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.thread-tool-path,
+.thread-tool-flag {
+  min-width: 0;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.thread-tool-path {
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.thread-tool-toggle,
+.thread-tool-copy {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--fg-dim);
+  background: transparent;
+  cursor: pointer;
+}
+
+.thread-tool-toggle svg,
+.thread-tool-copy svg {
+  width: 14px;
+  height: 14px;
+}
+
+.thread-tool-copy {
+  margin-left: auto;
+  opacity: 0;
+}
+
+.thread-block-tool:hover .thread-tool-copy,
+.thread-tool-copy:focus-visible {
+  opacity: 1;
+}
+
+.thread-tool-toggle:hover,
+.thread-tool-copy:hover {
+  color: var(--fg);
+  background: var(--stage-dot);
+}
+
+.thread-tool-preview-body {
+  max-height: calc(5 * 1.45em);
+  overflow: auto;
+}
+
+.thread-tool-preview-body.is-expanded {
+  max-height: none;
+}
+
+.thread-tool-preview-body.is-edit .is-added {
+  color: var(--green);
+}
+
+.thread-tool-preview-body.is-edit .is-removed {
+  color: var(--danger);
 }
 
 .thread-block-tool-result {
@@ -2495,10 +2726,11 @@ div.is-error {
 }
 
 .thread-tool-status {
+  flex: 0 0 auto;
   margin-left: auto;
   font-size: 10px;
   color: var(--fg-dim);
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .thread-tool-status.streaming { color: var(--warning); }
@@ -2518,25 +2750,59 @@ div.is-error {
 }
 
 .thread-block-model-attempt-failure-status {
-  padding: 4px 12px 0;
+  padding: 4px 12px;
   color: var(--fg-dim);
   font-size: 12px;
 }
 
-.thread-block-model-attempt-failure-status strong {
-  color: var(--warning);
+.thread-block-model-attempt-failure-status .thread-block-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.thread-attempt-failure-title {
+  color: var(--fg-muted);
   font-weight: 600;
 }
 
+.thread-attempt-failure-number,
+.thread-block-model-attempt-failure-error code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--stage-dot);
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
 .thread-attempt-failure-retry {
-  margin-left: 8px;
   color: var(--fg-dim);
 }
 
 .thread-block-model-attempt-failure-error {
-  padding: 8px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 12px;
   border-left: 2px solid var(--danger-border);
-  background: var(--danger-soft);
+  background: transparent;
+}
+
+.thread-block-model-attempt-failure-error code {
+  flex: 0 0 auto;
+  color: var(--danger);
+}
+
+.thread-block-model-attempt-failure-error .thread-error-raw {
+  min-width: 0;
+  flex: 1;
+  color: var(--fg-muted);
 }
 
 .thread-tool-pre {
@@ -2994,24 +3260,42 @@ div.is-error {
 }
 
 .thread-composer {
+  position: relative;
   flex-shrink: 0;
   padding: 8px 16px 10px;
   background: var(--stage-bg);
+  container-type: inline-size;
 }
 
 .thread-dock {
+  position: relative;
   width: 100%;
   margin: 0;
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  min-height: 48px;
-  padding: 6px 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 8px;
   border: 1px solid var(--stage-dot);
-  border-radius: 24px;
+  border-radius: 18px;
   background: var(--overlay-surface);
   box-shadow: none;
   backdrop-filter: blur(18px);
+}
+
+.thread-dock-controls {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.thread-dock-controls-spacer {
+  min-width: 0;
+  flex: 1;
 }
 
 .thread-dock-add {
@@ -3082,9 +3366,8 @@ div.is-error {
 
 .composer-editor {
   position: relative;
-  flex: 1;
   min-width: 0;
-  min-height: 34px;
+  min-height: 36px; /* one 20px text line centered by symmetric padding */
   max-height: 190px; /* ~10 lines at 18px line-height */
   overflow-y: auto;
   border: 0;
@@ -3093,7 +3376,7 @@ div.is-error {
   color: var(--fg);
   font-size: 14px;
   line-height: 20px;
-  padding: 7px 4px;
+  padding: 8px 6px;
   white-space: pre-wrap;
   word-break: break-word;
   cursor: text;
@@ -3102,9 +3385,9 @@ div.is-error {
 .composer-editor[data-placeholder-visible='true']::before {
   content: attr(data-placeholder);
   position: absolute;
-  top: 7px;
-  right: 4px;
-  left: 5px;
+  top: 8px;
+  right: 6px;
+  left: 7px;
   color: var(--fg-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3119,9 +3402,6 @@ div.is-error {
 
 .composer-pill {
   display: inline-block;
-  max-width: min(320px, 80%);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: bottom;
   margin: 0 3px;
@@ -3138,19 +3418,187 @@ div.is-error {
 .thread-composer-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   overflow-x: auto;
-  padding: 0 2px 8px;
+  padding: 0 2px 6px;
+}
+
+.thread-composer-controls {
+  position: relative;
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.thread-composer-controls-left,
+.thread-composer-controls-right {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.thread-composer-controls-right {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.thread-composer-control {
+  min-width: 0;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.thread-composer-control:hover:not(:disabled),
+.thread-composer-control[aria-expanded='true'] {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.thread-composer-control:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-composer-control > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-composer-control > svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+}
+
+.thread-composer-model-control {
+  max-width: min(100%, 420px);
+}
+
+.thread-composer-menu {
+  position: absolute;
+  z-index: 35;
+  bottom: calc(100% + 8px);
+  min-width: 180px;
+  max-width: min(420px, calc(100vw - 48px));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--overlay-surface-strong);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.thread-composer-menu.permission {
+  left: 0;
+}
+
+.thread-composer-menu.model {
+  right: 0;
+  min-width: min(340px, calc(100vw - 48px));
+}
+
+.thread-composer-menu-search {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  outline: 0;
+}
+
+.thread-composer-menu ul {
+  max-height: min(340px, 48vh);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  outline: 0;
+  list-style: none;
+}
+
+.thread-composer-menu li > button,
+.thread-composer-menu-back {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thread-composer-menu li > button.active,
+.thread-composer-menu li > button:hover,
+.thread-composer-menu-back:hover {
+  background: var(--surface-active);
+}
+
+.thread-composer-menu li > button > span,
+.thread-composer-menu-back {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-composer-menu li > button > svg,
+.thread-composer-menu-back > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--green-primary);
+}
+
+.thread-composer-menu-back {
+  justify-content: flex-start;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--fg-muted);
+}
+
+.thread-composer-menu-back > svg {
+  color: currentColor;
+}
+
+@container (max-width: 520px) {
+  .thread-composer-model-control {
+    max-width: 220px;
+  }
 }
 
 .attachment-reference {
   position: relative;
+  width: 200px;
   min-width: 0;
+  min-height: 54px;
+  flex: 0 1 200px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   max-width: 100%;
-  padding: 5px 8px;
+  padding: 6px 8px 6px 6px;
   border-radius: 8px;
   color: var(--fg-muted);
   background: var(--white-04);
@@ -3158,7 +3606,56 @@ div.is-error {
   font-size: 12px;
 }
 
-.attachment-reference-markdown {
+.attachment-reference-preview,
+.attachment-reference-file-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-active);
+  color: var(--fg-dim);
+}
+
+.attachment-reference-preview img,
+.attachment-reference-preview video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.attachment-reference-preview {
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.attachment-reference-preview:hover {
+  border-color: var(--fg-dim);
+}
+
+.attachment-reference-file-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.attachment-reference-file-icon.is-audio {
+  color: var(--info);
+}
+
+.attachment-reference-details {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.attachment-reference-name {
   min-width: 0;
   overflow: hidden;
   color: var(--info);
@@ -3168,18 +3665,16 @@ div.is-error {
 }
 
 .attachment-reference-status {
-  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--fg-dim);
   font-size: 11px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .attachment-reference.is-error .attachment-reference-status {
-  max-width: 240px;
-  min-width: 0;
-  overflow: hidden;
   color: var(--danger);
-  text-overflow: ellipsis;
 }
 
 .attachment-reference-retry,
@@ -3439,6 +3934,10 @@ div.is-error {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.thread-interaction-panel .environment-workspace-body {
+  padding: 8px 8px 0;
 }
 
 .thread-interaction-header {
@@ -3969,7 +4468,7 @@ div.is-error {
   flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 6px;
-  padding-top: 8px;
+  padding: 8px 10px 12px;
   border-top: 1px solid var(--border);
 }
 
@@ -4112,22 +4611,17 @@ div.is-error {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   background: var(--bg);
-  padding: 8px 16px 10px;
-  /* 按 footer 自身宽度渐进折行，而非全局视口 */
+  padding: 7px 16px 9px;
   container-type: inline-size;
   container-name: thread-status;
 }
 
-/*
- * 多段 status：先装箱成「行」再渲染。
- * │ 只存在于行内（row 的第二个及以后段前），故无行首/行尾裸竖线。
- */
 .thread-status-line {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 3px;
+  align-items: center;
+  gap: 14px;
   min-width: 0;
+  overflow: hidden;
   color: var(--fg-muted);
   font-size: 12px;
   line-height: 1.4;
@@ -4135,50 +4629,16 @@ div.is-error {
   text-align: left;
 }
 
-.thread-status-row {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  min-width: 0;
-  max-width: 100%;
-}
-
 .thread-status-unit {
   display: inline-flex;
   align-items: center;
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
 }
 
-.thread-status-sep {
-  flex: 0 0 auto;
-  margin: 0 8px;
-  color: var(--fg-dim);
-  opacity: 0.45;
-  font-weight: 300;
-  user-select: none;
-}
-
-.thread-status-seg.is-clickable {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-.thread-status-seg.is-clickable:hover {
-  color: var(--fg);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
 .thread-status-seg {
-  flex: 0 1 auto;
+  flex: 1;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -4188,6 +4648,29 @@ div.is-error {
 
 .thread-status-usage {
   font-variant-numeric: tabular-nums;
+}
+
+.thread-status-environment {
+  flex: 1 1 auto;
+}
+
+.thread-status-git,
+.thread-status-context,
+.thread-status-cache {
+  flex: 0 0 auto;
+}
+
+@container thread-status (max-width: 680px) {
+  .thread-status-git,
+  .thread-status-cache {
+    display: none;
+  }
+}
+
+@container thread-status (max-width: 480px) {
+  .thread-status-context {
+    display: none;
+  }
 }
 
 .run-status {

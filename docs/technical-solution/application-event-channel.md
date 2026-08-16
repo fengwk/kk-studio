@@ -25,6 +25,7 @@
 {"version":1,"type":"event","resource":{...},"name":"realtime","data":{...}}
 {"version":1,"type":"event","resource":{...},"name":"version","cursor":"<canonical decimal>","data":{"version":"<canonical decimal>"}}
 {"version":1,"type":"resync","resource":{...}}
+{"version":1,"type":"heartbeat"}
 {"version":1,"type":"error","code":"<string>","message":"<string>"}
 {"version":1,"type":"error","code":"<string>","message":"<string>","resource":{...}}
 ```
@@ -35,6 +36,7 @@
   - Thread `realtime`：`data` 是 realtime codec 的 JSON 对象（`MODEL_DELTA` / `TOOL_PARTIAL` envelope：`threadId/subjectKind/subjectId/attempt/sequence?/type/payload/createdAt`），**绝不携带 `cursor`**；
   - Canvas `version`：`data` 为 `{"version":"N"}`，顶层 `cursor` 必带且与 `data.version` 完全相等。
 - `resync`：整体替换为全量快照（重新读取 snapshot / `/changes`）。
+- `heartbeat`：连接级空闲保活，不绑定 resource、不携带 cursor/data；前端严格解码后静默消费，不触发业务 listener。
 - `error`：`code` / `message`；资源级错误（`RESOURCE_NOT_FOUND`）额外携带 `resource` 供客户端定位，连接级错误不携带。
 
 前端 `decodeServerMessage` 是严格解码：version 必须为 1、每种 type/name 只接受精确字段集、`resource/name` 组合必须合法（thread 仅 `revision|realtime`，canvas 仅 `version`）、durable 事件的 cursor 必须存在且与 data 值相等、realtime 的 data 必须是非数组 JSON 对象且不得携带 cursor；畸形消息永远不会到达 listeners。
@@ -57,6 +59,7 @@
 | 发送队列过载（512 帧 / 2MB 双限） | `error{code=BACKPRESSURE}` 后以 1013 `TRY_AGAIN_LATER` 关闭 |
 | 应用 shutdown | 尽力发送 `error{code=SEND_FAILED}` 后以 1012 `SERVICE_RESTART` 关闭；断线释放全部订阅 |
 | 网络断线 / 传输错误 | 释放全部订阅；前端退避重连 |
+| heartbeat 入队过载 | 与普通事件一致，发送 `BACKPRESSURE` 后以 1013 关闭，由前端重连 |
 
 前端 `ApplicationEventConnection` 状态机 `idle -> connecting -> open -> backoff -> connecting -> closed`：
 
@@ -67,6 +70,6 @@
 
 ## 4. 不占阻塞线程
 
-发送走 jakarta `AsyncRemote.sendText(SendHandler)`：同一时刻只有一个 in-flight 发送，完成回调驱动下一帧，帧顺序严格串行且**不占用任何常驻或阻塞 worker**；AsyncRemote 设置 10s send timeout，卡死的对端不会无限占用发送链。Thread/Canvas 的事件源（PostgreSQL LISTEN）是各自独立的守护线程，与浏览器连接数无关。
+发送走 jakarta `AsyncRemote.sendText(SendHandler)`：同一时刻只有一个 in-flight 发送，完成回调驱动下一帧，帧顺序严格串行且**不占用任何常驻或阻塞 worker**；AsyncRemote 设置 10s send timeout，卡死的对端不会无限占用发送链。所有浏览器连接共享一个 daemon `ScheduledExecutorService`，每 20 秒只把 heartbeat 放入既有异步发送队列，不为连接创建线程；连接关闭后立即停止向该连接入队，应用 shutdown 取消共享任务。Thread/Canvas 的事件源（PostgreSQL LISTEN）是各自独立的守护线程，与浏览器连接数无关。
 
 相关文档：[architecture.md](architecture.md)、[harness-runtime-contracts.md](harness-runtime-contracts.md)、[frontend-implementation-design.md](frontend-implementation-design.md)、[e2e-regression.md](e2e-regression.md)。

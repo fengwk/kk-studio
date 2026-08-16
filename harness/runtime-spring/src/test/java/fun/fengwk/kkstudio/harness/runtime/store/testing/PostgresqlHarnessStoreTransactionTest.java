@@ -135,6 +135,7 @@ class PostgresqlHarnessStoreTransactionTest {
     assertThrows(IllegalStateException.class, () -> escaped.insertSession(session(id(1L))));
     assertThrows(IllegalStateException.class, () -> escaped.findSession(id(1L)));
     assertThrows(IllegalStateException.class, () -> escaped.loadEntryPath(id(1L)));
+    assertThrows(IllegalStateException.class, () -> escaped.loadEntriesBySessionId(id(1L)));
   }
 
   @Test

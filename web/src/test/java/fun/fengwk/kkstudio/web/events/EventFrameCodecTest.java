@@ -195,12 +195,13 @@ class EventFrameCodecTest {
   }
 
   @Test
-  void encodesResyncAndErrorFrames() {
+  void encodesResyncHeartbeatAndErrorFrames() {
     assertEquals(
         "{\"version\":1,\"type\":\"resync\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
             + CANVAS
             + "\"}}",
         CODEC.resync(CANVAS_KEY));
+    assertEquals("{\"version\":1,\"type\":\"heartbeat\"}", CODEC.heartbeat());
     assertEquals(
         "{\"version\":1,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"boom\"}",
         CODEC.error(EventFrameCodec.INVALID_FRAME, "boom"));
