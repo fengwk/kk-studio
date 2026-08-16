@@ -199,6 +199,60 @@ public class CanvasFunctionRunTransactions {
     return terminal;
   }
 
+  /**
+   * Adapter checkpoint：基于当前 frozen run + stage/adapterState 生成 next state，锁定 document/node 并验证仍是同一
+   * RUNNING request，checkpoint CAS 后随 canvas version 与 node patch 在同一事务收敛。 document/node 消失、run 不再是
+   * 该请求的 RUNNING 或 CAS 失败一律以 {@link CanvasFunctionInternalCancellation} 终止 adapter，绝不把旧 run 写回。
+   */
+  @Transactional
+  public CanvasFunctionFrozenRun checkpoint(
+      UUID canvasId,
+      UUID nodeId,
+      String requestId,
+      String stage,
+      Map<String, Object> adapterState) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(nodeId, "nodeId");
+    String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
+    Objects.requireNonNull(stage, "stage");
+    Objects.requireNonNull(adapterState, "adapterState");
+    CanvasDocumentDO document = documentMapper.getByIdForUpdate(canvasId);
+    if (document == null) {
+      throw new CanvasFunctionInternalCancellation("Canvas document disappeared during checkpoint");
+    }
+    CanvasNodeDO node = nodeMapper.getByIdForUpdate(canvasId, nodeId);
+    if (node == null || node.getModelKey() == null) {
+      throw new CanvasFunctionInternalCancellation(
+          "Canvas Function node disappeared during checkpoint");
+    }
+    CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
+    if (!matchesRunning(current, validatedRequestId)) {
+      throw new CanvasFunctionInternalCancellation(
+          "FunctionRun checkpoint CAS failed because the run is no longer RUNNING");
+    }
+    CanvasFunctionFrozenRun next = stateCodec.checkpoint(decode(current), stage, adapterState);
+    CanvasFunctionRun updated =
+        new CanvasFunctionRun(
+            current.nodeId(),
+            current.requestId(),
+            CanvasFunctionRunStatus.RUNNING,
+            next.stage(),
+            stateCodec.encode(next),
+            null,
+            clock.instant());
+    if (!runRepository.checkpoint(
+        updated.nodeId(),
+        updated.requestId(),
+        updated.stateJson(),
+        updated.stage(),
+        updated.updatedAt())) {
+      throw new CanvasFunctionInternalCancellation(
+          "FunctionRun checkpoint CAS failed because the run is no longer RUNNING");
+    }
+    bumpAndPublishNode(document, canvasId, nodeId);
+    return next;
+  }
+
   @Transactional
   public boolean completeSuccess(CanvasFunctionFrozenRun frozen, List<UUID> orderedResourceIds) {
     Objects.requireNonNull(frozen, "frozen");

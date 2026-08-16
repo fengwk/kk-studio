@@ -17,33 +17,36 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionResourceStream;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.time.Clock;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 单个 frozen run 的受限执行上下文（blob 访问经全局 StorageBlobManager 的对象键）。 */
+/**
+ * 单个 frozen run 的受限执行上下文（blob 访问经全局 StorageBlobManager 的对象键）。
+ *
+ * <p>checkpoint 委托给 {@link CanvasFunctionRunTransactions} 的短事务入口：冻结 run 的 stage/adapterState 前进与
+ * canvas version + node patch 在同一事务边界收敛；CAS/节点消失/取消抛 {@link CanvasFunctionInternalCancellation} 终止
+ * adapter，失败时不更新本地 current（绝不写回旧 run）。
+ */
 final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutionContext {
 
   private final CanvasFunctionRunRepository runRepository;
-  private final CanvasFunctionRunStateCodec stateCodec;
+  private final CanvasFunctionRunTransactions transactions;
   private final S3StorageService storageService;
   private final StorageBlobManager blobManager;
   private final CanvasResourceMaterializer materializer;
-  private final Clock clock;
   private final AtomicReference<CanvasFunctionFrozenRun> current;
 
   CanvasFunctionExecutionContextImpl(
       CanvasFunctionRunRepository runRepository,
-      CanvasFunctionRunStateCodec stateCodec,
+      CanvasFunctionRunTransactions transactions,
       ObjectProvider<S3StorageService> storageServices,
       ObjectProvider<StorageBlobManager> blobManagers,
       ObjectProvider<CanvasResourceMaterializer> materializers,
-      Clock clock,
       CanvasFunctionFrozenRun frozen) {
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
-    this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
+    this.transactions = Objects.requireNonNull(transactions, "transactions");
     storageService =
         Objects.requireNonNull(
             storageServices.getIfAvailable(), "S3 storage is required for Canvas Function runtime");
@@ -55,21 +58,19 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
         Objects.requireNonNull(
             materializers.getIfAvailable(),
             "Canvas Resource materializer is required for Canvas Function runtime");
-    this.clock = Objects.requireNonNull(clock, "clock");
     current = new AtomicReference<>(Objects.requireNonNull(frozen, "frozen"));
   }
 
   @Override
   public void checkpoint(String stage, Map<String, Object> adapterState) {
+    CanvasFunctionFrozenRun frozen = current.get();
     CanvasFunctionFrozenRun next =
-        stateCodec.checkpoint(
-            current.get(), stage, Objects.requireNonNull(adapterState, "adapterState"));
-    String stateJson = stateCodec.encode(next);
-    if (!runRepository.checkpoint(
-        next.nodeId(), next.requestId(), stateJson, next.stage(), clock.instant())) {
-      throw new CanvasFunctionInternalCancellation(
-          "FunctionRun checkpoint CAS failed because the run is no longer RUNNING");
-    }
+        transactions.checkpoint(
+            frozen.canvasId(),
+            frozen.nodeId(),
+            frozen.requestId().toString(),
+            Objects.requireNonNull(stage, "stage"),
+            Objects.requireNonNull(adapterState, "adapterState"));
     current.set(next);
   }
 

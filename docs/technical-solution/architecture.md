@@ -144,8 +144,8 @@ Blank first send:
 Canvas 使用 `CanvasDocument` 聚合：所有业务节点都是 `ResourceNode`，当前内容通过直接 owner 的有序
 `Resource[]` 表达，资源生产能力通过可选 Function 表达；Group 与 Link 独立存在，Link target
 必须有 Function且允许成环。用户 typed command batch 通过 document 行 `version` CAS 原子提交，并以
-`(canvasId, commandId) + requestHash` 幂等。Function start 与 terminal 状态也前进同一 version，
-checkpoint 不前进。
+`(canvasId, commandId) + requestHash` 幂等。Function start、checkpoint 与 terminal 状态都前进同一 version，
+并发布携带 run 投影的 node patch 使前端经 version 事件收敛。
 
 媒体 Resource 只引用全局 `storage_blob`；`canvas_resource` 的
 `ownerNodeId + resourceIndex` 是成对可空字段，使 Function target 和 pinned orphan 可以暂时无 owner。

@@ -226,9 +226,9 @@ L1 的关键语义断言：
   method/url/headers/expiresAt（不暴露 bucket/key），download 字节与上传一致；
   TEXT 资源 URL 400、未知 resource/canvas 404；深删除画布后不可达。
 - `canvas.function_fake_runtime` 仅在 `--with-canvas-function` 下执行：显式注册
-  `fake-image`，验证 Function node 创建（客户端 UUID nodeId）、start/poll、成功 Resource
-  原子替换、`320×260 @ (100,100)` transform 精确回读、`document.version`（十进制字符串）
-  按命令与 Run 状态前进、公开 run DTO 无 `stateJson`，以及 preview signed GET 的 WEBP 字节。
+  `fake-image`，验证 Function node 创建（客户端 UUID nodeId）、start/checkpoint/terminal、
+  成功 Resource 原子替换、`320×260 @ (100,100)` transform 精确回读、`document.version`（十进制字符串）
+  按命令与 Run start/checkpoint/terminal 状态前进、公开 run DTO 无 `stateJson`，以及 preview signed GET 的 WEBP 字节。
 - `chat.attachment_upload_contract` 仅在 `--with-canvas-storage` 下执行：通用存储
   reserve -> 真实 presigned PUT -> complete -> USER_MESSAGE `ATTACHMENT(uploadId)`
   原子消费；入队响应 `requestHash` 为 64 位小写 hex、durable payload 为
