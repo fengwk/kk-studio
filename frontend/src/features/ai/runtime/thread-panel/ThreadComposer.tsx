@@ -48,14 +48,14 @@ import {
   canSubmitParts,
   partForUpload,
   removePartsForUpload,
-  uploadOccurrence,
   useAttachmentUploads,
   type AttachmentUpload,
   type HashFile,
   type StorageService,
 } from '@/features/ai/composer'
 import { useComposerMessageHistory } from '@/features/ai/runtime/thread-panel/useComposerMessageHistory'
-import { hasBlockingModal } from '@/shared/ui/blocking-overlay'
+import { useComposerFocus } from '@/features/ai/runtime/thread-panel/useComposerFocus'
+import { useComposerSubmissionSettle } from '@/features/ai/runtime/thread-panel/useComposerSubmissionSettle'
 import { useI18n } from '@/shared/i18n'
 
 const EMPTY_USER_MESSAGES: readonly string[] = []
@@ -117,16 +117,6 @@ export function ThreadComposer({
   const { t } = useI18n()
   const editorRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const focusTimerRef = useRef<number | null>(null)
-  const restoreFocusRef = useRef(false)
-  const wasPendingRef = useRef(false)
-  // 提交时的本地草稿快照（客户端 localId parts，trim 后）：发送失败恢复
-  // （相同 partsKey）时重新挂载上传条目；其余任何 parts 变化都视为上一轮
-  // 提交已 settle（条目隐藏，等待结果）。与提交 payload（server uploadId）
-  // 分开保存——恢复比对只可能命中本地草稿。
-  const submittedDraftRef = useRef<ComposerPart[] | null>(null)
-  const settleTransitionRef = useRef(false)
-  const submittingRef = useRef(false)
   const {
     uploads,
     addFiles,
@@ -164,51 +154,41 @@ export function ThreadComposer({
     [disabled, parts, slashMode, uploads],
   )
 
-  const clearFocusTimer = useCallback(() => {
-    if (focusTimerRef.current === null) {
+  // 全局 Escape 的覆盖层关闭：control menu 优先，其次 palette（slash 模式同时
+  // 清空命令草稿）；焦点状态机在命中后关闭覆盖层再统一恢复焦点。
+  const closeOverlay = useCallback(() => {
+    if (controlMenu != null) {
+      setPlusMenuOpen(false)
+      setControlMenu(null)
       return
     }
-    window.clearTimeout(focusTimerRef.current)
-    focusTimerRef.current = null
-  }, [])
+    if (paletteMode != null) {
+      setPlusMenuOpen(false)
+      if (paletteMode === 'slash') {
+        changeDraft([])
+      }
+    }
+  }, [changeDraft, controlMenu, paletteMode])
 
-  const focusComposer = useCallback((forceCaretAtEnd = false) => {
-    clearFocusTimer()
-    const scheduleFocus = (attempt: number, delay: number) => {
-      focusTimerRef.current = window.setTimeout(() => {
-        focusTimerRef.current = null
-        tryFocus(attempt)
-      }, delay)
-    }
-    const tryFocus = (attempt: number) => {
-      const el = editorRef.current
-      if (!el || el.getAttribute('contenteditable') !== 'true') {
-        if (attempt < 5) {
-          scheduleFocus(attempt + 1, 16)
-        }
-        return
-      }
-      if (document.activeElement !== el) {
-        el.focus({ preventScroll: true })
-      }
-      const selection = el.ownerDocument.getSelection()
-      if (
-        document.activeElement === el
-        && (
-          forceCaretAtEnd
-          || !selection
-          || selection.rangeCount === 0
-          || !el.contains(selection.getRangeAt(0).commonAncestorContainer)
-        )
-      ) {
-        placeCaretAtEnd(el)
-      }
-      if (attempt < 5 && document.activeElement !== el) {
-        scheduleFocus(attempt + 1, 16)
-      }
-    }
-    scheduleFocus(0, 0)
-  }, [clearFocusTimer])
+  // 组合焦点状态机：定时重试/覆盖层关闭后恢复/active 恢复/Escape/pending
+  // 完成后自动聚焦/卸载清理。
+  const { focusComposer } = useComposerFocus({
+    editorRef,
+    disabled,
+    active,
+    focusOnEscape,
+    pending,
+    closeOverlay,
+  })
+
+  // 提交 settle 状态机：本地草稿快照、发送失败恢复与成功后 detached 上传释放。
+  const { commit } = useComposerSubmissionSettle({
+    parts,
+    pending,
+    uploads,
+    markDetached,
+    releaseUpload,
+  })
 
   const closeCommandPalette = useCallback((forceCaretAtEnd = false) => {
     setPlusMenuOpen(false)
@@ -229,61 +209,13 @@ export function ThreadComposer({
     }
   }, [focusComposer])
 
+  // interaction panel 接管时关闭底栏菜单；焦点恢复请求（active 重新打开）由
+  // 焦点状态机 hook 负责。
   useEffect(() => {
     if (!active) {
-      restoreFocusRef.current = true
-      clearFocusTimer()
       setControlMenu(null)
-      return
     }
-    if (restoreFocusRef.current && !disabled) {
-      restoreFocusRef.current = false
-      focusComposer(true)
-    }
-  }, [active, clearFocusTimer, disabled, focusComposer])
-
-  useEffect(() => {
-    if (!focusOnEscape || !active) {
-      return
-    }
-    const handleEscape = (event: globalThis.KeyboardEvent) => {
-      if (
-        event.key !== 'Escape'
-        || event.defaultPrevented
-        || event.isComposing
-        || event.keyCode === 229
-      ) {
-        return
-      }
-      // Modal/alertdialog/lightbox 保留自己的 Escape 语义；关闭后再次按 Escape 才回到 Composer。
-      if (hasBlockingModal()) {
-        return
-      }
-      if (editorRef.current?.getAttribute('contenteditable') !== 'true') {
-        return
-      }
-      event.preventDefault()
-      if (controlMenu != null) {
-        changeControlMenu(null, true)
-        return
-      }
-      if (paletteOpen) {
-        closeCommandPalette(true)
-        return
-      }
-      focusComposer(true)
-    }
-    window.addEventListener('keydown', handleEscape)
-    return () => window.removeEventListener('keydown', handleEscape)
-  }, [
-    active,
-    changeControlMenu,
-    closeCommandPalette,
-    controlMenu,
-    focusComposer,
-    focusOnEscape,
-    paletteOpen,
-  ])
+  }, [active])
 
   const slashModeRef = useRef(slashMode)
   useEffect(() => {
@@ -300,16 +232,6 @@ export function ThreadComposer({
     }
     setActiveIndex(firstEnabledCommandIndex(filteredCommands))
   }, [paletteOpen, query, filteredCommands])
-
-  // 发送完成后（pending true -> false），继续在 composer 中键入。
-  useEffect(() => {
-    if (wasPendingRef.current && !pending && !disabled) {
-      focusComposer()
-    }
-    wasPendingRef.current = pending
-  }, [pending, disabled, focusComposer])
-
-  useEffect(() => () => clearFocusTimer(), [clearFocusTimer])
 
   /** DOM 与 props 对齐（外部同步或初始渲染）；重建时保留焦点与光标。 */
   useEffect(() => {
@@ -331,74 +253,6 @@ export function ThreadComposer({
       }
     }
   }, [parts])
-
-  /** 释放未被任何 parts 引用且未 detached 的条目（pill 移除/提交 settle 后调用）。 */
-  function releaseUnreferenced(
-    currentUploads: AttachmentUpload[],
-    currentParts: ComposerPart[],
-    release: (localId: string) => void,
-  ) {
-    for (const upload of currentUploads) {
-      if (upload.detached) {
-        continue
-      }
-      if (uploadOccurrence(upload, currentParts) === 0) {
-        release(upload.localId)
-      }
-    }
-  }
-
-  /** 提交快照引用的上传条目 localId 集合（本地草稿直接按 localId 匹配）。 */
-  function submittedUploadIds(submitted: ComposerPart[], currentUploads: AttachmentUpload[]): Set<string> {
-    return new Set(
-      currentUploads
-        .filter((upload) => uploadOccurrence(upload, submitted) > 0)
-        .map((upload) => upload.localId),
-    )
-  }
-
-  /** 释放/挂起：pill 移除（occurrence 0）与提交 settle/恢复的生命周期。 */
-  useEffect(() => {
-    const submitted = submittedDraftRef.current
-    if (submitted == null) {
-      releaseUnreferenced(uploads, parts, releaseUpload)
-      return
-    }
-    if (partsKey(parts) === partsKey(submitted)) {
-      if (settleTransitionRef.current) {
-        // 发送失败的恢复：重新挂载全部上传条目。
-        settleTransitionRef.current = false
-        submittedDraftRef.current = null
-        markDetached(submittedUploadIds(submitted, uploads), false)
-      }
-      return
-    }
-    // 提交后的清空或编辑：条目隐藏等待结果；恢复前绝不 DELETE
-    // （submittedDraftRef 保留本地草稿快照，供失败恢复比对）。
-    if (!settleTransitionRef.current) {
-      settleTransitionRef.current = true
-      markDetached(submittedUploadIds(submitted, uploads), true)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parts])
-
-  /** pending true -> false：上一轮提交结果确定；draft 未恢复 => 发送成功，释放挂起条目。 */
-  useEffect(() => {
-    if (submittingRef.current && !pending) {
-      submittingRef.current = false
-      const submitted = submittedDraftRef.current
-      if (submitted != null && partsKey(parts) !== partsKey(submitted)) {
-        submittedDraftRef.current = null
-        settleTransitionRef.current = false
-        for (const upload of uploads) {
-          if (upload.detached) {
-            releaseUpload(upload.localId)
-          }
-        }
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending])
 
   /** 从当前 DOM 提取 parts 并回传（输入/粘贴/删除后统一入口）。 */
   function syncFromDom() {
@@ -458,19 +312,12 @@ export function ThreadComposer({
       return
     }
     setPlusMenuOpen(false)
-    // 上一轮已 settle 的 detached 残留在此释放（它们的消息已确定不再回滚）。
-    for (const upload of uploads) {
-      if (upload.detached) {
-        releaseUpload(upload.localId)
-      }
-    }
     // 草稿始终引用客户端 localId；提交 payload 在序列化前解析为服务端 upload
     // 句柄（避免「上传完成异步改写 parts」与用户编辑竞态）。恢复快照必须保存
     // 本地草稿（trim 后），与 payload 分开——恢复比对只命中本地 id 草稿。
     const resolved = resolveUploadIds(parts)
     const localDraft = trimMessageParts(parts)
-    submittingRef.current = true
-    submittedDraftRef.current = localDraft
+    commit(localDraft)
     onSubmit(resolved, localDraft)
   }
 
