@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.ai.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.ai.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -19,6 +20,11 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Clock;
@@ -26,6 +32,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** 只读预览按最新 Agent 正文与始终存在的 current_environment 组合。 */
@@ -77,13 +84,64 @@ class SystemPromptPreviewServiceTest {
     assertFalse(preview.contains("You are the planner."), preview);
   }
 
+  /** PreviewService 必须把当前 branch 绑定与 live daemon 元数据直接投影到只读提示词。 */
+  @Test
+  void rendersBoundLiveEnvironmentMetadata() {
+    HarnessRuntime runtime = mock(HarnessRuntime.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
+    LiveEnvironmentRegistry environments = mock(LiveEnvironmentRegistry.class);
+    EnvironmentName environmentName = new EnvironmentName("local-dev");
+    EnvironmentBinding binding = new EnvironmentBinding(environmentName, ".");
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot(binding));
+    AgentDefinition agent = new AgentDefinition();
+    agent.setName("assistant");
+    agent.setSystemPrompt("You are the planner.");
+    agent.setConfigJson("agent-config");
+    when(agents.getByName("assistant")).thenReturn(agent);
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of());
+    config.setSubagents(List.of());
+    when(codec.decode("agent-config")).thenReturn(config);
+    LiveEnvironment liveEnvironment = mock(LiveEnvironment.class);
+    when(liveEnvironment.capabilities())
+        .thenReturn(
+            new DaemonCapabilities(
+                DaemonCapabilities.VERSION,
+                new DaemonEnvironmentInfo(
+                    DaemonOperatingSystem.WSL,
+                    "America/Los_Angeles",
+                    "Local <dev> & tools.",
+                    "/home/dev"),
+                List.of(),
+                List.of()));
+    when(environments.find(environmentName)).thenReturn(Optional.of(liveEnvironment));
+
+    String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
+
+    assertTrue(preview.contains("- name: local-dev"), preview);
+    assertTrue(preview.contains("- workspace: ."), preview);
+    assertTrue(preview.contains("- system: wsl"), preview);
+    assertTrue(preview.contains("- date: 2026-08-16"), preview);
+    assertTrue(preview.contains("- note: Local &lt;dev&gt; &amp; tools."), preview);
+  }
+
   private static SystemPromptPreviewService service(
       HarnessRuntime runtime, AgentDefinitionRepository agents, AgentDefinitionConfigCodec codec) {
+    return service(runtime, agents, codec, mock(LiveEnvironmentRegistry.class));
+  }
+
+  private static SystemPromptPreviewService service(
+      HarnessRuntime runtime,
+      AgentDefinitionRepository agents,
+      AgentDefinitionConfigCodec codec,
+      LiveEnvironmentRegistry environmentRegistry) {
     SubagentConfig subagentConfig = new SubagentConfig(2, 10, null, Duration.ZERO, 7);
     return new SystemPromptPreviewServiceFactory(
             agents,
             codec,
-            mock(LiveEnvironmentRegistry.class),
+            environmentRegistry,
             subagentConfig,
             new AgentPromptComposer(subagentConfig),
             Clock.fixed(NOW, ZoneOffset.UTC))
@@ -91,9 +149,16 @@ class SystemPromptPreviewServiceTest {
   }
 
   private static ThreadSnapshot snapshot() {
+    return snapshot(null);
+  }
+
+  private static ThreadSnapshot snapshot(EnvironmentBinding environment) {
     BranchSettings settings =
         new BranchSettings(
-            null, "assistant", new ModelSelection("provider", "model", "default"), List.of());
+            environment,
+            "assistant",
+            new ModelSelection("provider", "model", "default"),
+            List.of());
     EntryPath path =
         new EntryPath(
             List.of(new Entry(SESSION_ID, SESSION_ID, null, new RootPayload(settings), NOW)));

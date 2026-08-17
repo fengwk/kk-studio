@@ -24,12 +24,37 @@ function message(overrides: Partial<ToolDialogueMessage> = {}): ToolDialogueMess
 }
 
 describe('ToolMessageBlock', () => {
-  it('renders a call placeholder and a fallback tool name', () => {
+  it('does not render a copy action in the full-width tool card', () => {
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          arguments: '{"path":"/app"}',
+          status: 'error',
+          text: 'Environment tool read has no environment binding.',
+        })}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: '复制工具预览' })).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-turn-tool > .thread-block-tool')).toBeInTheDocument()
+    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: '展开工具预览' })).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-toggle')).not.toBeInTheDocument()
+    expect(container.querySelector(
+      '.thread-tool-surface > .thread-tool-result-body',
+    )).toBeInTheDocument()
+  })
+
+  it('uses color state instead of WORKING/DONE/FAILED labels', () => {
     render(<ToolMessageBlock message={message({ phase: 'call', toolName: '', status: 'streaming' })} />)
 
     expect(screen.getByText(/Tool/)).toBeInTheDocument()
-    expect(screen.getByText('WORKING')).toBeInTheDocument()
-    expect(screen.getByText('（无参数）')).toBeInTheDocument()
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+    expect(document.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.queryByText(/WORKING|DONE|FAILED/)).not.toBeInTheDocument()
+    expect(screen.queryByText('（无参数）')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '展开工具预览' })).not.toBeInTheDocument()
     expect(screen.queryByText('等待工具结果…')).not.toBeInTheDocument()
   })
 
@@ -45,8 +70,8 @@ describe('ToolMessageBlock', () => {
       />,
     )
 
-    expect(container.firstElementChild).toHaveClass('error')
-    expect(screen.getByText('FAILED')).toBeInTheDocument()
+    expect(container.firstElementChild).toHaveClass('tool-state-error')
+    expect(screen.queryByText(/WORKING|DONE|FAILED/)).not.toBeInTheDocument()
     expect(screen.queryByText('{"path":"missing"}')).not.toBeInTheDocument()
     expect(screen.getByText('read failed')).toBeInTheDocument()
     expect(screen.getByText('file not found')).toBeInTheDocument()
@@ -59,38 +84,42 @@ describe('ToolMessageBlock', () => {
     expect(screen.getAllByText('same error')).toHaveLength(1)
   })
 
-  it('renders streaming and completed empty result placeholders without call duplication', () => {
+  it('does not offer expansion when an empty result has no hidden content', () => {
     const { rerender } = render(
       <ToolMessageBlock message={message({ phase: 'result', status: 'streaming' })} />,
     )
 
-    expect(screen.getByText('等待工具结果…')).toBeInTheDocument()
-    expect(screen.queryByText('tool call ·')).not.toBeInTheDocument()
+    expect(screen.queryByText('等待工具结果…')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '展开工具预览' })).not.toBeInTheDocument()
 
     rerender(<ToolMessageBlock message={message({ phase: 'result', status: 'done' })} />)
-    expect(screen.getByText('无文本输出')).toBeInTheDocument()
+    expect(screen.queryByText('无文本输出')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '展开工具预览' })).not.toBeInTheDocument()
   })
 
-  it('defaults missing call, transient, and result statuses to done', () => {
+  it('defaults missing statuses to the success color state', () => {
     const { rerender } = render(
       <ToolMessageBlock
         message={message({ phase: 'call', status: undefined, partial: 'streaming text' })}
       />,
     )
-    expect(screen.getByText('DONE')).toBeInTheDocument()
-    expect(screen.getByText('streaming text')).toBeInTheDocument()
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+    expect(screen.queryByText(/WORKING|DONE|FAILED/)).not.toBeInTheDocument()
+    expect(screen.queryByText('streaming text')).not.toBeInTheDocument()
 
     rerender(<ToolMessageBlock message={message({ phase: 'result', status: undefined })} />)
-    expect(screen.getByText('DONE')).toBeInTheDocument()
-    expect(screen.getByText('无文本输出')).toBeInTheDocument()
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+    expect(screen.queryByText('无文本输出')).not.toBeInTheDocument()
   })
 
   it('shows the failed placeholder for an empty error result', () => {
-    render(<ToolMessageBlock message={message({ status: 'error' })} />)
+    const { container } = render(<ToolMessageBlock message={message({ status: 'error' })} />)
     expect(screen.getByText('工具执行失败。')).toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-toggle')).not.toBeInTheDocument()
   })
 
-  it('renders write content and edit diffs instead of raw JSON, and pairs result into the same card', () => {
+  it('renders compact write/edit previews and keeps call/result in one tool block', async () => {
+    const user = userEvent.setup()
     const { rerender } = render(
       <ToolMessageBlock
         message={message({
@@ -106,11 +135,14 @@ describe('ToolMessageBlock', () => {
     )
     expect(screen.getByText('App.java')).toBeInTheDocument()
     expect(screen.getByText('one')).toBeInTheDocument()
-    expect(screen.getByText('eight')).toBeInTheDocument()
+    expect(screen.queryByText('eight')).not.toBeInTheDocument()
+    expect(screen.getByText('... (1 more line, 8 total)')).toBeInTheDocument()
     expect(screen.queryByText(/"content"/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/还有/)).not.toBeInTheDocument()
     expect(document.querySelector('.thread-tool-preview-body')).toHaveClass('is-write')
     expect(document.querySelector('.thread-tool-preview-body')).not.toHaveClass('is-expanded')
+
+    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
+    expect(screen.getByText('eight')).toBeInTheDocument()
 
     rerender(
       <ToolMessageBlock
@@ -135,10 +167,68 @@ describe('ToolMessageBlock', () => {
     expect(screen.getByText('-beta')).toBeInTheDocument()
     expect(screen.getByText('+BETA')).toBeInTheDocument()
     expect(screen.getByText('Edited App.java successfully.')).toBeInTheDocument()
-    expect(screen.queryByText('工具结果 ·')).not.toBeInTheDocument()
+    expect(document.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(document.querySelector(
+      '.thread-tool-surface > .thread-tool-result-body',
+    )).toBeInTheDocument()
   })
 
-  it('keeps the original path case and expands the 5-line preview on toggle', async () => {
+  it('renders model-streamed write/edit arguments in a five-line rolling tail', () => {
+    render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          status: 'streaming',
+          subjectEntryId: null,
+          toolName: 'write',
+          rendererKey: 'write',
+          arguments: JSON.stringify({
+            path: 'App.java',
+            content: 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight',
+          }),
+        })}
+      />,
+    )
+
+    // 八行参数压成“提示 + 最新四行”，总窗口稳定为五行并持续跟随尾部。
+    expect(screen.getByText('... (4 earlier lines)')).toBeInTheDocument()
+    expect(screen.queryByText('one')).not.toBeInTheDocument()
+    expect(screen.queryByText('four')).not.toBeInTheDocument()
+    expect(screen.getByText('five')).toBeInTheDocument()
+    expect(screen.getByText('eight')).toBeInTheDocument()
+    expect(document.querySelector('.thread-tool-preview-body')).toHaveClass('is-streaming')
+    expect(document.querySelector('.thread-tool-preview-body')).not.toHaveClass('is-unbounded')
+  })
+
+  it('shows the complete edit diff once streamed arguments become durable', () => {
+    render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          status: 'streaming',
+          subjectEntryId: 'assistant-1',
+          toolName: 'edit',
+          rendererKey: 'edit',
+          arguments: JSON.stringify({
+            path: 'App.java',
+            old_string: 'one\ntwo\nthree\nfour\nfive\nsix',
+            new_string: 'ONE\nTWO\nTHREE\nFOUR\nFIVE\nSIX',
+          }),
+        })}
+      />,
+    )
+
+    // durable call 已完成参数生成；即使工具仍在审批/执行，也不再折叠完整 diff。
+    expect(screen.getByText('-one')).toBeInTheDocument()
+    expect(screen.getByText('-six')).toBeInTheDocument()
+    expect(screen.getByText('+ONE')).toBeInTheDocument()
+    expect(screen.getByText('+SIX')).toBeInTheDocument()
+    expect(screen.queryByText(/more lines/)).not.toBeInTheDocument()
+    expect(document.querySelector('.thread-tool-preview-body')).toHaveClass('is-unbounded')
+    expect(screen.queryByRole('button', { name: '展开工具预览' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the original path case and expands the preview on toggle', async () => {
     const user = userEvent.setup()
     render(
       <ToolMessageBlock
@@ -148,7 +238,7 @@ describe('ToolMessageBlock', () => {
           rendererKey: 'write',
           arguments: JSON.stringify({
             path: 'src/SortingAlgorithms.java',
-            content: 'one\ntwo\nthree\nfour\nfive\nsix',
+            content: 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight',
           }),
         })}
       />,
@@ -156,11 +246,116 @@ describe('ToolMessageBlock', () => {
 
     expect(screen.getByText('src/SortingAlgorithms.java')).toBeInTheDocument()
     expect(screen.queryByText('SRC/SORTINGALGORITHMS.JAVA')).not.toBeInTheDocument()
-    expect(screen.getByText('DONE')).toBeInTheDocument()
+    expect(screen.queryByText(/WORKING|DONE|FAILED/)).not.toBeInTheDocument()
+    expect(screen.queryByText('eight')).not.toBeInTheDocument()
     expect(document.querySelector('.thread-tool-preview-body')).not.toHaveClass('is-expanded')
 
     await user.click(screen.getByRole('button', { name: '展开工具预览' }))
     expect(document.querySelector('.thread-tool-preview-body')).toHaveClass('is-expanded')
+    expect(screen.getByText('eight')).toBeInTheDocument()
+  })
+
+  it('uses a pi-style summary and hides quiet successful results until expanded', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          arguments: JSON.stringify({
+            path: '/app/quicksort.py',
+            workdir: 'workspace',
+            offset: 2,
+            limit: 20,
+          }),
+        })}
+        result={message({
+          phase: 'result',
+          text: 'line one\nline two',
+        })}
+      />,
+    )
+
+    const header = container.querySelector('.thread-tool-header') as HTMLElement
+    const toggle = screen.getByRole('button', { name: '展开工具预览' })
+    expect(header).toHaveAttribute(
+      'title',
+      'read /app/quicksort.py in workspace [offset=2 limit=20]',
+    )
+    expect(header.tagName).toBe('DIV')
+    expect(header).toHaveClass('has-toggle')
+    expect(toggle).toHaveAttribute('title', '展开工具预览')
+    expect(container.querySelector(
+      '.thread-tool-header > .thread-tool-summary + .thread-tool-toggle',
+    )).toBeInTheDocument()
+    expect(screen.queryByText('line one')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-result-body')).not.toBeInTheDocument()
+
+    await user.click(header)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('line one')).not.toBeInTheDocument()
+
+    await user.click(toggle)
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('line one')
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('line two')
+    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(container.querySelector('.thread-tool-input')).not.toBeInTheDocument()
+    expect(container.querySelector(
+      '.thread-tool-surface > .thread-tool-result-body',
+    )).toBeInTheDocument()
+  })
+
+  it('shows only the last ten bash result lines while collapsed', async () => {
+    const user = userEvent.setup()
+    const output = Array.from({ length: 12 }, (_, index) => `output-${index + 1}`).join('\n')
+    render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'bash',
+          rendererKey: 'bash',
+          arguments: '{"command":"npm test"}',
+        })}
+        result={message({
+          phase: 'result',
+          toolName: 'bash',
+          rendererKey: 'bash',
+          text: output,
+        })}
+      />,
+    )
+
+    expect(screen.queryByText('output-1')).not.toBeInTheDocument()
+    expect(screen.queryByText('output-2')).not.toBeInTheDocument()
+    expect(screen.getByText(/^\.\.\. \(2 earlier lines\)/)).toBeInTheDocument()
+    expect(screen.getByText(/output-3/)).toBeInTheDocument()
+    expect(screen.getByText(/output-12/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
+    expect(screen.getByText(/output-1/)).toBeInTheDocument()
+    expect(screen.getByText(/output-12/)).toBeInTheDocument()
+  })
+
+  it('does not render a toggle when a short bash result is already fully visible', () => {
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'bash',
+          rendererKey: 'bash',
+          arguments: '{"command":"pwd"}',
+        })}
+        result={message({
+          phase: 'result',
+          toolName: 'bash',
+          rendererKey: 'bash',
+          text: '/app\n',
+        })}
+      />,
+    )
+
+    expect(screen.getByText('/app')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '展开工具预览' })).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-toggle')).not.toBeInTheDocument()
   })
 
   it('renders image, markdown-style linked file, and attachment fallbacks', async () => {
@@ -457,6 +652,8 @@ describe('ToolMessageBlock', () => {
       <ToolMessageBlock
         message={message({
           phase: 'call',
+          toolName: 'bash',
+          rendererKey: 'bash',
           status: 'streaming',
           invocationId: 'inv-1',
           partial: 'streaming answer',
@@ -469,6 +666,8 @@ describe('ToolMessageBlock', () => {
       <ToolMessageBlock
         message={message({
           phase: 'call',
+          toolName: 'bash',
+          rendererKey: 'bash',
           status: 'error',
           invocationId: 'inv-1',
           partialErrorText: 'boom',
@@ -535,11 +734,37 @@ describe('ToolMessageBlock', () => {
     expect(screen.queryByText('streaming answer')).not.toBeInTheDocument()
   })
 
+  it('does not expose raw task.status heartbeats when the task renderer is unavailable', () => {
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'task',
+          rendererKey: 'task',
+          status: 'streaming',
+          arguments: '{"subagent_type":"explorer","prompt":"inspect"}',
+          partial:
+            '{"kind":"task.status","subagentType":"explorer","state":"running_model"}',
+        })}
+      />,
+    )
+
+    expect(container.querySelector('.thread-tool-header')).toHaveAttribute(
+      'title',
+      'task explorer',
+    )
+    expect(screen.queryByRole('button', { name: '展开工具预览' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/task\.status/)).not.toBeInTheDocument()
+    expect(document.querySelector('.thread-tool-result-body')).not.toBeInTheDocument()
+  })
+
   it('overlays partial text over durable result text', () => {
     const { container } = render(
       <ToolMessageBlock
         message={message({
           phase: 'result',
+          toolName: 'bash',
+          rendererKey: 'bash',
           status: 'streaming',
           text: 'stable text',
           partial: 'streaming partial',
@@ -550,15 +775,20 @@ describe('ToolMessageBlock', () => {
     expect(container.textContent).not.toContain('stable text')
   })
 
-  it('keeps complete input visible and constrains only output to the tail viewport', () => {
+  it('shows complete generic input after expansion without making output a nested scroll target', async () => {
+    const user = userEvent.setup()
     const { container, rerender } = render(
       <ToolMessageBlock
         message={message({
           phase: 'call',
+          toolName: 'custom',
+          rendererKey: 'custom',
           arguments: '{"line1":1,\n"line2":2,\n"line3":3,\n"line4":4,\n"line5":5,\n"line6":6}',
         })}
       />,
     )
+    expect(container.querySelector('.thread-tool-input')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
     const input = container.querySelector('.thread-tool-input')
     expect(input).toHaveTextContent('"line1":1')
     expect(input).toHaveTextContent('"line6":6')
@@ -572,10 +802,11 @@ describe('ToolMessageBlock', () => {
     const output = container.querySelector('.thread-tool-output')
     expect(output).toHaveTextContent('one')
     expect(output).toHaveTextContent('six')
-    expect(output).toHaveAttribute('tabindex', '0')
+    expect(output).not.toHaveAttribute('tabindex')
   })
 
-  it('delegates the body to a compile-time renderer without duplicating the default output', () => {
+  it('delegates the body to a compile-time renderer without duplicating the default output', async () => {
+    const user = userEvent.setup()
     render(
       <ToolMessageBlock
         message={message({ text: 'default output' })}
@@ -584,6 +815,8 @@ describe('ToolMessageBlock', () => {
         )}
       />,
     )
+    expect(screen.queryByText('custom renderer: default output')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
     expect(screen.getByText('custom renderer: default output')).toBeInTheDocument()
     expect(screen.queryByText('default output')).not.toBeInTheDocument()
   })

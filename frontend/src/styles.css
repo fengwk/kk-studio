@@ -2627,86 +2627,189 @@ div.is-error {
 }
 
 .thread-block-tool,
-.thread-block-tool-call,
-.thread-block-tool-result {
+.thread-turn-tool,
+.thread-tool-surface,
+.thread-tool-call-body,
+.thread-tool-preview,
+.thread-tool-pre {
+  width: 100%;
+  min-width: 0;
+}
+
+.thread-tool-surface {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
+  transition: border-color 140ms ease, background-color 140ms ease;
 }
 
-.thread-block-tool .thread-block-label,
-.thread-block-tool-call .thread-block-label,
-.thread-block-tool-result .thread-block-label {
+.thread-turn-tool.tool-state-pending .thread-tool-surface {
+  border-color: var(--warning-border);
+  background:
+    linear-gradient(var(--warning-soft), var(--warning-soft)),
+    var(--surface);
+}
+
+.thread-turn-tool.tool-state-success .thread-tool-surface {
+  border-color: var(--green-border);
+  background:
+    linear-gradient(var(--green-soft), var(--green-soft)),
+    var(--surface);
+}
+
+.thread-turn-tool.tool-state-error .thread-tool-surface {
+  border-color: var(--danger-border);
+  background:
+    linear-gradient(var(--danger-soft), var(--danger-soft)),
+    var(--surface);
+}
+
+.thread-tool-header {
+  position: relative;
+  width: 100%;
+  min-width: 0;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  text-transform: none;
-  letter-spacing: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.thread-tool-summary {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  overflow: visible;
 }
 
 .thread-tool-name {
   flex: 0 0 auto;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
   font-weight: 600;
 }
 
-.thread-tool-path,
-.thread-tool-flag {
+.thread-tool-summary-detail {
   min-width: 0;
+  flex: 1 1 240px;
+  overflow: visible;
   color: var(--fg-dim);
   font-family: var(--mono);
   font-size: 12px;
-}
-
-.thread-tool-path {
-  flex: 1 1 auto;
+  line-height: 1.45;
+  text-overflow: clip;
+  white-space: normal;
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
 }
 
-.thread-tool-toggle,
-.thread-tool-copy {
+.thread-tool-toggle {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  z-index: 1;
   display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 50%;
-  color: var(--fg-dim);
+  border-radius: var(--radius-sm);
+  place-items: center;
   background: transparent;
+  color: var(--fg-dim);
   cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease;
 }
 
-.thread-tool-toggle svg,
-.thread-tool-copy svg {
+.thread-tool-toggle svg {
   width: 14px;
   height: 14px;
 }
 
-.thread-tool-copy {
-  margin-left: auto;
-  opacity: 0;
-}
-
-.thread-block-tool:hover .thread-tool-copy,
-.thread-tool-copy:focus-visible {
+.thread-tool-surface:hover .thread-tool-toggle,
+.thread-tool-toggle:focus-visible {
   opacity: 1;
 }
 
-.thread-tool-toggle:hover,
-.thread-tool-copy:hover {
-  color: var(--fg);
+.thread-tool-toggle:hover {
   background: var(--stage-dot);
 }
 
-.thread-tool-preview-body {
-  max-height: calc(5 * 1.45em);
-  overflow: auto;
+.thread-tool-toggle:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
-.thread-tool-preview-body.is-expanded {
+@media (hover: none) {
+  .thread-tool-header.has-toggle .thread-tool-summary {
+    padding-right: 26px;
+  }
+
+  .thread-tool-toggle {
+    opacity: 1;
+  }
+}
+
+.thread-turn-tool.tool-state-pending .thread-tool-toggle {
+  color: var(--warning);
+}
+
+.thread-turn-tool.tool-state-success .thread-tool-toggle {
+  color: var(--green);
+}
+
+.thread-turn-tool.tool-state-error .thread-tool-toggle {
+  color: var(--danger);
+}
+
+.thread-tool-call-body {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+
+.thread-tool-call-body:empty {
+  display: none;
+}
+
+.thread-tool-result-body {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+
+.thread-tool-result-body:empty {
+  display: none;
+}
+
+.thread-tool-input {
   max-height: none;
+  overflow: visible;
+}
+
+.thread-tool-preview-body {
+  max-height: calc(8 * 1.45em);
+  overflow: hidden;
+}
+
+.thread-tool-preview-body.is-streaming {
+  max-height: calc(5 * 1.45em);
+}
+
+.thread-tool-preview-body.is-expanded,
+.thread-tool-preview-body.is-unbounded {
+  max-height: none;
+  overflow: visible;
 }
 
 .thread-tool-preview-body.is-edit .is-added {
@@ -2717,25 +2820,9 @@ div.is-error {
   color: var(--danger);
 }
 
-.thread-block-tool-result {
-  background: var(--surface-active);
-}
-
 .thread-streaming-hint {
   color: var(--fg-dim);
 }
-
-.thread-tool-status {
-  flex: 0 0 auto;
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--fg-dim);
-  text-transform: none;
-}
-
-.thread-tool-status.streaming { color: var(--warning); }
-.thread-tool-status.error,
-.thread-turn.error .thread-block-body { color: var(--danger); }
 
 .thread-error-raw {
   margin: 0;
@@ -2815,23 +2902,15 @@ div.is-error {
   overflow-wrap: anywhere;
 }
 
-.thread-tool-input {
-  max-height: none;
-  overflow: visible;
-}
-
 .thread-tool-output {
   line-height: 1.5;
-  max-height: calc(5 * 1.5em);
-  overflow-x: auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  max-height: calc(var(--thread-tool-output-lines, 5) * 1.5em);
+  overflow: hidden;
 }
 
-.thread-tool-output:focus-visible {
-  outline: 1px solid var(--focus-ring);
-  outline-offset: 2px;
+.thread-tool-output.is-expanded {
+  max-height: none;
+  overflow: visible;
 }
 
 .thread-tool-placeholder,

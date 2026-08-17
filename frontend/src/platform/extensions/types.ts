@@ -97,13 +97,22 @@ export interface ToolRendererMessage {
 
 export interface ToolRendererProps {
   message: ToolRendererMessage
+  /** Tool 宿主卡片是否处于展开态；renderer 应在收起态遵守紧凑预览。 */
+  expanded?: boolean
 }
+
+export type ToolRendererExpandabilityResolver = (
+  call: ToolRendererMessage | undefined,
+  result: ToolRendererMessage | undefined,
+) => boolean
 
 /**
  * id 必须与后端 ToolDescriptor 冻结的 rendererKey 精确相同；未注册时由宿主回退到默认 renderer。
  */
 export interface ToolRendererContribution extends Contribution {
   component: ComponentType<ToolRendererProps>
+  /** 专属 renderer 是否存在收起态未展示的内容；未提供时由宿主使用默认文本策略判断。 */
+  isExpandable?: ToolRendererExpandabilityResolver
 }
 
 /**

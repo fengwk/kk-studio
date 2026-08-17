@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { MessageList } from '@/features/ai/runtime/thread-panel/messages/MessageList'
 import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
@@ -21,7 +22,8 @@ const message: ToolDialogueMessage = {
 }
 
 describe('MessageList tool renderer dispatch', () => {
-  it('dispatches by the frozen rendererKey and falls back when no contribution exists', () => {
+  it('dispatches by the frozen rendererKey and falls back when no contribution exists', async () => {
+    const user = userEvent.setup()
     const host = new ExtensionHost()
     host.register({
       id: 'test.tools',
@@ -39,6 +41,8 @@ describe('MessageList tool renderer dispatch', () => {
         <MessageList messages={[message]} />
       </ExtensionHostProvider>,
     )
+    expect(screen.queryByText('read renderer: {"path":"README.md"}')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
     expect(screen.getByText('read renderer: {"path":"README.md"}')).toBeInTheDocument()
     expect(screen.queryByText('full result')).not.toBeInTheDocument()
 
@@ -50,7 +54,8 @@ describe('MessageList tool renderer dispatch', () => {
     expect(screen.getByText('full result')).toBeInTheDocument()
   })
 
-  it('pairs a durable tool call and result into one card', () => {
+  it('pairs a durable tool call and result into one card', async () => {
+    const user = userEvent.setup()
     const call: ToolDialogueMessage = {
       ...message,
       id: 'tool-call',
@@ -66,6 +71,8 @@ describe('MessageList tool renderer dispatch', () => {
     }
     render(<MessageList messages={[call, result]} />)
     expect(screen.getAllByText('read')).toHaveLength(1)
+    expect(screen.queryByText('ok')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
     expect(screen.getByText('ok')).toBeInTheDocument()
     expect(screen.queryByText('工具调用 ·')).not.toBeInTheDocument()
     expect(screen.queryByText('工具结果 ·')).not.toBeInTheDocument()

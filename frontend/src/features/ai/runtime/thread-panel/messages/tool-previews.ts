@@ -106,7 +106,7 @@ export function generateSimpleDiffLines(oldText: string, newText: string): strin
 function extractPartialObjectFields(raw: string): Record<string, unknown> {
   const values: Record<string, unknown> = {}
   const pattern =
-    /"(path|content|old_string|new_string|replace_all)"\s*:\s*(true|false|"((?:\\.|[^"\\])*)("|$))/g
+    /"(path|content|old_string|new_string|replace_all|workdir|offset|limit|pattern|include|ignore_case|literal|multiline|timeout_seconds|command|line|character|query|target|subagent_type|session_id|maxTurns|name|server|tool)"\s*:\s*(true|false|-?\d+(?:\.\d+)?|"((?:\\.|[^"\\])*)("|$))/g
   for (const match of raw.matchAll(pattern)) {
     const key = match[1]
     if (!key) {
@@ -114,6 +114,10 @@ function extractPartialObjectFields(raw: string): Record<string, unknown> {
     }
     if (match[2] === 'true' || match[2] === 'false') {
       values[key] = match[2] === 'true'
+      continue
+    }
+    if (match[2] != null && !match[2].startsWith('"')) {
+      values[key] = Number(match[2])
       continue
     }
     values[key] = unescapeJsonString(match[3] ?? '')
