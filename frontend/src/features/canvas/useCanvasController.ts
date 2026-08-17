@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { canvasFileDescriptor } from '@/features/canvas/canvas-file'
+import { useCanvasUploadPipeline } from '@/features/canvas/canvas-upload'
 import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
 import { useCanvasVersionEvents } from '@/features/canvas/canvas-version-events'
 import {
@@ -10,20 +10,16 @@ import {
 import { createDefaultFunctionConfig } from '@/features/canvas/generation'
 import { useFunctionConfigSync } from '@/features/canvas/function-config'
 import { useCanvasFunctionRun } from '@/features/canvas/function-run'
-import { isNodeCompletelyOutsideGroup } from '@/features/canvas/group-membership'
 import {
   normalizeNodeAlias,
   uniqueNodeAlias,
 } from '@/features/canvas/node-alias'
-import { groupIdFromFlowId } from '@/features/canvas/projection'
 import { CANVAS_SINGLE_RESOURCE_NODE_SIZE } from '@/features/canvas/resource-node-size'
-import { isCanonicalUuid } from '@/features/canvas/uuid'
-import { createWorkerHasher, validateUploadFile } from '@/features/ai/composer'
+import { useCanvasTransformBatch } from '@/features/canvas/transform-batch'
 import type {
   AddMenuAction,
   CanvasLocalState,
   CanvasNodeCallbacks,
-  CanvasPositionUpdate,
   StageMetrics,
 } from '@/features/canvas/types'
 import {
@@ -45,7 +41,6 @@ import {
   getCanvas,
   listCanvasFunctionModels,
 } from '@/shared/api/studio-service'
-import { storageService } from '@/shared/api/storage-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 const DEFAULT_STAGE: StageMetrics = { width: 960, height: 640, dockTop: 520 }
@@ -54,8 +49,6 @@ const NODE_SIZE: CanvasTransformDTO = {
   y: 120,
   ...CANVAS_SINGLE_RESOURCE_NODE_SIZE,
 }
-/** 画布资源上传与共享 composer 一致：Web Worker 中计算 SHA-256。 */
-const canvasUploadHasher = createWorkerHasher()
 
 export function useCanvasController(initialCanvasId?: UUIDString) {
   const queryClient = useQueryClient()
@@ -90,10 +83,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const closeContextMenuRef = useRef<(() => void) | null>(null)
   const queueRef = useRef<CanvasCommandQueue | null>(null)
   const pendingCommandCountRef = useRef(0)
-  const transformTimerRef = useRef<number | null>(null)
-  const pendingNodeTransformsRef = useRef(new Map<UUIDString, CanvasTransformDTO>())
-  const pendingGroupMovesRef = useRef(new Map<UUIDString, { x: number; y: number }>())
-  const pendingUngroupsRef = useRef(new Map<UUIDString, UUIDString>())
   const reservedNodeAliasesRef = useRef(new Set<string>())
 
   const snapshotQuery = useQuery({
@@ -215,20 +204,88 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   })
 
   useEffect(() => () => {
-    if (transformTimerRef.current !== null) {
-      window.clearTimeout(transformTimerRef.current)
-    }
     resetFunctionConfigDrafts()
   }, [resetFunctionConfigDrafts])
 
-  const openEditor = useCallback((canvasId: UUIDString) => {
-    if (transformTimerRef.current !== null) {
-      window.clearTimeout(transformTimerRef.current)
-      transformTimerRef.current = null
+  const setPositionDrafts = useCallback((
+    updater: (current: Record<string, { x: number; y: number }>) => Record<string, { x: number; y: number }>,
+  ) => {
+    setState((current) => ({ ...current, positionDrafts: updater(current.positionDrafts) }))
+  }, [])
+
+  const transformBatch = useCanvasTransformBatch({
+    snapshot: snapshotQuery.data,
+    executeCommands,
+    setPositionDrafts,
+  })
+  const { moveNodes, commitTransforms, reset: resetTransformBatch } = transformBatch
+
+  const availableNodeNames = useCallback(() => {
+    const snapshot = queueRef.current?.currentSnapshot() ?? snapshotQuery.data
+    return [
+      ...(snapshot?.nodes.map((node) => node.name) ?? []),
+      ...reservedNodeAliasesRef.current,
+    ]
+  }, [snapshotQuery.data])
+
+  const suggestNodeAlias = useCallback((preferred: string) => (
+    uniqueNodeAlias(preferred, availableNodeNames())
+  ), [availableNodeNames])
+
+  const reserveNodeAlias = useCallback((preferred: string) => {
+    const alias = suggestNodeAlias(preferred)
+    reservedNodeAliasesRef.current.add(alias)
+    return alias
+  }, [suggestNodeAlias])
+
+  const releaseNodeAlias = useCallback((alias: string) => {
+    const normalized = normalizeNodeAlias(alias)
+    for (const reserved of reservedNodeAliasesRef.current) {
+      if (normalizeNodeAlias(reserved) === normalized) {
+        reservedNodeAliasesRef.current.delete(reserved)
+        return
+      }
     }
-    pendingNodeTransformsRef.current.clear()
-    pendingGroupMovesRef.current.clear()
-    pendingUngroupsRef.current.clear()
+  }, [])
+
+  const nextTransform = useCallback((
+    size: Pick<CanvasTransformDTO, 'width' | 'height'> = NODE_SIZE,
+  ): CanvasTransformDTO => {
+    const count = (queueRef.current?.currentSnapshot() ?? snapshotQuery.data)?.nodes.length ?? 0
+    return {
+      ...NODE_SIZE,
+      ...size,
+      x: 100 + (count % 4) * 360,
+      y: 100 + Math.floor(count / 4) * 380,
+    }
+  }, [snapshotQuery.data])
+
+  const setUploadProgress = useCallback((localId: string, progress: number | null) => {
+    setState((current) => {
+      const uploadProgress = { ...current.uploadProgress }
+      if (progress === null) {
+        delete uploadProgress[localId]
+      } else {
+        uploadProgress[localId] = progress
+      }
+      return { ...current, uploadProgress }
+    })
+  }, [])
+
+  const uploadPipeline = useCanvasUploadPipeline({
+    canvasId: state.canvasId,
+    executeCommands,
+    reserveNodeAlias,
+    releaseNodeAlias,
+    nextTransform,
+    onUploadProgress: setUploadProgress,
+    setToast,
+  })
+  const { uploadFiles, resetUploads } = uploadPipeline
+
+  const openEditor = useCallback((canvasId: UUIDString) => {
+    resetTransformBatch()
+    resetUploads()
     resetFunctionConfigDrafts()
     reservedNodeAliasesRef.current.clear()
     queueRef.current = null
@@ -244,16 +301,11 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       conflictMessage: null,
       textEditor: null,
     }))
-  }, [resetFunctionConfigDrafts])
+  }, [resetFunctionConfigDrafts, resetTransformBatch, resetUploads])
 
   const openLibrary = useCallback(() => {
-    if (transformTimerRef.current !== null) {
-      window.clearTimeout(transformTimerRef.current)
-      transformTimerRef.current = null
-    }
-    pendingNodeTransformsRef.current.clear()
-    pendingGroupMovesRef.current.clear()
-    pendingUngroupsRef.current.clear()
+    resetTransformBatch()
+    resetUploads()
     reservedNodeAliasesRef.current.clear()
     setInitialFitPending(false)
     setState((current) => ({
@@ -267,109 +319,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       threadOpen: false,
       textEditor: null,
     }))
-  }, [])
-
-  const flushTransforms = useCallback(() => {
-    transformTimerRef.current = null
-    const commands: CanvasCommandDTO[] = []
-    const submittedDrafts: Record<string, { x: number; y: number }> = {}
-    const updates = [...pendingNodeTransformsRef.current].map(([nodeId, transform]) => ({
-      nodeId,
-      transform,
-    }))
-    for (const [nodeId, transform] of pendingNodeTransformsRef.current) {
-      submittedDrafts[nodeId] = { x: transform.x, y: transform.y }
-    }
-    pendingNodeTransformsRef.current.clear()
-    for (const [groupId, position] of pendingGroupMovesRef.current) {
-      commands.push({ type: 'MOVE_GROUP', groupId, ...position })
-      submittedDrafts[`group:${groupId}`] = position
-    }
-    pendingGroupMovesRef.current.clear()
-    if (updates.length > 0) {
-      commands.push({ type: 'UPDATE_NODE_TRANSFORMS', updates })
-    }
-    const ungroupedByGroup = new Map<UUIDString, UUIDString[]>()
-    for (const [nodeId, groupId] of pendingUngroupsRef.current) {
-      const memberNodeIds = ungroupedByGroup.get(groupId) ?? []
-      memberNodeIds.push(nodeId)
-      ungroupedByGroup.set(groupId, memberNodeIds)
-    }
-    pendingUngroupsRef.current.clear()
-    for (const [groupId, memberNodeIds] of ungroupedByGroup) {
-      commands.push({ type: 'UNGROUP', groupId, memberNodeIds })
-    }
-    if (commands.length > 0) {
-      void executeCommands(commands)
-        .catch(() => undefined)
-        .finally(() => {
-          setState((current) => ({
-            ...current,
-            positionDrafts: removeSubmittedDrafts(current.positionDrafts, submittedDrafts),
-          }))
-        })
-    }
-  }, [executeCommands])
-
-  const scheduleTransformFlush = useCallback(() => {
-    if (transformTimerRef.current !== null) {
-      window.clearTimeout(transformTimerRef.current)
-    }
-    transformTimerRef.current = window.setTimeout(flushTransforms, 180)
-  }, [flushTransforms])
-
-  const moveNodes = useCallback((updates: CanvasPositionUpdate[]) => {
-    const snapshot = snapshotQuery.data
-    if (!snapshot) {
-      return
-    }
-    setState((current) => {
-      const positionDrafts = { ...current.positionDrafts }
-      for (const update of updates) {
-        if (update.kind === 'group') {
-          const groupId = groupIdFromFlowId(update.id)
-          if (!groupId) {
-            continue
-          }
-          const group = snapshot.groups.find((item) => item.id === groupId)
-          if (!group) {
-            continue
-          }
-          const position = {
-            x: update.transform.x,
-            y: update.transform.y,
-          }
-          positionDrafts[update.id] = position
-          pendingGroupMovesRef.current.set(groupId, position)
-        } else {
-          positionDrafts[update.id] = {
-            x: update.transform.x,
-            y: update.transform.y,
-          }
-          const nodeId = update.id as UUIDString
-          pendingNodeTransformsRef.current.set(nodeId, update.transform)
-          const node = snapshot.nodes.find((item) => item.id === nodeId)
-          const group = node?.groupId
-            ? snapshot.groups.find((item) => item.id === node.groupId)
-            : null
-          if (
-            node?.groupId
-            && group
-            && isNodeCompletelyOutsideGroup(update.transform, group.transform)
-          ) {
-            pendingUngroupsRef.current.set(nodeId, node.groupId)
-          } else {
-            pendingUngroupsRef.current.delete(nodeId)
-          }
-        }
-      }
-      return { ...current, positionDrafts }
-    })
-  }, [snapshotQuery.data])
-
-  const commitTransforms = useCallback(() => {
-    scheduleTransformFlush()
-  }, [scheduleTransformFlush])
+  }, [resetTransformBatch, resetUploads])
 
   const setViewport = useCallback((viewport: StoredCanvasViewport) => {
     setState((current) => {
@@ -427,46 +377,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       },
     }))
   }, [])
-
-  const availableNodeNames = useCallback(() => {
-    const snapshot = queueRef.current?.currentSnapshot() ?? snapshotQuery.data
-    return [
-      ...(snapshot?.nodes.map((node) => node.name) ?? []),
-      ...reservedNodeAliasesRef.current,
-    ]
-  }, [snapshotQuery.data])
-
-  const suggestNodeAlias = useCallback((preferred: string) => (
-    uniqueNodeAlias(preferred, availableNodeNames())
-  ), [availableNodeNames])
-
-  const reserveNodeAlias = useCallback((preferred: string) => {
-    const alias = suggestNodeAlias(preferred)
-    reservedNodeAliasesRef.current.add(alias)
-    return alias
-  }, [suggestNodeAlias])
-
-  const releaseNodeAlias = useCallback((alias: string) => {
-    const normalized = normalizeNodeAlias(alias)
-    for (const reserved of reservedNodeAliasesRef.current) {
-      if (normalizeNodeAlias(reserved) === normalized) {
-        reservedNodeAliasesRef.current.delete(reserved)
-        return
-      }
-    }
-  }, [])
-
-  const nextTransform = useCallback((
-    size: Pick<CanvasTransformDTO, 'width' | 'height'> = NODE_SIZE,
-  ): CanvasTransformDTO => {
-    const count = (queueRef.current?.currentSnapshot() ?? snapshotQuery.data)?.nodes.length ?? 0
-    return {
-      ...NODE_SIZE,
-      ...size,
-      x: 100 + (count % 4) * 360,
-      y: 100 + Math.floor(count / 4) * 380,
-    }
-  }, [snapshotQuery.data])
 
   const createTextNode = useCallback(() => {
     setState((current) => ({
@@ -606,98 +516,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const deleteGroup = useCallback((groupId: UUIDString) => {
     void executeCommands([{ type: 'DELETE_GROUP', groupId }]).catch(() => undefined)
   }, [executeCommands])
-
-  const uploadFiles = useCallback(async (files: FileList | File[]) => {
-    if (!state.canvasId) {
-      return
-    }
-    for (const file of Array.from(files)) {
-      const descriptor = canvasFileDescriptor(file)
-      const localId = `${file.name}:${file.lastModified}:${file.size}`
-      if (!descriptor) {
-        setToast(`不支持的文件类型：${file.name}`)
-        continue
-      }
-      const sizeError = validateUploadFile(file)
-      if (sizeError) {
-        setToast(sizeError)
-        continue
-      }
-      try {
-        setState((current) => ({
-          ...current,
-          uploadProgress: { ...current.uploadProgress, [localId]: 0.1 },
-        }))
-        // 画布资源上传走共享存储：Web Worker SHA-256 → reserve → PENDING 直传 →
-        // complete。upload 句柄由服务端生成，complete 后句柄不变，作为命令引用键。
-        const sha256 = await canvasUploadHasher(file)
-        setState((current) => ({
-          ...current,
-          uploadProgress: { ...current.uploadProgress, [localId]: 0.3 },
-        }))
-        const reservation = await storageService.reserveUpload({
-          filename: file.name,
-          mediaType: descriptor.mediaType,
-          sizeBytes: file.size,
-          sha256,
-        })
-        setState((current) => ({
-          ...current,
-          uploadProgress: { ...current.uploadProgress, [localId]: 0.5 },
-        }))
-        if (reservation.state === 'PENDING') {
-          // PENDING = 对象尚未落库：必须直传；READY = sha256 命中，跳过直传。
-          await storageService.uploadFile(reservation.presignedPut, file)
-          setState((current) => ({
-            ...current,
-            uploadProgress: { ...current.uploadProgress, [localId]: 0.8 },
-          }))
-        }
-        const completed = await storageService.completeUpload(reservation.id)
-        // 共享存储的 upload 句柄是服务端生成的 canonical UUID：命令引用前校验。
-        const uploadId = completed.id
-        if (!isCanonicalUuid(uploadId)) {
-          throw new Error('存储服务返回了无效的上传句柄')
-        }
-        // 最终命令失败不删除已完成的句柄：它可能已被服务端资源引用，
-        // 交由存储过期回收；绝不删除已消费（complete）的句柄。
-        const alias = reserveNodeAlias(file.name)
-        try {
-          await executeCommands([{
-            type: 'CREATE_RESOURCE_NODE',
-            nodeId: crypto.randomUUID(),
-            name: alias,
-            uploadIds: [uploadId],
-            transform: nextTransform(),
-          }])
-        } finally {
-          releaseNodeAlias(alias)
-        }
-        setState((current) => {
-          const progress = { ...current.uploadProgress }
-          delete progress[localId]
-          return { ...current, uploadProgress: progress, toast: `已上传 ${file.name}` }
-        })
-      } catch (error) {
-        setState((current) => {
-          const progress = { ...current.uploadProgress }
-          delete progress[localId]
-          return {
-            ...current,
-            uploadProgress: progress,
-            toast: error instanceof Error ? error.message : `上传 ${file.name} 失败`,
-          }
-        })
-      }
-    }
-  }, [
-    executeCommands,
-    nextTransform,
-    releaseNodeAlias,
-    reserveNodeAlias,
-    setToast,
-    state.canvasId,
-  ])
 
   const handleAddAction = useCallback((action: AddMenuAction) => {
     setState((current) => ({ ...current, addMenuOpen: false }))
@@ -860,20 +678,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     collapseThread,
     focusThread,
   }
-}
-
-function removeSubmittedDrafts(
-  current: Record<string, { x: number; y: number }>,
-  submitted: Record<string, { x: number; y: number }>,
-): Record<string, { x: number; y: number }> {
-  const next = { ...current }
-  for (const [id, position] of Object.entries(submitted)) {
-    const draft = next[id]
-    if (draft?.x === position.x && draft.y === position.y) {
-      delete next[id]
-    }
-  }
-  return next
 }
 
 function sameSelection(
