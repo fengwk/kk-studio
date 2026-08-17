@@ -67,6 +67,7 @@ node scripts/e2e/ui-smoke.mjs \
 Redis/S3-compatible endpoint：
 
 ```bash
+docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 docker compose -f deploy/test/compose.yaml up -d --wait
 
 env \
