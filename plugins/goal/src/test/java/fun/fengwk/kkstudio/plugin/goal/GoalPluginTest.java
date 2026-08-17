@@ -23,10 +23,19 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /** Goal 插件的 branch snapshot、工具状态机、fork 与上下文投影测试。 */
@@ -53,6 +62,47 @@ class GoalPluginTest {
         catalog.findTool("get_goal").orElseThrow().stateAccesses().get(0).mode());
     assertTrue(catalog.findCustomEntryType(GoalPlugin.ID, GoalPlugin.STATE_TYPE).isPresent());
     assertEquals(1, catalog.contextProjectors().size());
+  }
+
+  /** 三个 Goal Tool 的版本、可见类型、副作用与 schema 精确对齐 durable goal 协议。 */
+  @Test
+  void exposesCanonicalGoalToolDescriptors() {
+    ToolDescriptor create = new CreateGoalTool().descriptor();
+    assertDescriptor(
+        create,
+        CreateGoalTool.NAME,
+        CreateGoalTool.VERSION,
+        ToolSideEffect.IDEMPOTENT,
+        Set.of("objective"),
+        Set.of("objective", "tokenBudget"));
+    assertInstanceOf(ToolStringSchema.class, create.inputSchema().properties().get("objective"));
+    assertInstanceOf(ToolIntegerSchema.class, create.inputSchema().properties().get("tokenBudget"));
+
+    ToolDescriptor get = new GetGoalTool().descriptor();
+    assertDescriptor(
+        get, GetGoalTool.NAME, GetGoalTool.VERSION, ToolSideEffect.READ_ONLY, Set.of(), Set.of());
+
+    ToolDescriptor update = new UpdateGoalTool().descriptor();
+    assertDescriptor(
+        update,
+        UpdateGoalTool.NAME,
+        UpdateGoalTool.VERSION,
+        ToolSideEffect.IDEMPOTENT,
+        Set.of("status", "reason"),
+        Set.of("status", "reason"));
+    ToolEnumSchema status =
+        assertInstanceOf(ToolEnumSchema.class, update.inputSchema().properties().get("status"));
+    assertEquals(List.of("complete", "blocked"), status.values());
+    assertInstanceOf(ToolStringSchema.class, update.inputSchema().properties().get("reason"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolCall(
+                    "create-extra",
+                    CreateGoalTool.NAME,
+                    "{\"objective\":\"ship\",\"unexpected\":true}")
+                .validateFor(create));
   }
 
   @Test
@@ -299,6 +349,25 @@ class GoalPluginTest {
 
   private static String text(PluginToolResult result) {
     return ((TextToolContent) result.result().contents().get(0)).text();
+  }
+
+  private static void assertDescriptor(
+      ToolDescriptor descriptor,
+      String name,
+      String version,
+      ToolSideEffect sideEffect,
+      Set<String> required,
+      Set<String> properties) {
+    assertEquals(name, descriptor.name());
+    assertEquals(version, descriptor.version());
+    assertEquals(ToolType.PLATFORM, descriptor.type());
+    assertEquals(name, descriptor.rendererKey());
+    assertEquals(sideEffect, descriptor.sideEffect());
+    assertEquals(Duration.ZERO, descriptor.timeout());
+    ToolParamsSchema schema = descriptor.inputSchema();
+    assertEquals(required, schema.required());
+    assertEquals(properties, schema.properties().keySet());
+    assertFalse(schema.additionalProperties());
   }
 
   private static BranchView branch() {

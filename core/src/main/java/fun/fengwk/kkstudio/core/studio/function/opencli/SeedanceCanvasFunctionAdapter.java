@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -53,14 +54,16 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   private final OpenCliHubClient client;
   private final OpenCliReferenceUploader uploader;
   private final ObjectMapper mapper;
+  private final Clock clock;
   private final Sleeper sleeper;
 
   public SeedanceCanvasFunctionAdapter(
       OpenCliHubProperties hubProperties,
       SeedanceCanvasProperties properties,
       OpenCliHubClient client,
-      ObjectMapper objectMapper) {
-    this(hubProperties, properties, client, objectMapper, Thread::sleep);
+      ObjectMapper objectMapper,
+      Clock clock) {
+    this(hubProperties, properties, client, objectMapper, clock, Thread::sleep);
   }
 
   SeedanceCanvasFunctionAdapter(
@@ -69,12 +72,23 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       OpenCliHubClient client,
       ObjectMapper objectMapper,
       Sleeper sleeper) {
+    this(hubProperties, properties, client, objectMapper, Clock.systemUTC(), sleeper);
+  }
+
+  SeedanceCanvasFunctionAdapter(
+      OpenCliHubProperties hubProperties,
+      SeedanceCanvasProperties properties,
+      OpenCliHubClient client,
+      ObjectMapper objectMapper,
+      Clock clock,
+      Sleeper sleeper) {
     this.hubProperties = Objects.requireNonNull(hubProperties, "hubProperties");
     this.properties = Objects.requireNonNull(properties, "properties");
     properties.validate();
     this.client = Objects.requireNonNull(client, "client");
     uploader = new OpenCliReferenceUploader(client);
     mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
+    this.clock = Objects.requireNonNull(clock, "clock");
     this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
   }
 
@@ -194,7 +208,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       }
       state.remove(OpenCliAdapterState.EXECUTION_ID);
       state.put(OpenCliAdapterState.ASSET_ID, assetId);
-      state.put(OpenCliAdapterState.POLL_STARTED_AT, Instant.now().toString());
+      state.put(OpenCliAdapterState.POLL_STARTED_AT, clock.instant().toString());
       context.checkpoint("SEEDANCE_STATUS_WAITING", state);
     } else {
       uploads = OpenCliAdapterState.uploads(state);
@@ -206,7 +220,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       if (!context.isRunning()) {
         throw new IllegalStateException("Canvas Function run is no longer running");
       }
-      if (!Instant.now().isBefore(deadline)) {
+      if (!clock.instant().isBefore(deadline)) {
         throw new OpenCliHubException("Seedance generation exceeded maximum wait");
       }
       executionId = OpenCliAdapterState.optionalString(state, OpenCliAdapterState.EXECUTION_ID);
@@ -215,7 +229,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
         if (!context.isRunning()) {
           throw new IllegalStateException("Canvas Function run is no longer running");
         }
-        if (!Instant.now().isBefore(deadline)) {
+        if (!clock.instant().isBefore(deadline)) {
           throw new OpenCliHubException("Seedance generation exceeded maximum wait");
         }
         Execution statusExecution =

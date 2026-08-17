@@ -95,7 +95,7 @@ export class CanvasCommandQueue {
 
   /**
    * 从 afterVersion（缺省为当前版本）开始拉取 changes 并应用。
-   * 供 SSE 'version' 事件与命令响应的 gap 恢复共用：返回连续 patches 则
+   * 供应用事件 WebSocket `version` 与命令响应的 gap 恢复共用：返回连续 patches 则
    * 逐个应用，载荷要求 snapshot 或 patches 无法闭环时回退全量快照。
    */
   async syncFrom(afterVersion?: CanvasVersion, signal?: AbortSignal): Promise<CanvasSnapshotDTO> {

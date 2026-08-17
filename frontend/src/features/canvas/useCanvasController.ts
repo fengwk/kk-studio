@@ -117,7 +117,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }
   }, [queryClient, snapshotQuery.data, state.canvasId])
 
-  // SSE 版本事件：按最后已知版本拉取 changes（连续 patches 或全量快照）；
+  // 应用事件 WebSocket version：按最后已知版本拉取 changes（连续 patches 或全量快照）；
   // resync 事件通过 invalidate 触发权威快照整体替换。
   const syncCanvasChanges = useCallback(() => {
     void queueRef.current?.syncFrom().catch(() => undefined)
