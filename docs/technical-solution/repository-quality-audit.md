@@ -109,3 +109,21 @@ Bound Thread、Composer 与 Canvas 的新状态机必须优先在独立 hook 测
 | 真实模型 | 只允许显式 `--real`，且付费 case 硬校验 `minimax/MiniMax-M2.7` |
 
 当前构建仍可能报告 Vite 单 chunk 大于 500kB 的提示；路由、Canvas 与 Mermaid 已按现有边界拆包，该提示不影响正确性门禁。新增重量级依赖或同步首屏模块时必须重新评估 chunk。
+
+## 6. 当前验收证据
+
+当前基线已完成以下验证：
+
+- Java：13 个 Maven 模块全部通过，2837 tests，0 failure/error/skip；Spotless、Checkstyle 与 JaCoCo report 均成功。
+- 前端：142 test files / 1109 tests；lint 与 production build 通过。
+- 前端全局覆盖率：statements 87.79%、branches 82.19%、functions 88.82%、lines 87.83%。
+- 关键 Java 路径：
+  - `ChangeGate` line/branch 100%；
+  - `TaskTool` line 98.2%；
+  - `HarnessOneShotService` line 96.9%；
+  - `SubagentRunRegistry` line 98.3%；
+  - `CanvasFunctionRunTransactions.checkpoint` line 100%、branch 90%；
+  - `EditTool.run` line 95.9%、branch 92.3%。
+- Node E2E API：分层执行 L1 65 + L2 4 + L3 1 + L4 3，覆盖注册矩阵 73/73。
+- Playwright UI：免费矩阵 35/35，Environment → Workspace Tool 场景 1/1，合计 36/36。
+- 所有真实 Provider E2E 均由 runner 在执行前硬校验 `minimax/MiniMax-M2.7`。
