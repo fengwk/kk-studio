@@ -2,12 +2,20 @@ package fun.fengwk.kkstudio.core.ai.runtime.task;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /** 进程内 task 并发 reservation 的计数与 session 归属语义。 */
 class SubagentRunRegistryTest {
@@ -19,7 +27,7 @@ class SubagentRunRegistryTest {
   }
 
   private static SubagentConfig config(int maxConcurrency, Integer maxTotalConcurrency) {
-    return new SubagentConfig(2, maxConcurrency, maxTotalConcurrency, ONE_MS, 50, ONE_MS);
+    return new SubagentConfig(2, maxConcurrency, maxTotalConcurrency, ONE_MS, 50);
   }
 
   /** 同一 parent 的直系子 Agent 数不得超过 maxConcurrency；关闭释放计数。 */
@@ -184,5 +192,136 @@ class SubagentRunRegistryTest {
     grandchild.close();
     assertEquals(List.of(), registry.descendantStatuses(id(1)));
     child.close();
+  }
+
+  /** descendant 订阅在 publish/attach/release 三个变更路径都收到锁外通知；释放订阅后不再通知。 */
+  @Test
+  void notifiesDescendantSubscribersOnPublishAttachAndRelease() {
+    SubagentRunRegistry registry = new SubagentRunRegistry();
+    SubagentConfig config = config(10, null);
+    List<String> events = new ArrayList<>();
+    try (SubagentRunRegistry.ChangeSubscription subscription =
+        registry.subscribeDescendants(id(1), () -> events.add("wake"))) {
+      SubagentRunRegistry.Reservation child = registry.reserve(id(1), id(1), null, config);
+      try {
+        // attach 通知祖先。
+        child.attach(id(2));
+        assertEquals(1, events.size(), "attach must notify descendant subscribers");
+
+        // publish 通知祖先。
+        registry.publishStatus(
+            new SubagentRunRegistry.RelayedStatus(
+                id(2), "coder", "running_model", 2, 1, 0, "running_model", List.of()));
+        assertEquals(2, events.size(), "publish must notify descendant subscribers");
+      } finally {
+        // release 通知祖先。
+        child.close();
+      }
+      assertEquals(3, events.size(), "release must notify descendant subscribers");
+    }
+    // 订阅释放后不再收到通知。
+    SubagentRunRegistry.Reservation again = registry.reserve(id(1), id(1), null, config);
+    try {
+      again.attach(id(4));
+    } finally {
+      again.close();
+    }
+    assertEquals(3, events.size(), "closed subscription must not be notified");
+  }
+
+  /** 发布 thread 自身的 status 只通知严格祖先：观察自己 child 的订阅者不会被自己的发布唤醒（无自循环）。 */
+  @Test
+  void publishingOwnStatusDoesNotWakeDescendantSelfSubscriber() {
+    SubagentRunRegistry registry = new SubagentRunRegistry();
+    SubagentConfig config = config(10, null);
+    SubagentRunRegistry.Reservation child = registry.reserve(id(1), id(1), null, config);
+    child.attach(id(2));
+    List<String> selfWakes = new ArrayList<>();
+    List<String> ancestorWakes = new ArrayList<>();
+    try (SubagentRunRegistry.ChangeSubscription self =
+            registry.subscribeDescendants(id(2), () -> selfWakes.add("wake"));
+        SubagentRunRegistry.ChangeSubscription ancestor =
+            registry.subscribeDescendants(id(1), () -> ancestorWakes.add("wake"))) {
+      registry.publishStatus(
+          new SubagentRunRegistry.RelayedStatus(
+              id(2), "coder", "running_model", 2, 1, 0, "running_model", List.of()));
+
+      assertTrue(
+          selfWakes.isEmpty(), "own status publish must not wake own descendant subscription");
+      assertEquals(1, ancestorWakes.size(), "ancestor subscribers must be notified");
+    }
+    child.close();
+  }
+
+  /**
+   * 回调在锁外执行且异常隔离：一个订阅者抛异常不阻断其他订阅者；回调被阻塞期间，另一线程仍能在 bounded timeout 内 读/写 registry（若回调在锁内执行，publish
+   * 持锁阻塞回调，检查线程将超时失败）。
+   */
+  @Test
+  void isolatesCallbackFailuresAndRunsOutsideRegistryLock() throws Exception {
+    SubagentRunRegistry registry = new SubagentRunRegistry();
+    SubagentConfig config = config(10, null);
+    SubagentRunRegistry.Reservation child = registry.reserve(id(1), id(1), null, config);
+    child.attach(id(2));
+    List<String> healthyWakes = new CopyOnWriteArrayList<>();
+    CountDownLatch callbackEntered = new CountDownLatch(1);
+    CountDownLatch releaseCallback = new CountDownLatch(1);
+    ExecutorService publisher = daemonExecutor();
+    ExecutorService checker = daemonExecutor();
+    try (SubagentRunRegistry.ChangeSubscription failing =
+            registry.subscribeDescendants(
+                id(1),
+                () -> {
+                  throw new IllegalStateException("boom");
+                });
+        SubagentRunRegistry.ChangeSubscription healthy =
+            registry.subscribeDescendants(
+                id(1),
+                () -> {
+                  callbackEntered.countDown();
+                  try {
+                    assertTrue(releaseCallback.await(5, TimeUnit.SECONDS));
+                  } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                  }
+                  healthyWakes.add("wake");
+                })) {
+      // publish 在独立线程执行；failing 订阅者抛异常被隔离，healthy 订阅者随后进入并阻塞。
+      Future<?> published =
+          publisher.submit(
+              () ->
+                  registry.publishStatus(
+                      new SubagentRunRegistry.RelayedStatus(
+                          id(2), "coder", "running_model", 2, 1, 0, "running_model", List.of())));
+      assertTrue(callbackEntered.await(5, TimeUnit.SECONDS), "healthy callback must run");
+      // 回调被阻塞期间，另一线程读写 registry 必须立即完成：锁内回调会让 publish 持锁，这些调用会超时。
+      Future<?> concurrentAccess =
+          checker.submit(
+              () -> {
+                assertEquals(1, registry.descendantStatuses(id(1)).size());
+                try (SubagentRunRegistry.Reservation other =
+                    registry.reserve(id(3), id(1), null, config)) {
+                  other.attach(id(4));
+                }
+              });
+      concurrentAccess.get(3, TimeUnit.SECONDS);
+      releaseCallback.countDown();
+      published.get(3, TimeUnit.SECONDS);
+    } finally {
+      releaseCallback.countDown(); // 回归路径（回调持锁）时解除潜在死锁再关闭线程池。
+      publisher.shutdownNow();
+      checker.shutdownNow();
+    }
+    assertEquals(1, healthyWakes.size(), "failing subscriber must not block healthy subscribers");
+    child.close();
+  }
+
+  private static ExecutorService daemonExecutor() {
+    return Executors.newSingleThreadExecutor(
+        runnable -> {
+          Thread thread = new Thread(runnable);
+          thread.setDaemon(true);
+          return thread;
+        });
   }
 }

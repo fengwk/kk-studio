@@ -79,8 +79,7 @@ class SystemPromptPreviewServiceTest {
 
   private static SystemPromptPreviewService service(
       HarnessRuntime runtime, AgentDefinitionRepository agents, AgentDefinitionConfigCodec codec) {
-    SubagentConfig subagentConfig =
-        new SubagentConfig(2, 10, null, Duration.ZERO, 7, Duration.ofMillis(100));
+    SubagentConfig subagentConfig = new SubagentConfig(2, 10, null, Duration.ZERO, 7);
     return new SystemPromptPreviewServiceFactory(
             agents,
             codec,

@@ -18,8 +18,8 @@ HarnessToolGatewayConfiguration
   -> CoreToolGateway（普通 Tool / plugin Tool + preflight + 两阶段激活 + FIFO 回调桥）
 
 RuntimeToolsConfiguration
-  -> loadSkillTool / TaskTool（内部 PLATFORM Tool beans）
-  -> SubagentConfig（maxDepth/并发/idle/maxTurns/poll）+ SubagentRunRegistry（进程内并发 reservation）
+  -> loadSkillTool / TaskTool（内部 PLATFORM Tool beans；TaskTool 依赖 core port HarnessThreadChangeSource，由 web 组合根适配 ThreadRevisionEventSource 提供）
+  -> SubagentConfig（maxDepth/并发/idle/maxTurns，无轮询间隔）+ SubagentRunRegistry（进程内并发 reservation + descendant 订阅）
 
 DatabaseTurnResolver
   -> Agent/Provider/Model/Variant Catalog 查询（按名称读最新行）
