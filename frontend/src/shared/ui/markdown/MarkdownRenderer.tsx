@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react'
+import { memo, type ComponentProps, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -12,10 +12,10 @@ import 'highlight.js/styles/github-dark.min.css'
 
 export type MarkdownTone = 'default' | 'muted'
 
-const REMARK_PLUGINS = [remarkGfm, remarkMath]
-// rehype 插件表：用 any 保持 pluggable 联合类型可赋值（remark 生态常见写法）
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const REHYPE_PLUGINS: any[] = [
+type ReactMarkdownProps = ComponentProps<typeof ReactMarkdown>
+
+const REMARK_PLUGINS: NonNullable<ReactMarkdownProps['remarkPlugins']> = [remarkGfm, remarkMath]
+const REHYPE_PLUGINS: NonNullable<ReactMarkdownProps['rehypePlugins']> = [
   [rehypeKatex, { throwOnError: false, strict: 'ignore', output: 'html' }],
   rehypeHighlight,
 ]

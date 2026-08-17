@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
@@ -66,6 +67,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private final StorageMediaProbe mediaProbe;
   private final S3StorageProperties s3Properties;
   private final StorageProperties storageProperties;
+  private final Clock clock;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate mandatoryTransactionTemplate;
 
@@ -78,6 +80,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       StorageMediaProbe mediaProbe,
       S3StorageProperties s3Properties,
       StorageProperties storageProperties,
+      Clock clock,
       PlatformTransactionManager transactionManager) {
     this.uploadRepository = Objects.requireNonNull(uploadRepository, "uploadRepository");
     this.blobRepository = Objects.requireNonNull(blobRepository, "blobRepository");
@@ -87,6 +90,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
     this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
     this.storageProperties = Objects.requireNonNull(storageProperties, "storageProperties");
+    this.clock = Objects.requireNonNull(clock, "clock");
     PlatformTransactionManager requiredTransactionManager =
         Objects.requireNonNull(transactionManager, "transactionManager");
     this.transactionTemplate = new TransactionTemplate(requiredTransactionManager);
@@ -107,7 +111,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     UUID uploadId = UUID.randomUUID();
     UUID candidateBlobId = UUID.randomUUID();
     Instant expiresAt =
-        Instant.now().plusSeconds(storageProperties.getEffectiveUploadExpiresSeconds());
+        clock.instant().plusSeconds(storageProperties.getEffectiveUploadExpiresSeconds());
     ReserveOutcome outcome =
         transactionTemplate.execute(
             status -> {
@@ -227,7 +231,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
             throw new StorageVerificationException(
                 "upload " + uploadId + " is PENDING; complete it before consuming");
           }
-          if (!locked.getExpiresAt().isAfter(Instant.now())) {
+          if (!locked.getExpiresAt().isAfter(clock.instant())) {
             throw new StorageVerificationException("upload " + uploadId + " expired");
           }
           return new ReadyUpload(locked.getBlobId(), locked.getFilename());
