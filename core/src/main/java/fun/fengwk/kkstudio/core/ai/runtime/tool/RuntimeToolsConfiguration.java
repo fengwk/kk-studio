@@ -8,6 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
@@ -61,8 +62,7 @@ public class RuntimeToolsConfiguration {
         properties.getSubagentMaxConcurrency(),
         properties.getSubagentMaxTotalConcurrency(),
         properties.getSubagentIdleTimeout(),
-        properties.getSubagentMaxTurns(),
-        properties.getSubagentPollInterval());
+        properties.getSubagentMaxTurns());
   }
 
   @Bean
@@ -81,10 +81,17 @@ public class RuntimeToolsConfiguration {
       AgentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfig subagentConfig,
       SubagentRunRegistry runRegistry,
+      HarnessThreadChangeSource changeSource,
       @Qualifier("subagentTaskExecutor") ExecutorService executor,
       ObjectMapper objectMapper) {
     return new TaskTool(
-        runtimeProvider, settingsMaterializer, subagentConfig, runRegistry, executor, objectMapper);
+        runtimeProvider,
+        settingsMaterializer,
+        subagentConfig,
+        runRegistry,
+        changeSource,
+        executor,
+        objectMapper);
   }
 
   @Bean

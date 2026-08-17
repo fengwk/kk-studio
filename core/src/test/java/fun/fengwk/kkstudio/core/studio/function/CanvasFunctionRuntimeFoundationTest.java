@@ -7,13 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.core.storage.S3PresignService;
@@ -23,6 +27,7 @@ import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.impl.PostgresqlStorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlobState;
+import fun.fengwk.kkstudio.core.studio.realtime.CanvasPatchStore;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
@@ -31,9 +36,12 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourceRefRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.studio.canvas.CanvasNodePatch;
+import fun.fengwk.kkstudio.studio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
@@ -46,8 +54,11 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionRunException;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -91,6 +102,13 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresSpringTestSupport {
   @Autowired private CanvasFunctionRunTransactions transactions;
   @Autowired private CanvasFunctionModelRegistry registry;
   @Autowired private CanvasFunctionRunStateCodec stateCodec;
+  @Autowired private InMemoryCanvasPatchStore patchStore;
+  @Autowired private PlatformTransactionManager transactionManager;
+
+  @BeforeEach
+  void clearPatchStore() {
+    patchStore.clear();
+  }
 
   /** 相同 requestId exact replay；不同并发 request 只有一个成功；终态允许新 request 覆盖；每次状态前进 bump version。 */
   @Test
@@ -280,6 +298,92 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresSpringTestSupport {
     assertEquals(1L, blobRepository.getById(generated.blobId()).getRefCount());
   }
 
+  /** checkpoint 成功：run stage/state、document version 与 node patch 在同一事务收敛。 */
+  @Test
+  void checkpointAdvancesRunVersionAndPublishesNodePatchInOneTransaction() {
+    CanvasDocument canvas = commandService.createCanvas("checkpoint-transaction");
+    UUID nodeId = createFunction(canvas, "output", config("prompt", "{}"));
+    transactions.start(canvas.id(), nodeId, REQUEST_1);
+    long versionAfterStart = version(canvas);
+    int patchesBefore = patchStore.readAll(canvas.id()).size();
+
+    CanvasFunctionFrozenRun next =
+        transactions.checkpoint(
+            canvas.id(), nodeId, REQUEST_1, "CHECKPOINTED", Map.of("jobId", "job"));
+
+    assertEquals("CHECKPOINTED", next.stage());
+    CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
+    CanvasFunctionFrozenRun decoded = decode(current);
+    assertEquals("CHECKPOINTED", decoded.stage());
+    assertEquals(Map.of("jobId", "job"), decoded.adapterState());
+    assertEquals(versionAfterStart + 1L, version(canvas));
+
+    List<CanvasPatch> patches = patchStore.readAll(canvas.id());
+    assertEquals(patchesBefore + 1, patches.size());
+    CanvasPatch last = patches.get(patches.size() - 1);
+    assertEquals(versionAfterStart, last.baseVersion());
+    assertEquals(versionAfterStart + 1L, last.version());
+    assertEquals(1, last.nodes().size());
+    assertTrue(last.nodes().get(0) instanceof CanvasNodePatch.Upsert);
+    CanvasResourceNode projected = ((CanvasNodePatch.Upsert) last.nodes().get(0)).node();
+    assertEquals(nodeId, projected.id());
+    assertEquals("CHECKPOINTED", projected.run().stage());
+  }
+
+  /** 已取消 run 的迟到 checkpoint：内部取消信号、零版本变更、零 patch。 */
+  @Test
+  void checkpointOnCancelledRunLeavesVersionAndPatchesUntouched() {
+    CanvasDocument canvas = commandService.createCanvas("checkpoint-cancelled");
+    UUID nodeId = createFunction(canvas, "output", config("prompt", "{}"));
+    transactions.start(canvas.id(), nodeId, REQUEST_1);
+    transactions.cancel(canvas.id(), nodeId, REQUEST_1);
+    long versionAfterCancel = version(canvas);
+    int patchesAfterCancel = patchStore.readAll(canvas.id()).size();
+
+    assertThrows(
+        CanvasFunctionInternalCancellation.class,
+        () ->
+            transactions.checkpoint(
+                canvas.id(), nodeId, REQUEST_1, "LATE", Map.of("jobId", "job")));
+
+    assertEquals(versionAfterCancel, version(canvas));
+    assertEquals(patchesAfterCancel, patchStore.readAll(canvas.id()).size());
+    CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.CANCELLED, current.status());
+    assertEquals("CANCELLED", current.stage());
+  }
+
+  /** 外层事务异常回滚：checkpoint 内的 run 写入、version 前进与 afterCommit patch 全部不生效。 */
+  @Test
+  void checkpointRollbackDoesNotPublishNorBumpVersion() {
+    CanvasDocument canvas = commandService.createCanvas("checkpoint-rollback");
+    UUID nodeId = createFunction(canvas, "output", config("prompt", "{}"));
+    transactions.start(canvas.id(), nodeId, REQUEST_1);
+    long versionAfterStart = version(canvas);
+    int patchesAfterStart = patchStore.readAll(canvas.id()).size();
+
+    TransactionTemplate template = new TransactionTemplate(transactionManager);
+    try {
+      template.executeWithoutResult(
+          status -> {
+            CanvasFunctionFrozenRun next =
+                transactions.checkpoint(
+                    canvas.id(), nodeId, REQUEST_1, "INNER", Map.of("step", 1L));
+            assertEquals("INNER", next.stage());
+            throw new IllegalStateException("rollback checkpoint along with outer transaction");
+          });
+    } catch (IllegalStateException expected) {
+      // 预期：rollback 驱动断言。
+    }
+
+    assertEquals(versionAfterStart, version(canvas));
+    assertEquals(patchesAfterStart, patchStore.readAll(canvas.id()).size());
+    CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals("QUEUED", current.stage());
+    assertFalse(current.stateJson().contains("\"step\""));
+  }
+
   private Object raceStart(CountDownLatch start, UUID canvasId, UUID nodeId, String requestId)
       throws InterruptedException {
     start.await();
@@ -411,6 +515,39 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresSpringTestSupport {
     StorageBlobManager testCanvasStorageBlobManager(StorageBlobRepository blobRepository) {
       return new PostgresqlStorageBlobManager(
           blobRepository, mock(S3StorageService.class), mock(S3PresignService.class));
+    }
+
+    @Bean
+    @Primary
+    InMemoryCanvasPatchStore inMemoryCanvasPatchStore() {
+      return new InMemoryCanvasPatchStore();
+    }
+  }
+
+  /** 确定性断言 afterCommit patch 的内存缓存（替换 Redis，避免测试依赖真实缓存；按 canvasId 隔离）。 */
+  static final class InMemoryCanvasPatchStore implements CanvasPatchStore {
+
+    private final Map<UUID, List<CanvasPatch>> byCanvas = new HashMap<>();
+
+    synchronized void clear() {
+      byCanvas.clear();
+    }
+
+    @Override
+    public synchronized void append(UUID canvasId, CanvasPatch patch) {
+      byCanvas.computeIfAbsent(canvasId, ignored -> new ArrayList<>()).add(patch);
+    }
+
+    @Override
+    public synchronized Optional<CanvasPatch> findByVersion(UUID canvasId, long version) {
+      return byCanvas.getOrDefault(canvasId, List.of()).stream()
+          .filter(patch -> patch.version() == version)
+          .findFirst();
+    }
+
+    @Override
+    public synchronized List<CanvasPatch> readAll(UUID canvasId) {
+      return List.copyOf(byCanvas.getOrDefault(canvasId, List.of()));
     }
   }
 }

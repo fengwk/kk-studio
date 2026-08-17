@@ -126,7 +126,7 @@ export type CanvasLinkPatchDTO =
   | { op: 'REMOVE'; sourceNodeId: UUIDString; targetNodeId: UUIDString }
 
 /**
- * 幂等 graph patch：command 响应、changes 回放与 SSE 恢复统一使用它。
+ * 幂等 graph patch：command 响应、changes 回放与应用事件恢复统一使用它。
  * baseVersion -> version 表示一次连续前进；version <= 客户端当前版本时忽略，
  * baseVersion != 客户端当前版本时视为 gap，必须通过 changes 恢复。
  * 两个版本都是 canonical 非负十进制字符串（Java long wire）。
@@ -150,7 +150,7 @@ export interface CanvasChangesDTO {
 }
 
 /**
- * SSE 'version' 事件 payload：version 前进提示，客户端随后按自身
+ * 应用事件 WebSocket `version` payload：version 前进提示，客户端随后按自身
  * 最后已知版本拉取 changes。'resync' 事件无 payload，表示需要全量快照。
  * version 是 canonical 非负十进制字符串；数字/前导零/负数/畸形 payload 一律忽略。
  */

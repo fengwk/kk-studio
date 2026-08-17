@@ -41,7 +41,7 @@ id, title, version, threadId?, createdAt, updatedAt
   version 一律是 canonical 非负十进制字符串（如 `"0"`、`"42"`），与数据库 `bigint` 一一对应；
   客户端禁止转换为 JS number，比较必须使用十进制字符串长度/字典序（bigint-safe）。
 - 每个成功的 typed command batch 恰好前进一次。
-- Function Run 的新 start、cancel、success 或 failure 终态各前进一次；checkpoint 不前进。
+- Function Run 的新 start、checkpoint、cancel、success 或 failure 各前进一次。
 - 同 commandId + 同 request hash 的精确重放返回当前版本的空 Patch，不前进。
 - `threadId` 可空且唯一；首次 Canvas Chat 发送原子创建并绑定一个 Harness 根 Thread，绑定本身不前进 graph version。
 - PostgreSQL UPDATE 使用 `greatest(updated_at, clock_timestamp())`，不依赖事务开始时间，保证 `updatedAt` 不回拨。
@@ -130,7 +130,7 @@ nodeId, requestId, status, stateJson, error?, updatedAt
 
 状态为 `RUNNING | SUCCEEDED | FAILED | CANCELLED`。相同 requestId exact replay；不同 requestId 遇 RUNNING 冲突；终态可被新 request 覆盖。公开 DTO 只返回 `nodeId/requestId/status/stage/error/updatedAt`，不返回 `stateJson`。
 
-`stateJson` 保存 versioned frozen plan、manifest、预分配 target Resource ID、stage 与 adapter checkpoint。Checkpoint 只按 `nodeId + requestId + RUNNING` CAS 更新，不修改 document version。
+`stateJson` 保存 versioned frozen plan、manifest、预分配 target Resource ID、stage 与 adapter checkpoint。Checkpoint 只按 `nodeId + requestId + RUNNING` CAS 更新，并在同一事务内前进 document version 与发布 node patch；任何 CAS/取消/节点消失都回滚且不发布。
 
 ### 2.5 INPUT/OUTPUT pin 与成功交换
 
@@ -349,7 +349,7 @@ Canvas 已绑定 Thread 时，只按 `clientCommandId + raw requestHash` 重放�
 
 PostgreSQL 实体与 `canvas_document.version` 是唯一事实源。
 
-- 每次 command 或 Run 状态前进产生一个 `baseVersion -> version` Patch。
+- 每次 command 或 Run start/checkpoint/terminal 状态前进产生一个 `baseVersion -> version` Patch。
 - Patch 只在事务 `afterCommit` 写 Redis Stream。
 - 每个 Canvas 一个 bounded Stream：`kk-studio:canvas:{canvasId}:changes`，默认 exact max length 5000。
 - `/changes?afterVersion=N` 只在缓存覆盖全部连续版本时返回 patches；初次读取、Redis 不可用、损坏或任意 gap 都返回权威 Snapshot。
@@ -359,6 +359,8 @@ PostgreSQL 实体与 `canvas_document.version` 是唯一事实源。
   `cursor` 与之相等），收到后按最后已知版本拉 `/changes`；`resync` 要求整体替换 Snapshot；
   `subscribed`（首次与每次重连重订阅）同样触发 changes 同步，关闭快照 GET 与 wire 建立之间及
   断线窗口内的版本缺口。数字/前导零/负数/畸形 version 事件一律忽略。
+- Function run 生命周期不再使用前端固定间隔轮询：每次 checkpoint/terminal 都随 node patch 前进
+  version，前端以 version 事件驱动的 changes/snapshot 收敛；start/cancel 本地响应只做即时投影。
 
 Redis 不是事实源，不建立 consumer group，也不承担恢复。
 
@@ -425,6 +427,7 @@ MiniMax-H3 的 Prompt Agent 也使用 durable Blob Resource：Canvas manifest �
 - Attachment Pill、IME、光标/Backspace/Delete、同名/重复附件、失败重试；
 - Chat 与 Canvas ordered contents；
 - Patch projection、事件通道 changes 恢复、Resource URL 渲染；
+- Function run 生命周期（start/cancel 即时投影、version 事件驱动的 changes/snapshot 收敛、start 失败 authoritative fallback）与 config debounce/flush；RUNNING node 无固定间隔轮询；
 - 节点尺寸、整卡拖拽、Chat 面板与窄屏布局。
 
 默认自动化不得访问付费模型；真实 GPT Image、Seedance 和 H3 提交必须显式人工开关。

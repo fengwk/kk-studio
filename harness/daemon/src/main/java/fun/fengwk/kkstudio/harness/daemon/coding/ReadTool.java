@@ -78,7 +78,7 @@ public final class ReadTool extends AbstractCodingTool {
     List<String> output = new ArrayList<>();
     output.add("path: " + rawPath);
     output.add("ends_with_newline: " + (endsWithNewline ? "yes" : "no"));
-    output.add("lsp: unsupported");
+    output.add("lsp: " + (config.lspBridgeCommand() != null ? "supported" : "unsupported"));
     output.add("");
     for (int index = start; index <= end; index++) {
       String line = lines.get(index - 1).replace("\r", "\\r").replace("\u0000", "\\0");

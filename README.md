@@ -14,6 +14,7 @@
 - [docs/technical-solution/harness-runtime-architecture.md](docs/technical-solution/harness-runtime-architecture.md)
 - [docs/technical-solution/prompt-to-resource.md](docs/technical-solution/prompt-to-resource.md)
 - [docs/technical-solution/canvas-resource-function-v1.md](docs/technical-solution/canvas-resource-function-v1.md)
+- [docs/technical-solution/repository-quality-audit.md](docs/technical-solution/repository-quality-audit.md)
 
 ## 能力摘要
 

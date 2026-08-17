@@ -45,8 +45,5 @@ export const queryKeys = {
     canvasResourceOriginal: (canvasId: string, resourceId: string) => (
       ['studio', 'canvas-resource', canvasId, resourceId, 'original'] as const
     ),
-    canvasRun: (canvasId: string, nodeId: string) => (
-      ['studio', 'canvas-run', canvasId, nodeId] as const
-    ),
   },
 }

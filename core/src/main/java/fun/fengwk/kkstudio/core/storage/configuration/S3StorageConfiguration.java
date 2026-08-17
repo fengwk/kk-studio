@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.core.storage.service.impl.PostgresqlStorageBlobManage
 import fun.fengwk.kkstudio.core.storage.service.impl.StorageUploadServiceImpl;
 
 import java.net.URI;
+import java.time.Clock;
 
 /**
  * S3 存储配置.
@@ -128,6 +129,7 @@ public class S3StorageConfiguration {
       StorageMediaProbe mediaProbe,
       S3StorageProperties s3Properties,
       StorageProperties storageProperties,
+      Clock clock,
       PlatformTransactionManager transactionManager) {
     return new StorageUploadServiceImpl(
         uploadRepository,
@@ -138,6 +140,7 @@ public class S3StorageConfiguration {
         mediaProbe,
         s3Properties,
         storageProperties,
+        clock,
         transactionManager);
   }
 

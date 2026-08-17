@@ -221,15 +221,15 @@ Daemon 仅依赖 `harness-tool`，不反向依赖 runtime/model。
 
 ### Coding tools
 
-独立 Daemon 进程通过 `CodingTools.registerAll` 注册固定目录中的九个 coding tool：
+Environment 固定目录共 11 个工具。`CodingTools.registerAll` 注册 9 个 coding tool，它们是 pi-base 既有 coding 能力的本地 Java 实现：
 
 ```text
 read, write, edit, bash, grep, find,
 lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile
 ```
 
-另由 `McpBridgeTools.registerAll` 注册固定桥接工具 `mcp_list_tools` / `mcp_call_tool`（见「本地 MCP server」），Environment 固定目录共 11 个工具。动态 MCP 工具绝不进入该目录。
+`McpBridgeTools.registerAll` 另注册固定桥接工具 `mcp_list_tools` / `mcp_call_tool`（见「本地 MCP server」）。`PLATFORM` 工具与动态 MCP 工具是独立边界，绝不进入该固定目录。
 
-静态 Tool prompt 资源位于 `harness/tool/src/main/resources/.../environment/prompts/`。LSP bridge 协议为 JSON stdin/stdout；未配置 bridge 时不得伪造成功结果。`DaemonMain` 只以 `DaemonConfig.environmentRoot()` 构造 coding 配置，`CodingToolsConfig` 只持有 canonical `environmentRoot`；每次 invocation 的默认 workdir 由 Daemon 在 INVOKE 时把 payload `workspacePath` canonicalize 为 Environment Root 内现存目录后写入 `ToolExecutionRequest.workdir`，coding tools 以它为缺省基准（相对 `workdir` 值也以其为基准，absolute 允许但必须 canonical 在 root 内）。旧 `kkstudio.daemon.environment-root` / `kkstudio.daemon.default-workdir` 系统属性不再读取。
+静态 Tool prompt 资源位于 `harness/tool/src/main/resources/.../environment/prompts/`。LSP bridge 协议为 JSON stdin/stdout；未配置 bridge 时不得伪造成功结果。`read` 文本输出 header 的 `lsp` 行反映同一 LspBridge 配置：配置了 `kkstudio.daemon.lsp-bridge` 时为 `lsp: supported`，否则为 `lsp: unsupported`。`edit` 执行确定性精确替换：old/new 在 LF/CRLF/CR 归一后相同、`replace_all` 下 occurrence 重叠、或编码后的输出字节与原文完全相同时拒绝写入，文件保持原样；匹配在 LF 归一空间进行，未修改区域原样保留 CR/LF/CRLF，`new_string` 内换行按文件检测样式插入（mixed 且歧义时回退 LF）。`DaemonMain` 只以 `DaemonConfig.environmentRoot()` 构造 coding 配置，`CodingToolsConfig` 只持有 canonical `environmentRoot`；每次 invocation 的默认 workdir 由 Daemon 在 INVOKE 时把 payload `workspacePath` canonicalize 为 Environment Root 内现存目录后写入 `ToolExecutionRequest.workdir`，coding tools 以它为缺省基准（相对 `workdir` 值也以其为基准，absolute 允许但必须 canonical 在 root 内）。旧 `kkstudio.daemon.environment-root` / `kkstudio.daemon.default-workdir` 系统属性不再读取。
 
 `grep` / `find` 由 Java 21 NIO、regex 与仓库内 glob/`.gitignore` 规则实现，不启动 `rg`、`fd`、`grep` 或 `find` 子进程，也不读取对应 executable 系统属性。搜索不会跟随符号链接，硬排除 `.git`，按 environment root 相对 POSIX 路径稳定排序，并从 environment root 到搜索目录逐层应用 `.gitignore`；被忽略目录在加载后代规则前剪枝。目录 grep 跳过二进制或不可读文件，直接二进制目标返回错误。`bash`、可选 LSP bridge、`javap` 与 resource 相关系统属性保持有效。默认 preview 上限为 2000 行 / 50KB，超出部分外部化为 ResourceRef。

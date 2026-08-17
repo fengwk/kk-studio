@@ -6,13 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -39,16 +36,14 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-/** Execution context 只允许 frozen original/target，并验证对象长度与 checkpoint CAS。 */
+/** Execution context 只允许 frozen original/target，并验证对象长度与事务 checkpoint 委托。 */
 class CanvasFunctionExecutionContextImplTest {
 
   private static final UUID CANVAS = UUID.fromString("00000000-0000-0000-0000-000000000001");
@@ -60,20 +55,19 @@ class CanvasFunctionExecutionContextImplTest {
   private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000007");
 
   private CanvasFunctionRunRepository runs;
+  private CanvasFunctionRunTransactions transactions;
   private S3StorageService storage;
   private StorageBlobManager blobManager;
   private CanvasResourceMaterializer materializer;
-  private CanvasFunctionRunStateCodec stateCodec;
   private CanvasFunctionFrozenRun frozen;
 
   @BeforeEach
   void setUp() {
     runs = mock(CanvasFunctionRunRepository.class);
+    transactions = mock(CanvasFunctionRunTransactions.class);
     storage = mock(S3StorageService.class);
     blobManager = mock(StorageBlobManager.class);
     materializer = mock(CanvasResourceMaterializer.class);
-    CanvasFunctionConfigCodec configCodec = new CanvasFunctionConfigCodec(new ObjectMapper());
-    stateCodec = new CanvasFunctionRunStateCodec(new ObjectMapper(), configCodec);
     CanvasFunctionModel model =
         new CanvasFunctionModel(
             "test-image",
@@ -115,7 +109,7 @@ class CanvasFunctionExecutionContextImplTest {
                     REQUEST,
                     CanvasFunctionRunStatus.RUNNING,
                     "QUEUED",
-                    stateCodec.encode(frozen),
+                    "{\"stage\":\"QUEUED\"}",
                     null,
                     Instant.EPOCH)));
   }
@@ -201,22 +195,46 @@ class CanvasFunctionExecutionContextImplTest {
   }
 
   @Test
-  void checkpointCasStopsExecutionAndAdapterStateIsBounded() {
+  void checkpointDelegatesToTransactionsAndUpdatesCurrent() {
+    CanvasFunctionFrozenRun next =
+        new CanvasFunctionFrozenRun(
+            frozen.canvasId(),
+            frozen.nodeId(),
+            frozen.nodeName(),
+            frozen.requestId(),
+            frozen.model(),
+            frozen.config(),
+            frozen.manifest(),
+            frozen.outputName(),
+            frozen.targetResourceId(),
+            "SUBMITTING",
+            Map.of("jobId", "job"));
+    when(transactions.checkpoint(
+            eq(CANVAS),
+            eq(NODE),
+            eq(REQUEST.toString()),
+            eq("SUBMITTING"),
+            eq(Map.of("jobId", "job"))))
+        .thenReturn(next);
     CanvasFunctionExecutionContextImpl context = context();
-    when(runs.checkpoint(any(), any(), anyString(), anyString(), any())).thenReturn(false);
+
+    context.checkpoint("SUBMITTING", Map.of("jobId", "job"));
+
+    assertEquals(next, context.currentRun());
+  }
+
+  @Test
+  void checkpointCasCancellationPropagatesWithoutUpdatingCurrent() {
+    when(transactions.checkpoint(any(), any(), anyString(), anyString(), any()))
+        .thenThrow(new CanvasFunctionInternalCancellation("no longer RUNNING"));
+    CanvasFunctionExecutionContextImpl context = context();
+
     assertThrows(
         CanvasFunctionInternalCancellation.class,
         () -> context.checkpoint("SUBMITTING", Map.of("jobId", "job")));
 
-    clearInvocations(runs);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            context.checkpoint(
-                "SUBMITTING",
-                Map.of(
-                    "oversized", "x".repeat(CanvasFunctionRunStateCodec.MAX_ADAPTER_STATE_BYTES))));
-    verify(runs, never()).checkpoint(any(), any(), anyString(), anyString(), any());
+    assertEquals(
+        frozen, context.currentRun(), "failed checkpoint must not write back the old frozen run");
   }
 
   private CanvasFunctionExecutionContextImpl context() {
@@ -224,13 +242,7 @@ class CanvasFunctionExecutionContextImplTest {
     ObjectProvider<StorageBlobManager> blobManagerProvider = provider(blobManager);
     ObjectProvider<CanvasResourceMaterializer> materializerProvider = provider(materializer);
     return new CanvasFunctionExecutionContextImpl(
-        runs,
-        stateCodec,
-        storageProvider,
-        blobManagerProvider,
-        materializerProvider,
-        Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
-        frozen);
+        runs, transactions, storageProvider, blobManagerProvider, materializerProvider, frozen);
   }
 
   @SuppressWarnings("unchecked")

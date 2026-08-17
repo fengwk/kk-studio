@@ -66,7 +66,6 @@ export function ChatWorkspacePane({
     return (
       <BoundThreadPane
         chatId={chat?.id ?? ''}
-        agents={agents}
         environments={environments}
         paneId={pane.id}
         threadId={pane.threadId}
