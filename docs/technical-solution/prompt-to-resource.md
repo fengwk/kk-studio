@@ -88,7 +88,7 @@ subagentBindings   # 最新 Agent subagents 的名称 + 描述 allowlist（未�
 yoloEnabled        # 冻结运行时策略
 ```
 
-system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合，固定顺序为：Agent 正文（非空时）→ `<current_environment>`（至少有一个有值字段时）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。Events 顶部只读预览通过 `GET /api/ai/runtime/threads/{threadId}/system-prompt` 按当前 branch 最新状态现算同一组合；进入 `/events` 拉一次，turn 结束后再拉一次。current_environment 只输出有值字段：
+system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合，固定顺序为：Agent 正文（非空时）→ `<current_environment>`（至少有一个有值字段时）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。Events 顶部只读预览通过 `GET /api/ai/runtime/threads/{threadId}/system-prompt` 按当前 branch 最新状态现算同一组合；进入 `/events` 拉一次，turn 开始与结束时各拉一次，使同批设置变更在模型工作期间即可可见。current_environment 只输出有值字段：
 
 ```text
 <current_environment>

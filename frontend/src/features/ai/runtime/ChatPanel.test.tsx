@@ -116,8 +116,9 @@ describe('ChatPanel', () => {
     )
 
     expect(screen.getByText('1 个运行中')).toBeInTheDocument()
-    expect(screen.getByText('explorer')).toBeInTheDocument()
+    expect(screen.getAllByText('explorer')).toHaveLength(2)
     expect(screen.getByText('模型运行中')).toBeInTheDocument()
+    expect(screen.queryByText(/task\.status/)).not.toBeInTheDocument()
   })
 
   it('keeps working visible while an interaction panel hides Composer, queue, and widgets', () => {

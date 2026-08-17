@@ -22,9 +22,9 @@ spring:
 
 kk-studio:
   tool:
-    # L4 tool.read_turn 固定验证非 YOLO approval；生产 profile 仍使用部署级 permission 配置。
+    # 本地/e2e 的读取与文件变更均显式审批；生产 profile 仍使用部署级 permission 配置。
     settings-json: >-
-      {"permission":{"read":"ask"},"defaultYolo":false}
+      {"permission":{"read":"ask","write":"ask","edit":"ask"},"defaultYolo":false}
   harness:
     environment-gateway:
       daemon-token: e2e-daemon-token

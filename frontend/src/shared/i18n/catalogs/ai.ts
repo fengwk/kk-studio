@@ -1410,10 +1410,6 @@ export const aiCatalog = {
     'en-US': 'Collapse tool preview',
     'zh-CN': '收起工具预览',
   },
-  'ai.runtime.message.copyTool': {
-    'en-US': 'Copy tool preview',
-    'zh-CN': '复制工具预览',
-  },
   'ai.runtime.message.toolFailed': {
     'en-US': 'Tool execution failed.',
     'zh-CN': '工具执行失败。',

@@ -271,15 +271,32 @@ function applyToolCallDelta(
     return next
   }
   if (delta.id != null) {
-    existing.id += delta.id
+    existing.id = mergeToolCallIdentity(existing.id, delta.id)
   }
   if (delta.name != null) {
-    existing.name += delta.name
+    existing.name = mergeToolCallIdentity(existing.name, delta.name)
   }
   if (delta.argumentsJson != null) {
     existing.argumentsJson += delta.argumentsJson
   }
   return next
+}
+
+/**
+ * Provider identity partials 是完整值或逐步延长的前缀，不是文本 delta。
+ * 与后端 ModelStreamAccumulator 保持一致，重复的完整 name/id 不能被拼接。
+ */
+function mergeToolCallIdentity(current: string, incoming: string): string {
+  if (!current) {
+    return incoming
+  }
+  if (incoming === current || current.startsWith(incoming)) {
+    return current
+  }
+  if (incoming.startsWith(current)) {
+    return incoming
+  }
+  return current
 }
 
 export function isRealtimeModelDeltaGap(

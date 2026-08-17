@@ -158,7 +158,8 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
   单行 summary ellipsis；failed 行 danger 色、running 行 pulse dot）：初始无选中；
   点击选中并打开详情；`↑/↓` 只在已选中时切换相邻行；hover / Home / End / Page /
   Enter 不改选中；`Esc` 与详情 X 取消选中。顶部固定一块最新系统提示词预览（10 行，
-  超出独立滚动）；进入 `/events` 拉一次，turn 从 working 回到 idle 后再拉一次。
+  超出独立滚动）；进入 `/events` 拉一次，turn 的 working 状态开始与结束时各拉一次，
+  使同批 `SET_ENVIRONMENT` 等设置在模型工作期间即可反映到预览。
 - 事件详情是**只读 widget**（`ThreadEventDetail`，位于 widget zone 第一项、TaskStatus
   之前，ThreadWidgetStack、Composer 上方），不是 InteractionPanel：不隐藏 Composer、
   不抢焦点、无 backdrop、无 auto focus、无 Copy；展示当前选中 event 的 pretty JSON；

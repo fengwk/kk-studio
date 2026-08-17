@@ -107,9 +107,26 @@ describe('parseTaskFinalText', () => {
 })
 
 describe('TaskToolRenderer call phase', () => {
+  it('keeps the collapsed call to live status and defers task arguments until expanded', () => {
+    render(
+      <TaskToolRenderer
+        message={message({
+          status: 'streaming',
+          partial: heartbeat,
+        })}
+      />,
+    )
+
+    expect(screen.getByText('工具运行中')).toBeInTheDocument()
+    expect(screen.getByText('3 轮')).toBeInTheDocument()
+    expect(screen.queryByText('inspect the workspace')).not.toBeInTheDocument()
+    expect(screen.queryByText('子代理')).not.toBeInTheDocument()
+  })
+
   it('renders stable subagent/prompt/session/maxTurns and the latest live status', () => {
     render(
       <TaskToolRenderer
+        expanded
         message={message({
           arguments:
             '{"subagent_type":"explorer","prompt":"inspect the workspace","session_id":"7","maxTurns":4}',
@@ -136,6 +153,7 @@ describe('TaskToolRenderer call phase', () => {
   it('renders without the live strip when the partial is not a task.status heartbeat', () => {
     render(
       <TaskToolRenderer
+        expanded
         message={message({ partial: '{"kind":"other","text":"delta"}' })}
       />,
     )
@@ -144,12 +162,39 @@ describe('TaskToolRenderer call phase', () => {
   })
 
   it('falls back to the raw arguments when they are not valid JSON', () => {
-    render(<TaskToolRenderer message={message({ arguments: 'not-json', partial: undefined })} />)
+    render(
+      <TaskToolRenderer
+        expanded
+        message={message({ arguments: 'not-json', partial: undefined })}
+      />,
+    )
     expect(screen.getByText('not-json')).toBeInTheDocument()
   })
 })
 
 describe('TaskToolRenderer result phase', () => {
+  it('shows the last five report lines while collapsed and the full report when expanded', () => {
+    const report = Array.from({ length: 7 }, (_, index) => `report-${index + 1}`).join('\n')
+    const terminal = message({
+      phase: 'result',
+      status: 'done',
+      text:
+        '<task id="101" state="completed">\n<task_result>\n'
+        + `${report}\n</task_result>\n</task>`,
+    })
+    const { container, rerender } = render(<TaskToolRenderer message={terminal} />)
+    const output = container.querySelector('.thread-tool-output')
+
+    expect(output).not.toHaveTextContent('report-1')
+    expect(output).not.toHaveTextContent('report-2')
+    expect(output).toHaveTextContent('report-3')
+    expect(output).toHaveTextContent('report-7')
+
+    rerender(<TaskToolRenderer message={terminal} expanded />)
+    expect(output).toHaveTextContent('report-1')
+    expect(output).toHaveTextContent('report-7')
+  })
+
   it('renders the final report and completed state instead of raw XML', () => {
     render(
       <TaskToolRenderer

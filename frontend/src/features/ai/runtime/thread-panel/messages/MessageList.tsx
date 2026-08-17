@@ -35,13 +35,14 @@ export function MessageList({
             approvalPending,
           )
         }
-        const renderer = extensionHost?.toolRenderers.get(item.call.rendererKey)?.component
+        const renderer = extensionHost?.toolRenderers.get(item.call.rendererKey)
         return (
           <ToolMessageBlock
             key={item.call.id}
             message={item.call}
             result={item.result}
-            renderer={renderer}
+            renderer={renderer?.component}
+            isRendererExpandable={renderer?.isExpandable}
             onDecideApproval={onDecideApproval}
             approvalPending={approvalPending}
           />
@@ -67,12 +68,13 @@ function renderSingleMessage(
     case 'system':
       return <SystemMessageBlock key={message.id} message={message} />
     case 'tool': {
-      const renderer = extensionHost?.toolRenderers.get(message.rendererKey)?.component
+      const renderer = extensionHost?.toolRenderers.get(message.rendererKey)
       return (
         <ToolMessageBlock
           key={message.id}
           message={message}
-          renderer={renderer}
+          renderer={renderer?.component}
+          isRendererExpandable={renderer?.isExpandable}
           onDecideApproval={onDecideApproval}
           approvalPending={approvalPending}
         />

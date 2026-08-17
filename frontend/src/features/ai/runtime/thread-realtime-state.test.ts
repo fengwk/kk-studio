@@ -49,17 +49,17 @@ describe('thread realtime state', () => {
     expect(complete).toMatchObject({ sequence: 3, text: 'one', thinking: 'plan', toolCalls: [] })
   })
 
-  it('accumulates TOOL_CALL_DELTA fragments into a streaming write preview draft', () => {
+  it('accumulates arguments while reconciling cumulative tool-call identities', () => {
     const first = parseRealtimeModelDelta(toolCallEvent(1, {
       index: 0,
-      id: 'call-',
+      id: 'call',
       name: 'wri',
       argumentsJson: '{"path":',
     }))!
     const second = parseRealtimeModelDelta(toolCallEvent(2, {
       index: 0,
-      id: '1',
-      name: 'te',
+      id: 'call-1',
+      name: 'write',
       argumentsJson: '"App.java","content":"class App {}"}',
     }))!
     const stream = reduceRealtimeModelStream(reduceRealtimeModelStream(null, first), second)
@@ -71,6 +71,29 @@ describe('thread realtime state', () => {
         argumentsJson: '{"path":"App.java","content":"class App {}"}',
       },
     ])
+  })
+
+  it('does not duplicate repeated full tool names or ids from provider partials', () => {
+    const first = parseRealtimeModelDelta(toolCallEvent(1, {
+      index: 0,
+      id: 'call-1',
+      name: 'edit',
+      argumentsJson: '{"new_string":"one',
+    }))!
+    const second = parseRealtimeModelDelta(toolCallEvent(2, {
+      index: 0,
+      id: 'call-1',
+      name: 'edit',
+      argumentsJson: '\\ntwo"}',
+    }))!
+
+    const stream = reduceRealtimeModelStream(reduceRealtimeModelStream(null, first), second)
+    expect(stream.toolCalls).toEqual([{
+      index: 0,
+      id: 'call-1',
+      name: 'edit',
+      argumentsJson: '{"new_string":"one\\ntwo"}',
+    }])
   })
 
   it('mirrors the Java checkpoint codec: nullable string-only text/thinking with one non-empty', () => {

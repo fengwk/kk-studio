@@ -1,30 +1,31 @@
-import { fireEvent, render } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
 
 describe('ToolOutputViewport', () => {
-  it('keeps full output and follows the tail only while the user remains at the bottom', () => {
-    const { container, rerender } = render(<ToolOutputViewport text={'one\ntwo\nthree\nfour\nfive\nsix'} />)
+  it('keeps the formatted text without creating a focusable nested scroll owner', () => {
+    const { container } = render(
+      <ToolOutputViewport text={'... (2 earlier lines)\none\ntwo\nthree\nfour'} />,
+    )
     const output = container.querySelector('pre')
-    expect(output).not.toBeNull()
-    if (!output) {
-      return
-    }
-    Object.defineProperties(output, {
-      scrollHeight: { configurable: true, value: 120 },
-      clientHeight: { configurable: true, value: 30 },
-    })
 
-    output.scrollTop = 90
-    fireEvent.scroll(output)
-    rerender(<ToolOutputViewport text={'one\ntwo\nthree\nfour\nfive\nsix\nseven'} />)
-    expect(output.scrollTop).toBe(120)
-    expect(output).toHaveTextContent('one')
-    expect(output).toHaveTextContent('seven')
+    // 上游 formatter 已完成尾随窗口裁剪；viewport 只负责展示，不抢占滚轮/键盘焦点。
+    expect(output).toHaveTextContent('... (2 earlier lines)')
+    expect(output).toHaveTextContent('four')
+    expect(output).not.toHaveAttribute('tabindex')
+  })
 
-    output.scrollTop = 10
-    fireEvent.scroll(output)
-    rerender(<ToolOutputViewport text={'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight'} />)
-    expect(output.scrollTop).toBe(10)
+  it('accepts a collapsed line budget and removes the height cap when expanded', () => {
+    const { container, rerender } = render(
+      <ToolOutputViewport text={'one\ntwo'} maxLines={10} />,
+    )
+    const output = container.querySelector('pre')
+
+    expect(output).toHaveStyle({ '--thread-tool-output-lines': '10' })
+    expect(output).not.toHaveClass('is-expanded')
+
+    rerender(<ToolOutputViewport text={'one\ntwo'} maxLines={null} />)
+    expect(output).toHaveClass('is-expanded')
+    expect(output?.style.getPropertyValue('--thread-tool-output-lines')).toBe('')
   })
 })

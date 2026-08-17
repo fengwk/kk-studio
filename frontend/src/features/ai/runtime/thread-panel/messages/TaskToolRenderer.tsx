@@ -7,29 +7,34 @@ import {
   parseTaskStatus,
   type TaskStatusState,
 } from '@/features/ai/runtime/task-status'
+import { formatToolResultPreview } from '@/features/ai/runtime/thread-panel/messages/tool-display'
 import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
 import type { ToolRendererProps } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
 
 /** task 工具调用的组件化 renderer：call 展示参数 + 最新运行状态；result 展示最终报告。 */
-export function TaskToolRenderer({ message }: ToolRendererProps) {
+export function TaskToolRenderer({ message, expanded = false }: ToolRendererProps) {
   if (message.phase === 'call') {
-    return <TaskToolCall message={message} />
+    return <TaskToolCall message={message} expanded={expanded} />
   }
-  return <TaskToolResult message={message} />
+  return <TaskToolResult message={message} expanded={expanded} />
 }
 
-function TaskToolCall({ message }: ToolRendererProps) {
+function TaskToolCall({ message, expanded = false }: ToolRendererProps) {
   const { t } = useI18n()
   const args = parseTaskArguments(message.arguments)
   const status = parseTaskStatus(message.partial ?? '')
   const hasParsedField =
     args.subagentType != null || args.prompt != null || args.sessionId != null
     || args.maxTurns != null
+  const showStatus = status != null && (expanded || message.status === 'streaming')
+  if (!expanded && !showStatus) {
+    return null
+  }
   return (
     <div className="task-tool-renderer">
-      {status != null ? <TaskLiveStatus status={status} /> : null}
-      {hasParsedField ? (
+      {showStatus ? <TaskLiveStatus status={status} /> : null}
+      {expanded && hasParsedField ? (
         <dl className="task-tool-fields">
           {args.subagentType != null ? (
             <div className="task-tool-field">
@@ -51,28 +56,34 @@ function TaskToolCall({ message }: ToolRendererProps) {
           ) : null}
         </dl>
       ) : null}
-      {args.prompt != null ? (
+      {expanded && args.prompt != null ? (
         <div className="task-tool-section">
           <span className="task-tool-section-label">{t('ai.runtime.task.prompt')}</span>
-          <ToolOutputViewport text={args.prompt} />
+          <ToolOutputViewport text={args.prompt} maxLines={null} />
         </div>
       ) : null}
       {/* 参数不是合法 JSON 时（后端会拒绝，理论上不会发生）回退展示原始参数。 */}
-      {!hasParsedField && message.arguments.trim() ? (
-        <ToolOutputViewport text={message.arguments} />
+      {expanded && !hasParsedField && message.arguments.trim() ? (
+        <ToolOutputViewport text={message.arguments} maxLines={null} />
       ) : null}
     </div>
   )
 }
 
-function TaskToolResult({ message }: ToolRendererProps) {
+function TaskToolResult({ message, expanded = false }: ToolRendererProps) {
   const { t } = useI18n()
   const parsed = parseTaskFinalText(message.text)
   if (parsed == null) {
     // 终态文本不是规范的 <task> 格式：回退到原始文本 + 错误消息（不丢信息）。
     return (
       <div className="task-tool-renderer">
-        {message.text.trim() ? <ToolOutputViewport text={message.text} /> : null}
+        {message.text.trim() ? (
+          <TaskResultOutput
+            text={message.text}
+            expanded={expanded}
+            error={message.status === 'error'}
+          />
+        ) : null}
         {message.errorMessage && message.errorMessage !== message.text ? (
           <p className="thread-tool-error">{message.errorMessage}</p>
         ) : null}
@@ -89,17 +100,42 @@ function TaskToolResult({ message }: ToolRendererProps) {
       {parsed.report != null ? (
         <div className="task-tool-section">
           <span className="task-tool-section-label">{t('ai.runtime.task.report')}</span>
-          <ToolOutputViewport text={parsed.report} />
+          <TaskResultOutput text={parsed.report} expanded={expanded} error={false} />
         </div>
       ) : null}
       {parsed.error != null ? (
         <div className="task-tool-section">
           <span className="task-tool-section-label">{t('ai.runtime.task.error')}</span>
-          {/* 错误可能是并发限制等长文本：同样用五行视口，避免撑爆 transcript。 */}
-          <ToolOutputViewport text={parsed.error} className="task-tool-error-viewport" />
+          <TaskResultOutput
+            text={parsed.error}
+            expanded={expanded}
+            error
+            className="task-tool-error-viewport"
+          />
         </div>
       ) : null}
     </div>
+  )
+}
+
+function TaskResultOutput({
+  text,
+  expanded,
+  error,
+  className,
+}: {
+  text: string
+  expanded: boolean
+  error: boolean
+  className?: string
+}) {
+  const preview = formatToolResultPreview('task', text, { expanded, error })
+  return (
+    <ToolOutputViewport
+      text={preview.text}
+      maxLines={preview.maxLines}
+      className={className}
+    />
   )
 }
 

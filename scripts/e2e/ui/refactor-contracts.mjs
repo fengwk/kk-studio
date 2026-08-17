@@ -271,6 +271,162 @@ export async function runRefactorContractMatrix(ui) {
   )
 
   await run(
+    'ui.chat.tool_card.streaming_layout_scroll',
+    'Tool 卡流式/稳定布局、write/edit 审批与 transcript 滚轮传播',
+    async (caseArt) => {
+      const originalViewport = page.viewportSize()
+      await page.setViewportSize({ width: 720, height: 420 })
+      try {
+        await withUiFixture(
+          page,
+          () => createToolCardFixture(apiCtx, stamp),
+          async (fixture) => {
+            await fixture.start('edit')
+            await Promise.all([
+              bindThreadComposer(page, goto, fixture),
+              waitForThreadSubscription(page, fixture.threadId),
+            ])
+            await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
+            await fixture.stream()
+
+            const card = page.locator('.thread-tool-surface').filter({
+              has: page.locator('.thread-tool-name', { hasText: 'edit' }),
+            }).last()
+            const streamingPreview = card.locator('.thread-tool-preview-body.is-streaming')
+            await streamingPreview.waitFor({ state: 'visible', timeout: 15_000 })
+            await streamingPreview.getByText('+new-8', { exact: true })
+              .waitFor({ state: 'visible', timeout: 15_000 })
+            const streaming = await card.evaluate((surface) => {
+              const header = surface.querySelector('.thread-tool-header')
+              const summary = surface.querySelector('.thread-tool-summary')
+              const detail = surface.querySelector('.thread-tool-summary-detail')
+              const toggle = surface.querySelector('.thread-tool-toggle')
+              const preview = surface.querySelector('.thread-tool-preview-body')
+              if (
+                !(header instanceof HTMLElement)
+                || !(summary instanceof HTMLElement)
+                || !(detail instanceof HTMLElement)
+                || !(toggle instanceof HTMLElement)
+                || !(preview instanceof HTMLElement)
+              ) {
+                return null
+              }
+              const detailStyle = getComputedStyle(detail)
+              return {
+                name: surface.querySelector('.thread-tool-name')?.textContent ?? '',
+                previewLines: (preview.textContent ?? '').split('\n'),
+                detail: detail.textContent ?? '',
+                detailHeight: detail.getBoundingClientRect().height,
+                detailLineHeight: Number.parseFloat(detailStyle.lineHeight),
+                detailWhiteSpace: detailStyle.whiteSpace,
+                headerWidth: header.getBoundingClientRect().width,
+                summaryWidth: summary.getBoundingClientRect().width,
+                togglePosition: getComputedStyle(toggle).position,
+              }
+            })
+            assert(streaming != null, 'streaming edit card did not expose the expected DOM')
+            assert(streaming.name === 'edit', `streamed tool name was duplicated: ${streaming.name}`)
+            assert(
+              streaming.previewLines.length === 5
+              && streaming.previewLines[0].includes('earlier lines')
+              && streaming.previewLines.at(-1) === '+new-8',
+              `edit streaming preview is not a five-line tail: ${JSON.stringify(streaming.previewLines)}`,
+            )
+            assert(
+              streaming.detail === fixture.path
+              && streaming.detailWhiteSpace === 'normal'
+              && streaming.detailHeight > streaming.detailLineHeight * 1.5,
+              `long tool header did not wrap completely: ${JSON.stringify(streaming)}`,
+            )
+            assert(
+              Math.abs(streaming.headerWidth - streaming.summaryWidth) <= 1
+              && streaming.togglePosition === 'absolute',
+              `hidden toggle still reserves header width: ${JSON.stringify(streaming)}`,
+            )
+
+            await fixture.finish()
+            const approval = card.locator('.thread-tool-approval')
+            await approval.waitFor({ state: 'visible', timeout: 15_000 })
+            const completedPreview = card.locator('.thread-tool-preview-body.is-edit.is-unbounded')
+            await completedPreview.waitFor({ state: 'visible', timeout: 15_000 })
+            const completedText = await completedPreview.textContent() ?? ''
+            assert(
+              completedText.includes('-old-1')
+              && completedText.includes('-old-8')
+              && completedText.includes('+new-1')
+              && completedText.includes('+new-8')
+              && !completedText.includes('more lines'),
+              `completed edit diff is not fully visible: ${completedText}`,
+            )
+            assert(
+              await approval.getByRole('button', { name: '允许', exact: true }).count() === 1
+              && await approval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              `edit did not enter approval: ${await approval.innerText()}`,
+            )
+            await approval.getByRole('button', { name: '拒绝', exact: true }).click()
+            await waitForQuiescentThread(apiCtx, fixture.threadId, {
+              timeoutMs: 30_000,
+              intervalMs: 100,
+            })
+            await page.locator('.thread-working').waitFor({ state: 'hidden', timeout: 10_000 })
+
+            const output = card.locator('.thread-tool-output')
+            await output.waitFor({ state: 'visible', timeout: 15_000 })
+            const transcript = page.locator('.thread-dialogue')
+            await output.hover()
+            const before = await transcript.evaluate((element) => element.scrollTop)
+            assert(before > 0, `fixture did not overflow transcript: scrollTop=${before}`)
+            await page.mouse.wheel(0, -180)
+            await page.waitForFunction(
+              ({ selector, previous }) => {
+                const element = document.querySelector(selector)
+                return element instanceof HTMLElement && element.scrollTop < previous
+              },
+              { selector: '.thread-dialogue', previous: before },
+              { timeout: 5_000 },
+            )
+            const outputStyle = await output.evaluate((element) => ({
+              overflow: getComputedStyle(element).overflow,
+              tabIndex: element.getAttribute('tabindex'),
+            }))
+            assert(
+              outputStyle.overflow === 'visible' && outputStyle.tabIndex == null,
+              `tool output still owns nested scrolling: ${JSON.stringify(outputStyle)}`,
+            )
+
+            await fixture.start('write')
+            await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
+            await fixture.stream()
+            const writeCard = page.locator('.thread-tool-surface').filter({
+              has: page.locator('.thread-tool-name', { hasText: 'write' }),
+            }).last()
+            await fixture.finish()
+            const writeApproval = writeCard.locator('.thread-tool-approval')
+            await writeApproval.waitFor({ state: 'visible', timeout: 15_000 })
+            assert(
+              await writeCard.locator('.thread-tool-name').textContent() === 'write'
+              && await writeApproval.getByRole('button', { name: '允许', exact: true }).count() === 1
+              && await writeApproval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              `write did not enter approval: ${await writeCard.innerText()}`,
+            )
+            await writeApproval.getByRole('button', { name: '拒绝', exact: true }).click()
+            await waitForQuiescentThread(apiCtx, fixture.threadId, {
+              timeoutMs: 30_000,
+              intervalMs: 100,
+            })
+            await page.locator('.thread-working').waitFor({ state: 'hidden', timeout: 10_000 })
+
+            await shot(caseArt, 'tool-card-streaming-layout-scroll')
+            expectNoFatal(pageErrors, consoleErrors)
+          },
+        )
+      } finally {
+        if (originalViewport) await page.setViewportSize(originalViewport)
+      }
+    },
+  )
+
+  await run(
     'ui.chat.task_status.bound_widget',
     'Bound ChatPanel 通过应用事件永久呈现活动 task 状态',
     async (caseArt) => {
@@ -591,6 +747,115 @@ async function createActiveTaskFixture(apiCtx, stamp) {
   }
 }
 
+async function createToolCardFixture(apiCtx, stamp) {
+  const suffix = cid().slice(0, 8)
+  const markers = {
+    edit: `edit tool card ${stamp} ${suffix}`,
+    write: `write tool card ${stamp} ${suffix}`,
+  }
+  const path =
+    `/workspace/${'very-long-directory-segment/'.repeat(12)}`
+    + 'QuickSort.java'
+  const mock = new ToolCardOpenAiMock({
+    markers,
+    path,
+    oldText: Array.from({ length: 8 }, (_, index) => `old-${index + 1}`).join('\n'),
+    newText: Array.from({ length: 8 }, (_, index) => `new-${index + 1}`).join('\n'),
+  })
+  const state = {
+    agent: null,
+    apiCtx,
+    chat: null,
+    markers,
+    mock,
+    model: null,
+    path,
+    provider: null,
+    threadId: null,
+  }
+  try {
+    await mock.start()
+    const providerResponse = await apiCtx.call('POST', '/api/ai/catalog/providers', {
+      name: `e2e-ui-tool-card-provider-${suffix}`,
+      description: 'Local streaming provider for Tool card browser contracts.',
+      providerType: 'openai',
+      baseUrl: mock.baseUrl('/v1'),
+      credential: `e2e-ui-tool-card-${suffix}`,
+      modelCallTimeoutMillis: 60_000,
+      modelCallIdleTimeoutMillis: 60_000,
+    })
+    assert(providerResponse.status === 201, `create tool-card provider: ${JSON.stringify(providerResponse)}`)
+    state.provider = envelopeData(providerResponse.json)
+
+    const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
+      providerName: state.provider.name,
+      name: `e2e-ui-tool-card-model-${suffix}`,
+      description: 'Local streaming model for Tool card browser contracts.',
+      config: baseModelConfig({
+        limit: { context: 4096, output: 256 },
+        abilities: {
+          tools: true,
+          reasoning: false,
+          inputModalities: ['TEXT'],
+        },
+        variants: [{ id: 'default', temperature: 0 }],
+      }),
+    })
+    assert(modelResponse.status === 201, `create tool-card model: ${JSON.stringify(modelResponse)}`)
+    state.model = envelopeData(modelResponse.json)
+
+    const agentResponse = await apiCtx.call('POST', '/api/ai/catalog/agents', {
+      name: `e2e-ui-tool-card-agent-${suffix}`,
+      description: 'Agent used by deterministic Tool card browser contracts.',
+      systemPrompt: 'Follow each deterministic Tool request exactly once.',
+      model: `${state.model.providerName}/${state.model.name}`,
+      variant: 'default',
+      config: { tools: ['write', 'edit'], skills: [], subagents: [] },
+    })
+    assert(agentResponse.status === 201, `create tool-card agent: ${JSON.stringify(agentResponse)}`)
+    state.agent = envelopeData(agentResponse.json)
+
+    state.chat = await createChat(apiCtx, {
+      title: `e2e-ui-tool-card-${stamp}-${suffix}`,
+      agentName: state.agent.name,
+      yoloEnabled: false,
+    })
+    const created = await createChatThread(apiCtx, state.chat.id, {
+      title: null,
+      yoloEnabled: false,
+      branchSettings: branchSettingsOf(
+        state.agent,
+        {
+          providerName: state.model.providerName,
+          modelName: state.model.name,
+          variant: 'default',
+        },
+        { activeTools: ['write', 'edit'] },
+      ),
+    })
+    state.threadId = created.thread.threadId
+    return {
+      ...state,
+      start: async (toolName) => {
+        assert(markers[toolName], `unknown tool-card fixture call: ${toolName}`)
+        const snapshot = await getThreadSnapshot(apiCtx, state.threadId)
+        await enqueueCommands(apiCtx, state.threadId, {
+          expectedHeadEntryId: snapshot.thread.headEntryId,
+          expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+          commands: [userMessageCommand(markers[toolName], cid())],
+        })
+        await mock.waitForCall(toolName)
+      },
+      stream: () => mock.streamCall(),
+      finish: () => mock.finishCall(),
+      dispose: () => cleanupToolCardFixture(state),
+    }
+  } catch (error) {
+    await cleanupToolCardFixture(state).catch(() => undefined)
+    throw error
+  }
+}
+
 async function cleanupCompletedUsageFixture(state) {
   const errors = []
   await cleanup('stop thread', errors, async () => {
@@ -706,6 +971,61 @@ async function cleanupActiveTaskFixture(state) {
   }
 }
 
+async function cleanupToolCardFixture(state) {
+  const errors = []
+  await cleanup('stop tool-card thread', errors, async () => {
+    if (!state.threadId) return
+    const snapshot = await getThreadSnapshot(state.apiCtx, state.threadId)
+    if (
+      snapshot.thread.status !== 'IDLE'
+      || snapshot.thread.processing
+      || snapshot.queuedCommands.length > 0
+      || snapshot.modelInvocation !== null
+    ) {
+      await stopThread(state.apiCtx, state.threadId, {
+        stopRequestId: cid(),
+        expectedRevision: snapshot.thread.revision,
+      })
+    }
+  })
+  await cleanup('tool-card mock', errors, () => state.mock.close())
+  await cleanup('tool-card chat', errors, async () => {
+    if (state.chat?.id) {
+      await state.apiCtx.call(
+        'DELETE',
+        `/api/ai/chat/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+      )
+    }
+  })
+  await cleanup('tool-card agent', errors, async () => {
+    if (state.agent?.name) {
+      await state.apiCtx.call(
+        'DELETE',
+        `/api/ai/catalog/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
+      )
+    }
+  })
+  await cleanup('tool-card model', errors, async () => {
+    if (state.model?.providerName && state.model?.name) {
+      await state.apiCtx.call(
+        'DELETE',
+        `/api/ai/catalog/models?providerName=${encodeURIComponent(state.model.providerName)}&modelName=${encodeURIComponent(state.model.name)}&expectedVersion=${encodeURIComponent(state.model.version)}`,
+      )
+    }
+  })
+  await cleanup('tool-card provider', errors, async () => {
+    if (state.provider?.name) {
+      await state.apiCtx.call(
+        'DELETE',
+        `/api/ai/catalog/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
+      )
+    }
+  })
+  if (errors.length > 0) {
+    throw new Error(`Tool-card fixture cleanup failed: ${errors.join('; ')}`)
+  }
+}
+
 async function cleanup(label, errors, action) {
   try {
     await action()
@@ -801,6 +1121,265 @@ class CompletingOpenAiMock {
   }
 
   async close() {
+    for (const socket of this.sockets) socket.destroy()
+    this.sockets.clear()
+    if (!this.listening) return
+    await new Promise((resolve, reject) => {
+      this.server.close((error) => (error ? reject(error) : resolve()))
+    })
+    this.listening = false
+  }
+}
+
+class ToolCardOpenAiMock {
+  constructor({ markers, path, oldText, newText }) {
+    this.calls = {
+      edit: {
+        marker: markers.edit,
+        argumentsJson: JSON.stringify({
+          path,
+          old_string: oldText,
+          new_string: newText,
+        }),
+      },
+      write: {
+        marker: markers.write,
+        argumentsJson: JSON.stringify({
+          path,
+          content: Array.from({ length: 8 }, (_, index) => `write-${index + 1}`).join('\n'),
+        }),
+      },
+    }
+    this.base = null
+    this.callResponse = null
+    this.callWaiters = []
+    this.heartbeat = null
+    this.listening = false
+    this.sockets = new Set()
+    this.server = createServer((request, response) => {
+      void this.handle(request, response)
+    })
+    this.server.on('connection', (socket) => {
+      this.sockets.add(socket)
+      socket.once('close', () => this.sockets.delete(socket))
+    })
+  }
+
+  async start() {
+    await new Promise((resolve, reject) => {
+      this.server.once('error', reject)
+      this.server.listen(0, '127.0.0.1', () => {
+        this.server.removeListener('error', reject)
+        resolve()
+      })
+    })
+    const address = this.server.address()
+    assert(address && typeof address === 'object', 'tool-card server did not bind')
+    this.base = `http://127.0.0.1:${address.port}`
+    this.listening = true
+  }
+
+  baseUrl(suffix = '') {
+    assert(this.base, 'tool-card server is not started')
+    return `${this.base}${suffix}`
+  }
+
+  async waitForCall(toolName, timeoutMs = 20_000) {
+    if (this.callResponse?.toolName === toolName) return
+    await Promise.race([
+      new Promise((resolve) => {
+        this.callWaiters.push({ resolve, toolName })
+      }),
+      sleep(timeoutMs).then(() => {
+        throw new Error(`streaming ${toolName} Provider request did not start`)
+      }),
+    ])
+  }
+
+  finishCall() {
+    assert(this.callResponse, 'streaming Tool response is not pending')
+    assert(this.callResponse.streamed, 'Tool arguments were not streamed')
+    this.stopHeartbeat()
+    const {
+      body,
+      callId,
+      completionId,
+      created,
+      response,
+      toolName,
+    } = this.callResponse
+    response.write(sseFrame({
+      id: completionId,
+      object: 'chat.completion.chunk',
+      created,
+      model: body.model || 'e2e-ui-tool-card-model',
+      choices: [{
+        index: 0,
+        delta: {
+          tool_calls: [{
+            index: 0,
+            id: callId,
+            type: 'function',
+            function: { name: toolName, arguments: '' },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+    }))
+    response.end('data: [DONE]\n\n')
+    this.callResponse = null
+  }
+
+  async handle(request, response) {
+    if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+      response.writeHead(request.method === 'POST' ? 404 : 405, { Connection: 'close' })
+      response.end()
+      return
+    }
+    let body
+    try {
+      body = JSON.parse(await readRequestBody(request))
+    } catch (error) {
+      response.writeHead(400, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: { message: `invalid tool-card JSON: ${error.message}` } }))
+      return
+    }
+    if (body.messages?.at(-1)?.role === 'tool') {
+      this.sendCompletion(response, body)
+      return
+    }
+    const latestUser = [...(body.messages ?? [])].reverse()
+      .find((message) => message.role === 'user')
+    const serializedUser = JSON.stringify(latestUser ?? {})
+    const toolName = Object.keys(this.calls)
+      .find((candidate) => serializedUser.includes(this.calls[candidate].marker))
+    if (!toolName) {
+      this.sendCompletion(response, body)
+      return
+    }
+    assert(this.callResponse == null, 'tool-card mock received a duplicate active Tool call')
+    const created = Math.floor(Date.now() / 1000)
+    const callId = `call_${toolName}_${cid().replaceAll('-', '')}`
+    const completionId = `e2e-ui-tool-card-${cid()}`
+    request.socket.setNoDelay(true)
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    })
+    response.flushHeaders()
+    response.write(': tool-card request ready\n\n')
+    this.callResponse = {
+      body,
+      callId,
+      completionId,
+      created,
+      response,
+      streamed: false,
+      toolName,
+    }
+    response.once('close', () => {
+      if (this.callResponse?.response === response) this.callResponse = null
+    })
+    const readyWaiters = this.callWaiters.filter((waiter) => waiter.toolName === toolName)
+    this.callWaiters = this.callWaiters.filter((waiter) => waiter.toolName !== toolName)
+    readyWaiters.forEach((waiter) => waiter.resolve())
+  }
+
+  async streamCall() {
+    assert(this.callResponse, 'Tool response is not pending')
+    assert(!this.callResponse.streamed, 'Tool arguments were already streamed')
+    const {
+      body,
+      callId,
+      completionId,
+      created,
+      response,
+      toolName,
+    } = this.callResponse
+    const chunks = chunkText(this.calls[toolName].argumentsJson, 48)
+    for (const [index, argumentsChunk] of chunks.entries()) {
+      this.writeToolDelta(
+        { body, callId, completionId, created, response, toolName },
+        argumentsChunk,
+        index === 0,
+      )
+      await sleep(20)
+    }
+    this.callResponse.streamed = true
+    // TOOL_PARTIAL is lossy; trailing JSON whitespace replays the accumulated call without changing it.
+    this.heartbeat = setInterval(() => {
+      if (!this.callResponse?.streamed) return
+      this.writeToolDelta(this.callResponse, ' ', false)
+    }, 100)
+  }
+
+  writeToolDelta(
+    { body, callId, completionId, created, response, toolName },
+    argumentsChunk,
+    withRole,
+  ) {
+    response.write(sseFrame({
+      id: completionId,
+      object: 'chat.completion.chunk',
+      created,
+      model: body.model || 'e2e-ui-tool-card-model',
+      choices: [{
+        index: 0,
+        delta: {
+          ...(withRole ? { role: 'assistant' } : {}),
+          tool_calls: [{
+            index: 0,
+            id: callId,
+            type: 'function',
+            function: {
+              name: toolName,
+              arguments: argumentsChunk,
+            },
+          }],
+        },
+        finish_reason: null,
+      }],
+    }))
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeat) clearInterval(this.heartbeat)
+    this.heartbeat = null
+  }
+
+  sendCompletion(response, body) {
+    const created = Math.floor(Date.now() / 1000)
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    })
+    response.write(sseFrame({
+      id: `e2e-ui-tool-card-complete-${cid()}`,
+      object: 'chat.completion.chunk',
+      created,
+      model: body.model || 'e2e-ui-tool-card-model',
+      choices: [{
+        index: 0,
+        delta: { role: 'assistant', content: 'Tool card fixture completed.' },
+        finish_reason: null,
+      }],
+    }))
+    response.write(sseFrame({
+      id: `e2e-ui-tool-card-stop-${cid()}`,
+      object: 'chat.completion.chunk',
+      created,
+      model: body.model || 'e2e-ui-tool-card-model',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    }))
+    response.end('data: [DONE]\n\n')
+  }
+
+  async close() {
+    this.stopHeartbeat()
+    if (this.callResponse) this.callResponse.response.destroy()
+    this.callResponse = null
     for (const socket of this.sockets) socket.destroy()
     this.sockets.clear()
     if (!this.listening) return
@@ -948,6 +1527,58 @@ class TaskHoldingOpenAiMock {
 
 function sseFrame(payload) {
   return `data: ${JSON.stringify(payload)}\n\n`
+}
+
+function chunkText(text, size) {
+  const chunks = []
+  for (let offset = 0; offset < text.length; offset += size) {
+    chunks.push(text.slice(offset, offset + size))
+  }
+  return chunks
+}
+
+function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    const sockets = new Set()
+    let settled = false
+    let timer = null
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      if (timer != null) clearTimeout(timer)
+      page.off('websocket', onWebSocket)
+      for (const socket of sockets) socket.off('framereceived', onFrame)
+      if (error) {
+        reject(error)
+      } else {
+        resolve()
+      }
+    }
+    const onFrame = (event) => {
+      let message
+      try {
+        message = JSON.parse(String(event.payload))
+      } catch {
+        return
+      }
+      if (
+        message?.type === 'subscribed'
+        && message.resource?.kind === 'thread'
+        && message.resource?.id === threadId
+      ) {
+        finish()
+      }
+    }
+    const onWebSocket = (socket) => {
+      if (!socket.url().endsWith('/api/events/v1')) return
+      sockets.add(socket)
+      socket.on('framereceived', onFrame)
+    }
+    page.on('websocket', onWebSocket)
+    timer = setTimeout(() => {
+      finish(new Error(`thread realtime subscription did not open: ${threadId}`))
+    }, timeoutMs)
+  })
 }
 
 async function readRequestBody(request) {

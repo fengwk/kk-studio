@@ -262,9 +262,9 @@ tool.read_turn
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；`rootPath` 存在；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `daemon.directories` | `--with-tools` | `GET /api/ai/environments/{name}/directories` 缺省 `path="."` 浏览 root（canonical 相对 wire path；`displayPath` 等于请求 `path` 的最后一段，root 为 `'.'`，只作展示、绝不暴露 daemon 本地绝对路径；root `parentPath="."`；`truncated` 布尔；`gitBranch` 可空；entries 只含直属子目录 `{name,path}`：`name` 等于 `path` 最后一段、`path` 是请求目录的直接子路径）；显式 `path="."` 与缺省一致；`..` 段 400 `INVALID_PATH`、不存在目录 404 `NOT_FOUND`、非法环境名 400 `INVALID_ENVIRONMENT_NAME` |
-| `tool.read_turn` | `--real --with-tools` | e2e profile 固定 `read: ask`；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
+| `tool.read_turn` | `--real --with-tools` | e2e profile 固定 `read/write/edit: ask`，本 case 验证 read；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
 
-### L5 UI（默认 35，`--with-tools` / `--real` 各追加 1）
+### L5 UI（默认 36，`--with-tools` / `--real` 各追加 1）
 
 `scripts/e2e.sh --ui` 的免费 UI E2E 矩阵包含：
 
@@ -302,6 +302,7 @@ ui.chat.shortcuts.escape_restores_focus
 ui.chat.composer.settings_controls_batch
 ui.chat.composer.multi_pane_settings_isolation
 ui.chat.footer.readonly_facts
+ui.chat.tool_card.streaming_layout_scroll
 ui.chat.task_status.bound_widget
 ui.settings.notifications_single_entry
 ```
@@ -341,6 +342,7 @@ Composer 矩阵的维度与边界如下：
 | `ui.chat.composer.settings_controls_batch` | 本地 hold-provider + 两 Variant Model + 活跃 Thread | 浏览器几何确认默认单行输入与控制栏组成紧凑两行布局；Permission 菜单只有 Default/YOLO；Model→Variant 两级 anchored listbox；选择 review+YOLO 后与 USER_MESSAGE 按 `SET_MODEL→SET_YOLO→USER_MESSAGE` 同批入队 |
 | `ui.chat.composer.multi_pane_settings_isolation` | split-2 绑定两条真实 Thread | pane-1 YOLO 不污染 pane-2 Default；一次只存在一个 settings listbox；打开 pane-2 自动关闭 pane-1 菜单，Escape 只恢复 pane-2 Composer 焦点 |
 | `ui.chat.footer.readonly_facts` | 本地 completion-provider 冻结 usage，再切换到 unavailable 长 Workspace path | Footer 中间省略安全 wire path，完整 title 不含 daemon 绝对路径；展示 usage、used/contextWindow、cache hit；缺失 usage 时按 0 展示；缺失 Git 整段省略；无 button，且不含 Agent/Model/Permission/Notification |
+| `ui.chat.tool_card.streaming_layout_scroll` | 本地 streaming-provider 重复发送完整 write/edit name/id 并冻结参数流；e2e profile 非 YOLO approval | 流式身份不重复拼接；edit 参数预览为 5 行尾随窗口；长 header 完整折行且绝对定位 toggle 不占宽；稳定 edit 完整展示 diff；write/edit 均真实进入 approval；拒绝后 Tool output 不拥有纵向滚动，卡内滚轮滚动外层 transcript |
 | `ui.chat.task_status.bound_widget` | 先绑定共享 Bound ChatPanel，再由本地 parent Provider 产生真实 `task` tool call，child Provider 保持运行 | 通过 `/api/events/v1` 后续 `task.status` heartbeat 渲染 TaskStatusWidget，不把 lossy realtime 误当作可重放快照；无需真实模型费用 |
 | `ui.settings.notifications_single_entry` | Settings + 免费 durable Thread | `/settings` 恰好一个浏览器通知 switch；Thread panel/Footer 无 switch、button 或 `notify:*` 旧入口 |
 

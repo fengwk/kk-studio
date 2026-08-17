@@ -317,10 +317,11 @@ CanvasTextEditor（非模态，编辑态锚定文本节点下方）
 规则：
 
 1. **容器只组合，不内联多类型渲染逻辑。**
-2. **消息按 kind / role 分型组件渲染**（对齐 pi：`AssistantMessageComponent` / `UserMessageComponent` / `ToolExecutionComponent`）。Tool 是单卡片：工具名 + 参数摘要 + preview + result，write 显示代码预览，edit 显示 diff，不把 call/result 拆成两张卡。
-3. **Composer 与 Transcript 分离。**
-4. **Bound Chat 与 Canvas 共用 ChatPanel/ThreadComposer；Canvas 只负责 document.threadId 绑定与 pane-local BranchDraft adapter。**
-5. **Footer 只读。**仅展示真实 Environment/Workspace、Git、usage/context/cache facts，不放 Agent/Model/Permission/Notification 控件。
+2. **消息按 kind / role 分型组件渲染**（对齐 pi：`AssistantMessageComponent` / `UserMessageComponent` / `ToolExecutionComponent`）。Tool 是单个全宽消息块，摘要、call preview 与 result 共享同一个 surface，只在内部做布局分区；`ToolMessageBlock` 只负责 shell 组合，ViewModel、默认 call/result、审批和附件分别由独立模块承担。write 显示代码预览，edit 显示 diff，不把 call/result 拆成两条消息或两张卡片。
+3. **Tool 默认收起。**标题优先使用 pi-base 风格的工具专属摘要，未知工具回退为 `name + JSON`；header 摘要不做单行省略，超宽内容自然折行。专属摘要已覆盖参数时，展开后不重复展示原始参数 JSON。标题行本身不可点击；只有收起态确实隐藏或截断了 call/result 内容时，才在右上角提供 hover/focus 可见的 icon-only 展开按钮，透明按钮使用绝对定位且不占摘要宽度，两种状态内容一致时不渲染按钮。write/edit 参数生成期间使用 5 行尾随窗口；参数稳定后 write 收起展示前 7 行，edit 完整展示 diff preview。成功的 read/grep/find/edit/write/load_skill/LSP 结果收起时隐藏，bash 展示末 10 行、task 展示末 5 行、其它工具展示末 5 行，收起预览最多 2500 字符；截断时使用 `... (N earlier lines)`、`... (N more lines, T total)` 或 `... (output truncated)` 明示省略量。Tool 内部文本区只裁剪、不拥有纵向滚动，鼠标滚轮始终交给外层 transcript。失败与展开态完整展示。运行中/成功/失败不显示文字徽标，分别使用既有 warning/green/danger token 的淡橙/绿/红 surface。
+4. **Composer 与 Transcript 分离。**
+5. **Bound Chat 与 Canvas 共用 ChatPanel/ThreadComposer；Canvas 只负责 document.threadId 绑定与 pane-local BranchDraft adapter。**
+6. **Footer 只读。**仅展示真实 Environment/Workspace、Git、usage/context/cache facts，不放 Agent/Model/Permission/Notification 控件。
 
 ### 5.6 Canvas 专属
 

@@ -10,6 +10,7 @@ import {
   ResourceEditorDialog,
 } from '@/features/ai/extensions/ai-extension'
 import { TaskToolRenderer } from '@/features/ai/runtime/thread-panel/messages/TaskToolRenderer'
+import { isTaskToolRendererExpandable } from '@/features/ai/runtime/thread-panel/messages/task-tool-display'
 import type { TrustedReactExtension } from '@/platform/extensions/types'
 
 /** 非组件导出单独放文件，避免 React Fast Refresh 整页失效导致白屏。 */
@@ -43,5 +44,9 @@ export const aiExtension: TrustedReactExtension = {
   ],
   // rendererKey 必须与后端 TaskDescriptor 冻结的 'task' 精确相同；MessageList
   // 不做 name switch，一律通过 extension host 按 rendererKey 分发。
-  toolRenderers: [{ id: 'task', component: TaskToolRenderer }],
+  toolRenderers: [{
+    id: 'task',
+    component: TaskToolRenderer,
+    isExpandable: isTaskToolRendererExpandable,
+  }],
 }
