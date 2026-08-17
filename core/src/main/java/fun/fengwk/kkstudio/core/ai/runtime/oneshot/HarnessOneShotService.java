@@ -4,6 +4,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.core.ai.runtime.ChangeGate;
+import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
@@ -41,31 +43,25 @@ import java.util.function.BooleanSupplier;
 @Component
 public final class HarnessOneShotService {
 
-  private static final Duration DEFAULT_POLL_INTERVAL = Duration.ofMillis(100);
+  /** timed signal wait 同时兼做 caller-active/deadline 检查的切片：无事件时不读 snapshot，但取消/超时最迟在该切片内被察觉。 */
+  private static final long CALLER_CHECK_NANOS = Duration.ofMillis(100).toNanos();
 
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
   private final SubagentConfig subagentConfig;
-  private final Duration pollInterval;
+  private final HarnessThreadChangeSource changeSource;
 
   @Autowired
   public HarnessOneShotService(
       ObjectProvider<HarnessRuntime> runtimes,
       AgentBranchSettingsMaterializer settingsMaterializer,
-      SubagentConfig subagentConfig) {
-    this(runtimes, settingsMaterializer, subagentConfig, DEFAULT_POLL_INTERVAL);
-  }
-
-  HarnessOneShotService(
-      ObjectProvider<HarnessRuntime> runtimes,
-      AgentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfig subagentConfig,
-      Duration pollInterval) {
+      HarnessThreadChangeSource changeSource) {
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.settingsMaterializer =
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
     this.subagentConfig = Objects.requireNonNull(subagentConfig, "subagentConfig");
-    this.pollInterval = requirePositive(pollInterval, "pollInterval");
+    this.changeSource = Objects.requireNonNull(changeSource, "changeSource");
   }
 
   public UUID submit(
@@ -122,23 +118,47 @@ public final class HarnessOneShotService {
     Objects.requireNonNull(threadId, "threadId");
     Duration boundedTimeout = requirePositive(timeout, "timeout");
     Objects.requireNonNull(continueWaiting, "continueWaiting");
+    long timeoutNanos = boundedTimeout.toNanos();
     HarnessRuntime runtime = requireRuntime();
-    long deadline = System.nanoTime() + boundedTimeout.toNanos();
-    while (true) {
-      if (!continueWaiting.getAsBoolean()) {
-        stop(runtime, threadId);
-        throw new IllegalStateException("one-shot caller is no longer active");
+    long startedAt = System.nanoTime();
+    ChangeGate gate = new ChangeGate();
+    // 订阅必须在 success/error/timeout/cancel/interruption 全路径释放。
+    try (HarnessThreadChangeSource.Subscription subscription =
+        changeSource.subscribe(threadId, gate::revision)) {
+      ChangeGate.State since = gate.snapshot();
+      boolean first = true;
+      while (true) {
+        if (!continueWaiting.getAsBoolean()) {
+          stop(runtime, threadId);
+          throw new IllegalStateException("one-shot caller is no longer active");
+        }
+        ChangeGate.State current = gate.snapshot();
+        boolean revisionWake = first || current.revision() != since.revision();
+        since = current;
+        first = false;
+        if (revisionWake) {
+          // 终态优先：订阅后的首次权威读取与 revision/resync 唤醒后都先检查 terminal，再判 timeout。
+          ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
+          String result = terminalText(snapshot);
+          if (result != null) {
+            return result;
+          }
+        }
+        // 相对 elapsed 计时：remaining 非负、无绝对 deadline，避免 nanoTime + timeout 溢出。
+        long remaining = timeoutNanos - (System.nanoTime() - startedAt);
+        if (remaining <= 0L) {
+          stop(runtime, threadId);
+          throw new IllegalStateException("one-shot Harness execution timed out after " + timeout);
+        }
+        long sliceNanos = Math.min(remaining, CALLER_CHECK_NANOS);
+        try {
+          gate.awaitChange(since, sliceNanos);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException(
+              "one-shot observation thread was interrupted", interrupted);
+        }
       }
-      ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-      String result = terminalText(snapshot);
-      if (result != null) {
-        return result;
-      }
-      if (System.nanoTime() - deadline >= 0L) {
-        stop(runtime, threadId);
-        throw new IllegalStateException("one-shot Harness execution timed out after " + timeout);
-      }
-      sleep();
     }
   }
 
@@ -226,19 +246,16 @@ public final class HarnessOneShotService {
         runtimes.getIfAvailable(), "HarnessRuntime is required for one-shot execution");
   }
 
-  private void sleep() {
-    try {
-      Thread.sleep(pollInterval);
-    } catch (InterruptedException interrupted) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException("one-shot observation thread was interrupted", interrupted);
-    }
-  }
-
   private static Duration requirePositive(Duration value, String field) {
     Objects.requireNonNull(value, field);
     if (value.isZero() || value.isNegative()) {
       throw new IllegalArgumentException(field + " must be positive");
+    }
+    try {
+      value.toNanos();
+    } catch (ArithmeticException overflow) {
+      throw new IllegalArgumentException(
+          field + " is too large to express in nanoseconds", overflow);
     }
     return value;
   }

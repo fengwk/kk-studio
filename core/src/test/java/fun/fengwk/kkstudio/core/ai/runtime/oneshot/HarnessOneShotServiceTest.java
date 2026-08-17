@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.core.ai.runtime.oneshot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.eq;
@@ -17,6 +19,7 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
+import fun.fengwk.kkstudio.core.ai.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
@@ -57,6 +60,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** one-shot service 证明 root 配置、同批消息、恢复观察、终态文本与 timeout stop。 */
 class HarnessOneShotServiceTest {
@@ -78,6 +88,7 @@ class HarnessOneShotServiceTest {
 
   private HarnessRuntime runtime;
   private AgentBranchSettingsMaterializer materializer;
+  private TestThreadChangeSource changeSource;
   private HarnessOneShotService service;
 
   @BeforeEach
@@ -88,12 +99,13 @@ class HarnessOneShotServiceTest {
     ObjectProvider<HarnessRuntime> runtimes = mock(ObjectProvider.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     when(materializer.materialize(any(), any(), any(Integer.class), any())).thenReturn(SETTINGS);
+    changeSource = new TestThreadChangeSource();
     service =
         new HarnessOneShotService(
             runtimes,
             materializer,
-            new SubagentConfig(2, 2, null, Duration.ZERO, 10, Duration.ofMillis(10)),
-            Duration.ofMillis(1));
+            new SubagentConfig(2, 2, null, Duration.ZERO, 10),
+            changeSource);
   }
 
   @Test
@@ -161,6 +173,120 @@ class HarnessOneShotServiceTest {
 
     assertEquals("final prompt", service.await(id(3), Duration.ofSeconds(1), () -> true));
     verify(runtime).getThreadSnapshot(id(3));
+  }
+
+  /** 终态优先：订阅后的首次权威 snapshot 已 terminal 时，即使 timeout 极短也返回结果而不是报 timeout。 */
+  @Test
+  void returnsCompletedResultEvenWithElapsedTimeout() {
+    ThreadSnapshot completed = completed("final prompt");
+    when(runtime.getThreadSnapshot(id(3))).thenReturn(completed);
+
+    assertEquals("final prompt", service.await(id(3), Duration.ofNanos(1), () -> true));
+    verify(runtime, never()).stop(any(StopCommand.class));
+    verify(runtime).getThreadSnapshot(id(3));
+    assertEquals(0, changeSource.activeSubscriptions(id(3)), "success path must release");
+  }
+
+  /** 订阅必须先于首次权威读取；首读期间到达的 revision 信号不得丢失，唤醒后重读并返回终态。 */
+  @Test
+  void subscribesBeforeFirstReadAndRereadsOnRevisionSignal() throws Exception {
+    AtomicInteger reads = new AtomicInteger();
+    CountDownLatch firstRead = new CountDownLatch(1);
+    when(runtime.getThreadSnapshot(id(3)))
+        .thenAnswer(
+            inv -> {
+              if (reads.incrementAndGet() == 1) {
+                assertTrue(
+                    changeSource.isSubscribed(id(3)),
+                    "first snapshot read must happen after subscribe (subscribe-before-read)");
+                firstRead.countDown();
+                return idle();
+              }
+              return completed("final prompt");
+            });
+
+    CompletableFuture<String> await =
+        CompletableFuture.supplyAsync(
+            () -> service.await(id(3), Duration.ofSeconds(5), () -> true));
+    assertTrue(firstRead.await(5, TimeUnit.SECONDS));
+    changeSource.signal(id(3));
+
+    assertEquals("final prompt", await.get(5, TimeUnit.SECONDS));
+    assertEquals(2, reads.get(), "initial read plus one revision-wake re-read");
+    assertEquals(0, changeSource.activeSubscriptions(id(3)), "success path must release");
+  }
+
+  /** 无事件时 snapshot 只读一次（不按固定间隔重复读取）；caller 取消经 timed signal wait 察觉并释放订阅。 */
+  @Test
+  void doesNotRereadWithoutSignalAndReleasesOnCallerInactive() throws Exception {
+    AtomicInteger reads = new AtomicInteger();
+    CountDownLatch firstRead = new CountDownLatch(1);
+    when(runtime.getThreadSnapshot(id(3)))
+        .thenAnswer(
+            inv -> {
+              reads.incrementAndGet();
+              firstRead.countDown();
+              return idle();
+            })
+        .thenThrow(new HarnessRuntimeNotFoundException("gone"));
+    AtomicBoolean keepWaiting = new AtomicBoolean(true);
+    CompletableFuture<String> await =
+        CompletableFuture.supplyAsync(
+            () -> service.await(id(3), Duration.ofSeconds(5), () -> keepWaiting.get()));
+
+    assertTrue(firstRead.await(5, TimeUnit.SECONDS));
+    keepWaiting.set(false);
+
+    ExecutionException error =
+        assertThrows(ExecutionException.class, () -> await.get(5, TimeUnit.SECONDS));
+    assertInstanceOf(IllegalStateException.class, error.getCause());
+    assertEquals("one-shot caller is no longer active", error.getCause().getMessage());
+    assertEquals(1, reads.get(), "no durable snapshot read without a revision signal");
+    assertEquals(0, changeSource.activeSubscriptions(id(3)), "caller-inactive must release");
+  }
+
+  /** timeout 路径 best-effort stop 后必须释放订阅。 */
+  @Test
+  void timeoutReleasesSubscription() {
+    ThreadSnapshot idle = idle();
+    when(runtime.getThreadSnapshot(id(3))).thenReturn(idle);
+
+    assertThrows(
+        IllegalStateException.class, () -> service.await(id(3), Duration.ofNanos(1), () -> true));
+    verify(runtime).stop(any(StopCommand.class));
+    assertEquals(
+        0, changeSource.activeSubscriptions(id(3)), "timeout must release the subscription");
+  }
+
+  /** 观察线程被中断时以原错误语义抛出，且订阅释放、不遗留注册。 */
+  @Test
+  void interruptionReleasesSubscription() throws Exception {
+    when(runtime.getThreadSnapshot(id(3))).thenReturn(idle());
+    AtomicReference<Throwable> failure = new AtomicReference<>();
+    CountDownLatch done = new CountDownLatch(1);
+    Thread awaiter =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    service.await(id(3), Duration.ofSeconds(5), () -> true);
+                  } catch (Throwable error) {
+                    failure.set(error);
+                  } finally {
+                    done.countDown();
+                  }
+                });
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!changeSource.isSubscribed(id(3)) && System.nanoTime() < deadline) {
+      Thread.sleep(1);
+    }
+    assertTrue(changeSource.isSubscribed(id(3)), "await must subscribe before observation");
+    awaiter.interrupt();
+
+    assertTrue(done.await(5, TimeUnit.SECONDS));
+    assertInstanceOf(IllegalStateException.class, failure.get());
+    assertEquals("one-shot observation thread was interrupted", failure.get().getMessage());
+    assertEquals(0, changeSource.activeSubscriptions(id(3)), "interruption must release");
   }
 
   @Test

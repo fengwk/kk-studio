@@ -92,9 +92,6 @@ public class HarnessRuntimeProperties {
   /** task.maxTurns 未指定时的默认软回合预算。 */
   private int subagentMaxTurns = 50;
 
-  /** task Tool 观察子 Thread durable 状态的轮询间隔。 */
-  private Duration subagentPollInterval = Duration.ofMillis(100);
-
   public Path resolvedEnvironmentRoot() {
     if (environmentRoot == null) {
       throw new IllegalArgumentException(

@@ -1642,8 +1642,7 @@ class DatabaseTurnResolverTest {
       when(providerFactory.promptCacheCapability()).thenReturn(cacheCapability);
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
-      SubagentConfig subagentConfig =
-          new SubagentConfig(2, 10, null, Duration.ZERO, 50, Duration.ofMillis(100));
+      SubagentConfig subagentConfig = new SubagentConfig(2, 10, null, Duration.ZERO, 50);
       resolver =
           new DatabaseTurnResolver(
               agents,

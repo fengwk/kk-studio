@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.core.ai.runtime.ChangeGate;
+import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -81,6 +83,7 @@ public final class TaskTool implements Tool {
   private final AgentBranchSettingsMaterializer settingsMaterializer;
   private final SubagentConfig config;
   private final SubagentRunRegistry runRegistry;
+  private final HarnessThreadChangeSource changeSource;
   private final ExecutorService executor;
   private final ObjectMapper objectMapper;
   private final ToolDescriptor descriptor;
@@ -90,6 +93,7 @@ public final class TaskTool implements Tool {
       AgentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfig config,
       SubagentRunRegistry runRegistry,
+      HarnessThreadChangeSource changeSource,
       ExecutorService executor,
       ObjectMapper objectMapper) {
     this.runtimeProvider = Objects.requireNonNull(runtimeProvider, "runtimeProvider");
@@ -97,6 +101,7 @@ public final class TaskTool implements Tool {
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
     this.config = Objects.requireNonNull(config, "config");
     this.runRegistry = Objects.requireNonNull(runRegistry, "runRegistry");
+    this.changeSource = Objects.requireNonNull(changeSource, "changeSource");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     this.descriptor =
@@ -144,7 +149,9 @@ public final class TaskTool implements Tool {
     private final ToolExecutionRequest request;
     private final ToolExecutionListener listener;
     private final AtomicBoolean cancelled = new AtomicBoolean();
+    private final AtomicBoolean cancelChildStarted = new AtomicBoolean();
     private final AtomicReference<UUID> childThreadId = new AtomicReference<>();
+    private final ChangeGate gate = new ChangeGate();
 
     private TaskExecution(ToolExecutionRequest request, ToolExecutionListener listener) {
       this.request = request;
@@ -187,7 +194,7 @@ public final class TaskTool implements Tool {
           childThreadId.set(threadId);
           reservation.attach(threadId);
           if (cancelled.get()) {
-            cancelChild(runtime, threadId, request.context().invocationId());
+            cancelChildOnce(runtime, threadId, request.context().invocationId());
             complete(
                 call, selected.name(), threadId, RunState.CANCELLED, cancelledMessage(threadId));
             return;
@@ -229,13 +236,28 @@ public final class TaskTool implements Tool {
       if (!cancelled.compareAndSet(false, true)) {
         return;
       }
+      // 主动唤醒观察循环，使取消在同一 wake 通道上立即生效（不依赖任何 durable 事件）。
+      gate.cancel();
       UUID threadId = childThreadId.get();
       if (threadId != null) {
         try {
-          cancelChild(requireRuntime(), threadId, request.context().invocationId());
+          // 与观察循环/attach 后检查共享 single-owner 执行权：整个 TaskExecution 至多一条 stop 重试序列。
+          cancelChildOnce(requireRuntime(), threadId, request.context().invocationId());
         } catch (RuntimeException ignored) {
           // 父 Tool stop 已是 durable 事实；子 Thread 的 best-effort cascade 失败不能反转它。
         }
+      }
+    }
+
+    /** 整个 TaskExecution 至多执行一条 3-attempt stop 重试序列：cancel()/attach 后检查/观察循环共享执行权。 */
+    private void cancelChildOnce(HarnessRuntime runtime, UUID threadId, UUID taskInvocationId) {
+      if (!cancelChildStarted.compareAndSet(false, true)) {
+        return;
+      }
+      try {
+        cancelChild(runtime, threadId, taskInvocationId);
+      } catch (RuntimeException ignored) {
+        // best-effort：stop 序列失败不反转取消/超时终态（与 cancel() 调用路径一致）。
       }
     }
 
@@ -271,66 +293,103 @@ public final class TaskTool implements Tool {
       List<SubagentRunRegistry.RelayedStatus> previousDescendants = List.of();
       long lastActivityNanos = System.nanoTime();
       long lastStatusNanos = lastActivityNanos;
-      while (true) {
-        if (cancelled.get()) {
-          cancelChild(runtime, threadId, request.context().invocationId());
-          return new RunResult(RunState.CANCELLED, cancelledMessage(threadId));
+      long idleDeadlineNanos = Long.MAX_VALUE;
+      ThreadSnapshot snapshot = null;
+      boolean first = true;
+      ChangeGate.State since = gate.snapshot();
+      try (HarnessThreadChangeSource.Subscription revisionSubscription =
+              changeSource.subscribe(threadId, gate::revision);
+          SubagentRunRegistry.ChangeSubscription descendantSubscription =
+              runRegistry.subscribeDescendants(threadId, gate::descendants)) {
+        while (true) {
+          if (cancelled.get()) {
+            cancelChildOnce(runtime, threadId, request.context().invocationId());
+            return new RunResult(RunState.CANCELLED, cancelledMessage(threadId));
+          }
+          long now = System.nanoTime();
+          long waitNanos;
+          if (!first && now - lastStatusNanos < STATUS_HEARTBEAT_NANOS) {
+            waitNanos = STATUS_HEARTBEAT_NANOS - (now - lastStatusNanos);
+          } else {
+            // 首次迭代立即执行权威首读；heartbeat 到点立即发布（不等待信号）。
+            waitNanos = 0L;
+          }
+          if (idleDeadlineNanos != Long.MAX_VALUE) {
+            // idle 到期由限时等待本身唤醒：timeout wake 不读 durable snapshot，按缓存 active-tools 语义触发。
+            waitNanos = Math.min(waitNanos, Math.max(0L, idleDeadlineNanos - now));
+          }
+          ChangeGate.State before = since;
+          try {
+            gate.awaitChange(since, waitNanos);
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("task observation thread was interrupted", interrupted);
+          }
+          since = gate.snapshot();
+          boolean revisionWake = first || since.revision() != before.revision();
+          first = false;
+          if (revisionWake) {
+            // 权威 durable snapshot 只在首读或 revision/resync 唤醒后读取；heartbeat/descendant 唤醒复用上一份缓存。
+            snapshot = runtime.getThreadSnapshot(threadId);
+            String fingerprint = fingerprint(snapshot);
+            if (!fingerprint.equals(previousFingerprint)) {
+              previousFingerprint = fingerprint;
+              lastActivityNanos = System.nanoTime();
+            }
+            idleDeadlineNanos = idleDeadline(snapshot, lastActivityNanos);
+          }
+          List<SubagentRunRegistry.RelayedStatus> descendants =
+              runRegistry.descendantStatuses(threadId);
+          boolean relayChanged = !descendants.equals(previousDescendants);
+          if (relayChanged) {
+            previousDescendants = descendants;
+          }
+          if (revisionWake
+              || relayChanged
+              || System.nanoTime() - lastStatusNanos >= STATUS_HEARTBEAT_NANOS) {
+            publishStatus(call, subagentType, snapshot, sourceHeadEntryId, descendants);
+            lastStatusNanos = System.nanoTime();
+          }
+          if (revisionWake) {
+            // reminder/terminal 只在初始或 revision wake 后按权威 snapshot 判断。
+            RunResult terminal = terminalResult(snapshot, sourceHeadEntryId);
+            if (terminal != null) {
+              return terminal;
+            }
+            int turns = countTurns(snapshot, sourceHeadEntryId);
+            if (turns >= nextReminderTurn && enqueueReminder(runtime, snapshot, nextReminderTurn)) {
+              nextReminderTurn = Math.addExact(nextReminderTurn, MAX_TURNS_REMINDER_INTERVAL);
+            }
+          }
+          // idle 检查对任何 wake 类别都生效（含限时等待自然到期）；deadline 依据缓存 snapshot 的 active-tools 语义
+          // 计算，到期时不重读 durable snapshot。
+          if (snapshot != null
+              && snapshot.toolSiblings().isEmpty()
+              && idleDeadlineNanos != Long.MAX_VALUE
+              && System.nanoTime() >= idleDeadlineNanos) {
+            cancelChildOnce(runtime, threadId, request.context().invocationId());
+            return new RunResult(
+                RunState.ERROR,
+                "Subagent idle timeout after "
+                    + config.idleTimeout()
+                    + ". Session preserved as `"
+                    + threadId
+                    + "`.");
+          }
         }
-        ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-        String fingerprint = fingerprint(snapshot);
-        List<SubagentRunRegistry.RelayedStatus> descendants =
-            runRegistry.descendantStatuses(threadId);
-        long now = System.nanoTime();
-        boolean durableChanged = !fingerprint.equals(previousFingerprint);
-        boolean relayChanged = !descendants.equals(previousDescendants);
-        if (durableChanged) {
-          previousFingerprint = fingerprint;
-          lastActivityNanos = now;
-        }
-        if (relayChanged) {
-          previousDescendants = descendants;
-        }
-        if (durableChanged || relayChanged || now - lastStatusNanos >= STATUS_HEARTBEAT_NANOS) {
-          publishStatus(call, subagentType, snapshot, sourceHeadEntryId, descendants);
-          lastStatusNanos = now;
-        }
-        RunResult terminal = terminalResult(snapshot, sourceHeadEntryId);
-        if (terminal != null) {
-          return terminal;
-        }
-        int turns = countTurns(snapshot, sourceHeadEntryId);
-        if (turns >= nextReminderTurn && enqueueReminder(runtime, snapshot, nextReminderTurn)) {
-          nextReminderTurn = Math.addExact(nextReminderTurn, MAX_TURNS_REMINDER_INTERVAL);
-        }
-        if (idleTimedOut(snapshot, lastActivityNanos)) {
-          cancelChild(runtime, threadId, request.context().invocationId());
-          return new RunResult(
-              RunState.ERROR,
-              "Subagent idle timeout after "
-                  + config.idleTimeout()
-                  + ". Session preserved as `"
-                  + threadId
-                  + "`.");
-        }
-        sleep();
       }
     }
 
-    private boolean idleTimedOut(ThreadSnapshot snapshot, long lastActivityNanos) {
+    private long idleDeadline(ThreadSnapshot snapshot, long lastActivityNanos) {
       if (config.idleTimeout().isZero() || !snapshot.toolSiblings().isEmpty()) {
-        return false;
+        return Long.MAX_VALUE;
       }
-      long elapsed = System.nanoTime() - lastActivityNanos;
-      return elapsed >= config.idleTimeout().toNanos();
+      return saturatingAdd(lastActivityNanos, config.idleTimeout().toNanos());
     }
 
-    private void sleep() {
-      try {
-        Thread.sleep(config.pollInterval());
-      } catch (InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-        throw new IllegalStateException("task observation thread was interrupted", interrupted);
-      }
+    private static long saturatingAdd(long value, long delta) {
+      long sum = value + delta;
+      return ((value ^ sum) & (delta ^ sum)) < 0 ? Long.MAX_VALUE : sum;
     }
   }
 
