@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.skill;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,17 +13,25 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 覆盖 selected-skill 解析、platform source 优先级与离线失败场景。 */
@@ -30,6 +39,28 @@ class LoadSkillToolTest {
 
   private static final EnvironmentBinding PLATFORM = EnvironmentBindings.binding("platform");
   private static final EnvironmentBinding LOCAL_DEV = EnvironmentBindings.binding("local-dev");
+
+  /** descriptor 的 name/version/visibility/side-effect/timeout 与单参数 schema 是稳定平台契约。 */
+  @Test
+  void exposesCanonicalDescriptorContract() {
+    LoadSkillTool tool =
+        new LoadSkillTool(
+            (invocationId, threadId) -> List.of(),
+            (environment, skillName, timeout) -> new CompletableFuture<>());
+
+    ToolDescriptor descriptor = tool.descriptor();
+    assertEquals(LoadSkillTool.NAME, descriptor.name());
+    assertEquals(LoadSkillTool.VERSION, descriptor.version());
+    assertEquals(ToolType.PLATFORM, descriptor.type());
+    assertEquals(LoadSkillTool.NAME, descriptor.rendererKey());
+    assertEquals(ToolSideEffect.READ_ONLY, descriptor.sideEffect());
+    assertEquals(Duration.ofMinutes(1), descriptor.timeout());
+    ToolParamsSchema schema = descriptor.inputSchema();
+    assertEquals(List.of("name"), schema.properties().keySet().stream().toList());
+    assertInstanceOf(ToolStringSchema.class, schema.properties().get("name"));
+    assertEquals(Set.of("name"), schema.required());
+    assertFalse(schema.additionalProperties());
+  }
 
   @Test
   void loadsSelectedSkillBodyFromResolvedSource() throws Exception {
@@ -50,6 +81,7 @@ class LoadSkillToolTest {
     assertEquals("# Skill\n\nDo the thing.\n", ((TextToolContent) result.contents().get(0)).text());
     assertEquals(PLATFORM, loader.environment);
     assertEquals("dev", loader.skillName);
+    assertEquals(Duration.ofSeconds(2), loader.timeout);
   }
 
   @Test
@@ -120,6 +152,55 @@ class LoadSkillToolTest {
     assertTrue(blank.error());
   }
 
+  /** cancel 必须中断 pending loader，并且重复 cancel 仍只产生一个 terminal ToolResult。 */
+  @Test
+  void cancellationCancelsThePendingLoadAndCompletesExactlyOnce() throws Exception {
+    CompletableFuture<SkillBodyLoader.SkillBodyLoadResult> pending = new CompletableFuture<>();
+    LoadSkillTool tool =
+        new LoadSkillTool(
+            (invocationId, threadId) ->
+                List.of(new SkillBinding("dev", "Developer rules", PLATFORM)),
+            (environment, skillName, timeout) -> pending);
+    AtomicReference<ToolResult> result = new AtomicReference<>();
+    AtomicInteger terminalCount = new AtomicInteger();
+    CountDownLatch latch = new CountDownLatch(1);
+    ToolExecutionHandle handle =
+        tool.execute(
+            new ToolExecutionRequest(
+                tool.descriptor(),
+                new ToolCall("c1", LoadSkillTool.NAME, "{\"name\":\"dev\"}"),
+                Duration.ofSeconds(2),
+                new ToolExecutionContext(
+                    UUID.fromString("00000000-0000-0000-0000-000000000007"),
+                    UUID.fromString("00000000-0000-0000-0000-000000000001"))),
+            new ToolExecutionListener() {
+              @Override
+              public void onPartial(ToolResult partial) {}
+
+              @Override
+              public void onComplete(ToolResult complete) {
+                terminalCount.incrementAndGet();
+                result.set(complete);
+                latch.countDown();
+              }
+
+              @Override
+              public void onError(Throwable error) {
+                throw new AssertionError(error);
+              }
+            });
+
+    handle.cancel();
+    handle.cancel();
+
+    assertTrue(latch.await(2, TimeUnit.SECONDS));
+    assertTrue(handle.isCancelled());
+    assertTrue(pending.isCancelled());
+    assertTrue(result.get().error());
+    assertTrue(text(result.get()).contains("Operation cancelled"));
+    assertEquals(1, terminalCount.get());
+  }
+
   private static String text(ToolResult result) {
     return ((TextToolContent) result.contents().get(0)).text();
   }
@@ -162,6 +243,7 @@ class LoadSkillToolTest {
   private static final class RecordingBodyLoader implements SkillBodyLoader {
     private EnvironmentBinding environment;
     private String skillName;
+    private Duration timeout;
     private SkillBodyLoadResult result;
 
     @Override
@@ -169,6 +251,7 @@ class LoadSkillToolTest {
         EnvironmentBinding environment, String skillName, Duration timeout) {
       this.environment = environment;
       this.skillName = skillName;
+      this.timeout = timeout;
       return CompletableFuture.completedFuture(result);
     }
   }

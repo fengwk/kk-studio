@@ -5,6 +5,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Clock;
+
 /** OpenCLI Hub 及其 Canvas Function adapters 始终注册，availability 由显式开关决定。 */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({
@@ -32,7 +34,9 @@ public class OpenCliCanvasFunctionConfiguration {
       OpenCliHubProperties hubProperties,
       SeedanceCanvasProperties properties,
       OpenCliHubClient client,
-      ObjectMapper objectMapper) {
-    return new SeedanceCanvasFunctionAdapter(hubProperties, properties, client, objectMapper);
+      ObjectMapper objectMapper,
+      Clock clock) {
+    return new SeedanceCanvasFunctionAdapter(
+        hubProperties, properties, client, objectMapper, clock);
   }
 }

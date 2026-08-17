@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -96,6 +97,113 @@ class CodingToolsTest {
     byte[] bytes = Files.readAllBytes(file);
     assertEquals((byte) 0xef, bytes[0]);
     assertEquals("b\r\nb\r\n", new String(bytes, 3, bytes.length - 3, StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void readReportsLspBridgeConfigurationStatus() throws Exception {
+    Files.writeString(environmentRoot.resolve("lsp-status.txt"), "x\n");
+    CodingToolsConfig bridged =
+        new CodingToolsConfig(
+            environmentRoot, 2000, 50 * 1024, "bash", new InMemoryResourceStore(), "echo", "javap");
+
+    ToolResult disabled = invoke(new ReadTool(config()), "{\"path\":\"lsp-status.txt\"}");
+    ToolResult enabled = invoke(new ReadTool(bridged), "{\"path\":\"lsp-status.txt\"}");
+
+    assertTrue(text(disabled).contains("lsp: unsupported"));
+    assertTrue(text(enabled).contains("lsp: supported"));
+  }
+
+  @Test
+  void editRejectsMultipleOrOverlappingOccurrences() throws Exception {
+    Path overlap = environmentRoot.resolve("overlap.txt");
+    Files.writeString(overlap, "aaa\n");
+    Path replaced = environmentRoot.resolve("replace-all.txt");
+    Files.writeString(replaced, "abab\n");
+    EditTool edit = new EditTool(config());
+
+    ToolResult overlapping =
+        invoke(edit, "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\"}");
+    ToolResult overlappingAll =
+        invoke(
+            edit,
+            "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\",\"replace_all\":true}");
+    ToolResult replacedResult =
+        invoke(
+            edit,
+            "{\"path\":\"replace-all.txt\",\"old_string\":\"ab\",\"new_string\":\"x\",\"replace_all\":true}");
+
+    assertTrue(text(overlapping).contains("Found 2 exact matches"));
+    assertTrue(text(overlappingAll).contains("overlapping exact matches"));
+    assertFalse(replacedResult.error());
+    assertArrayEquals("aaa\n".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(overlap));
+    assertEquals("xx\n", Files.readString(replaced));
+  }
+
+  @Test
+  void editRejectsNoOpEditsThatWouldLeaveBytesUnchanged() throws Exception {
+    Path crlf = environmentRoot.resolve("crlf-noop.txt");
+    Path lf = environmentRoot.resolve("lf-noop.txt");
+    byte[] originalCrlf = "alpha\r\n".getBytes(StandardCharsets.UTF_8);
+    byte[] originalLf = "alpha\n".getBytes(StandardCharsets.UTF_8);
+    Files.write(crlf, originalCrlf);
+    Files.write(lf, originalLf);
+    EditTool edit = new EditTool(config());
+
+    ToolResult crlfSpelled =
+        invoke(
+            edit,
+            "{\"path\":\"crlf-noop.txt\",\"old_string\":\"alpha\\r\\n\",\"new_string\":\"alpha\\n\"}");
+    ToolResult lfSpelled =
+        invoke(
+            edit,
+            "{\"path\":\"lf-noop.txt\",\"old_string\":\"alpha\\n\",\"new_string\":\"alpha\\r\\n\"}");
+
+    assertTrue(text(crlfSpelled).contains("No changes to apply"));
+    assertTrue(text(crlfSpelled).contains("must differ"));
+    assertTrue(text(lfSpelled).contains("No changes to apply"));
+    assertArrayEquals(originalCrlf, Files.readAllBytes(crlf));
+    assertArrayEquals(originalLf, Files.readAllBytes(lf));
+  }
+
+  @Test
+  void editPreservesCrOnlyAndMixedLineEndingsExactly() throws Exception {
+    // CR-only 文件：跨行 old_string 在 LF 归一空间匹配，未修改区域与替换换行沿用既有 CR。
+    Path cr = environmentRoot.resolve("cr-only.txt");
+    byte[] originalCr = "alpha\rbeta\rgamma\r".getBytes(StandardCharsets.UTF_8);
+    Files.write(cr, originalCr);
+    // mixed 文件：CRLF 与 CR 并存；替换跨行段落时未修改区域原样保留，新增换行沿用被替换段行尾。
+    Path mixed = environmentRoot.resolve("mixed.txt");
+    byte[] originalMixed = "alpha\r\nbeta\rgamma".getBytes(StandardCharsets.UTF_8);
+    Files.write(mixed, originalMixed);
+    EditTool edit = new EditTool(config());
+
+    ToolResult crResult =
+        invoke(
+            edit,
+            "{\"path\":\"cr-only.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\"}");
+    ToolResult mixedResult =
+        invoke(
+            edit,
+            "{\"path\":\"mixed.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\"}");
+
+    // mixed 文件中被替换段内部无行尾（歧义）时，新增换行回退 LF，未修改区域仍原样保留。
+    Path ambiguous = environmentRoot.resolve("mixed-ambiguous.txt");
+    Files.write(ambiguous, "head\r\nmiddle\rtail".getBytes(StandardCharsets.UTF_8));
+    ToolResult ambiguousResult =
+        invoke(
+            edit,
+            "{\"path\":\"mixed-ambiguous.txt\",\"old_string\":\"middle\",\"new_string\":\"left\\nright\"}");
+
+    assertFalse(crResult.error());
+    assertFalse(mixedResult.error());
+    assertFalse(ambiguousResult.error());
+    assertArrayEquals(
+        "left\rright\rgamma\r".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(cr));
+    assertArrayEquals(
+        "left\r\nright\rgamma".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(mixed));
+    assertArrayEquals(
+        "head\r\nleft\nright\rtail".getBytes(StandardCharsets.UTF_8),
+        Files.readAllBytes(ambiguous));
   }
 
   @Test

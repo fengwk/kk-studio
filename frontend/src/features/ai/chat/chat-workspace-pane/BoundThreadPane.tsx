@@ -1,9 +1,7 @@
 import {
   lazy,
   Suspense,
-  useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -11,19 +9,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChatPanel,
   ThreadEventDetail,
-  ThreadEventView,
   ThreadShortcutsPanel,
-  useThreadPanelViewState,
+  useBoundBranchPanel,
+  useBoundThreadPanelLabels,
+  useBoundThreadPanelViews,
+  buildBoundThreadTranscript,
   type ChatPanelActivityInput,
   type ChatPanelComposerInput,
-  type ChatPanelLabels,
-  type ChatPanelTranscriptInput,
   type CommandBatchReplay,
   type ThreadCommand,
-  type ThreadPanelMainView,
-  useAgentThreadController,
 } from '@/features/ai/runtime'
-import { useSystemPromptPreview } from '@/features/ai/runtime/useSystemPromptPreview'
 
 import {
   browserNotificationPermission,
@@ -36,21 +31,12 @@ import {
   ThreadSelectionPanel,
 } from '@/features/ai/chat/SelectionPanel'
 import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
-import { useEnvironmentWorkspaceMetadata } from '@/features/ai/environment/useEnvironmentWorkspaceMetadata'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { BOUND_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
 import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors'
 import {
-  branchDraftFromThread,
-  branchDraftsEqual,
-  activeToolsFromAgent,
-  projectPendingTarget,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
-import {
-  buildMessageBatchPlan,
-  type CommandBatchPlan,
-} from '@/features/ai/chat/command-batch-plan'
 import {
   createTextPart,
   hasMessageContent,
@@ -60,7 +46,6 @@ import {
 import { branchTarget } from '@/features/ai/chat/session-entry-tree'
 import { toThreadSelectionItem } from '@/features/ai/chat/thread-selection'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type {
   EnvironmentBindingDTO,
   LiveEnvironmentDTO,
@@ -92,7 +77,6 @@ function rebindErrorMessage(error: unknown): string {
 
 export function BoundThreadPane({
   chatId,
-  agents,
   environments = [],
   paneId,
   threadId,
@@ -106,7 +90,6 @@ export function BoundThreadPane({
   onReplayInitialized,
 }: {
   chatId: string
-  agents: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
   paneId: string
   threadId: string
@@ -121,51 +104,25 @@ export function BoundThreadPane({
   onReplayInitialized?: () => void
 }) {
   const { t } = useI18n()
-  // canonical 名称即展示身份；仅携带统一可用性标记（live 列表缺失/未知 => unavailable）。
-  const environmentReadyByName = useMemo(
-    () => new Map(environments.map((environment) => [environment.name, environment.ready])),
-    [environments],
-  )
-  // buildBatch 依赖 controller 的 snapshot thread；稳定回调通过 ref 转发，
-  // 并在提交事件到达前由下方 effect 更新。
-  const buildBatchRef = useRef<((parts: ComposerPart[]) => CommandBatchPlan | null) | null>(null)
-  const controller = useAgentThreadController(
+  const panel = useBoundBranchPanel({
     threadId,
-    initialDraft ?? initialReplay?.parts ?? [],
+    initialParts: initialDraft ?? initialReplay?.parts ?? [],
     initialReplay,
-    (parts) => buildBatchRef.current?.(parts) ?? null,
-  )
-  // 面板本地 branch draft：从持久化的 Thread snapshot 初始化，面板本地编辑，
-  // 与下一条 message batch 一起原子应用。base 跟随 snapshot；queued SET_*
-  // command 投影 effective base，避免连续发送时重复携带在途中的 settings。
-  const [branchState, setBranchState] = useState<{
-    base: BranchDraft
-    draft: BranchDraft
-    initialized: boolean
-  } | null>(null)
-  const [interaction, setInteraction] = useState<
-    'thread' | 'agent' | 'environment' | 'history' | 'shortcuts' | null
-  >(null)
+  })
+  const { controller } = panel
   // 互斥主视图与 Event 选中（mode/selected + 双 scrollTop）：每个 mounted
   // Pane 独立；threadId 重绑由 hook 全部重置回 conversation。
   const {
     mode,
     switchMode,
-    selectedEventId,
     selectEvent,
-    eventsBodyRef,
     initialConversationScrollTop,
-    initialEventsScrollTop,
-  } = useThreadPanelViewState(threadId, controller.bodyRef, controller.events)
-  const systemPrompt = useSystemPromptPreview(
-    threadId,
-    mode === 'events',
-    controller.working,
-  )
-  const selectedRecord =
-    selectedEventId == null
-      ? null
-      : (controller.events.find((event) => event.id === selectedEventId) ?? null)
+    selectedRecord,
+    mainView,
+  } = useBoundThreadPanelViews(threadId, controller)
+  const [interaction, setInteraction] = useState<
+    'thread' | 'agent' | 'environment' | 'history' | 'shortcuts' | null
+  >(null)
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
   const [discardConfirm, setDiscardConfirm] = useState<ConfirmModalState | null>(null)
   const queryClient = useQueryClient()
@@ -190,30 +147,26 @@ export function BoundThreadPane({
     enabled: notificationsEnabled && notificationPermission === 'granted',
   })
 
-  // 将面板重新绑定到另一个 Thread 时，会清空所有面板本地状态，并从新 snapshot
-  // 重新初始化 draft（controller 也会重置其 stop/decision replay 状态）；
-  // 主视图/Event 状态由 useThreadPanelViewState 在 threadId 变化时重置。
+  // 将面板重新绑定到另一个 Thread 时，会清空面板本地交互/错误/确认状态
+  //（branch draft 由 useBoundBranchPanel 重置，主视图/Event 状态由
+  // useThreadPanelViewState 重置；controller 也会重置其 stop/decision replay 状态）。
   useEffect(() => {
     if (boundThreadIdRef.current === threadId) {
       return
     }
     boundThreadIdRef.current = threadId
-    setBranchState(null)
     setInteraction(null)
     setRebindBlockedReason(null)
     setDiscardConfirm(null)
   }, [threadId])
 
-  const effectiveBase = useMemo(() => {
-    if (branchState == null) {
-      return null
-    }
-    return projectPendingTarget(branchState.base, controller.queuedCommands)
-  }, [branchState, controller.queuedCommands])
-  const dirty =
-    branchState != null
-    && effectiveBase != null
-    && !branchDraftsEqual(effectiveBase, branchState.draft)
+  const labels = useBoundThreadPanelLabels(environments, controller)
+  const transcript = buildBoundThreadTranscript({
+    controller,
+    threadId,
+    initialConversationScrollTop,
+    onDenyApproval: () => threadNotifications.markPermissionRejected(),
+  })
   const hasPendingCommands = controller.queuedCommands.length > 0
 
   useEffect(() => {
@@ -230,46 +183,6 @@ export function BoundThreadPane({
       onThreadChange(null)
     }
   }, [controller.messagesError, onThreadChange])
-
-  // 重新绑定到新 Thread 时，从其 snapshot 初始化 draft（base === draft，干净）。
-  useEffect(() => {
-    const thread = controller.thread
-    if (!thread) {
-      return
-    }
-    setBranchState((current) => {
-      const snapshotDraft = branchDraftFromThread(thread)
-      const pendingTarget = projectPendingTarget(snapshotDraft, controller.queuedCommands)
-      if (current == null) {
-        return { base: snapshotDraft, draft: pendingTarget, initialized: true }
-      }
-      if (!current.initialized) {
-        return { ...current, base: snapshotDraft, draft: pendingTarget, initialized: true }
-      }
-      // 持久化的 base 跟随 snapshot；用户 draft 永远不会被静默覆盖。
-      return { ...current, base: snapshotDraft }
-    })
-  }, [controller.queuedCommands, controller.thread])
-
-  const buildBatch = useCallback(
-    (parts: ComposerPart[]): CommandBatchPlan | null => {
-      const thread = controller.thread
-      if (!thread || branchState == null || effectiveBase == null) {
-        return null
-      }
-      return buildMessageBatchPlan({
-        thread,
-        effectiveBase,
-        draft: branchState.draft,
-        parts,
-      })
-    },
-    [branchState, controller.thread, effectiveBase],
-  )
-  useEffect(() => {
-    // Ref 由 controller 的 submit handler 使用（事件驱动，总在 effect 之后）。
-    buildBatchRef.current = buildBatch
-  })
 
   const rebindMutation = useMutation({
     mutationFn: (entry: HarnessSessionEntryDTO) => {
@@ -295,8 +208,7 @@ export function BoundThreadPane({
       ])
       // 成功重定位后，从目标 Thread 重新初始化 branch draft（yolo 保留服务器值；
       // branch settings 取自返回的 Thread）。
-      const snapshotDraft = branchDraftFromThread(updatedThread)
-      setBranchState({ base: snapshotDraft, draft: snapshotDraft, initialized: true })
+      panel.resetDraftFromThread(updatedThread)
       // USER/CUSTOM 回退会将其可编辑的原文恢复到 composer。
       controller.setDraft([createTextPart(branchTarget(entry).draft)])
     },
@@ -309,7 +221,7 @@ export function BoundThreadPane({
   //   head 重定位、stop、approval、未决的 exact batch replay，或等待精确重试的
   //   不确定 Stop 操作。
   const hasUnsentMessage = hasMessageContent(controller.draft)
-  const hasUnsentSettings = dirty
+  const hasUnsentSettings = panel.dirty
   const paneDirty = hasUnsentSettings || hasUnsentMessage
   const panePending =
     hasPendingCommands
@@ -323,50 +235,29 @@ export function BoundThreadPane({
   const threadPicker = useChatThreadPicker(chatId, interaction === 'thread', threadSort)
   const threadItems = threadPicker.items.map((item) => toThreadSelectionItem(item, threadSort))
 
-  function editDraft(patch: Partial<BranchDraft>) {
-    setBranchState((current) => {
-      if (current == null) {
-        return current
-      }
-      return { ...current, draft: { ...current.draft, ...patch } }
-    })
-  }
-
   function selectAgent(selectedAgentName: string) {
     setRebindBlockedReason(null)
-    const agent = agents.find((item) => item.name === selectedAgentName)
-    if (!agent) {
+    if (!panel.selectAgent(selectedAgentName)) {
       setRebindBlockedReason(t('ai.runtime.action.agentUnresolvable', { agent: selectedAgentName }))
       return
     }
-    // Draft-local edit：采用新的 agent name + 它的 active tool 集合；冻结的
-    // model/environment/yolo 选中值保持不变。
-    editDraft({ agentName: selectedAgentName, activeTools: activeToolsFromAgent(agent) })
     setInteraction(null)
   }
 
   function selectEnvironment(environment: EnvironmentBindingDTO | null) {
     setRebindBlockedReason(null)
-    editDraft({ environment })
+    panel.selectEnvironment(environment)
     setInteraction(null)
   }
 
   function setYoloEnabled(enabled: boolean) {
     setRebindBlockedReason(null)
-    setBranchState((current) => {
-      if (current == null) {
-        return current
-      }
-      return {
-        ...current,
-        draft: { ...current.draft, yoloEnabled: enabled },
-      }
-    })
+    panel.setYoloEnabled(enabled)
   }
 
   function selectModel(model: BranchDraft['model']) {
     setRebindBlockedReason(null)
-    editDraft({ model })
+    panel.selectModel(model)
   }
 
   function selectThread(selectedThreadId: string) {
@@ -471,7 +362,7 @@ export function BoundThreadPane({
         setInteraction('environment')
         return
       case 'yolo':
-        setYoloEnabled(!(branchState?.draft.yoloEnabled ?? false))
+        setYoloEnabled(!(panel.draft?.yoloEnabled ?? false))
         return
       case 'tree':
         openHistory()
@@ -511,43 +402,7 @@ export function BoundThreadPane({
     }
   }
 
-  const draft = branchState?.draft
-  // Footer 只投影已生效的 snapshot facts；Composer draft 是下一条消息的设置目标，
-  // 在 batch 持久化前不能伪装成当前 Environment/context。
-  const environment = controller.runtimeLabels.environment
-  const environmentReady =
-    environment != null
-      ? (environmentReadyByName.get(environment.name) ?? false)
-      : undefined
-  const { gitBranch } = useEnvironmentWorkspaceMetadata(environment, environmentReady)
-  const labels: ChatPanelLabels = {
-    environment,
-    environmentReady,
-    gitBranch,
-    branchUsage: controller.branchUsage,
-    contextWindow: controller.runtimeLabels.contextWindow,
-  }
-  const transcript: ChatPanelTranscriptInput = {
-    timeline: controller.timeline,
-    bodyRef: controller.bodyRef,
-    // conversation 重新挂载时以 initialScrollTop 恢复保存位置（null 首次进入贴底）；
-    // resetKey=threadId：重绑后新线程首次进入重新贴底。
-    initialScrollTop: initialConversationScrollTop,
-    resetKey: threadId,
-    eventCount: controller.entries.length + controller.queuedCommands.length,
-    loading: controller.messagesLoading,
-    error: controller.messagesError,
-    approvalPending: controller.approvalPending,
-    onDecideApproval: (_message, decision) => {
-      const invocationId = _message.invocationId
-      if (invocationId) {
-        if (decision === 'DENY') {
-          threadNotifications.markPermissionRejected()
-        }
-        void controller.decideApproval(invocationId, decision)
-      }
-    },
-  }
+  const draft = panel.draft
   const interactionPanel =
     interaction === 'thread' ? (
       <ThreadSelectionPanel
@@ -561,18 +416,18 @@ export function BoundThreadPane({
       />
     ) : interaction === 'agent' ? (
       <AgentSelectionPanel
-        agents={agents.map((agent) => ({
+        agents={controller.agents.map((agent) => ({
           name: agent.name,
           description: agent.description,
         }))}
-        selectedAgentName={branchState?.draft.agentName}
+        selectedAgentName={panel.draft?.agentName}
         onClose={() => setInteraction(null)}
         onSelect={selectAgent}
       />
     ) : interaction === 'environment' ? (
       <EnvironmentWorkspacePanel
         environments={environments}
-        current={branchState?.draft.environment ?? null}
+        current={panel.draft?.environment ?? null}
         onClose={() => setInteraction(null)}
         onSelect={selectEnvironment}
       />
@@ -604,8 +459,8 @@ export function BoundThreadPane({
       controller.pending
       || controller.disabled
       || rebindMutation.isPending
-      || branchState == null
-      || effectiveBase == null,
+      || panel.branchState == null
+      || panel.effectiveBase == null,
     onPartsChange: controller.setDraft,
     onHistoryPartsChange: (parts) => controller.setDraft(parts, 'history'),
     onSubmit: (payload, localDraft) => {
@@ -622,21 +477,6 @@ export function BoundThreadPane({
       onModelChange: selectModel,
       onYoloChange: setYoloEnabled,
     },
-  }
-  // 互斥主视图：events 时替换 transcript 滚动区；detail 是 widget zone 的只读展示，
-  // 不是 InteractionPanel（不隐藏 Composer、不抢焦点）。
-  const mainViewInput: ThreadPanelMainView = {
-    events:
-      mode === 'events' ? (
-        <ThreadEventView
-          events={controller.events}
-          selectedEventId={selectedEventId}
-          onSelectedEventIdChange={selectEvent}
-          bodyRef={eventsBodyRef}
-          initialScrollTop={initialEventsScrollTop}
-          systemPrompt={systemPrompt}
-        />
-      ) : undefined,
   }
   const activity: ChatPanelActivityInput = {
     working: controller.working,
@@ -665,7 +505,7 @@ export function BoundThreadPane({
       <ChatPanel
         labels={labels}
         transcript={transcript}
-        mainView={mainViewInput}
+        mainView={mainView}
         composer={composer}
         activity={activity}
       />

@@ -26,3 +26,11 @@ export {
   useAgentThreadController,
   type CommandBatchReplay,
 } from '@/features/ai/runtime/useAgentThreadController'
+export {
+  useBoundBranchPanel,
+} from '@/features/ai/runtime/useBoundBranchPanel'
+export {
+  useBoundThreadPanelViews,
+  useBoundThreadPanelLabels,
+  buildBoundThreadTranscript,
+} from '@/features/ai/runtime/useBoundThreadPanelViews'

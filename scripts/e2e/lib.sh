@@ -62,6 +62,35 @@ wait_http() {
   die "timed out waiting for $name: $url"
 }
 
+wait_http_process() {
+  local url=$1
+  local name=$2
+  local pid=$3
+  local log_file=$4
+  local attempts=${5:-90}
+  local i
+  for i in $(seq 1 "$attempts"); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      echo "ERROR: $name process exited before readiness (pid=$pid)" >&2
+      if [ -f "$log_file" ]; then
+        echo "--- $name log tail ---" >&2
+        tail -n 120 "$log_file" >&2 || true
+      fi
+      exit 1
+    fi
+    sleep 1
+  done
+  echo "ERROR: timed out waiting for $name: $url" >&2
+  if [ -f "$log_file" ]; then
+    echo "--- $name log tail ---" >&2
+    tail -n 120 "$log_file" >&2 || true
+  fi
+  exit 1
+}
+
 kill_port() {
   local port=$1
   local pids
@@ -137,8 +166,14 @@ start_backend() {
     --server.address="$BACKEND_HOST" \
     --server.port="$BACKEND_PORT" \
     >"$WORK_DIR/backend.log" 2>&1 &
-  echo $! >"$WORK_DIR/backend.pid"
-  wait_http "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" backend 120
+  local pid=$!
+  echo "$pid" >"$WORK_DIR/backend.pid"
+  wait_http_process \
+    "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" \
+    backend \
+    "$pid" \
+    "$WORK_DIR/backend.log" \
+    120
 }
 
 # Synchronize the complete MiniMax credential pair into the seeded provider after backend readiness.
@@ -163,7 +198,9 @@ start_frontend() {
       >"$WORK_DIR/frontend.log" 2>&1 &
     echo $! >"$WORK_DIR/frontend.pid"
   )
-  wait_http "$FRONTEND_URL/" frontend
+  local pid
+  pid=$(cat "$WORK_DIR/frontend.pid")
+  wait_http_process "$FRONTEND_URL/" frontend "$pid" "$WORK_DIR/frontend.log"
   # 额外确认代理已打到当前 backend 契约（结构化 config）
   curl -fsS "$FRONTEND_URL/api/ai/catalog/models?pageNumber=1&pageSize=1" \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
