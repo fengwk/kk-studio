@@ -50,7 +50,7 @@ Thread 行不保存 Session/Environment/status/epoch/lease/runnable；全部由 
 | 列 | 约束 |
 | --- | --- |
 | `thread_id` / `sequence` | `(thread_id, sequence)` 唯一；`sequence > 0` |
-| `command_type` | 七类 check 约束（USER_MESSAGE/CUSTOM_MESSAGE/SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO） |
+| `command_type` | 六类 check 约束（USER_MESSAGE/CUSTOM_MESSAGE/SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS）；YOLO 由 Thread 行直接控制 |
 | `payload` | JSON object |
 | `client_command_id` | UUID；`(thread_id, client_command_id)` 唯一幂等键 |
 | `request_hash` | raw 命令的 canonical SHA-256，64 位小写 hex；exact replay 必须匹配 |

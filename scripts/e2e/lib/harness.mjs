@@ -316,12 +316,6 @@ export function setActiveToolsCommand(activeTools, clientCommandId) {
   return { type: 'SET_ACTIVE_TOOLS', clientCommandId, activeTools }
 }
 
-export function setYoloCommand(yoloEnabled, clientCommandId) {
-  assert(typeof yoloEnabled === 'boolean', 'yoloEnabled must be boolean')
-  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  return { type: 'SET_YOLO', clientCommandId, yoloEnabled }
-}
-
 /**
  * 原子入队命令 batch（202 accepted）。clientCommandId 幂等：整批已存在则 replay 返回既有命令，
  * 部分存在 => 409 PARTIAL_COMMAND_REPLAY。
@@ -361,6 +355,26 @@ export async function updateThreadHead(ctx, threadId, { targetEntryId, expectedR
     },
   )
   assert(status === 200, `update head status ${status}: ${JSON.stringify(json)}`)
+  const updated = envelopeData(json)
+  threadIdOf(updated)
+  return updated
+}
+
+/**
+ * 直接更新 Thread YOLO policy（PUT /yolo，revision CAS）：同值请求在任何 CAS 之前即成功 no-op；
+ * 值变化且 revision 不匹配 => 409 STALE_REVISION。返回权威 Thread DTO。
+ */
+export async function setThreadYolo(ctx, threadId, { expectedRevision, yoloEnabled }) {
+  assert(typeof yoloEnabled === 'boolean', 'yoloEnabled must be boolean')
+  const { status, json } = await ctx.call(
+    'PUT',
+    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/yolo`,
+    {
+      expectedRevision: nonNegativeDecimal(expectedRevision, 'expectedRevision'),
+      yoloEnabled,
+    },
+  )
+  assert(status === 200, `set thread yolo status ${status}: ${JSON.stringify(json)}`)
   const updated = envelopeData(json)
   threadIdOf(updated)
   return updated

@@ -98,6 +98,22 @@ class ThreadStateTest {
   }
 
   @Test
+  void setYoloEnabledBumpsRevisionExactlyOnceAndPreservesCursor() {
+    ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
+    ThreadState enabled = stored.setYoloEnabled(true, CREATED.plusSeconds(2));
+    assertEquals(true, enabled.yoloEnabled());
+    assertEquals(6L, enabled.revision());
+    assertEquals(id(42), enabled.headEntryId());
+    assertEquals(3L, enabled.nextCommandSequence());
+    // 再次切换同样精确 +1；时间钳制与其它转换一致。
+    ThreadState disabled = enabled.setYoloEnabled(false, CREATED.plusSeconds(2));
+    assertEquals(false, disabled.yoloEnabled());
+    assertEquals(7L, disabled.revision());
+    assertEquals(CREATED.plusSeconds(2), enabled.updatedAt());
+    assertEquals(CREATED.plusSeconds(2), disabled.updatedAt());
+  }
+
+  @Test
   void transitionMethodsClampWallClockRollbackToCurrentUpdatedAt() {
     Instant durableNow = CREATED.plusSeconds(2);
     ThreadState stored = state(id(7), id(42), false, 3L, 5L, durableNow);
@@ -106,6 +122,7 @@ class ThreadStateTest {
     assertEquals(durableNow, stored.reserveCommandSequences(1, CREATED).updatedAt());
     assertEquals(durableNow, stored.advanceHead(id(99), true, CREATED).updatedAt());
     assertEquals(durableNow, stored.touchRevision(CREATED).updatedAt());
+    assertEquals(durableNow, stored.setYoloEnabled(true, CREATED).updatedAt());
   }
 
   @Test

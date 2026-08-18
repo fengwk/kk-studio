@@ -73,9 +73,11 @@ Create Chat 的默认 Environment 使用 `EnvironmentWorkspacePanel` 两阶段�
 
 ```text
 SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
-           SET_ACTIVE_TOOLS -> SET_YOLO）
+           SET_ACTIVE_TOOLS）
 + USER_MESSAGE（不携带 role）
 ```
+YOLO 是直接控制面（`PUT /yolo`，基于 snapshot revision 的 CAS）：Bound pane 选择 YOLO 时
+乐观更新 draft 并立即 PUT，成功只对齐 base+draft 的 yolo、失败回滚并暴露错误；绝不进入命令 batch。
 
 - batch 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 来自最新 snapshot Thread DTO。
 - `USER_MESSAGE` 之外的命令携带 pane 本地 draft 的对应字段（diff 相对 `effectiveBase`，避免重发 in-flight 设置）。

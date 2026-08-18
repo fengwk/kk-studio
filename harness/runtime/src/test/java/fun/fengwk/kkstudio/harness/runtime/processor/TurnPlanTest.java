@@ -40,7 +40,6 @@ class TurnPlanTest {
             baseline.threadId(),
             baseline.sessionId(),
             baseline.rootEntryId(),
-            false,
             1L,
             List.of(),
             List.of(),
@@ -48,7 +47,6 @@ class TurnPlanTest {
             candidatePath,
             TestIds.id(99),
             TestIds.id(100),
-            false,
             TurnStartReason.INPUT,
             null);
     assertEquals(baseline.threadId(), plan.threadId());
@@ -77,7 +75,6 @@ class TurnPlanTest {
             baseline.threadId(),
             baseline.sessionId(),
             baseline.rootEntryId(),
-            false,
             1L,
             List.of(message),
             List.of(),
@@ -85,7 +82,6 @@ class TurnPlanTest {
             candidatePath,
             TestIds.id(99),
             TestIds.id(100),
-            false,
             TurnStartReason.CONTINUATION,
             null);
     assertTrue(withDeferred.hasDeferredMessages());
@@ -95,7 +91,6 @@ class TurnPlanTest {
             baseline.threadId(),
             baseline.sessionId(),
             baseline.rootEntryId(),
-            false,
             1L,
             List.of(message),
             List.of(message),
@@ -103,7 +98,6 @@ class TurnPlanTest {
             candidatePath,
             TestIds.id(99),
             TestIds.id(100),
-            false,
             TurnStartReason.CONTINUATION,
             null);
     assertFalse(consumed.hasDeferredMessages());
@@ -171,7 +165,6 @@ class TurnPlanTest {
                 baseline.threadId(),
                 baseline.sessionId(),
                 baseline.rootEntryId(),
-                false,
                 0L,
                 List.of(),
                 List.of(),
@@ -179,7 +172,6 @@ class TurnPlanTest {
                 null,
                 TestIds.id(99),
                 TestIds.id(100),
-                false,
                 TurnStartReason.INPUT,
                 null));
     assertThrows(
@@ -189,7 +181,6 @@ class TurnPlanTest {
                 baseline.threadId(),
                 baseline.sessionId(),
                 baseline.rootEntryId(),
-                false,
                 0L,
                 List.of(),
                 List.of(),
@@ -197,7 +188,6 @@ class TurnPlanTest {
                 candidatePath,
                 TestIds.id(99),
                 TestIds.id(100),
-                false,
                 null,
                 null));
   }
@@ -214,7 +204,6 @@ class TurnPlanTest {
         threadId,
         sessionId,
         sourceHeadEntryId,
-        false,
         cutoffSequence,
         List.of(),
         List.of(),
@@ -222,7 +211,6 @@ class TurnPlanTest {
         candidatePath,
         turnStartEntryId,
         candidateHeadEntryId,
-        false,
         TurnStartReason.INPUT,
         null);
   }

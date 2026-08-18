@@ -18,7 +18,7 @@ Environment 的选择在持久化与 wire 上都是**原子**的完整绑定 `{n
 
 ## 3. SET_ENVIRONMENT：缺省 vs 显式 null
 
-`SET_ENVIRONMENT` 命令的 `environment` 字段在 JSON 中**必须出现**，可空对象：显式 `null` 表示解绑，非 null 必须是完整 `{name, workspacePath}`。字段缺失（缺省）按 400 拒绝；其余命令类型即使提供显式 null 的 `environment` 也按 forbidden 拒绝。前端 diff 只在 binding 变化时发出该命令，固定顺序 `SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL -> SET_ACTIVE_TOOLS -> SET_YOLO`。
+`SET_ENVIRONMENT` 命令的 `environment` 字段在 JSON 中**必须出现**，可空对象：显式 `null` 表示解绑，非 null 必须是完整 `{name, workspacePath}`。字段缺失（缺省）按 400 拒绝；其余命令类型即使提供显式 null 的 `environment` 也按 forbidden 拒绝。前端 diff 只在 binding 变化时发出该命令，固定顺序 `SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL -> SET_ACTIVE_TOOLS`；YOLO 是直接控制面（`PUT /yolo`），绝不作为命令发送。
 
 ## 4. ToolInvocation 冻结
 

@@ -23,7 +23,7 @@ import {
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
-  setYoloCommand,
+  setThreadYolo,
   stopThread,
   threadIdOf,
   updateThreadHead,
@@ -797,7 +797,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE 一个 batch；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings/yoloEnabled 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；额外字段与非法 EnvironmentBinding => 400',
+  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知类型、额外字段、显式 null 与非法 EnvironmentBinding => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -823,7 +823,6 @@ registerCase({
         cid(),
       ),
       setActiveToolsCommand(['read'], cid()),
-      setYoloCommand(true, cid()),
       userMessageCommand(`${marker} 消费 SET 后的第一条消息。`, cid()),
     ]
     const dto = await enqueueCommands(ctx, thread.threadId, {
@@ -833,7 +832,7 @@ registerCase({
     })
     assert(
       dto.map((command) => command.type).join(',') ===
-        'SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE',
+        'SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,USER_MESSAGE',
       JSON.stringify(dto),
     )
     for (let i = 1; i < dto.length; i++) {
@@ -867,7 +866,11 @@ registerCase({
         actual: finalSnapshot.thread.branchSettings,
       }),
     )
-    assert(finalSnapshot.thread.yoloEnabled === true, JSON.stringify(finalSnapshot.thread))
+    // yolo 是直接控制面：batch 不含 SET_YOLO，Thread 保持创建时的值（直接更新见 thread.yolo_direct_update）。
+    assert(
+      finalSnapshot.thread.yoloEnabled === thread.yoloEnabled,
+      JSON.stringify(finalSnapshot.thread),
+    )
     assert(
       finalSnapshot.queuedCommands.length === 0,
       `SET_* batch must be consumed: ${JSON.stringify(finalSnapshot.queuedCommands)}`,
@@ -906,9 +909,9 @@ registerCase({
         enqueueCommands(ctx, thread.threadId, {
           expectedHeadEntryId: fresh.thread.headEntryId,
           expectedNextCommandSequence: fresh.thread.nextCommandSequence,
-          commands: [{ type: 'SET_YOLO', clientCommandId: cid(), yoloEnabled: true, content: 'x' }],
+          commands: [{ type: 'RENAME_THREAD', clientCommandId: cid() }],
         }),
-      { status: 400, messageIncludes: /content/i },
+      { status: 400, messageIncludes: /type/i },
     )
     await expectHttpError(
       () =>
@@ -917,9 +920,9 @@ registerCase({
           expectedNextCommandSequence: fresh.thread.nextCommandSequence,
           commands: [
             {
-              type: 'SET_YOLO',
+              type: 'SET_AGENT',
               clientCommandId: cid(),
-              yoloEnabled: true,
+              agentName: 'x',
               unexpected: true,
             },
           ],
@@ -944,9 +947,13 @@ registerCase({
           expectedNextCommandSequence: fresh.thread.nextCommandSequence,
           commands: [
             {
-              type: 'SET_YOLO',
+              type: 'SET_MODEL',
               clientCommandId: cid(),
-              yoloEnabled: true,
+              model: {
+                providerName: modelSelection.providerName,
+                modelName: modelSelection.modelName,
+                variant: modelSelection.variant,
+              },
               environment: null,
             },
           ],
@@ -969,6 +976,71 @@ registerCase({
         }),
       { status: 400, messageIncludes: /environment|name/i },
     )
+  },
+})
+
+registerCase({
+  id: 'thread.yolo_direct_update',
+  level: 'L1',
+  title: 'Thread YOLO 直接控制面（revision CAS 与同值 no-op）',
+  docs: 'PUT /api/ai/runtime/threads/{id}/yolo {expectedRevision,yoloEnabled} => 200 权威 Thread；同值请求在任何 CAS 之前 no-op 成功（过期 revision 不冲突、revision 零触碰）；值变化时 revision 精确 +1，过期 revision => 409 STALE_REVISION；不创建 Command/Entry/Work',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
+    const { snapshot } = await createConfiguredChatThread(ctx, {
+      agent: ctx.vars.agent,
+      model: modelSelectionOf(ctx),
+      title: `e2e-yolo-${cid().slice(0, 8)}`,
+    })
+    const thread = snapshot.thread
+    assert(thread.yoloEnabled === false, JSON.stringify(thread))
+
+    // 变化 + 精确 revision：revision +1，返回权威 Thread。
+    const enabled = await setThreadYolo(ctx, thread.threadId, {
+      expectedRevision: thread.revision,
+      yoloEnabled: true,
+    })
+    assert(enabled.yoloEnabled === true, JSON.stringify(enabled))
+    assert(
+      String(Number(enabled.revision)) === String(Number(thread.revision) + 1),
+      JSON.stringify({ before: thread.revision, after: enabled.revision }),
+    )
+    assert(enabled.headEntryId === thread.headEntryId, JSON.stringify(enabled))
+
+    // 同值 no-op 先于 revision CAS：携带过期 expectedRevision 仍 200，revision/head 零触碰。
+    const sameValue = await setThreadYolo(ctx, thread.threadId, {
+      expectedRevision: '999999999',
+      yoloEnabled: true,
+    })
+    assert(sameValue.yoloEnabled === true, JSON.stringify(sameValue))
+    assert(String(sameValue.revision) === String(enabled.revision), JSON.stringify(sameValue))
+
+    // 变化 + 过期 revision：409 STALE_REVISION。
+    await expectHttpError(
+      () =>
+        setThreadYolo(ctx, thread.threadId, {
+          expectedRevision: thread.revision,
+          yoloEnabled: false,
+        }),
+      { status: 409, messageIncludes: /revision/i },
+    )
+
+    // 关闭并精确 +1；快照反映同一权威值，且全程不产生 queued Command / Entry / Work。
+    const disabled = await setThreadYolo(ctx, thread.threadId, {
+      expectedRevision: enabled.revision,
+      yoloEnabled: false,
+    })
+    assert(disabled.yoloEnabled === false, JSON.stringify(disabled))
+    assert(
+      String(Number(disabled.revision)) === String(Number(enabled.revision) + 1),
+      JSON.stringify({ before: enabled.revision, after: disabled.revision }),
+    )
+    const fresh = await getThreadSnapshot(ctx, thread.threadId)
+    assert(fresh.thread.yoloEnabled === false, JSON.stringify(fresh.thread))
+    assert(String(fresh.thread.revision) === String(disabled.revision), JSON.stringify(fresh.thread))
+    assert(fresh.queuedCommands.length === 0, JSON.stringify(fresh.queuedCommands))
+    // entries 仍只有 ROOT（创建即快照）；setThreadYolo 绝不追加 Entry。
+    assert(fresh.entries.length === 1, JSON.stringify(fresh.entries))
   },
 })
 

@@ -33,8 +33,8 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetYoloCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -76,7 +76,9 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(userMessageCommand(TestIds.id(1), "hello"), setYolo(TestIds.id(2), true))));
+                List.of(
+                    userMessageCommand(TestIds.id(1), "hello"),
+                    setAgent(TestIds.id(2), "coding"))));
     assertEquals(2, inserted.size());
     assertEquals(1L, inserted.get(0).sequence());
     assertEquals(2L, inserted.get(1).sequence());
@@ -464,9 +466,9 @@ class HarnessRuntimeEnqueueTest {
   @Test
   void setEnvironmentAllowsPreExistingQueuedConfigCommand() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    // 只有 USER/CUSTOM 阻塞 SET_ENVIRONMENT；已存在的配置命令（如 SET_YOLO）不阻塞。
+    // 只有 USER/CUSTOM 阻塞 SET_ENVIRONMENT；已存在的配置命令不阻塞。
     seedQueuedCommand(
-        store, baseline.threadId(), 1L, new SetYoloCommandPayload(true), TestIds.id(8));
+        store, baseline.threadId(), 1L, new SetAgentCommandPayload("coding"), TestIds.id(8));
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
@@ -729,8 +731,8 @@ class HarnessRuntimeEnqueueTest {
         payload, clientCommandId, ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
-  private static NewThreadCommand setYolo(UUID clientCommandId, boolean yolo) {
-    SetYoloCommandPayload payload = new SetYoloCommandPayload(yolo);
+  private static NewThreadCommand setAgent(UUID clientCommandId, String agentName) {
+    SetAgentCommandPayload payload = new SetAgentCommandPayload(agentName);
     return new NewThreadCommand(
         payload, clientCommandId, ThreadCommandPayloadJsonCodec.requestHash(payload));
   }

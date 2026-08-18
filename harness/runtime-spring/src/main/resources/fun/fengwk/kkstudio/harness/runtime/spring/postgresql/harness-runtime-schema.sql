@@ -112,7 +112,6 @@ create table harness_thread_command (
             'SET_AGENT',
             'SET_MODEL',
             'SET_ACTIVE_TOOLS',
-            'SET_YOLO',
             'SET_ENVIRONMENT'
         )
     ),

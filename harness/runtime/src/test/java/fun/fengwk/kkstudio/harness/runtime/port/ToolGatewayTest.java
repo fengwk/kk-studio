@@ -159,7 +159,7 @@ class ToolGatewayTest {
     ToolGateway gateway =
         new ToolGateway() {
           @Override
-          public PreflightResult preflight(ToolInvocationRequest request, boolean yoloEnabled) {
+          public PreflightResult preflight(ToolInvocationRequest request) {
             return new ToolGateway.Allow();
           }
 
@@ -168,7 +168,7 @@ class ToolGatewayTest {
             return new ToolGateway.Started(() -> {});
           }
         };
-    assertEquals(new ToolGateway.Allow(), gateway.preflight(PortTestData.toolRequest(), true));
+    assertEquals(new ToolGateway.Allow(), gateway.preflight(PortTestData.toolRequest()));
     ToolGateway.StartResult result =
         gateway.start(
             new ToolGateway.Execution(

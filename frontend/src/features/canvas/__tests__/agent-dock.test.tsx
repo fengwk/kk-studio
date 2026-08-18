@@ -58,6 +58,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     getSystemPromptPreview: vi.fn(),
     enqueueCommands: vi.fn(),
     updateThreadHead: vi.fn(),
+    setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
   },
@@ -403,6 +404,7 @@ describe('Canvas bound thread', () => {
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue({
       ...threadSnapshot(),
+      thread: { ...threadFixture, yoloEnabled: true },
       queuedCommands: [
         {
           threadId: THREAD_ID,
@@ -421,11 +423,11 @@ describe('Canvas bound thread', () => {
         {
           threadId: THREAD_ID,
           sequence: '2',
-          type: 'SET_YOLO',
+          type: 'SET_AGENT',
           state: 'QUEUED',
-          clientCommandId: 'queued-yolo',
+          clientCommandId: 'queued-agent',
           requestHash: '0123456789abcdef'.repeat(4),
-          payloadJson: JSON.stringify({ yoloEnabled: true }),
+          payloadJson: JSON.stringify({ agentName: 'coder' }),
           consumedTurnStartEntryId: null,
           cancelledAt: null,
           createTime: null,

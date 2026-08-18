@@ -2,9 +2,11 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -27,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.MoveHeadCommand;
+import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
@@ -149,11 +152,10 @@ class StudioHarnessThreadControllerTest {
              "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
              "clientCommandId": "00000000-0000-0000-0000-000000000103"},
             {"type": "SET_ACTIVE_TOOLS", "activeTools": ["web_search"], "clientCommandId": "00000000-0000-0000-0000-000000000104"},
-            {"type": "SET_YOLO", "yoloEnabled": true, "clientCommandId": "00000000-0000-0000-0000-000000000105"},
             {"type": "SET_ENVIRONMENT",
              "environment": {"name": "123e4567-e89b-12d3-a456-426614174000", "workspacePath": "."},
-             "clientCommandId": "00000000-0000-0000-0000-000000000106"},
-            {"type": "CUSTOM_MESSAGE", "role": "SYSTEM", "content": "rules", "clientCommandId": "00000000-0000-0000-0000-000000000107"}
+             "clientCommandId": "00000000-0000-0000-0000-000000000105"},
+            {"type": "CUSTOM_MESSAGE", "role": "SYSTEM", "content": "rules", "clientCommandId": "00000000-0000-0000-0000-000000000106"}
           ]
         }
         """;
@@ -175,16 +177,16 @@ class StudioHarnessThreadControllerTest {
     assertEquals(id(1), batch.threadId());
     assertEquals(id(3), batch.expectedHeadEntryId());
     assertEquals(4L, batch.expectedNextCommandSequence());
-    assertEquals(7, batch.commands().size());
+    assertEquals(6, batch.commands().size());
     assertEquals(ThreadCommandType.USER_MESSAGE, batch.commands().get(0).payload().type());
     assertEquals(
         "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}",
         COMMAND_PAYLOADS.encode(batch.commands().get(0).payload()));
-    assertEquals(ThreadCommandType.SET_ENVIRONMENT, batch.commands().get(5).payload().type());
+    assertEquals(ThreadCommandType.SET_ENVIRONMENT, batch.commands().get(4).payload().type());
     assertEquals(
         "{\"environment\":{\"name\":\"123e4567-e89b-12d3-a456-426614174000\",\"workspacePath\":\".\"}}",
-        COMMAND_PAYLOADS.encode(batch.commands().get(5).payload()));
-    assertEquals(ThreadCommandType.CUSTOM_MESSAGE, batch.commands().get(6).payload().type());
+        COMMAND_PAYLOADS.encode(batch.commands().get(4).payload()));
+    assertEquals(ThreadCommandType.CUSTOM_MESSAGE, batch.commands().get(5).payload().type());
   }
 
   @Test
@@ -299,7 +301,7 @@ class StudioHarnessThreadControllerTest {
           "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
           "expectedNextCommandSequence": 4,
           "commands": [
-            {"type": "SET_YOLO", "yoloEnabled": true, "unexpected": true, "clientCommandId": "00000000-0000-0000-0000-000000000101"}
+            {"type": "SET_AGENT", "agentName": "default-assistant", "unexpected": true, "clientCommandId": "00000000-0000-0000-0000-000000000101"}
           ]
         }
         """;
@@ -422,7 +424,7 @@ class StudioHarnessThreadControllerTest {
         {
           "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
           "expectedNextCommandSequence": 4,
-          "commands": [{"type": "SET_YOLO", "yoloEnabled": true, "clientCommandId": "00000000-0000-0000-0000-000000000101"}]
+          "commands": [{"type": "SET_MODEL", "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"}, "clientCommandId": "00000000-0000-0000-0000-000000000101"}]
         }
         """;
     mockMvc
@@ -552,10 +554,10 @@ class StudioHarnessThreadControllerTest {
   }
 
   @Test
-  void serializesSevenCommandBatchJson() throws Exception {
+  void serializesSixCommandBatchJson() throws Exception {
     when(chatThreadCommandService.submitCommands(any(ThreadCommandBatch.class)))
         .thenReturn(List.of());
-    // 保证 mapper 对 7 类 discriminator 的 JSON 反序列化边界（严格字段）与 HTTP 层一致。
+    // 保证 mapper 对 6 类 discriminator 的 JSON 反序列化边界（严格字段）与 HTTP 层一致。
     String body =
         """
         {
@@ -567,8 +569,7 @@ class StudioHarnessThreadControllerTest {
             {"type": "SET_AGENT", "agentName": "a", "clientCommandId": "00000000-0000-0000-0000-000000000103"},
             {"type": "SET_MODEL", "model": {"providerName": "p", "modelName": "m", "variant": "v"}, "clientCommandId": "00000000-0000-0000-0000-000000000104"},
             {"type": "SET_ACTIVE_TOOLS", "activeTools": [], "clientCommandId": "00000000-0000-0000-0000-000000000105"},
-            {"type": "SET_YOLO", "yoloEnabled": false, "clientCommandId": "00000000-0000-0000-0000-000000000106"},
-            {"type": "SET_ENVIRONMENT", "environment": null, "clientCommandId": "00000000-0000-0000-0000-000000000107"}
+            {"type": "SET_ENVIRONMENT", "environment": null, "clientCommandId": "00000000-0000-0000-0000-000000000106"}
           ]
         }
         """;
@@ -582,10 +583,47 @@ class StudioHarnessThreadControllerTest {
     ArgumentCaptor<ThreadCommandBatch> captor = ArgumentCaptor.forClass(ThreadCommandBatch.class);
     verify(chatThreadCommandService).submitCommands(captor.capture());
     ThreadCommandBatch batch = captor.getValue();
-    assertEquals(7, batch.commands().size());
+    assertEquals(6, batch.commands().size());
     assertEquals(
-        "{\"environment\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(6).payload()));
+        "{\"environment\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(5).payload()));
     assertEquals(
         "{\"activeTools\":[]}", COMMAND_PAYLOADS.encode(batch.commands().get(4).payload()));
+  }
+
+  @Test
+  void updateYoloSetsPolicyWithRevisionCasAndReturnsThread() throws Exception {
+    when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
+        .thenReturn(HarnessRuntimeTestFixtures.thread(id(2)));
+    when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+
+    mockMvc
+        .perform(
+            put("/api/ai/runtime/threads/" + idText(1) + "/yolo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":\"3\",\"yoloEnabled\":true}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("IDLE"));
+
+    ArgumentCaptor<SetThreadYoloCommand> captor =
+        ArgumentCaptor.forClass(SetThreadYoloCommand.class);
+    verify(runtime).setThreadYolo(captor.capture());
+    assertEquals(id(1), captor.getValue().threadId());
+    assertEquals(3L, captor.getValue().expectedRevision());
+    assertTrue(captor.getValue().enabled());
+
+    // 缺失字段与非法 revision 稳定 400。
+    mockMvc
+        .perform(
+            put("/api/ai/runtime/threads/" + idText(1) + "/yolo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"yoloEnabled\":false}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/ai/runtime/threads/" + idText(1) + "/yolo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":\"-1\",\"yoloEnabled\":false}"))
+        .andExpect(status().isBadRequest());
+    verify(runtime, times(1)).setThreadYolo(any(SetThreadYoloCommand.class));
   }
 }

@@ -489,9 +489,10 @@ export function BoundThreadPane({
       }
       void controller.decideApproval(invocationId, decision, targetThreadId)
     },
-    actionError: rebindBlockedReason ?? controller.actionError,
+    actionError: rebindBlockedReason ?? panel.yoloError ?? controller.actionError,
     onDismissActionError: () => {
       setRebindBlockedReason(null)
+      panel.dismissYoloError()
       controller.dismissActionError()
     },
   }

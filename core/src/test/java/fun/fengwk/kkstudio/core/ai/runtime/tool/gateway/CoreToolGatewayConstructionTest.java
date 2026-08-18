@@ -47,7 +47,7 @@ class CoreToolGatewayConstructionTest {
     ToolGateway.Ask ask =
         assertInstanceOf(
             ToolGateway.Ask.class,
-            gateway.preflight(ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR), false));
+            gateway.preflight(ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)));
     assertTrue(ask.reason().contains("/env-root/sub/deep"), ask.reason());
   }
 

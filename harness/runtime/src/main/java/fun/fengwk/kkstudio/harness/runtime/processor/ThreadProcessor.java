@@ -45,7 +45,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetYoloCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -83,10 +82,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>Turn 启动采用 speculative plan：短事务锁 Thread、读取 queued Command 快照与 cutoff、校验 claim（并对近过期 lease 做
  * {@link ProcessorLeaseSupport#ensureLeaseMargin} 保证首次 Resolver heartbeat 前不会过期）、分配 candidate Entry
  * ID 并构造完整合法 candidate EntryPath（不写任何 durable 状态）；事务外调用 {@link TurnResolver}（期间由本地 {@link
- * WorkHeartbeat} 维持 lease）；第二短事务以 source head / source YOLO / cutoff 内 Command 精确快照 / claim
- * ownership 做 CAS，一次性原子提交 normalization + TURN_START + Message + Command markers + Thread 更新 +
+ * WorkHeartbeat} 维持 lease）；第二短事务以 source head / cutoff 内 Command 精确快照 / claim ownership 做
+ * CAS，一次性原子提交 normalization + TURN_START + Message + Command markers + Thread 更新 +
  * ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。Resolved
- * 请求在提交前先经 {@link ResolvedRequestValidator} 按 candidate branch 事实（yolo / route / model / variant /
+ * 请求在提交前先经 {@link ResolvedRequestValidator} 按 candidate branch 事实（route / model / variant /
  * tools）做机械一致性 校验，不一致即抛错且零 durable mutation（绝不转 typed rejection）。任何 CAS / claim 损失一律 完整 no-op 返回
  * LOST_OWNERSHIP；Resolver 异常 / null / heartbeat 调度失败按单一正失败延迟 reschedule，绝不静默丢弃 Work。duplicate /
  * stale THREAD claim 是 no-op。
@@ -834,21 +833,14 @@ public final class ThreadProcessor {
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed, config.leaseConfig(), now);
     Instant planNow = durableMutationTime(now, thread.updatedAt(), path.head().createdAt());
     TurnPlan plan =
-        planBuilder.build(
-            thread.id(),
-            path,
-            thread.yoloEnabled(),
-            reason,
-            queued,
-            tx::nextId,
-            planNow,
-            preparation);
+        planBuilder.build(thread.id(), path, reason, queued, tx::nextId, planNow, preparation);
     return new LoopStep.Plan(plan);
   }
 
   /**
    * 事务外解析 + 第二事务 CAS 提交：Resolver 异常 / null / heartbeat 调度失败按失败延迟 reschedule（零 durable mutation）；提交
-   * CAS（source head / cutoff 内 Command 快照 / claim）失败返回 LOST。YOLO 变化不使 plan 失效。
+   * CAS（source head / cutoff 内 Command 快照 / claim）失败返回 LOST。YOLO 变化不使 plan 失效：commit 以第二事务锁到的
+   * Thread 当前 YOLO 为准。
    */
   private ResolveOutcome resolveAndCommit(ClaimedWork claim, TurnPlan plan) {
     AtomicBoolean heartbeatLost = new AtomicBoolean();
@@ -890,10 +882,10 @@ public final class ThreadProcessor {
   /**
    * 第二事务 CAS 提交。要求当前 Thread head == planned source head、cutoff 内 queued Command 与 planned
    * 快照逐字段相等（允许 sequence &gt; cutoff 的新命令，不 CAS revision / nextCommandSequence），claim token 活跃；最终
-   * Thread 更新基于当前锁定行的 YOLO（再叠加本快照内 SET_YOLO）并保留其最新 nextCommandSequence，revision 精确 +1。锁序为 Thread
-   * -&gt; Commands -&gt; Model -&gt; Work：全部低序 mutation 先完成，claimed THREAD Work 的 final fence 最后执行
-   * （失败抛 {@link ClaimLostSignal} 整事务回滚）；fence 通过后按 (type, id) 升序请求同层 Work（先 THREAD wake 再 MODEL
-   * Work）。
+   * Thread 更新使用第二事务锁到的当前 YOLO（speculative plan 创建时的旧值绝不写回）并保留其最新 nextCommandSequence， revision 精确
+   * +1。锁序为 Thread -&gt; Commands -&gt; Model -&gt; Work：全部低序 mutation 先完成，claimed THREAD Work 的
+   * final fence 最后执行（失败抛 {@link ClaimLostSignal} 整事务回滚）；fence 通过后按 (type, id) 升序请求同层 Work（先 THREAD
+   * wake 再 MODEL Work）。
    */
   private CommitOutcome commit(ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
     return store.transaction(tx -> commitTx(tx, claim, plan, result));
@@ -928,7 +920,7 @@ public final class ThreadProcessor {
       consumed.add(command.consume(plan.turnStartEntryId()));
     }
     tx.updateCommands(consumed);
-    boolean yoloEnabled = commitYolo(thread, plan);
+    boolean yoloEnabled = thread.yoloEnabled();
     UUID invocationId = null;
     if (result instanceof TurnResolver.Resolved resolved) {
       ThreadState advanced =
@@ -1047,17 +1039,6 @@ public final class ThreadProcessor {
         new TurnStartPayload(
             start.reason(), start.settings(), start.ownerThreadId(), contextWindow),
         entry.createdAt());
-  }
-
-  /** 以第二事务锁到的 Thread YOLO 为起点，再叠加本快照内已消费的 SET_YOLO；不把 plan 创建时的旧值写回。 */
-  private static boolean commitYolo(ThreadState thread, TurnPlan plan) {
-    boolean yolo = thread.yoloEnabled();
-    for (ThreadCommand command : plan.consumedCommands()) {
-      if (command.payload() instanceof SetYoloCommandPayload setYolo) {
-        yolo = setYolo.yoloEnabled();
-      }
-    }
-    return yolo;
   }
 
   /**

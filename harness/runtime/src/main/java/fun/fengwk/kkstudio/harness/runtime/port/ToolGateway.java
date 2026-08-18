@@ -12,10 +12,10 @@ import java.util.UUID;
 /**
  * Tool 执行 admission 端口：preflight 权限判定与 execution 提交。
  *
- * <p>{@link #preflight} 是同步、无副作用、事务外的判定；异常表示本次判定没有产生执行副作用，Processor 可安全 reschedule。{@code
- * yoloEnabled} 与 frozen {@link ToolInvocationRequest} 一起决定 Allow / Ask / Deny。{@link #start}
- * 返回前不得同步调用任何 listener 回调；回调 duplicate / stale 由 Runtime fence，Gateway 不保证 exactly-once。Tool 的
- * retry 决策（Busy / Overloaded 后何时重试）由 Processor 决定，不放 Gateway。
+ * <p>{@link #preflight} 是同步、无副作用、事务外的判定；异常表示本次判定没有产生执行副作用，Processor 可安全 reschedule。它只接收 frozen
+ * {@link ToolInvocationRequest}，不感知 Thread YOLO——YOLO 短路由 Processor 在锁内读取 Thread 后自行决定，本端口 绝不查询
+ * HarnessStore。{@link #start} 返回前不得同步调用任何 listener 回调；回调 duplicate / stale 由 Runtime fence，Gateway
+ * 不保证 exactly-once。Tool 的 retry 决策（Busy / Overloaded 后何时重试）由 Processor 决定，不放 Gateway。
  *
  * <p>两阶段激活：{@link #start} 返回 {@link Started} 时不得打开任何回调 gate（同步回调只能缓冲），{@link Handle#activate} 由
  * Processor 在 attach handle + durable markRunning 之后、打开自身 listener 门之前调用，此时 Gateway 才允许打开回调 gate /
@@ -23,8 +23,8 @@ import java.util.UUID;
  */
 public interface ToolGateway {
 
-  /** 一次 Tool execution 前的权限判定。 */
-  PreflightResult preflight(ToolInvocationRequest request, boolean yoloEnabled);
+  /** 一次 Tool execution 前的权限判定（不携带也不查询 YOLO）。 */
+  PreflightResult preflight(ToolInvocationRequest request);
 
   /**
    * 提交一次 execution。只有当实现能证明外部 Gateway 尚未接受该 execution 时才允许抛异常：异常后 durable 仍是 DISPATCHING，Processor

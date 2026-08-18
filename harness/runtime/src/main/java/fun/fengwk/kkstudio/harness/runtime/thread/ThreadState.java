@@ -106,6 +106,24 @@ public record ThreadState(
     return next;
   }
 
+  /**
+   * 直接控制面更新 YOLO runtime policy：head / nextCommandSequence 不变，{@code revision} 严格 +1。调用方负责在
+   * revision CAS 之前先做「值相同即 no-op」判断。
+   */
+  public ThreadState setYoloEnabled(boolean enabled, Instant now) {
+    ThreadState next =
+        new ThreadState(
+            id,
+            headEntryId,
+            enabled,
+            nextCommandSequence,
+            Math.addExact(revision, 1L),
+            createdAt,
+            effectiveMutationTime(now));
+    validateTransition(this, next);
+    return next;
+  }
+
   /** 显式把对外可见的 snapshot revision +1，不修改其他 durable 字段。 */
   public ThreadState touchRevision(Instant now) {
     ThreadState next =

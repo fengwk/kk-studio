@@ -61,6 +61,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     getSystemPromptPreview: vi.fn(),
     enqueueCommands: vi.fn(),
     updateThreadHead: vi.fn(),
+    setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
   },
@@ -426,13 +427,16 @@ describe('ChatWorkspacePane commands', () => {
     vi.mocked(harnessService.updateThreadHead).mockImplementation(async (_threadId, _data) =>
       thread({ revision: '1' }),
     )
+    vi.mocked(harnessService.setThreadYolo).mockImplementation(async (_threadId, data) =>
+      thread({ yoloEnabled: data.yoloEnabled }),
+    )
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('updates agent/environment/yolo as a draft-local pane state without mutating services', async () => {
+  it('keeps agent/environment draft-local while yolo goes through the direct control API', async () => {
     const user = userEvent.setup()
     const { onThreadSortChange, onAgentChange, onYoloChange } = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -452,9 +456,17 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(within(dirPanel).getByRole('button', { name: /^使用当前 Workspace/ }))
     await waitFor(() => expect(harnessService.updateThreadHead).not.toHaveBeenCalled())
 
+    // yolo 是直接控制面：乐观更新 draft 并立即 PUT /yolo（基于 snapshot revision 的 CAS），
+    // 但绝不落到 Chat 默认值回调、head 重定位或 command batch。
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/yolo{Enter}')
-    await waitFor(() => expect(onYoloChange).not.toHaveBeenCalled())
+    await waitFor(() =>
+      expect(harnessService.setThreadYolo).toHaveBeenCalledWith('t1', {
+        expectedRevision: '0',
+        yoloEnabled: true,
+      }),
+    )
+    expect(onYoloChange).not.toHaveBeenCalled()
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
     expect(onThreadSortChange).not.toHaveBeenCalled()
@@ -938,12 +950,13 @@ describe('ChatWorkspacePane commands', () => {
       createTime: null,
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(thread({}), {
+      // yolo 是直接控制面值（来自 snapshot），不投影 queued settings。
+      snapshot(thread({ yoloEnabled: true }), {
         queuedCommands: [
           queuedSetting('1', 'SET_MODEL', {
             model: { providerName: 'local', modelName: 'Alternate', variant: 'review' },
           }),
-          queuedSetting('2', 'SET_YOLO', { yoloEnabled: true }),
+          queuedSetting('2', 'SET_AGENT', { agentName: 'coder' }),
         ],
       }),
     )

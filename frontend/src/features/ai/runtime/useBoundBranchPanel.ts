@@ -17,6 +17,8 @@ import {
   useAgentThreadController,
   type CommandBatchReplay,
 } from '@/features/ai/runtime/useAgentThreadController'
+import { harnessService } from '@/shared/api/harness-service'
+import { translate } from '@/shared/i18n'
 
 /**
  * 面板本地 branch draft：从持久化的 Thread snapshot 初始化，面板本地编辑，
@@ -30,6 +32,17 @@ interface BoundBranchState {
   threadId: string
   base: BranchDraft
   draft: BranchDraft
+}
+
+/** 请求失败时把原始错误映射为可读 message（与 controller 同风格）。 */
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+  if (typeof error === 'string' && error.trim()) {
+    return error
+  }
+  return translate('ai.runtime.action.updateYoloFailed')
 }
 
 /**
@@ -70,7 +83,10 @@ export function useBoundBranchPanel({
     (parts) => buildBatchRef.current?.(parts) ?? null,
   )
   const [branchState, setBranchState] = useState<BoundBranchState | null>(null)
+  const [yoloError, setYoloError] = useState<string | null>(null)
   const boundThreadIdRef = useRef<string | null>(null)
+  // YOLO 直接更新请求序号：只有最新的响应才允许写回（乐观编辑/回滚均以最新请求为准）。
+  const yoloRequestIdRef = useRef(0)
 
   // 重新绑定到另一个 Thread 时清空面板本地 draft，并从新 snapshot 重新初始化
   //（controller 也会重置其 stop/decision replay 状态）。Interaction/错误/确认等
@@ -82,6 +98,7 @@ export function useBoundBranchPanel({
     }
     boundThreadIdRef.current = threadId
     setBranchState(null)
+    setYoloError(null)
   }, [threadId])
 
   // 从持久化 Thread snapshot 初始化或跟随 base；用户 draft 绝不会被静默覆盖。
@@ -166,8 +183,54 @@ export function useBoundBranchPanel({
     editDraft({ environment })
   }
 
+  /**
+   * 切换 Thread YOLO runtime policy：乐观更新 draft 后立即调用直接控制面
+   * （PUT /yolo，基于当前 snapshot revision 的精确 CAS）。成功后只把 base 与
+   * draft 的 yolo 对齐服务器权威值（其它未发送 settings 原样保留）；失败则把
+   * draft 回滚到 base 值，并通过 {@code yoloError} 暴露错误。绝不生成
+   * SET_YOLO command。并发连点以最新请求为准（CAS 失败时旧请求整体回滚，
+   * 新请求已携带新 revision 重试）。
+   */
   function setYoloEnabled(enabled: boolean) {
+    if (boundBranchState == null || boundThread == null) {
+      return
+    }
+    const thread = boundThread
+    setYoloError(null)
     editDraft({ yoloEnabled: enabled })
+    const requestId = ++yoloRequestIdRef.current
+    void harnessService
+      .setThreadYolo(thread.threadId, {
+        expectedRevision: thread.revision,
+        yoloEnabled: enabled,
+      })
+      .then((updated: HarnessThreadDTO) => {
+        if (requestId !== yoloRequestIdRef.current) {
+          return
+        }
+        setBranchState((current) =>
+          current == null || current.threadId !== thread.threadId
+            ? current
+            : {
+                ...current,
+                base: { ...current.base, yoloEnabled: updated.yoloEnabled },
+                draft: { ...current.draft, yoloEnabled: updated.yoloEnabled },
+              },
+        )
+      })
+      .catch((error: unknown) => {
+        if (requestId !== yoloRequestIdRef.current) {
+          return
+        }
+        setBranchState((current) =>
+          current == null
+            || current.threadId !== thread.threadId
+            || current.base.yoloEnabled === enabled
+            ? current
+            : { ...current, draft: { ...current.draft, yoloEnabled: current.base.yoloEnabled } },
+        )
+        setYoloError(errorMessage(error))
+      })
   }
 
   function selectModel(model: BranchDraft['model']) {
@@ -193,6 +256,8 @@ export function useBoundBranchPanel({
     effectiveBase,
     draft: boundBranchState?.draft,
     dirty,
+    yoloError,
+    dismissYoloError: () => setYoloError(null),
     selectAgent,
     selectEnvironment,
     setYoloEnabled,

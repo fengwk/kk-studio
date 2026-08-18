@@ -26,7 +26,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 7 类 typed Thread command payload 的严格、确定性 JSON codec。
+ * 6 类 typed Thread command payload 的严格、确定性 JSON codec。
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
  * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_MODEL 携带完整 {@link
@@ -47,7 +47,6 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
   private static final Set<String> SET_ACTIVE_TOOLS_FIELDS = orderedSet("activeTools");
-  private static final Set<String> SET_YOLO_FIELDS = orderedSet("yoloEnabled");
   private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environment");
   private static final Set<String> ENVIRONMENT_BINDING_FIELDS = orderedSet("name", "workspacePath");
   private static final Set<String> MODEL_SELECTION_FIELDS =
@@ -130,7 +129,6 @@ public final class ThreadCommandPayloadJsonCodec {
       case SET_AGENT -> decodeSetAgent(root);
       case SET_MODEL -> decodeSetModel(root);
       case SET_ACTIVE_TOOLS -> decodeSetActiveTools(root);
-      case SET_YOLO -> decodeSetYolo(root);
       case SET_ENVIRONMENT -> decodeSetEnvironment(root);
     };
   }
@@ -172,9 +170,6 @@ public final class ThreadCommandPayloadJsonCodec {
         }
         yield node;
       }
-      case SetYoloCommandPayload value -> NODES
-          .objectNode()
-          .put("yoloEnabled", value.yoloEnabled());
       case SetEnvironmentCommandPayload value -> {
         ObjectNode node = NODES.objectNode();
         if (value.environment() == null) {
@@ -245,12 +240,6 @@ public final class ThreadCommandPayloadJsonCodec {
     return new SetActiveToolsCommandPayload(activeTools);
   }
 
-  private static SetYoloCommandPayload decodeSetYolo(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_YOLO");
-    requireExactFields(node, SET_YOLO_FIELDS, "SET_YOLO");
-    return new SetYoloCommandPayload(requiredBoolean(node, "yoloEnabled", "SET_YOLO"));
-  }
-
   private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
     ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
     requireExactFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
@@ -316,14 +305,6 @@ public final class ThreadCommandPayloadJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
     return CommandValueValidation.requireCanonicalName(value.textValue(), context + "." + field);
-  }
-
-  private static boolean requiredBoolean(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (!value.isBoolean()) {
-      throw new IllegalArgumentException(context + "." + field + " must be boolean");
-    }
-    return value.booleanValue();
   }
 
   private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {

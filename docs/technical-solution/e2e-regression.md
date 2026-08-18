@@ -138,6 +138,7 @@ thread.session_entry_tree
 thread.rebind_cross_session_rejected
 thread.stop_idle_noop
 thread.branch_settings_diff_commands
+thread.yolo_direct_update
 thread_snapshot.unknown_thread_404
 frontend.proxy_model_contract
 crud.provider.invalid_name
@@ -204,7 +205,8 @@ L1 的关键语义断言：
 - 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 的统一信封携带 `errors.reason=STALE_COMMAND_CURSOR`，且 Thread 状态（sequence/revision/head）逐字段不变；
 - `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT)` 列表：`TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`text`/`content` 文本 shorthand 已移除（`text` 为未知字段、`content` 对 USER_MESSAGE 禁用）；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段与非 canonical uploadId 返回 400；`CUSTOM_MESSAGE` 仍使用 `content` 且 role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
 - 命令响应携带 `requestHash`（raw 命令 canonical SHA-256，64 位小写 hex）与 `sequence`；同 `clientCommandId` + 同 hash 整批重放幂等返回既有命令且不二次消费 upload；部分重放 409；replay/400 不依赖异步消费时序；
-- `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO` 五类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；
+- `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS` 四类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；yolo 走直接控制面（`PUT /yolo`）绝不进入 mailbox；
+- `PUT /yolo` body `{expectedRevision,yoloEnabled}`：同值请求在任何 revision CAS 之前 no-op 成功（过期 expectedRevision 不冲突、revision 零触碰）；值变化时 revision 精确 +1 并返回权威 Thread，过期 revision 409 `STALE_REVISION`；不创建 Command/Entry/Work；
 - `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
@@ -342,7 +344,7 @@ Composer 矩阵的维度与边界如下：
 | `ui.chat.events.keyboard_nav` | durable Thread | listbox 初始无选中；点击选中并打开详情；hover 不改选中；`↑/↓` 只在已选中时切换相邻行；`Esc` 取消选中并关闭详情 |
 | `ui.chat.shortcuts.escape_restores_focus` | 空 Pane + 草稿 | `+` 菜单打开只读快捷键面板（region `键盘快捷键`）；`Esc` 关闭并恢复 Composer 焦点，草稿/localStorage 不变 |
 | `ui.chat.events.scroll_restore` | 30 条 durable Thread（两类主视图均真实 overflow；事件行紧凑布局后需更多条目） | headless 下以 DOM 属性 + 原生 `scroll` 事件向上滚动 600px；`/events` toggle 往返后各自的 `scrollTop` 原样恢复（容差 ±2），不贴底；重绑清零由单元测试覆盖 |
-| `ui.chat.composer.settings_controls_batch` | 本地 hold-provider + 两 Variant Model + 活跃 Thread | 浏览器几何确认默认单行输入与控制栏组成紧凑两行布局；Permission 菜单只有 Default/YOLO；Model→Variant 两级 anchored listbox；选择 review+YOLO 后与 USER_MESSAGE 按 `SET_MODEL→SET_YOLO→USER_MESSAGE` 同批入队 |
+| `ui.chat.composer.settings_controls_batch` | 本地 hold-provider + 两 Variant Model + 活跃 Thread | 浏览器几何确认默认单行输入与控制栏组成紧凑两行布局；Permission 菜单只有 Default/YOLO；Model→Variant 两级 anchored listbox；选择 review+YOLO 后与 USER_MESSAGE 按 `SET_MODEL→USER_MESSAGE` 同批入队，YOLO 经直接控制面 `PUT /yolo` 生效并反映在 Thread 快照 |
 | `ui.chat.composer.multi_pane_settings_isolation` | split-2 绑定两条真实 Thread | pane-1 YOLO 不污染 pane-2 Default；一次只存在一个 settings listbox；打开 pane-2 自动关闭 pane-1 菜单，Escape 只恢复 pane-2 Composer 焦点 |
 | `ui.chat.footer.readonly_facts` | 本地 completion-provider 冻结 usage，再切换到 unavailable 长 Workspace path | Footer 中间省略安全 wire path，完整 title 不含 daemon 绝对路径；展示 usage、used/contextWindow、cache hit；缺失 usage 时按 0 展示；缺失 Git 整段省略；无 button，且不含 Agent/Model/Permission/Notification |
 | `ui.chat.tool_card.streaming_layout_scroll` | 本地 streaming-provider 重复发送完整 write/edit/bash name/id 并冻结参数流；e2e profile 非 YOLO approval | 流式身份不重复拼接；edit 参数预览为 5 行尾随窗口；长 header 完整折行且绝对定位 toggle 不占宽；稳定 edit 完整展示 diff；write/edit/bash 均真实进入 approval；拒绝按钮使用 danger 红色边框；拒绝后 Tool output 不拥有纵向滚动，卡内滚轮滚动外层 transcript |
@@ -442,7 +444,7 @@ Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
 }
 ```
 
-`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId,name,preview)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE` 使用 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environment)`（完整 `{name, workspacePath}` 对象或 null）、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
+`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId,name,preview)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE` 使用 `content` 与 `role`（仅 `SYSTEM|USER`）。四类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environment)`（完整 `{name, workspacePath}` 对象或 null）、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`，多余字段一律 400。YOLO 不再是 command：`PUT /api/ai/runtime/threads/{threadId}/yolo` 直接更新 Thread policy（`{expectedRevision,yoloEnabled}` CAS，同值在任何 CAS 前 no-op 成功，值变化 revision 精确 +1，stale 409），绝不进入 mailbox。
 
 head move 与 stop 均为 revision CAS：
 

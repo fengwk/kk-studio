@@ -656,7 +656,7 @@ class HarnessWorkDispatcherHandoffTest {
     private final AtomicInteger preflightCalls = new AtomicInteger();
 
     @Override
-    public PreflightResult preflight(ToolInvocationRequest request, boolean yoloEnabled) {
+    public PreflightResult preflight(ToolInvocationRequest request) {
       preflightCalls.incrementAndGet();
       return new ToolGateway.Allow();
     }
