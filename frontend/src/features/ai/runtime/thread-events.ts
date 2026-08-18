@@ -273,14 +273,12 @@ export function buildThreadEventTimeline(
   }
   for (const invocation of toolInvocations) {
     // 运行中的 invocation 在 durable assistant tool_call 物化后仍必须展示：只有
-    // 同一 Turn 的 durable tool_result 已物化（或 DTO resultEntryId 已指向存在的
-    // Entry）时才跳过 terminal-pending overlay；跨 Turn 复用相同 toolCallId 不误抑制。
-    const materialized =
-      durableToolResultIdentities.has(
-        `${turnStartByEntryId.get(invocation.assistantEntryId) ?? ''}:${invocation.toolCallId}`,
-      )
-      || (invocation.resultEntryId != null
-        && entries.some((entry) => entry.entryId === invocation.resultEntryId))
+    // 同一 Turn 的 durable tool_result Entry 已物化时才跳过 terminal-pending
+    // overlay；跨 Turn 复用相同 toolCallId 不误抑制。ToolResult Entry 写入与
+    // invocation 删除原子提交，因此只需依据 durable Entry 与 invocation 存在性收敛。
+    const materialized = durableToolResultIdentities.has(
+      `${turnStartByEntryId.get(invocation.assistantEntryId) ?? ''}:${invocation.toolCallId}`,
+    )
     if (materialized) {
       continue
     }

@@ -227,7 +227,6 @@ export interface ToolInvocationDTO {
   approvalJson: string | null
   resultJson: string | null
   errorJson: string | null
-  resultEntryId: string | null
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }

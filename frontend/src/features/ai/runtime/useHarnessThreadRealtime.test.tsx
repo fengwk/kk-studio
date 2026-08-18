@@ -409,7 +409,6 @@ describe('useHarnessThreadRealtime', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      resultEntryId: null,
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
@@ -464,7 +463,6 @@ describe('useHarnessThreadRealtime', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      resultEntryId: null,
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
@@ -525,7 +523,7 @@ describe('useHarnessThreadRealtime', () => {
     expect(invalidate).toHaveBeenCalledTimes(2)
   })
 
-  it('aggregates TOOL_PARTIAL overlays per invocation and clears on the durable terminal result', async () => {
+  it('aggregates TOOL_PARTIAL overlays per invocation and clears when the invocation disappears with the durable result Entry', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const active: ToolInvocationDTO = {
       id: 'inv-tool-1',
@@ -544,7 +542,6 @@ describe('useHarnessThreadRealtime', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      resultEntryId: null,
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
@@ -579,17 +576,16 @@ describe('useHarnessThreadRealtime', () => {
     )
     expect(result.current?.toolStreams.get('inv-tool-1')?.error).toBe(false)
 
-    // 持久化 result Entry 挂接：Entry 成为 transcript 的事实来源。
+    // invocation 仍在 snapshot（终态空结果）：终态投影继续保留 —— ToolResult
+    // Entry 写入与 invocation 删除原子提交，只有 invocation 消失 overlay 才清除。
     rerender({
-      invocations: [{ ...active, resultJson: '{"contents":[]}', resultEntryId: 'entry-9' }],
+      invocations: [{ ...active, resultJson: '{"contents":[]}' }],
     })
-    await waitFor(() => expect(result.current?.toolStreams.size).toBe(0))
-
-    // invocation 消失：overlay 也一并清除。
-    rerender({ invocations: [{ ...active, resultJson: '{"contents":[]}' }] })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(''),
     )
+
+    // 持久 ToolResult Entry 落地：invocation 随同一事务从 snapshot 消失，overlay 清除。
     rerender({ invocations: [] })
     await waitFor(() => expect(result.current?.toolStreams.size).toBe(0))
   })
@@ -614,7 +610,6 @@ describe('useHarnessThreadRealtime', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      resultEntryId: null,
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
@@ -686,7 +681,6 @@ describe('useHarnessThreadRealtime', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      resultEntryId: null,
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
@@ -735,13 +729,12 @@ describe('useHarnessThreadRealtime', () => {
         details: null,
       }),
       errorJson: null,
-      resultEntryId: null,
       createTime: '2026-01-01T00:00:00Z',
       updateTime: '2026-01-01T00:00:00Z',
     }
 
-    // disabled 期不订阅；首次 snapshot（终态 resultJson、resultEntryId null）与
-    // ready 同批到达：reconcile effect 播种终态 tool overlay，随后订阅 state 尚为
+    // disabled 期不订阅；首次 snapshot（终态 resultJson）与 ready 同批到达：
+    // reconcile effect 播种终态 tool overlay，随后订阅 state 尚为
     // null 的过渡 render 不得清空它（下一 render 依赖不变不会重新播种）。
     const { result, rerender, sockets } = renderRealtime(client, {
       enabled: false,

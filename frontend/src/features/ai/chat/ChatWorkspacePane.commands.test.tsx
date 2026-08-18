@@ -221,7 +221,6 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
     resultJson: null,
     errorJson: null,
-    resultEntryId: null,
     createTime: '2026-07-28T10:00:00Z',
     updateTime: '2026-07-28T10:00:00Z',
     ...overrides,
