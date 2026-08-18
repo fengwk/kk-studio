@@ -66,47 +66,46 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Target Thread processor：消费 dispatcher 已 claim 的 THREAD Work，以固定优先级驱动 Thread 的完整 Agent Loop。
+ * Target Thread processor：消费 dispatcher 已 claim 的 THREAD Work，每个 claim 恰好执行一个 durable action 的
+ * single-action reducer（KISS），下一 action 一律由同事务 {@code requestWork} 驱动，绝不内部循环。
  *
- * <p>每步短事务先用纯 {@link ThreadContextClassifier} 把当前 Thread 分类为唯一的 live/historical 适用性上下文 （{@link
+ * <p>处理流程：先用纯 {@link ThreadContextClassifier} 把当前 Thread 分类为唯一的 live/historical 适用性上下文 （{@link
  * ThreadContext}，unlocked 读：Model 只按 (threadId, open TURN_START) 查找，Tool siblings 只在 Model 结果恰为当前
- * Assistant head 时加载），再按上下文执行：(a) MODEL_TERMINAL_PENDING —— head 恰为 basis 且未挂结果的 terminal
+ * Assistant head 时加载），再按上下文恰执行一个动作：(a) MODEL_TERMINAL_PENDING —— head 恰为 basis 且未挂结果的 terminal
  * ModelInvocation 原子 apply；(b) TOOL_TERMINAL_PENDING —— 当前 head 恰为本 Thread ModelInvocation 产出 的
- * Assistant Entry、且其 Tool siblings 全部 terminal 且全部未挂结果时按 ordinal 原子 apply；(c) MODEL_ACTIVE /
- * TOOL_ACTIVE —— 当前 applicable Model/Tool invocation 非 terminal 时完成 claim 并返回 SUSPENDED；(d)
- * CONTINUATION_DUE —— 无 open Turn 且 head 为 continueModel=true 的 TURN_END 时启动 continuation；(e)
- * queued USER_MESSAGE/CUSTOM_MESSAGE 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim 返回
- * QUIESCENT。旧 / 历史 open Turn 只在启动 新 INPUT Turn 时被 normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE
- * 拒绝，绝不降级为业务上下文。
+ * Assistant Entry、且其 Tool siblings 全部 terminal 时按 ordinal 原子 apply；(c) MODEL_ACTIVE / TOOL_ACTIVE
+ * —— 当前 applicable invocation 非 terminal 时完成 claim；(d) CONTINUATION_DUE —— 无 open Turn 且 head 为
+ * continueModel=true 的 TURN_END 时启动 continuation；(e) queued USER_MESSAGE/CUSTOM_MESSAGE 存在时启动 INPUT
+ * Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn 只在启动 新 INPUT Turn 时被 normalization，绝不恢复
+ * / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
  *
  * <p>Turn 启动采用 speculative plan：短事务锁 Thread、读取 queued Command 快照与 cutoff、校验 claim（并对近过期 lease 做
  * {@link ProcessorLeaseSupport#ensureLeaseMargin} 保证首次 Resolver heartbeat 前不会过期）、分配 candidate Entry
  * ID 并构造完整合法 candidate EntryPath（不写任何 durable 状态）；事务外调用 {@link TurnResolver}（期间由本地 {@link
  * WorkHeartbeat} 维持 lease）；第二短事务以 source head / cutoff 内 Command 精确快照 / claim ownership 做
- * CAS，一次性原子提交 normalization + TURN_START + Message + Command markers + Thread 更新 +
- * ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。Resolved
- * 请求在提交前先经 {@link ResolvedRequestValidator} 按 candidate branch 事实（route / model / variant /
- * tools）做机械一致性 校验，不一致即抛错且零 durable mutation（绝不转 typed rejection）。任何 CAS / claim 损失一律 完整 no-op 返回
- * LOST_OWNERSHIP；Resolver 异常 / null / heartbeat 调度失败按单一正失败延迟 reschedule，绝不静默丢弃 Work。duplicate /
- * stale THREAD claim 是 no-op。
+ * CAS，一次性原子提交 TURN_START + Message + Command markers + Thread 更新 + ModelInvocation/MODEL
+ * Work（resolved） 或 AssistantError + FAILED TURN_END（rejected）。Resolved 请求在提交前先经 {@link
+ * ResolvedRequestValidator} 按 candidate branch 事实（route / model / variant / tools /
+ * compaction）做机械一致性校验，不一致即抛错且零 durable mutation（绝不转 typed rejection）。任何 CAS / claim 损失一律抛内部 {@link
+ * ClaimLostSignal} 使事务完整回滚（零部分 mutation），由 {@link #process} 映射为 LOST_OWNERSHIP；Resolver 异常 / null /
+ * heartbeat 调度失败按单一正失败延迟 reschedule，绝不静默丢弃 Work。duplicate / stale THREAD claim 是 no-op。
  *
  * <p>锁序与 final fence：Model terminal apply / Tool sibling batch / resolve commit 都在同一事务内先完成全部低序
  * mutation（Thread -&gt; Commands -&gt; ModelInvocation -&gt; ToolInvocation siblings），claimed
- * THREAD Work 的 最终 fence 最后执行；fence 失败抛出内部 {@link ClaimLostSignal} 使事务完整回滚，再由 {@link #process} 映射为
+ * THREAD Work 的最终 fence 最后执行；fence 失败抛出内部 {@link ClaimLostSignal} 使事务完整回滚，再由 {@link #process} 映射为
  * LOST_OWNERSHIP，绝不存在带 durable mutation 的 LOST 提交。commit 与 applyModel 在同层 Work 中按 (type, id) 升序请求（先
  * THREAD wake 再 MODEL / TOOL Work）。历史 / 非 applicable open Turn（head 不在 applicable 位置） 在分类阶段只使用
  * unlocked 读，绝不先锁 Model/Tool 再落到 Commands / INPUT normalization。
  *
- * <p>Model terminal apply：SUCCEEDED 追加 ASSISTANT Entry；随后只按 {@link ModelResponsePlanner}
- * 的纯决策落地——COMPLETE 无 calls 追加 COMPLETED TURN_END(continueModel=false)；LENGTH 无 calls / FILTERED 追加
- * FAILED TURN_END(OUTPUT_TRUNCATED / CONTENT_FILTERED)；关闭 turn 的路径在同一事务
- * attach-then-delete（严格物化校验）并物理删除 ModelInvocation；有 calls 时按 ordinal materialize ToolInvocation 槽位
- * （READY / FAILED(INVALID_TOOL_ARGUMENTS / UNKNOWN_TOOL / MODEL_OUTPUT_TRUNCATED)，plugin sibling
- * WRITE 冲突 确定性转 FAILED(SIBLING_STATE_CONFLICT)），attach Model.resultEntryId（仅 active Tool phase）并保留
- * parent，仅为 READY 请求 TOOL Work，全部 immediate terminal 时自唤醒 THREAD 让 batch 应用并反馈模型；FAILED / CANCELLED
- * / UNKNOWN 追加 AssistantError 与 FAILED TURN_END 并删除 ModelInvocation。Tool sibling 应用绝不部分 apply：数量 /
- * ordinal 前缀 / ownership / 全部 terminal 任一违反即抛错回滚，batch TURN_END 同事务删除 children+parent。每次原子应用 Thread
- * head/revision 只 +1；Model / Tool processor 不写 Entry/head。
+ * <p>每次成功 action 都在同一事务 complete 当前 THREAD claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
+ * complete，依赖 wakeVersion 保留新 wake。Model terminal apply 按 planner 决策落地：active Tool phase 仅为 READY
+ * 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经 ToolTerminalPending 应用）；
+ * closed turn（COMPLETE 无 calls / LENGTH 无 calls / FILTERED / terminal failure / cancel / unknown /
+ * compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有 queued
+ * message 或成功 HISTORY / OVERFLOW compaction 需要延续时请求 THREAD。Tool sibling batch 追加 outcome 后 追加
+ * continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再 complete，下一 claim 才做
+ * continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
+ * （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 时先请求 THREAD 再 complete。
  *
  * <p>durable mutation 时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、
  * complete、request 与 reschedule 始终使用未抬升的本地 lease clock，避免未来 durable 时间改变 lease 语义。
@@ -161,12 +160,13 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 处理一次 dispatcher 已 claim 的 THREAD Work。
+   * 处理一次 dispatcher 已 claim 的 THREAD Work（single-action durable reducer）。
    *
    * <p>先用 Work-only 短事务验证 claim 当前真实 owned，再进 per-thread admission guard（同一 claim 重复 / 并发投递一律 LOST
-   * no-op；不同新 token 抢占 guard）。随后运行当前 claim 的步骤循环：终端应用 / Tool batch / rejected 提交继续同 claim，blocker /
-   * resolved / quiescent 完成 claim，Resolver 临时失败按延迟 reschedule。本循环不设可配置步数上限；后续 reducer 切片会拆掉内部 run
-   * loop。事务内 final fence 丢失抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为 LOST_OWNERSHIP。
+   * no-op；不同新 token 抢占 guard）。随后恰执行一次 durable action：单短事务分类并执行；若该 action 是 speculative plan 则事务外
+   * resolve + 第二事务 CAS 提交。action 在事务内完成当前 claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
+   * complete。事务内 final fence / CAS 丢失抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为 LOST_OWNERSHIP；
+   * 不存在内部 run loop / step 循环 / Continue 分支。
    */
   public ThreadProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
@@ -183,7 +183,8 @@ public final class ThreadProcessor {
       return ThreadProcessResult.LOST_OWNERSHIP;
     }
     try {
-      return runLoop(claim);
+      TurnPlan plan = step(claim);
+      return plan == null ? ThreadProcessResult.COMPLETED : resolveAndCommit(claim, plan);
     } catch (ClaimLostSignal lost) {
       return ThreadProcessResult.LOST_OWNERSHIP;
     } finally {
@@ -191,47 +192,20 @@ public final class ThreadProcessor {
     }
   }
 
-  private ThreadProcessResult runLoop(ClaimedWork claim) {
-    while (true) {
-      switch (step(claim)) {
-        case LoopStep.Continue ignored -> {}
-        case LoopStep.Plan plan -> {
-          switch (resolveAndCommit(claim, plan.plan())) {
-            case RESOLVED_COMMITTED -> {
-              return ThreadProcessResult.SUSPENDED;
-            }
-            case REJECTED_COMMITTED -> {}
-            case RESCHEDULED -> {
-              return ThreadProcessResult.RESCHEDULED;
-            }
-            case LOST -> {
-              return ThreadProcessResult.LOST_OWNERSHIP;
-            }
-          }
-        }
-        case LoopStep.Suspend ignored -> {
-          return ThreadProcessResult.SUSPENDED;
-        }
-        case LoopStep.Quiescent ignored -> {
-          return ThreadProcessResult.QUIESCENT;
-        }
-        case LoopStep.Lost ignored -> {
-          return ThreadProcessResult.LOST_OWNERSHIP;
-        }
-      }
-    }
-  }
-
-  /** 单步短事务：锁 Thread -&gt;（Model -&gt; Tool）-&gt; Work，按固定优先级决定并执行一个动作。 */
-  private LoopStep step(ClaimedWork claim) {
+  /**
+   * 单 action 短事务：锁 Thread -&gt;（Commands -&gt; Model -&gt; Tool）-&gt; Work，按固定优先级分类并恰执行一个 durable
+   * action。返回 null 表示 action 已在该事务完成 claim；非 null 表示构造了 speculative plan，由调用方在事务外 resolve 后第二事务
+   * 提交（第二事务同样完成 claim）。
+   */
+  private TurnPlan step(ClaimedWork claim) {
     return store.transaction(tx -> stepTx(tx, claim));
   }
 
-  private LoopStep stepTx(HarnessStore.Transaction tx, ClaimedWork claim) {
+  private TurnPlan stepTx(HarnessStore.Transaction tx, ClaimedWork claim) {
     Instant now = clock.instant();
     ThreadState thread = tx.lockThread(claim.target().id()).orElse(null);
     if (thread == null) {
-      return new LoopStep.Lost();
+      throw new ClaimLostSignal();
     }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
     ModelInvocation model = null;
@@ -253,27 +227,29 @@ public final class ThreadProcessor {
     ThreadContext context = contextClassifier.classify(thread, path, model, siblings);
     return switch (context) {
       case ThreadContext.ModelTerminalPending pending -> {
+        // 锁序 Thread -> Commands -> Model：判断 pre-existing queued message 必须在 lock Model 前加载。
+        boolean hasQueuedMessage = hasQueuedMessage(tx.loadQueuedCommands(thread.id()));
         ModelInvocation locked = tx.lockModelInvocation(pending.model().id()).orElse(null);
         if (locked == null) {
-          yield new LoopStep.Lost();
+          throw new ClaimLostSignal();
         }
-        yield applyModel(tx, claim, thread, path, locked, now);
+        applyModel(tx, claim, thread, path, locked, now, hasQueuedMessage);
+        yield null;
       }
       case ThreadContext.ModelActive ignored -> {
-        if (tx.lockClaimedWork(claim, now).isEmpty()) {
-          yield new LoopStep.Lost();
-        }
-        tx.completeWork(claim, now);
-        yield new LoopStep.Suspend();
+        completeClaim(tx, claim, now);
+        yield null;
       }
       case ThreadContext.ToolTerminalPending pending -> {
+        // 锁序 Thread -> Model -> Tool：Tool batch 固定 self-wake 下一 claim 的 continuation，不消费任何
+        // Command，因此无需加载 Command 快照（不为形式锁序锁无关行）。
         ModelInvocation locked = tx.lockModelInvocation(pending.model().id()).orElse(null);
         if (locked == null) {
-          yield new LoopStep.Lost();
+          throw new ClaimLostSignal();
         }
         List<ToolInvocation> lockedSiblings =
             tx.lockToolInvocationsByAssistantEntryId(pending.assistant().id());
-        yield applyToolBatch(
+        applyToolBatch(
             tx,
             claim,
             thread,
@@ -283,13 +259,11 @@ public final class ThreadProcessor {
             pending.calls(),
             lockedSiblings,
             now);
+        yield null;
       }
       case ThreadContext.ToolActive ignored -> {
-        if (tx.lockClaimedWork(claim, now).isEmpty()) {
-          yield new LoopStep.Lost();
-        }
-        tx.completeWork(claim, now);
-        yield new LoopStep.Suspend();
+        completeClaim(tx, claim, now);
+        yield null;
       }
       case ThreadContext.ContinuationDue ignored -> {
         // continuation 优先：现有 continueModel 义务必须原样执行，阈值压缩绝不插队（否则会吞掉既有 continuation）。
@@ -303,23 +277,31 @@ public final class ThreadProcessor {
           yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
         }
         List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-        boolean hasInput = false;
-        for (ThreadCommand command : queued) {
-          if (command.type().isMessage()) {
-            hasInput = true;
-            break;
-          }
-        }
-        if (hasInput) {
+        if (hasQueuedMessage(queued)) {
           yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
         }
-        if (tx.lockClaimedWork(claim, now).isEmpty()) {
-          yield new LoopStep.Lost();
-        }
-        tx.completeWork(claim, now);
-        yield new LoopStep.Quiescent();
+        completeClaim(tx, claim, now);
+        yield null;
       }
     };
+  }
+
+  /** queued 快照中是否存在待处理 message 命令（USER/CUSTOM）。 */
+  private static boolean hasQueuedMessage(List<ThreadCommand> queued) {
+    for (ThreadCommand command : queued) {
+      if (command.type().isMessage()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** blocker / idle 完成：final fence 后 completeWork；fence 失败抛内部信号回滚（零 mutation 的 LOST）。 */
+  private static void completeClaim(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
+    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+      throw new ClaimLostSignal();
+    }
+    tx.completeWork(claim, now);
   }
 
   /**
@@ -558,26 +540,32 @@ public final class ThreadProcessor {
   }
 
   /**
-   * Terminal Model 原子应用（Thread -&gt; Model -&gt; Tool -&gt; Work 锁序）。全部低序 mutation 完成后最后执行 claimed
-   * THREAD Work fence，fence 失败抛 {@link ClaimLostSignal} 整事务回滚；fence 通过后按 id 升序请求 TOOL Work。
+   * Terminal Model 原子应用（Thread -&gt; Model -&gt; Tool -&gt; Work 锁序），单 action 恰好执行一次并完成 claim。
    *
    * <p>关闭 turn 的路径（COMPLETE 无 calls / LENGTH 无 calls / FILTERED / terminal failure / cancel /
    * unknown / compaction 关闭结果）在同一事务追加 TURN_END 后执行严格物化校验（attach-then-delete，经 Store 的 {@link
    * ModelAttemptMaterialization} 校验）并物理删除 ModelInvocation；只有 active Tool phase（SUCCEEDED 带 calls）保留
-   * parent 并 attach resultEntryId。Closed turn 绝不保留 Model 行。
+   * parent 并 attach resultEntryId。
+   *
+   * <p>wake 决定：active Tool phase 只为 READY 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 经
+   * ToolTerminalPending 应用并反馈模型）；closed turn 在已有 queued message、成功 HISTORY 或 OVERFLOW compaction 需要
+   * 延续时先请求 THREAD 再 complete，由 wakeVersion 保留新 wake，其余直接 complete。新命令在事务后到达会自行 requestWork。
    */
-  private LoopStep applyModel(
+  private void applyModel(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       EntryPath path,
       ModelInvocation model,
-      Instant now) {
+      Instant now,
+      boolean hasQueuedMessage) {
     if (!model.status().isTerminal()
         || model.resultEntryId() != null
         || !thread.headEntryId().equals(model.basisHeadEntryId())) {
-      // 决策与执行同事务，理论不可达；防御性回到循环重新决策。
-      return new LoopStep.Continue();
+      // 决策与执行同事务，理论不可达；改为明确的不变量失败，绝不降级为循环重试。
+      throw new IllegalStateException(
+          "terminal model apply preconditions changed under the same transaction for model "
+              + model.id());
     }
     Instant mutationNow =
         durableMutationTime(now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
@@ -602,12 +590,15 @@ public final class ThreadProcessor {
     UUID head = resultEntryId;
     boolean toolPhase = false;
     List<ToolInvocation> invocations = List.of();
+    // 关闭的压缩 turn 是否需要 THREAD 延续：HISTORY 部分成功（TURN_PREFIX 义务）或 OVERFLOW 最终压缩 continueModel=true。
+    boolean compactionWake = false;
     if (succeeded && compactionRequest != null) {
       // 压缩 turn：成功结果固定无 tool call；HISTORY 部分成功固定 continueModel=false，只有 complete 最终压缩且
       // OVERFLOW 触发时才 continueModel=true（让既有 CONTINUATION 重试失败 turn）。
       boolean continueModel =
           compactionRequest.phase() != CompactionPhase.HISTORY
               && compactionRequest.trigger() == CompactionTrigger.OVERFLOW;
+      compactionWake = continueModel || compactionRequest.phase() == CompactionPhase.HISTORY;
       UUID turnEndId = tx.nextId();
       tx.insertEntry(
           new Entry(
@@ -707,17 +698,20 @@ public final class ThreadProcessor {
               mutationNow));
       head = turnEndId;
     }
+    boolean requestThread = false;
     if (!toolPhase) {
       // 关闭 turn：同事务 attach-then-delete 完成严格物化校验并删除 Model 行（closed turn 不保留 Invocation）。
       tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
       tx.deleteModelInvocation(model.id());
+      // HISTORY / OVERFLOW compaction 延续或已有 queued message 时先请求 THREAD，下一 action 才分下一 claim。
+      requestThread = hasQueuedMessage || compactionWake;
     }
     tx.updateThread(thread.advanceHead(head, mutationNow));
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    if (!invocations.isEmpty()) {
+    if (toolPhase) {
       List<ToolInvocation> ordered = new ArrayList<>(invocations);
       ordered.sort(Comparator.comparing(ToolInvocation::id, UuidOrder.COMPARATOR));
       boolean readyRequested = false;
@@ -729,21 +723,24 @@ public final class ThreadProcessor {
       }
       if (!readyRequested) {
         // 全部 immediate terminal（schema-invalid / unknown / truncated）：不请求 TOOL Work，自唤醒 THREAD
-        // 让 batch 经 ToolTerminalPending 应用并把错误反馈给模型。
-        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+        // 让 batch 经下一 claim 的 ToolTerminalPending 应用并把错误反馈给模型。
+        requestThread = true;
       }
     }
-    return new LoopStep.Continue();
+    if (requestThread) {
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+    }
+    tx.completeWork(claim, now);
   }
 
   /**
    * Tool sibling 原子应用：全部 terminal 才执行，按 ordinal 通过统一 appender 追加 effects + ToolResult，再追加 COMPLETED
-   * TURN_END(continueModel=true)；同一事务删除全部 child ToolInvocation 与 parent ModelInvocation。数量 /
-   * ordinal 前缀 / ownership / terminal 任一违反即抛错回滚；删除 parent 前先执行与 {@link ModelAttemptMaterialization}
-   * 等价的最小严格校验 （attached Assistant/result 与已物化失败 attempt 前缀），绝不绕过校验直接 delete。低序 mutation 完成后最后执行
-   * claimed THREAD Work fence。
+   * TURN_END(continueModel=true)；同一事务删除全部 child ToolInvocation 与 parent ModelInvocation并固定先请求
+   * THREAD 再 complete，下一 claim 才做 continuation。数量 / ordinal 前缀 / ownership / terminal 任一违反即抛错回滚；删除
+   * parent 前先执行 与 {@link ModelAttemptMaterialization} 等价的最小严格校验（attached Assistant/result 与已物化失败
+   * attempt 前缀），绝不 绕过校验直接 delete。低序 mutation 完成后最后执行 claimed THREAD Work fence。
    */
-  private LoopStep applyToolBatch(
+  private void applyToolBatch(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
@@ -800,11 +797,13 @@ public final class ThreadProcessor {
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    return new LoopStep.Continue();
+    // batch 关闭 turn 固定产生 continueModel 义务：先 request THREAD 再 complete，下一 claim 才做 continuation。
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+    tx.completeWork(claim, now);
   }
 
   /** 在步骤事务内构造 speculative plan；claim fence 与 lease margin 在构造前完成。 */
-  private LoopStep planStep(
+  private TurnPlan planStep(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
@@ -815,7 +814,7 @@ public final class ThreadProcessor {
   }
 
   /** COMPACTION turn 的 plan：切分事实由调用方传入（reason COMPACTION 时非空）。 */
-  private LoopStep planStep(
+  private TurnPlan planStep(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
@@ -823,42 +822,31 @@ public final class ThreadProcessor {
       TurnStartReason reason,
       CompactionPreparation preparation,
       Instant now) {
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    if (reason == TurnStartReason.CONTINUATION) {
-      if (path.openTurnStart().isPresent()
-          || !(path.head().payload() instanceof TurnEndPayload end && end.continueModel())) {
-        return new LoopStep.Continue();
-      }
-    } else if (reason != TurnStartReason.COMPACTION) {
-      boolean hasInput = false;
-      for (ThreadCommand command : queued) {
-        if (command.type().isMessage()) {
-          hasInput = true;
-          break;
-        }
-      }
-      if (!hasInput) {
-        return new LoopStep.Continue();
-      }
+    // 分类与构造同事务：classifier 已确认的 precondition 在此不可达，泄露即为不变量失败，fail closed 绝不循环重试。
+    if (reason == TurnStartReason.CONTINUATION
+        && (path.openTurnStart().isPresent()
+            || !(path.head().payload() instanceof TurnEndPayload end && end.continueModel()))) {
+      throw new IllegalStateException(
+          "continuation preconditions changed under the same transaction for thread "
+              + thread.id());
     }
+    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
     Work claimed = tx.lockClaimedWork(claim, now).orElse(null);
     if (claimed == null) {
-      return new LoopStep.Lost();
+      throw new ClaimLostSignal();
     }
     // 近过期 claim 在 Resolver 首次 heartbeat 前可能过期：plan 事务内先确保完整 lease margin。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed, config.leaseConfig(), now);
     Instant planNow = durableMutationTime(now, thread.updatedAt(), path.head().createdAt());
-    TurnPlan plan =
-        planBuilder.build(thread.id(), path, reason, queued, tx::nextId, planNow, preparation);
-    return new LoopStep.Plan(plan);
+    return planBuilder.build(thread.id(), path, reason, queued, tx::nextId, planNow, preparation);
   }
 
   /**
    * 事务外解析 + 第二事务 CAS 提交：Resolver 异常 / null / heartbeat 调度失败按失败延迟 reschedule（零 durable mutation）；提交
-   * CAS（source head / cutoff 内 Command 快照 / claim）失败返回 LOST。YOLO 变化不使 plan 失效：commit 以第二事务锁到的
-   * Thread 当前 YOLO 为准。
+   * CAS（source head / cutoff 内 Command 快照 / claim）失败抛 {@link ClaimLostSignal} 由 {@link #process}
+   * 映射为 LOST。YOLO 变化不使 plan 失效：commit 以第二事务锁到的 Thread 当前 YOLO 为准。成功后本 claim 已消费，返回 COMPLETED。
    */
-  private ResolveOutcome resolveAndCommit(ClaimedWork claim, TurnPlan plan) {
+  private ThreadProcessResult resolveAndCommit(ClaimedWork claim, TurnPlan plan) {
     AtomicBoolean heartbeatLost = new AtomicBoolean();
     WorkHeartbeat heartbeat =
         new WorkHeartbeat(
@@ -866,8 +854,8 @@ public final class ThreadProcessor {
     if (!heartbeat.start(claim)) {
       log.warn("cannot schedule work lease heartbeat for {}; rescheduling", claim.target());
       return rescheduleIfOwned(claim, config.resolveFailureDelay())
-          ? ResolveOutcome.RESCHEDULED
-          : ResolveOutcome.LOST;
+          ? ThreadProcessResult.RESCHEDULED
+          : ThreadProcessResult.LOST_OWNERSHIP;
     }
     TurnResolver.Result result;
     try {
@@ -881,18 +869,15 @@ public final class ThreadProcessor {
     }
     if (result == null || heartbeatLost.get()) {
       return rescheduleIfOwned(claim, config.resolveFailureDelay())
-          ? ResolveOutcome.RESCHEDULED
-          : ResolveOutcome.LOST;
+          ? ThreadProcessResult.RESCHEDULED
+          : ThreadProcessResult.LOST_OWNERSHIP;
     }
     if (result instanceof TurnResolver.Resolved resolved) {
       // Harness 边界校验：任何不一致都是 Resolver 契约错误，抛 ISE 且此刻零 durable mutation（绝不转 typed rejection）。
       ResolvedRequestValidator.validate(plan, resolved);
     }
-    return switch (commit(claim, plan, result)) {
-      case RESOLVED -> ResolveOutcome.RESOLVED_COMMITTED;
-      case REJECTED -> ResolveOutcome.REJECTED_COMMITTED;
-      case LOST -> ResolveOutcome.LOST;
-    };
+    commit(claim, plan, result);
+    return ThreadProcessResult.COMPLETED;
   }
 
   /**
@@ -900,26 +885,34 @@ public final class ThreadProcessor {
    * 快照逐字段相等（允许 sequence &gt; cutoff 的新命令，不 CAS revision / nextCommandSequence），claim token 活跃；最终
    * Thread 更新使用第二事务锁到的当前 YOLO（speculative plan 创建时的旧值绝不写回）并保留其最新 nextCommandSequence， revision 精确
    * +1。锁序为 Thread -&gt; Commands -&gt; Model -&gt; Work：全部低序 mutation 先完成，claimed THREAD Work 的
-   * final fence 最后执行（失败抛 {@link ClaimLostSignal} 整事务回滚）；fence 通过后按 (type, id) 升序请求同层 Work（先 THREAD
-   * wake 再 MODEL Work）。
+   * final fence 最后执行（失败抛 {@link ClaimLostSignal} 整事务回滚）。任何 head / 快照 / claim 损失一律抛 {@link
+   * ClaimLostSignal} 回滚（零 durable mutation），由 {@link #process} 映射为 LOST_OWNERSHIP。
+   *
+   * <p>resolved：同层 Work 按 (type, id) 升序（先 THREAD wake 再 MODEL Work）只请求 MODEL Work——绝不因 deferred
+   * messages 制造无意义 THREAD claim（terminal apply 会按 queued 快照重建 wake）——然后 complete。rejected：追加
+   * error+TURN_END 后，若 plan 保留了 deferred messages 则先请求 THREAD 再 complete，否则直接 complete。
    */
-  private CommitOutcome commit(ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
-    return store.transaction(tx -> commitTx(tx, claim, plan, result));
+  private void commit(ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
+    store.transaction(
+        tx -> {
+          commitTx(tx, claim, plan, result);
+          return null;
+        });
   }
 
-  private CommitOutcome commitTx(
+  private void commitTx(
       HarnessStore.Transaction tx, ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
     Instant now = clock.instant();
     ThreadState thread = tx.lockThread(plan.threadId()).orElse(null);
     if (thread == null) {
-      return CommitOutcome.LOST;
+      throw new ClaimLostSignal();
     }
     if (!thread.headEntryId().equals(plan.sourceHeadEntryId())) {
-      return CommitOutcome.LOST;
+      throw new ClaimLostSignal();
     }
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
     if (!snapshotMatches(plan, queued)) {
-      return CommitOutcome.LOST;
+      throw new ClaimLostSignal();
     }
     Instant mutationNow = durableMutationTime(now, thread.updatedAt());
     for (Entry entry : plan.candidateEntries()) {
@@ -987,16 +980,16 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     if (invocationId == null) {
-      // rejected：不 complete，同 claim 继续循环（下一步 quiescent 时完成）。
-      return CommitOutcome.REJECTED;
+      // rejected：若保留 deferred messages（如 continuation 未消费的 USER）则先请求 THREAD 再 complete。
+      if (plan.hasDeferredMessages()) {
+        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+      }
+      tx.completeWork(claim, now);
+      return;
     }
-    // 同层 Work 按 (type, id) 升序：先 THREAD wake 再 MODEL Work。
-    if (plan.reason() == TurnStartReason.CONTINUATION && plan.hasDeferredMessages()) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
-    }
+    // resolved：同层 Work 按 (type, id) 升序（先 THREAD wake 再 MODEL Work）只请求 MODEL Work 再 complete。
     tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), now);
     tx.completeWork(claim, now);
-    return CommitOutcome.RESOLVED;
   }
 
   /** cutoff 内 queued Command 与 planned 快照逐字段相等（id/thread/sequence/payload/client ID/state）。 */
@@ -1115,45 +1108,12 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 内部回滚信号：final claim fence 丢失时抛出，使当前事务完整回滚（零 durable mutation），再由 {@link #process} 捕获并映射为
+   * 内部回滚信号：final claim fence 或提交 CAS 丢失时抛出，使当前事务完整回滚（零 durable mutation），再由 {@link #process} 捕获并映射为
    * LOST_OWNERSHIP。除 {@link #process} 外不得被捕获。
    */
   private static final class ClaimLostSignal extends RuntimeException {
     private ClaimLostSignal() {
       super("claimed work lost at final fence", null, false, false);
     }
-  }
-
-  /** 单步短事务的确定性结果。 */
-  private sealed interface LoopStep
-      permits LoopStep.Continue,
-          LoopStep.Plan,
-          LoopStep.Suspend,
-          LoopStep.Quiescent,
-          LoopStep.Lost {
-    record Continue() implements LoopStep {}
-
-    record Plan(TurnPlan plan) implements LoopStep {}
-
-    record Suspend() implements LoopStep {}
-
-    record Quiescent() implements LoopStep {}
-
-    record Lost() implements LoopStep {}
-  }
-
-  /** resolve + 提交的组合结果。 */
-  private enum ResolveOutcome {
-    RESOLVED_COMMITTED,
-    REJECTED_COMMITTED,
-    RESCHEDULED,
-    LOST
-  }
-
-  /** 提交事务的组合结果。 */
-  private enum CommitOutcome {
-    RESOLVED,
-    REJECTED,
-    LOST
   }
 }

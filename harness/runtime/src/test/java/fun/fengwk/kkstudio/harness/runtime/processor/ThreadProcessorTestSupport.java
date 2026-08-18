@@ -1169,6 +1169,11 @@ final class ThreadProcessorTestSupport {
     public void close() {
       scheduler.shutdownNow();
     }
+
+    /** claim 并处理一次指定 Thread 的 THREAD claim（single-action），返回处理结果。 */
+    ThreadProcessResult nextClaim(UUID threadId) {
+      return processor.process(claimThreadWork(store, threadId, clock.instant()));
+    }
   }
 
   /**

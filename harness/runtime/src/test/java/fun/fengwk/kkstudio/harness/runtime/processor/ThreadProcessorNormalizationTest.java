@@ -69,7 +69,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     requestThreadWork(rootFixture.store, rootBaseline.threadId());
     rootFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork rootClaim = claimThreadWork(rootFixture.store, rootBaseline.threadId());
-    assertEquals(ThreadProcessResult.SUSPENDED, rootFixture.processor.process(rootClaim));
+    assertEquals(ThreadProcessResult.COMPLETED, rootFixture.processor.process(rootClaim));
     // ROOT -> TURN_START + USER：无 normalization suffix。
     assertEquals(3, rootFixture.resolver.lastPath.entries().size());
 
@@ -82,7 +82,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     requestThreadWork(closedFixture.store, closedBaseline.threadId());
     closedFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork closedClaim = claimThreadWork(closedFixture.store, closedBaseline.threadId());
-    assertEquals(ThreadProcessResult.SUSPENDED, closedFixture.processor.process(closedClaim));
+    assertEquals(ThreadProcessResult.COMPLETED, closedFixture.processor.process(closedClaim));
     // TURN_END(continueModel=false) + USER -> 直接新 INPUT Turn，无 HISTORY_CUT suffix。
     assertEquals(7, closedFixture.resolver.lastPath.entries().size());
     assertFalse(
@@ -103,7 +103,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
 
     // ROOT, TS1, USER1, TURN_END(CANCELLED), TS2, USER2
     EntryPath path = fixture.resolver.lastPath;
@@ -127,7 +127,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
 
     // ROOT, TS, USER, ASSISTANT, SYNTH0, SYNTH1, SYNTH2, TURN_END(CANCELLED), TS2, USER2
     EntryPath path = fixture.resolver.lastPath;
@@ -163,7 +163,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
 
     // ROOT, TS, USER, ASSISTANT, RESULT0(real), SYNTH1, SYNTH2, TURN_END(CANCELLED), TS2, USER2
     EntryPath path = fixture.resolver.lastPath;
@@ -192,7 +192,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, second.threadId());
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork bClaim = claimThreadWork(fixture.store, second.threadId());
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(bClaim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(bClaim));
 
     // Thread A 后处理：自己的 normalization，不读取 B 的 descendant 结果。
     seedCommand(
@@ -200,7 +200,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, shared.threadId());
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork aClaim = claimThreadWork(fixture.store, shared.threadId());
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(aClaim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(aClaim));
 
     EntryPath aPath = path(fixture.store, shared.threadId());
     EntryPath bPath = path(fixture.store, second.threadId());
@@ -287,7 +287,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
 
     // MOVE_HEAD 回 attached assistant（无调用）：不锁 Model/Tool，normalization 补 CANCELLED TURN_END 后新开
     // INPUT Turn。
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
 
     assertEquals(assistantId, model(fixture.store, modelId).resultEntryId());
     assertTrue(toolsByAssistant(fixture.store, assistantId).isEmpty());
@@ -351,7 +351,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
 
     // head != assistant、不在 basis 与 resultEntryId 上：IDLE_OR_HISTORICAL → INPUT normalization 只补缺失
     // ordinal。
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
 
     EntryPath path = path(fixture.store, threadId);
     assertEquals(9, path.entries().size());
