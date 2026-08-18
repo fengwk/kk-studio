@@ -61,11 +61,11 @@ import java.util.function.Function;
  * ModelInvocation 只能以 READY / attempt=0 插入并保持 {@code (thread, turnStartEntryId)}
  * 唯一，basisHeadEntryId 必须等于 thread 当前 head（创建时 basis CAS），turnStartEntryId 必须位于 basis 的 EntryPath
  * 上，resultEntryId 全局唯一、限定为 Assistant / AssistantError / AssistantAborted Entry 且其 path 同时包含 basis 与
- * turnStart（同 branch descendant）；新 ToolInvocation 只能以 READY / attempt=0 / approval=null 插入并保持
- * {@code (assistantEntryId, ordinal)} 唯一，其 modelInvocation 的 resultEntryId 必须 等于
- * assistantEntryId，request.call 与 Assistant 中按 ordinal 提取的 ToolCall 精确一致，resultEntryId 全局 唯一、限定为非
- * synthetic 且 status 精确映射 invocation terminal status 的匹配 ToolResult MESSAGE Entry 且其 path 包含
- * assistantEntryId（同 branch）；Work target 必须存在且保持 {@code (targetType, targetId)} 主键。
+ * turnStart（同 branch descendant）；新 ToolInvocation 只能以 READY（或用于 sibling 静态拒绝的 unattached
+ * FAILED）、attempt=0、approval=null 插入并保持 {@code (assistantEntryId, ordinal)} 唯一，其 modelInvocation 的
+ * resultEntryId 必须等于 assistantEntryId，durable {@code call} 与 Assistant 中按 ordinal 提取的 ToolCall 精确一致
+ * （binding 为 null 时 renderer 固定回退）；Tool 行不持有结果引用 —— Outcome 已追加为 ToolResult MESSAGE Entry 后行 被
+ * batch apply 物理删除；Work target 必须存在且保持 {@code (targetType, targetId)} 主键。
  *
  * <p>per-transaction lock tracking：updateThread / updateCommands / updateModelInvocation /
  * updateToolInvocations 要求对应行已在本事务锁定，且 Thread / Model / Tool 更新必须通过 aggregate 共享 transition
@@ -1036,8 +1036,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * request binding/call 必须与 Assistant MESSAGE 中按 ordinal 提取的 ToolCall（id / toolName /
-     * rendererKey / argumentsJson）精确一致。
+     * ToolInvocation 的 durable call/binding 必须与 Assistant MESSAGE 中按 ordinal 提取的 ToolCall（id /
+     * toolName / rendererKey / argumentsJson）精确一致。
      */
     private static void requireMatchingAssistantToolCall(
         ToolInvocation invocation, Entry assistant) {

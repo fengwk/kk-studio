@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
@@ -466,6 +467,26 @@ final class StoreTestSupport {
         List.of(),
         provider.cacheControl(),
         null);
+  }
+
+  /** SUCCEEDED live-attach 的机械请求：单一 bash binding（renderer 由 binding 派生，与 assistant ToolCall 全等）。 */
+  static ModelRequestSpec succeededRequest() {
+    ModelRequestSpec base = modelRequest();
+    return new ModelRequestSpec(
+        base.providerType(),
+        base.model(),
+        base.variant(),
+        base.preambleMessages(),
+        List.of(platformBinding()),
+        List.of(),
+        List.of(),
+        base.cacheControl(),
+        null);
+  }
+
+  /** SUCCEEDED assistant payload：由同一 request/response 经 mapper 机械派生（strict attach 校验要求全等）。 */
+  static MessagePayload mappedAssistant(ModelRequestSpec request, ProviderResponse response) {
+    return new HistoryPayloadMapper().assistantPayload(response, request.toolBindings());
   }
 
   static ToolCall toolCall(String toolCallId) {

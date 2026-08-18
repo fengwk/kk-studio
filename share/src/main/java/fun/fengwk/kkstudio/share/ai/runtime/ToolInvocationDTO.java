@@ -10,10 +10,10 @@ import java.time.Instant;
  *
  * <p>工具身份字段由 durable ToolCall 直接派生：{@code toolCallId} / {@code toolName} / {@code argumentsJson}
  * 恒有值。binding 派生字段仅在 binding 非 null 时有值：{@code toolVersion} / {@code toolType} / {@code
- * environment}（unknown tool 槽位显式 null），而 {@code rendererKey} 在 binding 非 null 时来自 binding，否则固定回退为
- * {@code tool}。{@code approvalJson} / {@code resultJson} / {@code errorJson} 为 canonical runtime
- * codec JSON，仅对应阶段非 null；{@code environment} 为 nullable 完整 Environment binding（{@code {name,
- * workspacePath}}）。
+ * environment}（binding 为 null（unknown tool 槽位）时显式序列化 null），而 {@code rendererKey} 在 binding 非 null
+ * 时来自 binding，否则固定回退为 {@code tool}。{@code approvalJson} / {@code resultJson} / {@code errorJson} 为
+ * canonical runtime codec JSON，仅对应阶段非 null；{@code environment} 为 nullable 完整 Environment
+ * binding（{@code {name, workspacePath}}）。
  */
 @Data
 public class ToolInvocationDTO {
@@ -44,13 +44,18 @@ public class ToolInvocationDTO {
   /** 冻结 ToolCall 的工具名（canonical tool name），恒有值（不依赖 binding）。 */
   private String toolName;
 
-  /** 绑定工具版本字符串；binding 为 null（unknown tool 槽位）时无值。 */
+  /** 绑定工具版本字符串；binding 为 null（unknown tool 槽位）时显式序列化 null（{@code @JsonInclude(ALWAYS)}）。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String toolVersion;
 
   /** 冻结的编译期前端 Tool renderer contribution id；binding 为 null 时固定回退为 {@code tool}。 */
   private String rendererKey;
 
-  /** 工具类型，取 {@code ToolType} 枚举名；binding 为 null（unknown tool 槽位）时无值。 */
+  /**
+   * 工具类型，取 {@code ToolType} 枚举名；binding 为 null（unknown tool 槽位）时显式序列化
+   * null（{@code @JsonInclude(ALWAYS)}）。
+   */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String toolType;
 
   /**

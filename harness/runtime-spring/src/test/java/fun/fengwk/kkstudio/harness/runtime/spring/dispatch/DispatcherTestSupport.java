@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -27,10 +28,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -181,9 +180,13 @@ final class DispatcherTestSupport {
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
           tx.insertEntry(userEntry(userEntryId, sessionId, turnStartEntryId));
-          tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId));
+          // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）：请求带 bash
+          // binding，使 assistant ToolCall renderer 与 ToolInvocation binding 全等。
+          ModelRequestSpec request = tooledRequest();
+          ProviderResponse response = toolResponse();
+          tx.insertEntry(
+              assistantEntry(assistantEntryId, sessionId, userEntryId, request, response));
           tx.insertThread(thread(threadId, turnStartEntryId));
-          ModelRequestSpec request = modelRequest();
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -205,7 +208,7 @@ final class DispatcherTestSupport {
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.markRunning(NOW));
           current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.succeed(toolResponse(), NOW));
+          tx.updateModelInvocation(current.succeed(response, NOW));
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.attachResultEntry(assistantEntryId, NOW));
           tx.insertToolInvocations(
@@ -585,30 +588,13 @@ final class DispatcherTestSupport {
         NOW);
   }
 
-  private static Entry assistantEntry(UUID id, UUID sessionId, UUID parentId) {
+  private static Entry assistantEntry(
+      UUID id, UUID sessionId, UUID parentId, ModelRequestSpec request, ProviderResponse response) {
     return new Entry(
         id,
         sessionId,
         parentId,
-        new MessagePayload(
-            new AgentMessage(
-                AgentMessageRole.ASSISTANT,
-                List.of(
-                    new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
-                    new TextMessageContent("assistant reply"))),
-            new AssistantMessageMetadata(
-                GenerationStopReason.COMPLETE,
-                new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-                new ModelCost(
-                    "USD",
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO)),
-            null),
+        new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()),
         NOW);
   }
 
@@ -631,6 +617,21 @@ final class DispatcherTestSupport {
         List.of(),
         List.of(),
         ProviderCacheControl.none(),
+        null);
+  }
+
+  /** 带 bash binding 的机械请求（与 {@link #toolRequest()} 的 binding renderer 全等）。 */
+  private static ModelRequestSpec tooledRequest() {
+    ModelRequestSpec base = modelRequest();
+    return new ModelRequestSpec(
+        base.providerType(),
+        base.model(),
+        base.variant(),
+        base.preambleMessages(),
+        List.of(toolRequest().binding()),
+        List.of(),
+        List.of(),
+        base.cacheControl(),
         null);
   }
 
