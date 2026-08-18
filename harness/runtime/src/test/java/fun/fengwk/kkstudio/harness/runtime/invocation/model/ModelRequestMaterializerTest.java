@@ -57,6 +57,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -94,17 +95,24 @@ class ModelRequestMaterializerTest {
 
   @Test
   void encodedSpecSizeIsIndependentOfOrdinaryHistoryLength() {
-    ModelRequestSpec spec = liveSpec(List.of(AgentMessage.system("sys")), bashBinding());
-    String encoded = CODEC.encode(spec);
-    int shortSize = encoded.length();
-    int longSize = CODEC.encode(spec).length();
+    // 两条独立构造的等价 spec：模拟 resolver 只冻结 preamble/bindings，不把普通历史写入 durable spec。
+    EntryPath shortPath = conversationPath(1);
+    EntryPath longPath = conversationPath(32);
+    ModelRequestSpec shortSpec =
+        specFromFrozenInputs(shortPath, List.of(AgentMessage.system("sys")), bashBinding());
+    ModelRequestSpec longSpec =
+        specFromFrozenInputs(longPath, List.of(AgentMessage.system("sys")), bashBinding());
+    String shortEncoded = CODEC.encode(shortSpec);
+    String longEncoded = CODEC.encode(longSpec);
 
-    ProviderRequest shortRequest = MATERIALIZER.materialize(conversationPath(1), spec);
-    ProviderRequest longRequest = MATERIALIZER.materialize(conversationPath(32), spec);
+    ProviderRequest shortRequest = MATERIALIZER.materialize(shortPath, shortSpec);
+    ProviderRequest longRequest = MATERIALIZER.materialize(longPath, longSpec);
 
-    assertEquals(shortSize, longSize);
-    assertFalse(encoded.contains("user-1"));
-    assertFalse(encoded.contains("reply-32"));
+    assertEquals(shortSpec, longSpec);
+    assertEquals(shortEncoded, longEncoded);
+    assertFalse(shortEncoded.contains("user-1"));
+    assertFalse(longEncoded.contains("user-32"));
+    assertFalse(longEncoded.contains("reply-32"));
     assertTrue(longRequest.messages().size() > shortRequest.messages().size());
     assertEquals(3, shortRequest.messages().size());
     assertEquals(65, longRequest.messages().size());
@@ -206,6 +214,13 @@ class ModelRequestMaterializerTest {
       parent = end;
     }
     return new EntryPath(entries);
+  }
+
+  /** Resolver 只把 preamble/bindings 冻进 spec；path 上的普通历史不得进入编码。参数保留以证明调用方即使看到长 path 也不会把它写进 spec。 */
+  private static ModelRequestSpec specFromFrozenInputs(
+      EntryPath path, List<AgentMessage> preamble, ToolBinding binding) {
+    Objects.requireNonNull(path, "path");
+    return liveSpec(preamble, binding);
   }
 
   private static ModelRequestSpec liveSpec(List<AgentMessage> preamble, ToolBinding binding) {

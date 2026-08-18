@@ -171,7 +171,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           tx.insertThread(thread(threadId, turnStartEntryId));
           return new TurnBaseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
@@ -187,7 +187,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           tx.insertThread(thread(threadId, turnStartEntryId));
           UUID modelId = tx.nextId();
           ModelInvocation model =
@@ -212,7 +212,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
           ThreadState thread = thread(threadId, userEntryId);
@@ -249,7 +249,7 @@ final class HarnessRuntimeTestSupport {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.CONTINUATION, settings(), OWNER_THREAD_ID),
+                  new TurnStartPayload(TurnStartReason.CONTINUATION, settings(), threadId, 100_000),
                   T1));
           ThreadState thread = thread(threadId, turnStartEntryId);
           tx.insertThread(thread);
@@ -273,7 +273,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           tx.insertThread(thread(threadId, turnStartEntryId));
           UUID modelId = tx.nextId();
           ModelInvocation model =
@@ -320,7 +320,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           ThreadState thread = thread(threadId, turnStartEntryId);
           tx.insertThread(thread);
           UUID userEntryId = tx.nextId();
@@ -468,7 +468,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           ThreadState thread = thread(threadId, headAtTurnEnd ? turnStartEntryId : rootEntryId);
           tx.insertThread(thread);
           UUID userEntryId = tx.nextId();
@@ -523,7 +523,7 @@ final class HarnessRuntimeTestSupport {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
-          tx.insertEntry(turnStartEntry(id, sessionId, parentEntryId, T1));
+          tx.insertEntry(turnStartEntry(id, sessionId, parentEntryId, T1, OWNER_THREAD_ID));
           return id;
         });
   }
@@ -675,11 +675,16 @@ final class HarnessRuntimeTestSupport {
   }
 
   static Entry turnStartEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {
+    return turnStartEntry(id, sessionId, parentId, createdAt, OWNER_THREAD_ID);
+  }
+
+  static Entry turnStartEntry(
+      UUID id, UUID sessionId, UUID parentId, Instant createdAt, UUID ownerThreadId) {
     return new Entry(
         id,
         sessionId,
         parentId,
-        new TurnStartPayload(TurnStartReason.INPUT, settings(), OWNER_THREAD_ID),
+        new TurnStartPayload(TurnStartReason.INPUT, settings(), ownerThreadId, 100_000),
         createdAt);
   }
 

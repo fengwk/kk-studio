@@ -59,6 +59,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -71,6 +72,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -93,6 +96,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -2127,6 +2131,34 @@ class ModelProcessorTest {
   }
 
   /**
+   * materialize 完成后再做 start fence：Stop / recovery 在加载 EntryPath 之后删除 MODEL work 时，不得再调用 Gateway。
+   */
+  @Test
+  void staleStartAfterMaterializationNeverCallsGateway() {
+    Fixture fixture = fixture();
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    HarnessStore hooked = afterEntryPathLoad(fixture.store, () -> deleteModelWork(fixture));
+    ModelProcessor processor =
+        new ModelProcessor(
+            hooked,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler());
+
+    assertEquals(
+        ProcessResult.LOST_OWNERSHIP,
+        processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+
+    assertEquals(0, fixture.gateway.startCalls, "post-materialization stale start must not start");
+    assertEquals(
+        ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
+    assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
+    assertFalse(processor.hasActiveExecution());
+  }
+
+  /**
    * scheduler 拒绝 heartbeat 且期间 ownership 已丢（bounce 前 work 行被删）：按 bounce 实际结果返回 LOST_OWNERSHIP，
    * 不得无条件 RESCHEDULED；不调用 Gateway。
    */
@@ -2439,6 +2471,59 @@ class ModelProcessorTest {
   // fixture / 辅助方法
   // ---------------------------------------------------------------------------------------------
 
+  /** 在一次 transaction 加载完不可变 EntryPath 并提交后执行 {@code afterLoad}，用于证明 materialize 之后的 start fence。 */
+  private static HarnessStore afterEntryPathLoad(HarnessStore delegate, Runnable afterLoad) {
+    return (HarnessStore)
+        Proxy.newProxyInstance(
+            HarnessStore.class.getClassLoader(),
+            new Class<?>[] {HarnessStore.class},
+            (proxy, method, args) -> {
+              if ("transaction".equals(method.getName()) && args != null && args.length == 1) {
+                @SuppressWarnings("unchecked")
+                Function<HarnessStore.Transaction, ?> callback =
+                    (Function<HarnessStore.Transaction, ?>) args[0];
+                AtomicBoolean loaded = new AtomicBoolean();
+                Object result =
+                    delegate.transaction(
+                        tx ->
+                            callback.apply(
+                                (HarnessStore.Transaction)
+                                    Proxy.newProxyInstance(
+                                        HarnessStore.Transaction.class.getClassLoader(),
+                                        new Class<?>[] {HarnessStore.Transaction.class},
+                                        (ignored, txMethod, txArgs) -> {
+                                          Object value = invokeUnchecked(tx, txMethod, txArgs);
+                                          if ("loadEntryPath".equals(txMethod.getName())) {
+                                            loaded.set(true);
+                                          }
+                                          return value;
+                                        })));
+                if (loaded.get()) {
+                  afterLoad.run();
+                }
+                return result;
+              }
+              return invokeUnchecked(delegate, method, args);
+            });
+  }
+
+  private static Object invokeUnchecked(Object target, Method method, Object[] args) {
+    try {
+      return method.invoke(target, args);
+    } catch (InvocationTargetException error) {
+      Throwable cause = error.getCause();
+      if (cause instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      if (cause instanceof Error fatal) {
+        throw fatal;
+      }
+      throw new IllegalStateException(cause);
+    } catch (IllegalAccessException error) {
+      throw new IllegalStateException(error);
+    }
+  }
+
   private void deleteModelWork(Fixture fixture) {
     deleteModelWork(fixture, fixture.invocationId);
   }
@@ -2545,6 +2630,7 @@ class ModelProcessorTest {
         tx -> {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(new Session(sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
@@ -2562,7 +2648,7 @@ class ModelProcessorTest {
                     sessionId,
                     rootEntryId,
                     new TurnStartPayload(
-                        TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID, 100_000),
+                        TurnStartReason.INPUT, branchSettings(), threadId, 100_000),
                     now.plusMillis(1)));
             tx.insertEntry(
                 new Entry(userId, sessionId, inputStart, userMessagePayload(), now.plusMillis(2)));
@@ -2579,13 +2665,12 @@ class ModelProcessorTest {
             turnStartAt = now.plusMillis(5);
           }
           UUID turnStartEntryId = tx.nextId();
-          UUID threadId = tx.nextId();
           tx.insertEntry(
               new Entry(
                   turnStartEntryId,
                   sessionId,
                   parentId,
-                  new TurnStartPayload(reason, branchSettings(), OWNER_THREAD_ID, 100_000),
+                  new TurnStartPayload(reason, branchSettings(), threadId, 100_000),
                   turnStartAt));
           tx.insertThread(new ThreadState(threadId, turnStartEntryId, false, 1, 0, now, now));
           return new Baseline(sessionId, rootEntryId, turnStartEntryId, threadId);
@@ -2690,7 +2775,7 @@ class ModelProcessorTest {
     return spec(
         List.of(),
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100L, id(3L), id(5L), null));
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100L, id(4L), id(6L), null));
   }
 
   private static ModelRequestSpec requestWithTool() {

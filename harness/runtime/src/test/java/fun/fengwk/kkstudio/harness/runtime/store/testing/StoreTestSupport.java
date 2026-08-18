@@ -77,6 +77,7 @@ final class StoreTestSupport {
 
   static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
   static final UUID OWNER_THREAD_ID = TestIds.id(10L);
+  static final int CONTEXT_WINDOW = 100_000;
   static final Instant T0 = Instant.ofEpochMilli(1000);
   static final Instant T1 = Instant.ofEpochMilli(2000);
   static final Instant T2 = Instant.ofEpochMilli(3000);
@@ -123,7 +124,13 @@ final class StoreTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(
+              new Entry(
+                  turnStartEntryId,
+                  sessionId,
+                  rootEntryId,
+                  resolvedTurnStartPayload(threadId),
+                  T1));
           tx.insertThread(thread(threadId, turnStartEntryId));
           return new TurnBaseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
@@ -179,6 +186,11 @@ final class StoreTestSupport {
 
   static EntryPayload turnStartPayload() {
     return new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID);
+  }
+
+  static EntryPayload resolvedTurnStartPayload(UUID ownerThreadId) {
+    return new TurnStartPayload(
+        TurnStartReason.INPUT, branchSettings(), ownerThreadId, CONTEXT_WINDOW);
   }
 
   /** ASSISTANT MESSAGE payload；{@code toolCallIds} 会按顺序变成 ToolCall 内容。 */

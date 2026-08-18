@@ -227,25 +227,9 @@ public final class ModelProcessor implements AutoCloseable {
           ? ProcessResult.RESCHEDULED
           : ProcessResult.LOST_OWNERSHIP;
     }
-    // stale-start fence：Gateway.start 的确切 admission 边界。再校验 durable 仍 DISPATCHING + attempt 匹配 +
-    // claim 仍 owned（覆盖跨实例 recovery：另一 JVM 的 processor 恢复 UNKNOWN 后本实例的本地 abandoned 检查看不到）。
-    // 失败立即 abandon 并 LOST，绝不调用 Gateway；此检查之后并发 Stop / recovery 属于 DISPATCHING 不确定窗口，
-    // 由 Gateway 的 Indeterminate / Started 后 markRunning 校验等现有 UNKNOWN / CANCEL 协议处理。
-    if (!checkStartBoundary(claim, dispatched)) {
-      execution.abandon();
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    ModelGateway.StartResult result;
+    ProviderRequest providerRequest;
     try {
-      ProviderRequest providerRequest = materializeRequest(claim, dispatched);
-      result =
-          gateway.start(
-              new ModelGateway.Execution(
-                  invocationId,
-                  proposedAttempt,
-                  dispatched.request().providerType(),
-                  providerRequest),
-              execution);
+      providerRequest = materializeRequest(claim, dispatched);
     } catch (ClaimLostSignal lost) {
       execution.abandon();
       return ProcessResult.LOST_OWNERSHIP;
@@ -262,6 +246,25 @@ public final class ModelProcessor implements AutoCloseable {
       return rejectDispatch(claim, dispatched, error)
           ? ProcessResult.TERMINATED
           : ProcessResult.LOST_OWNERSHIP;
+    }
+    // stale-start fence：Gateway.start 的确切 admission 边界。materialize 之后再校验 durable 仍 DISPATCHING +
+    // attempt 匹配 + claim 仍 owned（覆盖 materialize 期间 Stop / 跨实例 recovery 删除或改写 invocation/work）。
+    // 失败立即 abandon 并 LOST，绝不调用 Gateway；此检查之后并发 Stop / recovery 属于 DISPATCHING 不确定窗口，
+    // 由 Gateway 的 Indeterminate / Started 后 markRunning 校验等现有 UNKNOWN / CANCEL 协议处理。
+    if (!checkStartBoundary(claim, dispatched)) {
+      execution.abandon();
+      return ProcessResult.LOST_OWNERSHIP;
+    }
+    ModelGateway.StartResult result;
+    try {
+      result =
+          gateway.start(
+              new ModelGateway.Execution(
+                  invocationId,
+                  proposedAttempt,
+                  dispatched.request().providerType(),
+                  providerRequest),
+              execution);
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 Gateway 肯定未接受，可安全转 READY 并 reschedule（attempt 不变）。
       log.warn(

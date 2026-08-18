@@ -206,7 +206,7 @@ final class ToolProcessorTestSupport {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID),
+                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), threadId, 100_000),
                   now.plusMillis(1)));
           tx.insertEntry(
               new Entry(

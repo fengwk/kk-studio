@@ -14,6 +14,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.syntheticToolResultPayload;
@@ -316,6 +317,85 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   @Test
+  void modelInvocationRejectsOwnerMismatchAndMissingContextWindow() {
+    Baseline root = seedThreadBaseline(store);
+    UUID foreignOwner = TestIds.id(99);
+    UUID mismatchedStart =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      root.sessionId(),
+                      root.rootEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          StoreTestSupport.branchSettings(),
+                          foreignOwner,
+                          StoreTestSupport.CONTEXT_WINDOW),
+                      T1));
+              ThreadState locked = tx.lockThread(root.threadId()).orElseThrow();
+              tx.updateThread(locked.advanceHead(id, locked.yoloEnabled(), T1));
+              return id;
+            });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(root.threadId());
+                  tx.insertModelInvocation(
+                      modelInvocation(
+                          TestIds.id(1),
+                          root.threadId(),
+                          mismatchedStart,
+                          mismatchedStart,
+                          ModelInvocationStatus.READY,
+                          null,
+                          T2));
+                }));
+
+    Baseline otherRoot = seedThreadBaseline(store);
+    UUID missingWindowStart =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      otherRoot.sessionId(),
+                      otherRoot.rootEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          StoreTestSupport.branchSettings(),
+                          otherRoot.threadId()),
+                      T1));
+              ThreadState locked = tx.lockThread(otherRoot.threadId()).orElseThrow();
+              tx.updateThread(locked.advanceHead(id, locked.yoloEnabled(), T1));
+              return id;
+            });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(otherRoot.threadId());
+                  tx.insertModelInvocation(
+                      modelInvocation(
+                          TestIds.id(2),
+                          otherRoot.threadId(),
+                          missingWindowStart,
+                          missingWindowStart,
+                          ModelInvocationStatus.READY,
+                          null,
+                          T2));
+                }));
+  }
+
+  @Test
   void modelInvocationInsertRequiresBasisEqualToCurrentThreadHead() {
     // 创建时 basis CAS：不是 thread head 的 basis 会被拒绝
     Baseline other = seedThreadBaseline(store);
@@ -408,14 +488,18 @@ public abstract class HarnessStoreInvocationContract {
             assistantEntryId,
             toolResultPayload(assistantEntryId, 0, "call-1"));
     // 链 B：root -> turnStartB -> userB -> errorB
+    UUID thread5 = store.transaction(HarnessStore.Transaction::nextId);
     UUID turnStartB =
-        insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.rootEntryId(), resolvedTurnStartPayload(thread5));
     UUID userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
     UUID errorEntryId =
         insertChildEntry(store, baseline.sessionId(), userB, assistantErrorPayload());
     // 链 C：root -> turnStartC -> userC -> abortedC
+    UUID thread6 = store.transaction(HarnessStore.Transaction::nextId);
     UUID turnStartC =
-        insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.rootEntryId(), resolvedTurnStartPayload(thread6));
     UUID userC = insertChildEntry(store, baseline.sessionId(), turnStartC, userMessagePayload());
     UUID abortedEntryId =
         insertChildEntry(store, baseline.sessionId(), userC, assistantAbortedPayload());
@@ -461,13 +545,7 @@ public abstract class HarnessStoreInvocationContract {
         ModelInvocationStatus.SUCCEEDED,
         assistantEntryId,
         T1);
-    UUID thread5 =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertThread(thread(id, turnStartB));
-              return id;
-            });
+    inTransaction(store, tx -> tx.insertThread(thread(thread5, turnStartB)));
     insertTerminalModel(
         TestIds.id(5),
         thread5,
@@ -476,13 +554,7 @@ public abstract class HarnessStoreInvocationContract {
         ModelInvocationStatus.FAILED,
         errorEntryId,
         T2);
-    UUID thread6 =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertThread(thread(id, turnStartC));
-              return id;
-            });
+    inTransaction(store, tx -> tx.insertThread(thread(thread6, turnStartC)));
     insertTerminalModel(
         TestIds.id(6),
         thread6,
@@ -2102,7 +2174,8 @@ public abstract class HarnessStoreInvocationContract {
                   new TurnStartPayload(
                       TurnStartReason.COMPACTION,
                       StoreTestSupport.branchSettings(),
-                      StoreTestSupport.OWNER_THREAD_ID),
+                      baseline.threadId(),
+                      StoreTestSupport.CONTEXT_WINDOW),
                   T1));
           tx.updateThread(
               tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, false, T2));
@@ -2459,7 +2532,8 @@ public abstract class HarnessStoreInvocationContract {
             new TurnStartPayload(
                 TurnStartReason.COMPACTION,
                 StoreTestSupport.branchSettings(),
-                StoreTestSupport.OWNER_THREAD_ID),
+                baseline.threadId(),
+                StoreTestSupport.CONTEXT_WINDOW),
             T1));
     tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, false, T2));
     UUID modelId = tx.nextId();
