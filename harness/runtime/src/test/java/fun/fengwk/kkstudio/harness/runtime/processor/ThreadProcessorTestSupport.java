@@ -830,7 +830,9 @@ final class ThreadProcessorTestSupport {
   }
 
   /**
-   * 种子一条压缩可触发状态：关闭的 INPUT turn（ASSISTANT 携带 {@code usage}）+ SUCCEEDED invocation（resultEntryId 挂上）。
+   * 种子一条压缩可触发状态（closed-turn Entry-only）：关闭的两段 INPUT turn 历史 + Thread head。历史事实仅由 immutable Entry
+   * 构成：TURN_START 的 owner/contextWindow 决定 turn 归属，turn2 ASSISTANT metadata 携带 caller 指定的 {@code
+   * usage}（planner 依赖它）；不 seed/保留任何 ModelInvocation（closed turn 不保留 invocation）。
    */
   static ClosedTurnBaseline seedCompactionReadyClosedTurn(
       InMemoryHarnessStore store, ModelUsage usage) {
@@ -842,133 +844,94 @@ final class ThreadProcessorTestSupport {
     // 形状：turn1（短消息，作为可摘要历史）+ turn2（长 USER 消息 + 带 usage 的短 ASSISTANT）。
     // planner 从尾部累计：turn2 的 ASSISTANT 远小于 keepRecentTokens，长 USER 处越过 -> cut 落在 turn2 USER（非切分
     // FULL）。
-    // live attached：turn2 invocation（plainRequest）的 SUCCEEDED 结果必须经 mapper 与 turn2 ASSISTANT 全等，
-    // 同时保留 caller 指定的 usage（随 response 快照进 assistant metadata，planner 依赖它）。
-    ModelRequestSpec request = plainRequest();
     ProviderResponse response = successResponse(usage, cost(), "assistant reply");
-    UUID[] modelIdHolder = new UUID[1];
-    ClosedTurnBaseline baseline =
-        store.transaction(
-            tx -> {
-              UUID sessionId = tx.nextId();
-              UUID rootEntryId = tx.nextId();
-              UUID turnStartEntryId = tx.nextId(); // turn1 TURN_START
-              UUID userEntryId = tx.nextId(); // turn1 USER
-              UUID assistantEntryId = tx.nextId(); // turn1 ASSISTANT
-              UUID turnEndEntryId = tx.nextId(); // turn1 TURN_END
-              UUID secondTurnStartId = tx.nextId(); // turn2 TURN_START
-              UUID secondUserEntryId = tx.nextId(); // turn2 USER（长消息）
-              UUID secondAssistantEntryId = tx.nextId(); // turn2 ASSISTANT（携带 usage）
-              UUID secondTurnEndId = tx.nextId(); // turn2 TURN_END
-              UUID threadId = tx.nextId();
-              tx.insertSession(new Session(sessionId, NOW));
-              tx.insertEntry(
-                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-              // turn1：短消息。
-              tx.insertEntry(
-                  new Entry(
-                      turnStartEntryId,
-                      sessionId,
-                      rootEntryId,
-                      resolvedInputTurnStart(threadId),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
-              tx.insertEntry(
-                  new Entry(
-                      assistantEntryId,
-                      sessionId,
-                      userEntryId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.ASSISTANT,
-                              List.of(new TextMessageContent("assistant reply"))),
-                          new AssistantMessageMetadata(
-                              GenerationStopReason.COMPLETE, usage(), cost()),
-                          null),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      turnEndEntryId,
-                      sessionId,
-                      assistantEntryId,
-                      new TurnEndPayload(
-                          turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
-                      NOW));
-              // turn2：长 USER + 短 ASSISTANT（usage 挂这里）。
-              tx.insertEntry(
-                  new Entry(
-                      secondTurnStartId,
-                      sessionId,
-                      turnEndEntryId,
-                      resolvedInputTurnStart(threadId),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      secondUserEntryId,
-                      sessionId,
-                      secondTurnStartId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.USER,
-                              List.of(new TextMessageContent(compactionUserText()))),
-                          null,
-                          null),
-                      NOW));
-              // Thread head 停在 turn2 USER：invocation 的 basis 必须是插入时刻的 head（与真实流程一致）。
-              tx.insertThread(
-                  new ThreadState(threadId, secondUserEntryId, false, 1L, 0L, NOW, NOW));
-              modelIdHolder[0] = tx.nextId();
-              tx.insertModelInvocation(
-                  new ModelInvocation(
-                      modelIdHolder[0],
-                      threadId,
-                      secondTurnStartId,
-                      secondUserEntryId,
-                      request,
-                      ModelInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      null,
-                      List.of(),
-                      NOW,
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      secondAssistantEntryId,
-                      sessionId,
-                      secondUserEntryId,
-                      new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      secondTurnEndId,
-                      sessionId,
-                      secondAssistantEntryId,
-                      new TurnEndPayload(
-                          secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
-                      NOW));
-              tx.updateThread(
-                  tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndId, NOW));
-              return new ClosedTurnBaseline(
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId(); // turn1 TURN_START
+          UUID userEntryId = tx.nextId(); // turn1 USER
+          UUID assistantEntryId = tx.nextId(); // turn1 ASSISTANT
+          UUID turnEndEntryId = tx.nextId(); // turn1 TURN_END
+          UUID secondTurnStartId = tx.nextId(); // turn2 TURN_START
+          UUID secondUserEntryId = tx.nextId(); // turn2 USER（长消息）
+          UUID secondAssistantEntryId = tx.nextId(); // turn2 ASSISTANT（携带 usage）
+          UUID secondTurnEndId = tx.nextId(); // turn2 TURN_END
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertEntry(
+              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          // turn1：短消息。
+          tx.insertEntry(
+              new Entry(
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
+          tx.insertEntry(
+              new Entry(
+                  userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId,
                   sessionId,
-                  rootEntryId,
+                  userEntryId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.ASSISTANT,
+                          List.of(new TextMessageContent("assistant reply"))),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
+                  turnEndEntryId,
+                  sessionId,
+                  assistantEntryId,
+                  new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+                  NOW));
+          // turn2：长 USER + 短 ASSISTANT（usage 挂这里，作为阈值触发事实）。
+          tx.insertEntry(
+              new Entry(
                   secondTurnStartId,
+                  sessionId,
+                  turnEndEntryId,
+                  resolvedInputTurnStart(threadId),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   secondUserEntryId,
+                  sessionId,
+                  secondTurnStartId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER,
+                          List.of(new TextMessageContent(compactionUserText()))),
+                      null,
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   secondAssistantEntryId,
+                  sessionId,
+                  secondUserEntryId,
+                  new HistoryPayloadMapper().assistantPayload(response, List.of()),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   secondTurnEndId,
-                  threadId);
-            });
-    // 插入后推进到 SUCCEEDED 并挂上 assistant 结果（与 seedModelInvocation 相同的状态机路径）。
-    UUID modelId = modelIdHolder[0];
-    transitionModel(store, modelId, m -> m.beginDispatch(NOW));
-    transitionModel(store, modelId, m -> m.markRunning(NOW));
-    transitionModel(store, modelId, m -> m.succeed(response, NOW));
-    transitionModel(store, modelId, m -> m.attachResultEntry(baseline.assistantEntryId(), NOW));
-    return baseline;
+                  sessionId,
+                  secondAssistantEntryId,
+                  new TurnEndPayload(
+                      secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
+                  NOW));
+          tx.insertThread(new ThreadState(threadId, secondTurnEndId, false, 1L, 0L, NOW, NOW));
+          return new ClosedTurnBaseline(
+              sessionId,
+              rootEntryId,
+              secondTurnStartId,
+              secondUserEntryId,
+              secondAssistantEntryId,
+              secondTurnEndId,
+              threadId);
+        });
   }
 
   /** 长 USER 文本：估计 token（22_500）超过默认 keepRecentTokens（20_000），保证 planner 把 cut 选在 turn2 USER 上。 */

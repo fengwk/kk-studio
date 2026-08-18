@@ -139,7 +139,7 @@ public final class ModelAttemptMaterialization {
   /** compaction 组装上下文：resultPath 去掉 head 结果后的前缀（至少保留 ROOT 与 basis 两项）。 */
   private static EntryPath preResultPath(EntryPath resultPath) {
     List<Entry> entries = resultPath.entries();
-    if (entries.size() < 2) {
+    if (entries.size() < 3) {
       throw new IllegalArgumentException(
           "model result path must keep a non-trivial prefix before its head");
     }

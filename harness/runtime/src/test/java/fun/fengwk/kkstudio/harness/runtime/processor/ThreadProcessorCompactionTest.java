@@ -9,7 +9,6 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.compactionRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.compactionUserText;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.resolvedCompactionTurnStart;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.resolvedInputTurnStart;
@@ -43,8 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -76,6 +73,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   void thresholdCompactionRunsBeforeQueuedInputAndConsumesZeroCommands() {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    // closed historical turn 不保留 invocation：阈值压缩只按 Entry 上的 owner/contextWindow + usage 事实触发。
+    assertTrue(
+        fixture
+            .store
+            .transaction(
+                tx ->
+                    tx.findModelInvocationByTurn(baseline.threadId(), baseline.turnStartEntryId()))
+            .isEmpty());
     UUID userCommand =
         seedCommand(
             fixture.store,
@@ -217,6 +222,13 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // 种子切分场景：HISTORY 部分成功（complete=false）后，下一次处理必须机械延续 TURN_PREFIX 且冻结原切分事实。
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
     UUID[] ids = seedClosedHistoryPartial(fixture, baseline);
+    // 关闭的 HISTORY partial 压缩 turn 不保留 invocation：TURN_PREFIX 延续只按 incomplete HISTORY payload 的
+    // Entry 事实触发。
+    assertTrue(
+        fixture
+            .store
+            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), ids[0]))
+            .isEmpty());
 
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
@@ -292,6 +304,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   void overflowCompactionAppliesContinueModelTrueThenNextProcessingCreatesContinuation() {
     Fixture fixture = fixture();
     var baseline = seedOverflowFailedClosedTurn(fixture.store);
+    // closed historical turn 不保留 invocation：OVERFLOW 压缩只按 Entry 上的错误事实触发。
+    assertTrue(
+        fixture
+            .store
+            .transaction(
+                tx ->
+                    tx.findModelInvocationByTurn(baseline.threadId(), baseline.turnStartEntryId()))
+            .isEmpty());
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
     assertEquals(
@@ -576,44 +596,28 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
     UUID sessionId = baseline.sessionId();
     UUID headId = baseline.turnEndEntryId();
-    UUID[] ids = new UUID[3]; // [turnStart, error, model]
+    // 手工失败的 COMPACTION turn 种子（closed-turn Entry-only）：TURN_START(COMPACTION) + ASSISTANT_ERROR +
+    // FAILED TURN_END，失败压缩事实只由 immutable Entry 承载，不 seed/保留 ModelInvocation。
     fixture.store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
-          ids[0] = tx.nextId();
+          UUID turnStartId = tx.nextId();
           tx.insertEntry(
               new Entry(
-                  ids[0],
+                  turnStartId,
                   sessionId,
                   headId,
                   resolvedCompactionTurnStart(baseline.threadId()),
                   NOW));
-          // 与真实 commit 一致：head 先推进到 TURN_START，invocation 的 basis 就是该 TURN_START。
+          // 与真实 commit 一致：head 先推进到 TURN_START，再追加错误结果与 FAILED TURN_END。
           tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(ids[0], NOW));
-          ids[2] = tx.nextId();
-          tx.insertModelInvocation(
-              new ModelInvocation(
-                  ids[2],
-                  baseline.threadId(),
-                  ids[0],
-                  ids[0],
-                  compactionRequest(historyPreparation()),
-                  ModelInvocationStatus.READY,
-                  0,
-                  null,
-                  null,
-                  null,
-                  null,
-                  List.of(),
-                  NOW,
-                  NOW));
-          ids[1] = tx.nextId();
+              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(turnStartId, NOW));
+          UUID errorId = tx.nextId();
           tx.insertEntry(
               new Entry(
-                  ids[1],
+                  errorId,
                   sessionId,
-                  ids[0],
+                  turnStartId,
                   new AssistantErrorPayload(
                       new AssistantError(ProviderErrorKind.INVALID_REQUEST.name(), "boom"), null),
                   NOW));
@@ -622,18 +626,13 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
               new Entry(
                   endId,
                   sessionId,
-                  ids[1],
+                  errorId,
                   new TurnEndPayload(
-                      ids[0], TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                      turnStartId, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
                   NOW));
           tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
           return null;
         });
-    transitionModel(
-        fixture.store,
-        ids[2],
-        m -> m.fail(new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "boom"), NOW));
-    transitionModel(fixture.store, ids[2], m -> m.attachResultEntry(ids[1], NOW));
 
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
@@ -681,15 +680,16 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   /**
-   * 关闭的 HISTORY partial 种子：COMPACTION turn（TURN_START + incomplete HISTORY payload + TURN_END）， 其
-   * invocation 已 SUCCEEDED 并挂上 result。返回 [turnStartId, resultId, modelId]。
+   * 关闭的 HISTORY partial 种子（closed-turn Entry-only）：COMPACTION turn（TURN_START + incomplete HISTORY
+   * payload + TURN_END），历史事实仅由 immutable Entry 构成，不 seed/保留 ModelInvocation（closed turn 不保留
+   * invocation）。返回 [turnStartId, resultId]。
    */
   private static UUID[] seedClosedHistoryPartial(Fixture fixture, ClosedTurnBaseline baseline) {
     UUID sessionId = baseline.sessionId();
     UUID headId = baseline.turnEndEntryId();
-    UUID[] ids = new UUID[3]; // [turnStart, result, model]
-    // 冻结 request/response；HISTORY 响应文本即 partial 的 summary（strict attach 校验要求全等）。
-    ModelRequestSpec request = compactionRequest(historyPreparation());
+    UUID[] ids = new UUID[2]; // [turnStart, result]
+    // 冻结切分事实；HISTORY 响应文本即 partial 的 summary（assembler 重放必须与真实 apply 一致）。
+    var request = compactionRequest(historyPreparation());
     ProviderResponse response =
         successResponse("history summary", List.of(), GenerationStopReason.COMPLETE);
     fixture.store.transaction(
@@ -703,32 +703,12 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   headId,
                   resolvedCompactionTurnStart(baseline.threadId()),
                   NOW));
-          // 与真实 commit 一致：head 先推进到 TURN_START，invocation 的 basis 就是该 TURN_START。
+          // 与真实 commit 一致：head 先推进到 TURN_START。
           tx.updateThread(
               tx.findThread(baseline.threadId()).orElseThrow().advanceHead(ids[0], NOW));
-          ids[2] = tx.nextId();
-          tx.insertModelInvocation(
-              new ModelInvocation(
-                  ids[2],
-                  baseline.threadId(),
-                  ids[0],
-                  ids[0],
-                  request,
-                  ModelInvocationStatus.READY,
-                  0,
-                  null,
-                  null,
-                  null,
-                  null,
-                  List.of(),
-                  NOW,
-                  NOW));
           return null;
         });
-    transitionModel(fixture.store, ids[2], m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, ids[2], m -> m.markRunning(NOW));
-    transitionModel(fixture.store, ids[2], m -> m.succeed(response, NOW));
-    // result payload 由同一 request/response + 真实 attach 前缀路径经 assembler 机械派生（HISTORY 前缀即
+    // result payload 由同一 request 的冻结切分事实 + 真实 apply 前缀路径经 assembler 机械派生（HISTORY 前缀即
     // head==TURN_START 的路径）。
     CompactionPayload resultPayload =
         CompactionSummaryAssembler.resultPayload(
@@ -749,149 +729,114 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
           return null;
         });
-    transitionModel(fixture.store, ids[2], m -> m.attachResultEntry(ids[1], NOW));
     return ids;
   }
 
   /**
-   * OVERFLOW 失败关闭 turn 种子：INPUT turn（USER + ASSISTANT_ERROR + FAILED TURN_END），invocation 以
-   * OVERFLOW 错误终止并挂上 error result。
+   * OVERFLOW 失败关闭 turn 种子（closed-turn Entry-only）：INPUT turn2（长 USER + ASSISTANT_ERROR(OVERFLOW) +
+   * FAILED TURN_END 挂在 turn1 后）。历史事实仅由 immutable Entry 构成（TURN_START owner/contextWindow + 错误
+   * payload），不 seed/保留 ModelInvocation（closed turn 不保留 invocation；OVERFLOW 触发按 Entry 错误事实判定）。
    */
   private static ClosedTurnBaseline seedOverflowFailedClosedTurn(InMemoryHarnessStore store) {
-    UUID[] modelIdHolder = new UUID[1];
-    ClosedTurnBaseline baseline =
-        store.transaction(
-            tx -> {
-              UUID sessionId = tx.nextId();
-              UUID rootEntryId = tx.nextId();
-              UUID turnStartEntryId = tx.nextId(); // turn1 TURN_START
-              UUID userEntryId = tx.nextId();
-              UUID assistantEntryId = tx.nextId();
-              UUID turnEndEntryId = tx.nextId();
-              UUID secondTurnStartId = tx.nextId(); // turn2 TURN_START
-              UUID secondUserEntryId = tx.nextId();
-              UUID errorEntryId = tx.nextId();
-              UUID secondTurnEndEntryId = tx.nextId();
-              UUID threadId = tx.nextId();
-              tx.insertSession(new Session(sessionId, NOW));
-              tx.insertEntry(
-                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-              tx.insertEntry(
-                  new Entry(
-                      turnStartEntryId,
-                      sessionId,
-                      rootEntryId,
-                      resolvedInputTurnStart(threadId),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      userEntryId,
-                      sessionId,
-                      turnStartEntryId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
-                          null,
-                          null),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      assistantEntryId,
-                      sessionId,
-                      userEntryId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.ASSISTANT,
-                              List.of(new TextMessageContent("assistant reply"))),
-                          new AssistantMessageMetadata(
-                              GenerationStopReason.COMPLETE, usage(), cost()),
-                          null),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      turnEndEntryId,
-                      sessionId,
-                      assistantEntryId,
-                      new TurnEndPayload(
-                          turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      secondTurnStartId,
-                      sessionId,
-                      turnEndEntryId,
-                      resolvedInputTurnStart(threadId),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      secondUserEntryId,
-                      sessionId,
-                      secondTurnStartId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.USER,
-                              List.of(new TextMessageContent(compactionUserText()))),
-                          null,
-                          null),
-                      NOW));
-              // Thread head 停在 turn2 USER：invocation 的 basis 必须是插入时刻的 head。
-              tx.insertThread(new ThreadState(threadId, secondUserEntryId, false, 1, 0, NOW, NOW));
-              modelIdHolder[0] = tx.nextId();
-              tx.insertModelInvocation(
-                  new ModelInvocation(
-                      modelIdHolder[0],
-                      threadId,
-                      secondTurnStartId,
-                      secondUserEntryId,
-                      plainRequest(),
-                      ModelInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      null,
-                      List.of(),
-                      NOW,
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      errorEntryId,
-                      sessionId,
-                      secondUserEntryId,
-                      new AssistantErrorPayload(
-                          new AssistantError(ProviderErrorKind.OVERFLOW.name(), "context overflow"),
-                          null),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      secondTurnEndEntryId,
-                      sessionId,
-                      errorEntryId,
-                      new TurnEndPayload(
-                          secondTurnStartId,
-                          TurnEndOutcome.FAILED,
-                          false,
-                          TurnEndReason.TURN_FAILED,
-                          null),
-                      NOW));
-              tx.updateThread(
-                  tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndEntryId, NOW));
-              return new ClosedTurnBaseline(
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId(); // turn1 TURN_START
+          UUID userEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
+          UUID turnEndEntryId = tx.nextId();
+          UUID secondTurnStartId = tx.nextId(); // turn2 TURN_START
+          UUID secondUserEntryId = tx.nextId();
+          UUID errorEntryId = tx.nextId();
+          UUID secondTurnEndEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertEntry(
+              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.insertEntry(
+              new Entry(
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
                   sessionId,
-                  rootEntryId,
+                  turnStartEntryId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                      null,
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId,
+                  sessionId,
+                  userEntryId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.ASSISTANT,
+                          List.of(new TextMessageContent("assistant reply"))),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
+                  turnEndEntryId,
+                  sessionId,
+                  assistantEntryId,
+                  new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   secondTurnStartId,
+                  sessionId,
+                  turnEndEntryId,
+                  resolvedInputTurnStart(threadId),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   secondUserEntryId,
+                  sessionId,
+                  secondTurnStartId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER,
+                          List.of(new TextMessageContent(compactionUserText()))),
+                      null,
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   errorEntryId,
+                  sessionId,
+                  secondUserEntryId,
+                  new AssistantErrorPayload(
+                      new AssistantError(ProviderErrorKind.OVERFLOW.name(), "context overflow"),
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   secondTurnEndEntryId,
-                  threadId);
-            });
-    transitionModel(
-        store,
-        modelIdHolder[0],
-        m -> m.fail(new ModelInvocationError(ProviderErrorKind.OVERFLOW, "context overflow"), NOW));
-    transitionModel(
-        store, modelIdHolder[0], m -> m.attachResultEntry(baseline.assistantEntryId(), NOW));
-    return baseline;
+                  sessionId,
+                  errorEntryId,
+                  new TurnEndPayload(
+                      secondTurnStartId,
+                      TurnEndOutcome.FAILED,
+                      false,
+                      TurnEndReason.TURN_FAILED,
+                      null),
+                  NOW));
+          tx.insertThread(new ThreadState(threadId, secondTurnEndEntryId, false, 1, 0, NOW, NOW));
+          return new ClosedTurnBaseline(
+              sessionId,
+              rootEntryId,
+              secondTurnStartId,
+              secondUserEntryId,
+              errorEntryId,
+              secondTurnEndEntryId,
+              threadId);
+        });
   }
 
   /** 被停止的 COMPACTION turn 种子：TURN_START(COMPACTION) -> ABORTED -> TURN_END(STOPPED)。 */
@@ -948,8 +893,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   /**
-   * 与 seedCompactionReadyClosedTurn 相同的双 turn 形状，但 turn2 的 invocation 属于另一个 thread（共享历史）： 处理本
-   * thread 时不得压缩该 turn。
+   * 与 seedCompactionReadyClosedTurn 相同的双 turn 形状，但 turn2 的 TURN_START 由另一 Thread 拥有（共享历史的 ownership
+   * barrier）：处理本 thread 时不得压缩该 turn。共享历史仅由 immutable Entry 构成（ {@link
+   * TurnStartPayload#ownerThreadId()} + 两个 Thread 指向同一 closed head），不依赖任何 ModelInvocation。
    */
   private static ClosedTurnBaseline seedClosedTurnOwnedByOtherThread(InMemoryHarnessStore store) {
     return store.transaction(
@@ -965,7 +911,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           UUID secondAssistantEntryId = tx.nextId();
           UUID secondTurnEndId = tx.nextId();
           UUID threadId = tx.nextId(); // 被处理的 thread
-          UUID otherThreadId = tx.nextId(); // 拥有 turn2 invocation 的 thread
+          UUID otherThreadId = tx.nextId(); // 拥有 turn2 的 thread（仅由 TURN_START ownerThreadId 表达）
           tx.insertSession(new Session(sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
@@ -1022,25 +968,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       null,
                       null),
                   NOW));
+          // 两个 Thread 都指向同一 closed head（共享历史由 immutable Entry 事实承载，而非 foreign active model）。
           tx.insertThread(new ThreadState(threadId, secondUserEntryId, false, 1, 0, NOW, NOW));
           tx.insertThread(new ThreadState(otherThreadId, secondUserEntryId, false, 1, 0, NOW, NOW));
-          UUID modelId = tx.nextId();
-          tx.insertModelInvocation(
-              new ModelInvocation(
-                  modelId,
-                  otherThreadId,
-                  secondTurnStartId,
-                  secondUserEntryId,
-                  plainRequest(),
-                  ModelInvocationStatus.READY,
-                  0,
-                  null,
-                  null,
-                  null,
-                  null,
-                  List.of(),
-                  NOW,
-                  NOW));
           tx.insertEntry(
               new Entry(
                   secondAssistantEntryId,
@@ -1063,6 +993,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       secondTurnStartId, TurnEndOutcome.COMPLETED, false, null, null),
                   NOW));
           tx.updateThread(tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndId, NOW));
+          tx.updateThread(
+              tx.findThread(otherThreadId).orElseThrow().advanceHead(secondTurnEndId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
