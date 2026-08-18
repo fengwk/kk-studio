@@ -336,7 +336,7 @@ public abstract class HarnessStoreInvocationContract {
                           StoreTestSupport.CONTEXT_WINDOW),
                       T1));
               ThreadState locked = tx.lockThread(root.threadId()).orElseThrow();
-              tx.updateThread(locked.advanceHead(id, locked.yoloEnabled(), T1));
+              tx.updateThread(locked.advanceHead(id, T1));
               return id;
             });
     assertThrows(
@@ -373,7 +373,7 @@ public abstract class HarnessStoreInvocationContract {
                           otherRoot.threadId()),
                       T1));
               ThreadState locked = tx.lockThread(otherRoot.threadId()).orElseThrow();
-              tx.updateThread(locked.advanceHead(id, locked.yoloEnabled(), T1));
+              tx.updateThread(locked.advanceHead(id, T1));
               return id;
             });
     assertThrows(
@@ -2176,8 +2176,7 @@ public abstract class HarnessStoreInvocationContract {
                       baseline.threadId(),
                       StoreTestSupport.CONTEXT_WINDOW),
                   T1));
-          tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, false, T2));
+          tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, T2));
           return start;
         });
   }
@@ -2534,7 +2533,7 @@ public abstract class HarnessStoreInvocationContract {
                 baseline.threadId(),
                 StoreTestSupport.CONTEXT_WINDOW),
             T1));
-    tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, false, T2));
+    tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, T2));
     UUID modelId = tx.nextId();
     tx.insertModelInvocation(
         new ModelInvocation(

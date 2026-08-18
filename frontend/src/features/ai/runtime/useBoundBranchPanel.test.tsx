@@ -370,6 +370,139 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.yoloError).toBeNull()
   })
 
+  it('uses the authoritative revision returned by /yolo for the next CAS (sequential second toggle)', async () => {
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
+      Promise.resolve(
+        threadFixture(threadId, {
+          yoloEnabled: data.yoloEnabled,
+          revision: String(Number(data.expectedRevision) + 1),
+        }),
+      ),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 第一次写基于 snapshot revision 0；成功后采纳 /yolo 返回的权威 revision 1。
+    expect(vi.mocked(harnessService.setThreadYolo).mock.calls[0]![1]).toEqual({
+      expectedRevision: '0',
+      yoloEnabled: true,
+    })
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+
+    act(() => {
+      result.current.setYoloEnabled(false)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 第二次写必须使用权威 revision 1，而不是滞后的 controller snapshot revision 0。
+    expect(vi.mocked(harnessService.setThreadYolo).mock.calls[1]![1]).toEqual({
+      expectedRevision: '1',
+      yoloEnabled: false,
+    })
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+  })
+
+  it('serializes rapid yolo toggles: the next request starts only after the prior resolves and uses its revision (latest wins)', async () => {
+    let releaseFirst: (() => void) | null = null
+    const calls: Array<{ expectedRevision: string; yoloEnabled: boolean }> = []
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) => {
+      calls.push({ expectedRevision: data.expectedRevision, yoloEnabled: data.yoloEnabled })
+      if (calls.length === 1) {
+        return new Promise<HarnessThreadDTO>((resolve) => {
+          releaseFirst = () =>
+            resolve(threadFixture(threadId, { yoloEnabled: true, revision: '1' }))
+        })
+      }
+      return Promise.resolve(threadFixture(threadId, { yoloEnabled: false, revision: '2' }))
+    })
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+      result.current.setYoloEnabled(false)
+    })
+    // 快速连点串行：第一个（true）请求返回前只有它在网；false 仅记录为最新意图。
+    expect(calls).toEqual([{ expectedRevision: '0', yoloEnabled: true }])
+
+    await act(async () => {
+      releaseFirst?.()
+    })
+    // true 返回（权威 revision 1）后，最新意图 false 才被发送，且携带 revision 1。
+    await waitFor(() => expect(calls.length).toBe(2))
+    expect(calls[1]).toEqual({ expectedRevision: '1', yoloEnabled: false })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // latest wins：最终 draft 与 base 均为 false。
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+  })
+
+  it('fences late yolo responses after rebind: old-thread failure neither surfaces yoloError nor mutates the new draft', async () => {
+    let rejectOld: ((error: Error) => void) | null = null
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) => {
+      if (threadId === THREAD_ID) {
+        return new Promise<HarnessThreadDTO>((_, reject) => {
+          rejectOld = reject
+        })
+      }
+      return Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled }))
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(
+        threadId === THREAD_ID_2
+          ? snapshotOf(
+              threadFixture(THREAD_ID_2, {
+                yoloEnabled: true,
+                branchSettings: branchSettings({ agentName: 'assistant2' }),
+              }),
+            )
+          : snapshotOf(threadFixture(THREAD_ID)),
+      ),
+    )
+    const client = createClient()
+    const { result, rerender } = renderHook(
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
+    )
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+
+    rerender({ threadId: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.draft?.agentName).toBe('assistant2'))
+    // 重绑后新面板干净，无陈旧错误。
+    expect(result.current.yoloError).toBeNull()
+
+    // 旧 Thread 的请求在重绑之后才被拒绝：generation 已失效。
+    await act(async () => {
+      rejectOld?.(new Error('STALE_REVISION: old thread gone'))
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 迟到失败不污染新面板：无 yoloError，draft/base 保持新 Thread 权威值。
+    expect(result.current.yoloError).toBeNull()
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.draft?.agentName).toBe('assistant2')
+  })
+
   it('resets the pane-local draft on thread rebind and re-initializes from the new snapshot', async () => {
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
       Promise.resolve(

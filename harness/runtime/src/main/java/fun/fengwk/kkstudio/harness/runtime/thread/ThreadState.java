@@ -89,10 +89,10 @@ public record ThreadState(
   }
 
   /**
-   * 在一个原子步骤中推进 head Entry cursor 并设置冻结的 YOLO runtime policy（terminal apply 会重新发送当前 policy 值）；{@code
-   * revision} 严格 +1。
+   * 在一个原子步骤中推进 head Entry cursor，恒保留当前冻结的 YOLO runtime policy（不再接受外部传入值，杜绝 terminal / resolver
+   * 提交路径写入过期策略）；{@code revision} 严格 +1。
    */
-  public ThreadState advanceHead(UUID headEntryId, boolean yoloEnabled, Instant now) {
+  public ThreadState advanceHead(UUID headEntryId, Instant now) {
     ThreadState next =
         new ThreadState(
             id,

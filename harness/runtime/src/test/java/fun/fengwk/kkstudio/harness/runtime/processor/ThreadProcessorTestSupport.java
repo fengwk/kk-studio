@@ -389,7 +389,7 @@ final class ThreadProcessorTestSupport {
           UUID id = tx.nextId();
           tx.insertEntry(
               new Entry(id, turn.sessionId(), turn.userEntryId(), assistantPayload(callIds), NOW));
-          tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, false, NOW));
+          tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, NOW));
           return id;
         });
   }
@@ -899,7 +899,7 @@ final class ThreadProcessorTestSupport {
                           secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
                       NOW));
               tx.updateThread(
-                  tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndId, false, NOW));
+                  tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndId, NOW));
               return new ClosedTurnBaseline(
                   sessionId,
                   rootEntryId,

@@ -282,7 +282,7 @@ final class StopControl {
     tx.insertEntry(
         new Entry(
             turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
-    ThreadState stopped = thread.advanceHead(turnEndId, thread.yoloEnabled(), now);
+    ThreadState stopped = thread.advanceHead(turnEndId, now);
     tx.updateThread(stopped);
     return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
   }
@@ -313,7 +313,7 @@ final class StopControl {
             barrierId,
             stoppedTurnEnd(model.turnStartEntryId(), stopRequestId),
             now));
-    ThreadState stopped = thread.advanceHead(turnEndId, thread.yoloEnabled(), now);
+    ThreadState stopped = thread.advanceHead(turnEndId, now);
     tx.updateThread(stopped);
     return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
   }
@@ -350,7 +350,7 @@ final class StopControl {
             parentId,
             stoppedTurnEnd(active.model().turnStartEntryId(), stopRequestId),
             now));
-    ThreadState stopped = thread.advanceHead(turnEndId, thread.yoloEnabled(), now);
+    ThreadState stopped = thread.advanceHead(turnEndId, now);
     tx.updateThread(stopped);
     return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
   }

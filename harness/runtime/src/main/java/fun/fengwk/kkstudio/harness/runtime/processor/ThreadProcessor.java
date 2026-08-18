@@ -698,7 +698,7 @@ public final class ThreadProcessor {
               mutationNow));
       head = turnEndId;
     }
-    tx.updateThread(thread.advanceHead(head, thread.yoloEnabled(), mutationNow));
+    tx.updateThread(thread.advanceHead(head, mutationNow));
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
@@ -780,7 +780,7 @@ public final class ThreadProcessor {
                 model.turnStartEntryId(), TurnEndOutcome.COMPLETED, true, null, null),
             mutationNow));
     tx.updateToolInvocations(updated);
-    tx.updateThread(thread.advanceHead(turnEndId, thread.yoloEnabled(), mutationNow));
+    tx.updateThread(thread.advanceHead(turnEndId, mutationNow));
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
@@ -920,11 +920,9 @@ public final class ThreadProcessor {
       consumed.add(command.consume(plan.turnStartEntryId()));
     }
     tx.updateCommands(consumed);
-    boolean yoloEnabled = thread.yoloEnabled();
     UUID invocationId = null;
     if (result instanceof TurnResolver.Resolved resolved) {
-      ThreadState advanced =
-          thread.advanceHead(plan.candidateHeadEntryId(), yoloEnabled, mutationNow);
+      ThreadState advanced = thread.advanceHead(plan.candidateHeadEntryId(), mutationNow);
       tx.updateThread(advanced);
       invocationId = tx.nextId();
       tx.insertModelInvocation(
@@ -966,7 +964,7 @@ public final class ThreadProcessor {
                   TurnEndReason.TURN_FAILED,
                   null),
               mutationNow));
-      tx.updateThread(thread.advanceHead(turnEndId, yoloEnabled, mutationNow));
+      tx.updateThread(thread.advanceHead(turnEndId, mutationNow));
     }
     // final fence 最后执行：损失抛内部信号，整事务回滚（零 durable mutation 的 LOST）。
     if (tx.lockClaimedWork(claim, now).isEmpty()) {

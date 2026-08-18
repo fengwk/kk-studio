@@ -346,7 +346,7 @@ final class HarnessRuntimeTestSupport {
                 toolInvocation(toolId, modelId, assistantEntryId, ordinal, callIds[ordinal], T1));
           }
           tx.insertToolInvocations(invocations);
-          tx.updateThread(thread.advanceHead(assistantEntryId, thread.yoloEnabled(), T2));
+          tx.updateThread(thread.advanceHead(assistantEntryId, T2));
           return new MultiToolBaseline(
               sessionId,
               rootEntryId,
@@ -479,7 +479,7 @@ final class HarnessRuntimeTestSupport {
               turnEndEntry(
                   turnEndEntryId, sessionId, assistantEntryId, T1, turnStartEntryId, true));
           if (headAtTurnEnd) {
-            tx.updateThread(thread.advanceHead(turnEndEntryId, thread.yoloEnabled(), T1));
+            tx.updateThread(thread.advanceHead(turnEndEntryId, T1));
           }
           return new ContinuationBaseline(sessionId, rootEntryId, turnEndEntryId, threadId);
         });

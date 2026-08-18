@@ -349,14 +349,14 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         fixture,
         tx -> {
           ThreadState current = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(current.advanceHead(tool1EntryId, false, NOW));
+          tx.updateThread(current.advanceHead(tool1EntryId, NOW));
           return null;
         });
     inTx(
         fixture,
         tx -> {
           ThreadState current = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(current.advanceHead(assistantId, false, NOW));
+          tx.updateThread(current.advanceHead(assistantId, NOW));
           return null;
         });
     seedCommand(fixture.store, threadId, new UserMessageCommandPayload(userMessage("hi")));
@@ -421,7 +421,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         fixture,
         tx -> {
           ThreadState current = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(current.advanceHead(tool0EntryId, false, NOW));
+          tx.updateThread(current.advanceHead(tool0EntryId, NOW));
           return null;
         });
     seedCommand(fixture.store, threadId, new UserMessageCommandPayload(userMessage("hi")));
