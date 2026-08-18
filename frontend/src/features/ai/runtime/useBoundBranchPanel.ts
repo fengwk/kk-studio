@@ -46,6 +46,23 @@ function errorMessage(error: unknown): string {
 }
 
 /**
+ * 精确比较非负十进制 revision 字符串（后端经 Long.toString 生成，可能远超
+ * Number.MAX_SAFE_INTEGER）。用 BigInt 避免 double 精度丢失导致回退误判。
+ * 返回 -1 / 0 / 1。
+ */
+function compareDecimalRevisions(a: string, b: string): number {
+  const bigA = BigInt(a)
+  const bigB = BigInt(b)
+  if (bigA < bigB) {
+    return -1
+  }
+  if (bigA > bigB) {
+    return 1
+  }
+  return 0
+}
+
+/**
  * 绑定 Thread 面板的共享编排（Bound Chat 与 Canvas Bound 同一事实源）：
  *
  * - `buildBatchRef` 转发 + `useAgentThreadController` 的循环桥接（submit handler
@@ -117,13 +134,16 @@ export function useBoundBranchPanel({
   }, [threadId])
 
   // 从持久化 Thread snapshot 初始化或跟随 base；用户 draft 绝不会被静默覆盖。
-  // 只接受属于当前 threadId 的快照：重绑后新 snapshot 未到达前不初始化。
+  // 只接受属于当前 threadId 的快照：重绑后新 snapshot 未到达前不初始化；
+  // revision 回退的迟到 snapshot 被整体忽略（不改 base、不降权威 revision）。
   useEffect(() => {
     const thread = controller.thread
     if (!thread || thread.threadId !== threadId) {
       return
     }
-    adoptAuthoritative(thread)
+    if (!adoptAuthoritative(thread)) {
+      return
+    }
     setBranchState((current) => {
       const snapshotDraft = branchDraftFromThread(thread)
       if (current == null || current.threadId !== threadId) {
@@ -200,19 +220,21 @@ export function useBoundBranchPanel({
   }
 
   /**
-   * 接受一个新的权威 Thread 快照。只接受同线程且不使 revision 回退的值，避免
-   * 迟到的 /yolo 前 snapshot 覆盖已确认的新 revision。
+   * 尝试接受一个新的权威 Thread 快照：只接受同线程且不使 revision 回退的值
+   * （精确十进制比较），避免迟到的 /yolo 前 snapshot 覆盖已确认的新 revision。
+   * 返回是否被采纳；调用方在拒绝时应整体忽略该 snapshot，避免用回退值改写 base。
    */
-  function adoptAuthoritative(thread: HarnessThreadDTO) {
+  function adoptAuthoritative(thread: HarnessThreadDTO): boolean {
     const current = authoritativeThreadRef.current
     if (
       current != null
       && current.threadId === thread.threadId
-      && Number(thread.revision) < Number(current.revision)
+      && compareDecimalRevisions(thread.revision, current.revision) < 0
     ) {
-      return
+      return false
     }
     authoritativeThreadRef.current = thread
+    return true
   }
 
   /**
@@ -275,20 +297,32 @@ export function useBoundBranchPanel({
       }
       adoptAuthoritative(updated)
       setYoloError(null)
-      setBranchState((current) =>
-        current == null || current.threadId !== threadId
-          ? current
-          : {
-              ...current,
-              base: { ...current.base, yoloEnabled: updated.yoloEnabled },
-              draft: { ...current.draft, yoloEnabled: updated.yoloEnabled },
-            },
-      )
+      // 捕获成功时刻的排队意图：React 会延迟执行 setBranchState 回调，届时
+      // pending 可能已被 drain 消费为 null，导致误判“无更新意图”而压掉乐观 draft。
+      const hasNewerIntent = yoloPendingRef.current != null
+      setBranchState((current) => {
+        if (current == null || current.threadId !== threadId) {
+          return current
+        }
+        // 排队意图时保留乐观 draft；base 恒跟随服务器确认值。
+        return {
+          ...current,
+          base: { ...current.base, yoloEnabled: updated.yoloEnabled },
+          draft: hasNewerIntent
+            ? current.draft
+            : { ...current.draft, yoloEnabled: updated.yoloEnabled },
+        }
+      })
     } catch (error) {
       if (
         generation !== yoloGenerationRef.current
         || authoritative.threadId !== boundThreadIdRef.current
       ) {
+        return
+      }
+      if (yoloPendingRef.current != null) {
+        // 过期中间请求失败且已有更新意图在排队：不动 draft、不产生瞬时错误，
+        // 交给后续请求出结果（latest wins）。
         return
       }
       setBranchState((current) =>
