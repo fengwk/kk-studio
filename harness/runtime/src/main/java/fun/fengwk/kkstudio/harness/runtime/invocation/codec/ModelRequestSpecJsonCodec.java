@@ -7,77 +7,89 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** 一个冻结 Model invocation request 的严格、确定性 JSON codec。 */
-public final class ModelInvocationRequestJsonCodec {
+/** 一个冻结 {@link ModelRequestSpec} 的严格、确定性 JSON codec。 */
+public final class ModelRequestSpecJsonCodec {
 
-  private static final String CONTEXT = "modelInvocationRequest";
+  private static final String CONTEXT = "modelRequestSpec";
+  private static final ModelDescriptorJsonCodec MODEL_CODEC = new ModelDescriptorJsonCodec();
   private static final ProviderRequestJsonCodec PROVIDER_CODEC = new ProviderRequestJsonCodec();
+  private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
   private static final ToolBindingJsonCodec BINDING_CODEC = new ToolBindingJsonCodec();
 
-  public String encode(ModelInvocationRequest request) {
-    return InvocationJsonSupport.write(encodeNode(request), CONTEXT);
+  public String encode(ModelRequestSpec spec) {
+    return InvocationJsonSupport.write(encodeNode(spec), CONTEXT);
   }
 
-  public ObjectNode encodeNode(ModelInvocationRequest request) {
-    Objects.requireNonNull(request, "request");
+  public ObjectNode encodeNode(ModelRequestSpec spec) {
+    Objects.requireNonNull(spec, "spec");
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
-    InvocationJsonSupport.putNullable(node, "environment", request.environment());
-    node.set("providerRequest", PROVIDER_CODEC.encodeNode(request.providerRequest()));
+    node.put("providerType", spec.providerType().name());
+    node.set("model", MODEL_CODEC.encodeDescriptorNode(spec.model()));
+    node.set("variant", MODEL_CODEC.encodeVariantNode(spec.variant()));
+    ArrayNode preamble = node.putArray("preambleMessages");
+    for (AgentMessage message : spec.preambleMessages()) {
+      preamble.add(MESSAGE_CODEC.encodeNode(message));
+    }
     ArrayNode tools = node.putArray("toolBindings");
-    for (ToolBinding binding : request.toolBindings()) {
+    for (ToolBinding binding : spec.toolBindings()) {
       tools.add(BINDING_CODEC.encodeNode(binding));
     }
     ArrayNode skills = node.putArray("skillBindings");
-    for (SkillBinding skill : request.skillBindings()) {
+    for (SkillBinding skill : spec.skillBindings()) {
       skills.add(encodeSkill(skill));
     }
     ArrayNode subagents = node.putArray("subagentBindings");
-    for (SubagentBinding subagent : request.subagentBindings()) {
+    for (SubagentBinding subagent : spec.subagentBindings()) {
       subagents.add(encodeSubagent(subagent));
     }
-    node.put("yoloEnabled", request.yoloEnabled());
-    node.put("contextWindow", request.contextWindow());
-    if (request.compaction() == null) {
+    node.set("cacheControl", PROVIDER_CODEC.encodeCacheControlNode(spec.cacheControl()));
+    if (spec.compaction() == null) {
       node.putNull("compaction");
     } else {
-      node.set("compaction", encodeCompaction(request.compaction()));
+      node.set("compaction", encodeCompaction(spec.compaction()));
     }
     return node;
   }
 
-  public ModelInvocationRequest decode(String json) {
+  public ModelRequestSpec decode(String json) {
     return decodeNode(InvocationJsonSupport.parse(json, CONTEXT));
   }
 
-  public ModelInvocationRequest decodeNode(JsonNode value) {
+  public ModelRequestSpec decodeNode(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
     InvocationJsonSupport.requireFields(
         node,
         CONTEXT,
-        "environment",
-        "providerRequest",
+        "providerType",
+        "model",
+        "variant",
+        "preambleMessages",
         "toolBindings",
         "skillBindings",
         "subagentBindings",
-        "yoloEnabled",
-        "contextWindow",
+        "cacheControl",
         "compaction");
-    EnvironmentBinding environment =
-        InvocationJsonSupport.nullableEnvironmentBinding(node, "environment", CONTEXT);
-    ProviderRequest providerRequest =
-        PROVIDER_CODEC.decodeNode(InvocationJsonSupport.required(node, "providerRequest", CONTEXT));
+    ArrayNode preambleNodes =
+        InvocationJsonSupport.array(
+            InvocationJsonSupport.required(node, "preambleMessages", CONTEXT), "preambleMessages");
+    List<AgentMessage> preambleMessages = new ArrayList<>(preambleNodes.size());
+    for (JsonNode messageNode : preambleNodes) {
+      preambleMessages.add(MESSAGE_CODEC.decodeNode(messageNode));
+    }
     ArrayNode toolNodes =
         InvocationJsonSupport.array(
             InvocationJsonSupport.required(node, "toolBindings", CONTEXT), "toolBindings");
@@ -99,19 +111,19 @@ public final class ModelInvocationRequestJsonCodec {
     for (JsonNode subagentNode : subagentNodes) {
       subagentBindings.add(decodeSubagent(subagentNode));
     }
-    boolean yoloEnabled = InvocationJsonSupport.bool(node, "yoloEnabled", CONTEXT);
-    int contextWindow = InvocationJsonSupport.positiveInt(node, "contextWindow", CONTEXT);
     JsonNode compactionNode = InvocationJsonSupport.declared(node, "compaction", CONTEXT);
     CompactionRequest compaction =
         compactionNode.isNull() ? null : decodeCompaction(compactionNode);
-    return new ModelInvocationRequest(
-        environment,
-        providerRequest,
+    return new ModelRequestSpec(
+        InvocationJsonSupport.requiredEnum(node, "providerType", ProviderType.class, CONTEXT),
+        MODEL_CODEC.decodeDescriptorNode(InvocationJsonSupport.required(node, "model", CONTEXT)),
+        MODEL_CODEC.decodeVariantNode(InvocationJsonSupport.required(node, "variant", CONTEXT)),
+        preambleMessages,
         toolBindings,
         skillBindings,
         subagentBindings,
-        yoloEnabled,
-        contextWindow,
+        PROVIDER_CODEC.decodeCacheControlNode(
+            InvocationJsonSupport.required(node, "cacheControl", CONTEXT)),
         compaction);
   }
 
@@ -119,7 +131,6 @@ public final class ModelInvocationRequestJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.put("phase", compaction.phase().name());
     node.put("trigger", compaction.trigger().name());
-    // tokensBefore 是数值（decode 用 nonNegativeLong 要求 integral number）；ids 是规范 UUID 字符串。
     node.put("tokensBefore", compaction.tokensBefore());
     node.put("firstKeptEntryId", compaction.firstKeptEntryId().toString());
     node.put("cutEntryId", compaction.cutEntryId().toString());

@@ -22,6 +22,14 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -29,7 +37,16 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
+import java.math.BigDecimal;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -40,13 +57,9 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
 
   @Test
   void routeMismatchIsContractErrorWithZeroMutation() {
-    assertMismatchRollsBack(branchSettings().withEnvironment(EnvironmentBindings.binding("env-2")));
-  }
-
-  @Test
-  void yoloMismatchIsContractErrorWithZeroMutation() {
-    // settings 一致，但请求 yolo=true 与 candidate finalYoloEnabled=false 不符。
-    assertMismatchRollsBack(branchSettings(), true);
+    BranchSettings mismatched =
+        branchSettings().withEnvironment(EnvironmentBindings.binding("env-2"));
+    assertMismatchRollsBack(requestWithEnvironmentTool(mismatched));
   }
 
   @Test
@@ -61,20 +74,19 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
         branchSettings().withModel(new ModelSelection("provider", "model", "v9")));
   }
 
-  /** candidate 默认 branch 事实下（settings = branchSettings()，yolo = false）请求与事实不一致。 */
+  /** candidate 默认 branch 事实下（settings = branchSettings()）请求与事实不一致。 */
   private void assertMismatchRollsBack(BranchSettings mismatchedSettings) {
-    assertMismatchRollsBack(mismatchedSettings, false);
+    assertMismatchRollsBack(requestFor(mismatchedSettings));
   }
 
-  private void assertMismatchRollsBack(BranchSettings mismatchedSettings, boolean requestedYolo) {
+  private void assertMismatchRollsBack(ModelRequestSpec mismatchedSpec) {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
     UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(
-        new TurnResolver.Resolved(requestFor(mismatchedSettings, requestedYolo)));
+    fixture.resolver.results.add(new TurnResolver.Resolved(mismatchedSpec, 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
@@ -101,5 +113,49 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
     assertNotNull(threadWork);
     assertNotNull(threadWork.leaseToken());
     assertEquals(NOW.plusSeconds(60), threadWork.leaseUntil());
+  }
+
+  private static ModelRequestSpec requestWithEnvironmentTool(BranchSettings settings) {
+    ToolBinding environmentTool =
+        new ToolBinding(
+            new ToolDescriptor(
+                "fs",
+                "1.0",
+                ToolType.ENVIRONMENT,
+                "filesystem",
+                "fs",
+                new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(30)),
+            ToolType.ENVIRONMENT,
+            settings.environment());
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        new ModelDescriptor(
+            settings.model().providerName(),
+            settings.model().modelName(),
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            new ModelPricing(
+                "USD",
+                "standard",
+                "standard",
+                BigDecimal.ONE,
+                "1",
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO)),
+        new ModelVariant(
+            settings.model().variant(), null, null, null, null, null, null, List.of(), null),
+        List.of(),
+        List.of(environmentTool),
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
+        null);
   }
 }

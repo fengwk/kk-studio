@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
@@ -218,7 +219,7 @@ class ModelResponseValidatorTest {
     return new ProviderToolDefinition(name, "description of " + name, "{}");
   }
 
-  private static ModelInvocationRequest request(ProviderToolDefinition... tools) {
+  private static ModelRequestSpec request(ProviderToolDefinition... tools) {
     ProviderRequest providerRequest =
         new ProviderRequest(
             new ModelDescriptor(
@@ -259,11 +260,19 @@ class ModelResponseValidatorTest {
               ToolType.PLATFORM,
               null));
     }
-    return new ModelInvocationRequest(
-        null, providerRequest, bindings, List.of(), false, 100_000, null);
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        providerRequest.model(),
+        providerRequest.variant(),
+        List.of(),
+        bindings,
+        List.of(),
+        List.of(),
+        providerRequest.cacheControl(),
+        null);
   }
 
-  private static ModelInvocationRequest compactionRequest() {
+  private static ModelRequestSpec compactionRequest() {
     ProviderRequest providerRequest =
         new ProviderRequest(
             new ModelDescriptor(
@@ -288,13 +297,15 @@ class ModelResponseValidatorTest {
             List.of(),
             List.of(),
             ProviderCacheControl.none());
-    return new ModelInvocationRequest(
-        null,
-        providerRequest,
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        providerRequest.model(),
+        providerRequest.variant(),
         List.of(),
         List.of(),
-        false,
-        100_000,
+        List.of(),
+        List.of(),
+        providerRequest.cacheControl(),
         new CompactionRequest(
             CompactionPhase.FULL,
             CompactionTrigger.THRESHOLD,

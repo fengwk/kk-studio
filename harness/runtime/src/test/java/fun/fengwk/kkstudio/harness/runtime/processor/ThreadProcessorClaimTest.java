@@ -105,7 +105,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     // resolve 期间重入投递同一 claim：admission guard 拒绝 -> LOST no-op；外层继续完成提交。
     fixture.resolver.onResolve =
         () ->

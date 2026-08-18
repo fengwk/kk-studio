@@ -45,8 +45,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
@@ -2100,7 +2100,9 @@ public abstract class HarnessStoreInvocationContract {
                   baseline.sessionId(),
                   endEntryId,
                   new TurnStartPayload(
-                      TurnStartReason.COMPACTION, StoreTestSupport.branchSettings()),
+                      TurnStartReason.COMPACTION,
+                      StoreTestSupport.branchSettings(),
+                      StoreTestSupport.OWNER_THREAD_ID),
                   T1));
           tx.updateThread(
               tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, false, T2));
@@ -2109,7 +2111,7 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   /** 在打开的 COMPACTION turn（head == turnStart）下插入 READY compaction invocation，返回 model id。 */
-  private UUID insertCompactionInvocation(UUID turnStart, ModelInvocationRequest request) {
+  private UUID insertCompactionInvocation(UUID turnStart, ModelRequestSpec request) {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -2136,7 +2138,7 @@ public abstract class HarnessStoreInvocationContract {
 
   /** 完整压缩 turn 种子：openCompactionTurn + READY invocation + SUCCEEDED result（元数据/引用按需校验）。 */
   private UUID seedCompletedCompactionTurn(
-      ModelInvocationRequest request, CompactionPayload resultPayload) {
+      ModelRequestSpec request, CompactionPayload resultPayload) {
     UUID turnStart = openCompactionTurn();
     UUID modelId = insertCompactionInvocation(turnStart, request);
     return store.transaction(
@@ -2178,16 +2180,18 @@ public abstract class HarnessStoreInvocationContract {
         "{}");
   }
 
-  private static ModelInvocationRequest compactionRequest(
+  private static ModelRequestSpec compactionRequest(
       CompactionPhase phase, UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
-    ModelInvocationRequest base = modelRequest();
-    return new ModelInvocationRequest(
-        base.environment(),
-        base.providerRequest(),
+    ModelRequestSpec base = modelRequest();
+    return new ModelRequestSpec(
+        base.providerType(),
+        base.model(),
+        base.variant(),
+        base.preambleMessages(),
         List.of(),
         List.of(),
-        base.yoloEnabled(),
-        base.contextWindow(),
+        List.of(),
+        base.cacheControl(),
         new CompactionRequest(
             phase,
             CompactionTrigger.THRESHOLD,
@@ -2199,7 +2203,7 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void compactionInvocationAcceptsSucceededResultWithExactFrozenMetadata() {
-    ModelInvocationRequest request =
+    ModelRequestSpec request =
         compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null);
     CompactionPayload result =
         new CompactionPayload(
@@ -2221,7 +2225,7 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void compactionResultRejectsNonSucceededStatusAndMetadataDrift() {
-    ModelInvocationRequest request =
+    ModelRequestSpec request =
         compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null);
     CompactionPayload result =
         new CompactionPayload(
@@ -2308,7 +2312,7 @@ public abstract class HarnessStoreInvocationContract {
         () ->
             store.transaction(
                 tx -> {
-                  ModelInvocationRequest request =
+                  ModelRequestSpec request =
                       compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null);
                   UUID turnStart = seedCompactionTurnWithReadyInvocation(tx, request);
                   UUID modelId = lastModelId(tx, turnStart);
@@ -2424,7 +2428,7 @@ public abstract class HarnessStoreInvocationContract {
 
   /** 在给定事务内：开 COMPACTION turn 链 + READY compaction invocation，返回 turnStart id。 */
   private UUID seedCompactionTurnWithReadyInvocation(
-      HarnessStore.Transaction tx, ModelInvocationRequest request) {
+      HarnessStore.Transaction tx, ModelRequestSpec request) {
     tx.lockThread(baseline.threadId());
     UUID userEntryId = tx.nextId();
     tx.insertEntry(
@@ -2452,7 +2456,10 @@ public abstract class HarnessStoreInvocationContract {
             start,
             baseline.sessionId(),
             endEntryId,
-            new TurnStartPayload(TurnStartReason.COMPACTION, StoreTestSupport.branchSettings()),
+            new TurnStartPayload(
+                TurnStartReason.COMPACTION,
+                StoreTestSupport.branchSettings(),
+                StoreTestSupport.OWNER_THREAD_ID),
             T1));
     tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, false, T2));
     UUID modelId = tx.nextId();

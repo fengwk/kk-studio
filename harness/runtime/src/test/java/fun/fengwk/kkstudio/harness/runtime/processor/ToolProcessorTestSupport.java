@@ -14,8 +14,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
@@ -93,6 +94,7 @@ import java.util.function.Function;
 final class ToolProcessorTestSupport {
 
   static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
+  static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
   static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
@@ -204,7 +206,7 @@ final class ToolProcessorTestSupport {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID),
                   now.plusMillis(1)));
           tx.insertEntry(
               new Entry(
@@ -241,7 +243,7 @@ final class ToolProcessorTestSupport {
           UUID modelId = tx.nextId();
           UUID toolId = tx.nextId();
           tx.lockThread(baseline.threadId());
-          ModelInvocationRequest modelRequest = modelRequest(yoloEnabled);
+          ModelRequestSpec modelRequest = modelRequest(yoloEnabled);
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -452,9 +454,18 @@ final class ToolProcessorTestSupport {
         Duration.ofSeconds(30));
   }
 
-  private static ModelInvocationRequest modelRequest(boolean yoloEnabled) {
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(), List.of(), List.of(), yoloEnabled, 100_000, null);
+  private static ModelRequestSpec modelRequest(boolean yoloEnabled) {
+    ProviderRequest provider = providerRequest();
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        provider.model(),
+        provider.variant(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        provider.cacheControl(),
+        null);
   }
 
   private static ProviderRequest providerRequest() {

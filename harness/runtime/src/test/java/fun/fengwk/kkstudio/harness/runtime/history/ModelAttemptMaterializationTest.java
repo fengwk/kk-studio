@@ -15,8 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -41,6 +41,7 @@ import java.util.stream.Stream;
 
 /** terminal Model attempt 状态清空前的 EntryPath 精确物化契约。 */
 class ModelAttemptMaterializationTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final Instant T0 = Instant.parse("2026-08-01T00:00:00Z");
   private static final Instant T1 = T0.plusSeconds(1);
@@ -223,7 +224,7 @@ class ModelAttemptMaterializationTest {
                     id(2L),
                     id(100L),
                     id(1L),
-                    new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+                    new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
                     T1),
                 result));
 
@@ -244,7 +245,7 @@ class ModelAttemptMaterializationTest {
   }
 
   private static ModelInvocation invocation(
-      ModelInvocationRequest request,
+      ModelRequestSpec request,
       ModelInvocationStatus status,
       int attempt,
       StreamCheckpoint checkpoint,
@@ -320,7 +321,7 @@ class ModelAttemptMaterializationTest {
                         id(2L),
                         id(100L),
                         id(1L),
-                        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
+                        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
                         T1),
                     new Entry(
                         id(3L),
@@ -341,19 +342,16 @@ class ModelAttemptMaterializationTest {
     return new Entry(id(1L), id(100L), null, new RootPayload(SETTINGS), T0);
   }
 
-  private static ModelInvocationRequest request(CompactionRequest compaction) {
-    return new ModelInvocationRequest(
-        ENVIRONMENT,
-        new ProviderRequest(
-            modelDescriptor(),
-            new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
-            List.of(),
-            List.of(),
-            ProviderCacheControl.none()),
+  private static ModelRequestSpec request(CompactionRequest compaction) {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor(),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
         List.of(),
         List.of(),
-        false,
-        100_000,
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
         compaction);
   }
 

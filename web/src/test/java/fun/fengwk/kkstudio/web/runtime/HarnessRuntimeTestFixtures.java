@@ -51,6 +51,7 @@ import java.util.UUID;
 public final class HarnessRuntimeTestFixtures {
 
   public static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
+  private static final UUID OWNER_THREAD_ID = id(10);
 
   private static UUID id(long value) {
     return new UUID(0L, value);
@@ -72,7 +73,11 @@ public final class HarnessRuntimeTestFixtures {
 
   public static Entry turnStartEntry() {
     return new Entry(
-        id(2), id(1), id(1), new TurnStartPayload(TurnStartReason.INPUT, settings()), NOW);
+        id(2),
+        id(1),
+        id(1),
+        new TurnStartPayload(TurnStartReason.INPUT, settings(), OWNER_THREAD_ID),
+        NOW);
   }
 
   public static Entry userMessageEntry() {

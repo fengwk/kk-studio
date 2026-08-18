@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 
 import java.time.Duration;
@@ -14,8 +15,9 @@ import java.util.UUID;
  * Model 执行 admission / stream 端口：把一次冻结的 Model invocation 提交给外部 Gateway。
  *
  * <p>execution key 是 {@code (invocationId, proposedAttempt)}，{@code proposedAttempt}
- * 必须为正数；execution 携带 完整 frozen {@link ModelInvocationRequest}。{@link #start} 返回前不得同步调用任何 listener
- * 回调；回调可能因进程崩溃 / lease 恢复而重复或迟到，去重与 stale fence 由 Runtime（Processor）负责，Gateway 不保证 exactly-once。
+ * 必须为正数；execution 携带冻结 {@link ProviderType} 与内存 {@link ProviderRequest}。{@link #start} 返回前不得同步调用任何
+ * listener 回调；回调可能因进程崩溃 / lease 恢复而重复或迟到，去重与 stale fence 由 Runtime（Processor）负责，Gateway 不保证
+ * exactly-once。
  *
  * <p>两阶段激活：{@link #start} 返回 {@link Started} 时不得打开任何回调 gate（即便 Provider 同步回调也只能缓冲）， {@link
  * Handle#activate} 由 Processor 在 attach handle + durable markRunning 之后、打开自身 listener 门之前调用， 此时
@@ -34,14 +36,19 @@ public interface ModelGateway {
    */
   StartResult start(Execution execution, Listener listener);
 
-  /** 一次 Model execution 的不可变描述：key 为 {@code (invocationId, proposedAttempt)}，request 已冻结。 */
-  record Execution(UUID invocationId, int proposedAttempt, ModelInvocationRequest request) {
+  /**
+   * 一次 Model execution 的不可变描述：key 为 {@code (invocationId, proposedAttempt)}，携带冻结协议类型与内存
+   * ProviderRequest。
+   */
+  record Execution(
+      UUID invocationId, int proposedAttempt, ProviderType providerType, ProviderRequest request) {
 
     public Execution {
       Objects.requireNonNull(invocationId, "invocationId");
       if (proposedAttempt <= 0) {
         throw new IllegalArgumentException("proposedAttempt must be positive");
       }
+      providerType = Objects.requireNonNull(providerType, "providerType");
       request = Objects.requireNonNull(request, "request");
     }
   }

@@ -64,6 +64,7 @@ import java.util.UUID;
  * margin。
  */
 class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   @Test
   void continuationHasPriorityOverQueuedInputAndLeavesMessagesForDeferredWake() {
@@ -73,7 +74,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
@@ -94,7 +95,6 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertNull(threadWork.leaseToken());
     assertEquals(2L, threadWork.wakeVersion());
     assertEquals(1, fixture.resolver.calls);
-    assertFalse(fixture.resolver.lastYoloEnabled);
   }
 
   @Test
@@ -140,7 +140,6 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), yoloCommand).state());
     assertTrue(thread(fixture.store, baseline.threadId()).yoloEnabled());
-    assertTrue(fixture.resolver.lastYoloEnabled);
     assertEquals(
         path.entries().get(5).id(),
         command(fixture.store, baseline.threadId(), modelCommand).consumedTurnStartEntryId());
@@ -310,7 +309,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             baseline.threadId(),
             new UserMessageCommandPayload(userMessage("first")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     // resolve 期间入队第二条 USER（sequence > cutoff）并请求 THREAD Work（enqueue 侧行为）。
     fixture.resolver.onResolve =
         () -> {
@@ -360,7 +359,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     fixture.resolver.onResolve =
         () ->
             inTx(
@@ -392,7 +391,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     // resolve 期间另一 actor 在 ROOT 下打开新 Turn 并移动 head。
     fixture.resolver.onResolve =
         () ->
@@ -406,7 +405,9 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                           baseline.sessionId(),
                           baseline.rootEntryId(),
                           new TurnStartPayload(
-                              TurnStartReason.INPUT, ThreadProcessorTestSupport.branchSettings()),
+                              TurnStartReason.INPUT,
+                              ThreadProcessorTestSupport.branchSettings(),
+                              OWNER_THREAD_ID),
                           NOW));
                   ThreadState current = tx.lockThread(baseline.threadId()).orElseThrow();
                   tx.updateThread(current.advanceHead(turnStartId, false, NOW));
@@ -431,7 +432,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     fixture.resolver.onResolve =
         () ->
             inTx(
@@ -500,7 +501,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
     // scheduler 已关闭：resolve 期间无法启动 heartbeat -> reschedule，零 durable mutation。
     fixture.scheduler.shutdownNow();
@@ -528,7 +529,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     // step 1 应用 terminal Model；step limit 用尽 -> reschedule，不丢 Work。
@@ -558,7 +559,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     // claim 的 lease 仅剩 4s（< heartbeat interval 5s）：plan 事务必须 renew 到 now + leaseDuration，否则
     // Resolver 首次 heartbeat 前 lease 即过期。
     fixture.resolver.onResolve =

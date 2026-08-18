@@ -54,11 +54,13 @@ import fun.fengwk.kkstudio.harness.runtime.history.SubagentContext;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -80,6 +82,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
@@ -135,15 +138,14 @@ class DatabaseTurnResolverTest {
     fixture.agent.setVariant("old-variant");
     when(fixture.providers.getByName("old-provider")).thenReturn(null);
 
-    ModelInvocationRequest request = fixture.resolved(fixture.path(settings(null, "custom")));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "custom")));
 
-    assertEquals("provider", request.providerRequest().model().providerName());
-    assertEquals("model", request.providerRequest().model().modelName());
-    assertEquals(
-        Set.of(ModelInputModality.TEXT), request.providerRequest().model().inputModalities());
-    assertEquals("custom", request.providerRequest().variant().id());
-    assertEquals(0.5, request.providerRequest().variant().temperature());
-    assertEquals(2048, request.providerRequest().variant().maxOutputTokens());
+    assertEquals("provider", request.model().providerName());
+    assertEquals("model", request.model().modelName());
+    assertEquals(Set.of(ModelInputModality.TEXT), request.model().inputModalities());
+    assertEquals("custom", request.variant().id());
+    assertEquals(0.5, request.variant().temperature());
+    assertEquals(2048, request.variant().maxOutputTokens());
   }
 
   @Test
@@ -163,7 +165,7 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
 
-    ModelInvocationRequest request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
 
     assertEquals(
         List.of("read"),
@@ -243,30 +245,28 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void resolvesModelOnlyBranchWithoutEnvironmentAndFreezesYolo() {
+  void resolvesModelOnlyBranchWithoutEnvironment() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
-    ModelInvocationRequest request =
-        fixture.resolved(fixture.path(settings(null, "default")), true);
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "default")));
 
-    assertNull(request.environment());
     assertEquals(List.of(), request.toolBindings());
     assertEquals(List.of(), request.skillBindings());
-    assertTrue(request.yoloEnabled());
+    assertTrue(request.preambleMessages().getFirst().contents().toString().contains("date:"));
   }
 
   @Test
   void alwaysProjectsNoneCurrentEnvironmentIntoProviderRequest() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
-    ModelInvocationRequest request = fixture.resolved(fixture.path(settings(null, "default")));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "default")));
 
     assertEquals(
         "agent system prompt\n\n"
             + "<current_environment>\n"
             + "- date: 2026-08-02\n"
             + "</current_environment>",
-        textOf(request.providerRequest().messages().getFirst()));
+        preambleText(request));
   }
 
   @Test
@@ -274,25 +274,13 @@ class DatabaseTurnResolverTest {
     Clock serviceClock = Clock.fixed(NOW, ZoneId.of("America/Los_Angeles"));
     Fixture fixture = new Fixture(List.of(), List.of(), List.of(), serviceClock);
 
-    String none =
-        textOf(
-            fixture
-                .resolved(fixture.path(settings(null, "default")))
-                .providerRequest()
-                .messages()
-                .getFirst());
+    String none = preambleText(fixture.resolved(fixture.path(settings(null, "default"))));
     assertFalse(none.contains("- name:"), none);
     assertFalse(none.contains("- system:"), none);
     assertTrue(none.contains("- date: 2026-08-01"), none);
     assertFalse(none.contains("- note:"), none);
 
-    String missing =
-        textOf(
-            fixture
-                .resolved(fixture.path(settings(ENV_MISSING, "default")))
-                .providerRequest()
-                .messages()
-                .getFirst());
+    String missing = preambleText(fixture.resolved(fixture.path(settings(ENV_MISSING, "default"))));
     assertTrue(missing.contains("- name: env-3"), missing);
     assertFalse(missing.contains("- system:"), missing);
     assertTrue(missing.contains("- date: 2026-08-01"), missing);
@@ -312,8 +300,8 @@ class DatabaseTurnResolverTest {
             "Custom <Linux> & tools.",
             "/home/dev"));
 
-    ModelInvocationRequest request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
-    String prompt = textOf(request.providerRequest().messages().getFirst());
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
+    String prompt = preambleText(request);
 
     assertTrue(prompt.contains("- name: env-1"), prompt);
     assertTrue(prompt.contains("- workspace: projects/web"), prompt);
@@ -329,12 +317,7 @@ class DatabaseTurnResolverTest {
     fixture.connectingEnvironment(ENV_A);
 
     String withoutMetadata =
-        textOf(
-            fixture
-                .resolved(fixture.path(settings(ENV_A, "default")))
-                .providerRequest()
-                .messages()
-                .getFirst());
+        preambleText(fixture.resolved(fixture.path(settings(ENV_A, "default"))));
     assertTrue(withoutMetadata.contains("- name: env-1"), withoutMetadata);
     assertTrue(withoutMetadata.contains("- workspace: projects/web"), withoutMetadata);
     assertFalse(withoutMetadata.contains("- system:"), withoutMetadata);
@@ -347,21 +330,11 @@ class DatabaseTurnResolverTest {
     Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
     readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
     String ready =
-        textOf(
-            readyFixture
-                .resolved(readyFixture.path(settings(ENV_A, "default")))
-                .providerRequest()
-                .messages()
-                .getFirst());
+        preambleText(readyFixture.resolved(readyFixture.path(settings(ENV_A, "default"))));
     Fixture staleFixture = new Fixture(List.of(), List.of(), List.of());
     staleFixture.staleEnvironment(ENV_A, environmentInfo);
     String stale =
-        textOf(
-            staleFixture
-                .resolved(staleFixture.path(settings(ENV_A, "default")))
-                .providerRequest()
-                .messages()
-                .getFirst());
+        preambleText(staleFixture.resolved(staleFixture.path(settings(ENV_A, "default"))));
     assertEquals(ready, stale);
     assertTrue(stale.contains("- system: wsl"), stale);
     assertTrue(stale.contains("- date: 2026-08-02"), stale);
@@ -401,7 +374,7 @@ class DatabaseTurnResolverTest {
   void bindsEnvironmentToolsWithLatestNameEvenWhenBranchHasNoEnvironment() {
     // 分支没有环境路由不再拒绝工具规划：ENVIRONMENT 工具仍按最新（null）名称绑定，实际执行时确定性失败。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    ModelInvocationRequest request =
+    ModelRequestSpec request =
         fixture.resolved(fixture.path(settings(null, "default", List.of("read"))));
     assertEquals(1, request.toolBindings().size());
     assertEquals(ToolType.ENVIRONMENT, request.toolBindings().getFirst().type());
@@ -418,7 +391,7 @@ class DatabaseTurnResolverTest {
   void missingOrNotReadyLatestEnvironmentDoesNotRejectToolPlanning() {
     // 缺失的 latest 环境：工具按最新名称绑定，规划成功。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    ModelInvocationRequest request =
+    ModelRequestSpec request =
         fixture.resolved(fixture.path(settings(ENV_MISSING, "default", List.of("read"))));
     assertEquals(ENV_MISSING, request.toolBindings().getFirst().environment());
 
@@ -451,9 +424,8 @@ class DatabaseTurnResolverTest {
     BranchSettings firstTurn = settings(ENV_A, "default", List.of("read"));
     BranchSettings latestTurn = settings(null, "default", List.of("read"));
 
-    ModelInvocationRequest request = fixture.resolved(multiTurnPath(firstTurn, latestTurn));
+    ModelRequestSpec request = fixture.resolved(multiTurnPath(firstTurn, latestTurn));
 
-    assertNull(request.environment());
     assertEquals(
         List.of("read"),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
@@ -468,7 +440,6 @@ class DatabaseTurnResolverTest {
             multiTurnPath(
                 settings(ENV_A, "default", List.of("read")),
                 settings(ENV_MISSING, "default", List.of("read"))));
-    assertEquals(ENV_MISSING, request.environment());
     assertEquals(ENV_MISSING, request.toolBindings().getFirst().environment());
 
     // Agent skills 同样只认最新快照：历史 turn 有 live Environment + skill，最新 null 时按最新精确拒绝。
@@ -519,9 +490,8 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
     BranchSettings settings = settings(ENV_B, "default", List.of("bash", "load_skill"));
 
-    ModelInvocationRequest request = fixture.resolved(fixture.path(settings));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings));
 
-    assertEquals(ENV_B, request.environment());
     assertEquals(
         List.of("bash", "load_skill"),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
@@ -543,7 +513,7 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_A);
     BranchSettings settings = settings(ENV_A, "default", List.of("bash", "create_goal", "read"));
 
-    ModelInvocationRequest request = fixture.resolved(fixture.path(settings));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings));
 
     List<String> boundNames =
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
@@ -552,8 +522,7 @@ class DatabaseTurnResolverTest {
         List.of(ToolType.ENVIRONMENT, ToolType.PLATFORM, ToolType.ENVIRONMENT),
         request.toolBindings().stream().map(ToolBinding::type).toList());
     // Provider tools 与 bindings 一一对应且顺序一致。
-    assertEquals(
-        boundNames, request.providerRequest().tools().stream().map(tool -> tool.name()).toList());
+    assertEquals(List.of("bash", "create_goal", "read"), boundNames);
 
     fixture = new Fixture(List.of("missing"), List.of(), List.of());
     assertEquals(
@@ -591,14 +560,14 @@ class DatabaseTurnResolverTest {
                             + "\"}"),
                     NOW)));
 
-    ModelInvocationRequest request = fixture.resolved(path);
+    ModelRequestSpec request = fixture.resolved(path);
 
     ToolBinding binding = request.toolBindings().getFirst();
     assertEquals("goal", binding.plugin().pluginId());
     assertEquals("create", binding.plugin().contributionLocalName());
     assertEquals("state", binding.plugin().stateAccesses().getFirst().customType());
     assertTrue(
-        request.providerRequest().messages().stream()
+        materialized(path, request).stream()
             .map(DatabaseTurnResolverTest::textOf)
             .anyMatch(text -> text.contains("\"objective\":\"ship\"")));
   }
@@ -609,7 +578,7 @@ class DatabaseTurnResolverTest {
         new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
 
-    ModelInvocationRequest request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
 
     assertEquals(
         List.of("load_skill"),
@@ -624,7 +593,7 @@ class DatabaseTurnResolverTest {
         new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
 
-    ModelInvocationRequest request =
+    ModelRequestSpec request =
         fixture.resolved(fixture.path(settings(ENV_A, "default", List.of("load_skill"))));
 
     assertEquals(
@@ -680,7 +649,7 @@ class DatabaseTurnResolverTest {
             PromptCacheCapability.unsupported(),
             true);
 
-    ModelInvocationRequest request =
+    ModelRequestSpec request =
         fixture.resolved(fixture.path(settings(null, "default", List.of("load_skill"))));
 
     assertEquals(List.of(), request.toolBindings());
@@ -693,7 +662,7 @@ class DatabaseTurnResolverTest {
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review <carefully> & report.");
 
-    ModelInvocationRequest request =
+    ModelRequestSpec request =
         fixture.resolved(fixture.path(settings(null, "default", List.of(TaskTool.NAME))));
 
     assertEquals(
@@ -703,7 +672,7 @@ class DatabaseTurnResolverTest {
         List.of(TaskTool.NAME),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(ToolType.PLATFORM, request.toolBindings().getFirst().type());
-    String system = textOf(request.providerRequest().messages().getFirst());
+    String system = preambleText(request);
     assertTrue(system.contains("<available_subagents>"), system);
     assertTrue(system.contains("<name>reviewer</name>"), system);
     assertTrue(
@@ -725,18 +694,18 @@ class DatabaseTurnResolverTest {
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review");
 
-    ModelInvocationRequest withTask = fixture.resolved(fixture.path(settings(null, "default")));
+    ModelRequestSpec withTask = fixture.resolved(fixture.path(settings(null, "default")));
     assertEquals(List.of(new SubagentBinding("reviewer", "Review")), withTask.subagentBindings());
     assertEquals(
         List.of(TaskTool.NAME),
         withTask.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
 
     fixture.agentConfig.setSubagents(List.of());
-    ModelInvocationRequest withoutTask =
+    ModelRequestSpec withoutTask =
         fixture.resolved(fixture.path(settings(null, "default", List.of(TaskTool.NAME))));
     assertEquals(List.of(), withoutTask.subagentBindings());
     assertEquals(List.of(), withoutTask.toolBindings());
-    assertFalse(textOf(withoutTask.providerRequest().messages().getFirst()).contains("subagent"));
+    assertFalse(preambleText(withoutTask).contains("subagent"));
 
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     EntryPath depthLimited =
@@ -750,7 +719,7 @@ class DatabaseTurnResolverTest {
                         settings(null, "default", List.of(TaskTool.NAME)),
                         new SubagentContext(id(90), id(80), id(70), 2)),
                     NOW)));
-    ModelInvocationRequest depthLimitedRequest = fixture.resolved(depthLimited);
+    ModelRequestSpec depthLimitedRequest = fixture.resolved(depthLimited);
     assertEquals(List.of(), depthLimitedRequest.subagentBindings());
     assertEquals(List.of(), depthLimitedRequest.toolBindings());
   }
@@ -790,17 +759,17 @@ class DatabaseTurnResolverTest {
   void usesCatalogVariantReasoningEffortDirectly() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
-    ModelInvocationRequest request = fixture.resolved(fixture.path(settings(null, "custom")));
-    assertEquals("custom", request.providerRequest().variant().id());
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "custom")));
+    assertEquals("custom", request.variant().id());
     // 所选 catalog variant 的 reasoningEffort 原样生效，不存在运行时 override。
-    assertEquals("medium", request.providerRequest().variant().reasoningEffort());
+    assertEquals("medium", request.variant().reasoningEffort());
     // 其余 variant 字段原样保留。
-    assertEquals(2048, request.providerRequest().variant().maxOutputTokens());
-    assertEquals(0.5, request.providerRequest().variant().temperature());
-    assertEquals(List.of("END"), request.providerRequest().variant().stopSequences());
+    assertEquals(2048, request.variant().maxOutputTokens());
+    assertEquals(0.5, request.variant().temperature());
+    assertEquals(List.of("END"), request.variant().stopSequences());
 
     request = fixture.resolved(fixture.path(settings(null, "default")));
-    assertNull(request.providerRequest().variant().reasoningEffort());
+    assertNull(request.variant().reasoningEffort());
 
     // variant 携带 reasoningEffort 时要求模型支持 reasoning。
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -813,7 +782,7 @@ class DatabaseTurnResolverTest {
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.modelSupportsReasoning(false);
     request = fixture.resolved(fixture.path(settings(null, "default")));
-    assertNull(request.providerRequest().variant().reasoningEffort());
+    assertNull(request.variant().reasoningEffort());
   }
 
   @Test
@@ -823,9 +792,10 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     BranchSettings settings = settings(ENV_A, "default", List.of("load_skill"));
 
-    ModelInvocationRequest request = fixture.resolved(multiTurnPath(settings));
+    EntryPath path = multiTurnPath(settings);
+    ModelRequestSpec request = fixture.resolved(path);
 
-    List<ProviderMessage> messages = request.providerRequest().messages();
+    List<ProviderMessage> messages = materialized(path, request);
     assertEquals(4, messages.size());
     assertEquals(ProviderMessageRole.SYSTEM, messages.get(0).role());
     assertTrue(textOf(messages.get(0)).startsWith("agent system prompt"));
@@ -845,9 +815,10 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings(null, "default");
 
-    ModelInvocationRequest request = fixture.resolved(failedAttemptPath(settings));
+    EntryPath path = failedAttemptPath(settings);
+    ModelRequestSpec request = fixture.resolved(path);
 
-    List<ProviderMessage> messages = request.providerRequest().messages();
+    List<ProviderMessage> messages = materialized(path, request);
     assertEquals(2, messages.size());
     assertEquals(ProviderMessageRole.SYSTEM, messages.get(0).role());
     assertEquals(ProviderMessageRole.USER, messages.get(1).role());
@@ -864,10 +835,10 @@ class DatabaseTurnResolverTest {
         new Fixture(List.of(), List.of("a&b<c>"), List.of(platformDescriptor("load_skill")));
     fixture.readyEnvironmentWithSkills(ENV_A, List.of(new DaemonSkillDescriptor("a&b<c>", "d&e")));
 
-    ModelInvocationRequest request =
+    ModelRequestSpec request =
         fixture.resolved(fixture.path(settings(ENV_A, "default", List.of("load_skill"))));
 
-    String system = textOf(request.providerRequest().messages().getFirst());
+    String system = preambleText(request);
     assertTrue(system.contains("<name>a&amp;b&lt;c&gt;</name>"));
     assertTrue(system.contains("<description>d&amp;e</description>"));
   }
@@ -886,11 +857,7 @@ class DatabaseTurnResolverTest {
             true);
     assertEquals(
         PromptCacheRetention.NONE,
-        fixture
-            .resolved(fixture.path(settings(null, "default")))
-            .providerRequest()
-            .cacheControl()
-            .retention());
+        fixture.resolved(fixture.path(settings(null, "default"))).cacheControl().retention());
 
     fixture =
         new Fixture(
@@ -902,9 +869,9 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             true);
-    ModelInvocationRequest affinity = fixture.resolved(fixture.path(settings(null, "default")));
-    assertEquals(PromptCacheRetention.SHORT, affinity.providerRequest().cacheControl().retention());
-    assertTrue(affinity.providerRequest().cacheControl().affinityKey().startsWith("pc1-"));
+    ModelRequestSpec affinity = fixture.resolved(fixture.path(settings(null, "default")));
+    assertEquals(PromptCacheRetention.SHORT, affinity.cacheControl().retention());
+    assertTrue(affinity.cacheControl().affinityKey().startsWith("pc1-"));
 
     fixture =
         new Fixture(
@@ -918,13 +885,12 @@ class DatabaseTurnResolverTest {
                 Set.of(PromptCacheRetention.SHORT),
                 Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
             true);
-    ModelInvocationRequest breakpoints =
+    ModelRequestSpec breakpoints =
         fixture.resolved(fixture.path(settings(null, "default", List.of("create_goal"))));
-    assertEquals(
-        PromptCacheRetention.SHORT, breakpoints.providerRequest().cacheControl().retention());
+    assertEquals(PromptCacheRetention.SHORT, breakpoints.cacheControl().retention());
     assertEquals(
         Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS),
-        breakpoints.providerRequest().cacheControl().breakpoints());
+        breakpoints.cacheControl().breakpoints());
   }
 
   @Test
@@ -935,7 +901,7 @@ class DatabaseTurnResolverTest {
         IllegalStateException.class,
         () ->
             missingAgent.resolver.resolve(
-                THREAD_ID, missingAgent.path(settings(null, "default")), false, null));
+                THREAD_ID, missingAgent.path(settings(null, "default")), null));
 
     Fixture missingProvider = new Fixture(List.of(), List.of(), List.of());
     missingProvider.failProviderLookup(new RuntimeException("db down"));
@@ -943,7 +909,7 @@ class DatabaseTurnResolverTest {
         RuntimeException.class,
         () ->
             missingProvider.resolver.resolve(
-                THREAD_ID, missingProvider.path(settings(null, "default")), false, null));
+                THREAD_ID, missingProvider.path(settings(null, "default")), null));
 
     Fixture missingModel = new Fixture(List.of(), List.of(), List.of());
     missingModel.failModelLookup(new RuntimeException("db down"));
@@ -951,7 +917,7 @@ class DatabaseTurnResolverTest {
         RuntimeException.class,
         () ->
             missingModel.resolver.resolve(
-                THREAD_ID, missingModel.path(settings(null, "default")), false, null));
+                THREAD_ID, missingModel.path(settings(null, "default")), null));
   }
 
   @Test
@@ -978,10 +944,36 @@ class DatabaseTurnResolverTest {
               PromptCacheCapability.unsupported(),
               true);
       // 持久 providerType 只用于在解析时选择当前 ProviderFactory；descriptor 不再冻结类型。
-      ModelInvocationRequest request = fixture.resolved(fixture.path(settings(null, "default")));
-      assertEquals("provider", request.providerRequest().model().providerName());
-      assertEquals("model", request.providerRequest().model().modelName());
+      ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "default")));
+      assertEquals("provider", request.model().providerName());
+      assertEquals("model", request.model().modelName());
+      assertEquals(mapping.getValue(), request.providerType());
     }
+  }
+
+  @Test
+  void resolvedSpecStaysFrozenAfterCatalogAndConfigChange() {
+    Fixture fixture =
+        new Fixture(List.of("create_goal"), List.of(), List.of(platformDescriptor("create_goal")));
+    EntryPath path = fixture.path(settings(null, "custom"));
+    ModelRequestSpec frozen = fixture.resolved(path);
+    String preamble = preambleText(frozen);
+    ModelDescriptor model = frozen.model();
+    ModelVariant variant = frozen.variant();
+    List<ToolBinding> tools = frozen.toolBindings();
+
+    fixture.agent.setSystemPrompt("changed system prompt");
+    fixture.agentConfig.setTools(List.of());
+    fixture.modelSupportsTools(false);
+
+    assertEquals(preamble, preambleText(frozen));
+    assertEquals(model, frozen.model());
+    assertEquals(variant, frozen.variant());
+    assertEquals(tools, frozen.toolBindings());
+    assertEquals("custom", frozen.variant().id());
+    assertEquals(
+        List.of("create_goal"),
+        tools.stream().map(binding -> binding.descriptor().name()).toList());
   }
 
   private static String textOf(ProviderMessage message) {
@@ -990,6 +982,14 @@ class DatabaseTurnResolverTest {
       text.append(((ProviderTextBlock) content).text());
     }
     return text.toString();
+  }
+
+  private static String preambleText(ModelRequestSpec spec) {
+    return textOf(new ProviderMessageProjector().project(spec.preambleMessages()).getFirst());
+  }
+
+  private static List<ProviderMessage> materialized(EntryPath path, ModelRequestSpec spec) {
+    return new ModelRequestMaterializer().materialize(path, spec).messages();
   }
 
   private static void assertNoLegacyCurrentEnvironmentFields(String prompt) {
@@ -1014,6 +1014,50 @@ class DatabaseTurnResolverTest {
         List.of(new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW)));
   }
 
+  /** ROOT + INPUT turn + USER + ASSISTANT，供压缩 materialize 按冻结 Entry IDs 取摘要范围。 */
+  private static EntryPath compactionHistoryPath(BranchSettings settings) {
+    return new EntryPath(
+        List.of(
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            new Entry(
+                id(2),
+                SESSION_ID,
+                id(1),
+                new TurnStartPayload(TurnStartReason.INPUT, settings, THREAD_ID, 4096),
+                NOW.plusSeconds(1)),
+            new Entry(
+                id(3),
+                SESSION_ID,
+                id(2),
+                new MessagePayload(
+                    new AgentMessage(
+                        AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                    null,
+                    null),
+                NOW.plusSeconds(2)),
+            new Entry(
+                id(4),
+                SESSION_ID,
+                id(3),
+                new MessagePayload(
+                    new AgentMessage(
+                        AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("reply"))),
+                    new AssistantMessageMetadata(
+                        ProviderStopReason.COMPLETED,
+                        new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L),
+                        new ModelCost(
+                            "USD",
+                            BigDecimal.ZERO,
+                            BigDecimal.ZERO,
+                            BigDecimal.ZERO,
+                            BigDecimal.ZERO,
+                            BigDecimal.ZERO,
+                            BigDecimal.ZERO,
+                            BigDecimal.ZERO)),
+                    null),
+                NOW.plusSeconds(3))));
+  }
+
   /** 两个关闭 Turn：USER + ABORTED + STOPPED；CUSTOM + ASSISTANT_ERROR + FAILED。两个 Turn 使用同一 settings。 */
   private static EntryPath multiTurnPath(BranchSettings settings) {
     return multiTurnPath(settings, settings);
@@ -1029,7 +1073,7 @@ class DatabaseTurnResolverTest {
                 id(2),
                 SESSION_ID,
                 id(1),
-                new TurnStartPayload(TurnStartReason.INPUT, firstTurnSettings),
+                new TurnStartPayload(TurnStartReason.INPUT, firstTurnSettings, THREAD_ID),
                 NOW),
             new Entry(
                 id(3),
@@ -1061,7 +1105,7 @@ class DatabaseTurnResolverTest {
                 id(6),
                 SESSION_ID,
                 id(5),
-                new TurnStartPayload(TurnStartReason.INPUT, latestTurnSettings),
+                new TurnStartPayload(TurnStartReason.INPUT, latestTurnSettings, THREAD_ID),
                 NOW),
             new Entry(
                 id(7),
@@ -1098,7 +1142,7 @@ class DatabaseTurnResolverTest {
                 id(2),
                 SESSION_ID,
                 id(1),
-                new TurnStartPayload(TurnStartReason.INPUT, settings),
+                new TurnStartPayload(TurnStartReason.INPUT, settings, THREAD_ID),
                 NOW),
             new Entry(
                 id(3),
@@ -1176,32 +1220,30 @@ class DatabaseTurnResolverTest {
             123L,
             4096L,
             id(2),
-            id(3),
+            id(4),
             null,
             null,
             messages);
 
-    ModelInvocationRequest request = fixture.resolved(fixture.path(settings), false, preparation);
+    EntryPath historyPath = compactionHistoryPath(settings);
+    ModelRequestSpec request = fixture.resolved(historyPath, preparation);
 
     // 冻结的切分事实与 contextWindow 逐字段保留。
     assertEquals(CompactionPhase.FULL, request.compaction().phase());
     assertEquals(CompactionTrigger.THRESHOLD, request.compaction().trigger());
     assertEquals(123L, request.compaction().tokensBefore());
     assertEquals(id(2), request.compaction().firstKeptEntryId());
-    assertEquals(id(3), request.compaction().cutEntryId());
+    assertEquals(id(4), request.compaction().cutEntryId());
     assertNull(request.compaction().turnPrefixStartEntryId());
-    assertEquals(4096, request.contextWindow());
-    assertEquals(ENV_A, request.environment());
-    // 解析的 inputModalities 必须随 descriptor 冻结进 compaction ProviderRequest。
-    assertEquals(
-        Set.of(ModelInputModality.TEXT), request.providerRequest().model().inputModalities());
+    assertEquals(4096, fixture.resolvedResult(historyPath, preparation).contextWindow());
+    // 解析的 inputModalities 必须随 descriptor 冻结进 compaction spec。
+    assertEquals(Set.of(ModelInputModality.TEXT), request.model().inputModalities());
     // 零 tool / skill，无 cache。
     assertEquals(List.of(), request.toolBindings());
     assertEquals(List.of(), request.skillBindings());
-    assertEquals(List.of(), request.providerRequest().tools());
-    assertEquals(ProviderCacheControl.none(), request.providerRequest().cacheControl());
+    assertEquals(ProviderCacheControl.none(), request.cacheControl());
     // 恰好 SYSTEM + USER 两个消息：summarization system prompt + summary user prompt。
-    List<ProviderMessage> providerMessages = request.providerRequest().messages();
+    List<ProviderMessage> providerMessages = materialized(historyPath, request);
     assertEquals(2, providerMessages.size());
     assertEquals(ProviderMessageRole.SYSTEM, providerMessages.get(0).role());
     assertEquals(CompactionPrompts.summarizationSystemPrompt(), textOf(providerMessages.get(0)));
@@ -1210,7 +1252,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         CompactionPrompts.summaryUserPrompt(messages, null), textOf(providerMessages.get(1)));
     // 输出上限 = min(variant 1024, floor(0.8 * 16384) = 13107) = 1024。
-    assertEquals(1024, request.providerRequest().variant().maxOutputTokens());
+    assertEquals(1024, request.variant().maxOutputTokens());
   }
 
   @Test
@@ -1246,15 +1288,13 @@ class DatabaseTurnResolverTest {
     assertEquals(
         600,
         fixture
-            .resolved(fixture.path(settings(null, "default")), false, full)
-            .providerRequest()
+            .resolved(fixture.path(settings(null, "default")), full)
             .variant()
             .maxOutputTokens());
     assertEquals(
         600,
         fixture
-            .resolved(fixture.path(settings(null, "default")), false, prefix)
-            .providerRequest()
+            .resolved(fixture.path(settings(null, "default")), prefix)
             .variant()
             .maxOutputTokens());
   }
@@ -1264,10 +1304,10 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings(ENV_A, "default");
 
-    ModelInvocationRequest request =
-        fixture.resolved(projectionPath(settings, "summary text", id(2), id(4)));
+    EntryPath path = projectionPath(settings, "summary text", id(2), id(4));
+    ModelRequestSpec request = fixture.resolved(path);
 
-    List<ProviderMessage> messages = request.providerRequest().messages();
+    List<ProviderMessage> messages = materialized(path, request);
     assertEquals(5, messages.size());
     assertEquals(ProviderMessageRole.SYSTEM, messages.get(0).role());
     assertTrue(textOf(messages.get(0)).startsWith("agent system prompt"));
@@ -1284,9 +1324,10 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings(ENV_A, "default");
 
-    ModelInvocationRequest request = fixture.resolved(stoppedCompactionProjectionPath(settings));
+    EntryPath path = stoppedCompactionProjectionPath(settings);
+    ModelRequestSpec request = fixture.resolved(path);
 
-    List<ProviderMessage> messages = request.providerRequest().messages();
+    List<ProviderMessage> messages = materialized(path, request);
     assertEquals(5, messages.size());
     assertEquals("first user", textOf(messages.get(1)));
     assertEquals("first reply", textOf(messages.get(2)));
@@ -1301,10 +1342,12 @@ class DatabaseTurnResolverTest {
     BranchSettings settings = settings(ENV_A, "default");
     // cut 不在当前路径。
     EntryPath missingCut = projectionPath(settings, "summary", id(2), id(999));
-    assertThrows(IllegalStateException.class, () -> fixture.resolved(missingCut));
+    ModelRequestSpec missingSpec = fixture.resolved(missingCut);
+    assertThrows(IllegalStateException.class, () -> materialized(missingCut, missingSpec));
     // firstKept 在 cut 之后（顺序非法）。
     EntryPath inverted = projectionPath(settings, "summary", id(4), id(3));
-    assertThrows(IllegalStateException.class, () -> fixture.resolved(inverted));
+    ModelRequestSpec invertedSpec = fixture.resolved(inverted);
+    assertThrows(IllegalStateException.class, () -> materialized(inverted, invertedSpec));
   }
 
   @Test
@@ -1312,9 +1355,10 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings(ENV_A, "default");
 
-    ModelInvocationRequest request = fixture.resolved(twoCompactionProjectionPath(settings));
+    EntryPath path = twoCompactionProjectionPath(settings);
+    ModelRequestSpec request = fixture.resolved(path);
 
-    List<ProviderMessage> messages = request.providerRequest().messages();
+    List<ProviderMessage> messages = materialized(path, request);
     assertEquals(6, messages.size());
     assertEquals(CompactionPrompts.compactedContext("latest summary"), textOf(messages.get(1)));
     // 只有最新压缩的 wrapper；从最新 cut（USER2）起保留。
@@ -1441,7 +1485,11 @@ class DatabaseTurnResolverTest {
 
   private static Entry turnEntry(UUID id, UUID parentId, BranchSettings settings) {
     return new Entry(
-        id, SESSION_ID, parentId, new TurnStartPayload(TurnStartReason.INPUT, settings), NOW);
+        id,
+        SESSION_ID,
+        parentId,
+        new TurnStartPayload(TurnStartReason.INPUT, settings, THREAD_ID),
+        NOW);
   }
 
   private static Entry userEntry(UUID id, UUID parentId, String text) {
@@ -1481,7 +1529,11 @@ class DatabaseTurnResolverTest {
 
   private static Entry compactionStartEntry(UUID id, UUID parentId, BranchSettings settings) {
     return new Entry(
-        id, SESSION_ID, parentId, new TurnStartPayload(TurnStartReason.COMPACTION, settings), NOW);
+        id,
+        SESSION_ID,
+        parentId,
+        new TurnStartPayload(TurnStartReason.COMPACTION, settings, THREAD_ID),
+        NOW);
   }
 
   private static Entry turnEnd(UUID id, UUID parentId, UUID turnStartEntryId) {
@@ -1769,23 +1821,22 @@ class DatabaseTurnResolverTest {
       return rootPath(settings);
     }
 
-    private ModelInvocationRequest resolved(EntryPath path) {
-      return resolved(path, false);
+    private ModelRequestSpec resolved(EntryPath path) {
+      return resolvedResult(path, null).spec();
     }
 
-    private ModelInvocationRequest resolved(EntryPath path, boolean yoloEnabled) {
-      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, yoloEnabled, null);
-      return assertInstanceOf(TurnResolver.Resolved.class, result).request();
+    private ModelRequestSpec resolved(EntryPath path, CompactionPreparation preparation) {
+      return resolvedResult(path, preparation).spec();
     }
 
-    private ModelInvocationRequest resolved(
-        EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
-      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, yoloEnabled, preparation);
-      return assertInstanceOf(TurnResolver.Resolved.class, result).request();
+    private TurnResolver.Resolved resolvedResult(
+        EntryPath path, CompactionPreparation preparation) {
+      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, preparation);
+      return assertInstanceOf(TurnResolver.Resolved.class, result);
     }
 
     private TurnResolver.Rejected rejected(EntryPath path) {
-      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, false, null);
+      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, null);
       return assertInstanceOf(TurnResolver.Rejected.class, result);
     }
 

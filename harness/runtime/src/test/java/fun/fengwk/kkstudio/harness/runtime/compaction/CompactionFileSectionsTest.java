@@ -44,6 +44,7 @@ import java.util.UUID;
  * turnPrefixStartEntryId；引用缺失/顺序非法 fail closed。
  */
 class CompactionFileSectionsTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
@@ -280,7 +281,7 @@ class CompactionFileSectionsTest {
               id(cur),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
+              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
               BASE));
       return cur;
     }
@@ -395,7 +396,7 @@ class CompactionFileSectionsTest {
               id(startId),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       entries.add(
           new Entry(

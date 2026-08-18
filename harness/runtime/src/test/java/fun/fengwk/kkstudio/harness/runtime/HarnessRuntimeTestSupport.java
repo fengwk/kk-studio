@@ -10,8 +10,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -78,6 +79,7 @@ import java.util.function.Function;
  */
 final class HarnessRuntimeTestSupport {
 
+  static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final Instant T0 = Instant.ofEpochMilli(1_000);
   static final Instant T1 = Instant.ofEpochMilli(2_000);
   static final Instant T2 = Instant.ofEpochMilli(3_000);
@@ -247,7 +249,7 @@ final class HarnessRuntimeTestSupport {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.CONTINUATION, settings()),
+                  new TurnStartPayload(TurnStartReason.CONTINUATION, settings(), OWNER_THREAD_ID),
                   T1));
           ThreadState thread = thread(threadId, turnStartEntryId);
           tx.insertThread(thread);
@@ -677,7 +679,7 @@ final class HarnessRuntimeTestSupport {
         id,
         sessionId,
         parentId,
-        new TurnStartPayload(TurnStartReason.INPUT, settings()),
+        new TurnStartPayload(TurnStartReason.INPUT, settings(), OWNER_THREAD_ID),
         createdAt);
   }
 
@@ -807,9 +809,18 @@ final class HarnessRuntimeTestSupport {
         ENV, "agent", new ModelSelection("provider", "model", "v1"), List.of());
   }
 
-  static ModelInvocationRequest modelRequest() {
-    return new ModelInvocationRequest(
-        ENV, providerRequest(), List.of(), List.of(), false, 100_000, null);
+  static ModelRequestSpec modelRequest() {
+    ProviderRequest provider = providerRequest();
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        provider.model(),
+        provider.variant(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        provider.cacheControl(),
+        null);
   }
 
   static ToolInvocationRequest toolRequest(String toolCallId) {

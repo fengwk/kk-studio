@@ -709,7 +709,7 @@ class ModelInvocationTransitionTest {
         source.threadId(),
         source.turnStartEntryId(),
         source.basisHeadEntryId(),
-        request(List.of(), false),
+        request(List.of()),
         source.status(),
         source.attempt(),
         source.streamCheckpoint(),

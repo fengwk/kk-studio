@@ -20,8 +20,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -105,6 +106,7 @@ import java.util.function.Function;
 final class ThreadProcessorTestSupport {
 
   static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
+  static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
   static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
@@ -175,11 +177,7 @@ final class ThreadProcessorTestSupport {
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
               new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
-                  NOW));
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
           tx.insertEntry(
               new Entry(
                   userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
@@ -205,11 +203,7 @@ final class ThreadProcessorTestSupport {
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
               new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
-                  NOW));
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
           tx.insertEntry(
               new Entry(
                   userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
@@ -258,11 +252,7 @@ final class ThreadProcessorTestSupport {
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
               new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
-                  NOW));
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
           tx.insertEntry(
               new Entry(
                   userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
@@ -415,7 +405,7 @@ final class ThreadProcessorTestSupport {
       UUID turnStartEntryId,
       UUID basisEntryId,
       ModelInvocationStatus status,
-      ModelInvocationRequest request,
+      ModelRequestSpec request,
       ProviderResponse response,
       ModelInvocationError error) {
     UUID modelId =
@@ -670,6 +660,18 @@ final class ThreadProcessorTestSupport {
         ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), List.of());
   }
 
+  /** Resolver 成功后的 INPUT TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
+  static TurnStartPayload resolvedInputTurnStart(UUID ownerThreadId) {
+    return new TurnStartPayload(
+        TurnStartReason.INPUT, branchSettings(), ownerThreadId, CONTEXT_WINDOW);
+  }
+
+  /** Resolver 成功后的 COMPACTION TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
+  static TurnStartPayload resolvedCompactionTurnStart(UUID ownerThreadId) {
+    return new TurnStartPayload(
+        TurnStartReason.COMPACTION, branchSettings(), ownerThreadId, CONTEXT_WINDOW);
+  }
+
   static EntryPayload userMessagePayload(String text) {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))), null, null);
@@ -702,53 +704,47 @@ final class ThreadProcessorTestSupport {
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
-  static ModelInvocationRequest tooledRequest(List<String> toolNames) {
+  static ModelRequestSpec tooledRequest(List<String> toolNames) {
     List<ToolBinding> bindings = new ArrayList<>();
-    List<ProviderToolDefinition> definitions = new ArrayList<>();
     for (String name : toolNames) {
       bindings.add(platformBinding(name));
-      definitions.add(new ProviderToolDefinition(name, "description of " + name, "{}"));
     }
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(definitions), bindings, List.of(), false, CONTEXT_WINDOW, null);
+    return requestWithBindings(bindings);
   }
 
-  static ModelInvocationRequest plainRequest() {
+  static ModelRequestSpec plainRequest() {
     return tooledRequest(List.of());
   }
 
-  static ModelInvocationRequest requestWithBindings(List<ToolBinding> bindings) {
-    List<ProviderToolDefinition> definitions = new ArrayList<>(bindings.size());
-    for (ToolBinding binding : bindings) {
-      definitions.add(
-          new ProviderToolDefinition(
-              binding.descriptor().name(), binding.descriptor().description(), "{}"));
-    }
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(definitions), bindings, List.of(), false, CONTEXT_WINDOW, null);
-  }
-
-  /** 按 candidate BranchSettings 构造机械一致的 Resolved 请求（env / model / variant / activeTools / yolo）。 */
-  static ModelInvocationRequest requestFor(BranchSettings settings, boolean yoloEnabled) {
-    List<ToolBinding> bindings = new ArrayList<>();
-    List<ProviderToolDefinition> definitions = new ArrayList<>();
-    for (String name : settings.activeTools()) {
-      bindings.add(platformBinding(name));
-      definitions.add(new ProviderToolDefinition(name, "description of " + name, "{}"));
-    }
-    return new ModelInvocationRequest(
-        settings.environment(),
-        new ProviderRequest(
-            modelDescriptor(settings.model().providerName(), settings.model().modelName()),
-            new ModelVariant(
-                settings.model().variant(), null, null, null, null, null, null, List.of(), null),
-            List.of(),
-            definitions,
-            ProviderCacheControl.none()),
+  static ModelRequestSpec requestWithBindings(List<ToolBinding> bindings) {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor("provider", "model"),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        List.of(),
         bindings,
         List.of(),
-        yoloEnabled,
-        CONTEXT_WINDOW,
+        List.of(),
+        ProviderCacheControl.none(),
+        null);
+  }
+
+  /** 按 candidate BranchSettings 构造机械一致的 Resolved spec（model / variant / tools）。 */
+  static ModelRequestSpec requestFor(BranchSettings settings) {
+    List<ToolBinding> bindings = new ArrayList<>();
+    for (String name : settings.activeTools()) {
+      bindings.add(platformBinding(name));
+    }
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor(settings.model().providerName(), settings.model().modelName()),
+        new ModelVariant(
+            settings.model().variant(), null, null, null, null, null, null, List.of(), null),
+        List.of(),
+        bindings,
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
         null);
   }
 
@@ -760,19 +756,16 @@ final class ThreadProcessorTestSupport {
    * 按冻结 preparation 构造机械一致的压缩 Resolved 请求（零 tool/skill、零 provider tools、缓存 none、
    * contextWindow/tokensBefore/ids 与 preparation 逐字段一致）。
    */
-  static ModelInvocationRequest compactionRequest(CompactionPreparation preparation) {
-    return new ModelInvocationRequest(
-        ENV_ID,
-        new ProviderRequest(
-            modelDescriptor("provider", "model"),
-            new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
-            List.of(),
-            List.of(),
-            ProviderCacheControl.none()),
+  static ModelRequestSpec compactionRequest(CompactionPreparation preparation) {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor("provider", "model"),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
         List.of(),
         List.of(),
-        false,
-        Math.toIntExact(preparation.contextWindow()),
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
         new CompactionRequest(
             preparation.phase(),
             preparation.trigger(),
@@ -819,7 +812,7 @@ final class ThreadProcessorTestSupport {
                       turnStartEntryId,
                       sessionId,
                       rootEntryId,
-                      new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                      resolvedInputTurnStart(threadId),
                       NOW));
               tx.insertEntry(
                   new Entry(
@@ -851,7 +844,7 @@ final class ThreadProcessorTestSupport {
                       secondTurnStartId,
                       sessionId,
                       turnEndEntryId,
-                      new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                      resolvedInputTurnStart(threadId),
                       NOW));
               tx.insertEntry(
                   new Entry(
@@ -1053,17 +1046,14 @@ final class ThreadProcessorTestSupport {
     boolean autoConsistent;
     UUID lastThreadId;
     EntryPath lastPath;
-    boolean lastYoloEnabled;
     CompactionPreparation lastPreparation;
     int calls;
 
     @Override
-    public Result resolve(
-        UUID threadId, EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
+    public Result resolve(UUID threadId, EntryPath path, CompactionPreparation preparation) {
       calls++;
       lastThreadId = threadId;
       lastPath = path;
-      lastYoloEnabled = yoloEnabled;
       lastPreparation = preparation;
       if (onResolve != null) {
         onResolve.run();
@@ -1072,12 +1062,10 @@ final class ThreadProcessorTestSupport {
         throw failure;
       }
       if (autoConsistent) {
-        // 按 candidate path 的最终 branch 事实自动构造一致请求（settings/yolo 与校验完全同源）；
-        // 压缩 turn 按冻结 preparation 构造零工具压缩请求。
+        // 按 candidate path 的最终 branch 事实自动构造一致 spec；压缩 turn 按冻结 preparation 构造。
         return new TurnResolver.Resolved(
-            preparation == null
-                ? requestFor(path.baseSettings(), yoloEnabled)
-                : compactionRequest(preparation));
+            preparation == null ? requestFor(path.baseSettings()) : compactionRequest(preparation),
+            CONTEXT_WINDOW);
       }
       if (results.isEmpty()) {
         return null;

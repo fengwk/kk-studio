@@ -26,7 +26,7 @@ public record ModelInvocation(
     UUID threadId,
     UUID turnStartEntryId,
     UUID basisHeadEntryId,
-    ModelInvocationRequest request,
+    ModelRequestSpec request,
     ModelInvocationStatus status,
     int attempt,
     StreamCheckpoint streamCheckpoint,

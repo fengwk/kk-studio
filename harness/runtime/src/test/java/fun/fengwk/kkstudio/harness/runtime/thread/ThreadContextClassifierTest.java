@@ -22,8 +22,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -38,10 +38,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -712,7 +712,7 @@ class ThreadContextClassifierTest {
             entry(
                 TURN_START_ID,
                 ROOT_ID,
-                new TurnStartPayload(TurnStartReason.INPUT, branchSettings())),
+                new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), THREAD_ID)),
             entry(USER_ID, TURN_START_ID, userMessage())));
   }
 
@@ -723,7 +723,7 @@ class ThreadContextClassifierTest {
             entry(
                 TURN_START_ID,
                 ROOT_ID,
-                new TurnStartPayload(TurnStartReason.INPUT, branchSettings())),
+                new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), THREAD_ID)),
             entry(USER_ID, TURN_START_ID, userMessage()),
             entry(ASSISTANT_ID, USER_ID, assistantMessage(callIds))));
   }
@@ -735,7 +735,7 @@ class ThreadContextClassifierTest {
             entry(
                 TURN_START_ID,
                 ROOT_ID,
-                new TurnStartPayload(TurnStartReason.INPUT, branchSettings())),
+                new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), THREAD_ID)),
             entry(USER_ID, TURN_START_ID, userMessage()),
             entry(
                 ERROR_ID,
@@ -750,7 +750,7 @@ class ThreadContextClassifierTest {
             entry(
                 TURN_START_ID,
                 ROOT_ID,
-                new TurnStartPayload(TurnStartReason.INPUT, branchSettings())),
+                new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), THREAD_ID)),
             entry(USER_ID, TURN_START_ID, userMessage()),
             entry(ASSISTANT_ID, USER_ID, assistantMessage(List.of())),
             entry(
@@ -858,19 +858,16 @@ class ThreadContextClassifierTest {
         NOW);
   }
 
-  private static ModelInvocationRequest modelRequest() {
-    return new ModelInvocationRequest(
-        EnvironmentBindings.binding("env-1"),
-        new ProviderRequest(
-            modelDescriptor(),
-            new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
-            List.of(),
-            List.of(),
-            ProviderCacheControl.none()),
+  private static ModelRequestSpec modelRequest() {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor(),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
         List.of(),
         List.of(),
-        false,
-        100_000,
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
         null);
   }
 

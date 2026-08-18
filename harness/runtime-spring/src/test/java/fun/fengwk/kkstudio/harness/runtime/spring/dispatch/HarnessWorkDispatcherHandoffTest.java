@@ -352,7 +352,7 @@ class HarnessWorkDispatcherHandoffTest {
     ThreadProcessor threadProcessor =
         new ThreadProcessor(
             store,
-            (threadId, path, yoloEnabled, preparation) -> {
+            (threadId, path, preparation) -> {
               throw new AssertionError("resolver must not be called for a quiescent thread");
             },
             new ThreadProcessorConfig(
