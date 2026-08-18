@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -200,13 +201,31 @@ public final class HarnessRuntimeTestFixtures {
         id(10),
         id(4),
         0,
-        request,
+        request.call(),
+        request.binding(),
         ToolInvocationStatus.WAITING_APPROVAL,
         0,
         ToolApproval.request(NOW, null),
         null,
         null,
+        NOW,
+        NOW);
+  }
+
+  /** unknown tool immediate FAILED 槽位：binding 为 null，但 durable ToolCall 身份仍必须完整投射。 */
+  public static ToolInvocation unknownToolFailedInvocation() {
+    return new ToolInvocation(
+        id(101),
+        id(10),
+        id(4),
+        0,
+        new ToolCall("call-77", "unknown_tool", "{\"x\":1}"),
         null,
+        ToolInvocationStatus.FAILED,
+        0,
+        null,
+        null,
+        new ToolInvocationError("FAILED", "unknown tool"),
         NOW,
         NOW);
   }

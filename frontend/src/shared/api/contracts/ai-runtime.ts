@@ -205,8 +205,10 @@ export interface ModelInvocationDTO {
 
 /**
  * ToolInvocation 查询投影；id 均为 canonical UUID string。
- * approvalJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段
- * 非 null；environment 是可空的完整 Environment binding。
+ * toolCallId / toolName / argumentsJson 恒来自 durable ToolCall；toolVersion / toolType /
+ * environment 仅 binding 非 null 时有值（unknown tool 槽位为 null），rendererKey 恒有值
+ *（binding null 时固定回退为 "tool"）。approvalJson / resultJson / errorJson 是规范的运行时
+ * codec JSON，仅在其对应阶段非 null。
  */
 export interface ToolInvocationDTO {
   id: string
@@ -217,9 +219,9 @@ export interface ToolInvocationDTO {
   attempt: number
   toolCallId: string
   toolName: string
-  toolVersion: string
+  toolVersion: string | null
   rendererKey: string
-  toolType: string
+  toolType: string | null
   environment: EnvironmentBindingDTO | null
   argumentsJson: string
   approvalJson: string | null

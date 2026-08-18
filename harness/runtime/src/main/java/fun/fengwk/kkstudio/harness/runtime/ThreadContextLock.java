@@ -19,9 +19,10 @@ import java.util.Optional;
  * repository。
  *
  * <p>从调用方已锁定的 Thread 出发，加载 root-to-head {@link EntryPath}，仅通过 {@code (threadId, open TURN_START)}
- * 查找 Model 并锁定该适用 Model；只有当该 Model 的 result 恰为 当前 Assistant head 时，才加载/锁定 Tool
- * siblings；随后在已锁定的行上运行纯 {@link ThreadContextClassifier}，从而保证各操作之间的分类不发生漂移。同时需要 Commands 的调用方必须
- * 先锁定已入队 Commands，保持规范顺序 Thread -&gt; Commands -&gt; Model -&gt; Tool siblings -&gt; Work。
+ * 查找 Model 并锁定该适用 Model；只有当该 Model 的 result 恰为 当前 Assistant head 时，才加载/锁定 Tool siblings（Tool
+ * siblings 存在即 outcome 尚未物化）；随后在已锁定的行上运行纯 {@link ThreadContextClassifier}，从而保证各操作之间的分类不发生漂移。同时需要
+ * Commands 的调用方必须 先锁定已入队 Commands，保持规范顺序 Thread -&gt; Commands -&gt; Model -&gt; Tool siblings
+ * -&gt; Work。
  */
 final class ThreadContextLock {
 

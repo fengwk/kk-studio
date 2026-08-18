@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.StreamCheckpointJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -254,21 +255,25 @@ public final class HarnessRuntimeWebMapper {
     dto.setOrdinal(invocation.ordinal());
     dto.setStatus(invocation.status().name());
     dto.setAttempt(invocation.attempt());
-    dto.setToolCallId(invocation.request().call().id());
-    ToolBinding binding = invocation.request().binding();
-    dto.setToolName(binding.descriptor().name());
-    dto.setToolVersion(binding.descriptor().version());
-    dto.setRendererKey(binding.descriptor().rendererKey());
-    dto.setToolType(binding.type().name());
-    dto.setEnvironment(toEnvironmentBindingDto(binding.environment()));
-    dto.setArgumentsJson(invocation.request().call().argumentsJson());
+    dto.setToolCallId(invocation.call().id());
+    dto.setToolName(invocation.call().toolName());
+    dto.setArgumentsJson(invocation.call().argumentsJson());
+    ToolBinding binding = invocation.binding();
+    if (binding == null) {
+      // unknown tool 槽位（immediate FAILED）：toolVersion/toolType/environment 显式 null，renderer 固定回退
+      // tool。
+      dto.setRendererKey(HistoryPayloadMapper.UNBOUND_RENDERER_KEY);
+    } else {
+      dto.setToolVersion(binding.descriptor().version());
+      dto.setRendererKey(binding.descriptor().rendererKey());
+      dto.setToolType(binding.type().name());
+      dto.setEnvironment(toEnvironmentBindingDto(binding.environment()));
+    }
     dto.setApprovalJson(
         invocation.approval() == null ? null : TOOL_APPROVALS.encode(invocation.approval()));
     dto.setResultJson(
         invocation.result() == null ? null : ToolResultJsonCodec.encode(invocation.result()));
     dto.setErrorJson(invocation.error() == null ? null : TOOL_ERRORS.encode(invocation.error()));
-    dto.setResultEntryId(
-        invocation.resultEntryId() == null ? null : invocation.resultEntryId().toString());
     dto.setCreateTime(invocation.createdAt());
     dto.setUpdateTime(invocation.updatedAt());
     return dto;

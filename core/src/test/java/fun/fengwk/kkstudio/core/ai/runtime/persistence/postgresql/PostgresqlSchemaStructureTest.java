@@ -325,14 +325,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "model_invocation_id",
         "assistant_entry_id",
         "ordinal",
-        "request",
+        "call",
+        "binding",
         "status",
         "attempt",
         "approval",
         "result",
         "effects",
         "error",
-        "result_entry_id",
         "created_at",
         "updated_at");
   }
@@ -390,7 +390,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "harness_model_invocation", "result");
     assertColumnType("jsonb", "harness_model_invocation", "error");
     assertColumnType("jsonb", "harness_model_invocation", "failed_attempts");
-    assertColumnType("jsonb", "harness_tool_invocation", "request");
+    assertColumnType("jsonb", "harness_tool_invocation", "call");
+    assertColumnType("jsonb", "harness_tool_invocation", "binding");
     assertColumnType("jsonb", "harness_tool_invocation", "approval");
     assertColumnType("jsonb", "harness_tool_invocation", "result");
     assertColumnType("jsonb", "harness_tool_invocation", "effects");
@@ -955,7 +956,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_harness_model_invocation_turn",
             "uk_harness_model_invocation_result",
             "uk_harness_tool_invocation_ordinal",
-            "uk_harness_tool_invocation_result",
             "uk_storage_blob_active_hash",
             "uk_storage_upload_candidate"),
         indexes,

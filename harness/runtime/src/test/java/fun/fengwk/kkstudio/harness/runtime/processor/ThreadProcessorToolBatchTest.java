@@ -8,7 +8,6 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.model;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.realToolResultPayload;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedModelInvocation;
@@ -25,7 +24,6 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchToolTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionTool;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -109,9 +107,13 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertTrue(end.continueModel());
     TurnStartPayload continuation = (TurnStartPayload) entries.get(7).payload();
     assertEquals(TurnStartReason.CONTINUATION, continuation.reason());
-    List<ToolInvocation> siblings = toolsByAssistant(fixture.store, chain.assistantEntryId());
-    assertEquals(entries.get(4).id(), siblings.get(0).resultEntryId());
-    assertEquals(entries.get(5).id(), siblings.get(1).resultEntryId());
+    // applyToolBatch 同事务删除全部 child ToolInvocation 行与 parent ModelInvocation 行。
+    assertTrue(toolsByAssistant(fixture.store, chain.assistantEntryId()).isEmpty());
+    assertNull(
+        fixture
+            .store
+            .transaction(tx -> tx.findModelInvocation(chain.modelInvocationId()))
+            .orElse(null));
     assertEquals(entries.get(7).id(), thread(fixture.store, chain.turn().threadId()).headEntryId());
     // baseline(1) + seed assistant 推进(2) + batch apply(3)
     assertEquals(3L, thread(fixture.store, chain.turn().threadId()).revision());
@@ -154,7 +156,12 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     for (Entry entry : durablePath.entries().subList(4, durablePath.entries().size())) {
       assertEquals(toolFloor, entry.createdAt());
     }
-    assertEquals(toolFloor, tool(fixture.store, chain.toolInvocationIds().getFirst()).updatedAt());
+    // applyToolBatch 已删除 Tool 行：无法读 tool.updatedAt，但 thread 的最终 updatedAt 仍受 mutationNow 抬升。
+    assertTrue(
+        fixture
+            .store
+            .transaction(tx -> tx.findToolInvocation(chain.toolInvocationIds().getFirst()))
+            .isEmpty());
     assertEquals(toolFloor, thread(fixture.store, chain.turn().threadId()).updatedAt());
     Entry continuation = durablePath.head();
     ModelInvocation continuationModel =
@@ -204,9 +211,13 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
         new CustomEntryPayload("goal", "state", 1, "{\"step\":2}"), entries.get(5).payload());
     assertTrue(entries.get(6).payload() instanceof MessagePayload);
     assertTrue(entries.get(7).payload() instanceof MessagePayload);
-    List<ToolInvocation> siblings = toolsByAssistant(fixture.store, chain.assistantEntryId());
-    assertEquals(entries.get(6).id(), siblings.get(0).resultEntryId());
-    assertEquals(entries.get(7).id(), siblings.get(1).resultEntryId());
+    // applyToolBatch 同事务删除全部 child ToolInvocation 行与 parent ModelInvocation 行。
+    assertTrue(toolsByAssistant(fixture.store, chain.assistantEntryId()).isEmpty());
+    assertNull(
+        fixture
+            .store
+            .transaction(tx -> tx.findModelInvocation(chain.modelInvocationId()))
+            .orElse(null));
   }
 
   @Test
@@ -283,9 +294,16 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     requestThreadWork(toolFixture.store, chain.turn().threadId());
     ClaimedWork toolClaim = claimThreadWork(toolFixture.store, chain.turn().threadId());
     assertEquals(ThreadProcessResult.SUSPENDED, toolFixture.processor.process(toolClaim));
+    // TOOL_ACTIVE 路径：applyToolBatch 未执行，Tool 行与 parent Model 行保持原样。
     List<ToolInvocation> siblings = toolsByAssistant(toolFixture.store, chain.assistantEntryId());
-    assertNull(siblings.get(0).resultEntryId());
-    assertNull(siblings.get(1).resultEntryId());
+    assertEquals(2, siblings.size());
+    assertEquals(ToolInvocationStatus.SUCCEEDED, siblings.get(0).status());
+    assertEquals(ToolInvocationStatus.READY, siblings.get(1).status());
+    assertNotNull(
+        toolFixture
+            .store
+            .transaction(tx -> tx.findModelInvocation(chain.modelInvocationId()))
+            .orElse(null));
     assertEquals(4, path(toolFixture.store, chain.turn().threadId()).entries().size());
   }
 
@@ -315,7 +333,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     // assistant 有 2 个 call 但只有 1 个 sibling：防御性 ISE，不写入任何 TOOL Entry。
     assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
     assertEquals(4, path(fixture.store, baseline.threadId()).entries().size());
-    assertNull(tool(fixture.store, toolId).resultEntryId());
+    // ISE 回滚后 Tool 行保持原样；ToolInvocation 无 resultEntryId 字段。
+    assertEquals(ToolInvocationStatus.SUCCEEDED, tool(fixture.store, toolId).status());
   }
 
   @Test
@@ -344,48 +363,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     // 2 个 call 但只有 1 个非 terminal sibling：数量一致性校验先于状态分类 -> ISE 回滚，绝非 blocker。
     assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
     assertEquals(4, path(fixture.store, baseline.threadId()).entries().size());
-    assertNull(tool(fixture.store, toolId).resultEntryId());
+    // ISE 回滚后 Tool 行保持原状；ToolInvocation 无 resultEntryId 字段。
     assertEquals(ToolInvocationStatus.READY, tool(fixture.store, toolId).status());
-  }
-
-  @Test
-  void attachedNonterminalMixedSiblingsAreInvariantViolationNotBlocker() {
-    Fixture fixture = fixture();
-    var chain =
-        seedToolChain(
-            fixture.store,
-            List.of("call-1", "call-2"),
-            ModelInvocationStatus.SUCCEEDED,
-            List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.READY));
-    UUID tool0EntryId =
-        inTx(
-            fixture,
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      chain.turn().sessionId(),
-                      chain.assistantEntryId(),
-                      realToolResultPayload(chain.assistantEntryId(), 0, "call-1"),
-                      NOW));
-              return id;
-            });
-    transitionTool(
-        fixture.store,
-        chain.toolInvocationIds().get(0),
-        t -> t.attachResultEntry(tool0EntryId, NOW));
-    requestThreadWork(fixture.store, chain.turn().threadId());
-    ClaimedWork claim = claimThreadWork(fixture.store, chain.turn().threadId());
-
-    // 已挂 result 但并非全部 terminal+已挂：不变量违反（旧行为会当作 blocker SUSPENDED）-> ISE 回滚零写入。
-    assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
-    assertEquals(4, path(fixture.store, chain.turn().threadId()).entries().size());
-    assertEquals(
-        tool0EntryId, tool(fixture.store, chain.toolInvocationIds().get(0)).resultEntryId());
-    assertNull(tool(fixture.store, chain.toolInvocationIds().get(1)).resultEntryId());
-    assertEquals(
-        chain.assistantEntryId(), thread(fixture.store, chain.turn().threadId()).headEntryId());
   }
 
   @Test
@@ -480,47 +459,6 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   }
 
   @Test
-  void mixedAttachedUnattachedSiblingsRollBackAtomically() {
-    Fixture fixture = fixture();
-    var chain =
-        seedToolChain(
-            fixture.store,
-            List.of("call-1", "call-2"),
-            ModelInvocationStatus.SUCCEEDED,
-            List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.SUCCEEDED));
-    // 另一 descendant 上已有 TOOL0 结果并挂载 tool0（head 不动，模拟 relocation 前的历史分支）。
-    UUID tool0EntryId =
-        inTx(
-            fixture,
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      chain.turn().sessionId(),
-                      chain.assistantEntryId(),
-                      realToolResultPayload(chain.assistantEntryId(), 0, "call-1"),
-                      NOW));
-              return id;
-            });
-    transitionTool(
-        fixture.store,
-        chain.toolInvocationIds().get(0),
-        t -> t.attachResultEntry(tool0EntryId, NOW));
-    requestThreadWork(fixture.store, chain.turn().threadId());
-    ClaimedWork claim = claimThreadWork(fixture.store, chain.turn().threadId());
-
-    // mixed attached/unattached 是不变量违反：ISE 回滚，零写入、零重挂载。
-    assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
-    assertEquals(4, path(fixture.store, chain.turn().threadId()).entries().size());
-    assertEquals(
-        tool0EntryId, tool(fixture.store, chain.toolInvocationIds().get(0)).resultEntryId());
-    assertNull(tool(fixture.store, chain.toolInvocationIds().get(1)).resultEntryId());
-    assertEquals(
-        chain.assistantEntryId(), thread(fixture.store, chain.turn().threadId()).headEntryId());
-  }
-
-  @Test
   void lostClaimAtToolBatchFenceRollsBackAllMutations() {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
     Fixture fixture = fixture(claimLosingStore(real, 2));
@@ -537,8 +475,11 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
 
     assertEquals(4, path(real, chain.turn().threadId()).entries().size());
-    assertNull(tool(real, chain.toolInvocationIds().get(0)).resultEntryId());
-    assertNull(tool(real, chain.toolInvocationIds().get(1)).resultEntryId());
+    // LOST 回滚后 Tool 行保持原状；ToolInvocation 无 resultEntryId 字段。
+    assertEquals(
+        ToolInvocationStatus.SUCCEEDED, tool(real, chain.toolInvocationIds().get(0)).status());
+    assertEquals(
+        ToolInvocationStatus.SUCCEEDED, tool(real, chain.toolInvocationIds().get(1)).status());
     assertEquals(chain.assistantEntryId(), thread(real, chain.turn().threadId()).headEntryId());
   }
 
@@ -579,8 +520,9 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     // Binary content 无法进入 Session 语义消息：mapper IAE -> 事务回滚零写入。
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(claim));
     assertEquals(4, path(fixture.store, baseline.threadId()).entries().size());
-    assertNull(tool(fixture.store, tool0).resultEntryId());
-    assertNull(tool(fixture.store, tool1).resultEntryId());
+    // IAE 回滚后 Tool 行保持原状；ToolInvocation 无 resultEntryId 字段。
+    assertEquals(ToolInvocationStatus.SUCCEEDED, tool(fixture.store, tool0).status());
+    assertEquals(ToolInvocationStatus.SUCCEEDED, tool(fixture.store, tool1).status());
     assertEquals(assistantId, thread(fixture.store, baseline.threadId()).headEntryId());
   }
 }

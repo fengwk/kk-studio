@@ -574,7 +574,7 @@ public final class TaskTool implements Tool {
       }
       approvals.add(
           new SubagentRunRegistry.RelayedApproval(
-              tool.id(), tool.request().call().toolName(), approval.reason()));
+              tool.id(), tool.call().toolName(), approval.reason()));
     }
     return List.copyOf(approvals);
   }
@@ -716,7 +716,7 @@ public final class TaskTool implements Tool {
 
   private static String lastActivity(ThreadSnapshot snapshot) {
     for (ToolInvocation tool : snapshot.toolSiblings()) {
-      return tool.status().name().toLowerCase() + " " + tool.request().call().toolName();
+      return tool.status().name().toLowerCase() + " " + tool.call().toolName();
     }
     if (snapshot.model() != null) {
       return snapshot.model().status().name().toLowerCase();

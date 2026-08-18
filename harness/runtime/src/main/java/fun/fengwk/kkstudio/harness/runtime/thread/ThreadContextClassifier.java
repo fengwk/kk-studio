@@ -37,9 +37,8 @@ import java.util.Optional;
  *   <li>仅当 {@code model.resultEntryId == head}、head 为 ASSISTANT Message、Model SUCCEEDED 且携带 result、
  *       response toolCalls 与 Assistant ToolCall contents 按序逐字段一致、sibling 数量等于 calls、ordinal 为
  *       0..N-1 连续前缀且全部归本 Model 所有时进入 Tool context；无 calls 且无 siblings 为历史 no-tools Assistant
- *       前缀（{@code IDLE_OR_HISTORICAL}）；存在已挂载但并非全部 terminal+已挂载是不变量错误；全部 terminal+已挂载为历史（结果位于
- *       relocation 后的另一 descendant）；全部未挂载且存在非 terminal 为 {@code TOOL_ACTIVE}；全部未挂载且全部 terminal 为
- *       {@code TOOL_TERMINAL_PENDING}。
+ *       前缀（{@code IDLE_OR_HISTORICAL}）；存在非 terminal sibling 为 {@code TOOL_ACTIVE}；全部 terminal 为
+ *       {@code TOOL_TERMINAL_PENDING}（Tool outcome 尚未物化，batch apply 后行会被删除，不存在“已挂载”的历史状态）。
  *   <li>任何其他 head/basis/result 关系均为 {@code IDLE_OR_HISTORICAL}：不检查 descendant 结果，也不使用另一 Thread 的
  *       Model。
  * </ol>
@@ -139,7 +138,7 @@ public final class ThreadContextClassifier {
               + assistant.id());
     }
     if (calls.isEmpty() && siblings.isEmpty()) {
-      // 合法历史：assistant 无 tool call（含 attached 无调用结果），交 normalization。
+      // 合法历史：assistant 无 tool call，交 normalization。
       return new ThreadContext.IdleOrHistorical();
     }
     if (calls.size() != siblings.size()) {
@@ -162,30 +161,15 @@ public final class ThreadContextClassifier {
             "tool siblings of entry " + assistant.id() + " must be owned by model " + model.id());
       }
     }
+    // Tool siblings 存在即 outcome 尚未物化：任一非 terminal 是 blocker，全部 terminal 待 batch apply。
     boolean allTerminal = true;
-    boolean anyUnattached = false;
-    boolean anyAttached = false;
     for (ToolInvocation sibling : siblings) {
       if (!sibling.status().isTerminal()) {
         allTerminal = false;
-      } else if (sibling.resultEntryId() == null) {
-        anyUnattached = true;
-      } else {
-        anyAttached = true;
+        break;
       }
     }
-    if (anyAttached && (!allTerminal || anyUnattached)) {
-      throw new IllegalStateException(
-          "tool siblings of entry "
-              + assistant.id()
-              + " must be all terminal and attached or all unattached");
-    }
-    if (anyAttached) {
-      // 全部 terminal 且全部已挂结果：结果位于另一 descendant，历史，交 normalization（不锁 Model/Tool）。
-      return new ThreadContext.IdleOrHistorical();
-    }
     if (!allTerminal) {
-      // 全部未挂载且存在非 terminal：blocker，Work-only。
       return new ThreadContext.ToolActive(model, assistant, calls, siblings);
     }
     return new ThreadContext.ToolTerminalPending(model, assistant, calls, siblings);

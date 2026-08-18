@@ -147,9 +147,6 @@ public interface HarnessStore {
     /** 按 (threadId, turnStartEntryId) 查找 ModelInvocation；不存在返回 {@link Optional#empty()}。 */
     Optional<ModelInvocation> findModelInvocationByTurn(UUID threadId, UUID turnStartEntryId);
 
-    /** 任意 Thread 是否存在绑定指定 TURN_START 的 ModelInvocation。 */
-    boolean hasModelInvocationForTurn(UUID turnStartEntryId);
-
     /**
      * 插入新 ModelInvocation（初始状态不变量：只能 READY / attempt=0 / 无 terminal facts）。约束：thread 存在且已在本事务锁定
      * （{@link #lockThread} 或同事务 {@link #insertThread}，basis CAS 才能原子成立，未锁定抛 {@link
@@ -187,23 +184,20 @@ public interface HarnessStore {
 
     /**
      * 批量插入新 ToolInvocation（初始状态只能是 READY，或用于 sibling 静态拒绝的 unattached FAILED；两者均
-     * attempt=0、approval=null、resultEntryId=null，effects 为空）；逐条校验 id、{@code (assistantEntryId,
-     * ordinal)} 唯一性，并要求：modelInvocation 存在且其 resultEntryId 等于 assistantEntryId；assistantEntryId 指向
-     * Assistant MESSAGE Entry 且 request.call 与其中按 ordinal 提取的 ToolCall（id / toolName /
-     * argumentsJson）精确一致；resultEntryId 全局唯一、是指向匹配 toolCallId / assistantEntryId / ordinal 的
-     * ToolResult MESSAGE Entry（非 synthetic，metadata.status 必须精确映射 invocation terminal status）且其
-     * path 包含 assistantEntryId（同 branch descendant）。完整预校验后按 {@code (assistantEntryId, ordinal)}
-     * 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
+     * attempt=0、approval=null、effects 为空）；逐条校验 id、{@code (assistantEntryId, ordinal)}
+     * 唯一性，并要求：modelInvocation 存在且其 resultEntryId 等于 assistantEntryId；assistantEntryId 指向 Assistant
+     * MESSAGE Entry 且 call 与其中按 ordinal 提取的 ToolCall（id / toolName / argumentsJson）精确一致。完整预校验后按
+     * {@code (assistantEntryId, ordinal)} 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list
+     * 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
      */
     void insertToolInvocations(List<ToolInvocation> invocations);
 
     /**
      * 批量更新 ToolInvocation current state。要求每行存在且已在本事务锁定，并通过共享 transition validation（{@link
      * ToolInvocation#validateTransition}）：id / modelInvocationId / assistantEntryId / ordinal /
-     * request / createdAt 不得改变，updatedAt 不回退，attempt 只在确认 start 时 +1，approval 一旦决定不可变，terminal
-     * facts（result/effects/error）不可变（resultEntryId 仅允许 null-&gt;non-null）；resultEntryId
-     * 按插入规则校验。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛 {@link
-     * IllegalArgumentException}。
+     * call / binding / createdAt 不得改变，updatedAt 不回退，attempt 只在确认 start 时 +1，approval
+     * 一旦决定不可变，terminal facts（result/effects/error）不可变。未锁定抛 {@link IllegalStateException}，身份改变、非法
+     * transition 或行不存在抛 {@link IllegalArgumentException}。
      */
     void updateToolInvocations(List<ToolInvocation> invocations);
 
@@ -303,5 +297,25 @@ public interface HarnessStore {
      * MODEL / TOOL target。要求该 Thread 已在本事务锁定（控制面删除 Work 的既有约束）。
      */
     int deleteWorkByThread(UUID threadId);
+
+    // ---------- 运行期 TURN_END / Stop 删除原语 ----------
+
+    /**
+     * 批量删除已锁定的 ToolInvocation 行并返回删除行数（batch apply / Stop 的 child 清理）。要求每行已在本事务锁定（{@link
+     * #lockToolInvocationsByAssistantEntryId} 或 {@link #lockToolInvocation}），未锁定抛 {@link
+     * IllegalStateException}；任一 id 对应行不存在抛 {@link IllegalArgumentException} 且不删除任何行（完整事务回滚，
+     * 绝不部分删除）；入参出现重复 id 抛 {@link IllegalArgumentException}（调用方错误必须显式暴露，禁止静默去重）；入参 list 被防御性拷贝且拒绝
+     * null 元素。调用方必须保证调用顺序 children 先于 parent（ModelInvocation），残留引用使事务回滚。
+     */
+    int deleteToolInvocationsByIds(List<UUID> toolInvocationIds);
+
+    /**
+     * 删除已锁定的单条 ModelInvocation 行并返回是否删除（TURN_END / Stop 的 parent 清理）。要求该行已在本事务锁定（{@link
+     * #lockModelInvocation}），未锁定抛 {@link IllegalStateException}；行不存在抛 {@link
+     * IllegalArgumentException}。存在引用本行的 ToolInvocation 子行时抛 {@link IllegalArgumentException} 且
+     * parent/child 均保留（显式 child 检查、不依赖底层 FK，保证所有实现语义一致；Model 锁已阻止并发 child insert）。
+     * 删除后该行不存在。调用方必须在删除前完成严格物化校验。
+     */
+    boolean deleteModelInvocation(UUID modelInvocationId);
   }
 }

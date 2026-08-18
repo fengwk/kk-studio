@@ -86,9 +86,10 @@ class PostgresqlHarnessSchemaTest {
             "harness_model_invocation.stream_checkpoint",
             "harness_thread_command.payload",
             "harness_tool_invocation.approval",
+            "harness_tool_invocation.binding",
+            "harness_tool_invocation.call",
             "harness_tool_invocation.effects",
             "harness_tool_invocation.error",
-            "harness_tool_invocation.request",
             "harness_tool_invocation.result"),
         jsonbColumns);
   }
@@ -116,16 +117,13 @@ class PostgresqlHarnessSchemaTest {
             "uk_harness_model_invocation_result",
             "uk_harness_model_invocation_turn",
             "uk_harness_thread_command_client",
-            "uk_harness_tool_invocation_ordinal",
-            "uk_harness_tool_invocation_result"),
+            "uk_harness_tool_invocation_ordinal"),
         indexes);
 
     String modelResult = indexDefinition("uk_harness_model_invocation_result");
-    String toolResult = indexDefinition("uk_harness_tool_invocation_result");
     String workAvailable = indexDefinition("idx_harness_work_available");
     String workLease = indexDefinition("idx_harness_work_lease_until");
     assertTrue(modelResult.contains("WHERE (result_entry_id IS NOT NULL)"));
-    assertTrue(toolResult.contains("WHERE (result_entry_id IS NOT NULL)"));
     assertTrue(workAvailable.contains("(available_at, target_type, target_id)"));
     assertTrue(workLease.contains("(lease_until, target_type, target_id)"));
     assertTrue(workLease.contains("WHERE (lease_until IS NOT NULL)"));

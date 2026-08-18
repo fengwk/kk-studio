@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
@@ -100,8 +101,8 @@ import java.util.function.Function;
  *
  * <p>每条链按 store 约束原子种子：Session + ROOT +（TURN_START + USER/ASSISTANT/TURN_END）+
  * Thread；ModelInvocation 只能以 READY/attempt=0 插入且 basis 必须等于 Thread 当前 head，terminal 状态通过共享
- * transition 逐级推进； ToolInvocation 只能以 READY/attempt=0/approval=null 插入且其
- * modelInvocation.resultEntryId 必须等于 assistantEntryId。
+ * transition 逐级推进； ToolInvocation 只能以 READY/attempt=0/approval=null 插入，call/binding 由基座固定绑定 bash
+ * tool。
  */
 final class ThreadProcessorTestSupport {
 
@@ -352,6 +353,8 @@ final class ThreadProcessorTestSupport {
       throw new IllegalArgumentException("toolStatuses must match callIds");
     }
     OpenTurnBaseline turn = seedOpenInputTurn(store);
+    ModelRequestSpec request = tooledRequest(List.of("bash"));
+    ProviderResponse response = successResponse(callIds, "bash");
     UUID modelId =
         seedModelInvocation(
             store,
@@ -359,10 +362,16 @@ final class ThreadProcessorTestSupport {
             turn.turnStartEntryId(),
             turn.userEntryId(),
             modelStatus,
-            tooledRequest(List.of("bash")),
-            successResponse(callIds, "bash"),
+            request,
+            response,
             null);
-    UUID assistantEntryId = insertAssistantWithCalls(store, turn, callIds);
+    // live attached fixture：assistant Entry 必须由同一 frozen request + ProviderResponse 经 mapper 生成，
+    // 与 validateAttached 的完整 payload 校验保持一致。
+    UUID assistantEntryId =
+        insertAssistantPayload(
+            store,
+            turn,
+            new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()));
     if (modelStatus == ModelInvocationStatus.SUCCEEDED) {
       transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     }
@@ -389,6 +398,21 @@ final class ThreadProcessorTestSupport {
           UUID id = tx.nextId();
           tx.insertEntry(
               new Entry(id, turn.sessionId(), turn.userEntryId(), assistantPayload(callIds), NOW));
+          tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, NOW));
+          return id;
+        });
+  }
+
+  /**
+   * 在 open Turn 的 head 后插入指定 payload 的 ASSISTANT Entry 并推进 Thread head（live attached fixture 专用）。
+   */
+  static UUID insertAssistantPayload(
+      InMemoryHarnessStore store, OpenTurnBaseline turn, EntryPayload payload) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(turn.threadId());
+          UUID id = tx.nextId();
+          tx.insertEntry(new Entry(id, turn.sessionId(), turn.userEntryId(), payload, NOW));
           tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, NOW));
           return id;
         });
@@ -449,7 +473,7 @@ final class ThreadProcessorTestSupport {
     return modelId;
   }
 
-  /** 插入 READY ToolInvocation 并把状态推进到 {@code status}（terminal 且 resultEntryId 仍 null）。 */
+  /** 插入 READY ToolInvocation 并把状态推进到 {@code status}。 */
   static UUID seedToolInvocation(
       InMemoryHarnessStore store,
       UUID modelInvocationId,
@@ -461,6 +485,7 @@ final class ThreadProcessorTestSupport {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
+              ToolInvocationRequest request = toolRequest(callId);
               tx.insertToolInvocations(
                   List.of(
                       new ToolInvocation(
@@ -468,10 +493,10 @@ final class ThreadProcessorTestSupport {
                           modelInvocationId,
                           assistantEntryId,
                           ordinal,
-                          toolRequest(callId),
+                          request.call(),
+                          request.binding(),
                           ToolInvocationStatus.READY,
                           0,
-                          null,
                           null,
                           null,
                           null,
@@ -589,14 +614,14 @@ final class ThreadProcessorTestSupport {
                 tool.modelInvocationId(),
                 tool.assistantEntryId(),
                 tool.ordinal(),
-                tool.request(),
+                tool.call(),
+                tool.binding(),
                 tool.status(),
                 tool.attempt(),
                 tool.approval(),
                 tool.result(),
                 tool.effects(),
                 tool.error(),
-                tool.resultEntryId(),
                 tool.createdAt(),
                 updatedAt));
   }

@@ -96,7 +96,8 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
         "response text",
         ((TextMessageContent) assistantPayload.message().contents().get(0)).text());
     assertNotNull(assistantPayload.assistantMetadata());
-    assertEquals(assistant.id(), model(fixture.store, modelId).resultEntryId());
+    // COMPLETE 无 calls 关闭 turn：Model 行被物理删除，Assistant Entry 仍存在于 path。
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
     TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
     assertEquals(baseline.turnStartEntryId(), end.turnStartEntryId());
     assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
@@ -148,11 +149,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
       assertEquals(ToolInvocationStatus.READY, tool.status());
       assertEquals(0, tool.attempt());
       assertNull(tool.approval());
-      assertNull(tool.resultEntryId());
       assertEquals(modelId, tool.modelInvocationId());
-      assertEquals("bash", tool.request().binding().descriptor().name());
-      assertEquals(calls.get(ordinal).toolCallId(), tool.request().call().id());
-      assertEquals("{}", tool.request().call().argumentsJson());
+      assertEquals("bash", tool.binding().descriptor().name());
+      assertEquals(calls.get(ordinal).toolCallId(), tool.call().id());
+      assertEquals("{}", tool.call().argumentsJson());
       assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tool.id())));
     }
     assertEquals(assistant.id(), thread(fixture.store, baseline.threadId()).headEntryId());
@@ -317,7 +317,8 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
       AssistantErrorPayload errorPayload = (AssistantErrorPayload) errorEntry.payload();
       assertEquals(error.kind().name(), errorPayload.error().code());
       assertEquals(error.message(), errorPayload.error().message());
-      assertEquals(errorEntry.id(), model(fixture.store, modelId).resultEntryId());
+      // terminal failure / cancel / unknown 关闭 turn：Model 行被物理删除，error Entry 仍存在。
+      assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
       TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
       assertEquals(TurnEndOutcome.FAILED, end.outcome());
       assertFalse(end.continueModel());
@@ -446,14 +447,9 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     EntryPath path = path(fixture.store, baseline.threadId());
     assertEquals(7, path.entries().size());
     Entry assistant = path.entries().get(3);
-    assertEquals(assistant.id(), model(fixture.store, modelId).resultEntryId());
-    List<ToolInvocation> tools = toolsByAssistant(fixture.store, assistant.id());
-    assertEquals(1, tools.size());
-    ToolInvocation tool = tools.getFirst();
-    assertEquals(ToolInvocationStatus.FAILED, tool.status());
-    assertEquals("UNKNOWN_TOOL", tool.error().kind());
-    assertNull(tool.request().binding());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tool.id())));
+    // applyToolBatch 同事务删除 Model 行与全部 child ToolInvocation。
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
+    assertTrue(toolsByAssistant(fixture.store, assistant.id()).isEmpty());
     // 反馈错误：TOOL entry（renderer fallback "tool"）+ TURN_END(COMPLETED, continueModel=true)。
     MessagePayload toolResult = (MessagePayload) path.entries().get(4).payload();
     assertEquals(AgentMessageRole.TOOL, toolResult.message().role());
@@ -490,13 +486,9 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    List<ToolInvocation> tools = toolsByAssistant(fixture.store, path.entries().get(3).id());
-    assertEquals(1, tools.size());
-    ToolInvocation tool = tools.getFirst();
-    assertEquals(ToolInvocationStatus.FAILED, tool.status());
-    assertEquals("INVALID_TOOL_ARGUMENTS", tool.error().kind());
-    assertEquals("bash", tool.request().binding().descriptor().name());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tool.id())));
+    // applyToolBatch 同事务删除 Model 行与全部 child ToolInvocation。
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
+    assertTrue(toolsByAssistant(fixture.store, path.entries().get(3).id()).isEmpty());
     TurnEndPayload end = (TurnEndPayload) path.entries().get(5).payload();
     assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
     assertTrue(end.continueModel());
@@ -533,7 +525,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(ToolInvocationStatus.READY, tools.get(0).status());
     assertEquals(ToolInvocationStatus.FAILED, tools.get(1).status());
     assertEquals("UNKNOWN_TOOL", tools.get(1).error().kind());
-    assertNull(tools.get(1).request().binding());
+    assertNull(tools.get(1).binding());
     assertEquals(ToolInvocationStatus.FAILED, tools.get(2).status());
     assertEquals("INVALID_TOOL_ARGUMENTS", tools.get(2).error().kind());
     assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(0).id())));
@@ -573,6 +565,8 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(TurnEndReason.OUTPUT_TRUNCATED, end.reason());
     assertFalse(end.continueModel());
     assertEquals(0, toolsByAssistant(fixture.store, path.entries().get(3).id()).size());
+    // LENGTH 无 calls 关闭 turn：Model 行被物理删除。
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
   }
 
   /** FILTERED：failed turn，stable reason CONTENT_FILTERED，零 ToolInvocation。 */
@@ -602,6 +596,8 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(TurnEndReason.CONTENT_FILTERED, end.reason());
     assertFalse(end.continueModel());
     assertEquals(0, toolsByAssistant(fixture.store, path.entries().get(3).id()).size());
+    // FILTERED 关闭 turn：Model 行被物理删除。
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
   }
 
   /** LENGTH 有 calls：每个 observed call 一个 immediate FAILED(MODEL_OUTPUT_TRUNCATED)，执行零个并反馈模型。 */
@@ -632,14 +628,9 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
 
     EntryPath path = path(fixture.store, baseline.threadId());
     assertEquals(8, path.entries().size());
-    List<ToolInvocation> tools = toolsByAssistant(fixture.store, path.entries().get(3).id());
-    assertEquals(2, tools.size());
-    for (ToolInvocation tool : tools) {
-      assertEquals(ToolInvocationStatus.FAILED, tool.status());
-      assertEquals("MODEL_OUTPUT_TRUNCATED", tool.error().kind());
-      assertEquals("bash", tool.request().binding().descriptor().name());
-      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tool.id())));
-    }
+    // 全部 immediate FAILED 槽位所在的 batch 已在同一次 process 内经 applyToolBatch 应用并物理删除 rows；
+    // LENGTH 错误已在 ToolResult Entry 中反馈给模型。
+    assertTrue(toolsByAssistant(fixture.store, path.entries().get(3).id()).isEmpty());
     assertEquals(
         AgentMessageRole.TOOL, ((MessagePayload) path.entries().get(4).payload()).message().role());
     assertEquals(
@@ -650,6 +641,9 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(
         TurnStartReason.CONTINUATION,
         ((TurnStartPayload) path.entries().get(7).payload()).reason());
+    // applyToolBatch 同事务删除 Model 行与全部 child ToolInvocation；continuation 另起新 Model。
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
+    assertTrue(toolsByAssistant(fixture.store, path.entries().get(3).id()).isEmpty());
   }
 
   @Test

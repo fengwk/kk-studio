@@ -153,7 +153,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(0, fixture.gateway.startCalls);
   }
 
-  /** terminal 行且 resultEntryId 仍 null：确保 THREAD wake 后 complete，不重复 bump revision。 */
+  /** terminal 行：确保 THREAD wake 后 complete，不重复 bump revision。 */
   @Test
   void terminalCleanupWakesThreadWhenResultNotLinked() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -175,7 +175,6 @@ class ToolProcessorRecoveryTest {
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
-    assertNull(tool.resultEntryId());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
     assertEquals(
@@ -184,43 +183,6 @@ class ToolProcessorRecoveryTest {
             .wakeVersion());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
     assertEquals(0, fixture.gateway.startCalls);
-  }
-
-  /** terminal 行且 resultEntryId 已链接：只 complete TOOL Work，不再请求 THREAD wake。 */
-  @Test
-  void terminalCleanupSkipsThreadWakeWhenResultEntryLinked() {
-    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
-    ToolProcessorTestSupport.toRunning(
-        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    ToolProcessorTestSupport.transition(
-        fixture.store,
-        fixture.toolInvocationId,
-        tool ->
-            tool.succeed(
-                ToolProcessorTestSupport.successResult("call-1", new TextToolContent("ok")),
-                ToolProcessorTestSupport.NOW));
-    UUID resultEntryId =
-        ToolProcessorTestSupport.insertToolResultEntry(
-            fixture.store, fixture.baseline, ToolProcessorTestSupport.NOW);
-    ToolProcessorTestSupport.transition(
-        fixture.store,
-        fixture.toolInvocationId,
-        tool -> tool.attachResultEntry(resultEntryId, ToolProcessorTestSupport.NOW));
-
-    assertEquals(
-        ProcessResult.TERMINATED,
-        fixture.processor.process(
-            ToolProcessorTestSupport.claim(
-                fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
-
-    assertEquals(
-        ToolInvocationStatus.SUCCEEDED,
-        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(
-        1,
-        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
-            .wakeVersion());
-    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
   }
 
   /** 恢复路径中 work 行已被删除：LOST_OWNERSHIP，无 mutation。 */

@@ -20,7 +20,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -143,7 +143,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(CompactionTrigger.THRESHOLD, payload.trigger());
     assertTrue(payload.complete());
     assertTrue(payload.summaryText().contains("response text"));
-    assertNotNull(modelResultEntryId(fixture, invocation.id()));
+    // COMPLETED 无 tool 的压缩 turn 已关闭：Model 行被物理删除（closed turn 不保留 Invocation）。
+    assertNull(
+        fixture.store.transaction(tx -> tx.findModelInvocation(invocation.id())).orElse(null));
     TurnEndPayload end = (TurnEndPayload) applied.entries().get(11).payload();
     assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
     assertFalse(end.continueModel()); // THRESHOLD 完成压缩不继续。
@@ -1083,14 +1085,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO);
-  }
-
-  private static UUID modelResultEntryId(Fixture fixture, UUID modelId) {
-    return fixture
-        .store
-        .transaction(tx -> tx.findModelInvocation(modelId))
-        .map(ModelInvocation::resultEntryId)
-        .orElse(null);
   }
 
   /**

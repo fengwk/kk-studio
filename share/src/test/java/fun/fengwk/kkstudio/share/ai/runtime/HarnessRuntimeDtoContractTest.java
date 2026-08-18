@@ -212,7 +212,6 @@ class HarnessRuntimeDtoContractTest {
     tool.setApprovalJson(null);
     tool.setResultJson(null);
     tool.setErrorJson(null);
-    tool.setResultEntryId(null);
     tool.setCreateTime(createTime);
     tool.setUpdateTime(updateTime);
 
@@ -228,7 +227,6 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("env-1", tool.getEnvironment().getName());
     assertEquals("{}", tool.getArgumentsJson());
     assertNull(tool.getApprovalJson());
-    assertNull(tool.getResultEntryId());
     assertEquals(createTime, tool.getCreateTime());
     assertEquals(updateTime, tool.getUpdateTime());
     assertEquals(Instant.class, fieldType(ToolInvocationDTO.class, "createTime"));

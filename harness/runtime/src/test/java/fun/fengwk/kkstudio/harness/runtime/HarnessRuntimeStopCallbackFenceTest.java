@@ -10,13 +10,11 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolWork;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -43,9 +41,8 @@ class HarnessRuntimeStopCallbackFenceTest {
         .stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
 
     assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, T5)).isEmpty());
-    assertEquals(
-        ModelInvocationStatus.CANCELLED,
-        store.transaction(tx -> tx.findModelInvocation(baseline.modelId()).orElseThrow()).status());
+    // stopModel 关闭 turn 后 Model 行被物理删除；迟到 callback 的 claim 也因 Work 已删而 no-op。
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
   }
 
   @Test
@@ -64,8 +61,7 @@ class HarnessRuntimeStopCallbackFenceTest {
         .stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
 
     assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, T5)).isEmpty());
-    assertEquals(
-        ToolInvocationStatus.UNKNOWN,
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow()).status());
+    // stopTools 关闭 turn 后全部 Tool 行与 parent Model 行被物理删除；迟到 callback 的 claim 也因 Work 已删而 no-op。
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
   }
 }

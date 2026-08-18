@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 
 import java.util.HashMap;
 import java.util.List;
@@ -586,6 +587,23 @@ class HarnessRuntimeWebMapperTest {
     assertEquals("{}", tool.path("argumentsJson").asText());
     assertTrue(tool.path("approvalJson").asText().contains("\"required\":true"));
     assertTrue(tool.path("approvalJson").asText().contains("\"decision\":null"));
+  }
+
+  @Test
+  void mapsUnknownToolInvocationWithoutDroppingDurableCallIdentity() throws Exception {
+    ToolInvocationDTO dto =
+        HarnessRuntimeWebMapper.toToolInvocationDto(
+            HarnessRuntimeTestFixtures.unknownToolFailedInvocation());
+    JsonNode tool = MAPPER.readTree(MAPPER.writeValueAsString(dto));
+    // durable ToolCall 身份绝不因 binding 为 null 而丢失。
+    assertEquals("call-77", tool.path("toolCallId").asText());
+    assertEquals("unknown_tool", tool.path("toolName").asText());
+    assertEquals("{\"x\":1}", tool.path("argumentsJson").asText());
+    // unknown tool 槽位：binding 派生字段显式无值，renderer 固定回退为 tool。
+    assertEquals("tool", tool.path("rendererKey").asText());
+    assertTrue(tool.path("toolVersion").isMissingNode());
+    assertTrue(tool.path("toolType").isMissingNode());
+    assertTrue(tool.path("environment").isNull());
   }
 
   @Test

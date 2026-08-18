@@ -8,10 +8,13 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -25,7 +28,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * Stop 将一个有效时间戳钳制到所有已锁定的 durable 事实，本地时钟回滚或跨节点时钟偏差 都不能让 Command、Entry、Thread、Model 或 Tool 的时间倒退。
@@ -61,9 +63,8 @@ class HarnessRuntimeStopEffectiveTimeTest {
             .stop(new StopCommand(baseline.threadId(), TestIds.id(2), 0));
 
     assertEquals(T6, result.thread().updatedAt());
-    ModelInvocation stopped =
-        store.transaction(tx -> tx.findModelInvocation(baseline.modelId()).orElseThrow());
-    assertEquals(T6, stopped.updatedAt());
+    // Model row 在 stopModel 同一事务内被物理删除；验证 findModelInvocation 为 empty。
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
     ThreadCommand command =
         store.transaction(
             tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
@@ -91,12 +92,19 @@ class HarnessRuntimeStopEffectiveTimeTest {
             .stop(new StopCommand(baseline.threadId(), TestIds.id(2), 1));
 
     assertEquals(T6, result.thread().updatedAt());
-    for (UUID toolId : baseline.toolIds()) {
-      ToolInvocation tool = store.transaction(tx -> tx.findToolInvocation(toolId).orElseThrow());
-      assertEquals(T6, tool.updatedAt());
-      assertEquals(
-          T6,
-          store.transaction(tx -> tx.findEntry(tool.resultEntryId()).orElseThrow()).createdAt());
+    // Tool/Model invocation 行已被 Stop 物理删除；只能通过 Entry path 验证每个 sibling 的 ToolResult createdAt。
+    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
+    List<Entry> toolResultEntries =
+        path.entries().stream()
+            .filter(
+                e ->
+                    e.payload() instanceof MessagePayload
+                        && ((MessagePayload) e.payload()).toolResultMetadata() != null)
+            .toList();
+    assertEquals(baseline.toolIds().size(), toolResultEntries.size());
+    for (Entry entry : toolResultEntries) {
+      assertEquals(T6, entry.createdAt());
     }
   }
 

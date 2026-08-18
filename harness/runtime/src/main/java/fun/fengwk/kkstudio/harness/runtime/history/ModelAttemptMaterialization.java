@@ -151,4 +151,99 @@ public final class ModelAttemptMaterialization {
         invocation.streamCheckpoint().text(),
         invocation.streamCheckpoint().thinking());
   }
+
+  /**
+   * 校验已 attach 的 terminal ModelInvocation 与 immutable EntryPath 事实一致：Tool batch apply / Stop 删除
+   * parent 前的最小严格校验，绝不绕过物化校验直接 delete。
+   *
+   * <p>attach 转换本身（{@code stored.resultEntryId == null -> non-null}）已经通过 {@link #validate} 完成失败
+   * attempt 与 terminal 结果的逐条物化校验，且 Entry 与 terminal invocation 事实不可变；本方法只重放当前 durable 事实：
+   *
+   * <ul>
+   *   <li>model 必须 terminal、resultEntryId 非空、failedAttempts 已清空、streamCheckpoint 已清空（attach 形状）；
+   *   <li>resultEntryId 必须是 resultPath 的 head（Assistant 结果恰在 head 才构成活跃 Tool phase）；
+   *   <li>resultPath 必须包含 basisHeadEntryId 且严格位于 head 之前（result 必须是 basis 的严格 descendant， 不允许
+   *       attach 到 basis 自身）；
+   *   <li>非压缩 model：basis 之后 head 之前的 ModelAttemptFailurePayload 必须精确等于已确认的 attempt 前缀（attempt 从 1
+   *       连续递增且数量恰为 {@code attached.attempt() - 1}，不允许遗漏）；压缩 model：不允许出现任何失败条目；
+   *   <li>SUCCEEDED model 的 result 必须按值等价于 Assistant head：通过与 {@link
+   *       HistoryPayloadMapper#assistantPayload} 映射结果（thinking / text / tool calls renderer /
+   *       metadata usage / cost / stop reason）完整一致， 不能只比对 tool calls。
+   * </ul>
+   */
+  public static void validateAttached(ModelInvocation attached, EntryPath resultPath) {
+    Objects.requireNonNull(attached, "attached");
+    Objects.requireNonNull(resultPath, "resultPath");
+    if (attached.resultEntryId() == null
+        || !attached.status().isTerminal()
+        || !attached.failedAttempts().isEmpty()
+        || attached.streamCheckpoint() != null) {
+      throw new IllegalArgumentException(
+          "attached model validation requires a terminal model invocation with a materialized"
+              + " result entry");
+    }
+    List<Entry> entries = resultPath.entries();
+    if (entries.isEmpty()
+        || !entries.get(entries.size() - 1).id().equals(attached.resultEntryId())) {
+      throw new IllegalArgumentException(
+          "attached model resultEntryId must be the result path head");
+    }
+    if (attached.resultEntryId().equals(attached.basisHeadEntryId())) {
+      throw new IllegalArgumentException(
+          "attached model result must be a strict descendant of its basis head entry");
+    }
+    boolean afterBasis = false;
+    boolean foundBasis = false;
+    int expectedAttempt = 1;
+    for (Entry entry : entries) {
+      if (entry.id().equals(attached.basisHeadEntryId())) {
+        afterBasis = true;
+        foundBasis = true;
+        continue;
+      }
+      if (!afterBasis || entry.id().equals(attached.resultEntryId())) {
+        continue;
+      }
+      if (entry.payload() instanceof ModelAttemptFailurePayload failure) {
+        if (attached.request().compaction() != null) {
+          throw new IllegalArgumentException(
+              "compaction result paths must not materialize model attempt failures");
+        }
+        if (failure.attempt().attempt() != expectedAttempt) {
+          throw new IllegalArgumentException(
+              "materialized model attempt failures must form a consecutive prefix starting at"
+                  + " attempt 1");
+        }
+        expectedAttempt++;
+      }
+    }
+    if (!foundBasis) {
+      throw new IllegalArgumentException("model result path must contain basisHeadEntryId");
+    }
+    if (attached.request().compaction() == null && expectedAttempt - 1 != attached.attempt() - 1) {
+      throw new IllegalArgumentException(
+          "materialized model attempt failures must be exactly the confirmed attempt prefix:"
+              + " expected "
+              + (attached.attempt() - 1)
+              + " but found "
+              + (expectedAttempt - 1));
+    }
+    Entry head = entries.get(entries.size() - 1);
+    if (attached.status() != ModelInvocationStatus.SUCCEEDED || attached.result() == null) {
+      throw new IllegalArgumentException(
+          "an attached tool-phase model invocation must be SUCCEEDED with a result");
+    }
+    if (!(head.payload() instanceof MessagePayload message)
+        || message.message().role() != AgentMessageRole.ASSISTANT) {
+      throw new IllegalArgumentException(
+          "an attached tool-phase model result head must be an ASSISTANT message entry");
+    }
+    MessagePayload expectedHead =
+        new HistoryPayloadMapper()
+            .assistantPayload(attached.result(), attached.request().toolBindings());
+    if (!expectedHead.equals(message)) {
+      throw new IllegalArgumentException(
+          "attached model result must materialize the exact assistant payload");
+    }
+  }
 }

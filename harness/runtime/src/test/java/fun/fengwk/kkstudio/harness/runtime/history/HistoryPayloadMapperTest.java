@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
@@ -74,8 +73,7 @@ class HistoryPayloadMapperTest {
     MessagePayload payload =
         MAPPER.assistantPayload(
             response,
-            List.of(
-                request().binding(), new ToolBinding(descriptor("grep"), ToolType.PLATFORM, null)));
+            List.of(binding(), new ToolBinding(descriptor("grep"), ToolType.PLATFORM, null)));
     assertEquals(4, payload.message().contents().size());
     assertEquals(
         "thinking here", ((ThinkingMessageContent) payload.message().contents().get(0)).text());
@@ -141,7 +139,7 @@ class HistoryPayloadMapperTest {
             null,
             "{}");
 
-    MessagePayload payload = MAPPER.assistantPayload(response, List.of(request().binding()));
+    MessagePayload payload = MAPPER.assistantPayload(response, List.of(binding()));
     ToolCallMessageContent call = (ToolCallMessageContent) payload.message().contents().get(0);
     assertEquals("shell-command", call.rendererKey());
     // 无匹配 binding（unknown tool 槽位）时 renderer fallback 固定为 "tool"。
@@ -310,10 +308,10 @@ class HistoryPayloadMapperTest {
             id(1L),
             id(7L),
             0,
-            request(),
+            call(),
+            binding(),
             ToolInvocationStatus.READY,
             0,
-            null,
             null,
             null,
             null,
@@ -350,13 +348,13 @@ class HistoryPayloadMapperTest {
             id(1L),
             id(7L),
             3,
-            new ToolInvocationRequest(new ToolCall("call-1", "undeclared", "{}"), null),
+            new ToolCall("call-1", "undeclared", "{}"),
+            null,
             ToolInvocationStatus.FAILED,
             0,
             ToolApproval.notRequired(),
             null,
             new ToolInvocationError("UNKNOWN_TOOL", "unknown tool: undeclared"),
-            null,
             NOW,
             NOW);
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
@@ -374,12 +372,12 @@ class HistoryPayloadMapperTest {
         id(1L),
         id(7L),
         3,
-        request(),
+        call(),
+        binding(),
         ToolInvocationStatus.SUCCEEDED,
         1,
         ToolApproval.notRequired(),
         result,
-        null,
         null,
         NOW,
         NOW);
@@ -392,21 +390,23 @@ class HistoryPayloadMapperTest {
         id(1L),
         id(7L),
         3,
-        request(),
+        call(),
+        binding(),
         status,
         status == ToolInvocationStatus.UNKNOWN ? 1 : 0,
         ToolApproval.notRequired(),
         null,
         error,
-        null,
         NOW,
         NOW);
   }
 
-  private static ToolInvocationRequest request() {
-    return new ToolInvocationRequest(
-        new ToolCall("call-1", "bash", "{}"),
-        new ToolBinding(descriptor("bash"), ToolType.PLATFORM, null));
+  private static ToolCall call() {
+    return new ToolCall("call-1", "bash", "{}");
+  }
+
+  private static ToolBinding binding() {
+    return new ToolBinding(descriptor("bash"), ToolType.PLATFORM, null);
   }
 
   private static ToolDescriptor descriptor(String name) {

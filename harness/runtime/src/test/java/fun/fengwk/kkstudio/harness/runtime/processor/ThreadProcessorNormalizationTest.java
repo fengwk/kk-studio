@@ -18,13 +18,10 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedSecondThreadAtHistoricalAssistant;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedToolChain;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.successResponse;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.tool;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.toolsByAssistant;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionTool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -297,96 +294,12 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     assertEquals(1, fixture.resolver.calls);
   }
 
-  @Test
-  void relocationToAttachedAssistantWithAttachedToolDescendantsNormalizesFreshTurn() {
-    Fixture fixture = fixture();
-    var chain =
-        seedToolChain(
-            fixture.store,
-            List.of("call-1", "call-2"),
-            ModelInvocationStatus.SUCCEEDED,
-            List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.SUCCEEDED));
-    UUID threadId = chain.turn().threadId();
-    UUID assistantId = chain.assistantEntryId();
-    // 模拟已 apply 的 descendant：TOOL0/TOOL1 结果链 + 挂载 + head 推进到 TOOL1，再 MOVE_HEAD 回 assistant。
-    UUID tool0EntryId =
-        inTx(
-            fixture,
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      chain.turn().sessionId(),
-                      assistantId,
-                      realToolResultPayload(assistantId, 0, "call-1"),
-                      NOW));
-              return id;
-            });
-    transitionTool(
-        fixture.store,
-        chain.toolInvocationIds().get(0),
-        t -> t.attachResultEntry(tool0EntryId, NOW));
-    UUID tool1EntryId =
-        inTx(
-            fixture,
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      chain.turn().sessionId(),
-                      tool0EntryId,
-                      realToolResultPayload(assistantId, 1, "call-2"),
-                      NOW));
-              return id;
-            });
-    transitionTool(
-        fixture.store,
-        chain.toolInvocationIds().get(1),
-        t -> t.attachResultEntry(tool1EntryId, NOW));
-    inTx(
-        fixture,
-        tx -> {
-          ThreadState current = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(current.advanceHead(tool1EntryId, NOW));
-          return null;
-        });
-    inTx(
-        fixture,
-        tx -> {
-          ThreadState current = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(current.advanceHead(assistantId, NOW));
-          return null;
-        });
-    seedCommand(fixture.store, threadId, new UserMessageCommandPayload(userMessage("hi")));
-    requestThreadWork(fixture.store, threadId);
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
-    ClaimedWork claim = claimThreadWork(fixture.store, threadId);
-
-    // 结果已在另一 descendant：不重挂、不 apply，normalization 补 2 个 synthetic 后新开 INPUT Turn。
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
-
-    assertEquals(
-        tool0EntryId, tool(fixture.store, chain.toolInvocationIds().get(0)).resultEntryId());
-    assertEquals(
-        tool1EntryId, tool(fixture.store, chain.toolInvocationIds().get(1)).resultEntryId());
-    assertEquals(assistantId, model(fixture.store, chain.modelInvocationId()).resultEntryId());
-    EntryPath path = path(fixture.store, threadId);
-    assertEquals(9, path.entries().size());
-    // ROOT, TS, USER, ASSISTANT, SYNTH0, SYNTH1, TURN_END(CANCELLED), TS2, USER2
-    for (int ordinal = 0; ordinal < 2; ordinal++) {
-      ToolResultMetadata metadata =
-          ((MessagePayload) path.entries().get(4 + ordinal).payload()).toolResultMetadata();
-      assertEquals(ordinal, metadata.ordinal());
-      assertTrue(metadata.synthetic());
-      assertEquals(assistantId, metadata.assistantEntryId());
-    }
-    TurnEndPayload end = (TurnEndPayload) path.entries().get(6).payload();
-    assertEquals(TurnEndOutcome.CANCELLED, end.outcome());
-    assertEquals(1, fixture.resolver.calls);
-  }
-
+  /**
+   * 历史 open Turn 的 head 已落到部分 ToolResult descendant（partial prefix）：新的 {@link
+   * ThreadContextClassifier}（rule 6：head/basis/result 任一不等视为历史）走 IDLE_OR_HISTORICAL → INPUT
+   * normalization，按 path 中已有的 ToolResult ordinal 前缀补写缺失 synthetic 并补 CANCELLED TURN_END 与新 INPUT
+   * Turn。Tool 行 不再有 resultEntryId 字段，"已挂载" 状态由 Entry 路径事实承载。
+   */
   @Test
   void partialHistoricalToolResultPathWithRealInvocationsNormalizesFreshTurn() {
     Fixture fixture = fixture();
@@ -398,7 +311,8 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
             List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.SUCCEEDED));
     UUID threadId = chain.turn().threadId();
     UUID assistantId = chain.assistantEntryId();
-    // 部分结果链：TOOL0 已挂载且 head 停在 TOOL0（历史前缀）；tool1 terminal 但未挂载（真实 invocation 在别处）。
+    // 真实 TOOL0 Entry 已存在于 path（作为 assistant 的 descendant，head 停在 TOOL0）；tool1 行仍是 terminal
+    // SUCCEEDED。
     UUID tool0EntryId =
         inTx(
             fixture,
@@ -413,10 +327,6 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
                       NOW));
               return id;
             });
-    transitionTool(
-        fixture.store,
-        chain.toolInvocationIds().get(0),
-        t -> t.attachResultEntry(tool0EntryId, NOW));
     inTx(
         fixture,
         tx -> {
@@ -429,12 +339,10 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, threadId);
 
-    // path 已含 TOOL 前缀 -> 历史：head != assistant，不再 apply 真实结果，normalization 只补缺失 ordinal。
+    // head != assistant、不在 basis 与 resultEntryId 上：IDLE_OR_HISTORICAL → INPUT normalization 只补缺失
+    // ordinal。
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
 
-    assertNull(tool(fixture.store, chain.toolInvocationIds().get(1)).resultEntryId());
-    assertEquals(
-        tool0EntryId, tool(fixture.store, chain.toolInvocationIds().get(0)).resultEntryId());
     EntryPath path = path(fixture.store, threadId);
     assertEquals(9, path.entries().size());
     // ROOT, TS, USER, ASSISTANT, TOOL0(real), SYNTH1, TURN_END(CANCELLED), TS2, USER2

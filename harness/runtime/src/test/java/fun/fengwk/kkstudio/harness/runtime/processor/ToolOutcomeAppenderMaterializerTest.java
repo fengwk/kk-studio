@@ -9,22 +9,28 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -103,5 +109,105 @@ class ToolOutcomeAppenderMaterializerTest {
     MessagePayload actual =
         assertInstanceOf(MessagePayload.class, entry(store, applied.headEntryId()).payload());
     assertEquals(PAYLOAD_MAPPER.toolResultPayload(invocation, contents), actual);
+  }
+
+  /** append 只接受 terminal Tool：READY 行被拒绝（不进入任何 Entry 追加）。 */
+  @Test
+  void rejectsNonTerminalToolAppend() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    var chain =
+        seedToolChain(
+            store,
+            List.of("call-1"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.READY));
+    ToolInvocation invocation = tool(store, chain.toolInvocationIds().getFirst());
+    var before = path(store, chain.turn().threadId());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx ->
+                    ToolOutcomeAppender.append(
+                        tx, before.root().sessionId(), chain.assistantEntryId(), invocation, NOW)));
+  }
+
+  /** SUCCEEDED 的 CUSTOM effects 按冻结顺序位于 ToolResult 之前；head 仍是 ToolResult Entry。 */
+  @Test
+  void appendsCustomEffectsBeforeToolResultInOrder() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    var chain =
+        seedToolChain(
+            store,
+            List.of("call-1"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.READY));
+    UUID toolId = chain.toolInvocationIds().getFirst();
+    succeedToolWith(
+        store,
+        toolId,
+        new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{}"),
+        new ToolEffectBatch(
+            List.of(
+                new CustomEntryPayload("goal", "type-a", 1, "{\"a\":1}"),
+                new CustomEntryPayload("goal", "type-b", 2, "{\"b\":2}"))));
+    ToolInvocation invocation = tool(store, toolId);
+    var before = path(store, chain.turn().threadId());
+
+    ToolOutcomeAppender.Applied applied =
+        store.transaction(
+            tx ->
+                ToolOutcomeAppender.append(
+                    tx, before.root().sessionId(), chain.assistantEntryId(), invocation, NOW));
+
+    // head 是 ToolResult Entry；其父链依次是 effect-b、effect-a、assistant。
+    Entry result = entry(store, applied.headEntryId());
+    assertInstanceOf(MessagePayload.class, result.payload());
+    Entry effectB = entry(store, result.parentEntryId());
+    assertInstanceOf(CustomEntryPayload.class, effectB.payload());
+    assertEquals("type-b", ((CustomEntryPayload) effectB.payload()).customType());
+    Entry effectA = entry(store, effectB.parentEntryId());
+    assertInstanceOf(CustomEntryPayload.class, effectA.payload());
+    assertEquals("type-a", ((CustomEntryPayload) effectA.payload()).customType());
+    assertEquals(chain.assistantEntryId(), effectA.parentEntryId());
+  }
+
+  /** materializer 返回空内容时回退为单个空 TextMessageContent，head ToolResult 仍被持久化。 */
+  @Test
+  void materializerEmptyContentsFallBackToEmptyText() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    var chain =
+        seedToolChain(
+            store,
+            List.of("call-1"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.READY));
+    succeedToolWith(
+        store,
+        chain.toolInvocationIds().getFirst(),
+        new ToolResult("call-1", List.of(new TextToolContent("raw")), false, "{}"));
+    ToolInvocation invocation = tool(store, chain.toolInvocationIds().getFirst());
+    var before = path(store, chain.turn().threadId());
+
+    ToolOutcomeAppender.Applied applied =
+        store.transaction(
+            tx ->
+                ToolOutcomeAppender.append(
+                    tx,
+                    before.root().sessionId(),
+                    chain.assistantEntryId(),
+                    invocation,
+                    NOW,
+                    (sessionId, result) -> List.of()));
+
+    ToolResultMessageContent result =
+        assertInstanceOf(
+            ToolResultMessageContent.class,
+            ((MessagePayload) entry(store, applied.headEntryId()).payload())
+                .message()
+                .contents()
+                .getFirst());
+    assertEquals(List.of(new TextMessageContent("")), result.contents());
   }
 }
