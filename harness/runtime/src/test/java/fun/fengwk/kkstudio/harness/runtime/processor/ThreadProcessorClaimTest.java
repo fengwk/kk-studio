@@ -5,7 +5,6 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.command;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.model;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestThreadWork;
@@ -19,6 +18,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -71,7 +71,8 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.QUIESCENT, fixture.processor.process(claim));
     // 同一 claim 再次投递：Work 已完成删除，claimOwned 失败 -> LOST no-op。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
-    assertNotNull(model(fixture.store, modelId).resultEntryId());
+    // SUCCEEDED-no-calls 关闭 turn 后 Model 行被物理删除。
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
   }
 
   @Test

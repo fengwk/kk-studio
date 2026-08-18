@@ -58,7 +58,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -2379,9 +2378,7 @@ class TaskToolTest {
   private static ToolInvocation toolInvocation(UUID id, ToolApproval approval) {
     ToolInvocation tool = mock(ToolInvocation.class);
     when(tool.id()).thenReturn(id);
-    ToolInvocationRequest request = mock(ToolInvocationRequest.class);
-    when(request.call()).thenReturn(new ToolCall("tc-" + id, "web_search", "{}"));
-    when(tool.request()).thenReturn(request);
+    when(tool.call()).thenReturn(new ToolCall("tc-" + id, "web_search", "{}"));
     when(tool.status()).thenReturn(ToolInvocationStatus.RUNNING);
     when(tool.attempt()).thenReturn(1);
     when(tool.updatedAt()).thenReturn(NOW);

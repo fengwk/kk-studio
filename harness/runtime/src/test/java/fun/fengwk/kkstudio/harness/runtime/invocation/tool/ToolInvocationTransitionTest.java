@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.CALL_ID;
-import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.request;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.call;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.platform;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -31,27 +32,27 @@ class ToolInvocationTransitionTest {
   private static final Instant T3 = CREATED.plusSeconds(3);
 
   private static ToolInvocation ready(int attempt, ToolApproval approval) {
-    return invocation(ToolInvocationStatus.READY, attempt, approval, null, null, null);
+    return invocation(ToolInvocationStatus.READY, attempt, approval, null, null);
   }
 
   private static ToolInvocation waiting() {
-    return invocation(ToolInvocationStatus.WAITING_APPROVAL, 0, undecided(), null, null, null);
+    return invocation(ToolInvocationStatus.WAITING_APPROVAL, 0, undecided(), null, null);
   }
 
   private static ToolInvocation dispatching(int attempt, ToolApproval approval) {
-    return invocation(ToolInvocationStatus.DISPATCHING, attempt, approval, null, null, null);
+    return invocation(ToolInvocationStatus.DISPATCHING, attempt, approval, null, null);
   }
 
   private static ToolInvocation running(int attempt, ToolApproval approval) {
-    return invocation(ToolInvocationStatus.RUNNING, attempt, approval, null, null, null);
+    return invocation(ToolInvocationStatus.RUNNING, attempt, approval, null, null);
   }
 
   private static ToolInvocation succeeded(int attempt) {
-    return invocation(ToolInvocationStatus.SUCCEEDED, attempt, allowed(), result(), null, null);
+    return invocation(ToolInvocationStatus.SUCCEEDED, attempt, allowed(), result(), null);
   }
 
   private static ToolInvocation failed(int attempt) {
-    return invocation(ToolInvocationStatus.FAILED, attempt, null, null, error(), null);
+    return invocation(ToolInvocationStatus.FAILED, attempt, null, null, error());
   }
 
   private static ToolInvocation invocation(
@@ -59,20 +60,19 @@ class ToolInvocationTransitionTest {
       int attempt,
       ToolApproval approval,
       ToolResult result,
-      ToolInvocationError error,
-      UUID resultEntryId) {
+      ToolInvocationError error) {
     return new ToolInvocation(
         id(1L),
         id(1L),
         id(1L),
         0,
-        request("bash", "{}"),
+        call("bash", "{}"),
+        platform("bash"),
         status,
         attempt,
         approval,
         result,
         error,
-        resultEntryId,
         CREATED,
         CREATED);
   }
@@ -263,10 +263,6 @@ class ToolInvocationTransitionTest {
     ToolInvocation succeeded = running(1, allowed()).succeed(result(), effects, T1);
     assertEquals(effects, succeeded.effects());
 
-    ToolInvocation attached = succeeded.attachResultEntry(id(99L), T2);
-    assertEquals(effects, attached.effects());
-    assertEquals(id(99L), attached.resultEntryId());
-
     ToolEffectBatch changed =
         new ToolEffectBatch(
             List.of(new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"other\"}")));
@@ -276,14 +272,14 @@ class ToolInvocationTransitionTest {
             succeeded.modelInvocationId(),
             succeeded.assistantEntryId(),
             succeeded.ordinal(),
-            succeeded.request(),
+            succeeded.call(),
+            succeeded.binding(),
             succeeded.status(),
             succeeded.attempt(),
             succeeded.approval(),
             succeeded.result(),
             changed,
             succeeded.error(),
-            succeeded.resultEntryId(),
             succeeded.createdAt(),
             T2);
     assertThrows(
@@ -298,14 +294,14 @@ class ToolInvocationTransitionTest {
                 id(1L),
                 id(1L),
                 0,
-                request("bash", "{}"),
+                call("bash", "{}"),
+                platform("bash"),
                 ToolInvocationStatus.FAILED,
                 0,
                 null,
                 null,
                 effects,
                 error(),
-                null,
                 CREATED,
                 CREATED));
     assertThrows(
@@ -316,13 +312,13 @@ class ToolInvocationTransitionTest {
                 id(1L),
                 id(1L),
                 0,
-                request("bash", "{}"),
+                call("bash", "{}"),
+                platform("bash"),
                 ToolInvocationStatus.RUNNING,
                 1,
                 allowed(),
                 null,
                 effects,
-                null,
                 null,
                 CREATED,
                 CREATED));
@@ -387,8 +383,7 @@ class ToolInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             ToolInvocation.validateTransition(
-                stored,
-                invocation(ToolInvocationStatus.FAILED, 0, undecided(), null, error(), null)));
+                stored, invocation(ToolInvocationStatus.FAILED, 0, undecided(), null, error())));
   }
 
   @Test
@@ -404,18 +399,17 @@ class ToolInvocationTransitionTest {
         () ->
             ToolInvocation.validateTransition(
                 stored,
-                invocation(ToolInvocationStatus.FAILED, 0, allowedDecision, null, error(), null)));
+                invocation(ToolInvocationStatus.FAILED, 0, allowedDecision, null, error())));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ToolInvocation.validateTransition(
-                stored,
-                invocation(ToolInvocationStatus.READY, 0, deniedDecision, null, null, null)));
+                stored, invocation(ToolInvocationStatus.READY, 0, deniedDecision, null, null)));
     // 匹配的 status 迁移保持合法
     ToolInvocation.validateTransition(
-        stored, invocation(ToolInvocationStatus.READY, 0, allowedDecision, null, null, null));
+        stored, invocation(ToolInvocationStatus.READY, 0, allowedDecision, null, null));
     ToolInvocation.validateTransition(
-        stored, invocation(ToolInvocationStatus.FAILED, 0, deniedDecision, null, error(), null));
+        stored, invocation(ToolInvocationStatus.FAILED, 0, deniedDecision, null, error()));
     // WAITING -> CANCELLED 保留完全相同的未决 approval（Stop）
     ToolInvocation.validateTransition(stored, stored.cancel(error(), T1));
     // WAITING 携带完全相同的未决 approval 直接转为 FAILED 被拒绝（无直接 fail 路径）
@@ -423,8 +417,7 @@ class ToolInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             ToolInvocation.validateTransition(
-                stored,
-                invocation(ToolInvocationStatus.FAILED, 0, undecided(), null, error(), null)));
+                stored, invocation(ToolInvocationStatus.FAILED, 0, undecided(), null, error())));
   }
 
   @Test
@@ -439,18 +432,6 @@ class ToolInvocationTransitionTest {
   }
 
   @Test
-  void attachResultEntryLinksOnlyOnTerminal() {
-    ToolInvocation attached = succeeded(1).attachResultEntry(id(99L), T1);
-    assertEquals(id(99L), attached.resultEntryId());
-    assertEquals(result(), attached.result());
-    assertThrows(
-        IllegalArgumentException.class, () -> ready(0, null).attachResultEntry(id(1L), T1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> succeeded(1).attachResultEntry(id(99L), T1).attachResultEntry(id(100L), T2));
-  }
-
-  @Test
   void validateTransitionAcceptsExactReplayAndRejectsIdentityAndTimeRegression() {
     ToolInvocation stored = withUpdatedAt(ready(0, null), T1);
     ToolInvocation.validateTransition(stored, stored);
@@ -459,7 +440,7 @@ class ToolInvocationTransitionTest {
         () -> ToolInvocation.validateTransition(stored, withId(stored, id(2L))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ToolInvocation.validateTransition(stored, withRequest(stored)));
+        () -> ToolInvocation.validateTransition(stored, withChangedCall(stored)));
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(stored, withCreatedAt(stored)));
@@ -478,8 +459,7 @@ class ToolInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             ToolInvocation.validateTransition(
-                stored,
-                invocation(ToolInvocationStatus.UNKNOWN, 1, allowed(), null, error(), null)));
+                stored, invocation(ToolInvocationStatus.UNKNOWN, 1, allowed(), null, error())));
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(dispatching(1, allowed()), running(3, allowed())));
@@ -488,7 +468,7 @@ class ToolInvocationTransitionTest {
         () ->
             ToolInvocation.validateTransition(
                 dispatching(1, allowed()),
-                invocation(ToolInvocationStatus.UNKNOWN, 1, allowed(), null, error(), null)));
+                invocation(ToolInvocationStatus.UNKNOWN, 1, allowed(), null, error())));
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(running(1, allowed()), succeeded(2)));
@@ -527,26 +507,18 @@ class ToolInvocationTransitionTest {
             succeeded.modelInvocationId(),
             succeeded.assistantEntryId(),
             succeeded.ordinal(),
-            succeeded.request(),
+            succeeded.call(),
+            succeeded.binding(),
             succeeded.status(),
             succeeded.attempt(),
             succeeded.approval(),
             new ToolResult(CALL_ID, List.of(new TextToolContent("different")), false, "{}"),
             succeeded.error(),
-            succeeded.resultEntryId(),
             succeeded.createdAt(),
             T1);
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(succeeded, changedResult));
-    ToolInvocation attached = succeeded.attachResultEntry(id(99L), T1);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ToolInvocation.validateTransition(attached, withResultEntry(attached, null)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ToolInvocation.validateTransition(attached, attached.attachResultEntry(id(100L), T2)));
   }
 
   private static ToolInvocation withId(ToolInvocation source, UUID id) {
@@ -555,30 +527,30 @@ class ToolInvocationTransitionTest {
         source.modelInvocationId(),
         source.assistantEntryId(),
         source.ordinal(),
-        source.request(),
+        source.call(),
+        source.binding(),
         source.status(),
         source.attempt(),
         source.approval(),
         source.result(),
         source.error(),
-        source.resultEntryId(),
         source.createdAt(),
         T1);
   }
 
-  private static ToolInvocation withRequest(ToolInvocation source) {
+  private static ToolInvocation withChangedCall(ToolInvocation source) {
     return new ToolInvocation(
         source.id(),
         source.modelInvocationId(),
         source.assistantEntryId(),
         source.ordinal(),
-        request("call-other", "{}"),
+        call("call-other", "{}"),
+        platform("bash"),
         source.status(),
         source.attempt(),
         source.approval(),
         source.result(),
         source.error(),
-        source.resultEntryId(),
         source.createdAt(),
         T1);
   }
@@ -589,13 +561,13 @@ class ToolInvocationTransitionTest {
         source.modelInvocationId(),
         source.assistantEntryId(),
         source.ordinal(),
-        source.request(),
+        source.call(),
+        source.binding(),
         source.status(),
         source.attempt(),
         source.approval(),
         source.result(),
         source.error(),
-        source.resultEntryId(),
         T1,
         T1);
   }
@@ -606,13 +578,13 @@ class ToolInvocationTransitionTest {
         source.modelInvocationId(),
         source.assistantEntryId(),
         source.ordinal(),
-        source.request(),
+        source.call(),
+        source.binding(),
         source.status(),
         source.attempt(),
         approval,
         source.result(),
         source.error(),
-        source.resultEntryId(),
         source.createdAt(),
         T1);
   }
@@ -623,31 +595,14 @@ class ToolInvocationTransitionTest {
         source.modelInvocationId(),
         source.assistantEntryId(),
         source.ordinal(),
-        source.request(),
+        source.call(),
+        source.binding(),
         source.status(),
         source.attempt(),
         source.approval(),
         source.result(),
         source.error(),
-        source.resultEntryId(),
         source.createdAt(),
         updatedAt);
-  }
-
-  private static ToolInvocation withResultEntry(ToolInvocation source, UUID resultEntryId) {
-    return new ToolInvocation(
-        source.id(),
-        source.modelInvocationId(),
-        source.assistantEntryId(),
-        source.ordinal(),
-        source.request(),
-        source.status(),
-        source.attempt(),
-        source.approval(),
-        source.result(),
-        source.error(),
-        resultEntryId,
-        source.createdAt(),
-        T1);
   }
 }

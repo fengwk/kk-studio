@@ -735,7 +735,7 @@ public final class HarnessRuntime {
       throw approvalNotApplicable(
           "tool invocation " + probe.id() + " is not in the current tool context");
     }
-    if (tool.status() != ToolInvocationStatus.WAITING_APPROVAL || tool.resultEntryId() != null) {
+    if (tool.status() != ToolInvocationStatus.WAITING_APPROVAL) {
       throw approvalNotApplicable("tool invocation " + tool.id() + " is not waiting for approval");
     }
     ToolApproval approval = tool.approval();

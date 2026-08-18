@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -118,6 +119,11 @@ final class StopControl {
     for (WorkTarget target : workTargets) {
       tx.lockWork(target);
     }
+    // Work rows 必须在 Invocation 行删除之前清掉：deleteWork 通过所属 Model/Tool 行校验 owner，而收敛步骤
+    // （stopModel/stopTools）会物理删除 Model/Tool 行。整个 Stop 是单事务，提前删除 Work 不改变原子性。
+    for (WorkTarget target : workTargets) {
+      tx.deleteWork(target);
+    }
     Instant now = effectiveNow(clock.instant(), thread, path, queued, context);
 
     List<ThreadCommand> cancelledCommands =
@@ -156,9 +162,6 @@ final class StopControl {
           case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
               "terminal Tool context escaped the Stop guard");
         };
-    for (WorkTarget target : workTargets) {
-      tx.deleteWork(target);
-    }
     return new Commit(result, modelExecutionId, toolExecutionIds);
   }
 
@@ -303,6 +306,7 @@ final class StopControl {
         ModelAttemptFailureAppender.append(tx, path.root().sessionId(), path.head().id(), model);
     UUID barrierId = tx.nextId();
     tx.insertEntry(new Entry(barrierId, path.root().sessionId(), parentId, barrier, now));
+    // attach 转换触发与 ModelAttemptMaterialization 等价的严格校验（failed attempts 与 terminal 结果逐条比对）。
     ModelInvocation cancelled = model.cancel(error, now).attachResultEntry(barrierId, now);
     tx.updateModelInvocation(cancelled);
     UUID turnEndId = tx.nextId();
@@ -315,6 +319,8 @@ final class StopControl {
             now));
     ThreadState stopped = thread.advanceHead(turnEndId, now);
     tx.updateThread(stopped);
+    // 严格校验通过后同事务删除 ModelInvocation（closed turn 不保留 Invocation；Work 由调用方删除）。
+    tx.deleteModelInvocation(model.id());
     return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
   }
 
@@ -326,7 +332,8 @@ final class StopControl {
       UUID stopRequestId,
       int cancelledCommandCount,
       Instant now) {
-    List<ToolInvocation> updated = new ArrayList<>(active.siblings().size());
+    // 删除 parent 前的严格物化校验：attached Assistant/result 与已物化失败 attempt 前缀必须与 immutable 事实一致。
+    ModelAttemptMaterialization.validateAttached(active.model(), path);
     UUID parentId = active.assistant().id();
     for (ToolInvocation sibling : active.siblings()) {
       ToolInvocation terminal =
@@ -338,10 +345,8 @@ final class StopControl {
       ToolOutcomeAppender.Applied applied =
           ToolOutcomeAppender.append(
               tx, path.root().sessionId(), parentId, terminal, now, toolResultHistoryMaterializer);
-      updated.add(applied.invocation());
       parentId = applied.headEntryId();
     }
-    tx.updateToolInvocations(updated);
     UUID turnEndId = tx.nextId();
     tx.insertEntry(
         new Entry(
@@ -352,6 +357,9 @@ final class StopControl {
             now));
     ThreadState stopped = thread.advanceHead(turnEndId, now);
     tx.updateThread(stopped);
+    // children 先于 parent 删除（FK 顺序）；Work 由调用方删除。
+    tx.deleteToolInvocationsByIds(active.siblings().stream().map(ToolInvocation::id).toList());
+    tx.deleteModelInvocation(active.model().id());
     return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
   }
 

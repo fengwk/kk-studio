@@ -19,10 +19,11 @@ import java.util.UUID;
 /**
  * 把一个 terminal Tool invocation 的 durable effects 与 ToolResult 原子追加到 branch。
  *
- * <p>SUCCEEDED 的 CUSTOM effects 按冻结顺序位于 ToolResult 之前；{@code resultEntryId} 永远指向 ToolResult
- * Entry。调用方负责在同一事务更新返回的 invocation 与最终 Thread head。注入 {@link ToolResultHistoryMaterializer} 时（可为
- * null），SUCCEEDED 结果在 Entry 插入前、同一事务内物化为 blob-backed durable 内容：持久化 message 绝不携带 瞬时 Resource URI /
- * ResourceStore 引用。
+ * <p>SUCCEEDED 的 CUSTOM effects 按冻结顺序位于 ToolResult 之前；返回的 {@code headEntryId} 即 ToolResult Entry。本
+ * appender 绝不 attach/更新 ToolInvocation 行：Terminal Tool 行始终表示 outcome 尚未进入 ToolResult
+ * Entry，调用方在同一事务完成 Entry append 后物理删除子行与父 ModelInvocation。注入 {@link ToolResultHistoryMaterializer}
+ * 时（可为 null），SUCCEEDED 结果在 Entry 插入前、同一事务内物化为 blob-backed durable 内容：持久化 message 绝不携带 瞬时 Resource
+ * URI / ResourceStore 引用。
  */
 public final class ToolOutcomeAppender {
 
@@ -50,9 +51,8 @@ public final class ToolOutcomeAppender {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(invocation, "invocation");
     Objects.requireNonNull(now, "now");
-    if (!invocation.status().isTerminal() || invocation.resultEntryId() != null) {
-      throw new IllegalArgumentException(
-          "tool outcome append requires an unattached terminal invocation");
+    if (!invocation.status().isTerminal()) {
+      throw new IllegalArgumentException("tool outcome append requires a terminal invocation");
     }
     UUID parent = parentEntryId;
     if (invocation.status() == ToolInvocationStatus.SUCCEEDED) {
@@ -78,9 +78,9 @@ public final class ToolOutcomeAppender {
     }
     UUID resultEntryId = tx.nextId();
     tx.insertEntry(new Entry(resultEntryId, sessionId, parent, payload, now));
-    return new Applied(invocation.attachResultEntry(resultEntryId, now), resultEntryId);
+    return new Applied(resultEntryId);
   }
 
-  /** 已追加 outcome 的 invocation 与新的 branch head（即 ToolResult Entry）。 */
-  public record Applied(ToolInvocation invocation, UUID headEntryId) {}
+  /** 已追加 outcome 的新的 branch head（即 ToolResult Entry）。 */
+  public record Applied(UUID headEntryId) {}
 }

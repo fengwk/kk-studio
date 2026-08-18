@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
@@ -30,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -97,15 +97,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * THREAD wake 再 MODEL / TOOL Work）。历史 / 非 applicable open Turn（head 不在 applicable 位置） 在分类阶段只使用
  * unlocked 读，绝不先锁 Model/Tool 再落到 Commands / INPUT normalization。
  *
- * <p>Model terminal apply：SUCCEEDED 追加 ASSISTANT Entry 并挂 resultEntryId，随后只按 {@link
- * ModelResponsePlanner} 的纯决策落地——COMPLETE 无 calls 追加 COMPLETED TURN_END(continueModel=false)；LENGTH
- * 无 calls / FILTERED 追加 FAILED TURN_END(OUTPUT_TRUNCATED / CONTENT_FILTERED)；有 calls 时按 ordinal
- * materialize ToolInvocation 槽位 （READY / FAILED(INVALID_TOOL_ARGUMENTS / UNKNOWN_TOOL /
- * MODEL_OUTPUT_TRUNCATED)，plugin sibling WRITE 冲突 确定性转 FAILED(SIBLING_STATE_CONFLICT)），仅为 READY 请求
- * TOOL Work，全部 immediate terminal 时自唤醒 THREAD 让 batch 应用并反馈模型；FAILED / CANCELLED / UNKNOWN 追加
- * AssistantError 与 FAILED TURN_END。Tool sibling 应用绝不部分 apply：数量 / ordinal 前缀 / ownership / 全部
- * terminal 且全部未挂 result 任一违反即抛错回滚。每次原子应用 Thread head/revision 只 +1；Model / Tool processor 不写
- * Entry/head。
+ * <p>Model terminal apply：SUCCEEDED 追加 ASSISTANT Entry；随后只按 {@link ModelResponsePlanner}
+ * 的纯决策落地——COMPLETE 无 calls 追加 COMPLETED TURN_END(continueModel=false)；LENGTH 无 calls / FILTERED 追加
+ * FAILED TURN_END(OUTPUT_TRUNCATED / CONTENT_FILTERED)；关闭 turn 的路径在同一事务
+ * attach-then-delete（严格物化校验）并物理删除 ModelInvocation；有 calls 时按 ordinal materialize ToolInvocation 槽位
+ * （READY / FAILED(INVALID_TOOL_ARGUMENTS / UNKNOWN_TOOL / MODEL_OUTPUT_TRUNCATED)，plugin sibling
+ * WRITE 冲突 确定性转 FAILED(SIBLING_STATE_CONFLICT)），attach Model.resultEntryId（仅 active Tool phase）并保留
+ * parent，仅为 READY 请求 TOOL Work，全部 immediate terminal 时自唤醒 THREAD 让 batch 应用并反馈模型；FAILED / CANCELLED
+ * / UNKNOWN 追加 AssistantError 与 FAILED TURN_END 并删除 ModelInvocation。Tool sibling 应用绝不部分 apply：数量 /
+ * ordinal 前缀 / ownership / 全部 terminal 任一违反即抛错回滚，batch TURN_END 同事务删除 children+parent。每次原子应用 Thread
+ * head/revision 只 +1；Model / Tool processor 不写 Entry/head。
  *
  * <p>durable mutation 时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、
  * complete、request 与 reschedule 始终使用未抬升的本地 lease clock，避免未来 durable 时间改变 lease 语义。
@@ -559,6 +560,11 @@ public final class ThreadProcessor {
   /**
    * Terminal Model 原子应用（Thread -&gt; Model -&gt; Tool -&gt; Work 锁序）。全部低序 mutation 完成后最后执行 claimed
    * THREAD Work fence，fence 失败抛 {@link ClaimLostSignal} 整事务回滚；fence 通过后按 id 升序请求 TOOL Work。
+   *
+   * <p>关闭 turn 的路径（COMPLETE 无 calls / LENGTH 无 calls / FILTERED / terminal failure / cancel /
+   * unknown / compaction 关闭结果）在同一事务追加 TURN_END 后执行严格物化校验（attach-then-delete，经 Store 的 {@link
+   * ModelAttemptMaterialization} 校验）并物理删除 ModelInvocation；只有 active Tool phase（SUCCEEDED 带 calls）保留
+   * parent 并 attach resultEntryId。Closed turn 绝不保留 Model 行。
    */
   private LoopStep applyModel(
       HarnessStore.Transaction tx,
@@ -593,8 +599,8 @@ public final class ThreadProcessor {
                     : payloadMapper.assistantPayload(response, model.request().toolBindings())
                 : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
             mutationNow));
-    tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
     UUID head = resultEntryId;
+    boolean toolPhase = false;
     List<ToolInvocation> invocations = List.of();
     if (succeeded && compactionRequest != null) {
       // 压缩 turn：成功结果固定无 tool call；HISTORY 部分成功固定 continueModel=false，只有 complete 最终压缩且
@@ -645,6 +651,9 @@ public final class ThreadProcessor {
           head = turnEndId;
         }
         case ModelResponsePlan.ToolBatch batch -> {
+          toolPhase = true;
+          // active Tool phase：attach resultEntryId 并保留 parent，插入全部 sibling。
+          tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
           List<ToolInvocation> materialized = new ArrayList<>(batch.tools().size());
           Map<PluginStateKey, PluginStateAccessMode> seenStateAccesses = new HashMap<>();
           for (int ordinal = 0; ordinal < batch.tools().size(); ordinal++) {
@@ -667,14 +676,14 @@ public final class ThreadProcessor {
                     model.id(),
                     resultEntryId,
                     ordinal,
-                    new ToolInvocationRequest(slot.call(), slot.binding()),
+                    slot.call(),
+                    slot.binding(),
                     status,
                     0,
                     null,
                     null,
                     ToolEffectBatch.EMPTY,
                     error,
-                    null,
                     mutationNow,
                     mutationNow));
           }
@@ -697,6 +706,11 @@ public final class ThreadProcessor {
                   null),
               mutationNow));
       head = turnEndId;
+    }
+    if (!toolPhase) {
+      // 关闭 turn：同事务 attach-then-delete 完成严格物化校验并删除 Model 行（closed turn 不保留 Invocation）。
+      tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
+      tx.deleteModelInvocation(model.id());
     }
     tx.updateThread(thread.advanceHead(head, mutationNow));
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
@@ -724,8 +738,10 @@ public final class ThreadProcessor {
 
   /**
    * Tool sibling 原子应用：全部 terminal 才执行，按 ordinal 通过统一 appender 追加 effects + ToolResult，再追加 COMPLETED
-   * TURN_END(continueModel=true)。数量 / ordinal 前缀 / ownership / terminal / unattached 任一违反即抛错回滚；低序
-   * mutation 完成后最后执行 claimed THREAD Work fence。
+   * TURN_END(continueModel=true)；同一事务删除全部 child ToolInvocation 与 parent ModelInvocation。数量 /
+   * ordinal 前缀 / ownership / terminal 任一违反即抛错回滚；删除 parent 前先执行与 {@link ModelAttemptMaterialization}
+   * 等价的最小严格校验 （attached Assistant/result 与已物化失败 attempt 前缀），绝不绕过校验直接 delete。低序 mutation 完成后最后执行
+   * claimed THREAD Work fence。
    */
   private LoopStep applyToolBatch(
       HarnessStore.Transaction tx,
@@ -747,14 +763,14 @@ public final class ThreadProcessor {
             "tool siblings must be a contiguous ordinal prefix of entry " + assistant.id());
       }
       ToolInvocation sibling = siblings.get(i);
-      if (!sibling.modelInvocationId().equals(model.id())
-          || !sibling.status().isTerminal()
-          || sibling.resultEntryId() != null) {
-        // 锁内复查：任何不一致都是不变量违反，回滚（绝不部分 apply 或重新挂载）。
+      if (!sibling.modelInvocationId().equals(model.id()) || !sibling.status().isTerminal()) {
+        // 锁内复查：任何不一致都是不变量违反，回滚（绝不部分 apply）。
         throw new IllegalStateException(
             "tool siblings changed under lock for assistant entry " + assistant.id());
       }
     }
+    // 删除 parent 前的严格物化校验：attached Assistant/result 与已物化失败 attempt 前缀必须与 immutable 事实一致。
+    ModelAttemptMaterialization.validateAttached(model, path);
     Instant mutationNow =
         durableMutationTime(now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
     for (ToolInvocation sibling : siblings) {
@@ -762,12 +778,10 @@ public final class ThreadProcessor {
     }
     UUID sessionId = path.root().sessionId();
     UUID parentId = path.head().id();
-    List<ToolInvocation> updated = new ArrayList<>(siblings.size());
     for (ToolInvocation sibling : siblings) {
       ToolOutcomeAppender.Applied applied =
           ToolOutcomeAppender.append(
               tx, sessionId, parentId, sibling, mutationNow, toolResultHistoryMaterializer);
-      updated.add(applied.invocation());
       parentId = applied.headEntryId();
     }
     UUID turnEndId = tx.nextId();
@@ -779,8 +793,10 @@ public final class ThreadProcessor {
             new TurnEndPayload(
                 model.turnStartEntryId(), TurnEndOutcome.COMPLETED, true, null, null),
             mutationNow));
-    tx.updateToolInvocations(updated);
     tx.updateThread(thread.advanceHead(turnEndId, mutationNow));
+    // children 先于 parent 删除（FK 顺序）。
+    tx.deleteToolInvocationsByIds(siblings.stream().map(ToolInvocation::id).toList());
+    tx.deleteModelInvocation(model.id());
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }

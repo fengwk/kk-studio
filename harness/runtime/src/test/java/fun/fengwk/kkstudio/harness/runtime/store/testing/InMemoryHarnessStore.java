@@ -8,8 +8,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -20,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
@@ -711,13 +708,6 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public boolean hasModelInvocationForTurn(UUID turnStartEntryId) {
-      checkOpen();
-      return state.modelInvocations.values().stream()
-          .anyMatch(invocation -> invocation.turnStartEntryId().equals(turnStartEntryId));
-    }
-
-    @Override
     public void insertModelInvocation(ModelInvocation invocation) {
       checkOpen();
       Objects.requireNonNull(invocation, "invocation");
@@ -818,6 +808,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
                     + " assistant-aborted entry for a compaction invocation"
                 : "model resultEntryId must reference an assistant, assistant-error or"
                     + " assistant-aborted entry");
+      }
+      if (resultEntryId.equals(invocation.basisHeadEntryId())) {
+        throw new IllegalArgumentException(
+            "model result entry must be a strict descendant of the basis head entry");
       }
       // result path 必须同时包含 basis 与 turnStart（同 branch descendant），不依赖 Thread 当前 head。
       EntryPath resultPath = loadEntryPath(resultEntryId);
@@ -991,12 +985,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
         requireAbsent(state.toolInvocations, invocation.id(), "tool invocation");
         // 新 durable invocation 通常为 READY；sibling 静态拒绝允许 unattached FAILED。两者均为 attempt=0、
-        // approval=null、resultEntryId=null，effects 由 record 不变量保证为空。
+        // approval=null，effects 由 record 不变量保证为空。
         if ((invocation.status() != ToolInvocationStatus.READY
                 && invocation.status() != ToolInvocationStatus.FAILED)
             || invocation.attempt() != 0
-            || invocation.approval() != null
-            || invocation.resultEntryId() != null) {
+            || invocation.approval() != null) {
           throw new IllegalArgumentException(
               "new tool invocations must be READY or unattached FAILED with attempt 0 and no approval");
         }
@@ -1040,7 +1033,6 @@ public final class InMemoryHarnessStore implements HarnessStore {
             "assistantEntryId must reference an assistant MESSAGE entry");
       }
       requireMatchingAssistantToolCall(invocation, assistant);
-      requireValidToolResultEntry(invocation);
     }
 
     /**
@@ -1061,18 +1053,17 @@ public final class InMemoryHarnessStore implements HarnessStore {
             "tool ordinal " + invocation.ordinal() + " exceeds the assistant tool calls");
       }
       ToolCallMessageContent call = calls.get(invocation.ordinal());
-      ToolCall requestCall = invocation.request().call();
+      ToolCall requestCall = invocation.call();
       String expectedRendererKey =
-          invocation.request().binding() == null
+          invocation.binding() == null
               ? HistoryPayloadMapper.UNBOUND_RENDERER_KEY
-              : invocation.request().binding().descriptor().rendererKey();
+              : invocation.binding().descriptor().rendererKey();
       if (!call.toolCallId().equals(requestCall.id())
           || !call.toolName().equals(requestCall.toolName())
           || !call.rendererKey().equals(expectedRendererKey)
           || !call.argumentsJson().equals(requestCall.argumentsJson())) {
         throw new IllegalArgumentException(
-            "tool request binding/call must exactly match the assistant tool call at the same"
-                + " ordinal");
+            "tool call/binding must exactly match the assistant tool call at the same ordinal");
       }
     }
 
@@ -1082,91 +1073,17 @@ public final class InMemoryHarnessStore implements HarnessStore {
           && message.message().role() == AgentMessageRole.ASSISTANT;
     }
 
-    private void requireValidToolResultEntry(ToolInvocation invocation) {
-      UUID resultEntryId = invocation.resultEntryId();
-      if (resultEntryId == null) {
-        return;
-      }
-      Entry result = requireExistingEntry(resultEntryId);
-      if (!isToolResultEntry(result)) {
-        throw new IllegalArgumentException(
-            "tool resultEntryId must reference a TOOL MESSAGE entry");
-      }
-      ToolResultMetadata metadata = ((MessagePayload) result.payload()).toolResultMetadata();
-      ToolResultMessageContent content =
-          (ToolResultMessageContent)
-              ((MessagePayload) result.payload()).message().contents().get(0);
-      String expectedRendererKey =
-          invocation.request().binding() == null
-              ? HistoryPayloadMapper.UNBOUND_RENDERER_KEY
-              : invocation.request().binding().descriptor().rendererKey();
-      if (!metadata.assistantEntryId().equals(invocation.assistantEntryId())
-          || metadata.ordinal() != invocation.ordinal()
-          || !metadata.toolCallId().equals(invocation.request().call().id())
-          || !content.toolCallId().equals(invocation.request().call().id())
-          || !content.toolName().equals(invocation.request().call().toolName())
-          || !content.rendererKey().equals(expectedRendererKey)) {
-        throw new IllegalArgumentException(
-            "tool result entry must match the invocation assistant entry, ordinal, call and"
-                + " renderer");
-      }
-      // synthetic 结果（history normalization 补写）不关联真实 ToolInvocation。
-      if (metadata.synthetic()) {
-        throw new IllegalArgumentException("tool result entry must not be synthetic");
-      }
-      // metadata.status 必须精确映射 invocation 的 terminal status（非 terminal 不可能携带 resultEntryId）。
-      ToolResultStatus expectedStatus =
-          switch (invocation.status()) {
-            case SUCCEEDED -> ToolResultStatus.SUCCEEDED;
-            case FAILED -> ToolResultStatus.FAILED;
-            case CANCELLED -> ToolResultStatus.CANCELLED;
-            case UNKNOWN -> ToolResultStatus.UNKNOWN;
-            default -> throw new IllegalStateException(
-                "resultEntryId requires a terminal tool invocation status");
-          };
-      if (metadata.status() != expectedStatus) {
-        throw new IllegalArgumentException(
-            "tool result status must exactly map the invocation status");
-      }
-      // result 必须是 assistant 同 branch 的 descendant（其 path 包含 assistantEntryId）。
-      boolean assistantOnResultPath =
-          loadEntryPath(resultEntryId).entries().stream()
-              .anyMatch(entry -> entry.id().equals(invocation.assistantEntryId()));
-      if (!assistantOnResultPath) {
-        throw new IllegalArgumentException(
-            "tool result entry must be in the same branch as the assistant entry");
-      }
-      for (ToolInvocation other : state.toolInvocations.values()) {
-        if (!other.id().equals(invocation.id())
-            && Objects.equals(other.resultEntryId(), resultEntryId)) {
-          throw new IllegalArgumentException(
-              "tool resultEntryId " + resultEntryId + " is already used");
-        }
-      }
-    }
-
-    private static boolean isToolResultEntry(Entry entry) {
-      return entry.payload().type() == EntryType.MESSAGE
-          && entry.payload() instanceof MessagePayload message
-          && message.message().role() == AgentMessageRole.TOOL;
-    }
-
     @Override
     public void updateToolInvocations(List<ToolInvocation> invocations) {
       checkOpen();
       List<ToolInvocation> copied =
           List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
       Set<UUID> ids = new HashSet<>();
-      Set<UUID> resultEntryIds = new HashSet<>();
       for (ToolInvocation invocation : copied) {
         requireMillisecondPrecision(invocation.createdAt());
         requireMillisecondPrecision(invocation.updatedAt());
         if (!ids.add(invocation.id())) {
           throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
-        }
-        if (invocation.resultEntryId() != null && !resultEntryIds.add(invocation.resultEntryId())) {
-          throw new IllegalArgumentException(
-              "duplicate tool resultEntryId " + invocation.resultEntryId());
         }
         requireLocked(LockKey.tool(invocation.id()));
         ToolInvocation stored = state.toolInvocations.get(invocation.id());
@@ -1175,7 +1092,6 @@ public final class InMemoryHarnessStore implements HarnessStore {
               "tool invocation " + invocation.id() + " does not exist");
         }
         ToolInvocation.validateTransition(stored, invocation);
-        requireValidToolResultEntry(invocation);
       }
       for (ToolInvocation invocation : copied) {
         state.toolInvocations.put(invocation.id(), invocation);
@@ -1365,6 +1281,50 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
       }
       return deleted;
+    }
+
+    @Override
+    public int deleteToolInvocationsByIds(List<UUID> toolInvocationIds) {
+      checkOpen();
+      List<UUID> copied =
+          List.copyOf(toolInvocationIds).stream().sorted(UuidOrder.COMPARATOR).toList();
+      for (int i = 1; i < copied.size(); i++) {
+        if (copied.get(i).equals(copied.get(i - 1))) {
+          throw new IllegalArgumentException(
+              "duplicate tool invocation id " + copied.get(i) + " must not be deleted twice");
+        }
+      }
+      for (UUID toolInvocationId : copied) {
+        if (!state.toolInvocations.containsKey(toolInvocationId)) {
+          throw new IllegalArgumentException(
+              "tool invocation " + toolInvocationId + " does not exist");
+        }
+        requireLocked(LockKey.tool(toolInvocationId));
+      }
+      int deleted = 0;
+      for (UUID toolInvocationId : copied) {
+        state.toolInvocations.remove(toolInvocationId);
+        deleted++;
+      }
+      return copied.size();
+    }
+
+    @Override
+    public boolean deleteModelInvocation(UUID modelInvocationId) {
+      checkOpen();
+      Objects.requireNonNull(modelInvocationId, "modelInvocationId");
+      if (!state.modelInvocations.containsKey(modelInvocationId)) {
+        throw new IllegalArgumentException(
+            "model invocation " + modelInvocationId + " does not exist");
+      }
+      requireLocked(LockKey.model(modelInvocationId));
+      for (ToolInvocation tool : state.toolInvocations.values()) {
+        if (tool.modelInvocationId().equals(modelInvocationId)) {
+          throw new IllegalArgumentException(
+              "model invocation " + modelInvocationId + " has tool invocation children");
+        }
+      }
+      return state.modelInvocations.remove(modelInvocationId) != null;
     }
 
     @Override

@@ -22,7 +22,6 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.user
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -326,7 +325,6 @@ class HarnessRuntimeStopReplayTest {
     ToolInvocation tool =
         store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.READY, tool.status());
-    assertNull(tool.resultEntryId());
     assertEquals(
         2L, store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow()).revision());
     assertTrue(

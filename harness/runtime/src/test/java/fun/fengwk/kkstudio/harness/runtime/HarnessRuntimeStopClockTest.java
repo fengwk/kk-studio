@@ -10,11 +10,11 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.storeAdvancingClockOnWorkLock;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
@@ -43,9 +43,9 @@ class HarnessRuntimeStopClockTest {
 
     ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
     assertEquals(T3, thread.updatedAt());
-    ModelInvocation model =
-        store.transaction(tx -> tx.findModelInvocation(baseline.modelId()).orElseThrow());
-    assertEquals(T3, model.updatedAt());
+    // Model 行在 Stop 关闭 turn 时被物理删除（closed turn 不保留 Invocation）；post-lock 时间戳由
+    // barrier/TURN_END Entry 与 cancelled command 承接。
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
     ThreadCommand command =
         store.transaction(
             tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());

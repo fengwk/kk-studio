@@ -114,7 +114,7 @@ public final class HistoryPayloadMapper {
     ToolResultMetadata metadata =
         new ToolResultMetadata(
             invocation.assistantEntryId(),
-            invocation.request().call().id(),
+            invocation.call().id(),
             invocation.ordinal(),
             statusOf(invocation),
             false,
@@ -173,9 +173,9 @@ public final class HistoryPayloadMapper {
     }
     ToolResultMessageContent content =
         new ToolResultMessageContent(
-            invocation.request().call().id(),
-            invocation.request().call().toolName(),
-            invocation.request().binding().descriptor().rendererKey(),
+            invocation.call().id(),
+            invocation.call().toolName(),
+            invocation.binding().descriptor().rendererKey(),
             effective,
             invocation.result().error(),
             invocation.result().detailsJson());
@@ -184,7 +184,7 @@ public final class HistoryPayloadMapper {
         null,
         new ToolResultMetadata(
             invocation.assistantEntryId(),
-            invocation.request().call().id(),
+            invocation.call().id(),
             invocation.ordinal(),
             statusOf(invocation),
             false,
@@ -213,9 +213,9 @@ public final class HistoryPayloadMapper {
       contents.add(new TextMessageContent(""));
     }
     return new ToolResultMessageContent(
-        invocation.request().call().id(),
-        invocation.request().call().toolName(),
-        invocation.request().binding().descriptor().rendererKey(),
+        invocation.call().id(),
+        invocation.call().toolName(),
+        invocation.binding().descriptor().rendererKey(),
         contents,
         result.error(),
         result.detailsJson());
@@ -226,8 +226,8 @@ public final class HistoryPayloadMapper {
       throw new IllegalArgumentException("non-succeeded invocation requires an error");
     }
     return new ToolResultMessageContent(
-        invocation.request().call().id(),
-        invocation.request().call().toolName(),
+        invocation.call().id(),
+        invocation.call().toolName(),
         rendererKey(invocation),
         List.of(new TextMessageContent(invocation.error().message())),
         true,
@@ -236,7 +236,7 @@ public final class HistoryPayloadMapper {
 
   /** FAILED 槽位的 binding 可能为空（unknown tool）：durable renderer fallback 固定为 {@code tool}。 */
   private static String rendererKey(ToolInvocation invocation) {
-    ToolBinding binding = invocation.request().binding();
+    ToolBinding binding = invocation.binding();
     return binding == null ? UNBOUND_RENDERER_KEY : binding.descriptor().rendererKey();
   }
 

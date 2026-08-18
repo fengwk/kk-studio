@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -138,7 +137,7 @@ class ThreadContextClassifierTest {
                 thread(TURN_END_ID),
                 closedTurnPath(false),
                 null,
-                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY, null))));
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
   }
 
   // -----------------------------------------------------------------------------------------------
@@ -164,7 +163,7 @@ class ThreadContextClassifierTest {
                 thread(USER_ID),
                 openUserPath(),
                 null,
-                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY, null))));
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
   }
 
   @Test
@@ -250,7 +249,7 @@ class ThreadContextClassifierTest {
                 thread(USER_ID),
                 openUserPath(),
                 model(THREAD_ID, TURN_START_ID, USER_ID, ModelInvocationStatus.READY, null, null),
-                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY, null))));
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
   }
 
   // -----------------------------------------------------------------------------------------------
@@ -327,7 +326,7 @@ class ThreadContextClassifierTest {
                     ModelInvocationStatus.SUCCEEDED,
                     response(List.of()),
                     null),
-                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY, null))));
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
   }
 
   @Test
@@ -366,11 +365,12 @@ class ThreadContextClassifierTest {
                     ModelInvocationStatus.FAILED,
                     null,
                     ERROR_ID),
-                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY, null))));
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
   }
 
   // -----------------------------------------------------------------------------------------------
   // 规则 5：Tool context 一致性校验
+  // （siblings 存在即 outcome 未物化：任一非 terminal -> ToolActive；全部 terminal -> ToolTerminalPending。）
   // -----------------------------------------------------------------------------------------------
 
   @Test
@@ -445,7 +445,7 @@ class ThreadContextClassifierTest {
                     ModelInvocationStatus.SUCCEEDED,
                     response(List.of()),
                     ASSISTANT_ID),
-                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY, null))));
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
   }
 
   @Test
@@ -481,7 +481,7 @@ class ThreadContextClassifierTest {
                     ModelInvocationStatus.SUCCEEDED,
                     response(List.of("call-1", "call-2")),
                     ASSISTANT_ID),
-                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY, null))));
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
   }
 
   @Test
@@ -500,8 +500,8 @@ class ThreadContextClassifierTest {
                     response(List.of("call-1", "call-2")),
                     ASSISTANT_ID),
                 List.of(
-                    tool(id(0), "call-1", ToolInvocationStatus.READY, null),
-                    tool(id(2), "call-2", ToolInvocationStatus.READY, null))));
+                    tool(id(0), "call-1", ToolInvocationStatus.READY),
+                    tool(id(2), "call-2", ToolInvocationStatus.READY))));
   }
 
   @Test
@@ -523,68 +523,6 @@ class ThreadContextClassifierTest {
   }
 
   @Test
-  void mixedAttachedUnattachedSiblingsAreInvariantError() {
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            classifier.classify(
-                thread(ASSISTANT_ID),
-                assistantPath(List.of("call-1", "call-2")),
-                model(
-                    THREAD_ID,
-                    TURN_START_ID,
-                    USER_ID,
-                    ModelInvocationStatus.SUCCEEDED,
-                    response(List.of("call-1", "call-2")),
-                    ASSISTANT_ID),
-                List.of(
-                    tool(id(0), "call-1", ToolInvocationStatus.SUCCEEDED, id(100)),
-                    tool(id(1), "call-2", ToolInvocationStatus.SUCCEEDED, null))));
-  }
-
-  @Test
-  void attachedNonterminalMixedSiblingsAreInvariantError() {
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            classifier.classify(
-                thread(ASSISTANT_ID),
-                assistantPath(List.of("call-1", "call-2")),
-                model(
-                    THREAD_ID,
-                    TURN_START_ID,
-                    USER_ID,
-                    ModelInvocationStatus.SUCCEEDED,
-                    response(List.of("call-1", "call-2")),
-                    ASSISTANT_ID),
-                List.of(
-                    tool(id(0), "call-1", ToolInvocationStatus.SUCCEEDED, id(100)),
-                    tool(id(1), "call-2", ToolInvocationStatus.READY, null))));
-  }
-
-  @Test
-  void allTerminalAttachedSiblingsAreIdleOrHistorical() {
-    // 全部 terminal+已挂载：结果位于 relocation 后的另一 descendant，历史，不重挂载。
-    assertEquals(
-        ThreadContext.IdleOrHistorical.class,
-        classifier
-            .classify(
-                thread(ASSISTANT_ID),
-                assistantPath(List.of("call-1", "call-2")),
-                model(
-                    THREAD_ID,
-                    TURN_START_ID,
-                    USER_ID,
-                    ModelInvocationStatus.SUCCEEDED,
-                    response(List.of("call-1", "call-2")),
-                    ASSISTANT_ID),
-                List.of(
-                    tool(id(0), "call-1", ToolInvocationStatus.SUCCEEDED, id(100)),
-                    tool(id(1), "call-2", ToolInvocationStatus.SUCCEEDED, id(101))))
-            .getClass());
-  }
-
-  @Test
   void allUnattachedWithNonterminalSiblingsIsToolActive() {
     ThreadContext.ToolActive context =
         assertInstanceOf(
@@ -600,8 +538,8 @@ class ThreadContextClassifierTest {
                     response(List.of("call-1", "call-2")),
                     ASSISTANT_ID),
                 List.of(
-                    tool(id(0), "call-1", ToolInvocationStatus.SUCCEEDED, null),
-                    tool(id(1), "call-2", ToolInvocationStatus.RUNNING, null))));
+                    tool(id(0), "call-1", ToolInvocationStatus.SUCCEEDED),
+                    tool(id(1), "call-2", ToolInvocationStatus.RUNNING))));
     assertEquals(MODEL_ID, context.model().id());
     assertEquals(ASSISTANT_ID, context.assistant().id());
     assertEquals(List.of("call-1", "call-2"), callIds(context.calls()));
@@ -624,8 +562,8 @@ class ThreadContextClassifierTest {
                     response(List.of("call-1", "call-2")),
                     ASSISTANT_ID),
                 List.of(
-                    tool(id(0), "call-1", ToolInvocationStatus.SUCCEEDED, null),
-                    tool(id(1), "call-2", ToolInvocationStatus.FAILED, null))));
+                    tool(id(0), "call-1", ToolInvocationStatus.SUCCEEDED),
+                    tool(id(1), "call-2", ToolInvocationStatus.FAILED))));
     assertEquals(MODEL_ID, context.model().id());
     assertEquals(ASSISTANT_ID, context.assistant().id());
     assertEquals(List.of("call-1", "call-2"), callIds(context.calls()));
@@ -663,7 +601,7 @@ class ThreadContextClassifierTest {
   @Test
   void toolContextListsAreImmutableCopies() {
     List<ToolInvocation> mutableSiblings = new ArrayList<>();
-    mutableSiblings.add(tool(id(0), "call-1", ToolInvocationStatus.READY, null));
+    mutableSiblings.add(tool(id(0), "call-1", ToolInvocationStatus.READY));
     ThreadContext.ToolActive context =
         assertInstanceOf(
             ThreadContext.ToolActive.class,
@@ -679,11 +617,11 @@ class ThreadContextClassifierTest {
                     ASSISTANT_ID),
                 mutableSiblings));
     // 结果列表是独立不可变拷贝：修改输入不影响上下文。
-    mutableSiblings.add(tool(id(1), "call-2", ToolInvocationStatus.READY, null));
+    mutableSiblings.add(tool(id(1), "call-2", ToolInvocationStatus.READY));
     assertEquals(1, context.siblings().size());
     assertThrows(
         UnsupportedOperationException.class,
-        () -> context.siblings().add(tool(id(2), "call-3", ToolInvocationStatus.READY, null)));
+        () -> context.siblings().add(tool(id(2), "call-3", ToolInvocationStatus.READY)));
     assertThrows(
         UnsupportedOperationException.class,
         () -> context.calls().add(new ToolCallMessageContent("call-9", "bash", "bash", "{}")));
@@ -811,7 +749,7 @@ class ThreadContextClassifierTest {
   }
 
   private static ToolInvocation tool(
-      UUID invocationId, String callId, ToolInvocationStatus status, UUID resultEntryId) {
+      UUID invocationId, String callId, ToolInvocationStatus status) {
     ToolApproval approval =
         status == ToolInvocationStatus.SUCCEEDED || status == ToolInvocationStatus.RUNNING
             ? ToolApproval.notRequired()
@@ -829,13 +767,13 @@ class ThreadContextClassifierTest {
         MODEL_ID,
         ASSISTANT_ID,
         Math.toIntExact(invocationId.getLeastSignificantBits()),
-        new ToolInvocationRequest(new ToolCall(callId, "bash", "{}"), toolBinding()),
+        new ToolCall(callId, "bash", "{}"),
+        toolBinding(),
         status,
         attempt,
         approval,
         result,
         error,
-        resultEntryId,
         NOW,
         NOW);
   }
@@ -847,10 +785,10 @@ class ThreadContextClassifierTest {
         id(MODEL_ID.getLeastSignificantBits() + 1),
         ASSISTANT_ID,
         ordinal,
-        new ToolInvocationRequest(new ToolCall(callId, "bash", "{}"), toolBinding()),
+        new ToolCall(callId, "bash", "{}"),
+        toolBinding(),
         ToolInvocationStatus.READY,
         0,
-        null,
         null,
         null,
         null,

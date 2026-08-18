@@ -5,7 +5,6 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T4;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantAbortedPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantErrorPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
@@ -14,19 +13,18 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.platformBinding;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.syntheticToolResultPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolCall;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolResultPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.turnStartPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.withRendererKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
@@ -63,7 +60,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
@@ -143,7 +139,6 @@ public abstract class HarnessStoreInvocationContract {
             0,
             "call-1",
             ToolInvocationStatus.READY,
-            null,
             T2);
     ToolInvocation nonCanonicalTool =
         new ToolInvocation(
@@ -151,13 +146,13 @@ public abstract class HarnessStoreInvocationContract {
             tool.modelInvocationId(),
             tool.assistantEntryId(),
             tool.ordinal(),
-            tool.request(),
+            tool.call(),
+            tool.binding(),
             tool.status(),
             tool.attempt(),
             tool.approval(),
             tool.result(),
             tool.error(),
-            tool.resultEntryId(),
             tool.createdAt().plusNanos(1),
             tool.updatedAt().plusNanos(1));
     assertThrows(
@@ -208,12 +203,6 @@ public abstract class HarnessStoreInvocationContract {
         store
             .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), TestIds.id(42)))
             .isEmpty());
-    boolean hasTurnInvocation =
-        store.transaction(tx -> tx.hasModelInvocationForTurn(baseline.turnStartEntryId()));
-    boolean hasMissingTurnInvocation =
-        store.transaction(tx -> tx.hasModelInvocationForTurn(TestIds.id(42)));
-    assertTrue(hasTurnInvocation);
-    assertFalse(hasMissingTurnInvocation);
   }
 
   /** 非空 failedAttempts 必须在 InMemory/PostgreSQL 两个 Store 实现中无损往返。 */
@@ -719,6 +708,51 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   @Test
+  void modelResultEntryCannotBeTheBasisHeadItself() {
+    // 链：root -> turnStartA -> userA -> assistantA；thread head 迁移到 assistantA 后以 assistantA 为 basis
+    // 建 model。
+    UUID userA =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantA = insertChildEntry(store, baseline.sessionId(), userA, assistantPayload());
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.updateThread(new ThreadState(baseline.threadId(), assistantA, false, 1, 1, T0, T2));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  TestIds.id(1),
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  assistantA,
+                  ModelInvocationStatus.READY,
+                  null,
+                  T2));
+        });
+    // 把 result 挂到 basis 自身（assistantA）：result 必须是 basis 的严格 descendant，不允许 attach 到 basis。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  ModelInvocation current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  tx.updateModelInvocation(current.beginDispatch(T2));
+                  current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  tx.updateModelInvocation(current.markRunning(T2));
+                  current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  tx.updateModelInvocation(
+                      current.succeed(successResponse(), T2).attachResultEntry(assistantA, T2));
+                }));
+  }
+
+  @Test
   void terminalReplayAndAttachStayLegalAfterTheThreadHeadRelocates() {
     // 链：root -> turnStartA -> userA -> assistantA
     UUID userA =
@@ -983,7 +1017,6 @@ public abstract class HarnessStoreInvocationContract {
                                 0,
                                 "call-1",
                                 ToolInvocationStatus.CANCELLED,
-                                null,
                                 T2)))));
     assertThrows(
         IllegalArgumentException.class,
@@ -998,10 +1031,10 @@ public abstract class HarnessStoreInvocationContract {
                                 TestIds.id(1),
                                 assistantEntryId,
                                 0,
-                                toolRequest("call-1"),
+                                toolCall("call-1"),
+                                platformBinding(),
                                 ToolInvocationStatus.READY,
                                 1,
-                                null,
                                 null,
                                 null,
                                 null,
@@ -1020,11 +1053,11 @@ public abstract class HarnessStoreInvocationContract {
                                 TestIds.id(1),
                                 assistantEntryId,
                                 0,
-                                toolRequest("call-1"),
+                                toolCall("call-1"),
+                                platformBinding(),
                                 ToolInvocationStatus.READY,
                                 0,
                                 new ToolApproval(false, null, null, null, null, null, null),
-                                null,
                                 null,
                                 null,
                                 T2,
@@ -1042,7 +1075,6 @@ public abstract class HarnessStoreInvocationContract {
                       0,
                       "call-1",
                       ToolInvocationStatus.READY,
-                      null,
                       T2)));
           tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
           tx.updateToolInvocations(
@@ -1054,9 +1086,208 @@ public abstract class HarnessStoreInvocationContract {
                       0,
                       "call-1",
                       ToolInvocationStatus.CANCELLED,
-                      null,
                       T2)));
         });
+  }
+
+  // ---- 运行期 TURN_END / Stop 精确删除 ----
+
+  /** deleteToolInvocationsByIds：只删除入参中存在的已锁定行并返回精确数量，未入参的 sibling 保留且删除后行不存在。 */
+  @Test
+  void deleteToolInvocationsByIdsDeletesExactlyTheLockedRows() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(11),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        1,
+                        "call-2",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(12),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        2,
+                        "call-3",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    int deleted =
+        store.transaction(
+            tx -> {
+              tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
+              return tx.deleteToolInvocationsByIds(List.of(TestIds.id(10), TestIds.id(12)));
+            });
+    assertEquals(2, deleted);
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(12))).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(11))).isPresent());
+  }
+
+  /** deleteToolInvocationsByIds：未锁定行抛 ISE，不删除任何行。 */
+  @Test
+  void deleteToolInvocationsByIdsRequiresLockedRows() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    assertThrows(
+        IllegalStateException.class,
+        () -> inTransaction(store, tx -> tx.deleteToolInvocationsByIds(List.of(TestIds.id(10)))));
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isPresent());
+  }
+
+  /** deleteToolInvocationsByIds：入参含缺失行时抛 IAE（公开契约 missing -> IAE）且事务不部分删除。 */
+  @Test
+  void deleteToolInvocationsByIdsRejectsMissingRowWithoutPartialDelete() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(11),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        1,
+                        "call-2",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
+                  tx.deleteToolInvocationsByIds(List.of(TestIds.id(10), TestIds.id(999)));
+                }));
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isPresent());
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(11))).isPresent());
+  }
+
+  /** deleteToolInvocationsByIds：入参重复 id 显式拒绝，绝不静默去重后删除。 */
+  @Test
+  void deleteToolInvocationsByIdsRejectsDuplicateIds() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockToolInvocation(TestIds.id(10));
+                  tx.deleteToolInvocationsByIds(List.of(TestIds.id(10), TestIds.id(10)));
+                }));
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isPresent());
+  }
+
+  /** deleteModelInvocation：缺失行抛 IAE（公开契约 missing -> IAE）；未锁定行抛 ISE；已锁定且无 child 时删除并在删除后不存在。 */
+  @Test
+  void deleteModelInvocationDeletesWhenLockedAndBecomesAbsent() {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  TestIds.id(1),
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> inTransaction(store, tx -> tx.deleteModelInvocation(TestIds.id(999))));
+    assertThrows(
+        IllegalStateException.class,
+        () -> inTransaction(store, tx -> tx.deleteModelInvocation(TestIds.id(1))));
+    boolean deletedAndAbsent =
+        store.<Boolean>transaction(
+            tx -> {
+              tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+              assertTrue(tx.deleteModelInvocation(TestIds.id(1)));
+              return tx.findModelInvocation(TestIds.id(1)).isEmpty();
+            });
+    assertTrue(deletedAndAbsent);
+  }
+
+  /** deleteModelInvocation：存在 child ToolInvocation 时明确拒绝，parent 与 child 均保留（不依赖底层 FK）。 */
+  @Test
+  void deleteModelInvocationRejectsChildToolInvocationAndPreservesBoth() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockModelInvocation(TestIds.id(1));
+                  tx.deleteModelInvocation(TestIds.id(1));
+                }));
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(TestIds.id(1))).isPresent());
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isPresent());
   }
 
   // ---- 工具调用 ----
@@ -1121,47 +1352,6 @@ public abstract class HarnessStoreInvocationContract {
         });
   }
 
-  /**
-   * 在一个 transaction 中插入一个 READY tool invocation 并将其推进到带指定 result link 的 terminal status （insert
-   * 仅接受初始状态；terminal apply 走 update）。
-   */
-  private void insertTerminalTool(
-      UUID id,
-      UUID modelInvocationId,
-      UUID assistantEntryId,
-      int ordinal,
-      String toolCallId,
-      ToolInvocationStatus status,
-      UUID resultEntryId,
-      Instant createdAt) {
-    inTransaction(
-        store,
-        tx -> {
-          tx.insertToolInvocations(
-              List.of(
-                  toolInvocation(
-                      id,
-                      modelInvocationId,
-                      assistantEntryId,
-                      ordinal,
-                      toolCallId,
-                      ToolInvocationStatus.READY,
-                      null,
-                      createdAt)));
-          tx.updateToolInvocations(
-              List.of(
-                  toolInvocation(
-                      id,
-                      modelInvocationId,
-                      assistantEntryId,
-                      ordinal,
-                      toolCallId,
-                      status,
-                      resultEntryId,
-                      createdAt)));
-        });
-  }
-
   private ToolInvocation updateTool(UUID invocationId, UnaryOperator<ToolInvocation> transition) {
     return store.transaction(
         tx -> {
@@ -1209,7 +1399,6 @@ public abstract class HarnessStoreInvocationContract {
                         1,
                         "call-2",
                         ToolInvocationStatus.READY,
-                        null,
                         T2),
                     toolInvocation(
                         TestIds.id(10),
@@ -1218,7 +1407,6 @@ public abstract class HarnessStoreInvocationContract {
                         0,
                         "call-1",
                         ToolInvocationStatus.READY,
-                        null,
                         T2))));
 
     List<ToolInvocation> stored =
@@ -1247,7 +1435,6 @@ public abstract class HarnessStoreInvocationContract {
                         0,
                         "call-1",
                         ToolInvocationStatus.READY,
-                        null,
                         T2))));
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, TestIds.id(10));
 
@@ -1288,10 +1475,10 @@ public abstract class HarnessStoreInvocationContract {
             TestIds.id(1),
             assistantEntryId,
             0,
-            toolRequest("call-1", argumentsJson),
+            toolCall("call-1", argumentsJson),
+            platformBinding(),
             ToolInvocationStatus.READY,
             0,
-            null,
             null,
             null,
             null,
@@ -1302,7 +1489,7 @@ public abstract class HarnessStoreInvocationContract {
 
     ToolInvocation stored =
         store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).orElseThrow();
-    assertEquals(argumentsJson, stored.request().call().argumentsJson());
+    assertEquals(argumentsJson, stored.call().argumentsJson());
   }
 
   @Test
@@ -1316,7 +1503,6 @@ public abstract class HarnessStoreInvocationContract {
             0,
             "call-1",
             ToolInvocationStatus.READY,
-            null,
             T2);
     inTransaction(store, tx -> tx.insertToolInvocations(List.of(ready)));
     updateTool(TestIds.id(10), tool -> tool.markApprovalNotRequired(T2));
@@ -1349,7 +1535,6 @@ public abstract class HarnessStoreInvocationContract {
             0,
             "call-1",
             ToolInvocationStatus.READY,
-            null,
             T2);
     ToolInvocation duplicateOrdinal =
         toolInvocation(
@@ -1359,7 +1544,6 @@ public abstract class HarnessStoreInvocationContract {
             0,
             "call-1",
             ToolInvocationStatus.READY,
-            null,
             T2);
 
     store.transaction(
@@ -1393,7 +1577,6 @@ public abstract class HarnessStoreInvocationContract {
                         0,
                         "call-1",
                         ToolInvocationStatus.READY,
-                        null,
                         T2),
                     toolInvocation(
                         TestIds.id(11),
@@ -1402,7 +1585,6 @@ public abstract class HarnessStoreInvocationContract {
                         1,
                         "call-2",
                         ToolInvocationStatus.READY,
-                        null,
                         T2))));
 
     store.transaction(
@@ -1416,7 +1598,6 @@ public abstract class HarnessStoreInvocationContract {
                   0,
                   "call-1",
                   ToolInvocationStatus.CANCELLED,
-                  null,
                   T2);
           ToolInvocation forgedIdentity =
               toolInvocation(
@@ -1426,7 +1607,6 @@ public abstract class HarnessStoreInvocationContract {
                   2,
                   "call-3",
                   ToolInvocationStatus.READY,
-                  null,
                   T2);
           try {
             tx.updateToolInvocations(List.of(valid, forgedIdentity));
@@ -1464,7 +1644,6 @@ public abstract class HarnessStoreInvocationContract {
                                 0,
                                 "call-1",
                                 ToolInvocationStatus.READY,
-                                null,
                                 T2)))));
   }
 
@@ -1499,7 +1678,6 @@ public abstract class HarnessStoreInvocationContract {
                                 0,
                                 "call-1",
                                 ToolInvocationStatus.READY,
-                                null,
                                 T2)))));
   }
 
@@ -1527,7 +1705,6 @@ public abstract class HarnessStoreInvocationContract {
                                 0,
                                 "call-1",
                                 ToolInvocationStatus.READY,
-                                null,
                                 T2)))));
   }
 
@@ -1546,7 +1723,6 @@ public abstract class HarnessStoreInvocationContract {
                         0,
                         "call-1",
                         ToolInvocationStatus.READY,
-                        null,
                         T2))));
     // 重复的 (assistantEntryId, ordinal)
     assertThrows(
@@ -1564,7 +1740,6 @@ public abstract class HarnessStoreInvocationContract {
                                 0,
                                 "call-2",
                                 ToolInvocationStatus.READY,
-                                null,
                                 T3)))));
     // 重复的 id
     assertThrows(
@@ -1582,7 +1757,6 @@ public abstract class HarnessStoreInvocationContract {
                                 1,
                                 "call-2",
                                 ToolInvocationStatus.READY,
-                                null,
                                 T3)))));
   }
 
@@ -1605,7 +1779,6 @@ public abstract class HarnessStoreInvocationContract {
                                 1,
                                 "call-other",
                                 ToolInvocationStatus.READY,
-                                null,
                                 T2)))));
     // ordinal 超过 assistant tool calls 范围
     assertThrows(
@@ -1623,7 +1796,6 @@ public abstract class HarnessStoreInvocationContract {
                                 5,
                                 "call-5",
                                 ToolInvocationStatus.READY,
-                                null,
                                 T2)))));
     // rendererKey 必须匹配 Assistant 中冻结的 renderer 身份
     assertThrows(
@@ -1642,7 +1814,6 @@ public abstract class HarnessStoreInvocationContract {
                                     0,
                                     "call-1",
                                     ToolInvocationStatus.READY,
-                                    null,
                                     T2),
                                 "other-renderer")))));
     // 精确匹配被接受
@@ -1658,263 +1829,7 @@ public abstract class HarnessStoreInvocationContract {
                         1,
                         "call-2",
                         ToolInvocationStatus.READY,
-                        null,
                         T2))));
-  }
-
-  @Test
-  void toolResultEntryMustBeMatchingToolMessage() {
-    UUID assistantEntryId = seedAssistantAndModel();
-    UUID resultEntryId0 =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            assistantEntryId,
-            toolResultPayload(assistantEntryId, 0, "call-1", ToolResultStatus.CANCELLED));
-    // 匹配的 result link 被接受
-    insertTerminalTool(
-        TestIds.id(10),
-        TestIds.id(1),
-        assistantEntryId,
-        0,
-        "call-1",
-        ToolInvocationStatus.CANCELLED,
-        resultEntryId0,
-        T2);
-    UUID rendererMismatchResult =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            resultEntryId0,
-            toolResultPayload(
-                assistantEntryId, 1, "call-2", ToolResultStatus.CANCELLED, "other-renderer"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            insertTerminalTool(
-                TestIds.id(11),
-                TestIds.id(1),
-                assistantEntryId,
-                1,
-                "call-2",
-                ToolInvocationStatus.CANCELLED,
-                rendererMismatchResult,
-                T3));
-    // assistant MESSAGE 不是 ToolResult entry
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  UUID id = tx.nextId();
-                  tx.insertToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              TestIds.id(1),
-                              assistantEntryId,
-                              1,
-                              "call-2",
-                              ToolInvocationStatus.READY,
-                              null,
-                              T3)));
-                  tx.updateToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              TestIds.id(1),
-                              assistantEntryId,
-                              1,
-                              "call-2",
-                              ToolInvocationStatus.CANCELLED,
-                              assistantEntryId,
-                              T3)));
-                }));
-    UUID resultEntryId1 =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            resultEntryId0,
-            toolResultPayload(assistantEntryId, 1, "call-2", ToolResultStatus.CANCELLED));
-    UUID resultEntryId2 =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            resultEntryId1,
-            toolResultPayload(assistantEntryId, 2, "call-3", ToolResultStatus.CANCELLED));
-    // result metadata 必须匹配本 invocation 的 ordinal/toolCallId
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  UUID id = tx.nextId();
-                  tx.insertToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              TestIds.id(1),
-                              assistantEntryId,
-                              2,
-                              "call-3",
-                              ToolInvocationStatus.READY,
-                              null,
-                              T4)));
-                  tx.updateToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              TestIds.id(1),
-                              assistantEntryId,
-                              2,
-                              "call-3",
-                              ToolInvocationStatus.CANCELLED,
-                              resultEntryId1,
-                              T4)));
-                }));
-    // request call 必须匹配同 ordinal 处的 assistant tool call
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  UUID id = tx.nextId();
-                  tx.insertToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              TestIds.id(1),
-                              assistantEntryId,
-                              1,
-                              "call-other",
-                              ToolInvocationStatus.READY,
-                              null,
-                              T4)));
-                  tx.updateToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              TestIds.id(1),
-                              assistantEntryId,
-                              1,
-                              "call-other",
-                              ToolInvocationStatus.CANCELLED,
-                              resultEntryId1,
-                              T4)));
-                }));
-    // 匹配的 result entry 被接受
-    insertTerminalTool(
-        TestIds.id(14),
-        TestIds.id(1),
-        assistantEntryId,
-        2,
-        "call-3",
-        ToolInvocationStatus.CANCELLED,
-        resultEntryId2,
-        T5);
-  }
-
-  @Test
-  void toolResultStatusMustExactlyMapTheInvocationStatus() {
-    UUID assistantEntryId = seedAssistantAndModel();
-    // SUCCEEDED 的 ToolResult 不能关联 CANCELLED 的 invocation
-    UUID succeededResultEntryId =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            assistantEntryId,
-            toolResultPayload(assistantEntryId, 0, "call-1", ToolResultStatus.SUCCEEDED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  UUID id = tx.nextId();
-                  tx.insertToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              TestIds.id(1),
-                              assistantEntryId,
-                              0,
-                              "call-1",
-                              ToolInvocationStatus.READY,
-                              null,
-                              T2)));
-                  tx.updateToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              TestIds.id(1),
-                              assistantEntryId,
-                              0,
-                              "call-1",
-                              ToolInvocationStatus.CANCELLED,
-                              succeededResultEntryId,
-                              T2)));
-                }));
-    // 匹配的 status 被接受
-    UUID cancelledResultEntryId =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            succeededResultEntryId,
-            toolResultPayload(assistantEntryId, 1, "call-2", ToolResultStatus.CANCELLED));
-    insertTerminalTool(
-        TestIds.id(12),
-        TestIds.id(1),
-        assistantEntryId,
-        1,
-        "call-2",
-        ToolInvocationStatus.CANCELLED,
-        cancelledResultEntryId,
-        T3);
-  }
-
-  @Test
-  void toolResultEntryMustNotBeSynthetic() {
-    UUID assistantEntryId = seedAssistantAndModel();
-    UUID syntheticResultEntryId =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            assistantEntryId,
-            syntheticToolResultPayload(assistantEntryId, 0, "call-1"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  UUID id = tx.nextId();
-                  tx.insertToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              TestIds.id(1),
-                              assistantEntryId,
-                              0,
-                              "call-1",
-                              ToolInvocationStatus.READY,
-                              null,
-                              T2)));
-                  ToolInvocation locked =
-                      tx.lockToolInvocationsByAssistantEntryId(assistantEntryId).get(0);
-                  // 通过合法 transition 走到 terminal UNKNOWN 状态，再附加 synthetic result entry：
-                  // store 必须直接拒绝该 synthetic 关联本身
-                  ToolInvocation next =
-                      locked
-                          .markApprovalNotRequired(T2)
-                          .beginDispatch(T2)
-                          .markRunning(T2)
-                          .unknown(new ToolInvocationError("UNKNOWN", "ownership lost"), T2)
-                          .attachResultEntry(syntheticResultEntryId, T2);
-                  tx.updateToolInvocations(List.of(next));
-                }));
   }
 
   @Test
@@ -1932,7 +1847,6 @@ public abstract class HarnessStoreInvocationContract {
                         2,
                         "call-3",
                         ToolInvocationStatus.READY,
-                        null,
                         T2),
                     toolInvocation(
                         TestIds.id(11),
@@ -1941,7 +1855,6 @@ public abstract class HarnessStoreInvocationContract {
                         0,
                         "call-1",
                         ToolInvocationStatus.READY,
-                        null,
                         T2),
                     toolInvocation(
                         TestIds.id(12),
@@ -1950,7 +1863,6 @@ public abstract class HarnessStoreInvocationContract {
                         1,
                         "call-2",
                         ToolInvocationStatus.READY,
-                        null,
                         T2))));
     List<Integer> ordinals =
         store.transaction(
@@ -1959,78 +1871,6 @@ public abstract class HarnessStoreInvocationContract {
                     .map(ToolInvocation::ordinal)
                     .toList());
     assertEquals(List.of(0, 1, 2), ordinals);
-  }
-
-  @Test
-  void lockToolInvocationsByAssistantEntryIdAllowsBatchTerminalUpdate() {
-    UUID assistantEntryId = seedAssistantAndModel();
-    UUID resultEntryId0 =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            assistantEntryId,
-            toolResultPayload(assistantEntryId, 0, "call-1", ToolResultStatus.CANCELLED));
-    UUID resultEntryId1 =
-        insertChildEntry(
-            store,
-            baseline.sessionId(),
-            resultEntryId0,
-            toolResultPayload(assistantEntryId, 1, "call-2", ToolResultStatus.CANCELLED));
-    inTransaction(
-        store,
-        tx ->
-            tx.insertToolInvocations(
-                List.of(
-                    toolInvocation(
-                        TestIds.id(10),
-                        TestIds.id(1),
-                        assistantEntryId,
-                        0,
-                        "call-1",
-                        ToolInvocationStatus.READY,
-                        null,
-                        T2),
-                    toolInvocation(
-                        TestIds.id(11),
-                        TestIds.id(1),
-                        assistantEntryId,
-                        1,
-                        "call-2",
-                        ToolInvocationStatus.READY,
-                        null,
-                        T2))));
-    inTransaction(
-        store,
-        tx -> {
-          List<ToolInvocation> locked = tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
-          tx.updateToolInvocations(
-              List.of(
-                  toolInvocation(
-                      locked.get(0).id(),
-                      TestIds.id(1),
-                      assistantEntryId,
-                      locked.get(0).ordinal(),
-                      locked.get(0).request().call().id(),
-                      ToolInvocationStatus.CANCELLED,
-                      resultEntryId0,
-                      locked.get(0).createdAt()),
-                  toolInvocation(
-                      locked.get(1).id(),
-                      TestIds.id(1),
-                      assistantEntryId,
-                      locked.get(1).ordinal(),
-                      locked.get(1).request().call().id(),
-                      ToolInvocationStatus.CANCELLED,
-                      resultEntryId1,
-                      locked.get(1).createdAt())));
-        });
-    List<UUID> resultEntries =
-        store.transaction(
-            tx ->
-                tx.loadToolInvocationsByAssistantEntryId(assistantEntryId).stream()
-                    .map(ToolInvocation::resultEntryId)
-                    .toList());
-    assertEquals(List.of(resultEntryId0, resultEntryId1), resultEntries);
   }
 
   @Test
@@ -2048,7 +1888,6 @@ public abstract class HarnessStoreInvocationContract {
                         0,
                         "call-1",
                         ToolInvocationStatus.READY,
-                        null,
                         T2))));
     ToolInvocation stored =
         store.transaction(tx -> tx.findToolInvocation(TestIds.id(10)).orElseThrow());
@@ -2072,13 +1911,13 @@ public abstract class HarnessStoreInvocationContract {
                               stored.modelInvocationId(),
                               stored.assistantEntryId(),
                               stored.ordinal(),
-                              toolRequest("call-other"),
+                              toolCall("call-other"),
+                              platformBinding(),
                               stored.status(),
                               stored.attempt(),
                               stored.approval(),
                               stored.result(),
                               stored.error(),
-                              stored.resultEntryId(),
                               stored.createdAt(),
                               T3)));
                 }));
@@ -2099,7 +1938,6 @@ public abstract class HarnessStoreInvocationContract {
                         0,
                         "call-1",
                         ToolInvocationStatus.READY,
-                        null,
                         T2))));
     List<ToolInvocation> loaded =
         store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId));
@@ -2114,7 +1952,6 @@ public abstract class HarnessStoreInvocationContract {
                     1,
                     "call-2",
                     ToolInvocationStatus.READY,
-                    null,
                     T2)));
     assertThrows(
         NullPointerException.class,
@@ -2131,7 +1968,6 @@ public abstract class HarnessStoreInvocationContract {
                                 1,
                                 "call-2",
                                 ToolInvocationStatus.READY,
-                                null,
                                 T2),
                             null))));
   }

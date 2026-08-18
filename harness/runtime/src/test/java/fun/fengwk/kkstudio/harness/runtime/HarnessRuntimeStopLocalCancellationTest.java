@@ -12,17 +12,18 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.succeedTool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -53,10 +54,8 @@ class HarnessRuntimeStopLocalCancellationTest {
             Clock.fixed(T5, ZoneOffset.UTC),
             invocationId -> {
               modelCalls.add(invocationId);
-              ModelInvocation model =
-                  store.transaction(tx -> tx.findModelInvocation(invocationId).orElseThrow());
-              assertEquals(ModelInvocationStatus.CANCELLED, model.status());
-              assertNotNull(model.resultEntryId());
+              // 本地取消回调在 Stop 事务提交后执行：Model 行已被 stopModel 物理删除。
+              assertTrue(store.transaction(tx -> tx.findModelInvocation(invocationId)).isEmpty());
               assertFalse(
                   store
                       .transaction(
@@ -96,10 +95,8 @@ class HarnessRuntimeStopLocalCancellationTest {
             modelCalls::add,
             invocationId -> {
               toolCalls.add(invocationId);
-              ToolInvocation tool =
-                  store.transaction(tx -> tx.findToolInvocation(invocationId).orElseThrow());
-              assertTrue(tool.status().isTerminal());
-              assertNotNull(tool.resultEntryId());
+              // 本地取消回调在 Stop 事务提交后执行：stopTools 已删除全部 child Tool 行与 parent Model 行。
+              assertTrue(store.transaction(tx -> tx.findToolInvocation(invocationId)).isEmpty());
               assertFalse(
                   store
                       .transaction(
@@ -111,7 +108,29 @@ class HarnessRuntimeStopLocalCancellationTest {
 
     assertTrue(modelCalls.isEmpty());
     assertEquals(List.of(ids.get(0), ids.get(1)), toolCalls);
-    assertEquals(ToolInvocationStatus.SUCCEEDED, storedTool(store, ids.get(2)).status());
+    // 已 terminal 的 SUCCEEDED sibling 不在取消列表中；其 ToolResult Entry 仍然存在并标记 SUCCEEDED。
+    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
+    List<Entry> toolResults =
+        path.entries().stream()
+            .filter(
+                e ->
+                    e.payload() instanceof MessagePayload
+                        && ((MessagePayload) e.payload()).toolResultMetadata() != null)
+            .toList();
+    assertEquals(baseline.toolIds().size(), toolResults.size());
+    Entry succeededEntry =
+        toolResults.stream()
+            .filter(
+                e ->
+                    "call-2"
+                        .equals(((MessagePayload) e.payload()).toolResultMetadata().toolCallId()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(
+        ToolResultStatus.SUCCEEDED,
+        ((MessagePayload) succeededEntry.payload()).toolResultMetadata().status());
+    assertFalse(((MessagePayload) succeededEntry.payload()).toolResultMetadata().synthetic());
   }
 
   @Test
@@ -133,11 +152,22 @@ class HarnessRuntimeStopLocalCancellationTest {
 
     assertEquals(StopResult.Status.STOPPED, result.status());
     assertEquals(baseline.toolIds(), calls);
+    // 本地取消失败仅记日志：durable Stop 仍然删除全部 child Tool 行并 append CANCELLED ToolResult Entries。
     for (UUID id : baseline.toolIds()) {
-      ToolInvocation tool = storedTool(store, id);
-      assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
-      assertNotNull(tool.resultEntryId());
+      assertTrue(store.transaction(tx -> tx.findToolInvocation(id)).isEmpty());
     }
+    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
+    List<ToolResultStatus> statuses =
+        path.entries().stream()
+            .filter(
+                e ->
+                    e.payload() instanceof MessagePayload
+                        && ((MessagePayload) e.payload()).toolResultMetadata() != null)
+            .map(e -> ((MessagePayload) e.payload()).toolResultMetadata().status())
+            .toList();
+    assertEquals(baseline.toolIds().size(), statuses.size());
+    assertTrue(statuses.stream().allMatch(s -> s == ToolResultStatus.CANCELLED));
   }
 
   @Test
@@ -154,9 +184,5 @@ class HarnessRuntimeStopLocalCancellationTest {
     HarnessRuntimeTestSupport.Baseline idle = seedBaseline(store);
     runtime.stop(new StopCommand(idle.threadId(), TestIds.id(2), 0));
     assertEquals(List.of(active.modelId()), calls);
-  }
-
-  private static ToolInvocation storedTool(InMemoryHarnessStore store, UUID toolId) {
-    return store.transaction(tx -> tx.findToolInvocation(toolId).orElseThrow());
   }
 }

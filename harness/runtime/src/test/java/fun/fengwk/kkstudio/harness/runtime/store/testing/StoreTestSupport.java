@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -385,7 +384,9 @@ final class StoreTestSupport {
         createdAt);
   }
 
-  /** READY（非 terminal）或 CANCELLED（terminal，可携带 resultEntryId）的 tool invocation。 */
+  /**
+   * READY（非 terminal）或 CANCELLED（terminal）的 tool invocation；不再持有 resultEntryId（batch apply 后行物理删除）。
+   */
   static ToolInvocation toolInvocation(
       UUID id,
       UUID modelInvocationId,
@@ -393,7 +394,6 @@ final class StoreTestSupport {
       int ordinal,
       String toolCallId,
       ToolInvocationStatus status,
-      UUID resultEntryId,
       Instant createdAt) {
     if (status != ToolInvocationStatus.READY && status != ToolInvocationStatus.CANCELLED) {
       throw new IllegalArgumentException("fixture supports READY and CANCELLED only");
@@ -404,20 +404,20 @@ final class StoreTestSupport {
         modelInvocationId,
         assistantEntryId,
         ordinal,
-        toolRequest(toolCallId),
+        toolCall(toolCallId),
+        platformBinding(),
         status,
         0,
         null,
         null,
         error,
-        resultEntryId,
         createdAt,
         createdAt);
   }
 
   /** 复制 invocation，仅替换冻结 binding 的 rendererKey。 */
   static ToolInvocation withRendererKey(ToolInvocation invocation, String rendererKey) {
-    ToolDescriptor descriptor = invocation.request().binding().descriptor();
+    ToolDescriptor descriptor = invocation.binding().descriptor();
     ToolBinding binding =
         new ToolBinding(
             new ToolDescriptor(
@@ -429,22 +429,22 @@ final class StoreTestSupport {
                 descriptor.inputSchema(),
                 descriptor.sideEffect(),
                 descriptor.timeout()),
-            invocation.request().binding().type(),
-            invocation.request().binding().environment(),
-            invocation.request().binding().plugin());
+            invocation.binding().type(),
+            invocation.binding().environment(),
+            invocation.binding().plugin());
     return new ToolInvocation(
         invocation.id(),
         invocation.modelInvocationId(),
         invocation.assistantEntryId(),
         invocation.ordinal(),
-        new ToolInvocationRequest(invocation.request().call(), binding),
+        invocation.call(),
+        binding,
         invocation.status(),
         invocation.attempt(),
         invocation.approval(),
         invocation.result(),
         invocation.effects(),
         invocation.error(),
-        invocation.resultEntryId(),
         invocation.createdAt(),
         invocation.updatedAt());
   }
@@ -468,13 +468,12 @@ final class StoreTestSupport {
         null);
   }
 
-  static ToolInvocationRequest toolRequest(String toolCallId) {
-    return toolRequest(toolCallId, "{}");
+  static ToolCall toolCall(String toolCallId) {
+    return toolCall(toolCallId, "{}");
   }
 
-  static ToolInvocationRequest toolRequest(String toolCallId, String argumentsJson) {
-    return new ToolInvocationRequest(
-        new ToolCall(toolCallId, "bash", argumentsJson), platformBinding());
+  static ToolCall toolCall(String toolCallId, String argumentsJson) {
+    return new ToolCall(toolCallId, "bash", argumentsJson);
   }
 
   private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
@@ -530,7 +529,7 @@ final class StoreTestSupport {
             BigDecimal.ZERO));
   }
 
-  private static ToolBinding platformBinding() {
+  static ToolBinding platformBinding() {
     return new ToolBinding(toolDescriptor("bash"), ToolType.PLATFORM, null);
   }
 

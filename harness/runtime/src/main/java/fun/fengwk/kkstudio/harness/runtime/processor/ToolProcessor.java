@@ -229,19 +229,18 @@ public final class ToolProcessor implements AutoCloseable {
     }
     // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
+    // READY 边界临时构造 transient executable request（不持久化）。
+    ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
     if (tool.approval() == null) {
       if (thread.yoloEnabled()) {
         // YOLO=true：锁内快照直接 Allow，绝不调用 permission evaluator / ToolGateway.preflight。
-        return new Prepare.Allowed(
-            thread.id(), tool.assistantEntryId(), tool.attempt(), tool.request());
+        return new Prepare.Allowed(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
       }
-      return new Prepare.Preflight(
-          thread.id(), tool.assistantEntryId(), tool.attempt(), tool.request());
+      return new Prepare.Preflight(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
     }
     tx.updateToolInvocations(List.of(tool.beginDispatch(now)));
     tx.updateThread(thread.touchRevision(now));
-    return new Prepare.Dispatched(
-        thread.id(), tool.assistantEntryId(), tool.attempt(), tool.request());
+    return new Prepare.Dispatched(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
   }
 
   /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump revision、不 request THREAD。 */
@@ -273,18 +272,18 @@ public final class ToolProcessor implements AutoCloseable {
     return new Prepare.Terminated();
   }
 
-  /** terminal 行：resultEntryId 仍 null 时确保 THREAD Work 请求，然后 complete TOOL Work；不重复 bump revision。 */
+  /**
+   * terminal 行：始终确保 THREAD Work 请求（outcome 尚未物化才可能有 terminal 行），然后 complete TOOL Work；不重复 bump
+   * revision。
+   */
   private Prepare cleanupTerminal(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       ToolInvocation tool,
       Instant now) {
-    boolean needsThreadWake = tool.resultEntryId() == null;
-    if (needsThreadWake) {
-      // requestWork 同时 upsert 并锁定 THREAD Work；即使原行不存在，也能建立正确锁序。
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
-    }
+    // requestWork 同时 upsert 并锁定 THREAD Work；即使原行不存在，也能建立正确锁序。
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }

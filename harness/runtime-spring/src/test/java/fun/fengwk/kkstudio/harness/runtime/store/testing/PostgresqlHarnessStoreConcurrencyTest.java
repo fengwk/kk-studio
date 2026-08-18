@@ -304,10 +304,10 @@ class PostgresqlHarnessStoreConcurrencyTest {
         });
     ToolInvocation ordinal0 =
         toolInvocation(
-            id(10L), id(1L), assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2);
+            id(10L), id(1L), assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, T2);
     ToolInvocation ordinal1 =
         toolInvocation(
-            id(11L), id(1L), assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, null, T2);
+            id(11L), id(1L), assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, T2);
 
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);

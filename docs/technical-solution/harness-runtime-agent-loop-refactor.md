@@ -757,15 +757,21 @@ Stop 继续使用 `(threadId, stopRequestId)` durable replay key 与 revision CA
 Stop 成功关闭 live turn 的同一事务必须：
 
 ```text
+锁 Thread + context（Model / Tool Invocation）
+锁并净化全部相关 Work mailbox（canonical：THREAD < MODEL < TOOL）
+cancel queued commands
 append safe AssistantAborted / AssistantError
 append Tool CANCELLED/UNKNOWN outcomes
 append TURN_END(STOPPED)
-cancel queued commands
+advance Thread
 delete ToolInvocations
 delete ModelInvocation
-complete/delete related Work
-advance Thread
 ```
+
+Work mailbox 的净化必须放在展开（append / advance / 删除 Invocation）之前：`deleteWork` 的 owner 校验会反查对应
+Model/Tool Invocation 行，而关闭 live turn 时这些行也要被物理删除。在 Invocation 行删除后删除指向它们的
+mailbox 会形成悬挂 mailbox，Store 刻意以 IAE 拒绝该状态。整个 Stop 仍是单事务，Work 提前删除不改变原子性，
+锁顺序保持 THREAD < MODEL < TOOL。
 
 事务提交后再 best-effort 取消本地 Provider/Tool handle。迟到 callback 因 Invocation 已删除或 claim 失效而 no-op。
 

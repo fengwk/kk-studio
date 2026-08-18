@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -15,7 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -325,14 +325,21 @@ final class HarnessRuntimeTestSupport {
           tx.insertThread(thread);
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
+          ModelRequestSpec request = tooledModelRequest(List.of("bash"));
+          ProviderResponse response = responseWithToolCalls(callIds);
           UUID assistantEntryId = tx.nextId();
-          tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId, T1, callIds));
+          // live attached fixture：assistant Entry 由同一 frozen request + ProviderResponse 经 mapper
+          // 生成，
+          // 与 validateAttached 的完整 payload 校验保持一致。
+          tx.insertEntry(
+              mappedAssistantEntry(
+                  assistantEntryId, sessionId, userEntryId, T1, request, response));
           UUID modelId = tx.nextId();
           ModelInvocation model =
-              modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
+              modelInvocationWithRequest(
+                  modelId, threadId, turnStartEntryId, turnStartEntryId, request, T1);
           tx.insertModelInvocation(model);
-          ModelInvocation succeeded =
-              model.beginDispatch(T2).markRunning(T2).succeed(responseWithToolCalls(callIds), T2);
+          ModelInvocation succeeded = model.beginDispatch(T2).markRunning(T2).succeed(response, T2);
           tx.updateModelInvocation(model.beginDispatch(T2));
           tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
           tx.updateModelInvocation(succeeded);
@@ -434,10 +441,7 @@ final class HarnessRuntimeTestSupport {
           ToolInvocation updated =
               tool.succeed(
                   new ToolResult(
-                      tool.request().call().id(),
-                      List.of(new TextToolContent("real result")),
-                      false,
-                      "{}"),
+                      tool.call().id(), List.of(new TextToolContent("real result")), false, "{}"),
                   effects,
                   T3);
           tx.updateToolInvocations(List.of(updated));
@@ -785,6 +789,67 @@ final class HarnessRuntimeTestSupport {
         createdAt);
   }
 
+  /**
+   * READY model invocation with an explicit frozen request（live tool baseline 需要 tooled binding）。
+   */
+  static ModelInvocation modelInvocationWithRequest(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID basisHeadEntryId,
+      ModelRequestSpec request,
+      Instant createdAt) {
+    return new ModelInvocation(
+        id,
+        threadId,
+        turnStartEntryId,
+        basisHeadEntryId,
+        request,
+        ModelInvocationStatus.READY,
+        0,
+        null,
+        null,
+        null,
+        null,
+        List.of(),
+        createdAt,
+        createdAt);
+  }
+
+  /** live tool baseline 的 tooled 冻结请求：按 {@code toolNames} 构造 platform bindings。 */
+  static ModelRequestSpec tooledModelRequest(List<String> toolNames) {
+    List<ToolBinding> bindings = new ArrayList<>();
+    for (String name : toolNames) {
+      bindings.add(new ToolBinding(toolDescriptor(name), ToolType.PLATFORM, null));
+    }
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor(),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        List.of(),
+        bindings,
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
+        null);
+  }
+
+  /** 由同一 frozen request + ProviderResponse 经 HistoryPayloadMapper 精确生成 live assistant Entry。 */
+  static Entry mappedAssistantEntry(
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
+      Instant createdAt,
+      ModelRequestSpec request,
+      ProviderResponse response) {
+    return new Entry(
+        id,
+        sessionId,
+        parentId,
+        new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()),
+        createdAt);
+  }
+
   static ToolInvocation toolInvocation(
       UUID id,
       UUID modelInvocationId,
@@ -797,10 +862,10 @@ final class HarnessRuntimeTestSupport {
         modelInvocationId,
         assistantEntryId,
         ordinal,
-        toolRequest(toolCallId),
+        new ToolCall(toolCallId, "bash", "{}"),
+        platformBinding(),
         ToolInvocationStatus.READY,
         0,
-        null,
         null,
         null,
         null,
@@ -825,10 +890,6 @@ final class HarnessRuntimeTestSupport {
         List.of(),
         provider.cacheControl(),
         null);
-  }
-
-  static ToolInvocationRequest toolRequest(String toolCallId) {
-    return new ToolInvocationRequest(new ToolCall(toolCallId, "bash", "{}"), platformBinding());
   }
 
   static ProviderResponse responseWithToolCalls(String... toolCallIds) {
