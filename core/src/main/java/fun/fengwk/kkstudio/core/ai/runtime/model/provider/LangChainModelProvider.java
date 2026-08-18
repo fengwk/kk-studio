@@ -167,9 +167,11 @@ abstract class LangChainModelProvider implements ModelProvider {
                     // 分类过的 Provider 失败（例如不可映射的 finish reason -> INVALID_RESPONSE）原样保留 kind。
                     handler.onError(providerFailure, stream);
                   } catch (RuntimeException error) {
+                    // terminal response 归一化（toResponse / tool call 归一化 / usage/cost）失败是 invalid
+                    // provider terminal shape，不是调用方请求问题：INVALID_RESPONSE 供 Runtime 自动重试。
                     handler.onError(
                         new ProviderException(
-                            ProviderErrorKind.INVALID_REQUEST, userFacingMessage(error), error),
+                            ProviderErrorKind.INVALID_RESPONSE, userFacingMessage(error), error),
                         stream);
                   }
                 }
@@ -500,6 +502,10 @@ abstract class LangChainModelProvider implements ModelProvider {
       if (thinking.isEmpty()) {
         thinking = split.thinking();
       }
+    }
+    if (stopReason == GenerationStopReason.FILTERED && !calls.isEmpty()) {
+      // canonical 约束：FILTERED 响应不得携带 tool calls（绝不创建 ToolInvocation）；过滤完成时丢弃残余调用。
+      calls = List.of();
     }
     return new ProviderResponse(
         text,

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.CALL_ID;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.platform;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.request;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
@@ -361,6 +363,132 @@ class ToolInvocationTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> invocation(ToolInvocationStatus.SUCCEEDED, 1, null, result(), null, id(-1L)));
+  }
+
+  /** durable 不变量：非空 binding 必须匹配 call 的 toolName（codec 解码的 READY 无法再携带错配 binding）。 */
+  @Test
+  void rejectsBindingMismatchingToolNameOnExecutableStates() {
+    ToolInvocationRequest mismatched =
+        new ToolInvocationRequest(new ToolCall(CALL_ID, "other-tool", "{}"), platform("bash"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolInvocation(
+                id(1L),
+                id(1L),
+                id(1L),
+                0,
+                mismatched,
+                ToolInvocationStatus.READY,
+                0,
+                null,
+                null,
+                null,
+                null,
+                CREATED,
+                UPDATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolInvocation(
+                id(1L),
+                id(1L),
+                id(1L),
+                0,
+                mismatched,
+                ToolInvocationStatus.SUCCEEDED,
+                1,
+                null,
+                result(),
+                null,
+                id(99L),
+                CREATED,
+                UPDATED));
+  }
+
+  /** durable 不变量：除 immediate FAILED 外的状态必须通过 binding schema（codec 解码的 READY 无法携带非法参数）。 */
+  @Test
+  void rejectsSchemaInvalidArgumentsOnExecutableStates() {
+    ToolInvocationRequest schemaInvalid =
+        new ToolInvocationRequest(
+            new ToolCall(CALL_ID, "bash", "{\"unexpected\":1}"), platform("bash"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolInvocation(
+                id(1L),
+                id(1L),
+                id(1L),
+                0,
+                schemaInvalid,
+                ToolInvocationStatus.READY,
+                0,
+                null,
+                null,
+                null,
+                null,
+                CREATED,
+                UPDATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolInvocation(
+                id(1L),
+                id(1L),
+                id(1L),
+                0,
+                schemaInvalid,
+                ToolInvocationStatus.FAILED,
+                1,
+                null,
+                null,
+                error(),
+                null,
+                CREATED,
+                UPDATED));
+  }
+
+  /**
+   * immediate FAILED（attempt 0）是 INVALID_TOOL_ARGUMENTS / MODEL_OUTPUT_TRUNCATED / UNKNOWN_TOOL
+   * 的合法形态。
+   */
+  @Test
+  void acceptsImmediateFailedWithSchemaInvalidArgumentsOrNullBinding() {
+    ToolInvocation schemaInvalid =
+        new ToolInvocation(
+            id(1L),
+            id(1L),
+            id(1L),
+            0,
+            new ToolInvocationRequest(
+                new ToolCall(CALL_ID, "bash", "{\"unexpected\":1}"), platform("bash")),
+            ToolInvocationStatus.FAILED,
+            0,
+            null,
+            null,
+            error(),
+            null,
+            CREATED,
+            UPDATED);
+    assertEquals(ToolInvocationStatus.FAILED, schemaInvalid.status());
+    assertEquals(0, schemaInvalid.attempt());
+
+    ToolInvocation unbound =
+        new ToolInvocation(
+            id(1L),
+            id(1L),
+            id(1L),
+            0,
+            new ToolInvocationRequest(new ToolCall(CALL_ID, "unknown-tool", "{}"), null),
+            ToolInvocationStatus.FAILED,
+            0,
+            null,
+            null,
+            error(),
+            null,
+            CREATED,
+            UPDATED);
+    assertNull(unbound.request().binding());
   }
 
   private static ToolInvocation invocation(
