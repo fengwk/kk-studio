@@ -76,6 +76,13 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
         return request.model().reasoning();
       }
 
+      @Override
+      protected boolean reportsToolCallsWithOtherFinishReason(ProviderRequest request) {
+        // MiniMax 兼容端点对携带可执行 tool call 的回合上报 OTHER/STOP。该特例只在本 adapter 的 MiniMax
+        // 宿主上生效；公共映射绝不根据 hasToolCalls 覆盖 generation stop reason。
+        return minimax;
+      }
+
       private ProviderCacheControl prepareCacheControl(ProviderRequest request) {
         // requireOpenAiAffinity 同时被 validateRequest 与 chatModel 调用，作为幂等校验与键解析；LONG 或携带
         // breakpoints 时抛 IllegalArgumentException，被 LangChainModelProvider.stream 转换为

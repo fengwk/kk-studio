@@ -291,13 +291,13 @@ public record ModelInvocationRequest(
 - 终态 ToolResult 文本为 `<task id="..." state="completed|error|cancelled">` envelope：成功含 `<task_result>` 报告，失败/取消含 `<task_error>`（报告正文最多保留 8000 字符）；`details.kind=task.result`，`details` 携带 `threadId`/`subagentType`/`state`。`id` 即子 ThreadId（canonical UUID），可作 `session_id` 恢复。
 - 恢复契约：`session_id` 必须指向同 parent/root 归属的既有子 Session，且子 Thread quiescent；`maxTurns` 是软预算——达到后每 5 turn 注入一条 SYSTEM `CUSTOM_MESSAGE` 提醒（`rendererKey=message`），不是硬终止。
 
-`ProviderResponse` 是 terminal `resultJson` 的 canonical shape：
+`ProviderResponse` 是 terminal `resultJson` 的 canonical shape（stop reason 与 tool calls 正交）：
 
 ```java
 public record ProviderResponse(
     String text, String thinking,
     List<ProviderToolCall> toolCalls,
-    ProviderStopReason stopReason,
+    GenerationStopReason stopReason,
     ModelUsage usage, ModelCost cost,
     String requestId, String serviceTier, String rawUsageJson) {}
 ```

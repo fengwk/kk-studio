@@ -25,10 +25,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -706,8 +706,8 @@ final class HarnessRuntimeTestSupport {
       contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
-    ProviderStopReason stopReason =
-        toolCallIds.length > 0 ? ProviderStopReason.TOOL_CALLS : ProviderStopReason.COMPLETED;
+    GenerationStopReason stopReason =
+        toolCallIds.length > 0 ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new Entry(
         id,
         sessionId,
@@ -837,7 +837,7 @@ final class HarnessRuntimeTestSupport {
       calls.add(new ProviderToolCall(toolCallId, "bash", "{}"));
     }
     return new ProviderResponse(
-        "", "", calls, ProviderStopReason.TOOL_CALLS, usage(), cost(), null, null, null);
+        "", "", calls, GenerationStopReason.COMPLETE, usage(), cost(), null, null, null);
   }
 
   static ModelInvocationError modelError() {
@@ -848,7 +848,7 @@ final class HarnessRuntimeTestSupport {
     return new ToolInvocationError("CANCELLED", "cancelled");
   }
 
-  private static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {
+  private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
     return new AssistantMessageMetadata(stopReason, usage(), cost());
   }
 

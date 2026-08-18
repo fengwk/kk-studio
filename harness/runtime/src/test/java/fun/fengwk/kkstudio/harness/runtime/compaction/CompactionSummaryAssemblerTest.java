@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -439,7 +439,7 @@ class CompactionSummaryAssemblerTest {
               parentId(),
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-                  assistantMetadata(ProviderStopReason.TOOL_CALLS),
+                  assistantMetadata(GenerationStopReason.COMPLETE),
                   null),
               BASE));
       return this;
@@ -488,10 +488,10 @@ class CompactionSummaryAssemblerTest {
     }
 
     private static AssistantMessageMetadata assistantMetadata() {
-      return assistantMetadata(ProviderStopReason.COMPLETED);
+      return assistantMetadata(GenerationStopReason.COMPLETE);
     }
 
-    private static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {
+    private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
       return new AssistantMessageMetadata(
           stopReason,
           new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),

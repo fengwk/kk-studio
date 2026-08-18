@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.binding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -52,7 +53,7 @@ class ToolInvocationRequestJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** 嵌套精确字段、JSON-object 语法以及 descriptor 匹配都被重新校验。 */
+  /** 嵌套精确字段与 JSON-object 语法被重新校验；schema 语义校验在 planner，codec 不重复。 */
   @Test
   void rejectsCorruptCallOrBindingFacts() {
     String json =
@@ -79,9 +80,6 @@ class ToolInvocationRequestJsonCodecTest {
                 json.replace("\"argumentsJson\":\"{}\"", "\"argumentsJson\":{\"nested\":true}")));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(json.replace("\"toolName\":\"bash\"", "\"toolName\":\"other\"")));
-    assertThrows(
-        IllegalArgumentException.class,
         () -> codec.decode(json.replace("\"argumentsJson\":\"{}\"", "\"argumentsJson\":\"[]\"")));
     assertThrows(
         IllegalArgumentException.class,
@@ -89,13 +87,36 @@ class ToolInvocationRequestJsonCodecTest {
             codec.decode(json.replace("\"argumentsJson\":\"{}\"", "\"argumentsJson\":\"{} {}\"")));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                json.replace(
-                    "\"argumentsJson\":\"{}\"", "\"argumentsJson\":\"{\\\"extra\\\":1}\"")));
-    assertThrows(
-        IllegalArgumentException.class,
         () -> codec.decode(json.replace("\"call\":{", "\"call\":{\"unknown\":true,")));
+  }
+
+  /** toolName 与 binding 的语义匹配在 planner 校验，codec 只做语法级 round-trip。 */
+  @Test
+  void decodesToolNameMismatchAsSyntaxValidRequest() {
+    String json =
+        codec.encode(
+            new ToolInvocationRequest(
+                new ToolCall("call-1", "bash", "{}"), binding(ToolType.PLATFORM)));
+
+    ToolInvocationRequest decoded =
+        codec.decode(json.replace("\"toolName\":\"bash\"", "\"toolName\":\"other\""));
+    assertEquals("other", decoded.call().toolName());
+    assertEquals(binding(ToolType.PLATFORM), decoded.binding());
+  }
+
+  /** null binding 是 immediate FAILED 槽位的合法持久化形状，round-trip 保持为 null。 */
+  @Test
+  void roundTripsNullableBinding() {
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(new ToolCall("call-1", "undeclared", "{}"), null);
+    String expected =
+        "{\"call\":{\"id\":\"call-1\",\"toolName\":\"undeclared\",\"argumentsJson\":\"{}\"},"
+            + "\"binding\":null}";
+
+    assertEquals(expected, codec.encode(request));
+    assertEquals(request, codec.decode(expected));
+    assertNull(codec.decode(expected).binding());
+    assertEquals(request, codec.decodeNode(codec.encodeNode(request)));
   }
 
   /** encode 重新校验原始 JSON，使内存值无法绕过严格持久化边界。 */

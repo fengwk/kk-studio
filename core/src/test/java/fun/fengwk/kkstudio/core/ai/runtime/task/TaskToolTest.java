@@ -62,7 +62,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -2117,7 +2117,7 @@ class TaskToolTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("tc-1", "web_search", "web_search", "{}"))),
-                new AssistantMessageMetadata(ProviderStopReason.TOOL_CALLS, USAGE, COST),
+                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE, COST),
                 null),
             NOW);
     ThreadState thread =
@@ -2351,7 +2351,7 @@ class TaskToolTest {
   }
 
   private static AssistantMessageMetadata assistantMetadata() {
-    return new AssistantMessageMetadata(ProviderStopReason.COMPLETED, USAGE, COST);
+    return new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE, COST);
   }
 
   private static ThreadCommand queuedCommand() {

@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -18,26 +17,22 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
-import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** ModelResponseValidator 直接单元测试：工具可见性 / arguments JSON / stopReason 语义与压缩调用约束。 */
+/**
+ * ModelResponseValidator 直接单元测试：只校验 canonical response 不变量与压缩调用约束；binding 可见性 / tool schema 校验 已移入
+ * {@link ModelResponsePlanner}，stop reason 与 tool calls 正交。
+ */
 class ModelResponseValidatorTest {
 
   @Test
@@ -45,55 +40,30 @@ class ModelResponseValidatorTest {
     assertDoesNotThrow(
         () ->
             ModelResponseValidator.validate(
-                request(tool("bash")),
+                plainRequest(),
                 response(
                     List.of(new ProviderToolCall("call_1", "bash", "{}")),
-                    ProviderStopReason.TOOL_CALLS)));
+                    GenerationStopReason.COMPLETE)));
   }
 
+  /** COMPLETE 与 LENGTH 都可以有或没有 calls：不存在 TOOL_CALLS 等价约束。 */
   @Test
-  void rejectsUndeclaredToolCall() {
-    assertThrows(
-        IllegalArgumentException.class,
+  void acceptsOrthogonalStopReasonAndToolCalls() {
+    assertDoesNotThrow(
         () ->
             ModelResponseValidator.validate(
-                request(tool("bash")),
-                response(
-                    List.of(new ProviderToolCall("call_1", "undeclared", "{}")),
-                    ProviderStopReason.TOOL_CALLS)));
-  }
-
-  @Test
-  void rejectsDuplicateDeclaredTools() {
-    assertThrows(
-        IllegalArgumentException.class,
+                plainRequest(), response(List.of(), GenerationStopReason.COMPLETE)));
+    assertDoesNotThrow(
         () ->
             ModelResponseValidator.validate(
-                request(tool("bash"), tool("bash")),
+                plainRequest(),
                 response(
                     List.of(new ProviderToolCall("call_1", "bash", "{}")),
-                    ProviderStopReason.TOOL_CALLS)));
-  }
-
-  @Test
-  void rejectsToolCallsWithNonToolCallStopReason() {
-    assertThrows(
-        IllegalArgumentException.class,
+                    GenerationStopReason.LENGTH)));
+    assertDoesNotThrow(
         () ->
             ModelResponseValidator.validate(
-                request(tool("bash")),
-                response(
-                    List.of(new ProviderToolCall("call_1", "bash", "{}")),
-                    ProviderStopReason.COMPLETED)));
-  }
-
-  @Test
-  void rejectsToolCallStopReasonWithoutCalls() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ModelResponseValidator.validate(
-                request(tool("bash")), response(List.of(), ProviderStopReason.TOOL_CALLS)));
+                plainRequest(), response(List.of(), GenerationStopReason.LENGTH)));
   }
 
   @Test
@@ -102,12 +72,12 @@ class ModelResponseValidatorTest {
         IllegalArgumentException.class,
         () ->
             ModelResponseValidator.validate(
-                request(tool("bash")),
+                plainRequest(),
                 response(
                     List.of(
                         new ProviderToolCall("call_1", "bash", "{}"),
                         new ProviderToolCall("call_1", "bash", "{}")),
-                    ProviderStopReason.TOOL_CALLS)));
+                    GenerationStopReason.COMPLETE)));
   }
 
   @Test
@@ -116,10 +86,10 @@ class ModelResponseValidatorTest {
         IllegalArgumentException.class,
         () ->
             ModelResponseValidator.validate(
-                request(tool("bash")),
+                plainRequest(),
                 response(
                     List.of(new ProviderToolCall("call_1", "bash", "[1, 2]")),
-                    ProviderStopReason.TOOL_CALLS)));
+                    GenerationStopReason.COMPLETE)));
   }
 
   @Test
@@ -128,19 +98,40 @@ class ModelResponseValidatorTest {
         IllegalArgumentException.class,
         () ->
             ModelResponseValidator.validate(
-                request(tool("bash")),
+                plainRequest(),
                 response(
                     List.of(new ProviderToolCall("call_1", "bash", "{\"a\":1} extra")),
-                    ProviderStopReason.TOOL_CALLS)));
+                    GenerationStopReason.COMPLETE)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelResponseValidator.validate(
-                request(tool("bash")),
+                plainRequest(),
                 response(
                     List.of(new ProviderToolCall("call_1", "bash", "{\"a\":1,\"a\":2}")),
-                    ProviderStopReason.TOOL_CALLS)));
+                    GenerationStopReason.COMPLETE)));
   }
+
+  /** FILTERED 是唯一与 tool calls 冲突的 canonical 形状：FILTERED 的 calls 必须为空。 */
+  @Test
+  void rejectsFilteredResponsesWithToolCalls() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelResponseValidator.validate(
+                plainRequest(),
+                response(
+                    List.of(new ProviderToolCall("call_1", "bash", "{}")),
+                    GenerationStopReason.FILTERED)));
+    assertDoesNotThrow(
+        () ->
+            ModelResponseValidator.validate(
+                plainRequest(), response(List.of(), GenerationStopReason.FILTERED)));
+  }
+
+  // -----------------------------------------------------------------------------------------------
+  // compaction：行为与重构前保持一致（只允许 COMPLETE / 零 calls / 非空摘要文本，SUCCEEDED 前剥离 reserved sections）
+  // -----------------------------------------------------------------------------------------------
 
   @Test
   void acceptsValidCompactionResponse() {
@@ -148,7 +139,7 @@ class ModelResponseValidatorTest {
         () ->
             ModelResponseValidator.validate(
                 compactionRequest(),
-                response(List.of(), ProviderStopReason.COMPLETED, "structured summary")));
+                response(List.of(), GenerationStopReason.COMPLETE, "structured summary")));
   }
 
   @Test
@@ -158,7 +149,7 @@ class ModelResponseValidatorTest {
             compactionRequest(),
             response(
                 List.of(),
-                ProviderStopReason.COMPLETED,
+                GenerationStopReason.COMPLETE,
                 "structured summary\n\n<read-files>\nstale.txt\n</read-files>"));
 
     assertEquals("structured summary", normalized.text());
@@ -173,7 +164,7 @@ class ModelResponseValidatorTest {
                 compactionRequest(),
                 response(
                     List.of(new ProviderToolCall("call_1", "bash", "{}")),
-                    ProviderStopReason.COMPLETED,
+                    GenerationStopReason.COMPLETE,
                     "structured summary")));
   }
 
@@ -184,7 +175,7 @@ class ModelResponseValidatorTest {
         () ->
             ModelResponseValidator.validate(
                 compactionRequest(),
-                response(List.of(), ProviderStopReason.TOOL_CALLS, "structured summary")));
+                response(List.of(), GenerationStopReason.LENGTH, "structured summary")));
   }
 
   @Test
@@ -193,7 +184,7 @@ class ModelResponseValidatorTest {
         IllegalArgumentException.class,
         () ->
             ModelResponseValidator.validate(
-                compactionRequest(), response(List.of(), ProviderStopReason.COMPLETED, " ")));
+                compactionRequest(), response(List.of(), GenerationStopReason.COMPLETE, " ")));
   }
 
   @Test
@@ -205,18 +196,22 @@ class ModelResponseValidatorTest {
                 compactionRequest(),
                 response(
                     List.of(),
-                    ProviderStopReason.COMPLETED,
+                    GenerationStopReason.COMPLETE,
                     "<read-files>\na.txt\n</read-files>")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelResponseValidator.validate(
                 compactionRequest(),
-                response(List.of(), ProviderStopReason.COMPLETED, "summary\n<modified-files>")));
+                response(List.of(), GenerationStopReason.COMPLETE, "summary\n<modified-files>")));
   }
 
   private static ProviderToolDefinition tool(String name) {
     return new ProviderToolDefinition(name, "description of " + name, "{}");
+  }
+
+  private static ModelRequestSpec plainRequest() {
+    return request();
   }
 
   private static ModelRequestSpec request(ProviderToolDefinition... tools) {
@@ -244,28 +239,12 @@ class ModelResponseValidatorTest {
             List.of(),
             List.of(tools),
             ProviderCacheControl.none());
-    List<ToolBinding> bindings = new ArrayList<>();
-    for (ProviderToolDefinition tool : tools) {
-      bindings.add(
-          new ToolBinding(
-              new ToolDescriptor(
-                  tool.name(),
-                  "1.0",
-                  ToolType.PLATFORM,
-                  tool.description(),
-                  tool.name(),
-                  new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
-                  ToolSideEffect.READ_ONLY,
-                  Duration.ofSeconds(30)),
-              ToolType.PLATFORM,
-              null));
-    }
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         providerRequest.model(),
         providerRequest.variant(),
         List.of(),
-        bindings,
+        List.of(),
         List.of(),
         List.of(),
         providerRequest.cacheControl(),
@@ -316,12 +295,12 @@ class ModelResponseValidatorTest {
   }
 
   private static ProviderResponse response(
-      List<ProviderToolCall> calls, ProviderStopReason stopReason) {
+      List<ProviderToolCall> calls, GenerationStopReason stopReason) {
     return response(calls, stopReason, "");
   }
 
   private static ProviderResponse response(
-      List<ProviderToolCall> calls, ProviderStopReason stopReason, String text) {
+      List<ProviderToolCall> calls, GenerationStopReason stopReason, String text) {
     return new ProviderResponse(
         text,
         null,

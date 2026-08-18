@@ -37,9 +37,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -773,8 +773,8 @@ class ThreadContextClassifierTest {
       contents.add(new ToolCallMessageContent(callId, "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
-    ProviderStopReason stopReason =
-        callIds.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+    GenerationStopReason stopReason =
+        callIds.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         new AssistantMessageMetadata(stopReason, usage(), cost()),
@@ -912,8 +912,8 @@ class ThreadContextClassifierTest {
     for (String callId : callIds) {
       calls.add(new ProviderToolCall(callId, "bash", "{}"));
     }
-    ProviderStopReason stopReason =
-        callIds.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+    GenerationStopReason stopReason =
+        callIds.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new ProviderResponse(
         "response text", "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
   }

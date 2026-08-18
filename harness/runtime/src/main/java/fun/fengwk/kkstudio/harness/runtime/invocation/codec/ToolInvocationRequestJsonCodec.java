@@ -23,7 +23,11 @@ public final class ToolInvocationRequestJsonCodec {
     Objects.requireNonNull(request, "request");
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.set("call", encodeCall(request.call()));
-    node.set("binding", BINDING_CODEC.encodeNode(request.binding()));
+    if (request.binding() == null) {
+      node.putNull("binding");
+    } else {
+      node.set("binding", BINDING_CODEC.encodeNode(request.binding()));
+    }
     return node;
   }
 
@@ -35,8 +39,9 @@ public final class ToolInvocationRequestJsonCodec {
     ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
     InvocationJsonSupport.requireFields(node, CONTEXT, "call", "binding");
     ToolCall call = decodeCall(InvocationJsonSupport.required(node, "call", CONTEXT));
+    JsonNode bindingNode = node.get("binding");
     ToolBinding binding =
-        BINDING_CODEC.decodeNode(InvocationJsonSupport.required(node, "binding", CONTEXT));
+        bindingNode == null || bindingNode.isNull() ? null : BINDING_CODEC.decodeNode(bindingNode);
     return new ToolInvocationRequest(call, binding);
   }
 

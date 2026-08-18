@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 
 import java.io.IOException;
@@ -73,7 +73,7 @@ class ProviderResponseJsonCodecTest {
             null,
             null,
             List.of(),
-            ProviderStopReason.TOOL_CALLS,
+            GenerationStopReason.COMPLETE,
             new ModelUsage(1, 2, 3, 4, 5, 6, 21),
             zeroCost(),
             "request-7",
@@ -225,7 +225,7 @@ class ProviderResponseJsonCodecTest {
         List.of(
             new ProviderToolCall("call-1", "lookup", FIRST_ARGUMENTS),
             new ProviderToolCall("call-2", "weather", SECOND_ARGUMENTS)),
-        ProviderStopReason.COMPLETED,
+        GenerationStopReason.COMPLETE,
         new ModelUsage(100, 20, 0, 50, 0, 5, 175),
         new ModelCost(
             "USD",

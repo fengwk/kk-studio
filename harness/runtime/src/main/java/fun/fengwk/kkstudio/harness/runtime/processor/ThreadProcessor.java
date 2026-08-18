@@ -28,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -36,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -54,7 +52,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -101,12 +98,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * THREAD wake 再 MODEL / TOOL Work）。历史 / 非 applicable open Turn（head 不在 applicable 位置） 在分类阶段只使用
  * unlocked 读，绝不先锁 Model/Tool 再落到 Commands / INPUT normalization。
  *
- * <p>Model terminal apply：SUCCEEDED 追加 ASSISTANT Entry 并挂 resultEntryId，无 ToolCall 时追加 COMPLETED
- * TURN_END(continueModel=false)；有 ToolCall 时按 response ordinal materialize ToolInvocation（通常为
- * READY；命中 plugin sibling WRITE 后再 READ/WRITE 的调用直接为 unattached FAILED），仅为 READY 请求 TOOL Work 且不写
- * TURN_END；FAILED / CANCELLED / UNKNOWN 追加 AssistantError 与 FAILED TURN_END。Tool sibling 应用绝不部分
- * apply：数量 / ordinal 前缀 / ownership / 全部 terminal 且全部未挂 result 任一违反即抛错回滚。每次原子应用 Thread
- * head/revision 只 +1；Model / Tool processor 不写 Entry/head。
+ * <p>Model terminal apply：SUCCEEDED 追加 ASSISTANT Entry 并挂 resultEntryId，随后只按 {@link
+ * ModelResponsePlanner} 的纯决策落地——COMPLETE 无 calls 追加 COMPLETED TURN_END(continueModel=false)；LENGTH
+ * 无 calls / FILTERED 追加 FAILED TURN_END(OUTPUT_TRUNCATED / CONTENT_FILTERED)；有 calls 时按 ordinal
+ * materialize ToolInvocation 槽位 （READY / FAILED(INVALID_TOOL_ARGUMENTS / UNKNOWN_TOOL /
+ * MODEL_OUTPUT_TRUNCATED)，plugin sibling WRITE 冲突 确定性转 FAILED(SIBLING_STATE_CONFLICT)），仅为 READY 请求
+ * TOOL Work，全部 immediate terminal 时自唤醒 THREAD 让 batch 应用并反馈模型；FAILED / CANCELLED / UNKNOWN 追加
+ * AssistantError 与 FAILED TURN_END。Tool sibling 应用绝不部分 apply：数量 / ordinal 前缀 / ownership / 全部
+ * terminal 且全部未挂 result 任一违反即抛错回滚。每次原子应用 Thread head/revision 只 +1；Model / Tool processor 不写
+ * Entry/head。
  *
  * <p>durable mutation 时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、
  * complete、request 与 reschedule 始终使用未抬升的本地 lease clock，避免未来 durable 时间改变 lease 语义。
@@ -131,6 +131,7 @@ public final class ThreadProcessor {
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ThreadContextClassifier contextClassifier = new ThreadContextClassifier();
+  private final ModelResponsePlanner responsePlanner = new ModelResponsePlanner();
   private final CompactionPlanner compactionPlanner;
 
   public ThreadProcessor(
@@ -612,55 +613,76 @@ public final class ThreadProcessor {
                   model.turnStartEntryId(), TurnEndOutcome.COMPLETED, continueModel, null, null),
               mutationNow));
       head = turnEndId;
-    } else if (succeeded && response.toolCalls().isEmpty()) {
-      UUID turnEndId = tx.nextId();
-      tx.insertEntry(
-          new Entry(
-              turnEndId,
-              sessionId,
-              resultEntryId,
-              new TurnEndPayload(
-                  model.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
-              mutationNow));
-      head = turnEndId;
     } else if (succeeded) {
-      List<ProviderToolCall> calls = response.toolCalls();
-      List<ToolInvocation> materialized = new ArrayList<>(calls.size());
-      Map<PluginStateKey, PluginStateAccessMode> seenStateAccesses = new HashMap<>();
-      for (int ordinal = 0; ordinal < calls.size(); ordinal++) {
-        ProviderToolCall call = calls.get(ordinal);
-        ToolBinding binding = bindingFor(model.request().toolBindings(), call.name());
-        if (binding == null) {
-          throw new IllegalStateException(
-              "no frozen tool binding matches tool call "
-                  + call.name()
-                  + " of invocation "
-                  + model.id());
+      // canonical response 已在 SUCCEEDED 前通过 validator；这里只按 planner 的纯决策落地。
+      ModelResponsePlan plan = responsePlanner.plan(response, model.request().toolBindings());
+      switch (plan) {
+        case ModelResponsePlan.Completed ignored -> {
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  sessionId,
+                  resultEntryId,
+                  new TurnEndPayload(
+                      model.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
+                  mutationNow));
+          head = turnEndId;
         }
-        UUID toolId = tx.nextId();
-        ToolInvocationError conflict = siblingStateConflict(binding.plugin(), seenStateAccesses);
-        ToolInvocationStatus status =
-            conflict == null ? ToolInvocationStatus.READY : ToolInvocationStatus.FAILED;
-        materialized.add(
-            new ToolInvocation(
-                toolId,
-                model.id(),
-                resultEntryId,
-                ordinal,
-                new ToolInvocationRequest(
-                    new ToolCall(call.id(), call.name(), call.argumentsJson()), binding),
-                status,
-                0,
-                null,
-                null,
-                ToolEffectBatch.EMPTY,
-                conflict,
-                null,
-                mutationNow,
-                mutationNow));
+        case ModelResponsePlan.Failed failed -> {
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  sessionId,
+                  resultEntryId,
+                  new TurnEndPayload(
+                      model.turnStartEntryId(),
+                      TurnEndOutcome.FAILED,
+                      false,
+                      failed.reason(),
+                      null),
+                  mutationNow));
+          head = turnEndId;
+        }
+        case ModelResponsePlan.ToolBatch batch -> {
+          List<ToolInvocation> materialized = new ArrayList<>(batch.tools().size());
+          Map<PluginStateKey, PluginStateAccessMode> seenStateAccesses = new HashMap<>();
+          for (int ordinal = 0; ordinal < batch.tools().size(); ordinal++) {
+            ModelResponsePlan.ToolSlot slot = batch.tools().get(ordinal);
+            ToolInvocationStatus status = slot.status();
+            ToolInvocationError error = slot.error();
+            if (status == ToolInvocationStatus.READY) {
+              // READY 槽位的 binding 由 planner 保证非空；plugin sibling 状态冲突仍在 Thread 边界确定性拒绝。
+              ToolInvocationError conflict =
+                  siblingStateConflict(slot.binding().plugin(), seenStateAccesses);
+              if (conflict != null) {
+                status = ToolInvocationStatus.FAILED;
+                error = conflict;
+              }
+            }
+            UUID toolId = tx.nextId();
+            materialized.add(
+                new ToolInvocation(
+                    toolId,
+                    model.id(),
+                    resultEntryId,
+                    ordinal,
+                    new ToolInvocationRequest(slot.call(), slot.binding()),
+                    status,
+                    0,
+                    null,
+                    null,
+                    ToolEffectBatch.EMPTY,
+                    error,
+                    null,
+                    mutationNow,
+                    mutationNow));
+          }
+          tx.insertToolInvocations(materialized);
+          invocations = materialized;
+        }
       }
-      tx.insertToolInvocations(materialized);
-      invocations = materialized;
     } else {
       UUID turnEndId = tx.nextId();
       tx.insertEntry(
@@ -685,10 +707,17 @@ public final class ThreadProcessor {
     if (!invocations.isEmpty()) {
       List<ToolInvocation> ordered = new ArrayList<>(invocations);
       ordered.sort(Comparator.comparing(ToolInvocation::id, UuidOrder.COMPARATOR));
+      boolean readyRequested = false;
       for (ToolInvocation invocation : ordered) {
         if (invocation.status() == ToolInvocationStatus.READY) {
+          readyRequested = true;
           tx.requestWork(new WorkTarget(WorkTargetType.TOOL, invocation.id()), now);
         }
+      }
+      if (!readyRequested) {
+        // 全部 immediate terminal（schema-invalid / unknown / truncated）：不请求 TOOL Work，自唤醒 THREAD
+        // 让 batch 经 ToolTerminalPending 应用并把错误反馈给模型。
+        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
       }
     }
     return new LoopStep.Continue();
@@ -1029,16 +1058,6 @@ public final class ThreadProcessor {
       }
     }
     return yolo;
-  }
-
-  /** 在冻结 request 的 tool bindings 中按 descriptor name 匹配 call name。 */
-  private static ToolBinding bindingFor(List<ToolBinding> bindings, String toolName) {
-    for (ToolBinding binding : bindings) {
-      if (binding.descriptor().name().equals(toolName)) {
-        return binding;
-      }
-    }
-    return null;
   }
 
   /**

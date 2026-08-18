@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -1045,8 +1045,8 @@ class EntryPathTest {
     if (contents.isEmpty()) {
       contents.add(new TextMessageContent("answer"));
     }
-    ProviderStopReason stopReason =
-        toolCalls.length == 0 ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+    GenerationStopReason stopReason =
+        toolCalls.length == 0 ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new Entry(
         id,
         SESSION_ID,
@@ -1152,7 +1152,7 @@ class EntryPathTest {
         time(id));
   }
 
-  private static AssistantMessageMetadata metadata(ProviderStopReason reason) {
+  private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
     ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
     ModelCost cost =
         new ModelCost(

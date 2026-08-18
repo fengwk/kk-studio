@@ -291,7 +291,7 @@ final class ModelExecution implements ModelGateway.Listener {
       } else {
         deliverFailure(
             new ModelInvocationError(
-                ProviderErrorKind.INVALID_REQUEST, message(failure, "invalid provider callback")));
+                ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider callback")));
       }
       return;
     }
@@ -385,7 +385,7 @@ final class ModelExecution implements ModelGateway.Listener {
           ProcessorExceptions.describe(failure));
       return finishFailureLocked(
           new ModelInvocationError(
-              ProviderErrorKind.INVALID_REQUEST, message(failure, "invalid provider response")),
+              ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider response")),
           publishes);
     }
     long finalSequence = lastCommittedSequence;
@@ -408,7 +408,7 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private Applied finishFailureLocked(ModelInvocationError error, List<Publish> publishes) {
-    if (error.kind() == ProviderErrorKind.TRANSIENT && config.retryPolicy().allowsRetry(attempt)) {
+    if (isRetryable(error) && config.retryPolicy().allowsRetry(attempt)) {
       Duration delay = config.retryPolicy().delayBeforeRetry(attempt);
       boolean committed = safeTerminal(() -> commitRetry(delay, error));
       if (committed) {
@@ -429,6 +429,12 @@ final class ModelExecution implements ModelGateway.Listener {
     return safeTerminal(() -> commitTerminal(TerminalKind.FAILED, error))
         ? Applied.TERMINAL
         : Applied.LOST;
+  }
+
+  /** TRANSIENT 与 INVALID_RESPONSE 共享 {@link InvocationRetryPolicy}：两者耗尽后都转为 FAILED terminal。 */
+  private static boolean isRetryable(ModelInvocationError error) {
+    return error.kind() == ProviderErrorKind.TRANSIENT
+        || error.kind() == ProviderErrorKind.INVALID_RESPONSE;
   }
 
   private Applied finishUnknownLocked(ModelInvocationError error, List<Publish> publishes) {

@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -58,7 +58,7 @@ class HistoryEntryPayloadJsonCodecTest {
             null,
             null);
     EntryPayload assistant =
-        new MessagePayload(assistant("answer"), metadata(ProviderStopReason.COMPLETED), null);
+        new MessagePayload(assistant("answer"), metadata(GenerationStopReason.COMPLETE), null);
     EntryPayload tool =
         new MessagePayload(
             toolMessage("call-1"),
@@ -908,7 +908,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolCallId, "read", "read", List.of(new TextMessageContent("ok")), false, "{}")));
   }
 
-  private static AssistantMessageMetadata metadata(ProviderStopReason reason) {
+  private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
     ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
     ModelCost cost =
         new ModelCost(

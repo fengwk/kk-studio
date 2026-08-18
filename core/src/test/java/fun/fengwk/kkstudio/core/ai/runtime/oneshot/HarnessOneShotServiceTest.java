@@ -44,7 +44,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -393,7 +393,7 @@ class HarnessOneShotServiceTest {
                 null),
             NOW);
     AssistantMessageMetadata metadata = mock(AssistantMessageMetadata.class);
-    when(metadata.stopReason()).thenReturn(ProviderStopReason.COMPLETED);
+    when(metadata.stopReason()).thenReturn(GenerationStopReason.COMPLETE);
     Entry assistant =
         new Entry(
             id(6),

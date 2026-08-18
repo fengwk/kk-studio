@@ -29,7 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -661,8 +661,8 @@ class CompactionPlannerTest {
         contents.add(new ToolCallMessageContent(callId, "read", "read", "{\"path\":\"a.txt\"}"));
       }
       contents.add(new TextMessageContent(text(assistantText)));
-      ProviderStopReason stopReason =
-          callIds.length == 0 ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+      GenerationStopReason stopReason =
+          callIds.length == 0 ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
       entries.add(
           new Entry(
               id(nextId++),
