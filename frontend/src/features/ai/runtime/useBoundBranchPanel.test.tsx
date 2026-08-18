@@ -11,6 +11,7 @@ import type {
   DialogueMessage,
   ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
@@ -412,18 +413,22 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.branchState?.base.yoloEnabled).toBe(false)
   })
 
-  it('serializes rapid yolo toggles: the next request starts only after the prior resolves and uses its revision (latest wins)', async () => {
-    let releaseFirst: (() => void) | null = null
+  it('serializes rapid yolo toggles: the next request starts only after the prior resolves, uses its revision, and preserves the newer draft while pending (latest wins)', async () => {
+    const releases: Array<() => void> = []
     const calls: Array<{ expectedRevision: string; yoloEnabled: boolean }> = []
     vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) => {
       calls.push({ expectedRevision: data.expectedRevision, yoloEnabled: data.yoloEnabled })
-      if (calls.length === 1) {
-        return new Promise<HarnessThreadDTO>((resolve) => {
-          releaseFirst = () =>
-            resolve(threadFixture(threadId, { yoloEnabled: true, revision: '1' }))
-        })
-      }
-      return Promise.resolve(threadFixture(threadId, { yoloEnabled: false, revision: '2' }))
+      // 两个请求都 deferred，便于断言第二个请求返回前的中间状态。
+      return new Promise<HarnessThreadDTO>((resolve) => {
+        releases.push(() =>
+          resolve(
+            threadFixture(threadId, {
+              yoloEnabled: data.yoloEnabled,
+              revision: String(Number(data.expectedRevision) + 1),
+            }),
+          ),
+        )
+      })
     })
     const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
@@ -436,19 +441,144 @@ describe('useBoundBranchPanel', () => {
     })
     // 快速连点串行：第一个（true）请求返回前只有它在网；false 仅记录为最新意图。
     expect(calls).toEqual([{ expectedRevision: '0', yoloEnabled: true }])
+    expect(result.current.draft?.yoloEnabled).toBe(false)
 
     await act(async () => {
-      releaseFirst?.()
+      releases[0]?.()
     })
-    // true 返回（权威 revision 1）后，最新意图 false 才被发送，且携带 revision 1。
+    // true 返回后，最新意图 false 才被发送（携带权威 revision 1），但第二个请求尚未返回。
     await waitFor(() => expect(calls.length).toBe(2))
     expect(calls[1]).toEqual({ expectedRevision: '1', yoloEnabled: false })
+    // 第一个请求（true）成功：权威/base 采纳 true，但最新意图 false 的乐观 draft 不被压回 true。
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+
+    await act(async () => {
+      releases[1]?.()
+    })
     await act(async () => {
       await Promise.resolve()
     })
     // latest wins：最终 draft 与 base 均为 false。
     expect(result.current.draft?.yoloEnabled).toBe(false)
     expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+    expect(result.current.yoloError).toBeNull()
+  })
+
+  it('ignores a regressing snapshot arriving after /yolo success (exact decimal revision comparison beyond Number.MAX_SAFE_INTEGER)', async () => {
+    // 2^53 相邻的两个 revision：Number() 会把它们舍入为相同 double 而误判回退，
+    // 只有 BigInt 精确比较才能真正识别低 revision 的迟到 snapshot。
+    const BIG_LOW = '9007199254740992'
+    const BIG_AUTH = '9007199254740993'
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture(THREAD_ID, { revision: BIG_LOW })),
+    )
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
+      Promise.resolve(
+        threadFixture(threadId, {
+          yoloEnabled: data.yoloEnabled,
+          revision: String(BigInt(data.expectedRevision) + BigInt(1)),
+        }),
+      ),
+    )
+    const client = createClient()
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(client),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // /yolo 成功：base/draft 对齐 true，权威 revision 推进到 BIG_AUTH。
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+
+    // 注入迟到的低 revision snapshot（yolo=false + 不同 settings），模拟 /yolo 前失效快照晚到。
+    await act(async () => {
+      client.setQueryData(
+        queryKeys.threads.snapshot(THREAD_ID),
+        snapshotOf(
+          threadFixture(THREAD_ID, {
+            yoloEnabled: false,
+            revision: BIG_LOW,
+            branchSettings: branchSettings({ agentName: 'stale' }),
+          }),
+        ),
+      )
+    })
+    // 回退 snapshot 被整体忽略：base/draft 不被改写、权威 revision 不下降。
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.agentName).toBe('assistant')
+
+    act(() => {
+      result.current.setYoloEnabled(false)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 下一次 CAS 仍携带权威 BIG_AUTH，而不是回退的 BIG_LOW。
+    expect(vi.mocked(harnessService.setThreadYolo).mock.calls[1]![1].expectedRevision).toBe(
+      BIG_AUTH,
+    )
+  })
+
+  it('keeps the newer optimistic draft and suppresses yoloError when an obsolete intermediate request fails', async () => {
+    let rejectFirst: ((error: Error) => void) | null = null
+    let releaseSecond: (() => void) | null = null
+    const calls: Array<{ expectedRevision: string; yoloEnabled: boolean }> = []
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) => {
+      calls.push({ expectedRevision: data.expectedRevision, yoloEnabled: data.yoloEnabled })
+      if (calls.length === 1) {
+        return new Promise<HarnessThreadDTO>((_, reject) => {
+          rejectFirst = reject
+        })
+      }
+      return new Promise<HarnessThreadDTO>((resolve) => {
+        releaseSecond = () =>
+          resolve(threadFixture(threadId, { yoloEnabled: true, revision: '1' }))
+      })
+    })
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    // base=false 上先发一个过期中间值 false 请求，随即押注最新意图 true。
+    act(() => {
+      result.current.setYoloEnabled(false)
+      result.current.setYoloEnabled(true)
+    })
+    expect(calls).toEqual([{ expectedRevision: '0', yoloEnabled: false }])
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+
+    await act(async () => {
+      rejectFirst?.(new Error('network gone'))
+    })
+    await waitFor(() => expect(calls.length).toBe(2))
+    // 过期中间请求失败：最新意图 true 被保留（不回滚到 base false），且不产生瞬时错误；
+    // 第二个请求已发出但尚未返回。
+    expect(calls[1]).toEqual({ expectedRevision: '0', yoloEnabled: true })
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+    expect(result.current.yoloError).toBeNull()
+
+    await act(async () => {
+      releaseSecond?.()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 最新意图成功：最终一致，全程无瞬时错误/回滚。
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+    expect(result.current.yoloError).toBeNull()
   })
 
   it('fences late yolo responses after rebind: old-thread failure neither surfaces yoloError nor mutates the new draft', async () => {
