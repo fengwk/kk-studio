@@ -599,10 +599,10 @@ class HarnessRuntimeWebMapperTest {
     assertEquals("call-77", tool.path("toolCallId").asText());
     assertEquals("unknown_tool", tool.path("toolName").asText());
     assertEquals("{\"x\":1}", tool.path("argumentsJson").asText());
-    // unknown tool 槽位：binding 派生字段显式无值，renderer 固定回退为 tool。
+    // unknown tool 槽位：binding 派生字段显式 null 序列化，renderer 固定回退为 tool。
     assertEquals("tool", tool.path("rendererKey").asText());
-    assertTrue(tool.path("toolVersion").isMissingNode());
-    assertTrue(tool.path("toolType").isMissingNode());
+    assertTrue(tool.path("toolVersion").isNull());
+    assertTrue(tool.path("toolType").isNull());
     assertTrue(tool.path("environment").isNull());
   }
 

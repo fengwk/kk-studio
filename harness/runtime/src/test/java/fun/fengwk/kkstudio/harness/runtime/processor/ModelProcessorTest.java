@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -56,7 +57,6 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -2885,11 +2885,12 @@ class ModelProcessorTest {
   }
 
   private static EntryPayload assistantPayload() {
-    return new MessagePayload(
-        new AgentMessage(
-            AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("assistant reply"))),
-        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
-        null);
+    // live attached 场景的 assistant 由 fixture 的 canonical request/response 经 mapper 派生，与 strict
+    // attach 校验一致；
+    // 历史（无 active model）场景复用同一 payload 不影响 attach 校验。
+    return new HistoryPayloadMapper()
+        .assistantPayload(
+            response("ok", GenerationStopReason.COMPLETE), requestWithTool().toolBindings());
   }
 
   private static BranchSettings branchSettings() {

@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.Fixture;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.insertAssistantWithCalls;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.insertAssistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.model;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultReason;
@@ -38,7 +39,9 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -257,6 +260,8 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
   void relocationToAttachedAssistantWithoutToolsNormalizesFreshTurn() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
+    ModelRequestSpec request = plainRequest();
+    ProviderResponse response = successResponse(List.of(), "bash");
     UUID modelId =
         seedModelInvocation(
             fixture.store,
@@ -264,10 +269,15 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
             baseline.turnStartEntryId(),
             baseline.userEntryId(),
             ModelInvocationStatus.SUCCEEDED,
-            plainRequest(),
-            successResponse(List.of(), "bash"),
+            request,
+            response,
             null);
-    UUID assistantId = insertAssistantWithCalls(fixture.store, baseline, List.of());
+    // live attached assistant 由同一 request/response 经 mapper 生成（strict attach 校验要求全等）。
+    UUID assistantId =
+        insertAssistantPayload(
+            fixture.store,
+            baseline,
+            new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()));
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));

@@ -266,8 +266,8 @@ public interface HarnessStore {
     int deleteCommands(UUID threadId);
 
     /**
-     * 删除该 Thread 的全部 ToolInvocation 行（经其 ModelInvocation 归属判定）并返回删除行数。要求该 Thread 已在本事务 锁定；残留引用（如
-     * resultEntryId）会导致 FK 违反并使事务回滚。
+     * 删除该 Thread 的全部 ToolInvocation 行（经其 ModelInvocation 归属判定）并返回删除行数。要求该 Thread 已在本事务 锁定 （锁序
+     * Thread -&gt; Tool）；Tool 行不持有结果引用（Outcome 是自包含的 Entry 数据），无残留 FK 约束。
      */
     int deleteToolInvocations(UUID threadId);
 

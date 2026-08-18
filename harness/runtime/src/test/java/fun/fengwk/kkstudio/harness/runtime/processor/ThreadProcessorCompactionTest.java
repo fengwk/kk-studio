@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -43,11 +44,13 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -685,6 +688,10 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     UUID sessionId = baseline.sessionId();
     UUID headId = baseline.turnEndEntryId();
     UUID[] ids = new UUID[3]; // [turnStart, result, model]
+    // 冻结 request/response；HISTORY 响应文本即 partial 的 summary（strict attach 校验要求全等）。
+    ModelRequestSpec request = compactionRequest(historyPreparation());
+    ProviderResponse response =
+        successResponse("history summary", List.of(), GenerationStopReason.COMPLETE);
     fixture.store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -706,7 +713,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   baseline.threadId(),
                   ids[0],
                   ids[0],
-                  compactionRequest(historyPreparation()),
+                  request,
                   ModelInvocationStatus.READY,
                   0,
                   null,
@@ -716,22 +723,21 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   List.of(),
                   NOW,
                   NOW));
+          return null;
+        });
+    transitionModel(fixture.store, ids[2], m -> m.beginDispatch(NOW));
+    transitionModel(fixture.store, ids[2], m -> m.markRunning(NOW));
+    transitionModel(fixture.store, ids[2], m -> m.succeed(response, NOW));
+    // result payload 由同一 request/response + 真实 attach 前缀路径经 assembler 机械派生（HISTORY 前缀即
+    // head==TURN_START 的路径）。
+    CompactionPayload resultPayload =
+        CompactionSummaryAssembler.resultPayload(
+            request.compaction(), response.text(), path(fixture.store, baseline.threadId()));
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
           ids[1] = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  ids[1],
-                  sessionId,
-                  ids[0],
-                  new CompactionPayload(
-                      CompactionPhase.HISTORY,
-                      CompactionTrigger.THRESHOLD,
-                      500L,
-                      false,
-                      "history summary",
-                      id(3L),
-                      id(5L),
-                      id(4L)),
-                  NOW));
+          tx.insertEntry(new Entry(ids[1], sessionId, ids[0], resultPayload, NOW));
           UUID endId = tx.nextId();
           tx.insertEntry(
               new Entry(
@@ -743,9 +749,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
           return null;
         });
-    transitionModel(fixture.store, ids[2], m -> m.beginDispatch(NOW));
-    transitionModel(fixture.store, ids[2], m -> m.markRunning(NOW));
-    transitionModel(fixture.store, ids[2], m -> m.succeed(successResponse(List.of(), "bash"), NOW));
     transitionModel(fixture.store, ids[2], m -> m.attachResultEntry(ids[1], NOW));
     return ids;
   }

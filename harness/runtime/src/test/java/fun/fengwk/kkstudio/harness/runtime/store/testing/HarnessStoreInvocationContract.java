@@ -8,15 +8,17 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantAbortedPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantErrorPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayloadWithArguments;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.platformBinding;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolCall;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
@@ -56,6 +58,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
@@ -465,11 +468,14 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void modelResultEntryTypeAndUniquenessAreEnforced() {
     // 链 A：root -> turnStartA -> userA -> assistantA(call-1) -> toolResult(0, call-1)
+    ModelRequestSpec request = succeededRequest();
+    ProviderResponse response = assistantResponse("call-1");
     UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
-        insertChildEntry(store, baseline.sessionId(), userEntryId, assistantPayload("call-1"));
+        insertChildEntry(
+            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
     UUID toolResultEntryId =
         insertChildEntry(
             store,
@@ -532,6 +538,8 @@ public abstract class HarnessStoreInvocationContract {
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
         ModelInvocationStatus.SUCCEEDED,
+        request,
+        response,
         assistantEntryId,
         T1);
     inTransaction(store, tx -> tx.insertThread(thread(thread5, turnStartB)));
@@ -755,10 +763,14 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void terminalReplayAndAttachStayLegalAfterTheThreadHeadRelocates() {
     // 链：root -> turnStartA -> userA -> assistantA
+    ModelRequestSpec request = modelRequest();
+    // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）。
+    ProviderResponse response = assistantResponse();
     UUID userA =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
-    UUID assistantA = insertChildEntry(store, baseline.sessionId(), userA, assistantPayload());
+    UUID assistantA =
+        insertChildEntry(store, baseline.sessionId(), userA, mappedAssistant(request, response));
     // terminal invocation 不带关联 result entry
     inTransaction(
         store,
@@ -778,7 +790,7 @@ public abstract class HarnessStoreInvocationContract {
           current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
-          tx.updateModelInvocation(current.succeed(successResponse(), T2));
+          tx.updateModelInvocation(current.succeed(response, T2));
         });
     ModelInvocation committed =
         store.transaction(tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow());
@@ -788,7 +800,8 @@ public abstract class HarnessStoreInvocationContract {
         insertChildEntry(store, other.sessionId(), other.rootEntryId(), turnStartPayload());
     UUID otherUser =
         insertChildEntry(store, other.sessionId(), otherTurnStart, userMessagePayload());
-    UUID otherAssistant = insertChildEntry(store, other.sessionId(), otherUser, assistantPayload());
+    UUID otherAssistant =
+        insertChildEntry(store, other.sessionId(), otherUser, mappedAssistant(request, response));
     inTransaction(
         store,
         tx -> {
@@ -828,6 +841,9 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void updateModelInvocationMovesToTerminalWithResultEntry() {
+    ModelRequestSpec request = modelRequest();
+    // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）。
+    ProviderResponse response = assistantResponse();
     inTransaction(
         store,
         tx -> {
@@ -846,7 +862,8 @@ public abstract class HarnessStoreInvocationContract {
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
-        insertChildEntry(store, baseline.sessionId(), userEntryId, assistantPayload());
+        insertChildEntry(
+            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
     inTransaction(
         store,
         tx -> {
@@ -855,7 +872,7 @@ public abstract class HarnessStoreInvocationContract {
           current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
-          tx.updateModelInvocation(current.succeed(successResponse(), T2));
+          tx.updateModelInvocation(current.succeed(response, T2));
           current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(current.attachResultEntry(assistantEntryId, T2));
         });
@@ -1293,8 +1310,8 @@ public abstract class HarnessStoreInvocationContract {
   // ---- 工具调用 ----
 
   /**
-   * 在一个 transaction 中插入一个 READY model invocation 并将其推进到带指定 result link 的 terminal status （insert
-   * 仅接受初始状态；terminal apply 走 update）。
+   * terminal model 种子；SUCCEEDED 使用默认 fixture（modelRequest + successResponse，assistant 必须与其经 mapper
+   * 派生全等）；FAILED / CANCELLED 语义固定。
    */
   private void insertTerminalModel(
       UUID id,
@@ -1304,18 +1321,51 @@ public abstract class HarnessStoreInvocationContract {
       ModelInvocationStatus status,
       UUID resultEntryId,
       Instant createdAt) {
+    insertTerminalModel(
+        id,
+        threadId,
+        turnStartEntryId,
+        basisHeadEntryId,
+        status,
+        modelRequest(),
+        successResponse(),
+        resultEntryId,
+        createdAt);
+  }
+
+  /**
+   * terminal model 种子；SUCCEEDED 必须提供与 assistant 事实机械一致的 request+response（assistant 由同一对经 {@link
+   * HistoryPayloadMapper} 派生，strict attach 校验要求全等）。
+   */
+  private void insertTerminalModel(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID basisHeadEntryId,
+      ModelInvocationStatus status,
+      ModelRequestSpec request,
+      ProviderResponse response,
+      UUID resultEntryId,
+      Instant createdAt) {
     inTransaction(
         store,
         tx -> {
           tx.lockThread(threadId);
           tx.insertModelInvocation(
-              modelInvocation(
+              new ModelInvocation(
                   id,
                   threadId,
                   turnStartEntryId,
                   basisHeadEntryId,
+                  request,
                   ModelInvocationStatus.READY,
+                  0,
                   null,
+                  null,
+                  null,
+                  null,
+                  List.of(),
+                  createdAt,
                   createdAt));
           ModelInvocation current = tx.lockModelInvocation(id).orElseThrow();
           if (status == ModelInvocationStatus.SUCCEEDED) {
@@ -1323,7 +1373,7 @@ public abstract class HarnessStoreInvocationContract {
             current = tx.lockModelInvocation(id).orElseThrow();
             tx.updateModelInvocation(current.markRunning(createdAt));
             current = tx.lockModelInvocation(id).orElseThrow();
-            tx.updateModelInvocation(current.succeed(successResponse(), createdAt));
+            tx.updateModelInvocation(current.succeed(response, createdAt));
           } else if (status == ModelInvocationStatus.FAILED) {
             tx.updateModelInvocation(
                 current.fail(
@@ -1364,21 +1414,22 @@ public abstract class HarnessStoreInvocationContract {
 
   /** 合法 turn 链 TURN_START -> USER -> ASSISTANT(call-1..call-3)，并附带一个 terminal model result。 */
   private UUID seedAssistantAndModel() {
+    ModelRequestSpec request = succeededRequest();
+    ProviderResponse response = assistantResponse("call-1", "call-2", "call-3");
     UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store,
-            baseline.sessionId(),
-            userEntryId,
-            assistantPayload("call-1", "call-2", "call-3"));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
         ModelInvocationStatus.SUCCEEDED,
+        request,
+        response,
         assistantEntryId,
         T1);
     return assistantEntryId;
@@ -1452,21 +1503,22 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void toolArgumentsJsonPreservesItsExactLexicalForm() {
     String argumentsJson = "{   }";
+    ModelRequestSpec request = succeededRequest();
+    ProviderResponse response = succeededResponseWithArguments("call-1", argumentsJson);
     UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store,
-            baseline.sessionId(),
-            userEntryId,
-            assistantPayloadWithArguments("call-1", argumentsJson));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
         ModelInvocationStatus.SUCCEEDED,
+        request,
+        response,
         assistantEntryId,
         T1);
     ToolInvocation invocation =
@@ -2071,6 +2123,29 @@ public abstract class HarnessStoreInvocationContract {
         "summary",
         "",
         List.of(),
+        GenerationStopReason.COMPLETE,
+        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        "req-1",
+        null,
+        "{}");
+  }
+
+  /** 带冻结 argumentsJson 的 SUCCEEDED response（工具调用参数必须逐字保留进 assistant）。 */
+  private static ProviderResponse succeededResponseWithArguments(
+      String toolCallId, String argumentsJson) {
+    return new ProviderResponse(
+        "assistant reply",
+        "",
+        List.of(new ProviderToolCall(toolCallId, "bash", argumentsJson)),
         GenerationStopReason.COMPLETE,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
         new ModelCost(

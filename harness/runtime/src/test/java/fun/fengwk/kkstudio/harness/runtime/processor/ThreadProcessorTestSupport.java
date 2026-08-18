@@ -419,6 +419,36 @@ final class ThreadProcessorTestSupport {
   }
 
   /**
+   * 合法 attached SUCCEEDED tool-phase 的 (assistant, model) 对：assistant 经 mapper 与同一 request/response
+   * 全等。
+   */
+  record SeededToolPhase(UUID modelInvocationId, UUID assistantEntryId) {}
+
+  /** 原子种子合法 SUCCEEDED tool-phase model + mapper 派生 assistant（strict attach 校验要求全等），返回二者 id。 */
+  static SeededToolPhase seedSucceededToolPhase(
+      InMemoryHarnessStore store, OpenTurnBaseline turn, List<String> callIds) {
+    ModelRequestSpec request = tooledRequest(List.of("bash"));
+    ProviderResponse response = successResponse(callIds, "bash");
+    UUID modelId =
+        seedModelInvocation(
+            store,
+            turn.threadId(),
+            turn.turnStartEntryId(),
+            turn.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            request,
+            response,
+            null);
+    UUID assistantEntryId =
+        insertAssistantPayload(
+            store,
+            turn,
+            new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()));
+    transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
+    return new SeededToolPhase(modelId, assistantEntryId);
+  }
+
+  /**
    * 插入 READY ModelInvocation（basis 必须等于 Thread 当前 head）并把状态推进到 {@code status}（terminal 且
    * resultEntryId 仍 null）。
    */
@@ -812,6 +842,10 @@ final class ThreadProcessorTestSupport {
     // 形状：turn1（短消息，作为可摘要历史）+ turn2（长 USER 消息 + 带 usage 的短 ASSISTANT）。
     // planner 从尾部累计：turn2 的 ASSISTANT 远小于 keepRecentTokens，长 USER 处越过 -> cut 落在 turn2 USER（非切分
     // FULL）。
+    // live attached：turn2 invocation（plainRequest）的 SUCCEEDED 结果必须经 mapper 与 turn2 ASSISTANT 全等，
+    // 同时保留 caller 指定的 usage（随 response 快照进 assistant metadata，planner 依赖它）。
+    ModelRequestSpec request = plainRequest();
+    ProviderResponse response = successResponse(usage, cost(), "assistant reply");
     UUID[] modelIdHolder = new UUID[1];
     ClosedTurnBaseline baseline =
         store.transaction(
@@ -892,7 +926,7 @@ final class ThreadProcessorTestSupport {
                       threadId,
                       secondTurnStartId,
                       secondUserEntryId,
-                      plainRequest(),
+                      request,
                       ModelInvocationStatus.READY,
                       0,
                       null,
@@ -907,13 +941,7 @@ final class ThreadProcessorTestSupport {
                       secondAssistantEntryId,
                       sessionId,
                       secondUserEntryId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.ASSISTANT,
-                              List.of(new TextMessageContent("assistant reply"))),
-                          new AssistantMessageMetadata(
-                              GenerationStopReason.COMPLETE, usage, cost()),
-                          null),
+                      new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()),
                       NOW));
               tx.insertEntry(
                   new Entry(
@@ -938,7 +966,7 @@ final class ThreadProcessorTestSupport {
     UUID modelId = modelIdHolder[0];
     transitionModel(store, modelId, m -> m.beginDispatch(NOW));
     transitionModel(store, modelId, m -> m.markRunning(NOW));
-    transitionModel(store, modelId, m -> m.succeed(successResponse(List.of(), "bash"), NOW));
+    transitionModel(store, modelId, m -> m.succeed(response, NOW));
     transitionModel(store, modelId, m -> m.attachResultEntry(baseline.assistantEntryId(), NOW));
     return baseline;
   }
@@ -977,6 +1005,14 @@ final class ThreadProcessorTestSupport {
   static ProviderResponse successResponse(
       String text, List<ProviderToolCall> calls, GenerationStopReason stopReason) {
     return new ProviderResponse(text, "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
+  }
+
+  /**
+   * 带显式 usage/cost 的 SUCCEEDED response：文本即 assistant 文本、metadata 随 response 快照（live attach 需全等）。
+   */
+  static ProviderResponse successResponse(ModelUsage usage, ModelCost cost, String text) {
+    return new ProviderResponse(
+        text, "", List.of(), GenerationStopReason.COMPLETE, usage, cost, "req-1", null, "{}");
   }
 
   static ToolResult successToolResult(String callId) {

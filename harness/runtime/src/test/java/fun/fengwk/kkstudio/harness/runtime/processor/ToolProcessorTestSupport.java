@@ -8,10 +8,9 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -39,13 +38,9 @@ import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -202,6 +197,11 @@ final class ToolProcessorTestSupport {
           UUID userEntryId = tx.nextId();
           UUID assistantEntryId = tx.nextId();
           UUID threadId = tx.nextId();
+          // live attached tool baseline：assistant 由同一 frozen request + response 经 mapper 生成，与
+          // seedTool 的
+          // model request/successResponse 严格一致（renderer bash 来自 model request 的 bash binding）。
+          ModelRequestSpec modelRequest = modelRequest();
+          ProviderResponse response = successResponse("call-1");
           tx.insertSession(new Session(sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
@@ -224,7 +224,8 @@ final class ToolProcessorTestSupport {
                   assistantEntryId,
                   sessionId,
                   userEntryId,
-                  assistantPayload("call-1"),
+                  new HistoryPayloadMapper()
+                      .assistantPayload(response, modelRequest.toolBindings()),
                   now.plusMillis(3)));
           tx.insertThread(
               new ThreadState(threadId, turnStartEntryId, yoloEnabled, 1L, 0L, now, now));
@@ -266,7 +267,7 @@ final class ToolProcessorTestSupport {
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.markRunning(now));
           current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.succeed(successResponse("call-1"), now));
+          tx.updateModelInvocation(current.succeed(successResponse(request.call().id()), now));
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.attachResultEntry(baseline.assistantEntryId(), now));
           tx.insertToolInvocations(
@@ -288,22 +289,6 @@ final class ToolProcessorTestSupport {
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), now);
           tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), now);
           return new Seeded(modelId, toolId);
-        });
-  }
-
-  /** 在 ASSISTANT 下插入匹配的 TOOL result Entry 并返回其 id（供 resultEntryId 链接场景）。 */
-  static UUID insertToolResultEntry(InMemoryHarnessStore store, Baseline baseline, Instant now) {
-    return store.transaction(
-        tx -> {
-          UUID id = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  id,
-                  baseline.sessionId(),
-                  baseline.assistantEntryId(),
-                  toolResultPayload(baseline.assistantEntryId(), 0, "call-1"),
-                  now.plusMillis(10)));
-          return id;
         });
   }
 
@@ -458,7 +443,7 @@ final class ToolProcessorTestSupport {
         provider.model(),
         provider.variant(),
         List.of(),
-        List.of(),
+        List.of(platformBinding(ToolSideEffect.READ_ONLY)),
         List.of(),
         List.of(),
         provider.cacheControl(),
@@ -507,31 +492,6 @@ final class ToolProcessorTestSupport {
         null);
   }
 
-  private static EntryPayload assistantPayload(String... toolCallIds) {
-    List<AgentMessageContent> contents = new ArrayList<>();
-    for (String toolCallId : toolCallIds) {
-      contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
-    }
-    contents.add(new TextMessageContent("assistant reply"));
-    GenerationStopReason stopReason =
-        toolCallIds.length > 0 ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
-    return new MessagePayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-        new AssistantMessageMetadata(
-            stopReason,
-            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)),
-        null);
-  }
-
   private static ProviderResponse successResponse(String... toolCallIds) {
     List<ProviderToolCall> calls = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
@@ -555,18 +515,6 @@ final class ToolProcessorTestSupport {
         "req-1",
         null,
         "{}");
-  }
-
-  private static EntryPayload toolResultPayload(
-      UUID assistantEntryId, int ordinal, String toolCallId) {
-    ToolResultMessageContent content =
-        new ToolResultMessageContent(
-            toolCallId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
-    ToolResultMetadata metadata =
-        new ToolResultMetadata(
-            assistantEntryId, toolCallId, ordinal, ToolResultStatus.SUCCEEDED, false, null);
-    return new MessagePayload(
-        new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
   /** 从 READY / approval null 构造 required undecided approval（WAITING_APPROVAL 前置）。 */

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -46,7 +48,7 @@ public final class ModelAttemptMaterialization {
           "compaction result paths must not materialize model attempt failures");
     }
     if (stored.status().isTerminal()) {
-      requireTerminalResult(stored, resultPath.head().payload());
+      requireTerminalResult(stored, resultPath);
     } else {
       requireDirectStopResult(stored, attached, resultPath.head().payload());
     }
@@ -86,17 +88,62 @@ public final class ModelAttemptMaterialization {
     }
   }
 
-  private static void requireTerminalResult(
-      ModelInvocation invocation, EntryPayload resultPayload) {
+  /**
+   * terminal 结果的严格物化校验：SUCCEEDED 必须完整等于重放的结果 payload（normal 经 {@link HistoryPayloadMapper}，
+   * compaction 经 {@link CompactionSummaryAssembler}）；FAILED / CANCELLED 保持 exact error / checkpoint
+   * 语义不变。
+   */
+  private static void requireTerminalResult(ModelInvocation invocation, EntryPath resultPath) {
     if (invocation.status() == ModelInvocationStatus.SUCCEEDED) {
+      requireSuccessfulResult(invocation, resultPath);
       return;
     }
+    EntryPayload resultPayload = resultPath.head().payload();
     if (!(resultPayload instanceof AssistantErrorPayload actual)
         || !sameError(invocation, actual)
         || !Objects.equals(terminalAttempt(invocation), actual.attempt())) {
       throw new IllegalArgumentException(
           "materialized terminal error must match the invocation error and checkpoint");
     }
+  }
+
+  /**
+   * SUCCEEDED model 的结果 Entry payload 必须完整等于按当前 frozen 事实重放的结果：normal（无 compaction）为 {@link
+   * HistoryPayloadMapper#assistantPayload} 的 ASSISTANT payload；compaction 为 {@link
+   * CompactionSummaryAssembler#resultPayload} 的 COMPACTION payload（{@code preResultPath} 是
+   * resultPath 去掉 head 结果后的前缀，保证 TURN_PREFIX / HISTORY 组装上下文与 apply 时一致）。任何字段漂移（text / thinking /
+   * tool call renderer / metadata / summary text）都必须被拒。
+   */
+  private static void requireSuccessfulResult(ModelInvocation invocation, EntryPath resultPath) {
+    EntryPayload resultPayload = resultPath.head().payload();
+    CompactionRequest compaction = invocation.request().compaction();
+    if (compaction == null) {
+      MessagePayload expected =
+          new HistoryPayloadMapper()
+              .assistantPayload(invocation.result(), invocation.request().toolBindings());
+      if (!expected.equals(resultPayload)) {
+        throw new IllegalArgumentException(
+            "model result must materialize the exact assistant payload");
+      }
+      return;
+    }
+    CompactionPayload expected =
+        CompactionSummaryAssembler.resultPayload(
+            compaction, invocation.result().text(), preResultPath(resultPath));
+    if (!expected.equals(resultPayload)) {
+      throw new IllegalArgumentException(
+          "model result must materialize the exact compaction payload");
+    }
+  }
+
+  /** compaction 组装上下文：resultPath 去掉 head 结果后的前缀（至少保留 ROOT 与 basis 两项）。 */
+  private static EntryPath preResultPath(EntryPath resultPath) {
+    List<Entry> entries = resultPath.entries();
+    if (entries.size() < 2) {
+      throw new IllegalArgumentException(
+          "model result path must keep a non-trivial prefix before its head");
+    }
+    return new EntryPath(entries.subList(0, entries.size() - 1));
   }
 
   private static void requireDirectStopResult(
@@ -238,12 +285,6 @@ public final class ModelAttemptMaterialization {
       throw new IllegalArgumentException(
           "an attached tool-phase model result head must be an ASSISTANT message entry");
     }
-    MessagePayload expectedHead =
-        new HistoryPayloadMapper()
-            .assistantPayload(attached.result(), attached.request().toolBindings());
-    if (!expectedHead.equals(message)) {
-      throw new IllegalArgumentException(
-          "attached model result must materialize the exact assistant payload");
-    }
+    requireSuccessfulResult(attached, resultPath);
   }
 }

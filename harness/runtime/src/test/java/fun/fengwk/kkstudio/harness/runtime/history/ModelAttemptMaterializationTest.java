@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -536,6 +537,139 @@ class ModelAttemptMaterializationTest {
     }
   }
 
+  /** attach 转换的普通成功结果不再直接 return：必须完整等于 mapper 重放的 assistant payload。 */
+  @Test
+  void acceptsExactSuccessResultAndRejectsDrift() {
+    ModelInvocation stored =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(3L),
+            toolPhaseRequest(),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            toolResponse(),
+            null,
+            null,
+            List.of(),
+            T2,
+            T6);
+    Entry exactResult = assistantToolMessage(id(4L), id(3L));
+    assertDoesNotThrow(
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored,
+                stored.attachResultEntry(exactResult.id(), T6),
+                attachedToolPath(exactResult)));
+
+    // 相同类型但 text / metadata / renderer 任一漂移必须被拒（result 与 Assistant 完全一致才算成功物化）。
+    Entry textDrifted =
+        assistantToolMessageAt(
+            id(4L),
+            id(3L),
+            T2,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
+                        new TextMessageContent("unexpected text"))),
+                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                null));
+    Entry metadataDrifted =
+        assistantToolMessageAt(
+            id(4L),
+            id(3L),
+            T2,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
+                new AssistantMessageMetadata(GenerationStopReason.LENGTH, usage(), cost()),
+                null));
+    Entry rendererDrifted =
+        assistantToolMessageAt(
+            id(4L),
+            id(3L),
+            T2,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new ToolCallMessageContent("call-1", "bash", "tool", "{}"))),
+                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                null));
+    for (Entry drifted : List.of(textDrifted, metadataDrifted, rendererDrifted)) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              ModelAttemptMaterialization.validate(
+                  stored, stored.attachResultEntry(drifted.id(), T6), attachedToolPath(drifted)),
+          "success result must match the mapper-exact assistant payload");
+    }
+  }
+
+  /** attach 转换的 compaction 成功结果：必须完整等于装配 result payload（preResultPath 去 head 重放 apply 上下文）。 */
+  @Test
+  void acceptsExactCompactionSuccessResultAndRejectsSummaryDrift() {
+    CompactionRequest compaction =
+        new CompactionRequest(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100, id(1L), id(1L), null);
+    // compaction 结果必须位于 COMPACTION turn 内（TurnPathValidator），basis = TURN_START id(2)。
+    EntryPath preResult = new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1)));
+    ModelInvocation stored =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(2L),
+            request(compaction),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            compactionResponse("final summary"),
+            null,
+            null,
+            List.of(),
+            T2,
+            T6);
+    CompactionPayload exact =
+        CompactionSummaryAssembler.resultPayload(compaction, "final summary", preResult);
+    Entry result = new Entry(id(4L), id(100L), id(2L), exact, T6);
+    EntryPath path =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1), result));
+    assertDoesNotThrow(
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored, stored.attachResultEntry(result.id(), T6), path));
+
+    // summaryText 漂移（同一 phase/trigger/tokens，仅文本不同）必须被拒。
+    Entry drifted =
+        new Entry(
+            id(4L),
+            id(100L),
+            id(2L),
+            new CompactionPayload(
+                CompactionPhase.FULL,
+                CompactionTrigger.THRESHOLD,
+                100,
+                true,
+                "drifted summary",
+                compaction.firstKeptEntryId(),
+                compaction.cutEntryId(),
+                compaction.turnPrefixStartEntryId()),
+            T6);
+    EntryPath driftedPath =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1), drifted));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored, stored.attachResultEntry(drifted.id(), T6), driftedPath),
+        "compaction result must match the assembled summary exactly");
+  }
+
   private static ModelInvocation failedInvocation(List<ModelAttemptFailure> failures) {
     return invocation(
         request(null),
@@ -822,6 +956,16 @@ class ModelAttemptMaterializationTest {
         T1);
   }
 
+  /** COMPACTION turn 的 TURN_START（compaction 结果 Entry 必须位于 compaction turn 内）。 */
+  private static Entry compactionTurnStart(UUID entryId, UUID parentId, Instant createdAt) {
+    return new Entry(
+        entryId,
+        id(100L),
+        parentId,
+        new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
+        createdAt);
+  }
+
   private static Entry assistantToolMessage(UUID entryId, UUID parentId) {
     return new Entry(
         entryId,
@@ -847,6 +991,11 @@ class ModelAttemptMaterializationTest {
         null,
         null,
         "{}");
+  }
+
+  private static ProviderResponse compactionResponse(String text) {
+    return new ProviderResponse(
+        text, "", List.of(), GenerationStopReason.COMPLETE, usage(), cost(), null, null, "{}");
   }
 
   private static ModelUsage usage() {
