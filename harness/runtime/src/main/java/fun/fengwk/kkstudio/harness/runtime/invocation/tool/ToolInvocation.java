@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -540,15 +541,33 @@ public record ToolInvocation(
   }
 
   /**
-   * binding 约束：只有 immediate FAILED（attempt=0）允许可空 binding（unknown tool / 输出截断的槽位）；READY /
-   * WAITING_APPROVAL / DISPATCHING / RUNNING / SUCCEEDED / CANCELLED / UNKNOWN 与 attempt&gt;0 的
-   * FAILED 必须携带非空 binding，保证 dispatch 路径永远不会触碰空 binding。
+   * binding/call durable 不变量：binding 只在 immediate FAILED（attempt=0）槽位可空（unknown tool / 输出截断）； 非空
+   * binding 必须匹配 call 的 toolName；除 immediate FAILED 外的所有状态（READY / WAITING_APPROVAL / DISPATCHING /
+   * RUNNING / SUCCEEDED / CANCELLED / UNKNOWN 与 attempt&gt;0 的 FAILED）必须通过 binding schema 校验 —— 只有
+   * immediate FAILED 可以表示 INVALID_TOOL_ARGUMENTS / MODEL_OUTPUT_TRUNCATED 而绕过 schema。
    */
   private static void validateBindingConstraint(
       ToolInvocationStatus status, int attempt, ToolInvocationRequest request) {
-    if (request.binding() == null && (status != ToolInvocationStatus.FAILED || attempt != 0)) {
+    ToolBinding binding = request.binding();
+    if (binding == null) {
+      if (status != ToolInvocationStatus.FAILED || attempt != 0) {
+        throw new IllegalArgumentException(
+            "binding is only nullable on immediate FAILED invocations (attempt 0)");
+      }
+      return;
+    }
+    if (!binding.descriptor().name().equals(request.call().toolName())) {
       throw new IllegalArgumentException(
-          "binding is only nullable on immediate FAILED invocations (attempt 0)");
+          "binding descriptor name must match the request call toolName");
+    }
+    if (status != ToolInvocationStatus.FAILED || attempt != 0) {
+      try {
+        ToolArgumentsValidator.validate(
+            request.call().argumentsJson(), binding.descriptor().inputSchema());
+      } catch (IllegalArgumentException schemaFailure) {
+        throw new IllegalArgumentException(
+            "request arguments must conform to the binding tool schema", schemaFailure);
+      }
     }
   }
 

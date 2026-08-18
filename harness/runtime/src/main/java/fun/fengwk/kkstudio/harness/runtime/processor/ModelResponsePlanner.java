@@ -111,7 +111,13 @@ public final class ModelResponsePlanner {
       ToolArgumentsValidator.validate(call.argumentsJson(), binding.descriptor().inputSchema());
       return null;
     } catch (IllegalArgumentException failure) {
-      return new ToolInvocationError(INVALID_TOOL_ARGUMENTS, failure.getMessage());
+      // ToolInvocationError 拒绝 blank message：schema 校验失败 message 可能为空，回退为稳定描述。
+      String message = failure.getMessage();
+      return new ToolInvocationError(
+          INVALID_TOOL_ARGUMENTS,
+          message == null || message.isBlank()
+              ? "tool arguments do not conform to the tool schema"
+              : message);
     }
   }
 }
