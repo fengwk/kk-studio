@@ -452,7 +452,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                               OWNER_THREAD_ID),
                           NOW));
                   ThreadState current = tx.lockThread(baseline.threadId()).orElseThrow();
-                  tx.updateThread(current.advanceHead(turnStartId, false, NOW));
+                  tx.updateThread(current.advanceHead(turnStartId, NOW));
                   return null;
                 });
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());

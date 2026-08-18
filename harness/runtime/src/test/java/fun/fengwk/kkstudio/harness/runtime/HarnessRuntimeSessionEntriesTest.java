@@ -63,7 +63,7 @@ class HarnessRuntimeSessionEntriesTest {
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(thread.advanceHead(activeUserId, thread.yoloEnabled(), T5));
+          tx.updateThread(thread.advanceHead(activeUserId, T5));
           return null;
         });
 

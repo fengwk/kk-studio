@@ -376,8 +376,7 @@ public final class HarnessRuntime {
                 HarnessRuntimeConflictException.Reason.MOVE_TARGET_HAS_CONTINUATION_OBLIGATION,
                 "target entry " + target.id() + " is a continueModel=true TURN_END");
           }
-          ThreadState moved =
-              thread.advanceHead(command.targetEntryId(), thread.yoloEnabled(), clock.instant());
+          ThreadState moved = thread.advanceHead(command.targetEntryId(), clock.instant());
           tx.updateThread(moved);
           tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
           return moved;

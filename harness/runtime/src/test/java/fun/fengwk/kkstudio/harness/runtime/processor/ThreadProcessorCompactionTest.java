@@ -459,8 +459,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   new TurnEndPayload(
                       rejectedStart, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
                   NOW));
-          tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, false, NOW));
+          tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
           return null;
         });
     requestThreadWork(fixture.store, baseline.threadId());
@@ -586,7 +585,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   NOW));
           // 与真实 commit 一致：head 先推进到 TURN_START，invocation 的 basis 就是该 TURN_START。
           tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(ids[0], false, NOW));
+              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(ids[0], NOW));
           ids[2] = tx.nextId();
           tx.insertModelInvocation(
               new ModelInvocation(
@@ -622,8 +621,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   new TurnEndPayload(
                       ids[0], TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
                   NOW));
-          tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, false, NOW));
+          tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
           return null;
         });
     transitionModel(
@@ -698,7 +696,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   NOW));
           // 与真实 commit 一致：head 先推进到 TURN_START，invocation 的 basis 就是该 TURN_START。
           tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(ids[0], false, NOW));
+              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(ids[0], NOW));
           ids[2] = tx.nextId();
           tx.insertModelInvocation(
               new ModelInvocation(
@@ -740,8 +738,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   ids[1],
                   new TurnEndPayload(ids[0], TurnEndOutcome.COMPLETED, false, null, null),
                   NOW));
-          tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, false, NOW));
+          tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
           return null;
         });
     transitionModel(fixture.store, ids[2], m -> m.beginDispatch(NOW));
@@ -873,9 +870,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                           null),
                       NOW));
               tx.updateThread(
-                  tx.findThread(threadId)
-                      .orElseThrow()
-                      .advanceHead(secondTurnEndEntryId, false, NOW));
+                  tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndEntryId, NOW));
               return new ClosedTurnBaseline(
                   sessionId,
                   rootEntryId,
@@ -1062,8 +1057,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   new TurnEndPayload(
                       secondTurnStartId, TurnEndOutcome.COMPLETED, false, null, null),
                   NOW));
-          tx.updateThread(
-              tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndId, false, NOW));
+          tx.updateThread(tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,

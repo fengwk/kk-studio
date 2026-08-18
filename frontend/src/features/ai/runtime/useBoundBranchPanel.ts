@@ -54,7 +54,9 @@ function errorMessage(error: unknown): string {
  *   pending projection 出的 effectiveBase；
  * - 通过 `buildMessageBatchPlan` 构建原子 message batch；
  * - agent/environment/yolo/model 的 draft-local 编辑（agent 选择采用其
- *   activeTools，冻结其余选中值）。
+ *   activeTools，冻结其余选中值）；
+ * - YOLO 走直接控制面：写请求串行并合并快速连点（每次基于最新权威 revision，
+ *   latest wins），重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
  *
  * 重绑是 render-time fail-closed：只有 branch state 与 controller snapshot 都
  * 属于当前 `threadId` 时，才返回 draft/effectiveBase 并允许 build batch；否则
@@ -85,8 +87,17 @@ export function useBoundBranchPanel({
   const [branchState, setBranchState] = useState<BoundBranchState | null>(null)
   const [yoloError, setYoloError] = useState<string | null>(null)
   const boundThreadIdRef = useRef<string | null>(null)
-  // YOLO 直接更新请求序号：只有最新的响应才允许写回（乐观编辑/回滚均以最新请求为准）。
-  const yoloRequestIdRef = useRef(0)
+  // YOLO 直接控制面的权威 Thread 状态（revision + yolo policy）：来自 /yolo 成功
+  // 响应，或非回退的 snapshot。后续每次 CAS 都基于它，而不是可能滞后的
+  // controller snapshot —— 连续切换不会因 revision 过期而互相踩踏。
+  const authoritativeThreadRef = useRef<HarnessThreadDTO | null>(null)
+  // 串行并合并快速连点：yoloPendingRef 只保留最新用户意图；每个写请求开始时读取
+  // 最新权威 revision，上一次响应返回后再发下一次，latest wins。
+  const yoloPendingRef = useRef<boolean | null>(null)
+  const yoloDrainingRef = useRef(false)
+  // YOLO 更新 generation：每次重新绑定到另一个 Thread 时递增，使旧 Thread 的迟到
+  // 成功/失败都无法污染新面板（不改 draft、不设 yoloError）。
+  const yoloGenerationRef = useRef(0)
 
   // 重新绑定到另一个 Thread 时清空面板本地 draft，并从新 snapshot 重新初始化
   //（controller 也会重置其 stop/decision replay 状态）。Interaction/错误/确认等
@@ -97,6 +108,10 @@ export function useBoundBranchPanel({
       return
     }
     boundThreadIdRef.current = threadId
+    // 使旧 Thread 的在途 YOLO 请求全部失效，并丢弃陈旧权威 revision / 未发意图。
+    yoloGenerationRef.current += 1
+    authoritativeThreadRef.current = null
+    yoloPendingRef.current = null
     setBranchState(null)
     setYoloError(null)
   }, [threadId])
@@ -108,6 +123,7 @@ export function useBoundBranchPanel({
     if (!thread || thread.threadId !== threadId) {
       return
     }
+    adoptAuthoritative(thread)
     setBranchState((current) => {
       const snapshotDraft = branchDraftFromThread(thread)
       if (current == null || current.threadId !== threadId) {
@@ -184,53 +200,106 @@ export function useBoundBranchPanel({
   }
 
   /**
-   * 切换 Thread YOLO runtime policy：乐观更新 draft 后立即调用直接控制面
-   * （PUT /yolo，基于当前 snapshot revision 的精确 CAS）。成功后只把 base 与
-   * draft 的 yolo 对齐服务器权威值（其它未发送 settings 原样保留）；失败则把
-   * draft 回滚到 base 值，并通过 {@code yoloError} 暴露错误。绝不生成
-   * SET_YOLO command。并发连点以最新请求为准（CAS 失败时旧请求整体回滚，
-   * 新请求已携带新 revision 重试）。
+   * 接受一个新的权威 Thread 快照。只接受同线程且不使 revision 回退的值，避免
+   * 迟到的 /yolo 前 snapshot 覆盖已确认的新 revision。
+   */
+  function adoptAuthoritative(thread: HarnessThreadDTO) {
+    const current = authoritativeThreadRef.current
+    if (
+      current != null
+      && current.threadId === thread.threadId
+      && Number(thread.revision) < Number(current.revision)
+    ) {
+      return
+    }
+    authoritativeThreadRef.current = thread
+  }
+
+  /**
+   * 切换 Thread YOLO runtime policy：乐观更新 draft 后入队直接控制面写（PUT
+   * /yolo）。写请求串行执行并合并快速连点 —— 每次发送都基于最新权威 revision
+   * （上次 /yolo 成功返回或非回退 snapshot），latest wins。成功后把 base 与 draft
+   * 的 yolo 对齐服务器权威值（其它未发送 settings 原样保留）并采纳新 revision；
+   * 失败则把 draft 回滚到 base 值并暴露 yoloError。绝不生成 SET_YOLO command。
    */
   function setYoloEnabled(enabled: boolean) {
     if (boundBranchState == null || boundThread == null) {
       return
     }
-    const thread = boundThread
     setYoloError(null)
     editDraft({ yoloEnabled: enabled })
-    const requestId = ++yoloRequestIdRef.current
-    void harnessService
-      .setThreadYolo(thread.threadId, {
-        expectedRevision: thread.revision,
+    yoloPendingRef.current = enabled
+    void drainYolo()
+  }
+
+  /** 串行执行 YOLO 写：同一时刻至多一个在途请求，快速连点合并到最新目标。 */
+  async function drainYolo() {
+    if (yoloDrainingRef.current) {
+      return
+    }
+    yoloDrainingRef.current = true
+    try {
+      while (yoloPendingRef.current != null) {
+        const generation = yoloGenerationRef.current
+        const target = yoloPendingRef.current
+        yoloPendingRef.current = null
+        const authoritative = authoritativeThreadRef.current
+        if (authoritative == null || authoritative.threadId !== boundThreadIdRef.current) {
+          // 重绑后缺乏新 Thread 的权威 revision：丢弃这次尝试；新绑定后的
+          // setYoloEnabled 会以新 generation 重新入队。
+          continue
+        }
+        await writeYolo(generation, authoritative, target)
+      }
+    } finally {
+      yoloDrainingRef.current = false
+    }
+  }
+
+  /** 发出单次 YOLO 写；任何迟到（旧 Thread / 旧 generation）结果都静默丢弃。 */
+  async function writeYolo(
+    generation: number,
+    authoritative: HarnessThreadDTO,
+    enabled: boolean,
+  ) {
+    try {
+      const updated = await harnessService.setThreadYolo(authoritative.threadId, {
+        expectedRevision: authoritative.revision,
         yoloEnabled: enabled,
       })
-      .then((updated: HarnessThreadDTO) => {
-        if (requestId !== yoloRequestIdRef.current) {
-          return
-        }
-        setBranchState((current) =>
-          current == null || current.threadId !== thread.threadId
-            ? current
-            : {
-                ...current,
-                base: { ...current.base, yoloEnabled: updated.yoloEnabled },
-                draft: { ...current.draft, yoloEnabled: updated.yoloEnabled },
-              },
-        )
-      })
-      .catch((error: unknown) => {
-        if (requestId !== yoloRequestIdRef.current) {
-          return
-        }
-        setBranchState((current) =>
-          current == null
-            || current.threadId !== thread.threadId
-            || current.base.yoloEnabled === enabled
-            ? current
-            : { ...current, draft: { ...current.draft, yoloEnabled: current.base.yoloEnabled } },
-        )
-        setYoloError(errorMessage(error))
-      })
+      if (
+        generation !== yoloGenerationRef.current
+        || updated.threadId !== boundThreadIdRef.current
+      ) {
+        return
+      }
+      adoptAuthoritative(updated)
+      setYoloError(null)
+      setBranchState((current) =>
+        current == null || current.threadId !== threadId
+          ? current
+          : {
+              ...current,
+              base: { ...current.base, yoloEnabled: updated.yoloEnabled },
+              draft: { ...current.draft, yoloEnabled: updated.yoloEnabled },
+            },
+      )
+    } catch (error) {
+      if (
+        generation !== yoloGenerationRef.current
+        || authoritative.threadId !== boundThreadIdRef.current
+      ) {
+        return
+      }
+      setBranchState((current) =>
+        current == null
+          || current.threadId !== threadId
+          || current.base.yoloEnabled === enabled
+          ? current
+          : { ...current, draft: { ...current.draft, yoloEnabled: current.base.yoloEnabled } },
+      )
+      setYoloError(errorMessage(error))
+    }
   }
 
   function selectModel(model: BranchDraft['model']) {
@@ -246,6 +315,7 @@ export function useBoundBranchPanel({
     if (thread.threadId !== threadId) {
       return
     }
+    adoptAuthoritative(thread)
     const snapshotDraft = branchDraftFromThread(thread)
     setBranchState({ threadId, base: snapshotDraft, draft: snapshotDraft })
   }
