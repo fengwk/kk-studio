@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -15,10 +14,10 @@ import java.util.Set;
  * durable 会话消息。
  *
  * <p>SYSTEM 消息属于 {@link CustomMessagePayload}。USER 消息不携带 metadata；ASSISTANT 消息必须携带 {@link
- * AssistantMessageMetadata} 且不能携带 tool result metadata，且 {@code stopReason == TOOL_CALLS} 必须与是否存在
- * {@link ToolCallMessageContent} 匹配；assistant tool call id 必须唯一，以保证 ordinal/prefix 校验的确定性。TOOL
- * 消息必须携带 {@link ToolResultMetadata} 且不能携带 assistant metadata，且唯一的 {@link
- * ToolResultMessageContent#toolCallId()} 必须与 metadata 匹配。
+ * AssistantMessageMetadata} 且不能携带 tool result metadata；assistant tool call id 必须唯一，以保证
+ * ordinal/prefix 校验的确定性。TOOL 消息必须携带 {@link ToolResultMetadata} 且不能携带 assistant metadata，且唯一的 {@link
+ * ToolResultMessageContent#toolCallId()} 必须与 metadata 匹配。生成 stop reason 与 tool call 存在性 正交（{@code
+ * COMPLETE}/{@code LENGTH} 均可有 calls），不在此处施加等价约束。
  */
 public record MessagePayload(
     AgentMessage message,
@@ -41,13 +40,6 @@ public record MessagePayload(
           throw new IllegalArgumentException(
               "assistant messages require assistantMetadata and must not carry tool result"
                   + " metadata");
-        }
-        boolean hasToolCall =
-            message.contents().stream().anyMatch(ToolCallMessageContent.class::isInstance);
-        boolean toolStop = assistantMetadata.stopReason() == ProviderStopReason.TOOL_CALLS;
-        if (hasToolCall != toolStop) {
-          throw new IllegalArgumentException(
-              "assistant stop reason and tool call contents are inconsistent");
         }
         Set<String> toolCallIds = new HashSet<>();
         for (AgentMessageContent content : message.contents()) {

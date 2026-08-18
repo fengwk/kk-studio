@@ -25,7 +25,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -46,12 +45,14 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -417,8 +418,12 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(0, fixture.resolver.calls);
   }
 
+  /**
+   * COMPLETE + unknown tool：immediate FAILED(UNKNOWN_TOOL) 槽位（binding null），无 TOOL Work，自唤醒 THREAD
+   * 反馈模型。
+   */
   @Test
-  void unboundToolCallInTerminalResponseIsRejectedAtomically() {
+  void unknownToolCallMaterializesImmediateFailedInvocationAndFeedsBackToModel() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
     UUID modelId =
@@ -432,13 +437,219 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
             successResponse(List.of("call-1"), "unknown-tool"),
             null);
     requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    // request 的 frozen bindings 不匹配 response 的 tool call name：防御性 ISE，事务回滚零 mutation。
-    assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
-    assertEquals(3, path(fixture.store, baseline.threadId()).entries().size());
-    assertNull(model(fixture.store, modelId).resultEntryId());
-    assertEquals(ModelInvocationStatus.SUCCEEDED, model(fixture.store, modelId).status());
+    // applyModel -> 全部 immediate terminal -> 自唤醒 THREAD -> 同 claim 应用 batch -> 启动 continuation。
+    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(7, path.entries().size());
+    Entry assistant = path.entries().get(3);
+    assertEquals(assistant.id(), model(fixture.store, modelId).resultEntryId());
+    List<ToolInvocation> tools = toolsByAssistant(fixture.store, assistant.id());
+    assertEquals(1, tools.size());
+    ToolInvocation tool = tools.getFirst();
+    assertEquals(ToolInvocationStatus.FAILED, tool.status());
+    assertEquals("UNKNOWN_TOOL", tool.error().kind());
+    assertNull(tool.request().binding());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tool.id())));
+    // 反馈错误：TOOL entry（renderer fallback "tool"）+ TURN_END(COMPLETED, continueModel=true)。
+    MessagePayload toolResult = (MessagePayload) path.entries().get(4).payload();
+    assertEquals(AgentMessageRole.TOOL, toolResult.message().role());
+    assertEquals(
+        "tool", ((ToolResultMessageContent) toolResult.message().contents().get(0)).rendererKey());
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(5).payload();
+    assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
+    assertTrue(end.continueModel());
+    TurnStartPayload continuation = (TurnStartPayload) path.entries().get(6).payload();
+    assertEquals(TurnStartReason.CONTINUATION, continuation.reason());
+    // 全部 immediate terminal 的自唤醒 THREAD work 保持可见。
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+  }
+
+  /** COMPLETE + schema-invalid call：immediate FAILED(INVALID_TOOL_ARGUMENTS)，binding 保留，反馈模型。 */
+  @Test
+  void schemaInvalidToolCallMaterializesImmediateFailedInvocationAndFeedsBackToModel() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            tooledRequest(List.of("bash")),
+            successResponse(List.of(new ProviderToolCall("call-1", "bash", "{\"unexpected\":1}"))),
+            null);
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
+
+    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    List<ToolInvocation> tools = toolsByAssistant(fixture.store, path.entries().get(3).id());
+    assertEquals(1, tools.size());
+    ToolInvocation tool = tools.getFirst();
+    assertEquals(ToolInvocationStatus.FAILED, tool.status());
+    assertEquals("INVALID_TOOL_ARGUMENTS", tool.error().kind());
+    assertEquals("bash", tool.request().binding().descriptor().name());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tool.id())));
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(5).payload();
+    assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
+    assertTrue(end.continueModel());
+  }
+
+  /** COMPLETE + mixed batch：每 call 一个槽位，只为 READY 请求 TOOL Work，FAILED 槽位等待 batch 应用。 */
+  @Test
+  void mixedToolCallBatchRequestsToolWorkOnlyForReadySlots() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            tooledRequest(List.of("bash")),
+            successResponse(
+                List.of(
+                    new ProviderToolCall("call-1", "bash", "{}"),
+                    new ProviderToolCall("call-2", "undeclared", "{}"),
+                    new ProviderToolCall("call-3", "bash", "{\"unexpected\":1}"))),
+            null);
+    requestThreadWork(fixture.store, baseline.threadId());
+    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
+
+    // READY 槽位使 batch 非全部 terminal：TOOL Work 驱动，不写 TURN_END、不自唤醒 THREAD。
+    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+
+    UUID assistantId = model(fixture.store, modelId).resultEntryId();
+    List<ToolInvocation> tools = toolsByAssistant(fixture.store, assistantId);
+    assertEquals(3, tools.size());
+    assertEquals(ToolInvocationStatus.READY, tools.get(0).status());
+    assertEquals(ToolInvocationStatus.FAILED, tools.get(1).status());
+    assertEquals("UNKNOWN_TOOL", tools.get(1).error().kind());
+    assertNull(tools.get(1).request().binding());
+    assertEquals(ToolInvocationStatus.FAILED, tools.get(2).status());
+    assertEquals("INVALID_TOOL_ARGUMENTS", tools.get(2).error().kind());
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(0).id())));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(1).id())));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(2).id())));
+    assertEquals(4, path(fixture.store, baseline.threadId()).entries().size());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+  }
+
+  /** LENGTH 无 calls：failed turn，stable reason OUTPUT_TRUNCATED，零 ToolInvocation。 */
+  @Test
+  void lengthWithoutCallsClosesFailedTurnWithOutputTruncated() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            tooledRequest(List.of("bash")),
+            successResponse("partial text", List.of(), GenerationStopReason.LENGTH),
+            null);
+    requestThreadWork(fixture.store, baseline.threadId());
+    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
+
+    assertEquals(ThreadProcessResult.QUIESCENT, fixture.processor.process(claim));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(5, path.entries().size());
+    MessagePayload assistant = (MessagePayload) path.entries().get(3).payload();
+    assertEquals(
+        "partial text", ((TextMessageContent) assistant.message().contents().get(0)).text());
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
+    assertEquals(TurnEndReason.OUTPUT_TRUNCATED, end.reason());
+    assertFalse(end.continueModel());
+    assertEquals(0, toolsByAssistant(fixture.store, path.entries().get(3).id()).size());
+  }
+
+  /** FILTERED：failed turn，stable reason CONTENT_FILTERED，零 ToolInvocation。 */
+  @Test
+  void filteredResponseClosesFailedTurnWithContentFiltered() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            tooledRequest(List.of("bash")),
+            successResponse("", List.of(), GenerationStopReason.FILTERED),
+            null);
+    requestThreadWork(fixture.store, baseline.threadId());
+    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
+
+    assertEquals(ThreadProcessResult.QUIESCENT, fixture.processor.process(claim));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(5, path.entries().size());
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
+    assertEquals(TurnEndReason.CONTENT_FILTERED, end.reason());
+    assertFalse(end.continueModel());
+    assertEquals(0, toolsByAssistant(fixture.store, path.entries().get(3).id()).size());
+  }
+
+  /** LENGTH 有 calls：每个 observed call 一个 immediate FAILED(MODEL_OUTPUT_TRUNCATED)，执行零个并反馈模型。 */
+  @Test
+  void lengthWithCallsMaterializesTruncatedFailuresAndFeedsBackToModel() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            tooledRequest(List.of("bash")),
+            successResponse(
+                "partial",
+                List.of(
+                    new ProviderToolCall("call-1", "bash", "{}"),
+                    new ProviderToolCall("call-2", "bash", "{}")),
+                GenerationStopReason.LENGTH),
+            null);
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
+
+    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(8, path.entries().size());
+    List<ToolInvocation> tools = toolsByAssistant(fixture.store, path.entries().get(3).id());
+    assertEquals(2, tools.size());
+    for (ToolInvocation tool : tools) {
+      assertEquals(ToolInvocationStatus.FAILED, tool.status());
+      assertEquals("MODEL_OUTPUT_TRUNCATED", tool.error().kind());
+      assertEquals("bash", tool.request().binding().descriptor().name());
+      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tool.id())));
+    }
+    assertEquals(
+        AgentMessageRole.TOOL, ((MessagePayload) path.entries().get(4).payload()).message().role());
+    assertEquals(
+        AgentMessageRole.TOOL, ((MessagePayload) path.entries().get(5).payload()).message().role());
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(6).payload();
+    assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
+    assertTrue(end.continueModel());
+    assertEquals(
+        TurnStartReason.CONTINUATION,
+        ((TurnStartPayload) path.entries().get(7).payload()).reason());
   }
 
   @Test

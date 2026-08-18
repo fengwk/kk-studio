@@ -21,8 +21,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -597,7 +597,7 @@ final class DispatcherTestSupport {
                     new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
                     new TextMessageContent("assistant reply"))),
             new AssistantMessageMetadata(
-                ProviderStopReason.TOOL_CALLS,
+                GenerationStopReason.COMPLETE,
                 new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
                 new ModelCost(
                     "USD",
@@ -639,7 +639,7 @@ final class DispatcherTestSupport {
         "assistant reply",
         "",
         List.of(new ProviderToolCall("call-1", "bash", "{}")),
-        ProviderStopReason.TOOL_CALLS,
+        GenerationStopReason.COMPLETE,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
         new ModelCost(
             "USD",

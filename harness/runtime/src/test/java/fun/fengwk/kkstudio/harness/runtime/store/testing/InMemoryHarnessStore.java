@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
@@ -1061,9 +1062,13 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       ToolCallMessageContent call = calls.get(invocation.ordinal());
       ToolCall requestCall = invocation.request().call();
+      String expectedRendererKey =
+          invocation.request().binding() == null
+              ? HistoryPayloadMapper.UNBOUND_RENDERER_KEY
+              : invocation.request().binding().descriptor().rendererKey();
       if (!call.toolCallId().equals(requestCall.id())
           || !call.toolName().equals(requestCall.toolName())
-          || !call.rendererKey().equals(invocation.request().binding().descriptor().rendererKey())
+          || !call.rendererKey().equals(expectedRendererKey)
           || !call.argumentsJson().equals(requestCall.argumentsJson())) {
         throw new IllegalArgumentException(
             "tool request binding/call must exactly match the assistant tool call at the same"
@@ -1091,14 +1096,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
       ToolResultMessageContent content =
           (ToolResultMessageContent)
               ((MessagePayload) result.payload()).message().contents().get(0);
+      String expectedRendererKey =
+          invocation.request().binding() == null
+              ? HistoryPayloadMapper.UNBOUND_RENDERER_KEY
+              : invocation.request().binding().descriptor().rendererKey();
       if (!metadata.assistantEntryId().equals(invocation.assistantEntryId())
           || metadata.ordinal() != invocation.ordinal()
           || !metadata.toolCallId().equals(invocation.request().call().id())
           || !content.toolCallId().equals(invocation.request().call().id())
           || !content.toolName().equals(invocation.request().call().toolName())
-          || !content
-              .rendererKey()
-              .equals(invocation.request().binding().descriptor().rendererKey())) {
+          || !content.rendererKey().equals(expectedRendererKey)) {
         throw new IllegalArgumentException(
             "tool result entry must match the invocation assistant entry, ordinal, call and"
                 + " renderer");

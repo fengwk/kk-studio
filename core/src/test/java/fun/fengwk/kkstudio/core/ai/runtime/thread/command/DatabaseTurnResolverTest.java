@@ -70,13 +70,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -1055,7 +1055,7 @@ class DatabaseTurnResolverTest {
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("reply"))),
                     new AssistantMessageMetadata(
-                        ProviderStopReason.COMPLETED,
+                        GenerationStopReason.COMPLETE,
                         new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L),
                         new ModelCost(
                             "USD",
@@ -1524,7 +1524,7 @@ class DatabaseTurnResolverTest {
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
             new AssistantMessageMetadata(
-                ProviderStopReason.COMPLETED,
+                GenerationStopReason.COMPLETE,
                 new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
                 new ModelCost(
                     "USD",

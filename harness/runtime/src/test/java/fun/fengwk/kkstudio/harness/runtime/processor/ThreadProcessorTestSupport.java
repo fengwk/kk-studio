@@ -37,9 +37,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
@@ -683,8 +683,8 @@ final class ThreadProcessorTestSupport {
       contents.add(new ToolCallMessageContent(callIds.get(i), "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
-    ProviderStopReason stopReason =
-        callIds.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+    GenerationStopReason stopReason =
+        callIds.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         assistantMetadata(stopReason),
@@ -826,7 +826,7 @@ final class ThreadProcessorTestSupport {
                               AgentMessageRole.ASSISTANT,
                               List.of(new TextMessageContent("assistant reply"))),
                           new AssistantMessageMetadata(
-                              ProviderStopReason.COMPLETED, usage(), cost()),
+                              GenerationStopReason.COMPLETE, usage(), cost()),
                           null),
                       NOW));
               tx.insertEntry(
@@ -886,7 +886,8 @@ final class ThreadProcessorTestSupport {
                           new AgentMessage(
                               AgentMessageRole.ASSISTANT,
                               List.of(new TextMessageContent("assistant reply"))),
-                          new AssistantMessageMetadata(ProviderStopReason.COMPLETED, usage, cost()),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE, usage, cost()),
                           null),
                       NOW));
               tx.insertEntry(
@@ -928,8 +929,8 @@ final class ThreadProcessorTestSupport {
     for (String callId : callIds) {
       calls.add(new ProviderToolCall(callId, toolName, "{}"));
     }
-    ProviderStopReason stopReason =
-        callIds.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+    GenerationStopReason stopReason =
+        callIds.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new ProviderResponse(
         "response text", "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
   }
@@ -939,7 +940,7 @@ final class ThreadProcessorTestSupport {
         "response text",
         "",
         calls,
-        calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
+        GenerationStopReason.COMPLETE,
         usage(),
         cost(),
         "req-1",
@@ -947,11 +948,17 @@ final class ThreadProcessorTestSupport {
         "{}");
   }
 
+  /** 显式 stop reason 的 SUCCEEDED response（覆盖 LENGTH / FILTERED 等矩阵路径）。 */
+  static ProviderResponse successResponse(
+      String text, List<ProviderToolCall> calls, GenerationStopReason stopReason) {
+    return new ProviderResponse(text, "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
+  }
+
   static ToolResult successToolResult(String callId) {
     return new ToolResult(callId, List.of(new TextToolContent("tool ok")), false, "{}");
   }
 
-  static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {
+  static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
     return new AssistantMessageMetadata(stopReason, usage(), cost());
   }
 

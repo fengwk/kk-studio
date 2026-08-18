@@ -1,22 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
-import java.time.Duration;
-import java.util.Map;
-import java.util.Set;
-
-/** ToolInvocationRequest 的 call/binding 对应关系检查。 */
+/** ToolInvocationRequest 的 call/binding 冻结语义：binding 只对 immediate FAILED 槽位可空。 */
 class ToolInvocationRequestTest {
 
   @Test
@@ -29,47 +21,23 @@ class ToolInvocationRequestTest {
     assertEquals("bash", request.binding().descriptor().name());
   }
 
+  /** binding 可空只用于 immediate FAILED 槽位（unknown tool / 输出截断）；ToolCall 本身仍非空。 */
   @Test
-  void rejectsNameMismatchAndInvalidArguments() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocationRequest(
-                new ToolCall("call-1", "other", "{}"), ToolInvocationTestData.platform("bash")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocationRequest(
-                new ToolCall("call-1", "bash", "[1,2]"), ToolInvocationTestData.platform("bash")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocationRequest(
-                new ToolCall("call-1", "bash", "{}"), bindingRequiringPath()));
+  void allowsNullableBindingForImmediateFailedSlots() {
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(new ToolCall("call-1", "bash", "{}"), null);
+
+    assertEquals("call-1", request.call().id());
+    assertNull(request.binding());
   }
 
+  /** Tool schema 语义校验已移入 {@link ModelResponsePlanner}，构造器只保留 call 自身的不变量。 */
   @Test
-  void rejectsNullFacts() {
+  void rejectsNullCallAndMalformedCallFacts() {
     assertThrows(
         NullPointerException.class,
         () -> new ToolInvocationRequest(null, ToolInvocationTestData.platform("bash")));
-    assertThrows(
-        NullPointerException.class,
-        () -> new ToolInvocationRequest(new ToolCall("call-1", "bash", "{}"), null));
-  }
-
-  private static ToolBinding bindingRequiringPath() {
-    ToolDescriptor descriptor =
-        new ToolDescriptor(
-            "bash",
-            "1.0",
-            ToolType.PLATFORM,
-            "desc",
-            "bash",
-            new ToolParamsSchema(
-                "arguments", Map.of("path", new ToolStringSchema(null)), Set.of("path"), false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(30));
-    return new ToolBinding(descriptor, ToolType.PLATFORM, null);
+    assertThrows(IllegalArgumentException.class, () -> new ToolCall("call-1", "bash", "[1,2]"));
+    assertThrows(IllegalArgumentException.class, () -> new ToolCall("", "bash", "{}"));
   }
 }

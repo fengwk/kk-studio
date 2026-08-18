@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -41,15 +41,15 @@ class HistoryEntryPayloadTest {
         new MessagePayload(user("hello"), null, null),
         new MessagePayload(user("hello"), null, null));
     assertEquals(
-        new MessagePayload(assistant("answer"), metadata(ProviderStopReason.COMPLETED), null),
-        new MessagePayload(assistant("answer"), metadata(ProviderStopReason.COMPLETED), null));
+        new MessagePayload(assistant("answer"), metadata(GenerationStopReason.COMPLETE), null),
+        new MessagePayload(assistant("answer"), metadata(GenerationStopReason.COMPLETE), null));
     assertEquals(
         new MessagePayload(toolMessage("call-1"), null, TOOL_METADATA),
         new MessagePayload(toolMessage("call-1"), null, TOOL_METADATA));
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new MessagePayload(user("hello"), metadata(ProviderStopReason.COMPLETED), null));
+        () -> new MessagePayload(user("hello"), metadata(GenerationStopReason.COMPLETE), null));
     assertThrows(
         IllegalArgumentException.class,
         () -> new MessagePayload(user("hello"), null, TOOL_METADATA));
@@ -59,7 +59,7 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new MessagePayload(
-                assistant("answer"), metadata(ProviderStopReason.COMPLETED), TOOL_METADATA));
+                assistant("answer"), metadata(GenerationStopReason.COMPLETE), TOOL_METADATA));
     assertThrows(
         IllegalArgumentException.class,
         () -> new MessagePayload(toolMessage("call-1"), null, null));
@@ -67,12 +67,12 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new MessagePayload(
-                toolMessage("call-1"), metadata(ProviderStopReason.COMPLETED), null));
+                toolMessage("call-1"), metadata(GenerationStopReason.COMPLETE), null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new MessagePayload(
-                toolMessage("call-1"), metadata(ProviderStopReason.COMPLETED), TOOL_METADATA));
+                toolMessage("call-1"), metadata(GenerationStopReason.COMPLETE), TOOL_METADATA));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -87,28 +87,28 @@ class HistoryEntryPayloadTest {
   }
 
   @Test
-  void assistantMessagesEnforceToolCallStopReasonConsistencyAndUniqueIds() {
+  void assistantMessagesAllowAnyStopReasonWithOrWithoutToolCallsButEnforceUniqueIds() {
     AgentMessage withToolCall =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(new ToolCallMessageContent("call-1", "read", "read", "{}")));
     AgentMessage withoutToolCall = assistant("answer");
 
+    // generation stop reason 与 tool call 存在性正交：COMPLETE 可以有或没有 calls。
     assertEquals(
         AgentMessageRole.ASSISTANT,
-        new MessagePayload(withToolCall, metadata(ProviderStopReason.TOOL_CALLS), null)
+        new MessagePayload(withToolCall, metadata(GenerationStopReason.COMPLETE), null)
             .message()
             .role());
     assertEquals(
-        new MessagePayload(withoutToolCall, metadata(ProviderStopReason.COMPLETED), null),
-        new MessagePayload(withoutToolCall, metadata(ProviderStopReason.COMPLETED), null));
+        new MessagePayload(withoutToolCall, metadata(GenerationStopReason.COMPLETE), null),
+        new MessagePayload(withoutToolCall, metadata(GenerationStopReason.COMPLETE), null));
+    assertEquals(
+        AgentMessageRole.ASSISTANT,
+        new MessagePayload(withToolCall, metadata(GenerationStopReason.LENGTH), null)
+            .message()
+            .role());
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new MessagePayload(withToolCall, metadata(ProviderStopReason.COMPLETED), null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new MessagePayload(withoutToolCall, metadata(ProviderStopReason.TOOL_CALLS), null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -118,7 +118,7 @@ class HistoryEntryPayloadTest {
                     List.of(
                         new ToolCallMessageContent("call-1", "read", "read", "{}"),
                         new ToolCallMessageContent("call-1", "grep", "grep", "{}"))),
-                metadata(ProviderStopReason.TOOL_CALLS),
+                metadata(GenerationStopReason.COMPLETE),
                 null));
     assertEquals(
         AgentMessageRole.ASSISTANT,
@@ -128,7 +128,7 @@ class HistoryEntryPayloadTest {
                     List.of(
                         new ToolCallMessageContent("call-1", "read", "read", "{}"),
                         new ToolCallMessageContent("call-2", "grep", "grep", "{}"))),
-                metadata(ProviderStopReason.TOOL_CALLS),
+                metadata(GenerationStopReason.COMPLETE),
                 null)
             .message()
             .role());
@@ -548,7 +548,7 @@ class HistoryEntryPayloadTest {
                 toolCallId, "read", "read", List.of(new TextMessageContent("ok")), false, "{}")));
   }
 
-  private static AssistantMessageMetadata metadata(ProviderStopReason reason) {
+  private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
     ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
     ModelCost cost =
         new ModelCost(

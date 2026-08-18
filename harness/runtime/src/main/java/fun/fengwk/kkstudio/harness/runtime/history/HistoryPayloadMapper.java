@@ -44,6 +44,9 @@ public final class HistoryPayloadMapper {
   /** Synthetic history-cut ToolResult 的稳定错误内容。 */
   public static final String HISTORY_CUT_RESULT_TEXT = "No result provided";
 
+  /** 无 frozen binding（unknown tool / 输出截断）槽位的 durable renderer fallback。 */
+  public static final String UNBOUND_RENDERER_KEY = "tool";
+
   private static final String EMPTY_DETAILS_JSON = "{}";
 
   private final ToolInvocationErrorJsonCodec errorCodec = new ToolInvocationErrorJsonCodec();
@@ -225,10 +228,16 @@ public final class HistoryPayloadMapper {
     return new ToolResultMessageContent(
         invocation.request().call().id(),
         invocation.request().call().toolName(),
-        invocation.request().binding().descriptor().rendererKey(),
+        rendererKey(invocation),
         List.of(new TextMessageContent(invocation.error().message())),
         true,
         errorCodec.encode(invocation.error()));
+  }
+
+  /** FAILED 槽位的 binding 可能为空（unknown tool）：durable renderer fallback 固定为 {@code tool}。 */
+  private static String rendererKey(ToolInvocation invocation) {
+    ToolBinding binding = invocation.request().binding();
+    return binding == null ? UNBOUND_RENDERER_KEY : binding.descriptor().rendererKey();
   }
 
   private static ToolResultStatus statusOf(ToolInvocation invocation) {
@@ -242,12 +251,13 @@ public final class HistoryPayloadMapper {
     };
   }
 
+  /** ToolCall 的 rendererKey：优先 frozen binding；unknown tool 槽位 fallback 固定为 {@code tool}。 */
   private static String rendererKey(String toolName, List<ToolBinding> bindings) {
     for (ToolBinding binding : bindings) {
       if (binding.descriptor().name().equals(toolName)) {
         return binding.descriptor().rendererKey();
       }
     }
-    throw new IllegalStateException("no frozen tool binding matches tool call " + toolName);
+    return UNBOUND_RENDERER_KEY;
   }
 }

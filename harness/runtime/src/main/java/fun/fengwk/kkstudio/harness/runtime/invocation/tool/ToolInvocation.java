@@ -80,6 +80,7 @@ public record ToolInvocation(
     }
     effects = Objects.requireNonNull(effects, "effects");
     validateStatusFields(status, attempt, approval, result, effects, error, resultEntryId, request);
+    validateBindingConstraint(status, attempt, request);
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
     if (updatedAt.isBefore(createdAt)) {
@@ -536,6 +537,19 @@ public record ToolInvocation(
   private Instant effectiveMutationTime(Instant now) {
     Instant candidate = Objects.requireNonNull(now, "now");
     return candidate.isBefore(updatedAt) ? updatedAt : candidate;
+  }
+
+  /**
+   * binding 约束：只有 immediate FAILED（attempt=0）允许可空 binding（unknown tool / 输出截断的槽位）；READY /
+   * WAITING_APPROVAL / DISPATCHING / RUNNING / SUCCEEDED / CANCELLED / UNKNOWN 与 attempt&gt;0 的
+   * FAILED 必须携带非空 binding，保证 dispatch 路径永远不会触碰空 binding。
+   */
+  private static void validateBindingConstraint(
+      ToolInvocationStatus status, int attempt, ToolInvocationRequest request) {
+    if (request.binding() == null && (status != ToolInvocationStatus.FAILED || attempt != 0)) {
+      throw new IllegalArgumentException(
+          "binding is only nullable on immediate FAILED invocations (attempt 0)");
+    }
   }
 
   private static void validateStatusFields(

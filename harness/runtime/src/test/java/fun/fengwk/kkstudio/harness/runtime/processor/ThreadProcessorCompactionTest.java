@@ -46,8 +46,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -802,7 +802,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                               AgentMessageRole.ASSISTANT,
                               List.of(new TextMessageContent("assistant reply"))),
                           new AssistantMessageMetadata(
-                              ProviderStopReason.COMPLETED, usage(), cost()),
+                              GenerationStopReason.COMPLETE, usage(), cost()),
                           null),
                       NOW));
               tx.insertEntry(
@@ -992,7 +992,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       new AgentMessage(
                           AgentMessageRole.ASSISTANT,
                           List.of(new TextMessageContent("assistant reply"))),
-                      new AssistantMessageMetadata(ProviderStopReason.COMPLETED, usage(), cost()),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
                       null),
                   NOW));
           tx.insertEntry(
@@ -1051,7 +1051,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                           AgentMessageRole.ASSISTANT,
                           List.of(new TextMessageContent("assistant reply"))),
                       new AssistantMessageMetadata(
-                          ProviderStopReason.COMPLETED, OVER_THRESHOLD_USAGE, cost()),
+                          GenerationStopReason.COMPLETE, OVER_THRESHOLD_USAGE, cost()),
                       null),
                   NOW));
           tx.insertEntry(

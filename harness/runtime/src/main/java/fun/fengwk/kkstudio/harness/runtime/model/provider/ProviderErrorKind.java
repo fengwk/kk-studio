@@ -7,5 +7,6 @@ public enum ProviderErrorKind {
   AUTHENTICATION,
   BILLING,
   INVALID_REQUEST,
+  INVALID_RESPONSE,
   CANCELLED
 }

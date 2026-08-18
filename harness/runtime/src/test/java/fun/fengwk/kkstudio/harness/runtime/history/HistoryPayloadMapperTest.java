@@ -17,9 +17,9 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
@@ -65,7 +65,7 @@ class HistoryPayloadMapperTest {
             List.of(
                 new ProviderToolCall("call-1", "bash", "{}"),
                 new ProviderToolCall("call-2", "grep", "{}")),
-            ProviderStopReason.TOOL_CALLS,
+            GenerationStopReason.COMPLETE,
             usage(),
             cost(),
             "req",
@@ -86,7 +86,7 @@ class HistoryPayloadMapperTest {
         "call-2", ((ToolCallMessageContent) payload.message().contents().get(3)).toolCallId());
     assertEquals("bash", ((ToolCallMessageContent) payload.message().contents().get(2)).toolName());
     AssistantMessageMetadata metadata = payload.assistantMetadata();
-    assertEquals(ProviderStopReason.TOOL_CALLS, metadata.stopReason());
+    assertEquals(GenerationStopReason.COMPLETE, metadata.stopReason());
     assertEquals(usage(), metadata.usage());
     assertEquals(cost(), metadata.cost());
     assertNull(payload.toolResultMetadata());
@@ -100,7 +100,7 @@ class HistoryPayloadMapperTest {
                 "",
                 "thinking",
                 List.of(),
-                ProviderStopReason.COMPLETED,
+                GenerationStopReason.COMPLETE,
                 usage(),
                 cost(),
                 null,
@@ -113,7 +113,15 @@ class HistoryPayloadMapperTest {
     MessagePayload empty =
         MAPPER.assistantPayload(
             new ProviderResponse(
-                "", "", List.of(), ProviderStopReason.COMPLETED, usage(), cost(), null, null, "{}"),
+                "",
+                "",
+                List.of(),
+                GenerationStopReason.COMPLETE,
+                usage(),
+                cost(),
+                null,
+                null,
+                "{}"),
             List.of());
     assertEquals(1, empty.message().contents().size());
     assertEquals("", ((TextMessageContent) empty.message().contents().get(0)).text());
@@ -126,7 +134,7 @@ class HistoryPayloadMapperTest {
             "",
             "",
             List.of(new ProviderToolCall("call-1", "bash", "{}")),
-            ProviderStopReason.TOOL_CALLS,
+            GenerationStopReason.COMPLETE,
             usage(),
             cost(),
             null,
@@ -136,11 +144,13 @@ class HistoryPayloadMapperTest {
     MessagePayload payload = MAPPER.assistantPayload(response, List.of(request().binding()));
     ToolCallMessageContent call = (ToolCallMessageContent) payload.message().contents().get(0);
     assertEquals("shell-command", call.rendererKey());
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            MAPPER.assistantPayload(
-                response, List.of(new ToolBinding(descriptor("grep"), ToolType.PLATFORM, null))));
+    // 无匹配 binding（unknown tool 槽位）时 renderer fallback 固定为 "tool"。
+    MessagePayload unbound =
+        MAPPER.assistantPayload(
+            response, List.of(new ToolBinding(descriptor("grep"), ToolType.PLATFORM, null)));
+    ToolCallMessageContent unboundCall =
+        (ToolCallMessageContent) unbound.message().contents().get(0);
+    assertEquals(HistoryPayloadMapper.UNBOUND_RENDERER_KEY, unboundCall.rendererKey());
   }
 
   @Test
@@ -329,6 +339,33 @@ class HistoryPayloadMapperTest {
     assertTrue(result.error());
     assertEquals("No result provided", ((TextMessageContent) result.contents().get(0)).text());
     assertEquals("{}", result.detailsJson());
+  }
+
+  /** unknown tool 的 immediate FAILED 槽位 binding 为空：durable renderer fallback 固定为 {@code tool}。 */
+  @Test
+  void failedToolResultWithoutBindingFallsBackToToolRendererKey() {
+    ToolInvocation invocation =
+        new ToolInvocation(
+            id(1L),
+            id(1L),
+            id(7L),
+            3,
+            new ToolInvocationRequest(new ToolCall("call-1", "undeclared", "{}"), null),
+            ToolInvocationStatus.FAILED,
+            0,
+            ToolApproval.notRequired(),
+            null,
+            new ToolInvocationError("UNKNOWN_TOOL", "unknown tool: undeclared"),
+            null,
+            NOW,
+            NOW);
+    MessagePayload payload = MAPPER.toolResultPayload(invocation);
+    ToolResultMessageContent result =
+        (ToolResultMessageContent) payload.message().contents().get(0);
+    assertEquals("tool", result.rendererKey());
+    assertTrue(result.error());
+    assertEquals(
+        "unknown tool: undeclared", ((TextMessageContent) result.contents().get(0)).text());
   }
 
   private static ToolInvocation succeededInvocation(ToolResult result) {

@@ -18,8 +18,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -94,7 +94,7 @@ public final class HarnessRuntimeTestFixtures {
     MessagePayload payload =
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("ok"))),
-            new AssistantMessageMetadata(ProviderStopReason.COMPLETED, usage(), cost()),
+            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
             null);
     return new Entry(id(4), id(1), id(3), payload, NOW);
   }
@@ -158,7 +158,7 @@ public final class HarnessRuntimeTestFixtures {
         "",
         "",
         List.of(new ProviderToolCall("call-1", "web_search", "{}")),
-        ProviderStopReason.TOOL_CALLS,
+        GenerationStopReason.COMPLETE,
         usage(),
         cost(),
         null,
@@ -175,7 +175,7 @@ public final class HarnessRuntimeTestFixtures {
     MessagePayload payload =
         new MessagePayload(
             message,
-            new AssistantMessageMetadata(ProviderStopReason.TOOL_CALLS, usage(), cost()),
+            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
             null);
     return new Entry(id(4), id(1), id(3), payload, NOW);
   }
