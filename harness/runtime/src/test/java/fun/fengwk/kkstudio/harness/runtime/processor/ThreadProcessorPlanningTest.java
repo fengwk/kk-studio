@@ -12,8 +12,10 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedClosedTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.successResponse;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -63,11 +65,15 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * ThreadProcessor continuation / input planning 与 speculative plan + CAS 提交、reschedule、lease
- * margin。
+ * margin：每个 claim 恰执行一个动作。
  */
 class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
+  /**
+   * continuation 优先于 queued USER：claim1 只创建 continuation（不消费 USER、不 wake THREAD）；模拟 ModelProcessor
+   * 完成后 claim2 关闭 turn 时按 queued 快照 wake THREAD；claim3 才用保留 message 启动 INPUT。
+   */
   @Test
   void continuationHasPriorityOverQueuedInputAndLeavesMessagesForDeferredWake() {
     Fixture fixture = fixture();
@@ -77,26 +83,76 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
 
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
-
-    EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(6, path.entries().size());
-    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(5).payload();
+    // claim1：continuation plan -> resolve -> commit resolved：只请求 MODEL Work，不因 deferred USER 制造
+    // THREAD claim。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath afterContinuation = path(fixture.store, baseline.threadId());
+    assertEquals(6, afterContinuation.entries().size());
+    TurnStartPayload turnStart = (TurnStartPayload) afterContinuation.entries().get(5).payload();
     assertEquals(TurnStartReason.CONTINUATION, turnStart.reason());
     // continuation 不消费 USER_MESSAGE。
     assertEquals(
         ThreadCommandState.QUEUED,
         command(fixture.store, baseline.threadId(), userCommand).state());
-    // deferred wake：continuation 保留 USER/CUSTOM 时先 request THREAD Work 再 complete -> Work 保留、lease
-    // 已清。
+    // 无 THREAD wake：本 claim 的 THREAD Work 被 complete 删除，仅 MODEL Work 保留。
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    ModelInvocation continuationModel =
+        inTx(
+                fixture,
+                tx ->
+                    tx.findModelInvocationByTurn(
+                        baseline.threadId(), afterContinuation.entries().get(5).id()))
+            .orElseThrow();
+    assertNotNull(
+        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
+    assertEquals(1, fixture.resolver.calls);
+
+    // 模拟 ModelProcessor 完成 continuation Model 并请求 THREAD（enqueue 侧调度原语，重建 Work 行 v1）。
+    transitionModel(fixture.store, continuationModel.id(), m -> m.beginDispatch(NOW));
+    transitionModel(fixture.store, continuationModel.id(), m -> m.markRunning(NOW));
+    transitionModel(
+        fixture.store,
+        continuationModel.id(),
+        m -> m.succeed(successResponse(List.of(), "bash"), NOW));
+    requestThreadWork(fixture.store, baseline.threadId());
+
+    // claim2：closed apply（COMPLETE 无 calls）按 queued 快照重建 wake：先 request THREAD（wakeVersion=2）再
+    // complete。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath afterApply = path(fixture.store, baseline.threadId());
+    assertEquals(8, afterApply.entries().size());
+    // deferred wake：THREAD Work 保留、lease 已清，wakeVersion 从 enqueue 侧 v1 抬升到 apply 侧 v2。
     Work threadWork =
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
     assertNotNull(threadWork);
     assertNull(threadWork.leaseToken());
     assertEquals(2L, threadWork.wakeVersion());
+    // 关闭的 turn 未消费 USER；Model 行已被物理删除。
+    assertEquals(
+        ThreadCommandState.QUEUED,
+        command(fixture.store, baseline.threadId(), userCommand).state());
+    assertTrue(inTx(fixture, tx -> tx.findModelInvocation(continuationModel.id())).isEmpty());
     assertEquals(1, fixture.resolver.calls);
+
+    // claim3：保留 message 触发 INPUT turn（consume 后本 claim 的 THREAD Work 被 complete 删除）。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(10, path.entries().size());
+    TurnStartPayload input = (TurnStartPayload) path.entries().get(8).payload();
+    assertEquals(TurnStartReason.INPUT, input.reason());
+    assertEquals(
+        ThreadCommandState.APPLIED,
+        command(fixture.store, baseline.threadId(), userCommand).state());
+    ModelInvocation inputModel =
+        inTx(
+                fixture,
+                tx -> tx.findModelInvocationByTurn(baseline.threadId(), path.entries().get(8).id()))
+            .orElseThrow();
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, inputModel.id())));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    assertEquals(2, fixture.resolver.calls);
   }
 
   @Test
@@ -119,9 +175,9 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, baseline.threadId());
     // final branch 事实 = 消费 SET_MODEL 后的 candidate settings；auto 模式按同源事实构造一致请求。
     fixture.resolver.autoConsistent = true;
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    // 一个 claim：continuation 只消费 SET_MODEL（USER / SET_ENVIRONMENT 保留为 deferred，不在本 claim wake）。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
     TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(5).payload();
@@ -139,6 +195,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(
         path.entries().get(5).id(),
         command(fixture.store, baseline.threadId(), modelCommand).consumedTurnStartEntryId());
+    assertEquals(1, fixture.resolver.calls);
   }
 
   @Test
@@ -151,10 +208,9 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             baseline.threadId(),
             new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
     requestThreadWork(fixture.store, baseline.threadId());
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.QUIESCENT, fixture.processor.process(claim));
-
+    // 一个 claim：无 continuation / 无 message，config-only 直接 quiesce。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     assertEquals(1, path(fixture.store, baseline.threadId()).entries().size());
     assertEquals(0, fixture.resolver.calls);
     assertEquals(
@@ -176,9 +232,9 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    // 一个 claim：INPUT turn 一次构建并提交（Model Work 驱动，无 THREAD wake）。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
     assertEquals(3, path.entries().size());
@@ -231,9 +287,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
           touchThreadTimestamp(fixture.store, baseline.threadId(), commitFloor);
         };
 
-    assertEquals(
-        ThreadProcessResult.SUSPENDED,
-        fixture.processor.process(claimThreadWork(fixture.store, baseline.threadId())));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath durablePath = path(fixture.store, baseline.threadId());
     for (Entry committed : durablePath.entries().subList(1, 3)) {
@@ -313,9 +367,9 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.results.add(
         new TurnResolver.Rejected(new AssistantError("CONFIG_ERROR", "bad config")));
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.QUIESCENT, fixture.processor.process(claim));
+    // 一个 claim：rejected（message 已消费，无 deferred）直接完成，不请求 THREAD。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
     assertEquals(5, path.entries().size());
@@ -341,6 +395,47 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             .isEmpty());
   }
 
+  /**
+   * continuation 被 reject 但保留 deferred USER：commit 必须先请求 THREAD 再 complete（wake 保留），queued message
+   * 才能由后续 claim 处理。
+   */
+  @Test
+  void rejectedContinuationWithDeferredMessagesKeepsThreadWork() {
+    Fixture fixture = fixture();
+    var baseline = seedClosedTurn(fixture.store, true);
+    UUID userCommand =
+        seedCommand(
+            fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.results.add(
+        new TurnResolver.Rejected(new AssistantError("CONFIG_ERROR", "bad config")));
+
+    // 一个 claim：rejected 提交（候选 TURN_START + error + FAILED TURN_END）；deferred USER 保留 -> 先请求 THREAD。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(8, path.entries().size());
+    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(5).payload();
+    assertEquals(TurnStartReason.CONTINUATION, turnStart.reason());
+    AssistantErrorPayload error = (AssistantErrorPayload) path.entries().get(6).payload();
+    assertEquals("CONFIG_ERROR", error.error().code());
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(7).payload();
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
+    assertEquals(TurnEndReason.TURN_FAILED, end.reason());
+    assertEquals(
+        ThreadCommandState.QUEUED,
+        command(fixture.store, baseline.threadId(), userCommand).state());
+    // deferred wake：THREAD Work 保留（lease 已清）。
+    Work threadWork =
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+    assertNotNull(threadWork);
+    assertNull(threadWork.leaseToken());
+    assertEquals(1, fixture.resolver.calls);
+  }
+
+  /**
+   * resolve 期间 enqueue 侧新 wake 保留 THREAD Work；本 claim 的 commit 只请求 MODEL Work，complete 仍保留新 wake。
+   */
   @Test
   void cutoffCommandArrivingDuringResolveCommitsButIsExcluded() {
     Fixture fixture = fixture();
@@ -363,9 +458,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
           assertEquals(2L, command(fixture.store, baseline.threadId(), second).sequence());
           requestThreadWork(fixture.store, baseline.threadId());
         };
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     // 本 turn 只消费 cutoff 内命令；第二条命令保留 -> lost-wake 保留 Work 行（lease 已清）。
     EntryPath path = path(fixture.store, baseline.threadId());
@@ -415,9 +509,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                   tx.updateCommands(cancelled);
                   return null;
                 });
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.nextClaim(baseline.threadId()));
 
     assertEquals(1, path(fixture.store, baseline.threadId()).entries().size());
     assertEquals(
@@ -455,9 +548,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                   tx.updateThread(current.advanceHead(turnStartId, NOW));
                   return null;
                 });
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.nextClaim(baseline.threadId()));
 
     // 其他 actor 的 TURN_START 保留，本 plan 零写入。
     assertEquals(2, path(fixture.store, baseline.threadId()).entries().size());
@@ -484,10 +576,9 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                   tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
                   return null;
                 });
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     // commit 的 final fence（在全部低序 mutation 之后）丢失：整事务回滚，零 Entry / Command / Thread mutation。
-    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.nextClaim(baseline.threadId()));
 
     assertEquals(1, path(fixture.store, baseline.threadId()).entries().size());
     assertEquals(
@@ -575,7 +666,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     ClaimedWork claim =
         claimThreadWork(fixture.store, baseline.threadId(), NOW, NOW.plusSeconds(4));
 
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
     assertEquals(
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());

@@ -3,14 +3,13 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 /**
  * 一次 {@link ThreadProcessor#process} 调用的最小 typed 结果。
  *
- * <p>SUSPENDED 表示 Thread 已推进到一个正在运行的 Turn（终端应用后存在在途 Model/Tool invocation，或新 Turn 已 resolve 并 派发
- * MODEL Work），claim 已完成；QUIESCENT 表示当前没有任何可执行动作，claim 已完成；RESCHEDULED 表示临时失败（Resolver 异常 / null /
- * heartbeat 调度失败或 step limit）已按延迟重排 THREAD Work；LOST_OWNERSHIP 表示 claim 已 lost / stale 或提交 CAS
- * 失败，未做任何部分 mutation。
+ * <p>COMPLETED 表示本 claim 已消费：一个 durable action 已在该调用内完成，claim 的 THREAD Work 已完成（无新 wake 时删除行，
+ * 有同事务请求的新 wake 时清除 lease 并保留行），后续 action 一律由同事务 {@code requestWork} 驱动；RESCHEDULED 表示临时失败
+ * （Resolver 异常 / null / heartbeat 调度失败）已按延迟重排 THREAD Work；LOST_OWNERSHIP 表示 claim 已 lost / stale 或
+ * 提交 CAS 失败，未做任何部分 mutation。dispatcher 不解释本结果。
  */
 public enum ThreadProcessResult {
-  SUSPENDED,
-  QUIESCENT,
+  COMPLETED,
   RESCHEDULED,
   LOST_OWNERSHIP
 }

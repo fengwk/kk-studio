@@ -68,7 +68,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
             null);
     requestThreadWork(fixture.store, baseline.threadId());
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.QUIESCENT, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
     // 同一 claim 再次投递：Work 已完成删除，claimOwned 失败 -> LOST no-op。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
     // SUCCEEDED-no-calls 关闭 turn 后 Model 行被物理删除。
@@ -113,7 +113,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
                 ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(fixture.claim));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
     fixture.claim = claim;
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
     assertEquals(
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
@@ -136,7 +136,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     requestThreadWork(real, baseline.threadId());
     ClaimedWork claim = claimThreadWork(real, baseline.threadId());
 
-    // fence 调用序列：claimOwned（1）-> ModelActive blocker 的 Work fence（2）丢失 -> LoopStep.Lost -> LOST
+    // fence 调用序列：claimOwned（1）-> ModelActive blocker 的 Work fence（2）丢失 -> ClaimLostSignal -> LOST
     // no-op。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
     assertEquals(3, path(real, baseline.threadId()).entries().size());
@@ -187,7 +187,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     requestThreadWork(real, baseline.threadId());
     ClaimedWork claim = claimThreadWork(real, baseline.threadId());
 
-    // fence 调用序列：claimOwned（1）-> planStep 的 claim fence（2）丢失 -> LoopStep.Lost，resolver 不被调用。
+    // fence 调用序列：claimOwned（1）-> planStep 的 claim fence（2）丢失 -> ClaimLostSignal，resolver 不被调用。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
     assertEquals(1, path(real, baseline.threadId()).entries().size());
     assertEquals(0, fixture.resolver.calls);
