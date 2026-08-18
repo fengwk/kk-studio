@@ -95,7 +95,9 @@ class HarnessRuntimeStopReplayTest {
         store.transaction(
             tx -> {
               UUID turnStartId = tx.nextId();
-              tx.insertEntry(turnStartEntry(turnStartId, baseline.sessionId(), stoppedEndId, T5));
+              tx.insertEntry(
+                  turnStartEntry(
+                      turnStartId, baseline.sessionId(), stoppedEndId, T5, baseline.threadId()));
               UUID userEntryId = tx.nextId();
               tx.insertEntry(userMessageEntry(userEntryId, baseline.sessionId(), turnStartId, T5));
               return new UUID[] {turnStartId, userEntryId};
