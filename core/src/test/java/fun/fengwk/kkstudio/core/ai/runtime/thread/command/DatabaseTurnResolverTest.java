@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.ai.runtime.thread.command;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -967,6 +968,11 @@ class DatabaseTurnResolverTest {
     fixture.agent.setSystemPrompt("changed system prompt");
     fixture.agentConfig.setTools(List.of());
     fixture.modelSupportsTools(false);
+
+    // 二次 resolve 证明 mutation 真实生效：live spec 的 preamble 与 tools 都变了，而 frozen spec 不受影响。
+    ModelRequestSpec live = fixture.resolved(path);
+    assertNotEquals(preamble, preambleText(live));
+    assertTrue(live.toolBindings().isEmpty());
 
     assertEquals(preamble, preambleText(frozen));
     assertEquals(model, frozen.model());

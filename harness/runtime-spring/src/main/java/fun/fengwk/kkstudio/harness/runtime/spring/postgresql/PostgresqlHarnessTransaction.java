@@ -519,7 +519,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       throw new IllegalArgumentException(
           "turn start ownerThreadId must equal the model invocation threadId");
     }
-    if (turnStartPayload.contextWindow() == null) {
+    Integer contextWindow = turnStartPayload.contextWindow();
+    if (contextWindow == null || contextWindow <= 0) {
       throw new IllegalArgumentException(
           "model invocations require a positive turn start contextWindow");
     }
