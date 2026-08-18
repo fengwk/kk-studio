@@ -46,6 +46,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     getSystemPromptPreview: vi.fn(),
     enqueueCommands: vi.fn(),
     updateThreadHead: vi.fn(),
+    setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
   },
@@ -219,6 +220,10 @@ describe('useBoundBranchPanel', () => {
       snapshotOf(threadFixture(THREAD_ID)),
     )
     vi.mocked(harnessService.enqueueCommands).mockResolvedValue([] as HarnessThreadCommandDTO[])
+    // 直接控制面默认回显请求值（同值 no-op 由服务端保证，这里仅回显）。
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
+      Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled })),
+    )
   })
 
   it('initializes the draft from the snapshot with queued SET_* projected, and submits without a reversal diff', async () => {
@@ -284,19 +289,85 @@ describe('useBoundBranchPanel', () => {
     await send(result)
 
     const [, batch] = vi.mocked(harnessService.enqueueCommands).mock.calls[0]!
-    // buildBranchDiffCommands 的固定顺序：ENV/AGENT/MODEL/TOOLS/YOLO + USER_MESSAGE。
+    // buildBranchDiffCommands 的固定顺序：ENV/AGENT/MODEL/TOOLS + USER_MESSAGE；yolo 走直接控制面。
     expect(batch.commands.map((command) => command.type)).toEqual([
       'SET_ENVIRONMENT',
       'SET_AGENT',
       'SET_MODEL',
       'SET_ACTIVE_TOOLS',
-      'SET_YOLO',
       'USER_MESSAGE',
     ])
     const setAgent = batch.commands[1]!
     expect(setAgent).toMatchObject({ agentName: 'coder' })
     const setTools = batch.commands[3]!
     expect(setTools).toMatchObject({ activeTools: ['web-search', 'load_skill'] })
+    // 直接控制面调用基于 snapshot revision 的精确 CAS，绝不生成 SET_YOLO command。
+    expect(harnessService.setThreadYolo).toHaveBeenCalledWith(THREAD_ID, {
+      expectedRevision: '0',
+      yoloEnabled: true,
+    })
+  })
+
+  it('optimistically updates yolo via the direct API, aligning base+draft on success without touching other unsent settings', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectAgent('coder')
+      result.current.setYoloEnabled(true)
+    })
+    // 乐观：draft 立即变脏（yolo 目标值 + 未发送 agent），base 保持快照。
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 成功：base + draft 的 yolo 对齐服务器权威值；未发送的 agent 编辑原样保留。
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.yoloError).toBeNull()
+
+    await send(result)
+    const [, batch] = vi.mocked(harnessService.enqueueCommands).mock.calls[0]!
+    // 未发送的 agent 编辑（name + activeTools）仍与消息一起提交；yolo 已对齐，绝不重复发送。
+    expect(batch.commands.map((command) => command.type)).toEqual([
+      'SET_AGENT',
+      'SET_ACTIVE_TOOLS',
+      'USER_MESSAGE',
+    ])
+  })
+
+  it('reverts the optimistic yolo edit and surfaces yoloError when the direct API fails', async () => {
+    vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
+      new Error('STALE_REVISION: revision 2 does not match expected 0'),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 失败：draft 回滚到 base 值，错误暴露给面板；base 零触碰。
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+    expect(result.current.yoloError).toContain('STALE_REVISION')
+
+    act(() => {
+      result.current.dismissYoloError()
+    })
+    expect(result.current.yoloError).toBeNull()
   })
 
   it('resets the pane-local draft on thread rebind and re-initializes from the new snapshot', async () => {

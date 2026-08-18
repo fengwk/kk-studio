@@ -136,21 +136,22 @@ export async function runRefactorContractMatrix(ui) {
           await send.click()
           const queued = await waitForQueuedSettingsBatch(apiCtx, fixture.threadId, marker)
           assert(
-            queued.map((command) => command.type).join(',')
-              === 'SET_MODEL,SET_YOLO,USER_MESSAGE',
+            queued.map((command) => command.type).join(',') === 'SET_MODEL,USER_MESSAGE',
             `settings and message were not queued in frozen order: ${JSON.stringify(queued)}`,
           )
           const modelPayload = JSON.parse(queued[0].payloadJson)
-          const yoloPayload = JSON.parse(queued[1].payloadJson)
           assert(
             modelPayload.model?.providerName === fixture.provider.name
             && modelPayload.model?.modelName === fixture.model.name
             && modelPayload.model?.variant === 'review',
             `queued SET_MODEL does not match the UI selection: ${JSON.stringify(modelPayload)}`,
           )
+          // yolo 是直接控制面：选择 YOLO 立即 PUT /yolo（基于 snapshot revision 的 CAS），
+          // 绝不进入 command batch；Thread 快照反映权威值。
+          const fresh = await getThreadSnapshot(apiCtx, fixture.threadId)
           assert(
-            yoloPayload.yoloEnabled === true,
-            `queued SET_YOLO does not match the UI selection: ${JSON.stringify(yoloPayload)}`,
+            fresh.thread.yoloEnabled === true,
+            `direct yolo update was not reflected in the Thread snapshot: ${JSON.stringify(fresh.thread)}`,
           )
 
           await shot(caseArt, 'composer-settings-controls-batch')
@@ -667,8 +668,8 @@ async function waitForQueuedSettingsBatch(apiCtx, threadId, marker, timeoutMs = 
     const userIndex = commands.findIndex((command) =>
       command.type === 'USER_MESSAGE' && command.payloadJson.includes(marker),
     )
-    if (userIndex >= 2) {
-      return commands.slice(userIndex - 2, userIndex + 1)
+    if (userIndex >= 0) {
+      return commands
     }
     await sleep(50)
   }

@@ -166,8 +166,11 @@ export function CanvasBoundThread({
     onDecideTaskApproval: (targetThreadId, invocationId, decision) => {
       void controller.decideApproval(invocationId, decision, targetThreadId)
     },
-    actionError: controller.actionError,
-    onDismissActionError: controller.dismissActionError,
+    actionError: panel.yoloError ?? controller.actionError,
+    onDismissActionError: () => {
+      panel.dismissYoloError()
+      controller.dismissActionError()
+    },
   }
 
   return (

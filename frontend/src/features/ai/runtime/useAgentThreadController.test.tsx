@@ -271,7 +271,8 @@ describe('useAgentThreadController', () => {
     expect(batchArg.expectedNextCommandSequence).toBe('1')
     const types = batchArg.commands.map((command) => command.type)
     expect(types).toContain('SET_AGENT')
-    expect(types).toContain('SET_YOLO')
+    // YOLO 是 Thread 直接控制面，绝不进入 message batch。
+    expect(types).not.toContain('SET_YOLO')
     expect(types[types.length - 1]).toBe('USER_MESSAGE')
     const userMessage = batchArg.commands[batchArg.commands.length - 1]!
     expect(userMessage).toMatchObject({

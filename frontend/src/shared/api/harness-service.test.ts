@@ -20,7 +20,7 @@ describe('harnessService', () => {
       expectedNextCommandSequence: '0',
       commands: [
         { type: 'USER_MESSAGE', clientCommandId: 'cid-1', contents: [{ type: 'TEXT', text: 'hello' }] },
-        { type: 'SET_YOLO', clientCommandId: 'cid-2', yoloEnabled: true },
+        { type: 'SET_AGENT', clientCommandId: 'cid-2', agentName: 'assistant' },
       ],
     })
     await service.stopThread('thread /1', { stopRequestId: 'stop-1', expectedRevision: '5' })
@@ -28,6 +28,7 @@ describe('harnessService', () => {
       targetEntryId: '9007199254740993',
       expectedRevision: '5',
     })
+    await service.setThreadYolo('thread /1', { expectedRevision: '5', yoloEnabled: true })
     await service.decideApproval('thread /1', 'inv-9', {
       decision: 'ALLOW',
       decisionId: 'dec-1',
@@ -43,7 +44,7 @@ describe('harnessService', () => {
       expectedNextCommandSequence: '0',
       commands: [
         { type: 'USER_MESSAGE', clientCommandId: 'cid-1', contents: [{ type: 'TEXT', text: 'hello' }] },
-        { type: 'SET_YOLO', clientCommandId: 'cid-2', yoloEnabled: true },
+        { type: 'SET_AGENT', clientCommandId: 'cid-2', agentName: 'assistant' },
       ],
     })
     expect(client.post).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/stop', {
@@ -60,6 +61,10 @@ describe('harnessService', () => {
       targetEntryId: '9007199254740993',
       expectedRevision: '5',
     })
+    expect(client.put).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/yolo', {
+      expectedRevision: '5',
+      yoloEnabled: true,
+    })
   })
 
   it('exposes only the current Thread control and query surface', async () => {
@@ -70,6 +75,7 @@ describe('harnessService', () => {
     expect(service.getSystemPromptPreview).toBeTypeOf('function')
     expect(service.enqueueCommands).toBeTypeOf('function')
     expect(service.updateThreadHead).toBeTypeOf('function')
+    expect(service.setThreadYolo).toBeTypeOf('function')
     expect(service.stopThread).toBeTypeOf('function')
     expect(service.decideApproval).toBeTypeOf('function')
 

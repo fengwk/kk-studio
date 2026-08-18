@@ -48,7 +48,8 @@ import java.util.function.Consumer;
  * 跨节点时钟偏差，而 Work request 始终使用未抬升的本地调度时钟。
  *
  * <p>本切片实现 {@link #createThread}、{@link #enqueueCommands}、{@link #moveHead}、{@link #stop}、 {@link
- * #decideToolApproval}、{@link #getThreadSnapshot} 与 {@link #getThreadSessionEntries}。
+ * #decideToolApproval}、{@link #setThreadYolo}、{@link #getThreadSnapshot} 与 {@link
+ * #getThreadSessionEntries}。
  */
 @Slf4j
 public final class HarnessRuntime {
@@ -253,6 +254,42 @@ public final class HarnessRuntime {
             throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
           }
           return tx.findCommandByClientId(threadId, clientCommandId);
+        });
+  }
+
+  /**
+   * 在一个短 transaction 内直接更新 Thread 的 YOLO runtime policy。
+   *
+   * <p>锁 Thread 后先比较当前值：与请求值相同即按原样返回当前 Thread（网络重试 no-op，不触碰 revision、不创建 Command/Entry/Work、不请求
+   * Work），否则必须匹配 {@code expectedRevision}（否则 STALE_REVISION），随后在一个原子步骤中 更新 {@code yoloEnabled} 且
+   * revision 精确 +1。本操作绝不唤醒 processors。
+   */
+  public ThreadState setThreadYolo(SetThreadYoloCommand command) {
+    Objects.requireNonNull(command, "command");
+    return store.transaction(
+        tx -> {
+          ThreadState thread =
+              tx.lockThread(command.threadId())
+                  .orElseThrow(
+                      () ->
+                          new HarnessRuntimeNotFoundException(
+                              "thread " + command.threadId() + " does not exist"));
+          if (thread.yoloEnabled() == command.enabled()) {
+            return thread;
+          }
+          if (thread.revision() != command.expectedRevision()) {
+            throw conflict(
+                HarnessRuntimeConflictException.Reason.STALE_REVISION,
+                "thread "
+                    + thread.id()
+                    + " revision "
+                    + thread.revision()
+                    + " does not match expected "
+                    + command.expectedRevision());
+          }
+          ThreadState updated = thread.setYoloEnabled(command.enabled(), clock.instant());
+          tx.updateThread(updated);
+          return updated;
         });
   }
 

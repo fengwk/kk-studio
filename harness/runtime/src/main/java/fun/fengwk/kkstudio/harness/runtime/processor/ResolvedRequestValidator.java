@@ -15,7 +15,7 @@ import java.util.Objects;
  * Resolved 请求与 candidate branch 事实的机械一致性校验（Harness 边界）。
  *
  * <p>可直接对照 candidate {@link TurnPlan#candidatePath()} 最新 {@link BranchSettings} 的字段只有
- * provider/model/variant 选择，以及 environment-bound tool/skill 的 route。YOLO 不再进入 spec。
+ * provider/model/variant 选择，以及 environment-bound tool/skill 的 route。YOLO 不进入 spec，也不参与校验。
  *
  * <p>压缩 turn 必须携带与 preparation 逐字段一致的 {@link CompactionRequest} 元数据与相同 {@code contextWindow}，且
  * tool/skill binding 必须为空；正常 turn 必须携带 {@code compaction == null}。任何不一致都是 Resolver 契约 / 编程错误：抛清晰的

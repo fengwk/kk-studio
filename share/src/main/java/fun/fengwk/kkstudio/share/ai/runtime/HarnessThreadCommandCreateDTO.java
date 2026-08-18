@@ -14,8 +14,8 @@ import java.util.List;
  * 类型化 Thread mailbox 命令请求。
  *
  * <p>{@code type} 是 discriminator（USER_MESSAGE / CUSTOM_MESSAGE / SET_AGENT / SET_MODEL /
- * SET_ACTIVE_TOOLS / SET_YOLO / SET_ENVIRONMENT）；mapper 按 discriminator 严格校验 required/forbidden
- * 可选字段。{@code clientCommandId} 是稳定幂等键。
+ * SET_ACTIVE_TOOLS / SET_ENVIRONMENT）；mapper 按 discriminator 严格校验 required/forbidden 可选字段。{@code
+ * clientCommandId} 是稳定幂等键。YOLO 不再经过 mailbox，由 Thread 直接控制 API 更新。
  *
  * <p>USER_MESSAGE 只接受一个非空、有序的 {@link #contents}（内容为 TEXT / ATTACHMENT）；不提供任何文本 shorthand。
  * CUSTOM_MESSAGE 使用 {@link #content} 单文本正文。
@@ -24,8 +24,7 @@ import java.util.List;
 public class HarnessThreadCommandCreateDTO {
   /**
    * 必填命令类型 discriminator，取 {@code ThreadCommandType} 枚举名：USER_MESSAGE / CUSTOM_MESSAGE / SET_AGENT
-   * / SET_MODEL / SET_ACTIVE_TOOLS / SET_YOLO / SET_ENVIRONMENT；mapper 按类型严格校验 required/forbidden
-   * 字段。
+   * / SET_MODEL / SET_ACTIVE_TOOLS / SET_ENVIRONMENT；mapper 按类型严格校验 required/forbidden 字段。
    */
   private String type;
 
@@ -57,9 +56,6 @@ public class HarnessThreadCommandCreateDTO {
 
   /** 目标激活工具列表：仅 SET_ACTIVE_TOOLS 必填；其余类型禁止提供。 */
   private List<String> activeTools;
-
-  /** 目标 YOLO 策略：仅 SET_YOLO 必填；其余类型禁止提供。 */
-  private Boolean yoloEnabled;
 
   /**
    * 目标 Environment 完整 binding：仅 SET_ENVIRONMENT 必填，且 JSON 中必须出现该字段；可空对象（显式 null 表示解绑）；

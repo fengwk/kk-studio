@@ -77,7 +77,7 @@ class CoreToolGatewayPluginTest {
     Fixture fixture = fixture(pluginTool(PluginToolResult.withoutIntents(result(List.of()))));
 
     ToolGateway.PreflightResult result =
-        fixture.gateway.preflight(fixture.execution("write").request(), false);
+        fixture.gateway.preflight(fixture.execution("write").request());
 
     assertInstanceOf(ToolGateway.Allow.class, result);
   }

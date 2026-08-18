@@ -16,15 +16,14 @@ import java.util.UUID;
  *
  * <p>{@code candidatePath} 是 source path + candidate Entries 的完整合法 root-to-head 链（candidate Entry
  * 已分配 稳定 ID 但尚未持久化），交给 {@link fun.fengwk.kkstudio.harness.runtime.port.TurnResolver} 使用；提交事务必须重新校验
- * source head / source YOLO / cutoff 内 Command 精确快照 / claim ownership 后才能原子提交。{@code preparation}
- * 非空当且仅当 {@code reason == COMPACTION}：压缩 turn 的切分事实由纯 planner 在 plan 事务内冻结，Resolver 与
- * ResolvedRequestValidator 据此构造并严格校验压缩请求。
+ * source head / cutoff 内 Command 精确快照 / claim ownership 后才能原子提交；Thread YOLO 始终以第二事务锁到的当前值 为准，不进入
+ * plan。{@code preparation} 非空当且仅当 {@code reason == COMPACTION}：压缩 turn 的切分事实由纯 planner 在 plan
+ * 事务内冻结，Resolver 与 ResolvedRequestValidator 据此构造并严格校验压缩请求。
  */
 record TurnPlan(
     UUID threadId,
     UUID sessionId,
     UUID sourceHeadEntryId,
-    boolean sourceYoloEnabled,
     long cutoffSequence,
     List<ThreadCommand> plannedCommands,
     List<ThreadCommand> consumedCommands,
@@ -32,7 +31,6 @@ record TurnPlan(
     EntryPath candidatePath,
     UUID turnStartEntryId,
     UUID candidateHeadEntryId,
-    boolean finalYoloEnabled,
     TurnStartReason reason,
     CompactionPreparation preparation) {
 

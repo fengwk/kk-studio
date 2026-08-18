@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
 import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.MoveHeadCommand;
+import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -35,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandP
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetYoloCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
@@ -59,6 +59,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelAttemptFailureDTO;
@@ -417,6 +418,15 @@ public final class HarnessRuntimeWebMapper {
         parseNonNegativeDecimal(dto.getExpectedRevision(), "expectedRevision"));
   }
 
+  public static SetThreadYoloCommand toSetThreadYoloCommand(
+      String threadId, HarnessThreadYoloUpdateDTO dto) {
+    requireNonNull(dto, "yoloUpdateDTO");
+    return new SetThreadYoloCommand(
+        parseUuid(threadId, "threadId"),
+        parseNonNegativeDecimal(dto.getExpectedRevision(), "expectedRevision"),
+        requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
+  }
+
   public static ToolApprovalCommand toToolApprovalCommand(
       String threadId, String toolInvocationId, HarnessToolApprovalDTO dto) {
     requireNonNull(dto, "approvalDTO");
@@ -444,62 +454,32 @@ public final class HarnessRuntimeWebMapper {
     return switch (type) {
       case USER_MESSAGE -> {
         requireForbidden(
-            dto,
-            "content",
-            "role",
-            "agentName",
-            "model",
-            "activeTools",
-            "yoloEnabled",
-            "environment");
+            dto, "content", "role", "agentName", "model", "activeTools", "environment");
         yield new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
       }
       case CUSTOM_MESSAGE -> {
-        requireForbidden(
-            dto, "contents", "agentName", "model", "activeTools", "yoloEnabled", "environment");
+        requireForbidden(dto, "contents", "agentName", "model", "activeTools", "environment");
         AgentMessageRole role = requireRole(dto.getRole());
         yield new CustomMessageCommandPayload(
             new AgentMessage(
                 role, List.of(new TextMessageContent(requireText(dto.getContent(), "content")))));
       }
       case SET_AGENT -> {
-        requireForbidden(
-            dto,
-            "content",
-            "contents",
-            "role",
-            "model",
-            "activeTools",
-            "yoloEnabled",
-            "environment");
+        requireForbidden(dto, "content", "contents", "role", "model", "activeTools", "environment");
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
       case SET_MODEL -> {
         requireForbidden(
-            dto,
-            "content",
-            "contents",
-            "role",
-            "agentName",
-            "activeTools",
-            "yoloEnabled",
-            "environment");
+            dto, "content", "contents", "role", "agentName", "activeTools", "environment");
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
       }
       case SET_ACTIVE_TOOLS -> {
-        requireForbidden(
-            dto, "content", "contents", "role", "agentName", "model", "yoloEnabled", "environment");
+        requireForbidden(dto, "content", "contents", "role", "agentName", "model", "environment");
         yield new SetActiveToolsCommandPayload(requireList(dto.getActiveTools(), "activeTools"));
       }
-      case SET_YOLO -> {
-        requireForbidden(
-            dto, "content", "contents", "role", "agentName", "model", "activeTools", "environment");
-        yield new SetYoloCommandPayload(requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
-      }
       case SET_ENVIRONMENT -> {
-        requireForbidden(
-            dto, "content", "contents", "role", "agentName", "model", "activeTools", "yoloEnabled");
+        requireForbidden(dto, "content", "contents", "role", "agentName", "model", "activeTools");
         if (!dto.hasEnvironmentField()) {
           throw new IllegalArgumentException(
               "SET_ENVIRONMENT must contain environment (a binding object selects, null unbinds)");
@@ -608,7 +588,6 @@ public final class HarnessRuntimeWebMapper {
             case "agentName" -> dto.getAgentName();
             case "model" -> dto.getModel();
             case "activeTools" -> dto.getActiveTools();
-            case "yoloEnabled" -> dto.getYoloEnabled();
             case "environment" -> dto.hasEnvironmentField() ? Boolean.TRUE : null;
             default -> throw new IllegalArgumentException("unknown field: " + field);
           };

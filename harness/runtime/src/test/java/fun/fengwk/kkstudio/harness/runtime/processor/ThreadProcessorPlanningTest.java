@@ -24,6 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -42,7 +44,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetYoloCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -51,10 +52,14 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * ThreadProcessor continuation / input planning 与 speculative plan + CAS 提交、reschedule、lease
@@ -111,10 +116,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             fixture.store,
             baseline.threadId(),
             new SetEnvironmentCommandPayload(EnvironmentBindings.binding("env-1")));
-    UUID yoloCommand =
-        seedCommand(fixture.store, baseline.threadId(), new SetYoloCommandPayload(true));
     requestThreadWork(fixture.store, baseline.threadId());
-    // final branch 事实 = 消费 SET_MODEL/SET_YOLO 后的 candidate settings；auto 模式按同源事实构造一致请求。
+    // final branch 事实 = 消费 SET_MODEL 后的 candidate settings；auto 模式按同源事实构造一致请求。
     fixture.resolver.autoConsistent = true;
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
@@ -124,7 +127,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(5).payload();
     assertEquals("model-b", turnStart.settings().model().modelName());
     assertEquals("v2", turnStart.settings().model().variant());
-    // SET_MODEL / SET_YOLO 被 continuation 消费；USER_MESSAGE / SET_ENVIRONMENT 保留。
+    // SET_MODEL 被 continuation 消费；USER_MESSAGE / SET_ENVIRONMENT 保留。
     assertEquals(
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), modelCommand).state());
@@ -133,10 +136,6 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         command(fixture.store, baseline.threadId(), userCommand).state());
     assertEquals(
         ThreadCommandState.QUEUED, command(fixture.store, baseline.threadId(), envCommand).state());
-    assertEquals(
-        ThreadCommandState.APPLIED,
-        command(fixture.store, baseline.threadId(), yoloCommand).state());
-    assertTrue(thread(fixture.store, baseline.threadId()).yoloEnabled());
     assertEquals(
         path.entries().get(5).id(),
         command(fixture.store, baseline.threadId(), modelCommand).consumedTurnStartEntryId());
@@ -175,8 +174,6 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
-    UUID yoloCommand =
-        seedCommand(fixture.store, baseline.threadId(), new SetYoloCommandPayload(true));
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
@@ -197,10 +194,6 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
-    assertEquals(
-        ThreadCommandState.APPLIED,
-        command(fixture.store, baseline.threadId(), yoloCommand).state());
-    assertTrue(thread(fixture.store, baseline.threadId()).yoloEnabled());
     assertEquals(
         path.entries().get(2).id(), thread(fixture.store, baseline.threadId()).headEntryId());
     // ModelInvocation：basis == candidate head，turnStart 指向新 TURN_START，MODEL Work 已请求。
@@ -256,6 +249,58 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(commitFloor, invocation.createdAt());
     assertEquals(commitFloor, invocation.updatedAt());
     assertEquals(commitFloor, thread(fixture.store, baseline.threadId()).updatedAt());
+  }
+
+  /**
+   * Resolver 两阶段提交的 YOLO 以第二事务锁到的 Thread 当前值为准：plan 在 yolo=false 时构造，resolve 期间并发 {@code
+   * setThreadYolo(true)}（revision 0-&gt;1）成功，commit 重锁 Thread 后仍用最新的 {@code yoloEnabled=true} 推进
+   * head（revision 再 +1），绝不回写 plan 冻结值。
+   */
+  @Test
+  void resolvedCommitAdvancesYoloFromSecondTransactionLockedValue() throws Exception {
+    Fixture fixture = fixture();
+    var baseline = seedBaseline(fixture.store);
+    UUID userCommand =
+        seedCommand(
+            fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+    CountDownLatch resolverEntered = new CountDownLatch(1);
+    CountDownLatch releaseResolver = new CountDownLatch(1);
+    fixture.resolver.onResolve =
+        () -> {
+          resolverEntered.countDown();
+          try {
+            releaseResolver.await(5, TimeUnit.SECONDS);
+          } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+          }
+        };
+    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
+
+    Thread processing = new Thread(() -> fixture.processor.process(claim));
+    processing.start();
+    assertTrue(resolverEntered.await(5, TimeUnit.SECONDS));
+    // 并发直接控制面：与 plan 无关的独立短事务，成功（seedCommand 已把 revision 推进到 1，CAS 精确匹配）。
+    HarnessRuntime runtime = new HarnessRuntime(fixture.store, Clock.fixed(NOW, ZoneOffset.UTC));
+    ThreadState yoloUpdate =
+        runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 1, true));
+    assertTrue(yoloUpdate.yoloEnabled());
+    assertEquals(2L, yoloUpdate.revision());
+    releaseResolver.countDown();
+    processing.join(5000);
+    assertFalse(processing.isAlive());
+
+    ThreadState finalThread = thread(fixture.store, baseline.threadId());
+    assertTrue(finalThread.yoloEnabled());
+    // seedCommand +1，setThreadYolo +1，commit advanceHead 再 +1。
+    assertEquals(3L, finalThread.revision());
+    assertEquals(
+        ThreadCommandState.APPLIED,
+        command(fixture.store, baseline.threadId(), userCommand).state());
+    assertEquals(
+        path(fixture.store, baseline.threadId()).entries().get(2).id(), finalThread.headEntryId());
+    assertEquals(1, fixture.resolver.calls);
   }
 
   @Test

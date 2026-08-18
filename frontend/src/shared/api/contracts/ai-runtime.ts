@@ -127,7 +127,6 @@ export type HarnessThreadCommandCreateDTO =
   | { type: 'SET_AGENT'; clientCommandId: string; agentName: string }
   | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
   | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
-  | { type: 'SET_YOLO'; clientCommandId: string; yoloEnabled: boolean }
   | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environment: EnvironmentBindingDTO | null }
 
 /** 原子化的 Thread mailbox 入队请求；期望游标来自最新的 thread DTO。 */
@@ -148,6 +147,15 @@ export interface HarnessThreadCreateDTO {
 export interface HarnessThreadHeadUpdateDTO {
   targetEntryId: string
   expectedRevision: string
+}
+
+/**
+ * Thread YOLO policy 直接更新请求；expectedRevision 是精确的 revision CAS 游标
+ * （同值请求在任何 CAS 之前即成功 no-op）。
+ */
+export interface HarnessThreadYoloUpdateDTO {
+  expectedRevision: string
+  yoloEnabled: boolean
 }
 
 /** Thread 停止请求；stopRequestId 是稳定的幂等键。 */

@@ -93,7 +93,7 @@ Session、Environment、status 与 branch settings 都由 head Entry 分支派�
 
 ### ThreadCommand
 
-有序 mailbox，只接受七类命令：
+有序 mailbox，只接受六类命令：
 
 ```text
 USER_MESSAGE
@@ -102,8 +102,9 @@ SET_ENVIRONMENT
 SET_AGENT
 SET_MODEL
 SET_ACTIVE_TOOLS
-SET_YOLO
 ```
+
+Thread 的 YOLO runtime policy 是直接控制面（`PUT /yolo` 修订 CAS），绝不经过 mailbox。
 
 每行保存 `(thread_id, sequence)` 主键、UUID `client_command_id`（thread 内唯一幂等键）、
 `request_hash`（raw 命令 canonical SHA-256）、`consumed_turn_start_entry_id` 与

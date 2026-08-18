@@ -180,8 +180,9 @@ function sameStringList(left: string[], right: string[]): boolean {
 }
 
 /**
- * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO。
+ * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS。
  * 每个 command 都通过注入的 id factory 携带自己的稳定 clientCommandId。
+ * YOLO 是 Thread 级直接控制面（PUT /yolo），绝不生成 SET_YOLO command。
  */
 export function buildBranchDiffCommands(
   base: BranchDraft,
@@ -215,13 +216,6 @@ export function buildBranchDiffCommands(
       type: 'SET_ACTIVE_TOOLS',
       clientCommandId: createCommandId(),
       activeTools: [...draft.activeTools],
-    })
-  }
-  if (base.yoloEnabled !== draft.yoloEnabled) {
-    commands.push({
-      type: 'SET_YOLO',
-      clientCommandId: createCommandId(),
-      yoloEnabled: draft.yoloEnabled,
     })
   }
   return commands
@@ -305,12 +299,6 @@ function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO
         ? payload.activeTools.filter((item): item is string => typeof item === 'string')
         : base.activeTools
       return { ...base, activeTools: [...activeTools] }
-    }
-    case 'SET_YOLO': {
-      const yoloEnabled = typeof payload.yoloEnabled === 'boolean'
-        ? payload.yoloEnabled
-        : base.yoloEnabled
-      return { ...base, yoloEnabled }
     }
     default:
       return base

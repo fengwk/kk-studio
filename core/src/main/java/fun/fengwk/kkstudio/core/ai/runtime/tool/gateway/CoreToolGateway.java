@@ -72,8 +72,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * Production {@link ToolGateway}：冻结 Tool request 的权限 preflight 与 admission 路由。
  *
  * <p>{@link #preflight} 是纯判定：用 {@link PermissionEvaluator} + 部署 {@link ToolSettings} + 配置的
- * workdir/environmentRoot 评估冻结的 call/binding，YOLO 在加载 settings / evaluator 之前直接返回 Allow；绝不改写
- * binding/arguments。{@link #start} 按冻结 binding 的 {@link ToolType} 路由：PLATFORM 走 {@link
+ * workdir/environmentRoot 评估冻结的 call/binding，绝不改写 binding/arguments；YOLO 短路由由 Runtime 决定，本类 不感知
+ * YOLO 也不查询 HarnessStore。{@link #start} 按冻结 binding 的 {@link ToolType} 路由：PLATFORM 走 {@link
  * ToolFactories} 精确 name/version + descriptor equality 后提交注入的 {@link ExecutorService}
  * 执行；ENVIRONMENT 只按冻结的完整 binding 经 {@link RemoteToolTransport} 发送。missing capability /
  * 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active remote invocation 映射
@@ -255,12 +255,8 @@ public final class CoreToolGateway implements ToolGateway {
   }
 
   @Override
-  public PreflightResult preflight(ToolInvocationRequest request, boolean yoloEnabled) {
+  public PreflightResult preflight(ToolInvocationRequest request) {
     Objects.requireNonNull(request, "request");
-    if (yoloEnabled) {
-      // YOLO 覆盖一切权限判定：在加载 settings / evaluator 之前直接 Allow（两者可能依赖外部资源，YOLO 路径绝不触碰）。
-      return new ToolGateway.Allow();
-    }
     ToolSettings settings = toolSettingsProvider.get();
     PermissionEvaluator.Evaluation evaluation =
         permissionEvaluator.evaluate(

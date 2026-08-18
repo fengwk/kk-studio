@@ -65,11 +65,11 @@ Model attempt 审计 payload 由同一 codec 严格编解码：
 
 ## 3. 命令 batch
 
-七类命令：
+六类命令：
 
 ```java
 USER_MESSAGE, CUSTOM_MESSAGE, SET_ENVIRONMENT, SET_AGENT, SET_MODEL,
-SET_ACTIVE_TOOLS, SET_YOLO
+SET_ACTIVE_TOOLS
 ```
 
 请求 wire（`HarnessThreadCommandBatchDTO`）：
@@ -98,7 +98,7 @@ SET_ACTIVE_TOOLS, SET_YOLO
 - `commands` 非空；每个 command 必须有 canonical UUID `clientCommandId`（thread 内唯一，幂等键）；同 batch 内不得重复。
 - `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费物化为 durable `resource(blobId,name,preview)`），未知字段、未知类型、空 `contents` 与非 canonical uploadId 一律拒绝。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝、`content` 对 USER_MESSAGE 禁用。
 - `CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
-- `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environment`（完整 `{name, workspacePath}` 对象或 null）。
+- `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_ENVIRONMENT` 携带 `environment`（完整 `{name, workspacePath}` 对象或 null）。YOLO 不是 command：`PUT /api/ai/runtime/threads/{threadId}/yolo` 直接更新 Thread policy（见 §3「YOLO 直接控制面」）。
 - mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `contents`（`role` 仅 `CUSTOM_MESSAGE` 允许）等不相关字段，未知字段（含 `text`）一律拒绝。
 
 ### Ordered command-set replay
@@ -113,6 +113,10 @@ SET_ACTIVE_TOOLS, SET_YOLO
 全新 batch 才做双 cursor CAS（任一不匹配 → `STALE_COMMAND_CURSOR` 409），成功后一次性预留全部 sequence（`nextCommandSequence += commands.length`，revision +1）、全部命令写入 QUEUED、请求 THREAD Work，整体原子提交。
 
 包含 `SET_ENVIRONMENT` 的全新 batch 额外要求**真正静止的前置状态**：无 queued `USER_MESSAGE` / `CUSTOM_MESSAGE`、共享 classifier 结果为 `IDLE_OR_HISTORICAL`、且 **THREAD Work 行完全不存在**（行存在即 fence 投机 Resolver/runnable mailbox，无论是否已 lease）。Exact replay 绕过该 admission 检查。
+
+### YOLO 直接控制面
+
+`PUT /{threadId}/yolo` body `{expectedRevision, yoloEnabled}`：锁 Thread 后同值请求在任何 revision CAS 之前按原样返回当前 Thread（网络重试 no-op，revision/updatedAt 零触碰）；值变化必须匹配 `expectedRevision`（否则 `STALE_REVISION` 409），随后一个原子步骤更新 `yoloEnabled` 且 revision 精确 +1。返回权威 Thread DTO（与 `PUT /head`/`POST /stop` 一致）。不创建 Command/Entry/Work，不唤醒 processors。
 
 ## 4. Snapshot
 

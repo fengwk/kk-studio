@@ -42,7 +42,7 @@ class ToolProcessorPreflightTest {
 
   /**
    * Allow：同一短事务顺序 markApprovalNotRequired -&gt; beginDispatch（Thread revision 只 +1），随后 markRunning
-   * +1， preflight 收到冻结 request 与 source model 的 yolo 策略。
+   * +1，preflight 收到冻结 request。
    */
   @Test
   void allowDispatchesAndStarts() {
@@ -59,7 +59,6 @@ class ToolProcessorPreflightTest {
 
     assertEquals(1, fixture.gateway.preflightCallsCount);
     assertEquals(fixture.request, fixture.gateway.preflightCalls.get(0).request());
-    assertFalse(fixture.gateway.preflightCalls.get(0).yoloEnabled());
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.RUNNING, tool.status());
     assertEquals(1, tool.attempt());
@@ -335,14 +334,19 @@ class ToolProcessorPreflightTest {
     assertEquals("near-expiry", toolWork.leaseToken());
   }
 
-  /** yolo 策略从 source model 的冻结 request 读取，而不是 Thread 当前值。 */
+  /**
+   * YOLO=true：锁内 Thread 快照直接 Allow，绝不调用 ToolGateway.preflight / permission evaluator，但仍恰好启动一次
+   * Tool（admission 段走既有 dispatch：registry / heartbeat / lease / cancel 语义完整保留）。
+   */
   @Test
-  void yoloEnabledIsFrozenFromSourceModelRequest() {
+  void yoloTrueDispatchesWithoutGatewayPreflightAndStartsExactlyOnce() {
     ToolProcessorTestSupport.Fixture fixture =
         ToolProcessorTestSupport.fixture(
             ToolProcessorTestSupport.NO_RETRY, ToolSideEffect.READ_ONLY, true);
-    fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    // 不 queue 任何 preflight result：若 YOLO 路径错误地调用 gateway.preflight 会立即抛
+    // IllegalStateException，测试确定性失败。
+    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
+    fixture.gateway.queueStart(new ToolGateway.Started(handle));
 
     assertEquals(
         ProcessResult.STARTED,
@@ -350,7 +354,82 @@ class ToolProcessorPreflightTest {
             ToolProcessorTestSupport.claim(
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
 
-    assertTrue(fixture.gateway.preflightCalls.get(0).yoloEnabled());
+    assertEquals(0, fixture.gateway.preflightCallsCount);
+    assertEquals(1, fixture.gateway.startCalls);
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.RUNNING, tool.status());
+    assertEquals(1, tool.attempt());
+    assertNotNull(tool.approval());
+    assertFalse(tool.approval().required());
+    assertEquals(
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
+    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
+    assertEquals(1, fixture.gateway.executions.get(0).proposedAttempt());
+    assertEquals(fixture.request, fixture.gateway.executions.get(0).request());
+    assertFalse(handle.isCancelled());
+    // registry / lease 语义与普通 Allow 路径一致：本地 execution 已注册，TOOL Work 持有 claim lease。
+    assertTrue(fixture.processor.hasActiveExecution());
+    assertTrue(fixture.processor.cancel(fixture.toolInvocationId));
+    assertFalse(fixture.processor.hasActiveExecution());
+    Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
+    assertNotNull(toolWork);
+    assertEquals("token-" + fixture.toolInvocationId, toolWork.leaseToken());
+  }
+
+  /** YOLO=true 不改变 WAITING_APPROVAL：已进入审批的 Tool 保留原审批请求，不因打开 YOLO 自动放行（不执行、不 bump revision）。 */
+  @Test
+  void yoloTrueLeavesWaitingApprovalUntouched() {
+    ToolProcessorTestSupport.Fixture fixture =
+        ToolProcessorTestSupport.fixture(
+            ToolProcessorTestSupport.NO_RETRY, ToolSideEffect.READ_ONLY, true);
+    ToolProcessorTestSupport.transition(
+        fixture.store,
+        fixture.toolInvocationId,
+        tool ->
+            ToolProcessorTestSupport.waitingApproval(
+                tool, "needs confirmation", ToolProcessorTestSupport.NOW));
+
+    assertEquals(
+        ProcessResult.TERMINATED,
+        fixture.processor.process(
+            ToolProcessorTestSupport.claim(
+                fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.WAITING_APPROVAL, tool.status());
+    assertNotNull(tool.approval());
+    assertTrue(tool.approval().required());
+    assertTrue(tool.approval().isUndecided());
+    assertEquals(0, fixture.gateway.preflightCallsCount);
+    assertEquals(0, fixture.gateway.startCalls);
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** YOLO=true 时锁内快照已决策的 Allow 在提交前仍做二次校验：claim 丢失完整 no-op（不启动 gateway），与普通 Allow 路径一致。 */
+  @Test
+  void yoloDirectAllowLostClaimIsNoOp() {
+    ToolProcessorTestSupport.Fixture fixture =
+        ToolProcessorTestSupport.fixture(
+            ToolProcessorTestSupport.NO_RETRY, ToolSideEffect.READ_ONLY, true);
+    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+
+    ClaimedWork claimed =
+        ToolProcessorTestSupport.claim(
+            fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    ToolProcessorTestSupport.deleteToolWork(fixture);
+
+    // 二次校验事务内 lockClaimedWork 失败：完整 no-op。
+    assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
+    assertEquals(
+        ToolInvocationStatus.READY,
+        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
+    assertEquals(
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(0, fixture.gateway.preflightCallsCount);
+    assertEquals(0, fixture.gateway.startCalls);
+    assertFalse(fixture.processor.hasActiveExecution());
   }
 
   /** preflight 期间 ownership 丢失（Stop deleteWork）：二次校验失败，完整 no-op，绝不 start。 */

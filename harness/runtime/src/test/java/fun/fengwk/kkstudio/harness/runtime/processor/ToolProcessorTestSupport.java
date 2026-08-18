@@ -142,8 +142,8 @@ final class ToolProcessorTestSupport {
         ScheduledExecutorService scheduler) {
       this.scheduler = scheduler;
       this.request = toolRequest("call-1", sideEffect);
-      this.baseline = seedToolBaseline(store, NOW);
-      Seeded seeded = seedTool(store, baseline, request, yoloEnabled, NOW);
+      this.baseline = seedToolBaseline(store, NOW, yoloEnabled);
+      Seeded seeded = seedTool(store, baseline, request, NOW);
       this.modelInvocationId = seeded.modelInvocationId();
       this.toolInvocationId = seeded.toolInvocationId();
       this.processor =
@@ -160,7 +160,7 @@ final class ToolProcessorTestSupport {
     /** 额外种子第二条完整 Tool 链（复用同一 request 的 call-1）。 */
     Seeded seedExtraTool() {
       Baseline extraBaseline = seedToolBaseline(store, NOW);
-      return seedTool(store, extraBaseline, request, false, NOW);
+      return seedTool(store, extraBaseline, request, NOW);
     }
   }
 
@@ -190,6 +190,10 @@ final class ToolProcessorTestSupport {
   }
 
   static Baseline seedToolBaseline(InMemoryHarnessStore store, Instant now) {
+    return seedToolBaseline(store, now, false);
+  }
+
+  static Baseline seedToolBaseline(InMemoryHarnessStore store, Instant now, boolean yoloEnabled) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -222,7 +226,8 @@ final class ToolProcessorTestSupport {
                   userEntryId,
                   assistantPayload("call-1"),
                   now.plusMillis(3)));
-          tx.insertThread(new ThreadState(threadId, turnStartEntryId, false, 1L, 0L, now, now));
+          tx.insertThread(
+              new ThreadState(threadId, turnStartEntryId, yoloEnabled, 1L, 0L, now, now));
           return new Baseline(
               sessionId, rootEntryId, turnStartEntryId, userEntryId, assistantEntryId, threadId);
         });
@@ -233,17 +238,13 @@ final class ToolProcessorTestSupport {
    * + READY ToolInvocation + THREAD / TOOL Work。
    */
   static Seeded seedTool(
-      InMemoryHarnessStore store,
-      Baseline baseline,
-      ToolInvocationRequest request,
-      boolean yoloEnabled,
-      Instant now) {
+      InMemoryHarnessStore store, Baseline baseline, ToolInvocationRequest request, Instant now) {
     return store.transaction(
         tx -> {
           UUID modelId = tx.nextId();
           UUID toolId = tx.nextId();
           tx.lockThread(baseline.threadId());
-          ModelRequestSpec modelRequest = modelRequest(yoloEnabled);
+          ModelRequestSpec modelRequest = modelRequest();
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -450,7 +451,7 @@ final class ToolProcessorTestSupport {
         Duration.ofSeconds(30));
   }
 
-  private static ModelRequestSpec modelRequest(boolean yoloEnabled) {
+  private static ModelRequestSpec modelRequest() {
     ProviderRequest provider = providerRequest();
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -630,9 +631,9 @@ final class ToolProcessorTestSupport {
     }
 
     @Override
-    public PreflightResult preflight(ToolInvocationRequest request, boolean yoloEnabled) {
+    public PreflightResult preflight(ToolInvocationRequest request) {
       preflightCallsCount++;
-      PreflightCall call = new PreflightCall(request, yoloEnabled);
+      PreflightCall call = new PreflightCall(request);
       preflightCalls.add(call);
       Object result = preflightResults.poll();
       if (result == null) {
@@ -678,7 +679,7 @@ final class ToolProcessorTestSupport {
     }
   }
 
-  record PreflightCall(ToolInvocationRequest request, boolean yoloEnabled) {}
+  record PreflightCall(ToolInvocationRequest request) {}
 
   static class FakeHandle implements ToolGateway.Handle {
     final AtomicInteger cancels = new AtomicInteger();

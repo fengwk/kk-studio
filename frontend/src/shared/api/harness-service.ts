@@ -9,6 +9,7 @@ import type {
   HarnessThreadSnapshotDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
+  HarnessThreadYoloUpdateDTO,
   HarnessToolApprovalDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
@@ -19,7 +20,7 @@ import type {
  * - GET entries（Thread 所属 Session 的完整不可变 Entry Tree）
  * - GET system-prompt（按当前 branch 最新状态现算的系统提示词预览）
  * - POST commands（202 已接受，返回持久的 command 列表）
- * - PUT head / POST stop / POST approval（均基于 revision CAS）
+ * - PUT head / PUT yolo / POST stop / POST approval（head/yolo/stop 均基于 revision CAS）
  * - 实时事件经应用级 WebSocket（/api/events/v1，见 shared/app-events）
  */
 export function createHarnessService(client: HttpClient = apiClient) {
@@ -40,6 +41,11 @@ export function createHarnessService(client: HttpClient = apiClient) {
       data: HarnessThreadHeadUpdateDTO,
     ): Promise<HarnessThreadDTO> =>
       client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/head`, data),
+    setThreadYolo: (
+      threadId: string,
+      data: HarnessThreadYoloUpdateDTO,
+    ): Promise<HarnessThreadDTO> =>
+      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/yolo`, data),
     stopThread: (
       threadId: string,
       data: HarnessThreadStopDTO,
