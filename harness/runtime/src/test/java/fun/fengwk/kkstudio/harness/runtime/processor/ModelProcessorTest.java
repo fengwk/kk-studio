@@ -112,8 +112,6 @@ import java.util.function.Function;
  * wake 保留、sink 失败隔离、 cancel / close 与 wrong target。
  */
 class ModelProcessorTest {
-  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
-
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
   private static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
   private static final ProcessorLeaseConfig LEASE_CONFIG =
