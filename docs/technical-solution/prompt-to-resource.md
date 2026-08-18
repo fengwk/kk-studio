@@ -1,6 +1,6 @@
 # Prompt 到 Resource 数据流
 
-本文描述 Harness 从命令 batch、BranchSettings 到冻结 ProviderRequest，经 Model/Tool 执行，最终把 Tool Result 的瞬时 `ResourceRef` 摄入全局 Blob，并以 `resource(blobId,name,preview)` 回到 Entry/浏览器的事实链。Runtime 语义见 [harness-runtime-architecture.md](harness-runtime-architecture.md)，Resource 编解码见 [harness-storage-runtime.md](harness-storage-runtime.md)。
+本文描述 Harness 从命令 batch、BranchSettings 到 compact ModelRequestSpec，经 MODEL claim 内 Materializer 重建内存 ProviderRequest，再经 Model/Tool 执行，最终把 Tool Result 的瞬时 `ResourceRef` 摄入全局 Blob，并以 `resource(blobId,name,preview)` 回到 Entry/浏览器的事实链。Runtime 语义见 [harness-runtime-architecture.md](harness-runtime-architecture.md)，Resource 编解码见 [harness-storage-runtime.md](harness-storage-runtime.md)。
 
 ## 1. 数据流
 
@@ -9,10 +9,12 @@ flowchart LR
     Command[Commands batch<br/>USER_MESSAGE + SET_*]
     Turn[TurnPlanBuilder<br/>TURN_START + Message]
     Resolver[TurnResolver]
-    Request[Frozen ModelInvocationRequest]
+    Spec[compact ModelRequestSpec]
+    Mat[ModelRequestMaterializer<br/>MODEL claim 内重建内存请求]
+    Request[内存 ProviderRequest]
     Model[ModelInvocation]
     Assistant[ASSISTANT Message Entry<br/>+ usage/cost metadata]
-    Tool[ToolInvocation<br/>frozen binding]
+    Tool[ToolInvocation<br/>call + binding]
     Result[Tool Result]
     Effects[Plugin intents<br/>validated ToolEffectBatch]
     Ext[ToolResultExternalizer]
@@ -25,7 +27,10 @@ flowchart LR
 
     Command --> Turn
     Turn --> Resolver
-    Resolver --> Request
+    Resolver --> Spec
+    Spec --> Model
+    Mat --> Request
+    Model --> Mat
     Request --> Model
     Model --> Assistant
     Assistant --> Tool
@@ -62,30 +67,32 @@ INPUT Turn：消费 cutoff 内完整 queued 快照
   -> 可选 history normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END）
   -> TURN_START(INPUT, 完整 BranchSettings) + 按 sequence 顺序的 USER/CUSTOM Message Entries
 
-CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/ACTIVE_TOOLS/YOLO）
+CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/ACTIVE_TOOLS）
   -> 保留 SET_ENVIRONMENT（只会在后续 INPUT Turn 完整收割时进入 BranchSettings）
   -> 不产生 Message Entry
 ```
 
 `USER_MESSAGE` / `CUSTOM_MESSAGE` 之外的 settings 命令不产生 Message Entry；`SET_ENVIRONMENT` 只进入 TURN_START 的 BranchSettings 快照。
 
-## 3. Resolver 冻结请求
+## 3. Resolver 冻结 compact spec
 
-`TurnResolver.resolve(threadId, candidatePath, yoloEnabled)` 在事务外同步解析，只读最新 Catalog/Environment 事实：
+`TurnResolver.resolve(threadId, candidatePath, compactionPreparation)` 在事务外同步解析，只读最新 Catalog/Environment 事实（YOLO 不参与 Resolver）：
 
 1. 从 candidate path 前缀的最近 TURN_START `BranchSettings`（**latest-snapshot-wins**：只使用最近一个 ROOT/TURN_START 的完整快照，null/缺失/不可用值绝不向更旧快照回退）读取 `environment` binding、`agentName`、`model`；历史 `activeTools` 不参与新 turn 能力计算；
 2. 按 `agentName` 读取最新 Agent；按 Model ref 读取最新 Provider/Model/Variant；
 3. 从最新 Agent config 派生 tool set：直接工具按 `config.tools` 顺序绑定；skills 非空时追加内部 `load_skill`；subagents 非空且当前 Session depth 小于 `maxDepth` 时追加内部 `task`。ENVIRONMENT 工具一律按最新 binding 绑定（null/缺失/未 READY 规划不拒绝；实际 start 时不可用 → 确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）；
 4. Agent skills 必须由最新选中且 live 的 Environment 精确提供；subagent allowlist 每个名称必须解析到现存 Agent，名称 + 描述冻结为 `subagentBindings`；
-5. 生成 `ModelInvocationRequest`：
+5. 生成 compact `ModelRequestSpec`：
 
 ```text
-environment         # 本请求的单一 Environment binding（可 null）
-providerRequest    # exact Provider transport payload（model/variant/messages/tools/cacheControl）
-toolBindings       # (descriptor, type, environment binding, plugin provenance/access) 与 providerRequest.tools 一一对应
-skillBindings      # 最新 Agent skills（非空时自动派生内部 load_skill）
-subagentBindings   # 最新 Agent subagents 的名称 + 描述 allowlist（未达最大深度时）
-yoloEnabled        # 冻结运行时策略
+providerType      # Provider 协议类型（随 invocation 冻结；attempt 时当前行 type 必须一致）
+model / variant   # 本次调用真正使用的 ModelDescriptor / ModelVariant
+preambleMessages  # Resolver 冻结的非历史投影（Agent system prompt、current_environment、skill/subagent prompt、插件 ContextProjector）
+toolBindings      # (descriptor, type, environment binding, plugin provenance/access)；Provider tools 由它派生
+skillBindings     # 最新 Agent skills（非空时自动派生内部 load_skill）
+subagentBindings  # 最新 Agent subagents 的名称 + 描述 allowlist（未达最大深度时）
+cacheControl      # Resolver 生成的 compact ProviderCacheControl
+compaction        # null 或冻结的 CompactionRequest
 ```
 
 system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合，固定顺序为：Agent 正文（非空时）→ `<current_environment>`（至少有一个有值字段时）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。Events 顶部只读预览通过 `GET /api/ai/runtime/threads/{threadId}/system-prompt` 按当前 branch 最新状态现算同一组合；进入 `/events` 拉一次，turn 开始与结束时各拉一次，使同批设置变更在模型工作期间即可可见。current_environment 只输出有值字段：
@@ -114,10 +121,10 @@ Compaction summarizer 走独立最小请求路径，不调用 `AgentPromptCompos
 
 ## 4. Model 执行与 usage/cost 冻结
 
-`harness_model_invocation.request` 保存 exact 冻结请求。`ModelProcessor` 两阶段激活后（每次 attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造 attempt-local Provider，见 [harness-capability-wiring.md](harness-capability-wiring.md)）：
+`harness_model_invocation.request` 保存 compact `ModelRequestSpec`（不持久化完整 ProviderRequest）。每次 MODEL attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存 ProviderRequest（preamble + compaction-aware Entry 历史投影），随后 `ModelProcessor` 两阶段激活（每次 attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造 attempt-local Provider，见 [harness-capability-wiring.md](harness-capability-wiring.md)）：
 
 - `MODEL_DELTA` 节流持久化 `stream_checkpoint`（attempt-local），**commit 后**才 best-effort 发布 Redis realtime delta；
-- retryable `TRANSIENT` 失败把当前 accumulator 的 text/thinking、最后已提交 sequence、error 与 `failedAt/retryAt` 追加到 Invocation `failedAttempts`，清除 checkpoint 并按 retryAt reschedule；立即 retry 继续使用完全相同的 frozen request；
+- retryable `TRANSIENT` 失败把当前 accumulator 的 text/thinking、最后已提交 sequence、error 与 `failedAt/retryAt` 追加到 Invocation `failedAttempts`，清除 checkpoint 并按 retryAt reschedule；每次 retry 从相同 `basisHeadEntryId + spec` 重新 materialize logical request（credential/baseURL/timeout/Resource URL 保持 attempt-time live）；
 - terminal `resultJson` 是 canonical `ProviderResponse`：
 
 ```text
@@ -126,7 +133,7 @@ Compaction summarizer 走独立最小请求路径，不调用 `AgentPromptCompos
 
 - `usage`（`ModelUsage` 七项 token 分类）与 `cost`（`ModelCost` 七项金额）在 terminal 冻结进 `resultJson`，apply 时由 `HistoryPayloadMapper` 快照进 ASSISTANT Message Entry 的 `AssistantMessageMetadata`（stopReason + usage + cost）；
 - 最终 apply/Stop 先按 attempt 顺序把 `failedAttempts` 物化为 `MODEL_ATTEMPT_FAILURE`，再写 Assistant/AssistantError/AssistantAborted 与 TURN_END；terminal `ASSISTANT_ERROR` 把 error 与当前 attempt partial 分离。两类失败审计都不投影给 Provider；
-- 无 ToolCall 时追加 COMPLETED TURN_END；Provider 返回冻结 request 中不可见的 Tool 时终结为可恢复错误（`ASSISTANT_ERROR` 含请求名称与可用 Tool 名称），不物化 ToolInvocation。
+- 无 ToolCall 时追加 COMPLETED TURN_END；Provider 返回冻结 spec 中不可见的 Tool 时（unknown，binding 查找失败）由 `ModelResponsePlanner` 物化为带 null binding 的 FAILED ToolInvocation 槽位并反馈模型，不执行该调用。
 
 **无 usage ledger**：usage/cost 只冻结在 Invocation result 与 Assistant Entry metadata 中，不存在 usage 表、聚合表或查询 API。
 
@@ -172,7 +179,7 @@ sha256      # 可选，64 位小写 hex
 - Tool outcome Entry 写入前，`ToolOutcomeAppender` 在同一 Store 事务调用 `GlobalStorageToolResultHistoryMaterializer`：有界读取 data/file/http/https/s3，摄入 `storage_blob`，通过 `harness_session_blob_ref` retain，并把 durable 内容转换为 `resource(blobId,name,preview)`。任何一步失败时事务整体回滚；没有 materializer 时含 Resource 的成功结果 fail closed。
 - ToolProcessor 接收 `ToolSuccess(已外部化 ToolResult, effects)` 并在短事务内做严格 terminal CAS（fire-once、claim ownership 校验），以一次 Store update 原子持久化 `SUCCEEDED + result + effects`，不做存储外部化。
 - Model terminal materialize siblings 时按 ordinal 静态检查 plugin state accesses；同一 `(pluginId, customType)` 的 WRITE 后再 READ/WRITE 直接写成 `FAILED(kind=SIBLING_STATE_CONFLICT)`，不 dispatch。
-- 全部 Tool siblings terminal 后，`ThreadProcessor` 通过唯一 `ToolOutcomeAppender` 按 ordinal apply：每个成功调用先按 effects 顺序追加 `CUSTOM`，再追加 TOOL `MESSAGE` Entry（inline 内容 + durable `resource(blobId,name,preview)` + ToolResultMetadata），推进 head，并**固定追加 `TURN_END(COMPLETED, continueModel=true)`**。`resultEntryId` 仍指向 Tool Result；Stop 的 terminal winner 使用同一 appender。
+- 全部 Tool siblings terminal 后，`ThreadProcessor` 通过唯一 `ToolOutcomeAppender` 按 ordinal apply：每个成功调用先按 effects 顺序追加 `CUSTOM`，再追加 TOOL `MESSAGE` Entry（inline 内容 + durable `resource(blobId,name,preview)` + ToolResultMetadata），推进 head，并**固定追加 `TURN_END(COMPLETED, continueModel=true)`**、请求 THREAD Work，随后删除全部 Tool siblings 再删除父 ModelInvocation（closed turn 不保留 Invocation 行）；Stop 的 terminal winner 使用同一 appender。
 
 ## 6. 前端呈现与恢复
 

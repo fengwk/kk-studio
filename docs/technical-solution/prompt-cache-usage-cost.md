@@ -1,28 +1,29 @@
 # Prompt Cache 与 Usage/Cost 冻结
 
-本文描述当前的提示缓存控制、usage/cost 归一化与冻结边界。一次 Provider 调用使用冻结 `ModelInvocationRequest.providerRequest()` 与 `ProviderResponse` 生成 Assistant Entry；usage/cost 冻结在 Invocation result 与 Assistant Entry metadata 中，**不存在 usage ledger 表、聚合表或查询 API**。
+本文描述当前的提示缓存控制、usage/cost 归一化与冻结边界。一次 Provider 调用使用每次 MODEL attempt 从 `basisHeadEntryId + compact ModelRequestSpec` 重建的内存 `ProviderRequest` 与 `ProviderResponse` 生成 Assistant Entry；usage/cost 冻结在 Invocation result 与 Assistant Entry metadata 中，**不存在 usage ledger 表、聚合表或查询 API**。
 
 ## 1. 端到端链路
 
 ```mermaid
 flowchart LR
-    A[TurnResolver<br/>生成初始 ProviderRequest]
+    A[TurnResolver<br/>生成 compact ModelRequestSpec<br/>含 ProviderCacheControl]
     B[PromptCacheRequestFinalizer]
-    C[冻结 ModelInvocationRequest]
-    D[ModelProcessor / Provider Adapter]
-    E[ProviderResponse<br/>usage + cost]
-    F[ASSISTANT Message Entry<br/>metadata 快照 usage/cost]
+    C[冻结 ModelRequestSpec]
+    D[MODEL claim 内 ModelRequestMaterializer<br/>重建内存 ProviderRequest]
+    E[ModelProcessor / Provider Adapter]
+    F[ProviderResponse<br/>usage + cost]
+    G[ASSISTANT Message Entry<br/>metadata 快照 usage/cost]
 
-    A --> B --> C --> D --> E --> F
+    A --> B --> C --> D --> E --> F --> G
 ```
 
 事实边界：
 
-1. Resolver 先生成含 `ProviderCacheControl` 的 ProviderRequest（policy 由当前行的 `ProviderFactory` capability 解析）；
+1. Resolver 生成 compact `ModelRequestSpec`，其中 `cacheControl` 的 policy 由当前行的 `ProviderFactory` capability 解析；
 2. `PromptCacheRequestFinalizer` 是 turn-time cache control 的唯一生成点；
-3. `ModelInvocationRequest` 冻结 ProviderRequest、route、ToolBinding、SkillBinding 与 YOLO；`ModelDescriptor` 只含 providerName/modelName/inputModalities/tools/reasoning/pricing 六个字段；
-4. ModelProcessor 调度冻结 ProviderRequest；
-5. attempt 时按 `providerName` 读取当前 `agent_provider` 行构造 Provider；CoreModelGateway 仅按当前 `ProviderFactory` capability 规范化 cache control，其他 request 字段保持不变，不兼容能力降级为 `none()`；
+3. spec 冻结 `providerType`/model/variant/preamble/tool/skill/subagent bindings/`cacheControl`/可空 compaction；**不包含 history messages、YOLO、contextWindow 与完整 ProviderRequest**；`ModelDescriptor` 只含 providerName/modelName/inputModalities/tools/reasoning/pricing 六个字段；
+4. 每次 MODEL attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存 ProviderRequest；
+5. attempt 时按 `providerName` 读取当前 `agent_provider` 行构造 Provider；CoreModelGateway 仅按当前 `ProviderFactory` capability 规范化 cache control，其他 spec 字段保持不变，不兼容能力降级为 `none()`；
 6. terminal `ProviderResponse` 的 `usage`/`cost` 冻结进 `resultJson`；
 7. apply 时由 `HistoryPayloadMapper` 把 `stopReason`、`usage`、`cost` 快照进 ASSISTANT Message Entry 的 `AssistantMessageMetadata`（`turn_usage` 前端 meta 消息展示）。
 
@@ -116,7 +117,7 @@ total
 
 Model config 写入时严格校验：`limit.context`/`limit.output` 为正整数且 output 不超过 context；`abilities.tools`/`abilities.reasoning` 为 boolean；`inputModalities` 非空且只包含受支持 enum；`variants` 非空、variant id 唯一且命中 `defaultVariant`；pricing 字段完整、单价非负、multiplier 为正。Agent config 写入时校验可选择 Tool 名与 Skill 字段结构。
 
-每次 turn 由 `DatabaseTurnResolver` 从 `BranchSettings` 读取 agent/model/environment 引用，再读取最新 Agent、Provider、Model、Variant 与 ToolCatalog，并从最新 Agent config 派生 tools/skills/subagents，结果冻结进 `ModelInvocationRequest`（Agent/Model 修改下一 turn 生效；历史 activeTools 不限制或扩张能力）。缺失 Agent/Provider/Model/Variant、未知可选择 Tool，或 skills 所需 Environment 不可用 → `ASSISTANT_ERROR` barrier；普通 ENVIRONMENT 工具允许冻结 null/未 READY binding，在实际 start 时产生模型可见的失败 ToolResult。每次 Model attempt 再由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。effective cache control 按 attempt 时当前 capability 规范化。
+每次 turn 由 `DatabaseTurnResolver` 从 `BranchSettings` 读取 agent/model/environment 引用，再读取最新 Agent、Provider、Model、Variant 与 ToolCatalog，并从最新 Agent config 派生 tools/skills/subagents，结果冻结进 compact `ModelRequestSpec`（Agent/Model 修改下一 turn 生效；历史 activeTools 不限制或扩张能力；spec 不含 YOLO/contextWindow/messages）。缺失 Agent/Provider/Model/Variant、未知可选择 Tool，或 skills 所需 Environment 不可用 → `ASSISTANT_ERROR` barrier；普通 ENVIRONMENT 工具允许冻结 null/未 READY binding，在实际 start 时产生模型可见的失败 ToolResult。每次 Model attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存 ProviderRequest，再由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。effective cache control 按 attempt 时当前 capability 规范化。
 
 ## 7. 实现与测试入口
 

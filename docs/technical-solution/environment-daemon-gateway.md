@@ -141,7 +141,7 @@ Skill 通过 `LOAD_SKILL` / `SKILL_LOADED` / `SKILL_LOAD_FAILED` 按需加载；
 
 ## Invocation 分发
 
-`harness_tool_invocation.request` 冻结 binding（descriptor/type/environment binding/plugin）；ENVIRONMENT binding 的 plugin 恒为 null。统一 `ToolProcessor` 只消费 dispatcher 已 claim 的 TOOL Work：
+`harness_tool_invocation` 持久化 `call` + 可空 `binding`（binding 冻结 descriptor/type/environment binding/plugin；ENVIRONMENT binding 的 plugin 恒为 null，unknown tool 槽位 binding 为 null 且 renderer 固定回退 `tool`）；只有 READY Tool 在 ToolProcessor/Gateway 边界临时构造 executable request。统一 `ToolProcessor` 只消费 dispatcher 已 claim 的 TOOL Work：
 
 ```text
 claim TOOL Work（Work-only 短事务）

@@ -47,8 +47,8 @@ Chat 设置不复制到 Thread。Thread 的完整 BranchSettings 来自 ROOT/TUR
 | `harness_entry` | `id uuid`、session/parent、entry_type、payload、时间；每 Session 唯一 ROOT |
 | `harness_thread` | `id uuid`、非空 head、YOLO、next sequence、revision、时间 |
 | `harness_thread_command` | PK `(thread_id, sequence)`；`client_command_id uuid`、`request_hash`、payload 与消费/取消事实 |
-| `harness_model_invocation` | `id uuid`、冻结 request、status、attempt、checkpoint、append-only `failed_attempts`、terminal result/error |
-| `harness_tool_invocation` | `id uuid`、ordinal、冻结 request、approval、result/effects/error |
+| `harness_model_invocation` | `id uuid`、`basis_head_entry_id` + compact `ModelRequestSpec`、status、attempt、checkpoint、append-only `failed_attempts`、terminal result/error（`result_entry_id` 只属于 open Tool phase） |
+| `harness_tool_invocation` | `id uuid`、ordinal、`call` + 可空 `binding`、approval、result/effects/error（无 `result_entry_id`） |
 | `harness_work` | PK `(target_type, target_id uuid)`；available_at、wake_version、lease |
 
 `harness_thread_command` 没有代理 id。`request_hash` 是 raw command（含 ordered contents 与 uploadId）

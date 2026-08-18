@@ -11,7 +11,7 @@
 | 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位、全局 Locale 与浏览器偏好（`kkstudio.browser-preferences.v1`） |
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
-| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `entries` / `commands` / `head` / `stop` / `tool-invocations/{id}/approval`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
+| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `entries` / `commands` / `yolo` / `head` / `stop` / `tool-invocations/{id}/approval`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
 | Realtime | REST snapshot first；应用事件 WebSocket（durable `revision`/`resync` + 无 cursor 的 Redis realtime overlay） |
 | 浏览器路由 | `BrowserRouter`，服务端对 SPA 路径回退 `index.html` |
 | 视觉规范 | [前端设计规范](../product-design/frontend-design-system.md) |
@@ -88,7 +88,7 @@ YOLO 是直接控制面（`PUT /yolo`，基于 snapshot revision 的 CAS）：Bo
 Blank Chat、Bound Thread 与 Canvas Chat 共用唯一 `ThreadComposer`：
 
 - DOM 固定分为上层输入/附件行与下层控制栏：`[+] [Default|YOLO] ... [provider/model · variant] [发送]`；空草稿输入行默认单行且文字垂直居中，内容增长后在上限内滚动；Permission 与 Model/Variant 常驻可见，Footer 不承担设置入口；
-- Permission 是 anchored listbox，仅有 `Default` / `YOLO`；Model 使用 anchored 两级 listbox（provider/model → Variant），不创建 modal/backdrop；选择只修改 pane-local draft，随下一条消息进入同一 SET_* batch；
+- Permission 是 anchored listbox，仅有 `Default` / `YOLO`；Model 使用 anchored 两级 listbox（provider/model → Variant），不创建 modal/backdrop；Model/Variant 选择只修改 pane-local draft，随下一条消息进入同一 SET_* batch；Permission（YOLO）选择经直接控制面立即 `PUT /yolo`（见 §4），绝不进入命令 batch；
 - 草稿是 ordered `TEXT/ATTACHMENT` parts；`contenteditable=false` pill 在 DOM 仅保存
   `data-part-id`、`data-upload-id`、`data-filename`，展示为完整 `[name]`，不省略且不暴露内部 upload 语法；
 - 左侧 `+` 直接打开命令表，不向草稿写入 `/`；slash 输入仍复用同一命令过滤与执行状态机；
@@ -181,7 +181,8 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
   活跃 overlay 与 durable Entry 重叠窗口（`ModelTerminalPending`/`ToolTerminalPending`）
   按 **Turn 内**身份去重（沿 entries 线性路径跟踪当前 `TURN_START.entryId`）：
   failure 用 `turnStartEntryId + attempt + sequence`，tool 只认已物化的 durable
-  `tool_result`（或 DTO `resultEntryId` 已指向已存在 Entry），身份为
+  `tool_result`（ToolInvocation 无 resultEntryId；Tool overlay 依据 invocation 存在性
+  + durable ToolResult Entry 判定），身份为
   `assistantEntryId 所在 Turn + toolCallId`——旧 Turn 的 durable 记录绝不抑制新 Turn
   相同数字/复用 toolCallId 的活跃 overlay；durable assistant `tool_call` 不抑制
   运行中的 tool invocation。活跃状态映射五态：model 优先 realtime stream error，
