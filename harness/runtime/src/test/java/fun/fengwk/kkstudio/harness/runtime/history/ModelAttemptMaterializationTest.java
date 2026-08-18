@@ -613,27 +613,10 @@ class ModelAttemptMaterializationTest {
   /** attach 转换的 compaction 成功结果：必须完整等于装配 result payload（preResultPath 去 head 重放 apply 上下文）。 */
   @Test
   void acceptsExactCompactionSuccessResultAndRejectsSummaryDrift() {
-    CompactionRequest compaction =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100, id(1L), id(1L), null);
+    CompactionRequest compaction = compactionRequest();
     // compaction 结果必须位于 COMPACTION turn 内（TurnPathValidator），basis = TURN_START id(2)。
+    ModelInvocation stored = compactionSucceededInvocation(compaction);
     EntryPath preResult = new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1)));
-    ModelInvocation stored =
-        new ModelInvocation(
-            id(10L),
-            id(20L),
-            id(2L),
-            id(2L),
-            request(compaction),
-            ModelInvocationStatus.SUCCEEDED,
-            1,
-            null,
-            compactionResponse("final summary"),
-            null,
-            null,
-            List.of(),
-            T2,
-            T6);
     CompactionPayload exact =
         CompactionSummaryAssembler.resultPayload(compaction, "final summary", preResult);
     Entry result = new Entry(id(4L), id(100L), id(2L), exact, T6);
@@ -668,6 +651,50 @@ class ModelAttemptMaterializationTest {
             ModelAttemptMaterialization.validate(
                 stored, stored.attachResultEntry(drifted.id(), T6), driftedPath),
         "compaction result must match the assembled summary exactly");
+  }
+
+  /** preResultPath 下界：compaction 成功结果前的 preResult 前缀必须至少保留 ROOT + basis（即 resultPath 至少 3 项）。 */
+  @Test
+  void compactionSuccessResultRequiresNonTrivialPreResultPath() {
+    CompactionRequest compaction = compactionRequest();
+    ModelInvocation stored = compactionSucceededInvocation(compaction);
+    // 最短合法形状恰为 [ROOT, TURN_START, result]：preResult = [ROOT, TURN_START]（ROOT+basis 两项）是 <3
+    // 下界守卫允许的边界；更短（只剩 ROOT）的前缀无法由 EntryPath 构造（ROOT-first + COMPACTION 必须在 open TURN_START
+    // 内），该守卫仅作不可达防御。
+    EntryPath preResult = new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1)));
+    CompactionPayload exact =
+        CompactionSummaryAssembler.resultPayload(compaction, "final summary", preResult);
+    Entry result = new Entry(id(4L), id(100L), id(2L), exact, T6);
+    EntryPath minimum =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1), result));
+    assertDoesNotThrow(
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored, stored.attachResultEntry(result.id(), T6), minimum));
+  }
+
+  private static CompactionRequest compactionRequest() {
+    return new CompactionRequest(
+        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100, id(1L), id(1L), null);
+  }
+
+  /** SUCCEEDED compaction invocation：basis = TURN_START id(2)，result = 固定摘要文本快照。 */
+  private static ModelInvocation compactionSucceededInvocation(CompactionRequest compaction) {
+    return new ModelInvocation(
+        id(10L),
+        id(20L),
+        id(2L),
+        id(2L),
+        request(compaction),
+        ModelInvocationStatus.SUCCEEDED,
+        1,
+        null,
+        compactionResponse("final summary"),
+        null,
+        null,
+        List.of(),
+        T2,
+        T6);
   }
 
   private static ModelInvocation failedInvocation(List<ModelAttemptFailure> failures) {

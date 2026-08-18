@@ -182,7 +182,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   }
 
   @Test
-  void successfulEffectsAreAppendedBeforeTheirToolResultAndResultEntryIdSkipsCustomEntries() {
+  void successfulEffectsAreAppendedBeforeTheirToolResults() {
     Fixture fixture = fixture();
     var chain =
         seedToolChain(
