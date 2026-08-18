@@ -148,6 +148,8 @@ describe('TaskStatusWidget', () => {
     )
     expect(screen.getByText('等待审批：bash — runs a script')).toBeInTheDocument()
     expect(screen.getByText('等待审批：read')).toBeInTheDocument()
+    // 子任务审批复用同一 danger 按钮契约，覆盖嵌套审批不会退回普通灰色边框。
+    expect(screen.getByRole('button', { name: '拒绝 read' })).toHaveClass('ghost-btn', 'danger')
 
     await user.click(screen.getByRole('button', { name: '允许 bash' }))
     expect(onDecideApproval).toHaveBeenCalledWith('101', '201', 'ALLOW')

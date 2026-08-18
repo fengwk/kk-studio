@@ -41,14 +41,14 @@ import java.util.UUID;
  * Resource 引用内容（data/file/http/https/s3）外部化为全局 Storage blob，并以 {@code
  * ResourceMessageContent(blobId, name, preview)} 返回 durable 内容；Text/Json 原样映射。
  *
- * <p>解析与摄入按内容顺序逐个完成（失败即异常 → 调用方事务整体回滚，绝不产生部分 history）。单资源字节预算与 {@code
- * kk-studio.harness.runtime.resource-max-bytes} 默认一致（16 MiB）。s3 URI 的 bucket 必须与全局存储 配置 bucket
+ * <p>解析与摄入按内容顺序逐个完成（失败即异常 → 调用方事务整体回滚，绝不产生部分 history）。单资源字节预算与数据库
+ * SystemSettings.Advanced.resourceMaxBytes 默认一致（16 MiB）。s3 URI 的 bucket 必须与全局存储 配置 bucket
  * 精确一致，否则确定性拒绝（服务端 S3 客户端是固定 bucket 契约）。本类由 S3 装配（{@code S3StorageConfiguration}）以 bean 形式提供；S3
  * 未启用时不存在该 bean，Runtime 对含 Resource 引用的 ToolResult 保持 fail-closed。
  */
 public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHistoryMaterializer {
 
-  /** 单资源解析字节预算：与 HarnessRuntimeProperties.resourceMaxBytes 默认值一致。 */
+  /** 单资源解析字节预算：与 SystemSettings.Advanced.resourceMaxBytes 默认值一致（独立于装配值的安全上界）。 */
   static final int MAX_RESOLVED_BYTES = 16 * 1024 * 1024;
 
   private final StorageBlobIngestService ingestService;

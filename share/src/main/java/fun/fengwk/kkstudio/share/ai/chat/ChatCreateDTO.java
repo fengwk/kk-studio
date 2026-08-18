@@ -21,7 +21,7 @@ public class ChatCreateDTO {
    */
   private EnvironmentBindingDTO environment;
 
-  /** 可选的发送权限模式（YOLO）：true 时工具调用跳过权限评估直接 Allow；省略时使用部署级 ToolSettings 的 defaultYolo。 */
+  /** 可选的发送权限模式（YOLO）：true 时工具调用跳过权限评估直接 Allow；省略时捕获创建时数据库 SystemSettings.Tool.defaultYolo。 */
   private Boolean yoloEnabled;
 
   @JsonAnySetter

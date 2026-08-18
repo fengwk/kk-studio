@@ -11,13 +11,14 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.runtime.AgentModelRuntimeConfig
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.BranchView;
 import fun.fengwk.kkstudio.harness.plugin.ContextProjectorContribution;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
@@ -80,6 +81,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -116,7 +118,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final ToolCatalog toolCatalog;
   private final PluginCatalog pluginCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final EnvironmentGatewayProperties environmentGatewayProperties;
+  private final SystemSettings.Environment environmentSettings;
   private final CompactionConfig compactionConfig;
   private final SubagentConfig subagentConfig;
   private final AgentPromptComposer promptComposer;
@@ -135,7 +137,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       ToolCatalog toolCatalog,
       PluginCatalog pluginCatalog,
       LiveEnvironmentRegistry environmentRegistry,
-      EnvironmentGatewayProperties environmentGatewayProperties,
+      SystemSettingsSnapshot snapshot,
       CompactionConfig compactionConfig,
       SubagentConfig subagentConfig,
       AgentPromptComposer promptComposer,
@@ -150,8 +152,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.environmentGatewayProperties =
-        Objects.requireNonNull(environmentGatewayProperties, "environmentGatewayProperties");
+    this.environmentSettings = Objects.requireNonNull(snapshot, "snapshot").get().environment();
     this.compactionConfig = Objects.requireNonNull(compactionConfig, "compactionConfig");
     this.subagentConfig = Objects.requireNonNull(subagentConfig, "subagentConfig");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
@@ -521,7 +522,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
           "agent skills require the latest selected environment which is not live: "
               + environmentName);
     }
-    if (!environment.isReady(now, environmentGatewayProperties.requireHeartbeatTimeout())) {
+    if (!environment.isReady(
+        now, Duration.ofMillis(environmentSettings.heartbeatTimeoutMillis()))) {
       throw rejection(
           "agent skills require the latest selected environment which is not ready: "
               + environmentName);

@@ -18,6 +18,8 @@ import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimePropertie
 import fun.fengwk.kkstudio.core.ai.runtime.resource.ManagedResourceDownloadService;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewServiceFactory;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
@@ -51,6 +53,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -66,6 +69,9 @@ import java.util.concurrent.TimeUnit;
  * <p>进程内 worker（dispatcher + listener）只受 {@code workers-enabled} 控制；关闭时控制/查询平面（{@link
  * HarnessRuntime}、store、processor 与 realtime 适配）仍然可用，只是不启动调度。生命周期顺序：启动 dispatcher 后 listener，停止
  * listener 后 dispatcher；processor 关闭与 executor shutdown 由 Spring 按依赖逆序 destroy 保证。
+ *
+ * <p>processor/dispatcher/资源/重试/事件等运行软策略统一读取共享启动快照 {@link SystemSettingsSnapshot}（装配期一次 DB 读取，DB
+ * 变更需重启生效）；本组合根不持有任何硬编码的重复默认值。
  *
  * <p>所有 executor 线程均为 daemon 并以 {@code destroyMethod = "shutdown"} 交给 Spring 持有生命周期；dispatcher 使用
  * fail-fast 单线程 drain executor 与 bounded AbortPolicy worker executor。
@@ -86,18 +92,20 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * 内容寻址的本地文件 {@link ResourceStore}，根目录为 {@code environment-root/.kkstudio/resources/}，单对象上限由
-   * {@code resource-max-bytes} 控制（默认 16 MiB）。启动时安全创建根目录。
+   * 内容寻址的本地文件 {@link ResourceStore}，根目录为 {@code environment-root/.kkstudio/resources/}，单对象上限由数据库
+   * SystemSettings.Advanced 的 {@code resourceMaxBytes} 控制（共享启动快照，DB 变更需重启生效）。启动时安全创建根目录。
    */
   @Bean
-  public ResourceStore harnessResourceStore(HarnessRuntimeProperties properties) {
+  public ResourceStore harnessResourceStore(
+      HarnessRuntimeProperties properties, SystemSettingsSnapshot systemSettingsSnapshot) {
     Path root = properties.resolvedEnvironmentRoot().resolve(".kkstudio").resolve("resources");
+    int maxBytes = Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     try {
       Files.createDirectories(root);
     } catch (IOException error) {
       throw new IllegalStateException("cannot create resource store root: " + root, error);
     }
-    return new LocalFileResourceStore(root, properties.getResourceMaxBytes());
+    return new LocalFileResourceStore(root, maxBytes);
   }
 
   @Bean
@@ -140,58 +148,84 @@ public class HarnessRuntimeConfiguration {
   @Bean(destroyMethod = "close")
   public RedisRealtimeEventSource redisRealtimeEventSource(
       @Qualifier("redisRealtimeConnectionFactory") LettuceConnectionFactory connectionFactory,
-      RedisRealtimeConfig config) {
-    return new RedisRealtimeEventSource(connectionFactory, config, new RealtimeEventJsonCodec());
+      RedisRealtimeConfig config,
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    // 连接失联时的重连间隔：读取共享启动快照的 SystemSettings.Advanced.redisRealtimeRetryDelayMillis。
+    Duration retryDelay =
+        Duration.ofMillis(systemSettingsSnapshot.get().advanced().redisRealtimeRetryDelayMillis());
+    return new RedisRealtimeEventSource(
+        connectionFactory, config, new RealtimeEventJsonCodec(), retryDelay);
   }
 
+  /** Model / Tool 调用的全局重试策略：读取共享启动快照的 SystemSettings.AiRuntime（DB 变更需重启生效）。 */
   @Bean
-  public InvocationRetryPolicy invocationRetryPolicy() {
-    return InvocationRetryPolicy.DEFAULT;
+  public InvocationRetryPolicy invocationRetryPolicy(
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
+    return new InvocationRetryPolicy(
+        aiRuntime.retryMaxRetries(),
+        aiRuntime.retryBackoffStrategy(),
+        Duration.ofMillis(aiRuntime.retryBaseDelayMillis()),
+        Duration.ofMillis(aiRuntime.retryMaxDelayMillis()));
   }
 
+  /** processor 共用的 claim/lease 与 heartbeat 节奏：读取共享启动快照的 SystemSettings.Advanced。 */
   @Bean
-  public ProcessorLeaseConfig processorLeaseConfig(HarnessRuntimeProperties properties) {
+  public ProcessorLeaseConfig processorLeaseConfig(SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ProcessorLeaseConfig(
-        properties.getProcessorLeaseDuration(), properties.getProcessorHeartbeatInterval());
+        Duration.ofMillis(advanced.processorLeaseDurationMillis()),
+        Duration.ofMillis(advanced.processorHeartbeatIntervalMillis()));
   }
 
   @Bean
   public ThreadProcessorConfig threadProcessorConfig(
-      HarnessRuntimeProperties properties,
       ProcessorLeaseConfig leaseConfig,
-      CompactionConfig compactionConfig) {
+      CompactionConfig compactionConfig,
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ThreadProcessorConfig(
         leaseConfig,
-        properties.getThreadStepLimit(),
-        properties.getThreadResolveFailureDelay(),
+        advanced.threadStepLimit(),
+        Duration.ofMillis(advanced.threadResolveFailureDelayMillis()),
         compactionConfig);
   }
 
   @Bean
   public ModelProcessorConfig modelProcessorConfig(
-      HarnessRuntimeProperties properties,
       ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicy retryPolicy) {
+      InvocationRetryPolicy retryPolicy,
+      SystemSettingsSnapshot systemSettingsSnapshot) {
     return new ModelProcessorConfig(
-        leaseConfig, retryPolicy, properties.getModelDispatchBusyFallbackDelay());
+        leaseConfig,
+        retryPolicy,
+        Duration.ofMillis(
+            systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()));
   }
 
   @Bean
   public ToolProcessorConfig toolProcessorConfig(
-      HarnessRuntimeProperties properties,
       ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicy retryPolicy) {
+      InvocationRetryPolicy retryPolicy,
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ToolProcessorConfig(
         leaseConfig,
         retryPolicy,
-        properties.getToolPreflightFailureDelay(),
-        properties.getToolDispatchBusyFallbackDelay());
+        Duration.ofMillis(advanced.toolPreflightFailureDelayMillis()),
+        Duration.ofMillis(advanced.toolDispatchBusyFallbackDelayMillis()));
   }
 
+  /**
+   * Model / Tool / Thread-resolve 共用的 lease heartbeat 调度池。
+   *
+   * <p>心跳任务本身只是一次 {@code harness_work} 单行 renew，1 个线程足够正常续期。第 2 个线程只兜底极端情况：某次 renew 等行锁，或
+   * lost-ownership 回调里同步 {@code handle.cancel()} 时，不把其余 claim 的续期堵在同一条线程上。
+   */
   @Bean(name = "harnessProcessorScheduler", destroyMethod = "shutdown")
   public ScheduledExecutorService harnessProcessorScheduler() {
     return Executors.newScheduledThreadPool(
-        4, Thread.ofPlatform().name("harness-processor-", 0L).daemon(true).factory());
+        2, Thread.ofPlatform().name("harness-processor-", 0L).daemon(true).factory());
   }
 
   @Bean
@@ -254,9 +288,11 @@ public class HarnessRuntimeConfiguration {
 
   /** bounded worker executor：固定并发 + 有界队列 + AbortPolicy（fail-fast，绝不静默丢弃 handoff task）。 */
   @Bean(name = "harnessDispatcherWorkerExecutor", destroyMethod = "shutdown")
-  public ExecutorService harnessDispatcherWorkerExecutor(HarnessRuntimeProperties properties) {
-    int concurrency = properties.getDispatcherWorkerConcurrency();
-    int queueCapacity = properties.getDispatcherWorkerQueueCapacity();
+  public ExecutorService harnessDispatcherWorkerExecutor(
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
+    int concurrency = advanced.dispatcherWorkerConcurrency();
+    int queueCapacity = advanced.dispatcherWorkerQueueCapacity();
     if (concurrency <= 0) {
       throw new IllegalArgumentException("dispatcher worker concurrency must be positive");
     }
@@ -282,7 +318,7 @@ public class HarnessRuntimeConfiguration {
   @Bean
   public HarnessWorkDispatcher harnessWorkDispatcher(
       HarnessStore store,
-      HarnessRuntimeProperties properties,
+      SystemSettingsSnapshot systemSettingsSnapshot,
       Clock clock,
       @Qualifier("harnessDispatcherDrainExecutor") Executor drainExecutor,
       @Qualifier("harnessDispatcherWorkerExecutor") Executor workerExecutor,
@@ -290,14 +326,17 @@ public class HarnessRuntimeConfiguration {
       ThreadProcessor threadProcessor,
       ModelProcessor modelProcessor,
       ToolProcessor toolProcessor) {
+    // dispatcher 的 lease/poll/rejection/预算：读取共享启动快照的 SystemSettings.Advanced。
+    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
+    Duration dispatcherLease = Duration.ofMillis(advanced.dispatcherLeaseDurationMillis());
     HarnessWorkDispatcherConfig config =
         new HarnessWorkDispatcherConfig(
-            properties.getDispatcherLeaseDuration(),
-            properties.getDispatcherLeaseDuration(),
-            properties.getDispatcherLeaseDuration(),
-            properties.getDispatcherPollInterval(),
-            properties.getDispatcherRejectionDelay(),
-            properties.getDispatcherMaxDispatchTasks());
+            dispatcherLease,
+            dispatcherLease,
+            dispatcherLease,
+            Duration.ofMillis(advanced.dispatcherPollIntervalMillis()),
+            Duration.ofMillis(advanced.dispatcherRejectionDelayMillis()),
+            advanced.dispatcherMaxDispatchTasks());
     return new HarnessWorkDispatcher(
         store,
         config,
@@ -312,8 +351,16 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public PostgresqlWorkListener postgresqlWorkListener(
-      DataSource dataSource, HarnessWorkDispatcher dispatcher) {
-    return new PostgresqlWorkListener(dataSource, dispatcher::wake);
+      DataSource dataSource,
+      HarnessWorkDispatcher dispatcher,
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    // LISTEN poll 间隔与重连退避：读取共享启动快照的 SystemSettings.Advanced。
+    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
+    return new PostgresqlWorkListener(
+        dataSource,
+        dispatcher::wake,
+        Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
+        Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
   }
 
   /** READY 事件只唤醒 Work dispatcher；实际 Environment 事实由 {@link TurnResolver} 在 resolve 时读取。 */

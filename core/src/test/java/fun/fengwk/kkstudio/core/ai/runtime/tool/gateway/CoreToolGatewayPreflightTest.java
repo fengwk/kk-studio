@@ -175,9 +175,9 @@ class CoreToolGatewayPreflightTest {
   }
 
   @Test
-  void environmentWorkspaceExpandsPathCandidatesUnderEnvironmentRoot() {
-    // path 候选必须包含 environmentRoot 相对 workspace 路径（repo/sub/src/Main.java），因此 repo/sub/**
-    // 规则命中 DENY；若 preflight 仍用 server 默认 workdir，候选不含该路径，结果会是 ASK。
+  void environmentWorkspaceIsTheOnlyPathRuleBase() {
+    // path 只相对冻结 binding 的 effective workdir（environmentRoot 下的 canonical workspacePath）解析，
+    // environmentRoot 不再作为 pattern 坐标：src/** 命中 DENY，而旧的环境相对坐标 repo/sub/** 不再命中。
     EnvironmentBinding binding = new EnvironmentBinding(new EnvironmentName("env-1"), "repo/sub");
     ToolSettings settings =
         new ToolSettings(
@@ -185,12 +185,24 @@ class CoreToolGatewayPreflightTest {
                 "*",
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
-                    new PermissionRule("repo/sub/**", PermissionAction.DENY))),
+                    new PermissionRule("src/**", PermissionAction.DENY))),
             false);
     ToolGateway.PreflightResult result =
         environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", settings);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("PERMISSION_DENIED", deny.error().kind());
+
+    ToolSettings environmentRelativeAlias =
+        new ToolSettings(
+            Map.of(
+                "*",
+                List.of(
+                    new PermissionRule("*", PermissionAction.ASK),
+                    new PermissionRule("repo/sub/**", PermissionAction.DENY))),
+            false);
+    ToolGateway.PreflightResult aliasResult =
+        environmentPreflight(binding, "{\"path\":\"src/Main.java\"}", environmentRelativeAlias);
+    assertInstanceOf(ToolGateway.Ask.class, aliasResult);
   }
 
   @Test

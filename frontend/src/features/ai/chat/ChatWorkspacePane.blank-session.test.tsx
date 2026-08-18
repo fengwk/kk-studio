@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import { BLANK_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
 import { composerDraftStorageKey } from '@/features/ai/composer/composer-draft'
-import { ApplicationSettingsProvider } from '@/features/settings/application-settings'
+import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { chatService } from '@/shared/api/chat-service'
@@ -237,11 +237,11 @@ function renderBlankPane(overrides?: {
     )
   }
   render(
-    <ApplicationSettingsProvider>
+    <BrowserPreferencesProvider>
       <QueryClientProvider client={queryClient}>
         <Harness />
       </QueryClientProvider>
-    </ApplicationSettingsProvider>,
+    </BrowserPreferencesProvider>,
   )
   return { onThreadChange, onAgentChange, onYoloChange, onEnvironmentChange }
 }

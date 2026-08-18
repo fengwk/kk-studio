@@ -23,7 +23,7 @@ public class Chat {
   /** 可空的默认分支完整 Environment binding（路由名 + workspace path，同存同空）：新空面板/线程草稿以此为起点，发送前可更改或清空。 */
   private EnvironmentBinding environment;
 
-  /** YOLO 模式开关：true 时工具调用跳过权限评估直接 Allow；创建时未显式指定则取部署级 ToolSettings 的 defaultYolo。 */
+  /** YOLO 模式开关：true 时工具调用跳过权限评估直接 Allow；创建时未显式指定则捕获当时数据库 SystemSettings.Tool.defaultYolo。 */
   private boolean yoloEnabled;
 
   /** 乐观锁版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据。 */

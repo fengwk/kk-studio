@@ -366,6 +366,38 @@ create table chat (
 create index idx_chat_modified on chat (updated_at, created_at);
 
 ------------------------------------------------------------------------------
+-- 1b. Singleton system settings (id=1)
+--
+-- system_setting 是全局强类型配置聚合的权威存储：恒为一行（id=1），config 保存完整
+-- SystemSettings 六个 section 的 canonical JSON（写路径只接受强类型 DTO，绝无任意 JSON
+-- 写接口），version 是乐观锁 CAS 令牌（非负，每次更新 +1），时间字段毫秒精度。
+-- 默认行插入安全默认聚合：tool.permission 默认 write/edit/bash 各 `* -> ask`。
+------------------------------------------------------------------------------
+
+create table system_setting (
+    id         bigint         primary key,
+    config     jsonb          not null,
+    version    bigint         not null default 0,
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp,
+    constraint ck_system_setting_id check (id = 1),
+    constraint ck_system_setting_config_object check (jsonb_typeof(config) = 'object'),
+    constraint ck_system_setting_version_nonneg check (version >= 0)
+);
+
+comment on table system_setting is '全局 system settings 单行聚合（id=1）：config 为强类型 canonical JSON，version 为 CAS 乐观锁版本';
+comment on column system_setting.id is '恒为 1：全局配置恰好一行';
+comment on column system_setting.config is '六个 section（tool/aiRuntime/environment/integrations/storageMedia/advanced）的完整强类型 canonical JSON，必须为 object';
+comment on column system_setting.version is '乐观锁行版本：非负，从 0 开始，每次写操作 +1';
+comment on column system_setting.created_at is '创建时间（毫秒精度）';
+comment on column system_setting.updated_at is '最后更新时间（毫秒精度），应用侧维护';
+
+insert into system_setting (id, config) values (
+    1,
+    '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"canvasFunctionExecutorCoreSize":2,"canvasFunctionExecutorMaxSize":4,"canvasFunctionExecutorQueueCapacity":64,"canvasRealtimeMaxLength":5000,"dispatcherLeaseDurationMillis":30000,"dispatcherMaxDispatchTasks":64,"dispatcherPollIntervalMillis":1000,"dispatcherRejectionDelayMillis":1000,"dispatcherWorkerConcurrency":16,"dispatcherWorkerQueueCapacity":64,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"redisRealtimeRetryDelayMillis":1000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"threadStepLimit":16,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionEnabled":true,"compactionMaxRecentTokens":20000,"compactionReserveTokens":16384,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentIdleTimeoutMillis":0,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTurns":50},"environment":{"directoryListTimeoutMillis":10000,"heartbeatTimeoutMillis":60000,"maxMessageBytes":16777216,"maxResourceBytes":8388608},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":"http://vps-opencli-hub:8080","connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3Enabled":false,"s3PresignDefaultExpiresSeconds":600,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":3600},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"skillLoadTimeoutMillis":30000,"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
+);
+
+------------------------------------------------------------------------------
 -- 2. Harness runtime execution protocol
 --
 -- The block below (the seven tables + their indexes, including comments) is

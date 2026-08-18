@@ -1,52 +1,52 @@
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApplicationSettingsProvider,
-  decodeApplicationSettings,
-  useApplicationSettings,
-} from '@/features/settings/application-settings'
+  BrowserPreferencesProvider,
+  decodeBrowserPreferences,
+  useBrowserPreferences,
+} from '@/features/settings/browser-preferences'
 
-const STORAGE_KEY = 'kkstudio.application-settings.v1'
+const STORAGE_KEY = 'kkstudio.browser-preferences.v1'
 
-describe('decodeApplicationSettings', () => {
+describe('decodeBrowserPreferences', () => {
   it('returns the default (false) for null, malformed JSON and non-object values', () => {
-    expect(decodeApplicationSettings(null)).toEqual({ notificationsEnabled: false })
-    expect(decodeApplicationSettings('not json')).toEqual({ notificationsEnabled: false })
-    expect(decodeApplicationSettings('42')).toEqual({ notificationsEnabled: false })
-    expect(decodeApplicationSettings('"text"')).toEqual({ notificationsEnabled: false })
-    expect(decodeApplicationSettings('[]')).toEqual({ notificationsEnabled: false })
+    expect(decodeBrowserPreferences(null)).toEqual({ notificationsEnabled: false })
+    expect(decodeBrowserPreferences('not json')).toEqual({ notificationsEnabled: false })
+    expect(decodeBrowserPreferences('42')).toEqual({ notificationsEnabled: false })
+    expect(decodeBrowserPreferences('"text"')).toEqual({ notificationsEnabled: false })
+    expect(decodeBrowserPreferences('[]')).toEqual({ notificationsEnabled: false })
   })
 
   it('strictly rejects unknown shapes and non-boolean fields back to the default', () => {
     // 字段缺失 / 类型非法 / 携带未知字段：一律回默认 false，绝不误读。
-    expect(decodeApplicationSettings('{}')).toEqual({ notificationsEnabled: false })
-    expect(decodeApplicationSettings('{"notificationsEnabled":"yes"}')).toEqual({ notificationsEnabled: false })
-    expect(decodeApplicationSettings('{"notificationsEnabled":1}')).toEqual({ notificationsEnabled: false })
-    expect(decodeApplicationSettings('{"notificationsEnabled":true,"other":1}')).toEqual({
+    expect(decodeBrowserPreferences('{}')).toEqual({ notificationsEnabled: false })
+    expect(decodeBrowserPreferences('{"notificationsEnabled":"yes"}')).toEqual({ notificationsEnabled: false })
+    expect(decodeBrowserPreferences('{"notificationsEnabled":1}')).toEqual({ notificationsEnabled: false })
+    expect(decodeBrowserPreferences('{"notificationsEnabled":true,"other":1}')).toEqual({
       notificationsEnabled: false,
     })
-    expect(decodeApplicationSettings('{"notificationsEnabled":null}')).toEqual({ notificationsEnabled: false })
+    expect(decodeBrowserPreferences('{"notificationsEnabled":null}')).toEqual({ notificationsEnabled: false })
   })
 
   it('accepts only the exact known shape', () => {
-    expect(decodeApplicationSettings('{"notificationsEnabled":true}')).toEqual({
+    expect(decodeBrowserPreferences('{"notificationsEnabled":true}')).toEqual({
       notificationsEnabled: true,
     })
-    expect(decodeApplicationSettings('{"notificationsEnabled":false}')).toEqual({
+    expect(decodeBrowserPreferences('{"notificationsEnabled":false}')).toEqual({
       notificationsEnabled: false,
     })
   })
 })
 
-describe('ApplicationSettingsProvider', () => {
+describe('BrowserPreferencesProvider', () => {
   beforeEach(() => {
     localStorage.clear()
   })
 
-  it('reads persisted settings on mount and writes the exact storage shape', () => {
+  it('reads persisted preferences on mount and writes the exact storage shape', () => {
     localStorage.setItem(STORAGE_KEY, '{"notificationsEnabled":true}')
-    const { result } = renderHook(() => useApplicationSettings(), {
-      wrapper: ApplicationSettingsProvider,
+    const { result } = renderHook(() => useBrowserPreferences(), {
+      wrapper: BrowserPreferencesProvider,
     })
     expect(result.current.notificationsEnabled).toBe(true)
 
@@ -57,15 +57,15 @@ describe('ApplicationSettingsProvider', () => {
 
   it('falls back to false for illegal persisted values', () => {
     localStorage.setItem(STORAGE_KEY, '{"notificationsEnabled":"yes"}')
-    const { result } = renderHook(() => useApplicationSettings(), {
-      wrapper: ApplicationSettingsProvider,
+    const { result } = renderHook(() => useBrowserPreferences(), {
+      wrapper: BrowserPreferencesProvider,
     })
     expect(result.current.notificationsEnabled).toBe(false)
   })
 
   it('synchronizes other consumers in the same tab via CustomEvent', () => {
     function Probe() {
-      const { notificationsEnabled, setNotificationsEnabled } = useApplicationSettings()
+      const { notificationsEnabled, setNotificationsEnabled } = useBrowserPreferences()
       return (
         <button type="button" onClick={() => setNotificationsEnabled(true)}>
           {notificationsEnabled ? 'on' : 'off'}
@@ -73,10 +73,10 @@ describe('ApplicationSettingsProvider', () => {
       )
     }
     render(
-      <ApplicationSettingsProvider>
+      <BrowserPreferencesProvider>
         <Probe />
         <Probe />
-      </ApplicationSettingsProvider>,
+      </BrowserPreferencesProvider>,
     )
     const buttons = screen.getAllByRole('button')
     expect(buttons.map((button) => button.textContent)).toEqual(['off', 'off'])
@@ -85,8 +85,8 @@ describe('ApplicationSettingsProvider', () => {
   })
 
   it('synchronizes across tabs via the storage event', async () => {
-    const { result } = renderHook(() => useApplicationSettings(), {
-      wrapper: ApplicationSettingsProvider,
+    const { result } = renderHook(() => useBrowserPreferences(), {
+      wrapper: BrowserPreferencesProvider,
     })
     expect(result.current.notificationsEnabled).toBe(false)
 
@@ -103,8 +103,8 @@ describe('ApplicationSettingsProvider', () => {
   })
 
   it('ignores storage events for unrelated keys', () => {
-    const { result } = renderHook(() => useApplicationSettings(), {
-      wrapper: ApplicationSettingsProvider,
+    const { result } = renderHook(() => useBrowserPreferences(), {
+      wrapper: BrowserPreferencesProvider,
     })
     act(() => {
       window.dispatchEvent(
@@ -120,8 +120,8 @@ describe('ApplicationSettingsProvider', () => {
   it('requires the provider', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
-      expect(() => renderHook(() => useApplicationSettings())).toThrow(
-        'ApplicationSettingsProvider is required',
+      expect(() => renderHook(() => useBrowserPreferences())).toThrow(
+        'BrowserPreferencesProvider is required',
       )
     } finally {
       consoleError.mockRestore()

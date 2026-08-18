@@ -56,6 +56,12 @@ public abstract class PostgresSchemaSupport {
     migrate(conn, "classpath:db/migration", "classpath:db/seed/e2e");
   }
 
+  /** 在调用方持有的连接上执行 baseline、dev seed 与 Docker Canvas test 专用设置迁移。 */
+  public static void applyCanvasTestDatabase(Connection conn) {
+    migrate(
+        conn, "classpath:db/migration", "classpath:db/seed/dev", "classpath:db/seed/canvas-test");
+  }
+
   private static void migrate(Connection conn, String... locations) {
     Flyway.configure()
         // suppressClose 保留调用方持有的连接生命周期。

@@ -3,12 +3,13 @@ package fun.fengwk.kkstudio.core.ai.runtime.tool.gateway;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.plugin.PluginBranchViewLoader;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
@@ -17,12 +18,12 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** {@link CoreToolGateway} 的 executor 与配置 bean 装配。 */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(HarnessRuntimeProperties.class)
 public class HarnessToolGatewayConfiguration {
 
   /**
@@ -35,10 +36,17 @@ public class HarnessToolGatewayConfiguration {
     return Executors.newVirtualThreadPerTaskExecutor();
   }
 
+  /**
+   * Tool Gateway 的重试延迟快照：读取共享启动快照的 {@code
+   * tool.toolGatewayBusyRetryMillis/toolGatewayOverloadRetryMillis}（装配期一次 DB 读取，DB 变更需重启生效）。
+   */
   @Bean
   @ConditionalOnMissingBean
-  public ToolGatewayConfig toolGatewayConfig() {
-    return ToolGatewayConfig.DEFAULT;
+  public ToolGatewayConfig toolGatewayConfig(SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.Tool tool = systemSettingsSnapshot.get().tool();
+    return new ToolGatewayConfig(
+        Duration.ofMillis(tool.toolGatewayBusyRetryMillis()),
+        Duration.ofMillis(tool.toolGatewayOverloadRetryMillis()));
   }
 
   @Bean
@@ -53,9 +61,13 @@ public class HarnessToolGatewayConfiguration {
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
       HarnessRuntimeProperties runtimeProperties,
+      SystemSettingsSnapshot systemSettingsSnapshot,
       @Qualifier("toolGatewayExecutor") ExecutorService toolGatewayExecutor,
       ToolGatewayConfig config,
       Clock clock) {
+    // 单对象资源字节预算：读取共享启动快照的 SystemSettings.Advanced.resourceMaxBytes（装配期一次 DB 读取，DB 变更需重启生效）。
+    int resourceMaxBytes =
+        Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     return new CoreToolGateway(
         toolFactories,
         pluginCatalog,
@@ -65,6 +77,7 @@ public class HarnessToolGatewayConfiguration {
         toolSettingsProvider,
         resourceStore,
         runtimeProperties,
+        resourceMaxBytes,
         toolGatewayExecutor,
         config,
         clock);

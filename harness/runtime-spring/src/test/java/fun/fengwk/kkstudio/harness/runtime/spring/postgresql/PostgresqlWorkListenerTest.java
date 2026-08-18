@@ -82,7 +82,8 @@ class PostgresqlWorkListenerTest {
     assertFalse(listener.isRunning());
 
     PostgresqlWorkListener neverStarted =
-        new PostgresqlWorkListener(new SequencedDataSource(), () -> {});
+        new PostgresqlWorkListener(
+            new SequencedDataSource(), () -> {}, Duration.ofMillis(10), Duration.ofSeconds(1));
     neverStarted.close();
     assertFalse(neverStarted.isRunning());
   }

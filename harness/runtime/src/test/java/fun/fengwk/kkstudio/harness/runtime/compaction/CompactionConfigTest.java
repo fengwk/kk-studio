@@ -11,7 +11,7 @@ class CompactionConfigTest {
 
   @Test
   void defaultsMatchUpstreamPi() {
-    CompactionConfig config = CompactionConfig.DEFAULTS;
+    CompactionConfig config = new CompactionConfig(true, 16_384, 20_000);
     assertTrue(config.enabled());
     assertEquals(16_384, config.reserveTokens());
     assertEquals(20_000, config.maxRecentTokens());
@@ -42,6 +42,6 @@ class CompactionConfigTest {
   void rejectsNonPositiveContextWindow() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> CompactionConfig.DEFAULTS.effectiveKeepRecentTokens(0));
+        () -> new CompactionConfig(true, 16_384, 20_000).effectiveKeepRecentTokens(0));
   }
 }

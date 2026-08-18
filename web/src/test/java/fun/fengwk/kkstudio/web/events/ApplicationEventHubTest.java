@@ -48,6 +48,9 @@ class ApplicationEventHubTest {
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
 
+  /** Hub 构造注入的缓冲上限：足够小以便测试溢出折叠路径，同时 > 1 覆盖多信号缓冲。 */
+  private static final int BUFFER_CAPACITY = 8;
+
   private ThreadRevisionEventSource revisionSource;
   private RealtimeEventSource realtimeSource;
   private CanvasVersionEventSource versionSource;
@@ -61,7 +64,7 @@ class ApplicationEventHubTest {
     when(revisionSource.subscribe(any(), any())).thenReturn(new SourceSubscribed(5L, () -> {}));
     when(versionSource.subscribe(any(), any())).thenReturn(new SourceSubscribed(3L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(() -> {});
-    hub = new ApplicationEventHub(revisionSource, realtimeSource, versionSource);
+    hub = new ApplicationEventHub(revisionSource, realtimeSource, versionSource, BUFFER_CAPACITY);
   }
 
   @Test
@@ -622,7 +625,7 @@ class ApplicationEventHubTest {
 
   @Test
   void pendingOverflowCollapsesToSingleResyncAndStopsAccumulating() {
-    // 激活前缓冲超过 MAX_BUFFERED_SIGNALS：清空并折叠为单个 Resync，后续信号不再累积（内存有界）；激活后恢复直接投递。
+    // 激活前缓冲超过容量上限：清空并折叠为单个 Resync，后续信号不再累积（内存有界）；激活后恢复直接投递。
     AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
         new AtomicReference<>();
     doAnswer(
@@ -635,7 +638,7 @@ class ApplicationEventHubTest {
     List<Signal> received = new ArrayList<>();
     Subscription subscription = hub.subscribe(THREAD_KEY, received::add);
 
-    for (int i = 1; i <= ApplicationEventHub.MAX_BUFFERED_SIGNALS; i++) {
+    for (int i = 1; i <= BUFFER_CAPACITY; i++) {
       revisionConsumer
           .get()
           .accept(new ThreadRevisionEventSource.Event(Integer.toString(i + 5), false));
@@ -643,15 +646,11 @@ class ApplicationEventHubTest {
     // 第 MAX_BUFFERED_SIGNALS + 1 个信号触发折叠。
     revisionConsumer
         .get()
-        .accept(
-            new ThreadRevisionEventSource.Event(
-                Integer.toString(ApplicationEventHub.MAX_BUFFERED_SIGNALS + 6), false));
+        .accept(new ThreadRevisionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 6), false));
     // 折叠后不再累积。
     revisionConsumer
         .get()
-        .accept(
-            new ThreadRevisionEventSource.Event(
-                Integer.toString(ApplicationEventHub.MAX_BUFFERED_SIGNALS + 7), false));
+        .accept(new ThreadRevisionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 7), false));
 
     subscription.activate();
     assertEquals(List.of(new Signal.Resync()), received, "overflow must collapse to one resync");
@@ -659,32 +658,28 @@ class ApplicationEventHubTest {
     // 激活后直接投递，不再折叠。
     revisionConsumer
         .get()
-        .accept(
-            new ThreadRevisionEventSource.Event(
-                Integer.toString(ApplicationEventHub.MAX_BUFFERED_SIGNALS + 8), false));
+        .accept(new ThreadRevisionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 8), false));
     assertEquals(
-        List.of(
-            new Signal.Resync(),
-            new Signal.Revision(Integer.toString(ApplicationEventHub.MAX_BUFFERED_SIGNALS + 8))),
+        List.of(new Signal.Resync(), new Signal.Revision(Integer.toString(BUFFER_CAPACITY + 8))),
         received);
     subscription.close();
   }
 
   @Test
   void earlyOverflowCollapsesToSingleResyncBeforeFirstSubscriber() {
-    // establish 期间（首个订阅者加入前）信号超过 MAX_BUFFERED_SIGNALS：early 折叠为单个 Resync 且不再累积；
+    // establish 期间（首个订阅者加入前）信号超过容量上限：early 折叠为单个 Resync 且不再累积；
     // 首订阅者回放得到 Resync（可恢复），之后建立期间回调不再缓冲。
     when(revisionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
               Consumer<ThreadRevisionEventSource.Event> consumer = inv.getArgument(1);
-              for (int i = 1; i <= ApplicationEventHub.MAX_BUFFERED_SIGNALS + 1; i++) {
+              for (int i = 1; i <= BUFFER_CAPACITY + 1; i++) {
                 consumer.accept(
                     new ThreadRevisionEventSource.Event(Integer.toString(i + 5), false));
               }
               consumer.accept(
                   new ThreadRevisionEventSource.Event(
-                      Integer.toString(ApplicationEventHub.MAX_BUFFERED_SIGNALS + 7), false));
+                      Integer.toString(BUFFER_CAPACITY + 7), false));
               return new SourceSubscribed(5L, () -> {});
             });
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});

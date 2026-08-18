@@ -8,12 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.postgresql.Driver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.SmartLifecycle;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -22,12 +24,14 @@ import org.testcontainers.utility.DockerImageName;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
@@ -41,6 +45,10 @@ import fun.fengwk.kkstudio.web.WebTestApplication;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -64,6 +72,21 @@ class HarnessRuntimeConfigurationTest {
 
   static {
     POSTGRES.start();
+    // HarnessRuntimeConfiguration 的众多装配 bean 在上下文创建期会通过 SystemSettingsSnapshot 读取一次
+    // system_setting 默认行，
+    // 因此该测试上下文加载前必须完成 baseline 迁移（V1 默认行 + Harness 表），否则缺行会启动失败。
+    try (Connection conn =
+        DriverManager.getConnection(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
+      Flyway.configure()
+          .dataSource(new SingleConnectionDataSource(conn, true))
+          .locations("classpath:db/migration")
+          .validateMigrationNaming(true)
+          .load()
+          .migrate();
+    } catch (SQLException error) {
+      throw new ExceptionInInitializerError(error);
+    }
   }
 
   @DynamicPropertySource
@@ -78,6 +101,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private HarnessRuntimeProperties properties;
   @Autowired private HarnessStore harnessStore;
   @Autowired private ResourceStore resourceStore;
+  @Autowired private SystemSettingsSnapshot systemSettingsSnapshot;
   @Autowired private RedisRealtimeConfig redisRealtimeConfig;
   @Autowired private RealtimeEventSink realtimeEventSink;
   @Autowired private RealtimeEventSource realtimeEventSource;
@@ -117,7 +141,13 @@ class HarnessRuntimeConfigurationTest {
     assertNotNull(harnessWorkDispatcher);
     assertNotNull(postgresqlWorkListener);
     assertNotNull(environmentReadyListener);
-    assertEquals(InvocationRetryPolicy.DEFAULT, invocationRetryPolicy);
+    assertEquals(
+        new InvocationRetryPolicy(
+            3,
+            InvocationRetryBackoffStrategy.EXPONENTIAL,
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(60)),
+        invocationRetryPolicy);
   }
 
   @Test
@@ -128,11 +158,11 @@ class HarnessRuntimeConfigurationTest {
 
   @Test
   void resourceStoreRejectsOverBudgetContent() {
+    int resourceMaxBytes =
+        Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            resourceStore.put(
-                "text/plain", "too-big.bin", new byte[properties.getResourceMaxBytes() + 1]));
+        () -> resourceStore.put("text/plain", "too-big.bin", new byte[resourceMaxBytes + 1]));
   }
 
   @Test

@@ -1,29 +1,33 @@
 package fun.fengwk.kkstudio.core.studio.function;
 
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/** Canvas Function bounded worker executor 装配。 */
+/**
+ * Canvas Function 有界进程内 worker executor 装配。
+ *
+ * <p>executor 是长生命周期拓扑：规模来自启动时 SystemSettings.advanced 快照，运行时更新需重启生效。
+ */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(CanvasFunctionExecutorProperties.class)
 public class CanvasFunctionRuntimeConfiguration {
 
   @Bean(name = "canvasFunctionExecutor", destroyMethod = "shutdownNow")
-  public ExecutorService canvasFunctionExecutor(CanvasFunctionExecutorProperties properties) {
-    properties.validate();
+  public ExecutorService canvasFunctionExecutor(SystemSettingsSnapshot snapshot) {
+    var advanced = snapshot.get().advanced();
     return new ThreadPoolExecutor(
-        properties.getCoreSize(),
-        properties.getMaxSize(),
+        advanced.canvasFunctionExecutorCoreSize(),
+        advanced.canvasFunctionExecutorMaxSize(),
         30L,
         TimeUnit.SECONDS,
-        new ArrayBlockingQueue<>(properties.getQueueCapacity()),
+        new ArrayBlockingQueue<>(advanced.canvasFunctionExecutorQueueCapacity()),
         Thread.ofPlatform().name("canvas-function-", 0L).factory(),
         new ThreadPoolExecutor.AbortPolicy());
   }

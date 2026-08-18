@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -40,29 +43,36 @@ public class OpenCliHubClient {
   private static final int MAX_UPLOAD_EXTENSION_LENGTH = 16;
 
   private final OpenCliHubProperties properties;
+  private final SystemSettings.OpenCliHub settings;
   private final ObjectMapper mapper;
   private final HttpClient httpClient;
   private final URI origin;
 
-  public OpenCliHubClient(OpenCliHubProperties properties, ObjectMapper objectMapper) {
-    this.properties = Objects.requireNonNull(properties, "properties");
-    properties.validate();
-    mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
-    origin = normalizeOrigin(properties.getBaseUrl());
-    httpClient =
+  public OpenCliHubClient(
+      OpenCliHubProperties properties, SystemSettingsSnapshot snapshot, ObjectMapper objectMapper) {
+    this(
+        properties,
+        snapshot,
+        objectMapper,
         HttpClient.newBuilder()
-            .connectTimeout(properties.getConnectTimeout())
+            .connectTimeout(
+                Duration.ofMillis(
+                    snapshot.get().integrations().openCliHub().connectTimeoutMillis()))
             .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
+            .build());
   }
 
   OpenCliHubClient(
-      OpenCliHubProperties properties, ObjectMapper objectMapper, HttpClient httpClient) {
+      OpenCliHubProperties properties,
+      SystemSettingsSnapshot snapshot,
+      ObjectMapper objectMapper,
+      HttpClient httpClient) {
     this.properties = Objects.requireNonNull(properties, "properties");
     properties.validate();
+    this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().openCliHub();
     mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
-    origin = normalizeOrigin(properties.getBaseUrl());
+    origin = settings.baseUrl() == null ? null : normalizeOrigin(URI.create(settings.baseUrl()));
   }
 
   public UploadedResource upload(
@@ -88,7 +98,7 @@ public class OpenCliHubClient {
     HttpRequest.BodyPublisher media =
         HttpRequest.BodyPublishers.fromPublisher(
             new FixedInputStreamPublisher(
-                content, size, properties.getStreamBufferBytes(), "multipart upload"),
+                content, size, settings.streamBufferBytes(), "multipart upload"),
             size);
     HttpRequest.BodyPublisher body =
         HttpRequest.BodyPublishers.concat(
@@ -96,7 +106,7 @@ public class OpenCliHubClient {
             media,
             HttpRequest.BodyPublishers.ofByteArray(suffix));
     HttpRequest request =
-        request("/api/resources/uploads", properties.getRequestTimeout())
+        request("/api/resources/uploads", requestTimeout())
             .header("Content-Type", "multipart/form-data; boundary=" + boundary)
             .POST(body)
             .build();
@@ -128,7 +138,7 @@ public class OpenCliHubClient {
     normalized.forEach(argvNode::add);
     body.put("timeoutMillis", timeoutMillis);
     HttpRequest request =
-        request("/api/opencli/execute", properties.getRequestTimeout())
+        request("/api/opencli/execute", requestTimeout())
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(writeJson(body), StandardCharsets.UTF_8))
             .build();
@@ -141,8 +151,7 @@ public class OpenCliHubClient {
     if (waitSeconds < 0 || waitSeconds > 120) {
       throw new IllegalArgumentException("waitSeconds must be between 0 and 120");
     }
-    Duration timeout =
-        waitSeconds == 0 ? properties.getRequestTimeout() : properties.getLongPollTimeout();
+    Duration timeout = waitSeconds == 0 ? requestTimeout() : longPollTimeout();
     HttpRequest request =
         request("/api/executions/" + id + "?waitSeconds=" + waitSeconds, timeout).GET().build();
     return parseExecution(sendEnvelope(request));
@@ -157,7 +166,7 @@ public class OpenCliHubClient {
       HttpRequest request =
           request(
                   "/api/executions/" + validateExecutionId(executionId) + "/cancel",
-                  properties.getRequestTimeout())
+                  requestTimeout())
               .POST(HttpRequest.BodyPublishers.noBody())
               .build();
       parseExecution(sendEnvelope(request));
@@ -170,8 +179,7 @@ public class OpenCliHubClient {
     requireEnabled();
     Objects.requireNonNull(resource, "resource");
     URI uri = resolveResourceUri(firstText(resource.downloadUrl(), resource.contentUrl()));
-    HttpRequest request =
-        HttpRequest.newBuilder(uri).timeout(properties.getRequestTimeout()).GET().build();
+    HttpRequest request = HttpRequest.newBuilder(uri).timeout(requestTimeout()).GET().build();
     HttpResponse<InputStream> response;
     try {
       response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -224,7 +232,7 @@ public class OpenCliHubClient {
       if (!contentType.toLowerCase(Locale.ROOT).startsWith("application/json")) {
         throw malformed("success response Content-Type must be application/json");
       }
-      byte[] bytes = readBounded(body, properties.getMaxJsonResponseBytes(), "JSON response");
+      byte[] bytes = readBounded(body, settings.maxJsonResponseBytes(), "JSON response");
       JsonNode root = mapper.readTree(bytes);
       if (root == null || !root.isObject()) {
         throw malformed("Result envelope must be an object");
@@ -260,8 +268,8 @@ public class OpenCliHubClient {
     }
     String stdout = optionalText(data, "stdout");
     String stderr = optionalText(data, "stderr");
-    if (stdout.length() > properties.getMaxOutputChars()
-        || stderr.length() > properties.getMaxOutputChars()) {
+    if (stdout.length() > settings.maxOutputChars()
+        || stderr.length() > settings.maxOutputChars()) {
       throw malformed("OpenCLI Hub execution output exceeds local limit");
     }
     List<ExecutionResource> resources = new ArrayList<>();
@@ -292,7 +300,7 @@ public class OpenCliHubClient {
   }
 
   private OpenCliHubException httpError(int status, InputStream body) {
-    TruncatedBytes truncated = readTruncated(body, properties.getMaxErrorResponseBytes());
+    TruncatedBytes truncated = readTruncated(body, settings.maxErrorResponseBytes());
     String detail =
         new String(truncated.bytes(), StandardCharsets.UTF_8).replaceAll("\\p{Cntrl}", " ").strip();
     if (truncated.truncated()) {
@@ -305,7 +313,7 @@ public class OpenCliHubClient {
   private TruncatedBytes readTruncated(InputStream input, int limit) {
     try {
       ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 8192));
-      byte[] buffer = new byte[Math.min(properties.getStreamBufferBytes(), 8192)];
+      byte[] buffer = new byte[Math.min(settings.streamBufferBytes(), 8192)];
       int remaining = limit;
       while (remaining > 0) {
         int read = input.read(buffer, 0, Math.min(buffer.length, remaining));
@@ -324,7 +332,7 @@ public class OpenCliHubClient {
   private byte[] readBounded(InputStream input, int limit, String description) {
     try {
       ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 8192));
-      byte[] buffer = new byte[Math.min(properties.getStreamBufferBytes(), 8192)];
+      byte[] buffer = new byte[Math.min(settings.streamBufferBytes(), 8192)];
       int total = 0;
       int read;
       while ((read = input.read(buffer)) != -1) {
@@ -575,9 +583,17 @@ public class OpenCliHubClient {
   }
 
   private void requireEnabled() {
-    if (!properties.isEnabled()) {
-      throw new OpenCliHubException("OpenCLI Hub integration is disabled");
+    if (!settings.enabled()) {
+      throw new OpenCliHubException("OpenCLI Hub integration is disabled by SystemSettings");
     }
+  }
+
+  private Duration requestTimeout() {
+    return Duration.ofMillis(settings.requestTimeoutMillis());
+  }
+
+  private Duration longPollTimeout() {
+    return Duration.ofMillis(settings.longPollTimeoutMillis());
   }
 
   private static OpenCliHubException malformed(String message) {

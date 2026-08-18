@@ -1,13 +1,12 @@
 package fun.fengwk.kkstudio.core.studio.resource;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.core.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,6 +14,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -27,21 +27,24 @@ import java.util.UUID;
  * <p>调用方（上传消费 afterCommit、输出物化）决定何时 best-effort 调用；生成失败抛出异常但不破坏 blob 事实。
  */
 @Slf4j
-@Component
-@ConditionalOnProperty(prefix = "kk-studio.storage.s3", name = "enabled", havingValue = "true")
 public class CanvasBlobPreviewService {
 
   private static final long MAX_PREVIEW_INPUT = 512L * 1024 * 1024;
 
   private final CanvasMediaProperties properties;
+  private final SystemSettings.StorageMedia storageMedia;
   private final S3StorageService storageService;
   private final MediaProcessRunner processRunner;
 
   public CanvasBlobPreviewService(
-      CanvasMediaProperties properties, S3StorageService storageService) {
+      CanvasMediaProperties properties,
+      SystemSettings.StorageMedia storageMedia,
+      S3StorageService storageService) {
     this.properties = Objects.requireNonNull(properties, "properties");
+    this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
     this.storageService = Objects.requireNonNull(storageService, "storageService");
-    this.processRunner = new MediaProcessRunner(properties.getProcessTimeout());
+    this.processRunner =
+        new MediaProcessRunner(Duration.ofMillis(storageMedia.canvasMediaProcessTimeoutMillis()));
   }
 
   /**
@@ -96,16 +99,16 @@ public class CanvasBlobPreviewService {
         List.of(
             "-vf",
             "scale="
-                + properties.getThumbnailMaxDimension()
+                + storageMedia.thumbnailMaxDimension()
                 + ":"
-                + properties.getThumbnailMaxDimension()
+                + storageMedia.thumbnailMaxDimension()
                 + ":force_original_aspect_ratio=decrease",
             "-frames:v",
             "1",
             "-c:v",
             "libwebp",
             "-quality",
-            Integer.toString(properties.getThumbnailQuality()),
+            Integer.toString(storageMedia.thumbnailQuality()),
             "-an"));
     command.add(preview.toString());
     processRunner.run(command, stdout, stderr);

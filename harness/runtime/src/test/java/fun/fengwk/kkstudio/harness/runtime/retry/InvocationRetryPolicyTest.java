@@ -15,7 +15,12 @@ class InvocationRetryPolicyTest {
 
   @Test
   void defaultPolicyMatchesPiStyleExponentialDelays() {
-    InvocationRetryPolicy policy = InvocationRetryPolicy.DEFAULT;
+    InvocationRetryPolicy policy =
+        new InvocationRetryPolicy(
+            3,
+            InvocationRetryBackoffStrategy.EXPONENTIAL,
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(60));
 
     assertEquals(3, policy.maxRetries());
     assertEquals(Duration.ofSeconds(2), policy.delayBeforeRetry(1));
@@ -72,7 +77,14 @@ class InvocationRetryPolicyTest {
                 Duration.ofSeconds(2),
                 Duration.ofSeconds(1)));
     assertThrows(
-        IllegalArgumentException.class, () -> InvocationRetryPolicy.DEFAULT.delayBeforeRetry(0));
+        IllegalArgumentException.class,
+        () ->
+            new InvocationRetryPolicy(
+                    3,
+                    InvocationRetryBackoffStrategy.EXPONENTIAL,
+                    Duration.ofSeconds(2),
+                    Duration.ofSeconds(60))
+                .delayBeforeRetry(0));
   }
 
   /** 持久化 strategy 解析大小写无关，且与进程 locale 独立。 */

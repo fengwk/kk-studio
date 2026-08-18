@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.eclipse.jgit.ignore.FastIgnoreRule;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -15,10 +16,10 @@ import java.util.stream.Stream;
 /**
  * daemon 模块的轻量架构守卫。
  *
- * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、{@code harness.tool} 以及本模块自身包。 禁止引入
- * runtime/core/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。LangChain4j 只允许出现在技能与 MCP 适配器包中：
- * {@code dev.langchain4j.skills.*} 仅限 {@code .../daemon/skill/}，{@code dev.langchain4j.*} 其余仅限
- * {@code .../daemon/mcp/langchain/}。
+ * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、JGit（{@code org.eclipse.jgit.ignore.FastIgnoreRule}）、{@code
+ * harness.tool} 以及本模块自身包。 禁止引入 runtime/core/web、Spring/MyBatis/servlet/Redis 以及 Provider
+ * SDK。LangChain4j 只允许出现在技能与 MCP 适配器包中： {@code dev.langchain4j.skills.*} 仅限 {@code
+ * .../daemon/skill/}，{@code dev.langchain4j.*} 其余仅限 {@code .../daemon/mcp/langchain/}。
  */
 class DaemonModuleArchitectureTest {
 
@@ -110,7 +111,8 @@ class DaemonModuleArchitectureTest {
         || imported.startsWith("javax.")
         || imported.startsWith("com.fasterxml.jackson.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.tool.")
-        || imported.startsWith("fun.fengwk.kkstudio.harness.daemon.");
+        || imported.startsWith("fun.fengwk.kkstudio.harness.daemon.")
+        || imported.equals(FastIgnoreRule.class.getName());
   }
 
   private static String normalizeImport(String importLine) {

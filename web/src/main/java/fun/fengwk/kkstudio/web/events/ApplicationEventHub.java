@@ -76,6 +76,7 @@ final class ApplicationEventHub implements AutoCloseable {
   private final ThreadRevisionEventSource revisionSource;
   private final RealtimeEventSource realtimeSource;
   private final CanvasVersionEventSource versionSource;
+  private final int maxBufferedSignals;
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
 
   /**
@@ -87,16 +88,22 @@ final class ApplicationEventHub implements AutoCloseable {
   /** 关闭标记：仅在 {@link #lifecycleFence} 内由 false 转为 true；之后不得再发布新状态。 */
   private volatile boolean closed;
 
-  /** 单订阅待发缓冲与建立期 early 缓冲的最大信号数；溢出折叠为单个 {@link Signal.Resync}，保证可恢复且内存有界。 */
-  static final int MAX_BUFFERED_SIGNALS = 512;
-
+  /**
+   * 单订阅待发缓冲与建立期 early 缓冲的最大信号数（由数据库 SystemSettings.Advanced.applicationEventQueueCapacity
+   * 在装配时传入）；溢出折叠为单个 {@link Signal.Resync}，保证可恢复且内存有界。
+   */
   ApplicationEventHub(
       ThreadRevisionEventSource revisionSource,
       RealtimeEventSource realtimeSource,
-      CanvasVersionEventSource versionSource) {
+      CanvasVersionEventSource versionSource,
+      int maxBufferedSignals) {
     this.revisionSource = Objects.requireNonNull(revisionSource, "revisionSource");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
     this.versionSource = Objects.requireNonNull(versionSource, "versionSource");
+    if (maxBufferedSignals <= 0) {
+      throw new IllegalArgumentException("maxBufferedSignals must be positive");
+    }
+    this.maxBufferedSignals = maxBufferedSignals;
   }
 
   /**
@@ -138,7 +145,8 @@ final class ApplicationEventHub implements AutoCloseable {
           closeQuietly(state.versionHandle);
           throw error;
         }
-        LocalSubscription subscription = new LocalSubscription(this, resource, state.cursor, sink);
+        LocalSubscription subscription =
+            new LocalSubscription(this, resource, state.cursor, sink, maxBufferedSignals);
         state.subscribers.add(subscription);
         // 回放建立上游期间暂存的信号（establish 回调早于第一个订阅者加入）；deliver 按 cursor 过滤并缓冲到激活。
         for (Signal signal : state.early) {
@@ -224,9 +232,9 @@ final class ApplicationEventHub implements AutoCloseable {
 
   /**
    * 在资源锁内 fan-out：与「读 cursor + 注册订阅者」互斥，保证 ack 后无注册竞态窗口。 没有订阅者时（establish 上游期间的回调可能先于第一个
-   * LocalSubscription 加入）信号暂存到 {@link ResourceState#early}，由随后加入的订阅者按 cursor 过滤回放；early 超过 {@link
-   * #MAX_BUFFERED_SIGNALS} 时清空并折叠为单个 {@link Signal.Resync}，之后不再累积（首订阅前内存有界且可恢复）。 retired
-   * 状态（最后释放/建立失败/hub close 淘汰）的迟到回调直接丢弃，不向 detached state 累积。
+   * LocalSubscription 加入）信号暂存到 {@link ResourceState#early}，由随后加入的订阅者按 cursor 过滤回放；early
+   * 超过缓冲上限时清空并折叠为单个 {@link Signal.Resync}，之后不再累积（首订阅前内存有界且可恢复）。 retired 状态（最后释放/建立失败/hub close
+   * 淘汰）的迟到回调直接丢弃，不向 detached state 累积。
    */
   private void fanout(ResourceState state, Signal signal) {
     synchronized (state) {
@@ -237,7 +245,7 @@ final class ApplicationEventHub implements AutoCloseable {
         if (state.earlyCollapsed) {
           return;
         }
-        if (state.early.size() >= MAX_BUFFERED_SIGNALS) {
+        if (state.early.size() >= maxBufferedSignals) {
           state.early.clear();
           state.early.add(new Signal.Resync());
           state.earlyCollapsed = true;
@@ -311,6 +319,7 @@ final class ApplicationEventHub implements AutoCloseable {
     private final ApplicationEventHub hub;
     private final ResourceKey resource;
     private final long cursor;
+    private final int maxBufferedSignals;
     private final Sink sink;
     private final Object lock = new Object();
     private boolean active;
@@ -321,11 +330,16 @@ final class ApplicationEventHub implements AutoCloseable {
     private boolean pendingCollapsed;
 
     private LocalSubscription(
-        ApplicationEventHub hub, ResourceKey resource, long cursor, Sink sink) {
+        ApplicationEventHub hub,
+        ResourceKey resource,
+        long cursor,
+        Sink sink,
+        int maxBufferedSignals) {
       this.hub = hub;
       this.resource = resource;
       this.cursor = cursor;
       this.sink = sink;
+      this.maxBufferedSignals = maxBufferedSignals;
     }
 
     @Override
@@ -386,7 +400,7 @@ final class ApplicationEventHub implements AutoCloseable {
           if (pendingCollapsed) {
             return;
           }
-          if (pending.size() >= MAX_BUFFERED_SIGNALS) {
+          if (pending.size() >= maxBufferedSignals) {
             pending.clear();
             pending.add(new Signal.Resync());
             pendingCollapsed = true;

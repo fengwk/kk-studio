@@ -19,7 +19,6 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.core.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.core.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
@@ -54,7 +53,6 @@ import java.util.concurrent.TimeUnit;
 @Import(StorageS3TestConfiguration.class)
 @TestPropertySource(
     properties = {
-      "kk-studio.storage.s3.enabled=true",
       "kk-studio.storage.s3.endpoint=http://minio.example.local:9000",
       "kk-studio.storage.s3.public-endpoint=https://cdn.example.com",
       "kk-studio.storage.s3.region=us-east-1",
@@ -62,7 +60,7 @@ import java.util.concurrent.TimeUnit;
       "kk-studio.storage.s3.access-key=AKIAIOSFODNN7EXAMPLE",
       "kk-studio.storage.s3.secret-key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     })
-class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
+class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
 
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private StorageBlobManager storageBlobManager;

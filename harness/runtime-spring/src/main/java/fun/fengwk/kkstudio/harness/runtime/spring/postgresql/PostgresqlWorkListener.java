@@ -19,15 +19,14 @@ import java.util.Objects;
  * 把 Work notification 转为 dispatcher wake hints 的专用 PostgreSQL {@code LISTEN} 循环。
  *
  * <p>Notification 不是正确性事实：每次成功连接都会执行一次 startup wake，dispatcher 保留其独立的 periodic poll。 listener
- * 只拥有自己的 daemon thread 与专用 JDBC connection，不拥有 dispatcher 或任何注入的 executor。
+ * 只拥有自己的 daemon thread 与专用 JDBC connection，不拥有 dispatcher 或任何注入的 executor。poll 间隔与重连退避由装配方
+ * （HarnessRuntimeConfiguration）从数据库 SystemSettings.Advanced 传入，不再在此处保留默认值。
  */
 public final class PostgresqlWorkListener implements AutoCloseable {
 
   public static final String CHANNEL = PostgresqlWorkChannel.NAME;
 
   private static final Logger log = LoggerFactory.getLogger(PostgresqlWorkListener.class);
-  private static final Duration DEFAULT_NOTIFICATION_POLL = Duration.ofSeconds(5);
-  private static final Duration DEFAULT_RECONNECT_BACKOFF = Duration.ofSeconds(1);
 
   private final DataSource dataSource;
   private final Runnable wake;
@@ -38,10 +37,6 @@ public final class PostgresqlWorkListener implements AutoCloseable {
   private volatile boolean running;
   private volatile boolean stopped;
   private volatile Thread loopThread;
-
-  public PostgresqlWorkListener(DataSource dataSource, Runnable wake) {
-    this(dataSource, wake, DEFAULT_NOTIFICATION_POLL, DEFAULT_RECONNECT_BACKOFF);
-  }
 
   public PostgresqlWorkListener(
       DataSource dataSource,

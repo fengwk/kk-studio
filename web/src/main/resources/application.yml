@@ -62,20 +62,8 @@ convention:
       locale: ${convention.i18n.locale}
 
 kk-studio:
-  storage:
-    # 全局 Blob 存储：上传默认有效期（秒），过期后由机会式批次与启动恢复回收。
-    upload-expires-seconds: ${KK_STUDIO_STORAGE_UPLOAD_EXPIRES_SECONDS:3600}
   canvas:
     function:
       minimax-h3:
-        enabled: ${KK_STUDIO_CANVAS_H3_ENABLED:false}
-        prompt-agent-name: ${KK_STUDIO_CANVAS_H3_PROMPT_AGENT:}
-        prompt-environment-name: ${KK_STUDIO_CANVAS_H3_PROMPT_ENVIRONMENT:}
-        presign-expiry-seconds: ${KK_STUDIO_CANVAS_H3_PRESIGN_EXPIRY_SECONDS:600}
-        prompt-max-wait: ${KK_STUDIO_CANVAS_H3_PROMPT_MAX_WAIT:10m}
-        comfy-base-url: ${KK_STUDIO_CANVAS_H3_COMFY_BASE_URL:}
+        # 仅保留部署秘密；启用、路由与超时由 system_setting.integrations.minimaxH3 提供。
         comfy-bearer-token: ${KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN:}
-        comfy-connect-timeout: ${KK_STUDIO_CANVAS_H3_COMFY_CONNECT_TIMEOUT:10s}
-        comfy-request-timeout: ${KK_STUDIO_CANVAS_H3_COMFY_REQUEST_TIMEOUT:30s}
-        comfy-poll-interval: ${KK_STUDIO_CANVAS_H3_COMFY_POLL_INTERVAL:2s}
-        comfy-max-wait: ${KK_STUDIO_CANVAS_H3_COMFY_MAX_WAIT:30m}

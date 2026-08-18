@@ -7,12 +7,14 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 
-/** 验证不可变的 {@link ModelGatewayConfig} record 及其默认值。 */
+/** 验证不可变的 {@link ModelGatewayConfig} record 及整毫秒约束。默认值现在由数据库 SystemSettings 装配，不再有静态 DEFAULT。 */
 class ModelGatewayConfigTest {
 
   @Test
-  void providesDefaultBusyRetryDelay() {
-    assertEquals(Duration.ofSeconds(5), ModelGatewayConfig.DEFAULT.busyRetryDelay());
+  void acceptsPiDefaultBusyRetryDelay() {
+    // 与 SystemSettings.Tool.DEFAULT.modelGatewayBusyRetryMillis 一致的装配等价形式。
+    assertEquals(
+        Duration.ofSeconds(5), new ModelGatewayConfig(Duration.ofSeconds(5)).busyRetryDelay());
   }
 
   @Test

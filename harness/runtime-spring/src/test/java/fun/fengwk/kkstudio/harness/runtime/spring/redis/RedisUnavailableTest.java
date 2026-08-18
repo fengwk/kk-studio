@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 
 import java.net.ServerSocket;
+import java.time.Duration;
 import java.time.Instant;
 
 /** Redis 不可用时：sink 失败必须向上传播；source 订阅不抛错、可干净关闭。adapter 直连一个已释放的本地端口，无需 Docker。 */
@@ -66,7 +67,10 @@ class RedisUnavailableTest {
   void sourceSubscriptionIsAsyncAndClosesCleanlyWithoutRedis() throws Exception {
     RedisRealtimeEventSource source =
         new RedisRealtimeEventSource(
-            connectionFactory, new RedisRealtimeConfig(), new RealtimeEventJsonCodec());
+            connectionFactory,
+            new RedisRealtimeConfig(),
+            new RealtimeEventJsonCodec(),
+            Duration.ofMillis(1));
     try {
       // 订阅失败在 reactor 上异步发生：调用本身不抛错，也不产生 resync（从未连接成功）。
       AutoCloseable subscription = source.subscribe(id(1L), event -> {}, () -> {});
