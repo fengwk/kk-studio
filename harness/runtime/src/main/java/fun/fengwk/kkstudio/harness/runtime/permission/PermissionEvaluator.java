@@ -5,21 +5,25 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.file.Path;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
-/** PiBase 等价的 ordered Tool permission evaluator。路径仅构造候选，不承担 T09 path/symlink 安全。 */
+/**
+ * PiBase 等价的 ordered Tool permission evaluator。path target 只解析为 effective-workdir 相对 POSIX 路径，交给
+ * JGit gitignore 语义匹配；Bash/普通 command 候选仍使用简单 wildcard。这里只生成策略候选，不承担 T09 path/symlink 安全。
+ */
 public final class PermissionEvaluator {
   private static final int ARGUMENT_PREVIEW_LENGTH = 120;
 
   private final ObjectMapper objectMapper;
   private final BashSurfaceAnalyzer bashAnalyzer;
+  private final PermissionPathMatcher pathMatcher;
 
   public PermissionEvaluator(ObjectMapper objectMapper, BashSurfaceAnalyzer bashAnalyzer) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     this.bashAnalyzer = Objects.requireNonNull(bashAnalyzer, "bashAnalyzer");
+    this.pathMatcher = new PermissionPathMatcher();
   }
 
   /** 按调用方冻结的权限上下文评估 Tool 调用，返回 action 与 prompt preview。 */
@@ -28,9 +32,13 @@ public final class PermissionEvaluator {
     PermissionAction action;
     if (context.toolName().equals("bash") && input.path("command").isTextual()) {
       action = evaluateBash(input.path("command").asText(), context.settings(), context.toolName());
+    } else if (input.path("path").isTextual() && !input.path("path").asText().trim().isEmpty()) {
+      Path targetWorkdir = resolveWorkdir(input, context.workdir());
+      PathTarget target = describePathTarget(input.path("path").asText(), targetWorkdir);
+      action = evaluatePathRules(target, context.settings(), context.toolName());
     } else {
       action =
-          evaluateRules(describeCandidates(input, context), context.settings(), context.toolName());
+          evaluateWildcardRules(describeCandidates(input), context.settings(), context.toolName());
     }
     return new Evaluation(action, promptPreview(context, input));
   }
@@ -39,12 +47,21 @@ public final class PermissionEvaluator {
     return promptPreview(context, readArguments(context.argumentsJson()));
   }
 
-  List<String> describeCandidates(JsonNode input, PermissionEvaluationContext context) {
-    if (input.path("path").isTextual() && !input.path("path").asText().trim().isEmpty()) {
-      Path targetWorkdir = resolveWorkdir(input, context.workdir());
-      return buildPathCandidates(
-          input.path("path").asText(), targetWorkdir, context.environmentRoot());
-    }
+  /**
+   * 把工具 {@code path} 参数解析为相对目标。只保留到该次调用 effective workdir 的规范相对 POSIX 路径；raw、
+   * environment-root-relative 与 absolute 候选不再产生，Environment root 不参与 pattern 坐标。
+   */
+  PathTarget describePathTarget(String rawPath, Path workdir) {
+    String stripped = stripAtPrefix(rawPath);
+    boolean directory = stripped.endsWith("/") || stripped.endsWith("\\");
+    Path resolved = Path.of(display(expandHome(stripped)));
+    Path absolute =
+        resolved.isAbsolute() ? resolved.normalize() : workdir.resolve(resolved).normalize();
+    String relative = relativeDisplay(workdir, absolute);
+    return new PathTarget(relative, directory);
+  }
+
+  List<String> describeCandidates(JsonNode input) {
     if (input.path("command").isTextual()) {
       String command = input.path("command").asText().trim();
       return List.of(command.isEmpty() ? "<missing-command>" : command);
@@ -52,33 +69,34 @@ public final class PermissionEvaluator {
     return List.of("*");
   }
 
-  List<String> buildPathCandidates(String rawPath, Path workdir, Path environmentRoot) {
-    String stripped = rawPath.startsWith("@") ? rawPath.substring(1) : rawPath;
-    Path raw = Path.of(expandHome(stripped));
-    Path absolute = raw.isAbsolute() ? raw.normalize() : workdir.resolve(raw).normalize();
-    LinkedHashSet<String> candidates = new LinkedHashSet<>();
-    addCandidate(candidates, stripped);
-    addCandidate(candidates, relativeDisplay(workdir, absolute));
-    if (absolute.startsWith(environmentRoot)) {
-      addCandidate(candidates, relativeDisplay(environmentRoot, absolute));
+  private PermissionAction evaluatePathRules(
+      PathTarget target, ToolSettings settings, String toolName) {
+    PermissionAction action = PermissionAction.ALLOW;
+    List<List<PermissionRule>> rulesets =
+        List.of(settings.rulesFor("*"), settings.rulesFor(toolName));
+    for (List<PermissionRule> rules : rulesets) {
+      for (PermissionRule rule : rules) {
+        if (pathMatcher.matches(rule.pattern(), target)) {
+          action = rule.action();
+        }
+      }
     }
-    addCandidate(candidates, display(absolute));
-    return List.copyOf(candidates);
+    return action;
   }
 
   private PermissionAction evaluateBash(String command, ToolSettings settings, String toolName) {
     BashSurfaceAnalyzer.Analysis analysis = bashAnalyzer.analyze(command);
     if (!analysis.supported()) {
-      PermissionAction staticAction = evaluateRules(List.of(command), settings, toolName);
+      PermissionAction staticAction = evaluateWildcardRules(List.of(command), settings, toolName);
       return staticAction == PermissionAction.DENY ? PermissionAction.DENY : PermissionAction.ASK;
     }
     if (analysis.segments().isEmpty()) {
-      return evaluateRules(List.of(command), settings, toolName);
+      return evaluateWildcardRules(List.of(command), settings, toolName);
     }
     PermissionAction action = PermissionAction.ALLOW;
     for (String segment : analysis.segments()) {
       PermissionAction next =
-          evaluateRules(bashAnalyzer.buildCandidates(segment), settings, toolName);
+          evaluateWildcardRules(bashAnalyzer.buildCandidates(segment), settings, toolName);
       if (next == PermissionAction.DENY) {
         return PermissionAction.DENY;
       }
@@ -89,7 +107,7 @@ public final class PermissionEvaluator {
     return action;
   }
 
-  private PermissionAction evaluateRules(
+  private PermissionAction evaluateWildcardRules(
       List<String> candidates, ToolSettings settings, String toolName) {
     PermissionAction action = PermissionAction.ALLOW;
     List<List<PermissionRule>> rulesets =
@@ -140,7 +158,7 @@ public final class PermissionEvaluator {
     if (rawWorkdir.isBlank()) {
       throw new IllegalArgumentException("workdir must be a non-blank string when provided");
     }
-    Path configured = Path.of(expandHome(rawWorkdir));
+    Path configured = Path.of(display(expandHome(rawWorkdir)));
     return configured.isAbsolute()
         ? configured.toAbsolutePath().normalize()
         : defaultWorkdir.resolve(configured).toAbsolutePath().normalize();
@@ -176,22 +194,12 @@ public final class PermissionEvaluator {
     return Pattern.compile(regex.toString()).matcher(normalizedCandidate).matches();
   }
 
-  private static void addCandidate(LinkedHashSet<String> candidates, String value) {
-    if (value == null) {
-      return;
-    }
-    String normalized = display(value);
-    if (!normalized.isEmpty()) {
-      candidates.add(normalized);
-    }
-  }
-
   private static String relativeDisplay(Path base, Path target) {
     try {
       String relative = display(base.relativize(target));
       return relative.isEmpty() ? "." : relative;
     } catch (IllegalArgumentException error) {
-      return null;
+      throw new IllegalArgumentException("path is not reachable from the effective workdir", error);
     }
   }
 
@@ -234,6 +242,9 @@ public final class PermissionEvaluator {
   private static String display(String value) {
     return value.replace('\\', '/');
   }
+
+  /** 单次调用 effective workdir 相对的目标：POSIX 路径与 raw path 末尾分隔符表达的 directory hint。 */
+  record PathTarget(String relativePosixPath, boolean directory) {}
 
   public record Evaluation(PermissionAction action, PermissionPromptPreview promptPreview) {
     public Evaluation {

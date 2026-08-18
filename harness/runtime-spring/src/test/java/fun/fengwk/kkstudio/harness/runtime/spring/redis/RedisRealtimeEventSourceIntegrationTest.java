@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 class RedisRealtimeEventSourceIntegrationTest {
 
   private static final RedisRealtimeConfig CONFIG = new RedisRealtimeConfig();
+  private static final Duration RETRY_DELAY = Duration.ofMillis(1);
   private static final RealtimeEventJsonCodec CODEC = new RealtimeEventJsonCodec();
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
 
@@ -37,7 +39,9 @@ class RedisRealtimeEventSourceIntegrationTest {
     template = RedisRealtimeFixture.template();
     RedisRealtimeFixture.reset(CONFIG.prefix());
     sink = new RedisRealtimeEventSink(template, CONFIG, CODEC);
-    source = new RedisRealtimeEventSource(RedisRealtimeFixture.connectionFactory(), CONFIG, CODEC);
+    source =
+        new RedisRealtimeEventSource(
+            RedisRealtimeFixture.connectionFactory(), CONFIG, CODEC, RETRY_DELAY);
   }
 
   @AfterEach

@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.web.controller;
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,9 +25,8 @@ import java.util.UUID;
  * Canvas Resource 直读预签名 HTTP 边界：解析 Resource → blobId → blob 预签名， 绝不暴露 bucket 或对象 key。
  *
  * <p>上传/完成端点已移除：上传由全局 storage 服务负责，CREATE_RESOURCE_NODE 在服务端事务内消费 READY 上传。 TEXT 资源没有 blob 内容，请求其
- * URL 返回 400。
+ * URL 返回 400。控制器总是注册；S3 未启用（SystemSettings.storageMedia.s3Enabled=false）时请求确定性返回 503。
  */
-@ConditionalOnProperty(prefix = "kk-studio.storage.s3", name = "enabled", havingValue = "true")
 @RestController
 @RequestMapping("/api/canvases/{canvasId}/resources")
 public class StudioCanvasResourceController {

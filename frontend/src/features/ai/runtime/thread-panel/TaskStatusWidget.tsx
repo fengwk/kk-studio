@@ -136,7 +136,7 @@ function TaskStatusRow({
               </button>
               <button
                 type="button"
-                className="ghost-btn"
+                className="ghost-btn danger"
                 disabled={approvalPending}
                 aria-label={t('ai.runtime.task.denyTool', { toolName: approval.toolName })}
                 onClick={() => onDecideApproval?.(status.threadId, approval.invocationId, 'DENY')}

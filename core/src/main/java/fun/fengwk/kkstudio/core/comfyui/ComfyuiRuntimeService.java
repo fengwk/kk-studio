@@ -24,6 +24,8 @@ import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWork
 import fun.fengwk.kkstudio.core.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.core.storage.S3ObjectKeyNormalizer;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowCancelDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
@@ -70,21 +72,21 @@ public class ComfyuiRuntimeService {
   private static final String DEFAULT_CONTENT_TYPE = "application/octet-stream";
 
   private final ComfyuiWorkflowApiLookupService workflowApiLookupService;
-  private final ComfyuiProperties properties;
+  private final SystemSettings.Comfyui settings;
   private final ObjectProvider<ComfyUIClient> comfyUIClientProvider;
   private final ObjectProvider<S3StorageService> s3StorageServiceProvider;
   private final ObjectMapper objectMapper;
 
   public ComfyuiRuntimeService(
       ComfyuiWorkflowApiLookupService workflowApiLookupService,
-      ComfyuiProperties properties,
+      SystemSettingsSnapshot snapshot,
       ObjectProvider<ComfyUIClient> comfyUIClientProvider,
       ObjectProvider<S3StorageService> s3StorageServiceProvider,
       ObjectMapper objectMapper) {
     this.workflowApiLookupService =
         Objects.requireNonNull(
             workflowApiLookupService, "workflowApiLookupService must not be null");
-    this.properties = Objects.requireNonNull(properties, "properties must not be null");
+    this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().comfyui();
     this.comfyUIClientProvider =
         Objects.requireNonNull(comfyUIClientProvider, "comfyUIClientProvider must not be null");
     this.s3StorageServiceProvider =
@@ -431,9 +433,8 @@ public class ComfyuiRuntimeService {
   }
 
   private ComfyUIClient requireClient() {
-    if (!properties.isEnabled()) {
-      throw new IllegalStateException(
-          "ComfyUI runtime is disabled (kk-studio.comfyui.enabled=false)");
+    if (!settings.enabled()) {
+      throw new IllegalStateException("ComfyUI runtime is disabled by SystemSettings");
     }
     ComfyUIClient client = comfyUIClientProvider.getIfAvailable();
     if (client == null) {
@@ -446,25 +447,26 @@ public class ComfyuiRuntimeService {
     S3StorageService service = s3StorageServiceProvider.getIfAvailable();
     if (service == null) {
       throw new IllegalStateException(
-          "S3 storage is unavailable; enable kk-studio.storage.s3 for ComfyUI file inputs");
+          "S3 storage is unavailable; enable SystemSettings storageMedia.s3Enabled for ComfyUI file"
+              + " inputs");
     }
     return service;
   }
 
   private long maxInputFileSizeBytes() {
-    if (properties.getMaxInputFileSize() == null
-        || properties.getMaxInputFileSize().toBytes() < 0L) {
-      throw new IllegalStateException("kk-studio.comfyui.max-input-file-size must not be negative");
+    long maxInputFileBytes = settings.maxInputFileBytes();
+    if (maxInputFileBytes < 0L) {
+      throw new IllegalStateException("comfyui maxInputFileBytes must not be negative");
     }
-    return properties.getMaxInputFileSize().toBytes();
+    return maxInputFileBytes;
   }
 
   private Duration blockTimeout() {
-    Duration readTimeout = properties.getReadTimeout();
-    if (readTimeout == null || readTimeout.isZero() || readTimeout.isNegative()) {
-      throw new IllegalStateException("kk-studio.comfyui.read-timeout must be positive");
+    long readTimeoutMillis = settings.readTimeoutMillis();
+    if (readTimeoutMillis <= 0L) {
+      throw new IllegalStateException("comfyui readTimeoutMillis must be positive");
     }
-    return readTimeout.plusSeconds(1);
+    return Duration.ofMillis(readTimeoutMillis).plusSeconds(1);
   }
 
   private static String uploadedPath(UploadResult result) {

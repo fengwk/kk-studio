@@ -50,6 +50,30 @@ class CoreHarnessArchitectureTest {
   }
 
   /**
+   * path pattern 的 gitignore 语义只在 runtime 的 {@code PermissionPathPattern} 内部持有；core 永远不直接 import
+   * JGit。
+   */
+  @Test
+  void coreNeverImportsJGitDirectly() throws IOException {
+    Path main = locateCoreMainJava();
+    List<String> violations = new ArrayList<>();
+    try (Stream<Path> paths = Files.walk(main)) {
+      for (Path path : paths.filter(candidate -> candidate.toString().endsWith(".java")).toList()) {
+        for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+          String trimmed = line.trim();
+          if (trimmed.startsWith("import ")
+              && normalizeImport(trimmed).startsWith("org.eclipse.jgit")) {
+            violations.add(relative(main, path) + ": " + trimmed);
+          }
+        }
+      }
+    }
+    assertTrue(
+        violations.isEmpty(),
+        () -> "Core JGit imports must not exist:\n" + String.join("\n", violations));
+  }
+
+  /**
    * Core V1 迁移以字节级相同的方式嵌入 runtime-spring schema 源文件：连续的代码块从首行 {@code -- Harness Runtime durable
    * schema.} 一直到整个 runtime-spring 文件末尾（含全部 comment）必须与 runtime-spring 文件完全相等，因此两个 schema
    * 源文件绝不能发生漂移。

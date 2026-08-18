@@ -21,11 +21,12 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
@@ -1654,8 +1655,8 @@ class DatabaseTurnResolverTest {
               new ToolCatalog(platformDescriptors, internalPlatformToolNames),
               pluginCatalog,
               environmentRegistry,
-              new EnvironmentGatewayProperties(),
-              CompactionConfig.DEFAULTS,
+              new SystemSettingsSnapshot(SystemSettings.DEFAULT),
+              new CompactionConfig(true, 16_384, 20_000),
               subagentConfig,
               new AgentPromptComposer(subagentConfig),
               clock);

@@ -38,7 +38,6 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class LoadSkillTool implements Tool {
   public static final String NAME = "load_skill";
   public static final String VERSION = "1";
-  public static final Duration DEFAULT_LOAD_TIMEOUT = Duration.ofSeconds(30);
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final ToolDescriptor DESCRIPTOR =
@@ -60,10 +59,7 @@ public final class LoadSkillTool implements Tool {
   private final SkillBodyLoader skillBodyLoader;
   private final Duration loadTimeout;
 
-  public LoadSkillTool(ThreadSelectedSkillLookup skillLookup, SkillBodyLoader skillBodyLoader) {
-    this(skillLookup, skillBodyLoader, DEFAULT_LOAD_TIMEOUT);
-  }
-
+  /** 无默认超时：加载超时必须由生产装配从 SystemSettings 快照显式传入（test 基座同样显式传 fixture 值）。 */
   public LoadSkillTool(
       ThreadSelectedSkillLookup skillLookup,
       SkillBodyLoader skillBodyLoader,

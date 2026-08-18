@@ -38,4 +38,12 @@ describe('tool card style contracts', () => {
     expect(output).not.toContain('overscroll-behavior')
     expect(expandedOutput).toContain('overflow: visible')
   })
+
+  it('uses the danger token for approval rejection borders', () => {
+    const dangerButton = rule(/\.ghost-btn\.danger\s*\{[^}]*\}/)
+
+    // 组件只需声明 danger；该规则确保最终视觉始终使用设计系统的红色边框。
+    expect(dangerButton).toContain('border-color: var(--danger-border)')
+    expect(dangerButton).toContain('color: var(--danger)')
+  })
 })

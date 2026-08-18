@@ -512,6 +512,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresSpringTestSupport {
     }
 
     @Bean
+    @Primary
     StorageBlobManager testCanvasStorageBlobManager(StorageBlobRepository blobRepository) {
       return new PostgresqlStorageBlobManager(
           blobRepository, mock(S3StorageService.class), mock(S3PresignService.class));

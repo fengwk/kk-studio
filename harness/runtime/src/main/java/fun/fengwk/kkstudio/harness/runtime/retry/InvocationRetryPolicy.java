@@ -11,13 +11,6 @@ public record InvocationRetryPolicy(
     InvocationRetryBackoffStrategy backoffStrategy,
     Duration baseDelay,
     Duration maxDelay) {
-  public static final InvocationRetryPolicy DEFAULT =
-      new InvocationRetryPolicy(
-          3,
-          InvocationRetryBackoffStrategy.EXPONENTIAL,
-          Duration.ofSeconds(2),
-          Duration.ofSeconds(60));
-
   public InvocationRetryPolicy {
     if (maxRetries < 0) {
       throw new IllegalArgumentException("maxRetries must not be negative");

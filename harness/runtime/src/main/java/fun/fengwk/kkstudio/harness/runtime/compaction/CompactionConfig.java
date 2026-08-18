@@ -11,9 +11,6 @@ package fun.fengwk.kkstudio.harness.runtime.compaction;
  */
 public record CompactionConfig(boolean enabled, int reserveTokens, int maxRecentTokens) {
 
-  /** 上游 Pi 的默认压缩配置。 */
-  public static final CompactionConfig DEFAULTS = new CompactionConfig(true, 16_384, 20_000);
-
   public CompactionConfig {
     if (reserveTokens < 2) {
       throw new IllegalArgumentException("reserveTokens must be at least 2");

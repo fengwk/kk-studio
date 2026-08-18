@@ -220,6 +220,7 @@ final class ToolGatewayTestSupport {
         new FixedToolSettingsProvider(settings),
         store,
         properties,
+        RESOURCE_MAX_BYTES,
         executor,
         CONFIG);
   }

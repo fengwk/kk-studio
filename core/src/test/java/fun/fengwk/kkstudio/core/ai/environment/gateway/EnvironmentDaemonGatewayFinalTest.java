@@ -16,6 +16,8 @@ import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -360,7 +362,11 @@ class EnvironmentDaemonGatewayFinalTest {
     gatewayProperties.setDaemonToken(GATEWAY_TOKEN);
     EnvironmentDaemonGateway gateway =
         new EnvironmentDaemonGateway(
-            registry, gatewayProperties, Clock.fixed(NOW, ZoneOffset.UTC), environmentName -> {});
+            registry,
+            gatewayProperties,
+            new SystemSettingsSnapshot(SystemSettings.DEFAULT),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            environmentName -> {});
     FakeConnection connection = new FakeConnection("connection-race");
     gateway.open(connection);
     Thread receiveThread =
@@ -1447,6 +1453,7 @@ class EnvironmentDaemonGatewayFinalTest {
           new EnvironmentDaemonGateway(
               environmentRegistry,
               gatewayProperties,
+              new SystemSettingsSnapshot(SystemSettings.DEFAULT),
               new Clock() {
                 @Override
                 public ZoneId getZone() {

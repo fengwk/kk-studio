@@ -17,14 +17,14 @@ import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.Executi
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.ExecutionResource;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.ExecutionStatus;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.HubResourceStream;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -37,6 +37,7 @@ class OpenCliHubClientTest {
   private final ObjectMapper mapper = new ObjectMapper();
   private HttpServer server;
   private OpenCliHubProperties properties;
+  private SystemSettingsSnapshot snapshot;
   private OpenCliHubClient client;
 
   @BeforeEach
@@ -44,11 +45,10 @@ class OpenCliHubClientTest {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.start();
     properties = new OpenCliHubProperties();
-    properties.setEnabled(true);
-    properties.setBaseUrl(URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
-    properties.setLongPollTimeout(Duration.ofSeconds(121));
-    properties.setStreamBufferBytes(1024);
-    client = new OpenCliHubClient(properties, mapper);
+    snapshot =
+        new SystemSettingsSnapshot(
+            settings(openCliHub("http://127.0.0.1:" + server.getAddress().getPort(), 121_000L)));
+    client = new OpenCliHubClient(properties, snapshot, mapper);
   }
 
   @AfterEach
@@ -89,7 +89,8 @@ class OpenCliHubClientTest {
     assertEquals(null, transferEncoding.get());
     assertEquals(requestBody.get().length, Long.parseLong(contentLength.get()));
     assertTrue(input.closed);
-    assertTrue(input.maxRequested <= properties.getStreamBufferBytes());
+    assertTrue(
+        input.maxRequested <= snapshot.get().integrations().openCliHub().streamBufferBytes());
     byte[] body = requestBody.get();
     String text = new String(body, StandardCharsets.ISO_8859_1);
     assertTrue(text.contains("name=\"files\""));
@@ -178,7 +179,7 @@ class OpenCliHubClientTest {
         });
 
     properties.setInstanceId("instance-1");
-    client = new OpenCliHubClient(properties, mapper);
+    client = new OpenCliHubClient(properties, snapshot, mapper);
     Execution submitted = client.execute(List.of("chatgpt-agent", "ask", "prompt"), 1000L);
     client.cancelPendingBestEffort(submitted.id());
 
@@ -324,24 +325,58 @@ class OpenCliHubClientTest {
             client.openResource(
                 new ExecutionResource("x", "image/png", 1, null, "/api/resources/redirect")));
 
-    OpenCliHubProperties invalid = new OpenCliHubProperties();
-    invalid.setBaseUrl(URI.create("https://user@example.com/?secret=x"));
-    assertThrows(IllegalArgumentException.class, () -> new OpenCliHubClient(invalid, mapper));
-
-    OpenCliHubProperties excessiveConnectTimeout = new OpenCliHubProperties();
-    excessiveConnectTimeout.setConnectTimeout(Duration.ofMinutes(3));
+    // Hub 部署信息（base 配置）由 SystemSettings.integrations.openCliHub 判定：
+    // 带凭据/查询串的 base URL、超限超时都在聚合构造时 fail fast。
     assertThrows(
         IllegalArgumentException.class,
-        () -> new OpenCliHubClient(excessiveConnectTimeout, mapper));
-    OpenCliHubProperties excessiveRequestTimeout = new OpenCliHubProperties();
-    excessiveRequestTimeout.setRequestTimeout(Duration.ofMinutes(31));
+        () -> openCliHub("https://user@example.com/?secret=x", 130_000L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new OpenCliHubClient(excessiveRequestTimeout, mapper));
+        () -> openCliHub("http://127.0.0.1:1", 180_000L, 120_000L, 130_000L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> openCliHub("http://127.0.0.1:1", 120_000L, 31L * 60 * 1000, 130_000L));
 
-    OpenCliHubProperties ipv6 = new OpenCliHubProperties();
-    ipv6.setBaseUrl(URI.create("http://[::1]:8080"));
-    new OpenCliHubClient(ipv6, mapper);
+    new OpenCliHubClient(
+        properties,
+        new SystemSettingsSnapshot(settings(openCliHub("http://[::1]:8080", 130_000L))),
+        mapper);
+  }
+
+  private static SystemSettings.OpenCliHub openCliHub(String baseUrl, long longPollTimeoutMillis) {
+    return openCliHub(baseUrl, 5_000L, 120_000L, longPollTimeoutMillis);
+  }
+
+  private static SystemSettings.OpenCliHub openCliHub(
+      String baseUrl,
+      long connectTimeoutMillis,
+      long requestTimeoutMillis,
+      long longPollTimeoutMillis) {
+    return new SystemSettings.OpenCliHub(
+        true,
+        baseUrl,
+        connectTimeoutMillis,
+        requestTimeoutMillis,
+        longPollTimeoutMillis,
+        1024,
+        512 * 1024,
+        4096,
+        65_535);
+  }
+
+  private static SystemSettings settings(SystemSettings.OpenCliHub openCliHub) {
+    return new SystemSettings(
+        SystemSettings.Tool.DEFAULT,
+        SystemSettings.AiRuntime.DEFAULT,
+        SystemSettings.Environment.DEFAULT,
+        new SystemSettings.Integrations(
+            SystemSettings.Comfyui.DEFAULT,
+            openCliHub,
+            SystemSettings.Seedance.DEFAULT,
+            SystemSettings.GptImage2.DEFAULT,
+            SystemSettings.MiniMaxH3.DEFAULT),
+        SystemSettings.StorageMedia.DEFAULT,
+        SystemSettings.Advanced.DEFAULT);
   }
 
   private void assertUploadedFilename(String filename, String expected) {

@@ -16,10 +16,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryLister;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryEntryDTO;
@@ -40,10 +41,18 @@ class StudioEnvironmentDirectoryControllerTest {
   @BeforeEach
   void setUp() {
     directoryLister = mock(EnvironmentDirectoryLister.class);
-    EnvironmentGatewayProperties gatewayProperties = new EnvironmentGatewayProperties();
-    gatewayProperties.setDirectoryListTimeout(Duration.ofSeconds(5));
+    // 目录浏览超时来自 SystemSettings.environment（此处覆盖为 5 秒），而不是 bootstrap properties。
+    SystemSettings settings =
+        new SystemSettings(
+            SystemSettings.Tool.DEFAULT,
+            SystemSettings.AiRuntime.DEFAULT,
+            new SystemSettings.Environment(8L * 1024 * 1024, 16L * 1024 * 1024, 60_000L, 5_000L),
+            SystemSettings.Integrations.DEFAULT,
+            SystemSettings.StorageMedia.DEFAULT,
+            SystemSettings.Advanced.DEFAULT);
     StudioEnvironmentDirectoryController controller =
-        new StudioEnvironmentDirectoryController(directoryLister, gatewayProperties);
+        new StudioEnvironmentDirectoryController(
+            directoryLister, new SystemSettingsSnapshot(settings));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new ResultResponseBodyAdvice())

@@ -156,9 +156,13 @@ Compaction resolver 不读取 Agent prompt、plugin projector、Environment live
 - retry 重放同一 request；当前失败 attempt 的 partial/thinking/error 不修改冻结 request，后续 turn 的白名单历史投影同样排除 `MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR`；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择；
 - attempt 时 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造短生命周期 Provider，并把持久 cache control 按当前 factory capability 规范化：不兼容能力降级为 `none()`，兼容时按当前 capability 重求形态与断点。
 
-## 6. Interceptor chain
+## 6. 权限预检与审批
 
-`HarnessToolGatewayConfiguration` 通过 `ObjectProvider<BeforeToolCallInterceptor>` / `ObjectProvider<AfterToolCallInterceptor>` 按顺序构造 interceptor chain；唯一的 `PermissionBoundaryInterceptor` 位于 before chain 末端，在 registry lookup、RemoteTool send 和 `Tool.execute` 之前完成 Allow/Ask/Deny。`CoreToolGateway.preflight` 中 YOLO 在加载权限 settings/evaluator 之前直接返回 Allow（两处都不存在第二套权限实体）；权限结果写入 ToolInvocation approval 事实（durable `ALLOWED`/`DENIED`）；批准继续执行原 binding，拒绝写入失败终态并唤醒 owning Thread。子 Agent Thread 继承父 Thread 的 YOLO 策略，子工具审批复用同一 approval 端点。
+权限链路固定为 `ToolProcessor -> ToolGateway.preflight -> CoreToolGateway -> PermissionEvaluator -> Allow/Ask/Deny`。`ToolProcessor` 只在 ToolInvocation 为 `READY` 且尚无 approval 事实时执行同步、无副作用的 preflight；重试、重新调度以及已经进入 `WAITING_APPROVAL` 的 invocation 都不会重新评估。`CoreToolGateway.preflight` 先检查冻结在请求上的 YOLO：为 true 时在读取 settings/evaluator 前直接 Allow；否则通过 `ToolSettingsProvider` 现读数据库 `system_setting` 的 `SystemSettings.Tool.permission` 并评估。V1 默认规则为 `write/edit/bash: ask`，read 不受限，未匹配工具保持 Allow。
+
+Allow 写入 `READY + approval.required=false` 后进入实际 Tool dispatch；Ask 写入 `WAITING_APPROVAL + approval.decision=null`；Deny 写入 `FAILED + PERMISSION_DENIED`。审批 API 把 Allow 决策写成 durable `ALLOWED` 并恢复原 binding 执行，把 Deny 决策写成 durable `DENIED` 与失败终态；`decisionId` 保证幂等，相同 ID 的不同 payload 返回 409。子 Agent Thread 继承父 Thread 的 YOLO，子工具审批复用同一端点并以实际子 ThreadId 寻址。
+
+带 `path` 参数的权限目标只按该次调用的 effective workdir 解析为单一相对 POSIX 路径；raw、Environment root 相对和绝对路径不再作为并列 alias。pattern 使用 JGit `FastIgnoreRule` 的 gitignore 语义（包括 basename、`*`、`**`、根锚定和目录规则），规则仍按全局后工具级、last-match-wins；preflight 不做文件系统 I/O，只有 raw path 末尾显式 `/` 或 `\` 时才把目标本身视为目录，目录规则仍可覆盖其 descendant。由于 action 已表达 Allow/Ask/Deny，path pattern 的 `!` negation 以及空、comment-only、无效 pattern 均拒绝。Bash/普通 command 不使用 gitignore matcher：Bash 继续按顶层静态 surface 分段，动态 wrapper、command/process substitution 与无法可靠解析的复合语法保守进入 Ask（完整命令显式 Deny 除外）。
 
 ## 7. 代码与测试
 

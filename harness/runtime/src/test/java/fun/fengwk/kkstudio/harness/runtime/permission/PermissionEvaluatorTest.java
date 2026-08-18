@@ -36,31 +36,60 @@ class PermissionEvaluatorTest {
         PermissionAction.ASK, evaluate("write", "{\"path\":\"README.md\"}", settings).action());
   }
 
-  /** path 候选同时保留 raw、workdir-relative、environment-relative 与规范绝对展示路径。 */
+  /** path target 只产生到 effective workdir 的单一规范相对 POSIX 路径；`@` 前缀、绝对输入与 trailing slash hint 归一。 */
   @Test
-  void buildsPathCandidatesRelativeToExplicitWorkdirAndEnvironment() throws Exception {
-    Path environmentRoot = Path.of("/tmp/permission-environment");
-    Path workdir = environmentRoot.resolve("repo");
-    PermissionEvaluationContext context =
-        new PermissionEvaluationContext(
-            "write", "{}", workdir, environmentRoot, ToolSettings.DEFAULT);
-    JsonNode input = objectMapper.readTree("{\"path\":\"src/Main.java\"}");
+  void describesSingleEffectiveWorkdirRelativePathTarget() {
+    Path workdir = Path.of("/tmp/permission-environment/repo");
 
     assertEquals(
-        List.of(
-            "src/Main.java",
-            "repo/src/Main.java",
-            "/tmp/permission-environment/repo/src/Main.java"),
-        evaluator.buildPathCandidates("src/Main.java", workdir, environmentRoot));
+        new PermissionEvaluator.PathTarget("src/Main.java", false),
+        evaluator.describePathTarget("src/Main.java", workdir));
     assertEquals(
-        List.of(
-            "src/Main.java",
-            "repo/src/Main.java",
-            "/tmp/permission-environment/repo/src/Main.java"),
-        evaluator.describeCandidates(input, context));
+        new PermissionEvaluator.PathTarget("src/Main.java", false),
+        evaluator.describePathTarget("@src/Main.java", workdir));
+    assertEquals(
+        new PermissionEvaluator.PathTarget("src/Main.java", false),
+        evaluator.describePathTarget("/tmp/permission-environment/repo/src/Main.java", workdir));
+    assertEquals(
+        new PermissionEvaluator.PathTarget("docs", true),
+        evaluator.describePathTarget("docs/", workdir));
+    assertEquals(
+        new PermissionEvaluator.PathTarget("docs", true),
+        evaluator.describePathTarget("docs\\", workdir));
+    assertEquals(
+        new PermissionEvaluator.PathTarget("..", true),
+        evaluator.describePathTarget("../", workdir));
   }
 
-  /** 显式 workdir 决定 path 解析，generic Tool 使用单一 `*` 候选。 */
+  /** 同一绝对 target 只按 effective workdir 相对命中；environment-relative alias 不再是 pattern 坐标。 */
+  @Test
+  void absoluteTargetMatchesOnlyEffectiveWorkdirRelativeRules() {
+    Path workdir = Path.of("/tmp/permission-environment/repo");
+    ToolSettings settings =
+        settings(
+            Map.of(
+                "write",
+                List.of(
+                    new PermissionRule("*", PermissionAction.ASK),
+                    new PermissionRule("src/Main.java", PermissionAction.ALLOW),
+                    new PermissionRule("repo/src/Main.java", PermissionAction.DENY))));
+
+    assertEquals(
+        PermissionAction.ALLOW,
+        evaluateAtWorkdir(
+                "write",
+                "{\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}",
+                settings,
+                workdir)
+            .action());
+    // 工作目录为 /tmp/permission-environment 时，同一绝对路径的相对坐标是 repo/src/Main.java，规则按该基准命中。
+    assertEquals(
+        PermissionAction.DENY,
+        evaluate("write", "{\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}", settings)
+            .action());
+  }
+
+  /** 显式 workdir 决定 path 解析基准，generic Tool 使用单一 `*` 候选。 */
   @Test
   void matchesExplicitWorkdirAndGenericCandidate() {
     ToolSettings settings =
@@ -69,7 +98,7 @@ class PermissionEvaluatorTest {
                 "write",
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
-                    new PermissionRule("repo/src/*.java", PermissionAction.ALLOW)),
+                    new PermissionRule("src/*.java", PermissionAction.ALLOW)),
                 "browser",
                 List.of(new PermissionRule("*", PermissionAction.DENY))));
 
@@ -83,22 +112,62 @@ class PermissionEvaluatorTest {
     assertEquals(PermissionAction.DENY, evaluate("browser", "{}", settings).action());
   }
 
-  /** `~`、`$HOME` 与 `${HOME}` 规则和路径都按同一 home 目录匹配。 */
+  /** `~`、`$HOME` 与 `${HOME}` 路径快捷方式在 effective workdir 解析前展开。 */
   @Test
   void expandsSupportedHomeShortcuts() {
+    Path home = Path.of(System.getProperty("user.home"));
     ToolSettings settings =
-        settings(
-            Map.of(
-                "write",
-                List.of(
-                    new PermissionRule("*", PermissionAction.ALLOW),
-                    new PermissionRule("$HOME/*", PermissionAction.DENY))));
+        settings(Map.of("write", List.of(new PermissionRule("secret.txt", PermissionAction.DENY))));
 
     assertEquals(
-        PermissionAction.DENY,
-        evaluate("write", "{\"path\":\"${HOME}/secret.txt\"}", settings).action());
+        new PermissionEvaluator.PathTarget("secret.txt", false),
+        evaluator.describePathTarget("${HOME}/secret.txt", home));
     assertEquals(
-        PermissionAction.DENY, evaluate("write", "{\"path\":\"~/secret.txt\"}", settings).action());
+        PermissionAction.DENY,
+        evaluateAtWorkdir("write", "{\"path\":\"${HOME}/secret.txt\"}", settings, home).action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluateAtWorkdir("write", "{\"path\":\"~/secret.txt\"}", settings, home).action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluateAtWorkdir("write", "{\"path\":\"$HOME/secret.txt\"}", settings, home).action());
+  }
+
+  /**
+   * path pattern 使用 JGit gitignore 语义：`*` 不跨 `/`、`**` 跨层级、basename 任意层级、leading `/` 锚定、directory
+   * rule 覆盖 descendant。
+   */
+  @Test
+  void appliesJGitGitignorePathSemantics() {
+    assertEquals(
+        PermissionAction.ASK,
+        evaluate("write", "{\"path\":\"docs/deep/a.md\"}", deny("docs/*.md")).action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluate("write", "{\"path\":\"docs/a.md\"}", deny("docs/*.md")).action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluate("write", "{\"path\":\"docs/a.md\"}", deny("docs/**/*.md")).action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluate("write", "{\"path\":\"docs/deep/a.md\"}", deny("docs/**/*.md")).action());
+    assertEquals(
+        PermissionAction.DENY, evaluate("write", "{\"path\":\"a/b.tmp\"}", deny("*.tmp")).action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluate("write", "{\"path\":\"sub/README.md\"}", deny("README.md")).action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluate("write", "{\"path\":\"root-only.txt\"}", deny("/root-only.txt")).action());
+    assertEquals(
+        PermissionAction.ASK,
+        evaluate("write", "{\"path\":\"nested/root-only.txt\"}", deny("/root-only.txt")).action());
+    assertEquals(
+        PermissionAction.DENY, evaluate("write", "{\"path\":\"docs/a\"}", deny("docs/")).action());
+    assertEquals(
+        PermissionAction.ASK, evaluate("write", "{\"path\":\"docs\"}", deny("docs/")).action());
+    assertEquals(
+        PermissionAction.DENY, evaluate("write", "{\"path\":\"docs/\"}", deny("docs/")).action());
   }
 
   /** permission prompt 参数必须单行且最多 120 字符，无 UI 时可原样持久等待。 */
@@ -146,15 +215,24 @@ class PermissionEvaluatorTest {
     assertEquals("ask", global.path("permission").path("*").get(0).path("action").asText());
   }
 
+  private static ToolSettings deny(String deniedPattern) {
+    return settings(
+        Map.of(
+            "write",
+            List.of(
+                new PermissionRule("*", PermissionAction.ASK),
+                new PermissionRule(deniedPattern, PermissionAction.DENY))));
+  }
+
   private PermissionEvaluator.Evaluation evaluate(
       String toolName, String arguments, ToolSettings settings) {
+    return evaluateAtWorkdir(toolName, arguments, settings, Path.of("/tmp/permission-environment"));
+  }
+
+  private PermissionEvaluator.Evaluation evaluateAtWorkdir(
+      String toolName, String arguments, ToolSettings settings, Path workdir) {
     return evaluator.evaluate(
-        new PermissionEvaluationContext(
-            toolName,
-            arguments,
-            Path.of("/tmp/permission-environment"),
-            Path.of("/tmp/permission-environment"),
-            settings));
+        new PermissionEvaluationContext(toolName, arguments, workdir, settings));
   }
 
   private static ToolSettings settings(Map<String, List<PermissionRule>> rules) {

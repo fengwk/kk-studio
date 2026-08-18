@@ -51,7 +51,7 @@ import java.util.UUID;
  */
 class CompactionPlannerTest {
 
-  private static final CompactionConfig CONFIG = CompactionConfig.DEFAULTS;
+  private static final CompactionConfig CONFIG = new CompactionConfig(true, 16_384, 20_000);
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 
   @Test

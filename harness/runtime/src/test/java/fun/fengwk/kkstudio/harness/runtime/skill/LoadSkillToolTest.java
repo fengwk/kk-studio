@@ -46,7 +46,8 @@ class LoadSkillToolTest {
     LoadSkillTool tool =
         new LoadSkillTool(
             (invocationId, threadId) -> List.of(),
-            (environment, skillName, timeout) -> new CompletableFuture<>());
+            (environment, skillName, timeout) -> new CompletableFuture<>(),
+            Duration.ofSeconds(1));
 
     ToolDescriptor descriptor = tool.descriptor();
     assertEquals(LoadSkillTool.NAME, descriptor.name());
@@ -133,7 +134,8 @@ class LoadSkillToolTest {
     LoadSkillTool tool =
         new LoadSkillTool(
             (invocationId, threadId) -> List.of(),
-            (env, name, timeout) -> CompletableFuture.completedFuture(null));
+            (env, name, timeout) -> CompletableFuture.completedFuture(null),
+            Duration.ofSeconds(1));
     AtomicReference<ToolResult> result = new AtomicReference<>();
     CountDownLatch latch = new CountDownLatch(1);
     tool.execute(
@@ -160,7 +162,8 @@ class LoadSkillToolTest {
         new LoadSkillTool(
             (invocationId, threadId) ->
                 List.of(new SkillBinding("dev", "Developer rules", PLATFORM)),
-            (environment, skillName, timeout) -> pending);
+            (environment, skillName, timeout) -> pending,
+            Duration.ofSeconds(2));
     AtomicReference<ToolResult> result = new AtomicReference<>();
     AtomicInteger terminalCount = new AtomicInteger();
     CountDownLatch latch = new CountDownLatch(1);

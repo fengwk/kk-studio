@@ -33,6 +33,7 @@
         <json-path.version>2.9.0</json-path.version>
         <langchain4j.version>1.18.0</langchain4j.version>
         <testcontainers.version>2.0.5</testcontainers.version>
+        <jgit.version>7.7.1.202607240634-r</jgit.version>
     </properties>
 
     <dependencyManagement>
@@ -110,6 +111,11 @@
                 <version>${langchain4j.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jgit</groupId>
+                <artifactId>org.eclipse.jgit</artifactId>
+                <version>${jgit.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>

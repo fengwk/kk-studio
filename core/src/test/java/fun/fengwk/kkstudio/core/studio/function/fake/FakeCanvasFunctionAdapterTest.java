@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.TextSegment;
@@ -33,7 +35,11 @@ class FakeCanvasFunctionAdapterTest {
   void exposesExactModelsAndExecutesMainResourceFixture() {
     FakeCanvasFunctionAdapter adapter = new FakeCanvasFunctionAdapter();
     assertEquals(
-        2, new FakeCanvasFunctionConfiguration().fakeCanvasFunctionAdapter().models().size());
+        2,
+        new FakeCanvasFunctionConfiguration()
+            .fakeCanvasFunctionAdapter(s3EnabledSnapshot())
+            .models()
+            .size());
     CanvasFunctionModel image = adapter.models().get(0);
     CanvasFunctionModel video = adapter.models().get(1);
     assertEquals("fake-image", image.key());
@@ -101,6 +107,17 @@ class FakeCanvasFunctionAdapterTest {
             "QUEUED",
             Map.of());
     assertThrows(IllegalArgumentException.class, () -> adapter.preflight(unsupportedRun));
+  }
+
+  private static SystemSettingsSnapshot s3EnabledSnapshot() {
+    return new SystemSettingsSnapshot(
+        new SystemSettings(
+            SystemSettings.Tool.DEFAULT,
+            SystemSettings.AiRuntime.DEFAULT,
+            SystemSettings.Environment.DEFAULT,
+            SystemSettings.Integrations.DEFAULT,
+            new SystemSettings.StorageMedia(3_600L, true, 600L, 3_600L, 30_000L, 512, 80),
+            SystemSettings.Advanced.DEFAULT));
   }
 
   private static final class RecordingContext implements CanvasFunctionExecutionContext {

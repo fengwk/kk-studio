@@ -18,8 +18,8 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.core.storage.InMemoryS3StorageService;
+import fun.fengwk.kkstudio.core.storage.S3PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.core.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.core.storage.StorageS3TestConfiguration;
 import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
@@ -53,7 +53,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Import({StorageS3TestConfiguration.class})
 @TestPropertySource(
     properties = {
-      "kk-studio.storage.s3.enabled=true",
       "kk-studio.storage.s3.endpoint=http://minio.example.local:9000",
       "kk-studio.storage.s3.public-endpoint=https://cdn.example.com",
       "kk-studio.storage.s3.region=us-east-1",
@@ -61,7 +60,7 @@ import java.util.concurrent.atomic.AtomicInteger;
       "kk-studio.storage.s3.access-key=AKIAIOSFODNN7EXAMPLE",
       "kk-studio.storage.s3.secret-key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     })
-class GlobalStorageToolResultHistoryMaterializerTest extends PostgresSpringTestSupport {
+class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTestSupport {
 
   private static final UUID SESSION = new UUID(0L, 1L);
 

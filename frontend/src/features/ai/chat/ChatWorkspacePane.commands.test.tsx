@@ -8,9 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import { composerDraftStorageKey } from '@/features/ai/composer/composer-draft'
 import {
-  ApplicationSettingsProvider,
-  useApplicationSettings,
-} from '@/features/settings/application-settings'
+  BrowserPreferencesProvider,
+  useBrowserPreferences,
+} from '@/features/settings/browser-preferences'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { chatService } from '@/shared/api/chat-service'
@@ -304,7 +304,7 @@ function renderBoundPane(overrides?: {
   onAgentChange?: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
   paneThreadId?: string
-  /** 与 BoundThreadPane 一起挂进共享 ApplicationSettingsProvider 的额外探针。 */
+  /** 与 BoundThreadPane 一起挂进共享 BrowserPreferencesProvider 的额外探针。 */
   children?: ReactNode
 }) {
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
@@ -315,7 +315,7 @@ function renderBoundPane(overrides?: {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const element = (
-    <ApplicationSettingsProvider>
+    <BrowserPreferencesProvider>
       <QueryClientProvider client={queryClient}>
         {overrides?.children}
         <ChatWorkspacePane
@@ -351,7 +351,7 @@ function renderBoundPane(overrides?: {
         onYoloChange={onYoloChange}
       />
       </QueryClientProvider>
-    </ApplicationSettingsProvider>
+    </BrowserPreferencesProvider>
   )
   const view = render(element)
   return {
@@ -362,7 +362,7 @@ function renderBoundPane(overrides?: {
     onYoloChange,
     rerender: (paneThreadId: string) => {
       view.rerender(
-        <ApplicationSettingsProvider>
+        <BrowserPreferencesProvider>
           <QueryClientProvider client={queryClient}>
             {overrides?.children}
             <ChatWorkspacePane
@@ -387,7 +387,7 @@ function renderBoundPane(overrides?: {
               onYoloChange={onYoloChange}
             />
           </QueryClientProvider>
-        </ApplicationSettingsProvider>,
+        </BrowserPreferencesProvider>,
       )
     },
   }
@@ -1741,7 +1741,7 @@ describe('ChatWorkspacePane commands', () => {
       }),
     )
     function SettingsPageProbe() {
-      const { notificationsEnabled, setNotificationsEnabled } = useApplicationSettings()
+      const { notificationsEnabled, setNotificationsEnabled } = useBrowserPreferences()
       return (
         <button type="button" onClick={() => setNotificationsEnabled(true)}>
           {notificationsEnabled ? 'on' : 'off'}
@@ -1769,7 +1769,7 @@ describe('ChatWorkspacePane commands', () => {
       )
     } finally {
       delete (window as unknown as { Notification?: unknown }).Notification
-      localStorage.removeItem('kkstudio.application-settings.v1')
+      localStorage.removeItem('kkstudio.browser-preferences.v1')
     }
   })
 
@@ -1812,12 +1812,12 @@ describe('ChatWorkspacePane commands', () => {
       />
     )
     render(
-      <ApplicationSettingsProvider>
+      <BrowserPreferencesProvider>
         <QueryClientProvider client={queryClient}>
           <div data-testid="pane-A">{pane('pane-A')}</div>
           <div data-testid="pane-B">{pane('pane-B')}</div>
         </QueryClientProvider>
-      </ApplicationSettingsProvider>,
+      </BrowserPreferencesProvider>,
     )
     const paneA = () => screen.getByTestId('pane-A')
     const paneB = () => screen.getByTestId('pane-B')

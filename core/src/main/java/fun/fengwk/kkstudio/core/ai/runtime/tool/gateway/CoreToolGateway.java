@@ -143,6 +143,7 @@ public final class CoreToolGateway implements ToolGateway {
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
       HarnessRuntimeProperties runtimeProperties,
+      int resourceMaxBytes,
       @Qualifier("toolGatewayExecutor") ExecutorService executor,
       ToolGatewayConfig config,
       Clock clock) {
@@ -156,7 +157,7 @@ public final class CoreToolGateway implements ToolGateway {
         resourceStore,
         Objects.requireNonNull(runtimeProperties, "runtimeProperties").resolvedWorkdir(),
         runtimeProperties.resolvedEnvironmentRoot(),
-        runtimeProperties.getResourceMaxBytes(),
+        resourceMaxBytes,
         executor,
         config,
         clock);
@@ -169,6 +170,7 @@ public final class CoreToolGateway implements ToolGateway {
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
       HarnessRuntimeProperties runtimeProperties,
+      int resourceMaxBytes,
       ExecutorService executor,
       ToolGatewayConfig config) {
     this(
@@ -182,6 +184,7 @@ public final class CoreToolGateway implements ToolGateway {
         toolSettingsProvider,
         resourceStore,
         runtimeProperties,
+        resourceMaxBytes,
         executor,
         config,
         Clock.systemUTC());
@@ -265,7 +268,6 @@ public final class CoreToolGateway implements ToolGateway {
                 request.binding().descriptor().name(),
                 request.call().argumentsJson(),
                 permissionWorkdir(request),
-                environmentRoot,
                 settings));
     PermissionAction action = evaluation.action();
     return switch (action) {

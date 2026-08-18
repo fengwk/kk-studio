@@ -6,13 +6,13 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **73** 个 API case；标准入口默认执行免费的 **L1 61** 个 case（其中
+当前注册 **74** 个 API case；标准入口默认执行免费的 **L1 62** 个 case（其中
 `canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约）。Canvas
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI E2E
-由 `scripts/e2e.sh --ui` 另行附加，默认注册 35 个免费 UI case；`--with-tools --ui` 再追加 1 个 Environment/Workspace 创建 case。这些 UI case 不计入 73 个 Node API case。
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 37 个免费 UI case；`--with-tools --ui` 再追加 1 个 Environment/Workspace 创建 case。这些 UI case 不计入 74 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -64,7 +64,8 @@ node scripts/e2e/ui-smoke.mjs \
 默认 backend URL 是 `http://127.0.0.1:18081`，默认 frontend URL 由 `scripts/e2e.sh` 传入 `http://127.0.0.1:5173`。真实 Provider 使用 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`；所有付费 API/UI case 都在执行前硬校验 Provider/Model 为 `minimax/MiniMax-M2.7`，不得静默切换到其它付费 Provider。
 
 本地完整免费 Canvas 回归使用 `deploy/test` 提供 PostgreSQL、Redis 与 MinIO，只连接本机
-Redis/S3-compatible endpoint：
+Redis/S3-compatible endpoint；`s3Enabled` 由 canvas-test Flyway seed（`db/seed/canvas-test`
+`V3__canvas_test_system_settings.sql`）写入 SystemSettings：
 
 ```bash
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
@@ -76,7 +77,6 @@ env \
   KK_STUDIO_DB_USER=canvas_test \
   KK_STUDIO_DB_PASSWORD=canvas_test_only \
   KK_STUDIO_REDIS_URL=redis://127.0.0.1:16379 \
-  KK_STUDIO_STORAGE_S3_ENABLED=true \
   KK_STUDIO_STORAGE_S3_ENDPOINT=http://127.0.0.1:19000 \
   KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT=http://127.0.0.1:19000 \
   KK_STUDIO_STORAGE_S3_REGION=us-east-1 \
@@ -88,7 +88,7 @@ env \
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 ```
 
-该命令选择 65 个免费 API case 和 35 个免费 UI case，不启用真实 Provider、Tool 或
+该命令选择 66 个免费 API case 和 37 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
 rebuild；不得为这条回归追加 `--real`。
 
@@ -96,7 +96,7 @@ rebuild；不得为这条回归追加 `--real`。
 
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
-| L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、内部工具目录、Chat-scoped Thread、命令 batch 严格 wire、CAS/幂等、head move、IDLE stop no-op、模型 transient attempt retry 可见性、i18n 与 proxy |
+| L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、SystemSettings 完整聚合/CAS、内部工具目录、Chat-scoped Thread、命令 batch 严格 wire、CAS/幂等、head move、IDLE stop no-op、模型 transient attempt retry 可见性、i18n 与 proxy |
 | L2 | `--real` | MiniMax | 文本轮次 durable 边界、真实 task 委派 durable 子 Thread、运行中原子 batch 合并收割、stop partial + REPLAYED + continue |
 | L3 | `--real --with-branch` | MiniMax | 同一 Thread 同 Session move head 回退到历史 Entry 后继续 |
 | L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流、Resource 外部化与同源下载验证 |
@@ -121,7 +121,7 @@ FunctionRun，不下载或导入视频。它只准备页面，不触发生成；
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（注册 65，默认 61）
+### L1（注册 66，默认 62）
 
 ```text
 seed.structured_model_config
@@ -182,6 +182,7 @@ config.agent.invalid.duplicate_subagent
 config.agent.invalid.unknown_subagent
 config.agent.invalid.unknown_field_rejected
 matrix.agent.teardown_model
+settings.system_contract_cas
 model.attempt_failure_visibility
 events.heartbeat_keepalive
 canvas.storage_upload_contract
@@ -210,6 +211,7 @@ L1 的关键语义断言：
 - `model.attempt_failure_visibility` 免费 L1：先通过 `/api/events/v1` 建立 Thread 订阅并收到 `subscribed` ack；case 内 `node:http` OpenAI-compatible SSE mock 的首次 Provider attempt 随后流出确定性 text partial，再通过断连触发 LangChain4j `TRANSIENT`。事件通道必须观测到该 partial；活跃期轮询同一快照精确断言 `modelAttemptFailures`（`attempt=1`、HTTP decimal-string `sequence`、text/thinking、error、合法 `failedAt/retryAt`），立即 retry 的 Provider `messages` 必须与失败前完全一致且不含失败 partial/error；quiescent 后断言 `MODEL_ATTEMPT_FAILURE` 位于成功 assistant 之前且 payload 保留 partial/error/retryAt、未物化列表清空；第二 turn 的 mock request `messages` 同样不含失败 attempt 的 partial/thinking/error，两个 turn 均 `COMPLETED`，成功 assistant 不拼接失败 partial；
 - `events.heartbeat_keepalive` 使用 Node 原生 WebSocket 直连 `/api/events/v1`，不建立资源订阅，在 25 秒上限内等待严格 `{version:1,type:"heartbeat"}`；收到后连接必须仍为 OPEN。服务端所有连接共享单个 scheduler，case 不创建客户端 ping 协议或第三方 WS 依赖；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
+- `settings.system_contract_cas` 免费 L1：GET 必须返回六个完整 section，`version` 与 Long 字段为 canonical decimal string，已删除的无消费者字段不得残留；完整聚合 PUT 以 `expectedVersion` CAS 推进版本并回读新值；权限 tool name 首尾空白返回 400，stale version 返回 409，两类失败都不得推进版本；`finally` 以最新版本重试恢复原值并再次回读断言，不能污染后续 case。
 - `canvas.api_version_contract` 免费 L1：create/list/get/commands 使用 canonical UUID id 与
   十进制字符串 graph `version`（数据库 `canvas_document.version` 仍是 bigint，wire 是 canonical
   非负十进制字符串，`graphRevision` 字段不存在）；`expectedVersion` CAS stale 409；
@@ -262,9 +264,9 @@ tool.read_turn
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；`rootPath` 存在；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `daemon.directories` | `--with-tools` | `GET /api/ai/environments/{name}/directories` 缺省 `path="."` 浏览 root（canonical 相对 wire path；`displayPath` 等于请求 `path` 的最后一段，root 为 `'.'`，只作展示、绝不暴露 daemon 本地绝对路径；root `parentPath="."`；`truncated` 布尔；`gitBranch` 可空；entries 只含直属子目录 `{name,path}`：`name` 等于 `path` 最后一段、`path` 是请求目录的直接子路径）；显式 `path="."` 与缺省一致；`..` 段 400 `INVALID_PATH`、不存在目录 404 `NOT_FOUND`、非法环境名 400 `INVALID_ENVIRONMENT_NAME` |
-| `tool.read_turn` | `--real --with-tools` | e2e profile 固定 `read/write/edit: ask`，本 case 验证 read；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
+| `tool.read_turn` | `--real --with-tools` | e2e seed 覆盖 `system_setting` 使 `read/write/edit/bash: ask`（`db/seed/e2e/V2__e2e_seed.sql`），本 case 验证 read；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
 
-### L5 UI（默认 36，`--with-tools` / `--real` 各追加 1）
+### L5 UI（默认 37，`--with-tools` / `--real` 各追加 1）
 
 `scripts/e2e.sh --ui` 的免费 UI E2E 矩阵包含：
 
@@ -305,6 +307,7 @@ ui.chat.footer.readonly_facts
 ui.chat.tool_card.streaming_layout_scroll
 ui.chat.task_status.bound_widget
 ui.settings.notifications_single_entry
+ui.settings.system_contract_cas
 ```
 
 其中 `ui.canvas.page_loads` 验证 `/canvas` library 保留全局顶栏，点击或创建后进入
@@ -342,9 +345,10 @@ Composer 矩阵的维度与边界如下：
 | `ui.chat.composer.settings_controls_batch` | 本地 hold-provider + 两 Variant Model + 活跃 Thread | 浏览器几何确认默认单行输入与控制栏组成紧凑两行布局；Permission 菜单只有 Default/YOLO；Model→Variant 两级 anchored listbox；选择 review+YOLO 后与 USER_MESSAGE 按 `SET_MODEL→SET_YOLO→USER_MESSAGE` 同批入队 |
 | `ui.chat.composer.multi_pane_settings_isolation` | split-2 绑定两条真实 Thread | pane-1 YOLO 不污染 pane-2 Default；一次只存在一个 settings listbox；打开 pane-2 自动关闭 pane-1 菜单，Escape 只恢复 pane-2 Composer 焦点 |
 | `ui.chat.footer.readonly_facts` | 本地 completion-provider 冻结 usage，再切换到 unavailable 长 Workspace path | Footer 中间省略安全 wire path，完整 title 不含 daemon 绝对路径；展示 usage、used/contextWindow、cache hit；缺失 usage 时按 0 展示；缺失 Git 整段省略；无 button，且不含 Agent/Model/Permission/Notification |
-| `ui.chat.tool_card.streaming_layout_scroll` | 本地 streaming-provider 重复发送完整 write/edit name/id 并冻结参数流；e2e profile 非 YOLO approval | 流式身份不重复拼接；edit 参数预览为 5 行尾随窗口；长 header 完整折行且绝对定位 toggle 不占宽；稳定 edit 完整展示 diff；write/edit 均真实进入 approval；拒绝后 Tool output 不拥有纵向滚动，卡内滚轮滚动外层 transcript |
+| `ui.chat.tool_card.streaming_layout_scroll` | 本地 streaming-provider 重复发送完整 write/edit/bash name/id 并冻结参数流；e2e profile 非 YOLO approval | 流式身份不重复拼接；edit 参数预览为 5 行尾随窗口；长 header 完整折行且绝对定位 toggle 不占宽；稳定 edit 完整展示 diff；write/edit/bash 均真实进入 approval；拒绝按钮使用 danger 红色边框；拒绝后 Tool output 不拥有纵向滚动，卡内滚轮滚动外层 transcript |
 | `ui.chat.task_status.bound_widget` | 先绑定共享 Bound ChatPanel，再由本地 parent Provider 产生真实 `task` tool call，child Provider 保持运行 | 通过 `/api/events/v1` 后续 `task.status` heartbeat 渲染 TaskStatusWidget，不把 lossy realtime 误当作可重放快照；无需真实模型费用 |
 | `ui.settings.notifications_single_entry` | Settings + 免费 durable Thread | `/settings` 恰好一个浏览器通知 switch；Thread panel/Footer 无 switch、button 或 `notify:*` 旧入口 |
+| `ui.settings.system_contract_cas` | 真实本地 backend `/api/settings` | server tab 以 GET 权威聚合 hydration（Long 十进制字符串）；编辑后按 `expectedVersion` 完整聚合 CAS PUT，回读验证版本推进、六 section 完整与 wire 形态；外部写入推进版本后，陈旧保存必须弹出冲突说明，确认前保留 draft，点击重新加载后刷新页面并读取最新值；`finally` 中用最新版本恢复原值并回读断言，避免污染系统配置 |
 
 durable fixture 使用不存在的 Agent，使 USER_MESSAGE 在 Provider 调用前确定性物化；queued
 fixture 使用 case 内本地 hold-provider 保持真实 Model invocation 活跃，再通过真实命令 API
@@ -555,10 +559,9 @@ HTTP routes 覆盖 multipart、history、streaming、恢复与 materialize。
 
 1. 使用隔离的 S3 bucket、Prompt Agent/Environment 和测试专用 ComfyUI；先以只读方式
    检查 ComfyUI `/object_info`、`/system_stats`，不得在准备阶段上传或提交 prompt。
-2. 配置 `KK_STUDIO_CANVAS_H3_ENABLED=true`、
-   `KK_STUDIO_CANVAS_H3_PROMPT_AGENT`、
-   `KK_STUDIO_CANVAS_H3_PROMPT_ENVIRONMENT`、
-   `KK_STUDIO_CANVAS_H3_COMFY_BASE_URL` 和可选 Bearer，重启 backend。
+2. 通过 `GET/PUT /api/settings`（携带 `expectedVersion`）配置
+   `integrations.minimaxH3.enabled/promptAgentName/promptEnvironmentName/comfyBaseUrl` 及各等待预算；
+   可选 Bearer 仍使用 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN`，随后重启 backend 使启动快照生效。
 3. 创建一张满足 H3 metadata 约束的图片 Resource，将其连接到 Function Node；选择
    `minimax-h3-ref2va`、`ratio=16:9`、`duration=4`，只执行一次。
 4. 验证 Prompt Thread 为 root Thread、`activeTools=[]`，SYSTEM/USER 在同一 batch，USER

@@ -569,7 +569,8 @@ describe('ToolMessageBlock', () => {
     )
 
     expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '拒绝' })).toBeInTheDocument()
+    // danger class 直接命中全局红色边框契约，避免拒绝动作与普通次要按钮混淆。
+    expect(screen.getByRole('button', { name: '拒绝' })).toHaveClass('ghost-btn', 'danger')
 
     await user.click(screen.getByRole('button', { name: '允许' }))
     expect(onDecideApproval).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'tool-1' }), 'ALLOW')

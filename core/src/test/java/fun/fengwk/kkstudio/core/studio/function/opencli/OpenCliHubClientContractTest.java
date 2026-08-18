@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.Executi
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.ExecutionResource;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.ExecutionStatus;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.HubResourceStream;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
@@ -100,13 +102,13 @@ class OpenCliHubClientContractTest {
     assertExecutionFailure("\"stdoutTruncated\":true,\"resources\":[]");
     assertExecutionFailure("\"stdout\":5,\"resources\":[]");
 
-    OpenCliHubProperties limited = properties();
-    limited.setMaxOutputChars(1024);
+    SystemSettingsSnapshot limited = snapshot(hub(1024, 512 * 1024, 4096, 1024));
     String data = executionData("\"stdout\":\"" + "x".repeat(1025) + "\",\"resources\":[]");
     assertThrows(
         OpenCliHubException.class,
         () ->
             new OpenCliHubClient(
+                    properties(),
                     limited,
                     MAPPER,
                     new StubHttpClient(request -> jsonResponse(200, envelope(data))))
@@ -115,10 +117,10 @@ class OpenCliHubClientContractTest {
 
   @Test
   void boundsJsonAndErrorBodiesAndPreservesSanitizedHttpDetail() {
-    OpenCliHubProperties limitedJson = properties();
-    limitedJson.setMaxJsonResponseBytes(1024);
+    SystemSettingsSnapshot limitedJson = snapshot(hub(1024, 1024, 4096, 65_535));
     OpenCliHubClient jsonClient =
         new OpenCliHubClient(
+            properties(),
             limitedJson,
             MAPPER,
             new StubHttpClient(
@@ -129,10 +131,10 @@ class OpenCliHubClientContractTest {
                         "{\"status\":200,\"code\":\"OK\",\"data\":\"" + "x".repeat(1100) + "\"}")));
     assertThrows(OpenCliHubException.class, () -> jsonClient.getExecution("exec-1", 0));
 
-    OpenCliHubProperties limitedError = properties();
-    limitedError.setMaxErrorResponseBytes(256);
+    SystemSettingsSnapshot limitedError = snapshot(hub(1024, 512 * 1024, 256, 65_535));
     OpenCliHubClient errorClient =
         new OpenCliHubClient(
+            properties(),
             limitedError,
             MAPPER,
             new StubHttpClient(request -> response(500, "text/plain", "bad\n" + "x".repeat(300))));
@@ -175,6 +177,7 @@ class OpenCliHubClientContractTest {
     OpenCliHubClient neverCalled =
         new OpenCliHubClient(
             properties(),
+            snapshot(),
             MAPPER,
             new StubHttpClient(
                 request -> {
@@ -203,6 +206,7 @@ class OpenCliHubClientContractTest {
     OpenCliHubClient exactClient =
         new OpenCliHubClient(
             properties(),
+            snapshot(),
             MAPPER,
             new StubHttpClient(
                 request -> {
@@ -230,6 +234,7 @@ class OpenCliHubClientContractTest {
     OpenCliHubClient earlyEofClient =
         new OpenCliHubClient(
             properties(),
+            snapshot(),
             MAPPER,
             new StubHttpClient(
                 request -> {
@@ -252,6 +257,7 @@ class OpenCliHubClientContractTest {
     OpenCliHubClient client =
         new OpenCliHubClient(
             properties(),
+            snapshot(),
             MAPPER,
             new StubHttpClient(
                 request -> {
@@ -271,6 +277,7 @@ class OpenCliHubClientContractTest {
     OpenCliHubClient ioClient =
         new OpenCliHubClient(
             properties(),
+            snapshot(),
             MAPPER,
             new StubHttpClient(
                 request -> {
@@ -286,6 +293,7 @@ class OpenCliHubClientContractTest {
     OpenCliHubClient interrupted =
         new OpenCliHubClient(
             properties(),
+            snapshot(),
             MAPPER,
             new StubHttpClient(
                 request -> {
@@ -302,11 +310,10 @@ class OpenCliHubClientContractTest {
     assertTrue(Thread.currentThread().isInterrupted());
     Thread.interrupted();
 
-    OpenCliHubProperties disabledProperties = properties();
-    disabledProperties.setEnabled(false);
     OpenCliHubClient disabled =
         new OpenCliHubClient(
-            disabledProperties,
+            properties(),
+            snapshot(SystemSettings.OpenCliHub.DEFAULT),
             MAPPER,
             new StubHttpClient(
                 request -> {
@@ -318,6 +325,7 @@ class OpenCliHubClientContractTest {
     OpenCliHubClient client =
         new OpenCliHubClient(
             properties(),
+            snapshot(),
             MAPPER,
             new StubHttpClient(
                 request -> {
@@ -357,15 +365,56 @@ class OpenCliHubClientContractTest {
   }
 
   private static OpenCliHubProperties properties() {
-    OpenCliHubProperties properties = new OpenCliHubProperties();
-    properties.setEnabled(true);
-    properties.setBaseUrl(URI.create("http://hub.test:8080"));
-    properties.setStreamBufferBytes(1024);
-    return properties;
+    return new OpenCliHubProperties();
+  }
+
+  private static SystemSettingsSnapshot snapshot() {
+    return snapshot(hub());
+  }
+
+  private static SystemSettingsSnapshot snapshot(SystemSettings.OpenCliHub hub) {
+    return new SystemSettingsSnapshot(settings(hub));
+  }
+
+  private static SystemSettings settings(SystemSettings.OpenCliHub hub) {
+    return new SystemSettings(
+        SystemSettings.Tool.DEFAULT,
+        SystemSettings.AiRuntime.DEFAULT,
+        SystemSettings.Environment.DEFAULT,
+        new SystemSettings.Integrations(
+            SystemSettings.Comfyui.DEFAULT,
+            hub,
+            SystemSettings.Seedance.DEFAULT,
+            SystemSettings.GptImage2.DEFAULT,
+            SystemSettings.MiniMaxH3.DEFAULT),
+        SystemSettings.StorageMedia.DEFAULT,
+        SystemSettings.Advanced.DEFAULT);
+  }
+
+  private static SystemSettings.OpenCliHub hub() {
+    return hub(1024, 512 * 1024, 4096, 65_535);
+  }
+
+  private static SystemSettings.OpenCliHub hub(
+      int streamBufferBytes,
+      int maxJsonResponseBytes,
+      int maxErrorResponseBytes,
+      int maxOutputChars) {
+    return new SystemSettings.OpenCliHub(
+        true,
+        "http://hub.test:8080",
+        5_000L,
+        120_000L,
+        130_000L,
+        streamBufferBytes,
+        maxJsonResponseBytes,
+        maxErrorResponseBytes,
+        maxOutputChars);
   }
 
   private static OpenCliHubClient clientReturning(HttpResponse<InputStream> response) {
-    return new OpenCliHubClient(properties(), MAPPER, new StubHttpClient(request -> response));
+    return new OpenCliHubClient(
+        properties(), snapshot(), MAPPER, new StubHttpClient(request -> response));
   }
 
   private static HttpResponse<InputStream> jsonResponse(int status, String body) {

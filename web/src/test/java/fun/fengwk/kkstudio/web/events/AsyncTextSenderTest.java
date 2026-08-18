@@ -24,21 +24,27 @@ import java.util.List;
 /** AsyncTextSender：串行发送链、有界队列、send timeout、溢出/失败关闭与 error 帧兜底。 */
 class AsyncTextSenderTest {
 
+  /** 与 SystemSettings.Advanced 默认一致的仓库级发送软策略（测试用显式值，不依赖生产默认常量）。 */
+  private static final long DEFAULT_MAX_BYTES = 2L * 1024 * 1024;
+
+  private static final long SEND_TIMEOUT_MILLIS = 10_000L;
+
   @Test
   void setsBoundedSendTimeoutOnTheAsyncRemote() {
     Async async = mock(Async.class);
     Session session = mock(Session.class);
     when(session.getAsyncRemote()).thenReturn(async);
 
-    new AsyncTextSender(session, 4);
+    new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
 
-    verify(async).setSendTimeout(AsyncTextSender.SEND_TIMEOUT_MILLIS);
+    verify(async).setSendTimeout(SEND_TIMEOUT_MILLIS);
   }
 
   @Test
   void sendsFramesStrictlySeriallyInEnqueueOrder() {
     FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 8);
+    AsyncTextSender sender =
+        new AsyncTextSender(session(remote), 8, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
 
     assertTrue(sender.enqueue("a"));
     assertTrue(sender.enqueue("b"));
@@ -63,7 +69,8 @@ class AsyncTextSenderTest {
   @Test
   void enqueueRejectsWhenQueueIsFull() {
     FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 2);
+    AsyncTextSender sender =
+        new AsyncTextSender(session(remote), 2, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
 
     assertTrue(sender.enqueue("a")); // in-flight
     assertTrue(sender.enqueue("b")); // queued
@@ -75,7 +82,8 @@ class AsyncTextSenderTest {
   void failFlushesErrorFrameThenClosesSession() throws Exception {
     FakeAsyncRemote remote = new FakeAsyncRemote();
     Session session = session(remote);
-    AsyncTextSender sender = new AsyncTextSender(session, 4);
+    AsyncTextSender sender =
+        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
 
     sender.enqueue("a");
     sender.fail(
@@ -97,7 +105,8 @@ class AsyncTextSenderTest {
   void failedSendClosesSessionAndStopsTheChain() throws Exception {
     FakeAsyncRemote remote = new FakeAsyncRemote();
     Session session = session(remote);
-    AsyncTextSender sender = new AsyncTextSender(session, 4);
+    AsyncTextSender sender =
+        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
 
     sender.enqueue("a");
     sender.enqueue("b");
@@ -112,7 +121,8 @@ class AsyncTextSenderTest {
   void failingWithoutInFlightSendStillEmitsErrorFrameAndCloses() throws Exception {
     FakeAsyncRemote remote = new FakeAsyncRemote();
     Session session = session(remote);
-    AsyncTextSender sender = new AsyncTextSender(session, 4);
+    AsyncTextSender sender =
+        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
 
     sender.fail("{\"type\":\"error\",\"message\":\"bad\"}", CloseReason.CloseCodes.VIOLATED_POLICY);
     assertEquals(1, remote.sent.size());
@@ -132,7 +142,8 @@ class AsyncTextSenderTest {
         .sendText(any(String.class), any(SendHandler.class));
     Session session = mock(Session.class);
     when(session.getAsyncRemote()).thenReturn(async);
-    AsyncTextSender sender = new AsyncTextSender(session, 4);
+    AsyncTextSender sender =
+        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
 
     assertTrue(sender.enqueue("a"));
 
@@ -147,7 +158,7 @@ class AsyncTextSenderTest {
   void enqueueRejectsWhenTotalPendingUtf8BytesExceedMax() {
     // maxBytes=6：三帧 2 字节各入队后，第四帧使总量 7 > 6 被拒；在途帧（2B）计入上限。
     FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L);
+    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L, SEND_TIMEOUT_MILLIS);
 
     assertTrue(sender.enqueue("ab")); // in-flight 2B
     assertTrue(sender.enqueue("cd")); // queued 2B
@@ -160,7 +171,7 @@ class AsyncTextSenderTest {
   void countsUtf8BytesNotCharacters() {
     // "中文" 是 2 个字符、6 个 UTF-8 字节；maxBytes=6 时单帧通过、再加 1 字节帧即拒绝。
     FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L);
+    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L, SEND_TIMEOUT_MILLIS);
 
     assertTrue(sender.enqueue("中文"));
     assertFalse(sender.enqueue("x"), "multibyte frames must count UTF-8 bytes");
@@ -169,7 +180,7 @@ class AsyncTextSenderTest {
   @Test
   void inFlightFrameCountsTowardsByteLimitUntilCompleted() {
     FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L);
+    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L, SEND_TIMEOUT_MILLIS);
 
     assertTrue(sender.enqueue("abcd")); // in-flight 4B
     assertTrue(sender.enqueue("ef")); // queued 2B，总量 6B 到限
@@ -186,7 +197,7 @@ class AsyncTextSenderTest {
   @Test
   void oversizedSingleFrameIsRejectedWithoutBreakingTheChain() {
     FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L);
+    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L, SEND_TIMEOUT_MILLIS);
 
     assertFalse(sender.enqueue("abcdefg"), "a single frame above maxBytes must be rejected");
     assertTrue(sender.enqueue("ab"));

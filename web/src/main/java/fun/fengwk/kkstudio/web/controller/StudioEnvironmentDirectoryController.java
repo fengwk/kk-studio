@@ -10,11 +10,13 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryLister;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -32,12 +34,12 @@ import java.util.concurrent.CompletableFuture;
 public class StudioEnvironmentDirectoryController {
 
   private final EnvironmentDirectoryLister directoryLister;
-  private final EnvironmentGatewayProperties gatewayProperties;
+  private final SystemSettings.Environment environment;
 
   public StudioEnvironmentDirectoryController(
-      EnvironmentDirectoryLister directoryLister, EnvironmentGatewayProperties gatewayProperties) {
+      EnvironmentDirectoryLister directoryLister, SystemSettingsSnapshot snapshot) {
     this.directoryLister = Objects.requireNonNull(directoryLister, "directoryLister");
-    this.gatewayProperties = Objects.requireNonNull(gatewayProperties, "gatewayProperties");
+    this.environment = Objects.requireNonNull(snapshot, "snapshot").get().environment();
   }
 
   /**
@@ -56,7 +58,7 @@ public class StudioEnvironmentDirectoryController {
     // gateway 的 orTimeout 保证 future 在配置超时内完成；blocking join 不会悬挂。
     CompletableFuture<EnvironmentDirectoryListResult> future =
         directoryLister.listDirectory(
-            environmentName, path, gatewayProperties.requireDirectoryListTimeout());
+            environmentName, path, Duration.ofMillis(environment.directoryListTimeoutMillis()));
     EnvironmentDirectoryListResult result = future.join();
     if (result instanceof EnvironmentDirectoryListResult.Loaded loaded) {
       return ResponseEntity.ok(Results.ok(loaded.listing()));

@@ -23,8 +23,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import fun.fengwk.kkstudio.core.comfyui.ComfyuiFileDownload;
-import fun.fengwk.kkstudio.core.comfyui.ComfyuiProperties;
 import fun.fengwk.kkstudio.core.comfyui.ComfyuiRuntimeService;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsProvider;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowCancelDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
@@ -38,7 +38,7 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
  *
  * <ul>
  *   <li>成功路径 submit / get / cancel / file download 的状态码与响应字段；
- *   <li>默认禁用的 {@code kk-studio.comfyui.enabled=false} 测试配置下，运行期端点必须已注册并返回 503 而非 404；
+ *   <li>默认禁用的 {@code SystemSettings.integrations.comfyui.enabled=false} 下，运行期端点必须已注册并返回 503 而非 404；
  *   <li>submit 路径上 apiName 找不到已启用卡片 → 404；
  *   <li>参数 / 选择器校验失败 → 400。
  * </ul>
@@ -50,15 +50,17 @@ public class StudioComfyuiRuntimeControllerTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
-  @Autowired private ComfyuiProperties comfyuiProperties;
+  @Autowired private SystemSettingsProvider settingsProvider;
 
   /** 用 mock 替换真正的运行时服务，避免触发 ComfyUIClient 调用；保留真实的 enabled 默认值。 */
   @MockitoBean private ComfyuiRuntimeService comfyuiRuntimeService;
 
   @BeforeEach
   public void resetEnabledFlag() {
-    // 不主动修改全局配置；WebTestApplication 默认 kk-studio.comfyui.enabled 缺省即 false。
-    assertTrue(!comfyuiProperties.isEnabled(), "test assumes default disabled runtime");
+    // 不主动修改全局配置；WebTestApplication 默认 DB 行 integrations.comfyui.enabled 即 false。
+    assertTrue(
+        !settingsProvider.get().integrations().comfyui().enabled(),
+        "test assumes default disabled runtime");
   }
 
   // -------- 成功路径 --------
@@ -128,11 +130,9 @@ public class StudioComfyuiRuntimeControllerTest extends WebPostgresTestSupport {
 
   @Test
   public void shouldRegisterEndpointAndReturn503WhenRuntimeDisabled() throws Exception {
-    // 默认配置下 kk-studio.comfyui.enabled=false；端点必须已注册并返回 503 而非 404。
+    // 默认 system settings 下 ComfyUI disabled；端点必须已注册并返回 503 而非 404。
     when(comfyuiRuntimeService.run(eq("any-api"), any()))
-        .thenThrow(
-            new IllegalStateException(
-                "ComfyUI runtime is disabled (kk-studio.comfyui.enabled=false)"));
+        .thenThrow(new IllegalStateException("ComfyUI runtime is disabled by system settings"));
 
     mockMvc
         .perform(

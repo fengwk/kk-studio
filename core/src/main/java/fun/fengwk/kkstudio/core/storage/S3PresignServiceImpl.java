@@ -13,6 +13,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.time.Duration;
@@ -24,7 +25,7 @@ import java.util.Objects;
 
 /**
  * {@link S3PresignService} 的默认实现：基于 AWS SDK v2 的 {@link S3Presigner} 在本地完成签名， 不与 S3 产生任何 IO。bucket
- * 与 expiry 上下界均来自 {@link S3StorageProperties}。
+ * 来自 {@link S3StorageProperties}（部署连接），expiry 默认值/上限来自 {@link SystemSettings.StorageMedia}。
  *
  * <p>响应 headers 只返回调用方发起请求时必须显式设置的已签名头（例如 PUT 场景下的 {@code Content-Type}）， 浏览器根据 URL 自动发送且脚本禁止设置的
  * {@code Host} 不会出现在响应中。
@@ -38,10 +39,15 @@ public class S3PresignServiceImpl implements S3PresignService {
 
   private final S3StorageProperties properties;
   private final S3Presigner s3Presigner;
+  private final SystemSettings.StorageMedia storageMedia;
 
-  public S3PresignServiceImpl(S3StorageProperties properties, S3Presigner s3Presigner) {
+  public S3PresignServiceImpl(
+      S3StorageProperties properties,
+      S3Presigner s3Presigner,
+      SystemSettings.StorageMedia storageMedia) {
     this.properties = Objects.requireNonNull(properties, "properties must not be null");
     this.s3Presigner = Objects.requireNonNull(s3Presigner, "s3Presigner must not be null");
+    this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia must not be null");
   }
 
   @Override
@@ -142,8 +148,8 @@ public class S3PresignServiceImpl implements S3PresignService {
   }
 
   private Duration resolveExpires(Long expiresInSeconds) {
-    long defaultExpires = properties.getEffectivePresignDefaultExpiresSeconds();
-    long maxExpires = properties.getEffectivePresignMaxExpiresSeconds();
+    long defaultExpires = storageMedia.s3PresignDefaultExpiresSeconds();
+    long maxExpires = storageMedia.s3PresignMaxExpiresSeconds();
     long requested = expiresInSeconds == null ? defaultExpires : expiresInSeconds;
     Assert.isTrue(requested > 0L, "expiresInSeconds must be positive");
     Assert.isTrue(requested <= maxExpires, "expiresInSeconds must not exceed " + maxExpires);

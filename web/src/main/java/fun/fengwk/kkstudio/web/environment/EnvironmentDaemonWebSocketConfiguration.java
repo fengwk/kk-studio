@@ -7,7 +7,7 @@ import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 
 /**
  * Daemon 端点 v2（WebSocket 路径 `/api/ai/environment/daemon/v2`）Environment gateway 的 WebSocket 传输注册。
@@ -38,12 +38,16 @@ public class EnvironmentDaemonWebSocketConfiguration implements WebSocketConfigu
    */
   @Bean
   public ServletServerContainerFactoryBean environmentDaemonWebSocketContainer(
-      EnvironmentGatewayProperties properties) {
-    int maxMessageBytes = properties.requireMaxMessageBytes();
+      SystemSettingsSnapshot snapshot) {
+    long maxMessageBytes = snapshot.get().environment().maxMessageBytes();
+    if (maxMessageBytes <= 0L || maxMessageBytes > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException(
+          "SystemSettings environment.maxMessageBytes must be between 1 and " + Integer.MAX_VALUE);
+    }
     ServletServerContainerFactoryBean container =
         new EnvironmentDaemonWebSocketContainerFactoryBean();
-    container.setMaxTextMessageBufferSize(maxMessageBytes);
-    container.setMaxBinaryMessageBufferSize(maxMessageBytes);
+    container.setMaxTextMessageBufferSize((int) maxMessageBytes);
+    container.setMaxBinaryMessageBufferSize((int) maxMessageBytes);
     return container;
   }
 }
