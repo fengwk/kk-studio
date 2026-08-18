@@ -158,7 +158,6 @@ describe('thread realtime state', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      resultEntryId: null,
       createTime: '2026-07-28T10:00:00Z',
       updateTime: '2026-07-28T10:00:00Z',
     }
@@ -207,8 +206,9 @@ describe('thread realtime state', () => {
     )
     expect(failed).toMatchObject({ error: true, errorText: 'boom' })
 
-    // 设置 resultEntryId 后：持久的 Tool result Entry 才是 transcript 的真实来源。
-    expect(snapshotToolStream({ ...base, resultJson: '{}', resultEntryId: 'e-9' }, '7')).toBeNull()
+    // ToolResult Entry 写入与 invocation 删除在同一事务原子提交：invocation 从
+    // snapshot 消失时 overlay 才清除（durable Entry 的规范化去重由 timeline 负责）。
+    expect(snapshotToolStream(null, '7')).toBeNull()
   })
 
   it('ignores Resource contents in TOOL_PARTIAL chunks (the runtime forbids them)', () => {

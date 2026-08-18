@@ -227,7 +227,6 @@ describe('useAgentThreadController', () => {
           approvalJson: '{}',
           resultJson: null,
           errorJson: null,
-          resultEntryId: null,
           createTime: null,
           updateTime: null,
         }) satisfies ToolInvocationDTO,
@@ -998,7 +997,6 @@ describe('useAgentThreadController', () => {
         approvalJson: '{}',
         resultJson: null,
         errorJson: null,
-        resultEntryId: null,
         createTime: null,
         updateTime: null,
       } as ToolInvocationDTO)
@@ -1073,7 +1071,6 @@ describe('useAgentThreadController', () => {
         approvalJson: '{}',
         resultJson: null,
         errorJson: null,
-        resultEntryId: null,
         createTime: null,
         updateTime: null,
       } as ToolInvocationDTO)
