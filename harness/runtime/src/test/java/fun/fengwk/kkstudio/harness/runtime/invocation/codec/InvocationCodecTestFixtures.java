@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -78,27 +79,33 @@ final class InvocationCodecTestFixtures {
         ProviderCacheControl.none());
   }
 
-  static ModelInvocationRequest environmentModelRequest() {
+  static ModelRequestSpec environmentModelRequest() {
     ToolBinding binding = binding(ToolType.ENVIRONMENT);
-    return new ModelInvocationRequest(
-        ENVIRONMENT_ID,
-        providerRequest(binding.descriptor()),
+    ProviderRequest provider = providerRequest(binding.descriptor());
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        provider.model(),
+        provider.variant(),
+        List.of(),
         List.of(binding),
         List.of(new SkillBinding("review", "Review code", ENVIRONMENT_ID)),
-        true,
-        100_000,
+        List.of(),
+        provider.cacheControl(),
         null);
   }
 
-  static ModelInvocationRequest platformModelRequest() {
+  static ModelRequestSpec platformModelRequest() {
     ToolBinding binding = binding(ToolType.PLATFORM);
-    return new ModelInvocationRequest(
-        null,
-        providerRequest(binding.descriptor()),
+    ProviderRequest provider = providerRequest(binding.descriptor());
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        provider.model(),
+        provider.variant(),
+        List.of(),
         List.of(binding),
         List.of(new SkillBinding("review", "Review code", null)),
-        false,
-        100_000,
+        List.of(),
+        provider.cacheControl(),
         null);
   }
 

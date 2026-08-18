@@ -39,6 +39,7 @@ import java.util.UUID;
 
 /** EntryPath 链的不变量：同一 head 的 settings、turn 顺序、tool 前缀与结局。 */
 class EntryPathTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 
@@ -790,7 +791,7 @@ class EntryPathTest {
             id(2L),
             id(2L),
             id(1L),
-            new TurnStartPayload(TurnStartReason.INPUT, settings("turn")),
+            new TurnStartPayload(TurnStartReason.INPUT, settings("turn"), OWNER_THREAD_ID),
             time(id(2L)));
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, other)));
   }
@@ -814,7 +815,7 @@ class EntryPathTest {
             id(3L),
             SESSION_ID,
             id(5L),
-            new TurnStartPayload(TurnStartReason.INPUT, settings("t")),
+            new TurnStartPayload(TurnStartReason.INPUT, settings("t"), OWNER_THREAD_ID),
             time(id(3L)));
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, broken)));
 
@@ -824,7 +825,7 @@ class EntryPathTest {
             id(2L),
             SESSION_ID,
             id(2L),
-            new TurnStartPayload(TurnStartReason.INPUT, settings("t")),
+            new TurnStartPayload(TurnStartReason.INPUT, settings("t"), OWNER_THREAD_ID),
             time(id(3L)));
     assertThrows(
         IllegalArgumentException.class, () -> new EntryPath(List.of(root, start, duplicate)));
@@ -838,7 +839,7 @@ class EntryPathTest {
             id(2L),
             SESSION_ID,
             id(1L),
-            new TurnStartPayload(TurnStartReason.INPUT, settings("turn")),
+            new TurnStartPayload(TurnStartReason.INPUT, settings("turn"), OWNER_THREAD_ID),
             BASE.minusSeconds(1));
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, child)));
   }
@@ -961,7 +962,12 @@ class EntryPathTest {
 
   private static Entry turnStart(
       UUID id, UUID parentId, TurnStartReason reason, BranchSettings settings) {
-    return new Entry(id, SESSION_ID, parentId, new TurnStartPayload(reason, settings), time(id));
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentId,
+        new TurnStartPayload(reason, settings, OWNER_THREAD_ID),
+        time(id));
   }
 
   private static Entry turnEnd(
@@ -1083,7 +1089,7 @@ class EntryPathTest {
         id,
         SESSION_ID,
         parentId,
-        new TurnStartPayload(TurnStartReason.COMPACTION, settings),
+        new TurnStartPayload(TurnStartReason.COMPACTION, settings, OWNER_THREAD_ID),
         time(id));
   }
 

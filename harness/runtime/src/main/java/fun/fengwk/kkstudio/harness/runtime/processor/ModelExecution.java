@@ -4,8 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -53,7 +53,7 @@ final class ModelExecution implements ModelGateway.Listener {
   private final UUID invocationId;
   private final UUID threadId;
   private final int attempt;
-  private final ModelInvocationRequest request;
+  private final ModelRequestSpec request;
   private final ModelProcessorConfig config;
   private final Clock clock;
   private final WorkHeartbeat heartbeat;
@@ -74,7 +74,7 @@ final class ModelExecution implements ModelGateway.Listener {
       ClaimedWork claim,
       UUID threadId,
       int attempt,
-      ModelInvocationRequest request,
+      ModelRequestSpec request,
       ModelProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,

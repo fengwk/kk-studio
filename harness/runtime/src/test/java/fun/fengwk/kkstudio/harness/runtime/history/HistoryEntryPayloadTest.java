@@ -26,9 +26,11 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** history payload record 的不变量：role/metadata 矩阵、synthetic tool result 与 turn end。 */
 class HistoryEntryPayloadTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final ToolResultMetadata TOOL_METADATA =
       new ToolResultMetadata(id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null);
@@ -247,12 +249,28 @@ class HistoryEntryPayloadTest {
   @Test
   void rootAndTurnStartPayloadsRequireNonNullValues() {
     assertThrows(NullPointerException.class, () -> new RootPayload(null));
-    assertThrows(NullPointerException.class, () -> new TurnStartPayload(null, SETTINGS));
     assertThrows(
-        NullPointerException.class, () -> new TurnStartPayload(TurnStartReason.INPUT, null));
+        NullPointerException.class, () -> new TurnStartPayload(null, SETTINGS, OWNER_THREAD_ID));
+    assertThrows(
+        NullPointerException.class,
+        () -> new TurnStartPayload(TurnStartReason.INPUT, null, OWNER_THREAD_ID));
+    assertThrows(
+        NullPointerException.class,
+        () -> new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, null));
     assertEquals(SETTINGS, new RootPayload(SETTINGS).settings());
     assertEquals(
-        TurnStartReason.INPUT, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS).reason());
+        TurnStartReason.INPUT,
+        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID).reason());
+    assertEquals(
+        4096,
+        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 4096)
+            .contextWindow());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, -1));
   }
 
   @Test
@@ -470,7 +488,11 @@ class HistoryEntryPayloadTest {
     assertEquals(
         EntryType.TURN_START,
         new Entry(
-                id(2L), id(1L), id(1L), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), TIME)
+                id(2L),
+                id(1L),
+                id(1L),
+                new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+                TIME)
             .payload()
             .type());
     assertThrows(
@@ -480,7 +502,11 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new Entry(
-                id(2L), id(1L), null, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), TIME));
+                id(2L),
+                id(1L),
+                null,
+                new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+                TIME));
     assertThrows(NullPointerException.class, () -> new Entry(id(1L), id(1L), null, null, TIME));
     assertThrows(
         NullPointerException.class,

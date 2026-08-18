@@ -9,15 +9,15 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelInvocationRequestJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
@@ -33,8 +33,7 @@ import java.util.UUID;
 class DatabaseThreadSelectedSkillLookupTest {
 
   private static final EnvironmentBinding ENV_ID = TestEnvironmentBindings.binding("env-1");
-  private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
-      new ModelInvocationRequestJsonCodec();
+  private static final ModelRequestSpecJsonCodec REQUEST_CODEC = new ModelRequestSpecJsonCodec();
 
   private static final UUID INVOCATION_ID = new UUID(0L, 42L);
   private static final UUID THREAD_ID = new UUID(0L, 7L);
@@ -75,19 +74,16 @@ class DatabaseThreadSelectedSkillLookupTest {
   }
 
   private static String encodedRequest(EnvironmentBinding sourceEnvironment) {
-    ModelInvocationRequest request =
-        new ModelInvocationRequest(
-            ENV_ID,
-            new ProviderRequest(
-                modelDescriptor(),
-                new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
-                List.of(),
-                List.of(),
-                ProviderCacheControl.none()),
+    ModelRequestSpec request =
+        new ModelRequestSpec(
+            ProviderType.OPENAI,
+            modelDescriptor(),
+            new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+            List.of(),
             List.of(),
             List.of(new SkillBinding("review", "Review code", sourceEnvironment)),
-            false,
-            100_000,
+            List.of(),
+            ProviderCacheControl.none(),
             null);
     return REQUEST_CODEC.encode(request);
   }

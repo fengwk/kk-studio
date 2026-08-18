@@ -95,7 +95,7 @@ final class TurnPlanBuilder {
             turnStartEntryId,
             sessionId,
             parentId,
-            new TurnStartPayload(reason, harvest.branchSettings()),
+            new TurnStartPayload(reason, harvest.branchSettings(), threadId, null),
             now));
     parentId = turnStartEntryId;
     if (reason == TurnStartReason.INPUT || reason == TurnStartReason.CONTINUATION) {

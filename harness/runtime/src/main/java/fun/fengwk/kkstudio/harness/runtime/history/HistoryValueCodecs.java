@@ -277,6 +277,18 @@ final class HistoryValueCodecs {
     return value;
   }
 
+  static Integer nullablePositiveInt(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() <= 0) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a positive integer or null");
+    }
+    return value.intValue();
+  }
+
   static BigDecimal requiredDecimal(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (!value.isTextual()) {

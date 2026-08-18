@@ -8,8 +8,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -21,10 +21,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -82,6 +82,7 @@ import java.util.function.Function;
  */
 final class DispatcherTestSupport {
 
+  static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
   static final Duration THREAD_LEASE = Duration.ofSeconds(30);
   static final Duration MODEL_LEASE = Duration.ofSeconds(45);
@@ -182,7 +183,7 @@ final class DispatcherTestSupport {
           tx.insertEntry(userEntry(userEntryId, sessionId, turnStartEntryId));
           tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId));
           tx.insertThread(thread(threadId, turnStartEntryId));
-          ModelInvocationRequest request = modelRequest();
+          ModelRequestSpec request = modelRequest();
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -568,7 +569,7 @@ final class DispatcherTestSupport {
         id,
         sessionId,
         parentId,
-        new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+        new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID),
         NOW);
   }
 
@@ -620,19 +621,16 @@ final class DispatcherTestSupport {
         ENV_NAME, "agent", new ModelSelection("provider", "model", "v1"), List.of());
   }
 
-  private static ModelInvocationRequest modelRequest() {
-    return new ModelInvocationRequest(
-        ENV_NAME,
-        new ProviderRequest(
-            modelDescriptor(),
-            new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
-            List.of(),
-            List.of(),
-            ProviderCacheControl.none()),
+  private static ModelRequestSpec modelRequest() {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor(),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
         List.of(),
         List.of(),
-        false,
-        100_000,
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
         null);
   }
 

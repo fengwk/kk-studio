@@ -84,7 +84,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             ModelInvocationStatus.SUCCEEDED,
             List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.SUCCEEDED));
     requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, chain.turn().threadId());
 
     // batch apply -> TURN_END(COMPLETED, continueModel=true) -> 同 claim 继续启动 continuation。
@@ -145,7 +145,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     touchModelTimestamp(fixture.store, chain.modelInvocationId(), modelFloor);
     touchToolTimestamp(fixture.store, chain.toolInvocationIds().getFirst(), toolFloor);
     requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
 
     assertEquals(
         ThreadProcessResult.SUSPENDED,
@@ -191,7 +191,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
         chain.toolInvocationIds().get(1),
         new ToolResult("call-2", List.of(new TextToolContent("second")), false, "{}", false));
     requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
 
     assertEquals(
         ThreadProcessResult.SUSPENDED,
@@ -245,7 +245,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
                 ToolInvocationStatus.CANCELLED,
                 ToolInvocationStatus.UNKNOWN));
     requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, chain.turn().threadId());
 
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));

@@ -70,6 +70,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** one-shot service 证明 root 配置、同批消息、恢复观察、终态文本与 timeout stop。 */
 class HarnessOneShotServiceTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final Instant NOW = Instant.parse("2026-08-10T00:00:00Z");
 
@@ -376,7 +377,11 @@ class HarnessOneShotServiceTest {
     Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
     Entry turn =
         new Entry(
-            id(4), id(1), root.id(), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), NOW);
+            id(4),
+            id(1),
+            root.id(),
+            new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+            NOW);
     Entry user =
         new Entry(
             id(5),
@@ -419,7 +424,11 @@ class HarnessOneShotServiceTest {
     Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
     Entry turn =
         new Entry(
-            id(4), id(1), root.id(), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), NOW);
+            id(4),
+            id(1),
+            root.id(),
+            new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+            NOW);
     Entry user =
         new Entry(
             id(5),

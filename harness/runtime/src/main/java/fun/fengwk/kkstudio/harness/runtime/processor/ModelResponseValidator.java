@@ -7,20 +7,21 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionFileSections;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ToolCallVisibility;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * 校验最终 Provider response 相对完整冻结 {@link ModelInvocationRequest} 的语义（工具可见性 / arguments JSON /
+ * 校验最终 Provider response 相对冻结 {@link ModelRequestSpec} 的语义（工具可见性 / arguments JSON /
  * stopReason）；压缩调用（{@code request.compaction()} 非空）成功必须是 {@code COMPLETED}、零 tool call、非空摘要文本，并在
  * durable SUCCEEDED 前剥离 Runtime-owned file sections。失败走 INVALID_REQUEST terminal。
  */
@@ -37,11 +38,10 @@ final class ModelResponseValidator {
     return mapper;
   }
 
-  static ProviderResponse validate(ModelInvocationRequest request, ProviderResponse response) {
+  static ProviderResponse validate(ModelRequestSpec request, ProviderResponse response) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(response, "response");
-    ProviderRequest providerRequest = request.providerRequest();
-    List<String> availableToolNames = ToolCallVisibility.availableToolNames(providerRequest);
+    List<String> availableToolNames = availableToolNames(request);
     Set<String> declaredToolNames = declaredToolNames(availableToolNames);
     boolean hasToolCalls = !response.toolCalls().isEmpty();
     Set<String> toolCallIds = new HashSet<>();
@@ -89,6 +89,14 @@ final class ModelResponseValidator {
       }
     }
     return response;
+  }
+
+  private static List<String> availableToolNames(ModelRequestSpec request) {
+    List<String> names = new ArrayList<>(request.toolBindings().size());
+    for (ToolBinding binding : request.toolBindings()) {
+      names.add(binding.descriptor().name());
+    }
+    return List.copyOf(names);
   }
 
   private static Set<String> declaredToolNames(Iterable<String> definitions) {

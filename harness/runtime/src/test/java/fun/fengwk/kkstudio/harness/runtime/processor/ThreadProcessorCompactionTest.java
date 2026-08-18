@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.CONTEXT_WINDOW;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.ClosedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.Fixture;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
@@ -10,6 +11,8 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestThreadWork;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.resolvedCompactionTurnStart;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.resolvedInputTurnStart;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCompactionReadyClosedTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.successResponse;
@@ -411,6 +414,70 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   @Test
+  void rejectedTurnWithNullContextWindowDoesNotEraseEarlierOwnedUsage() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          UUID rejectedStart = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  rejectedStart,
+                  baseline.sessionId(),
+                  baseline.turnEndEntryId(),
+                  new TurnStartPayload(
+                      TurnStartReason.INPUT, branchSettings(), baseline.threadId()),
+                  NOW));
+          UUID userId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  userId,
+                  baseline.sessionId(),
+                  rejectedStart,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER, List.of(new TextMessageContent("rejected input"))),
+                      null,
+                      null),
+                  NOW));
+          UUID errorId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  errorId,
+                  baseline.sessionId(),
+                  userId,
+                  new AssistantErrorPayload(
+                      new AssistantError("PLANNING_FAILED", "missing model"), null),
+                  NOW));
+          UUID endId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  endId,
+                  baseline.sessionId(),
+                  errorId,
+                  new TurnEndPayload(
+                      rejectedStart, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                  NOW));
+          tx.updateThread(
+              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, false, NOW));
+          return null;
+        });
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    assertEquals(
+        ThreadProcessResult.SUSPENDED,
+        fixture.processor.process(claimThreadWork(fixture.store, baseline.threadId())));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    TurnStartPayload start = (TurnStartPayload) path.head().payload();
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    assertEquals(baseline.threadId(), start.ownerThreadId());
+    assertEquals(CONTEXT_WINDOW, start.contextWindow());
+  }
+
+  @Test
   void continuationDueRunsExistingContinuationWithoutCompactionInsertion() {
     Fixture fixture = fixture();
     // continueModel=true 的关闭 turn + 超阈值 usage：continuation 义务必须原样执行，阈值压缩绝不插队。
@@ -515,7 +582,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   ids[0],
                   sessionId,
                   headId,
-                  new TurnStartPayload(TurnStartReason.COMPACTION, branchSettings()),
+                  resolvedCompactionTurnStart(baseline.threadId()),
                   NOW));
           // 与真实 commit 一致：head 先推进到 TURN_START，invocation 的 basis 就是该 TURN_START。
           tx.updateThread(
@@ -627,7 +694,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   ids[0],
                   sessionId,
                   headId,
-                  new TurnStartPayload(TurnStartReason.COMPACTION, branchSettings()),
+                  resolvedCompactionTurnStart(baseline.threadId()),
                   NOW));
           // 与真实 commit 一致：head 先推进到 TURN_START，invocation 的 basis 就是该 TURN_START。
           tx.updateThread(
@@ -712,7 +779,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       turnStartEntryId,
                       sessionId,
                       rootEntryId,
-                      new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                      resolvedInputTurnStart(threadId),
                       NOW));
               tx.insertEntry(
                   new Entry(
@@ -751,7 +818,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       secondTurnStartId,
                       sessionId,
                       turnEndEntryId,
-                      new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                      resolvedInputTurnStart(threadId),
                       NOW));
               tx.insertEntry(
                   new Entry(
@@ -845,7 +912,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.COMPACTION, branchSettings()),
+                  resolvedCompactionTurnStart(threadId),
                   NOW));
           tx.insertEntry(
               new Entry(
@@ -904,11 +971,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
               new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
-                  NOW));
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
           tx.insertEntry(
               new Entry(
                   userEntryId,
@@ -944,7 +1007,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   secondTurnStartId,
                   sessionId,
                   turnEndEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                  new TurnStartPayload(
+                      TurnStartReason.INPUT, branchSettings(), otherThreadId, CONTEXT_WINDOW),
                   NOW));
           tx.insertEntry(
               new Entry(

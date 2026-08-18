@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetYoloCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -306,7 +307,7 @@ public final class ThreadProcessor {
       }
       case ThreadContext.IdleOrHistorical ignored -> {
         // 压缩优先于输入：到期压缩先执行（消费零 Command），不能被已 queued 的用户消息绕过。
-        CompactionPreparation preparation = compactionPreparation(tx, thread, path);
+        CompactionPreparation preparation = compactionPreparation(thread, path);
         if (preparation != null) {
           yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
         }
@@ -333,16 +334,14 @@ public final class ThreadProcessor {
   /**
    * 计算当前 Thread 是否应当启动一次压缩 turn（纯读、无锁写）。
    *
-   * <p>只基于路径上最新已关闭 turn：该 turn 是 COMPACTION 时，只有其结果为 incomplete HISTORY payload 才机械启动
-   * TURN_PREFIX（失败 / 停止 / 完成的压缩 turn 绝不立即再次压缩，避免 spin）；有 ModelInvocation 的非压缩 turn 必须由本 Thread
-   * 自己拥有（共享历史 turn 属于另一 Thread 时不压缩），且 turn 结果 Entry 必须正是该 invocation 的 {@code resultEntryId}；无
-   * ModelInvocation 的 Resolver Rejected turn 可跨越（normalized/relocated 历史形状不得借用其它后代结果）。最新 terminal
-   * OVERFLOW 错误优先触发 overflow 压缩；否则在最近一次 complete COMPACTION barrier 之后向前寻找本 Thread 最新 SUCCEEDED
-   * invocation，其 usage 超过 {@code max(0, contextWindow - reserveTokens)} 时阈值触发（providerTotalTokens 为
-   * 0 时回退 categorizedTokens，全零不触发）。planner 无内容可摘要时返回 null。
+   * <p>只基于路径上最新已关闭 turn 的 Entry 事实：该 turn 是 COMPACTION 时，只有其结果为 incomplete HISTORY payload 才机械启动
+   * TURN_PREFIX（失败 / 停止 / 完成的压缩 turn 绝不立即再次压缩，避免 spin）。非压缩 turn 必须 {@code ownerThreadId} 等于当前
+   * Thread（共享历史是 ownership barrier）；{@code contextWindow == null} 的 Resolver rejected turn 可跨越。最新
+   * terminal OVERFLOW 错误优先触发 overflow 压缩；否则在最近一次 complete COMPACTION barrier 之后向前寻找本 Thread 最新成功
+   * Assistant usage，超过 {@code max(0, contextWindow - reserveTokens)} 时阈值触发（providerTotalTokens 为 0
+   * 时回退 categorizedTokens，全零不触发）。planner 无内容可摘要时返回 null。活跃 open turn 查找仍可使用当前 Invocation。
    */
-  private CompactionPreparation compactionPreparation(
-      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+  private CompactionPreparation compactionPreparation(ThreadState thread, EntryPath path) {
     CompactionConfig compaction = config.compaction();
     if (!compaction.enabled()) {
       return null;
@@ -352,7 +351,8 @@ public final class ThreadProcessor {
       return null;
     }
     Entry latestStart = latestTurn.start();
-    if (((TurnStartPayload) latestStart.payload()).reason() == TurnStartReason.COMPACTION) {
+    TurnStartPayload latestStartPayload = (TurnStartPayload) latestStart.payload();
+    if (latestStartPayload.reason() == TurnStartReason.COMPACTION) {
       // 机械延续：最新关闭的 COMPACTION turn 结果为 incomplete HISTORY payload 时启动第二次 TURN_PREFIX 调用。
       if (latestTurn.end().outcome() != TurnEndOutcome.COMPLETED) {
         return null;
@@ -361,56 +361,42 @@ public final class ThreadProcessor {
       if (incomplete == null || incomplete.phase() != CompactionPhase.HISTORY) {
         return null;
       }
-      ModelInvocation history =
-          tx.findModelInvocationByTurn(thread.id(), latestStart.id()).orElse(null);
-      if (history == null || history.request().compaction() == null) {
+      Integer contextWindow = latestStartPayload.contextWindow();
+      if (contextWindow == null) {
         return null;
       }
-      return compactionPlanner.prepareTurnPrefix(
-          path, incomplete, history.request().contextWindow());
+      return compactionPlanner.prepareTurnPrefix(path, incomplete, contextWindow);
     }
-    ModelInvocation latestInvocation =
-        tx.findModelInvocationByTurn(thread.id(), latestStart.id()).orElse(null);
-    if (latestInvocation == null) {
-      if (tx.hasModelInvocationForTurn(latestStart.id())) {
-        // 最新已关闭 turn 的 invocation 属于另一 Thread 的共享历史：不压缩。
-        return null;
-      }
-    } else {
-      Entry latestResultEntry = turnResultEntry(path, latestStart);
-      if (latestInvocation.status().isTerminal()
-          && (latestResultEntry == null
-              || !Objects.equals(latestResultEntry.id(), latestInvocation.resultEntryId()))) {
-        // normalized/relocated 历史形状不得借用其它后代结果。
-        return null;
-      }
-      if (latestInvocation.status().isTerminal()
-          && latestInvocation.error() != null
-          && latestInvocation.error().kind() == ProviderErrorKind.OVERFLOW) {
-        if (isOverflowRecoveryRetry(path, latestTurn)) {
-          // 一次 OVERFLOW 只允许 compact + immediate CONTINUATION 重试一次；重试仍 overflow 时保留失败结果，
-          // 绝不进入无界 compaction/retry 循环。后续新的 INPUT 或 tool continuation 仍可独立触发压缩。
-          return null;
-        }
-        return compactionPlanner
-            .prepare(path, CompactionTrigger.OVERFLOW, latestInvocation.request().contextWindow())
-            .orElse(null);
-      }
+    if (!thread.id().equals(latestStartPayload.ownerThreadId())) {
+      // 最新已关闭 turn 属于另一 Thread 的共享历史：不压缩。
+      return null;
     }
-    return thresholdPreparation(tx, thread, path, latestTurn, compaction);
+    Entry latestResultEntry = turnResultEntry(path, latestStart);
+    if (latestResultEntry != null
+        && latestResultEntry.payload() instanceof AssistantErrorPayload error
+        && ProviderErrorKind.OVERFLOW.name().equals(error.error().code())) {
+      if (latestStartPayload.contextWindow() == null) {
+        return null;
+      }
+      if (isOverflowRecoveryRetry(path, latestTurn)) {
+        // 一次 OVERFLOW 只允许 compact + immediate CONTINUATION 重试一次；重试仍 overflow 时保留失败结果，
+        // 绝不进入无界 compaction/retry 循环。后续新的 INPUT 或 tool continuation 仍可独立触发压缩。
+        return null;
+      }
+      return compactionPlanner
+          .prepare(path, CompactionTrigger.OVERFLOW, latestStartPayload.contextWindow())
+          .orElse(null);
+    }
+    return thresholdPreparation(thread, path, latestTurn, compaction);
   }
 
   /**
-   * 最近一次 complete compaction 是 threshold freshness barrier；失败、STOPPED、incomplete compaction 与无
-   * invocation 的 Resolver Rejected turn 不抹掉更早成功 usage。无本 Thread invocation、但存在其它 Thread invocation
-   * 的共享 turn 是 ownership barrier。
+   * 最近一次 complete compaction 是 threshold freshness barrier；失败、STOPPED、incomplete compaction 与
+   * Resolver Rejected turn（{@code contextWindow == null}）不抹掉更早成功 usage。其它 Thread 拥有的共享 turn 是
+   * ownership barrier。
    */
   private CompactionPreparation thresholdPreparation(
-      HarnessStore.Transaction tx,
-      ThreadState thread,
-      EntryPath path,
-      ClosedTurn latestTurn,
-      CompactionConfig compaction) {
+      ThreadState thread, EntryPath path, ClosedTurn latestTurn, CompactionConfig compaction) {
     ClosedTurn candidate = latestTurn;
     while (candidate != null) {
       TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
@@ -422,42 +408,30 @@ public final class ThreadProcessor {
         candidate = previousClosedTurn(path, candidate);
         continue;
       }
-      ModelInvocation invocation =
-          tx.findModelInvocationByTurn(thread.id(), candidate.start().id()).orElse(null);
-      if (invocation == null) {
-        if (tx.hasModelInvocationForTurn(candidate.start().id())) {
-          return null;
-        }
+      if (!thread.id().equals(start.ownerThreadId())) {
+        return null;
+      }
+      if (start.contextWindow() == null) {
         candidate = previousClosedTurn(path, candidate);
         continue;
       }
       Entry resultEntry = turnResultEntry(path, candidate.start());
-      if (invocation.status().isTerminal()
-          && (resultEntry == null
-              || !Objects.equals(resultEntry.id(), invocation.resultEntryId()))) {
-        return null;
-      }
-      if (invocation.status() == ModelInvocationStatus.SUCCEEDED) {
-        if (!(resultEntry.payload() instanceof MessagePayload message)
-            || message.message().role() != AgentMessageRole.ASSISTANT) {
-          return null;
-        }
+      if (resultEntry != null
+          && resultEntry.payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.ASSISTANT
+          && message.assistantMetadata() != null) {
         ModelUsage usage = message.assistantMetadata().usage();
         long contextTokens =
             usage.providerTotalTokens() > 0
                 ? usage.providerTotalTokens()
                 : usage.categorizedTokens();
-        long threshold =
-            Math.max(0L, (long) invocation.request().contextWindow() - compaction.reserveTokens());
+        long threshold = Math.max(0L, (long) start.contextWindow() - compaction.reserveTokens());
         if (contextTokens <= threshold) {
           return null;
         }
         return compactionPlanner
-            .prepare(path, CompactionTrigger.THRESHOLD, invocation.request().contextWindow())
+            .prepare(path, CompactionTrigger.THRESHOLD, start.contextWindow())
             .orElse(null);
-      }
-      if (!invocation.status().isTerminal()) {
-        return null;
       }
       candidate = previousClosedTurn(path, candidate);
     }
@@ -855,7 +829,7 @@ public final class ThreadProcessor {
 
   /**
    * 事务外解析 + 第二事务 CAS 提交：Resolver 异常 / null / heartbeat 调度失败按失败延迟 reschedule（零 durable mutation）；提交
-   * CAS（source head / source YOLO / cutoff 内 Command 快照 / claim）失败返回 LOST。
+   * CAS（source head / cutoff 内 Command 快照 / claim）失败返回 LOST。YOLO 变化不使 plan 失效。
    */
   private ResolveOutcome resolveAndCommit(ClaimedWork claim, TurnPlan plan) {
     AtomicBoolean heartbeatLost = new AtomicBoolean();
@@ -870,9 +844,7 @@ public final class ThreadProcessor {
     }
     TurnResolver.Result result;
     try {
-      result =
-          resolver.resolve(
-              plan.threadId(), plan.candidatePath(), plan.finalYoloEnabled(), plan.preparation());
+      result = resolver.resolve(plan.threadId(), plan.candidatePath(), plan.preparation());
     } catch (RuntimeException failure) {
       log.warn(
           "turn resolver failed for thread {}; rescheduling its work", plan.threadId(), failure);
@@ -887,7 +859,7 @@ public final class ThreadProcessor {
     }
     if (result instanceof TurnResolver.Resolved resolved) {
       // Harness 边界校验：任何不一致都是 Resolver 契约错误，抛 ISE 且此刻零 durable mutation（绝不转 typed rejection）。
-      ResolvedRequestValidator.validate(plan, resolved.request());
+      ResolvedRequestValidator.validate(plan, resolved);
     }
     return switch (commit(claim, plan, result)) {
       case RESOLVED -> ResolveOutcome.RESOLVED_COMMITTED;
@@ -897,11 +869,12 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 第二事务 CAS 提交。要求当前 Thread head == planned source head、当前 yolo == source yolo、cutoff 内 queued
-   * Command 与 planned 快照逐字段相等（允许 sequence &gt; cutoff 的新命令，不 CAS revision / nextCommandSequence），
-   * claim token 活跃；最终 Thread 更新基于当前锁定行并保留其最新 nextCommandSequence，revision 精确 +1。锁序为 Thread -&gt;
-   * Commands -&gt; Model -&gt; Work：全部低序 mutation 先完成，claimed THREAD Work 的 final fence 最后执行 （失败抛
-   * {@link ClaimLostSignal} 整事务回滚）；fence 通过后按 (type, id) 升序请求同层 Work（先 THREAD wake 再 MODEL Work）。
+   * 第二事务 CAS 提交。要求当前 Thread head == planned source head、cutoff 内 queued Command 与 planned
+   * 快照逐字段相等（允许 sequence &gt; cutoff 的新命令，不 CAS revision / nextCommandSequence），claim token 活跃；最终
+   * Thread 更新基于当前锁定行的 YOLO（再叠加本快照内 SET_YOLO）并保留其最新 nextCommandSequence，revision 精确 +1。锁序为 Thread
+   * -&gt; Commands -&gt; Model -&gt; Work：全部低序 mutation 先完成，claimed THREAD Work 的 final fence 最后执行
+   * （失败抛 {@link ClaimLostSignal} 整事务回滚）；fence 通过后按 (type, id) 升序请求同层 Work（先 THREAD wake 再 MODEL
+   * Work）。
    */
   private CommitOutcome commit(ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
     return store.transaction(tx -> commitTx(tx, claim, plan, result));
@@ -914,8 +887,7 @@ public final class ThreadProcessor {
     if (thread == null) {
       return CommitOutcome.LOST;
     }
-    if (!thread.headEntryId().equals(plan.sourceHeadEntryId())
-        || thread.yoloEnabled() != plan.sourceYoloEnabled()) {
+    if (!thread.headEntryId().equals(plan.sourceHeadEntryId())) {
       return CommitOutcome.LOST;
     }
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
@@ -926,19 +898,22 @@ public final class ThreadProcessor {
     for (Entry entry : plan.candidateEntries()) {
       mutationNow = durableMutationTime(mutationNow, entry.createdAt());
     }
+    Integer contextWindow =
+        result instanceof TurnResolver.Resolved resolved ? resolved.contextWindow() : null;
     // 低序 mutation（Entries / Commands / Thread / ModelInvocation）先完成。
     for (Entry entry : plan.candidateEntries()) {
-      tx.insertEntry(withCreatedAt(entry, mutationNow));
+      tx.insertEntry(withCreatedAt(withResolvedTurnStart(entry, plan, contextWindow), mutationNow));
     }
     List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
     for (ThreadCommand command : plan.consumedCommands()) {
       consumed.add(command.consume(plan.turnStartEntryId()));
     }
     tx.updateCommands(consumed);
+    boolean yoloEnabled = commitYolo(thread, plan);
     UUID invocationId = null;
     if (result instanceof TurnResolver.Resolved resolved) {
       ThreadState advanced =
-          thread.advanceHead(plan.candidateHeadEntryId(), plan.finalYoloEnabled(), mutationNow);
+          thread.advanceHead(plan.candidateHeadEntryId(), yoloEnabled, mutationNow);
       tx.updateThread(advanced);
       invocationId = tx.nextId();
       tx.insertModelInvocation(
@@ -947,7 +922,7 @@ public final class ThreadProcessor {
               thread.id(),
               plan.turnStartEntryId(),
               plan.candidateHeadEntryId(),
-              resolved.request(),
+              resolved.spec(),
               ModelInvocationStatus.READY,
               0,
               null,
@@ -980,7 +955,7 @@ public final class ThreadProcessor {
                   TurnEndReason.TURN_FAILED,
                   null),
               mutationNow));
-      tx.updateThread(thread.advanceHead(turnEndId, plan.finalYoloEnabled(), mutationNow));
+      tx.updateThread(thread.advanceHead(turnEndId, yoloEnabled, mutationNow));
     }
     // final fence 最后执行：损失抛内部信号，整事务回滚（零 durable mutation 的 LOST）。
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
@@ -1038,6 +1013,32 @@ public final class ThreadProcessor {
   private static Entry withCreatedAt(Entry entry, Instant createdAt) {
     return new Entry(
         entry.id(), entry.sessionId(), entry.parentEntryId(), entry.payload(), createdAt);
+  }
+
+  /** 第二阶段 commit 在插入前补齐 Resolver 成功时的 contextWindow；rejected 保持 null。 */
+  private static Entry withResolvedTurnStart(Entry entry, TurnPlan plan, Integer contextWindow) {
+    if (!entry.id().equals(plan.turnStartEntryId())
+        || !(entry.payload() instanceof TurnStartPayload start)) {
+      return entry;
+    }
+    return new Entry(
+        entry.id(),
+        entry.sessionId(),
+        entry.parentEntryId(),
+        new TurnStartPayload(
+            start.reason(), start.settings(), start.ownerThreadId(), contextWindow),
+        entry.createdAt());
+  }
+
+  /** 以第二事务锁到的 Thread YOLO 为起点，再叠加本快照内已消费的 SET_YOLO；不把 plan 创建时的旧值写回。 */
+  private static boolean commitYolo(ThreadState thread, TurnPlan plan) {
+    boolean yolo = thread.yoloEnabled();
+    for (ThreadCommand command : plan.consumedCommands()) {
+      if (command.payload() instanceof SetYoloCommandPayload setYolo) {
+        yolo = setYolo.yoloEnabled();
+      }
+    }
+    return yolo;
   }
 
   /** 在冻结 request 的 tool bindings 中按 descriptor name 匹配 call name。 */

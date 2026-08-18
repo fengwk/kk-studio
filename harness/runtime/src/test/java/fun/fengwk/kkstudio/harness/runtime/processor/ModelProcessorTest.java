@@ -17,16 +17,20 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -44,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
@@ -103,6 +108,7 @@ import java.util.function.Function;
  * wake 保留、sink 失败隔离、 cancel / close 与 wrong target。
  */
 class ModelProcessorTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
   private static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
@@ -172,7 +178,8 @@ class ModelProcessorTest {
     ModelGateway.Execution execution = fixture.gateway.executions.get(0);
     assertEquals(fixture.invocationId, execution.invocationId());
     assertEquals(1, execution.proposedAttempt());
-    assertEquals(fixture.request, execution.request());
+    assertEquals(fixture.request.providerType(), execution.providerType());
+    assertEquals(materialized(fixture), execution.request());
     assertFalse(handle.isCancelled());
     assertTrue(fixture.processor.hasActiveExecution());
     Work modelWork =
@@ -248,7 +255,7 @@ class ModelProcessorTest {
   @Test
   void startExceptionBouncesWithFallbackDelay() {
     Fixture fixture = fixture();
-    fixture.gateway.queue(new IllegalStateException("gateway down"));
+    fixture.gateway.queue(new RuntimeException("gateway down"));
 
     assertEquals(
         ProcessResult.RESCHEDULED,
@@ -1494,7 +1501,7 @@ class ModelProcessorTest {
   void startExceptionWithLostWorkReturnsLostOwnership() {
     Fixture fixture = fixture();
     fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
-    fixture.gateway.queue(new IllegalStateException("gateway down"));
+    fixture.gateway.queue(new RuntimeException("gateway down"));
 
     assertEquals(
         ProcessResult.LOST_OWNERSHIP,
@@ -2477,13 +2484,13 @@ class ModelProcessorTest {
     return fixture(retryPolicy, request());
   }
 
-  private Fixture fixture(InvocationRetryPolicy retryPolicy, ModelInvocationRequest request) {
+  private Fixture fixture(InvocationRetryPolicy retryPolicy, ModelRequestSpec request) {
     return new Fixture(retryPolicy, request, newScheduler());
   }
 
   private Fixture fixture(
       InvocationRetryPolicy retryPolicy,
-      ModelInvocationRequest request,
+      ModelRequestSpec request,
       ScheduledExecutorService scheduler) {
     return new Fixture(retryPolicy, request, scheduler);
   }
@@ -2494,18 +2501,18 @@ class ModelProcessorTest {
     final FakeGateway gateway = new FakeGateway();
     final RecordingSink sink = new RecordingSink();
     final ScheduledExecutorService scheduler;
-    final ModelInvocationRequest request;
+    final ModelRequestSpec request;
     final Baseline baseline;
     final UUID invocationId;
     final ModelProcessor processor;
 
-    Fixture(InvocationRetryPolicy retryPolicy, ModelInvocationRequest request) {
+    Fixture(InvocationRetryPolicy retryPolicy, ModelRequestSpec request) {
       this(retryPolicy, request, newScheduler());
     }
 
     Fixture(
         InvocationRetryPolicy retryPolicy,
-        ModelInvocationRequest request,
+        ModelRequestSpec request,
         ScheduledExecutorService scheduler) {
       this.scheduler = scheduler;
       this.request = request;
@@ -2538,25 +2545,55 @@ class ModelProcessorTest {
         tx -> {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
-          UUID turnStartEntryId = tx.nextId();
-          UUID threadId = tx.nextId();
           tx.insertSession(new Session(sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
+          UUID parentId = rootEntryId;
+          Instant turnStartAt = now.plusMillis(1);
+          if (reason == TurnStartReason.COMPACTION) {
+            // 压缩 invocation 的 basis 是 COMPACTION TURN_START；摘要范围必须落在此前可见历史里。
+            UUID inputStart = tx.nextId();
+            UUID userId = tx.nextId();
+            UUID assistantId = tx.nextId();
+            UUID inputEnd = tx.nextId();
+            tx.insertEntry(
+                new Entry(
+                    inputStart,
+                    sessionId,
+                    rootEntryId,
+                    new TurnStartPayload(
+                        TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID, 100_000),
+                    now.plusMillis(1)));
+            tx.insertEntry(
+                new Entry(userId, sessionId, inputStart, userMessagePayload(), now.plusMillis(2)));
+            tx.insertEntry(
+                new Entry(assistantId, sessionId, userId, assistantPayload(), now.plusMillis(3)));
+            tx.insertEntry(
+                new Entry(
+                    inputEnd,
+                    sessionId,
+                    assistantId,
+                    new TurnEndPayload(inputStart, TurnEndOutcome.COMPLETED, false, null, null),
+                    now.plusMillis(4)));
+            parentId = inputEnd;
+            turnStartAt = now.plusMillis(5);
+          }
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertEntry(
               new Entry(
                   turnStartEntryId,
                   sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(reason, branchSettings()),
-                  now.plusMillis(1)));
+                  parentId,
+                  new TurnStartPayload(reason, branchSettings(), OWNER_THREAD_ID, 100_000),
+                  turnStartAt));
           tx.insertThread(new ThreadState(threadId, turnStartEntryId, false, 1, 0, now, now));
           return new Baseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
   }
 
   private static UUID seedInvocation(
-      InMemoryHarnessStore store, Baseline baseline, ModelInvocationRequest request, Instant now) {
+      InMemoryHarnessStore store, Baseline baseline, ModelRequestSpec request, Instant now) {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -2610,6 +2647,13 @@ class ModelProcessorTest {
     return store.transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
   }
 
+  private static ProviderRequest materialized(Fixture fixture) {
+    ModelInvocation invocation = model(fixture.store, fixture.invocationId);
+    EntryPath path =
+        fixture.store.transaction(tx -> tx.loadEntryPath(invocation.basisHeadEntryId()));
+    return new ModelRequestMaterializer().materialize(path, fixture.request);
+  }
+
   private static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
   }
@@ -2638,24 +2682,18 @@ class ModelProcessorTest {
     fail("condition not met within " + timeout);
   }
 
-  private static ModelInvocationRequest request() {
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(List.of()), List.of(), List.of(), false, 100_000, null);
+  private static ModelRequestSpec request() {
+    return spec(List.of(), null);
   }
 
-  private static ModelInvocationRequest compactionInvocationRequest() {
-    return new ModelInvocationRequest(
-        ENV_ID,
-        providerRequest(List.of()),
+  private static ModelRequestSpec compactionInvocationRequest() {
+    return spec(
         List.of(),
-        List.of(),
-        false,
-        100_000,
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100L, id(2L), id(2L), null));
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100L, id(3L), id(5L), null));
   }
 
-  private static ModelInvocationRequest requestWithTool() {
+  private static ModelRequestSpec requestWithTool() {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "bash",
@@ -2667,10 +2705,20 @@ class ModelProcessorTest {
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30));
     ToolBinding binding = new ToolBinding(descriptor, ToolType.PLATFORM, null);
-    ProviderRequest provider =
-        providerRequest(List.of(new ProviderToolDefinition("bash", "run bash commands", "{}")));
-    return new ModelInvocationRequest(
-        ENV_ID, provider, List.of(binding), List.of(), false, 100_000, null);
+    return spec(List.of(binding), null);
+  }
+
+  private static ModelRequestSpec spec(List<ToolBinding> bindings, CompactionRequest compaction) {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor(),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        List.of(),
+        bindings,
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
+        compaction);
   }
 
   private static ProviderRequest providerRequest(List<ProviderToolDefinition> tools) {

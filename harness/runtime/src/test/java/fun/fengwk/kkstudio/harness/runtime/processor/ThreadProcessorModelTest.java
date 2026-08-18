@@ -378,7 +378,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));

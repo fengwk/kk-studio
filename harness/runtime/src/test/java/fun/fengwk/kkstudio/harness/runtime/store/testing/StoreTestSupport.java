@@ -16,8 +16,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultReason;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -75,6 +76,7 @@ import java.util.function.Consumer;
 final class StoreTestSupport {
 
   static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
+  static final UUID OWNER_THREAD_ID = TestIds.id(10L);
   static final Instant T0 = Instant.ofEpochMilli(1000);
   static final Instant T1 = Instant.ofEpochMilli(2000);
   static final Instant T2 = Instant.ofEpochMilli(3000);
@@ -176,7 +178,7 @@ final class StoreTestSupport {
   }
 
   static EntryPayload turnStartPayload() {
-    return new TurnStartPayload(TurnStartReason.INPUT, branchSettings());
+    return new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID);
   }
 
   /** ASSISTANT MESSAGE payload；{@code toolCallIds} 会按顺序变成 ToolCall 内容。 */
@@ -440,9 +442,18 @@ final class StoreTestSupport {
         ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), List.of());
   }
 
-  static ModelInvocationRequest modelRequest() {
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(), List.of(), List.of(), false, 100_000, null);
+  static ModelRequestSpec modelRequest() {
+    ProviderRequest provider = providerRequest();
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        provider.model(),
+        provider.variant(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        provider.cacheControl(),
+        null);
   }
 
   static ToolInvocationRequest toolRequest(String toolCallId) {

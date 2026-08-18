@@ -49,6 +49,7 @@ import java.util.UUID;
  * history."。
  */
 class CompactionSummaryAssemblerTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
@@ -266,7 +267,7 @@ class CompactionSummaryAssemblerTest {
               id(startId),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
+              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
               BASE));
       openTurnStartId = startId;
       user(id(nextId++), userText);
@@ -284,7 +285,7 @@ class CompactionSummaryAssemblerTest {
               id(startId),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       openTurnStartId = startId;
       entries.add(
@@ -315,7 +316,7 @@ class CompactionSummaryAssemblerTest {
               id(startId),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       openTurnStartId = startId;
       entries.add(
@@ -345,7 +346,7 @@ class CompactionSummaryAssemblerTest {
               id(startId),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       openTurnStartId = startId;
       entries.add(
@@ -375,7 +376,7 @@ class CompactionSummaryAssemblerTest {
               id(startId),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       openTurnStartId = startId;
       return this;
@@ -387,7 +388,7 @@ class CompactionSummaryAssemblerTest {
               id,
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
+              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
               BASE));
       openTurnStartId = id.getLeastSignificantBits();
       return this;

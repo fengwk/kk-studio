@@ -67,7 +67,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         rootBaseline.threadId(),
         new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(rootFixture.store, rootBaseline.threadId());
-    rootFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    rootFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork rootClaim = claimThreadWork(rootFixture.store, rootBaseline.threadId());
     assertEquals(ThreadProcessResult.SUSPENDED, rootFixture.processor.process(rootClaim));
     // ROOT -> TURN_START + USER：无 normalization suffix。
@@ -80,7 +80,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         closedBaseline.threadId(),
         new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(closedFixture.store, closedBaseline.threadId());
-    closedFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    closedFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork closedClaim = claimThreadWork(closedFixture.store, closedBaseline.threadId());
     assertEquals(ThreadProcessResult.SUSPENDED, closedFixture.processor.process(closedClaim));
     // TURN_END(continueModel=false) + USER -> 直接新 INPUT Turn，无 HISTORY_CUT suffix。
@@ -100,7 +100,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
@@ -124,7 +124,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
@@ -160,7 +160,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
@@ -190,7 +190,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, second.threadId(), new UserMessageCommandPayload(userMessage("from-b")));
     requestThreadWork(fixture.store, second.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork bClaim = claimThreadWork(fixture.store, second.threadId());
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(bClaim));
 
@@ -198,7 +198,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, shared.threadId(), new UserMessageCommandPayload(userMessage("from-a")));
     requestThreadWork(fixture.store, shared.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork aClaim = claimThreadWork(fixture.store, shared.threadId());
     assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(aClaim));
 
@@ -275,7 +275,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     // MOVE_HEAD 回 attached assistant（无调用）：不锁 Model/Tool，normalization 补 CANCELLED TURN_END 后新开
@@ -361,7 +361,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         });
     seedCommand(fixture.store, threadId, new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, threadId);
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, threadId);
 
     // 结果已在另一 descendant：不重挂、不 apply，normalization 补 2 个 synthetic 后新开 INPUT Turn。
@@ -426,7 +426,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         });
     seedCommand(fixture.store, threadId, new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, threadId);
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     ClaimedWork claim = claimThreadWork(fixture.store, threadId);
 
     // path 已含 TOOL 前缀 -> 历史：head != assistant，不再 apply 真实结果，normalization 只补缺失 ordinal。

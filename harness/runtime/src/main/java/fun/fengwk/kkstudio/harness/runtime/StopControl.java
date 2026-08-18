@@ -267,7 +267,8 @@ final class StopControl {
             turnStartId,
             sessionId,
             path.head().id(),
-            new TurnStartPayload(TurnStartReason.CONTINUATION, path.baseSettings()),
+            new TurnStartPayload(
+                TurnStartReason.CONTINUATION, path.baseSettings(), thread.id(), null),
             now));
     UUID barrierId = tx.nextId();
     tx.insertEntry(

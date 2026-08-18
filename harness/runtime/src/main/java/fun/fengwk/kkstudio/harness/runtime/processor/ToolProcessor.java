@@ -219,13 +219,13 @@ public final class ToolProcessor implements AutoCloseable {
     // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
     if (tool.approval() == null) {
-      // yolo 策略从 source model 的冻结 request 读取：ToolInvocation 本身不携带 yolo。
+      // yolo 策略从已锁定的当前 Thread 读取：spec 不再携带 YOLO。
       return new Prepare.Preflight(
           thread.id(),
           tool.assistantEntryId(),
           tool.attempt(),
           tool.request(),
-          model.request().yoloEnabled());
+          thread.yoloEnabled());
     }
     tx.updateToolInvocations(List.of(tool.beginDispatch(now)));
     tx.updateThread(thread.touchRevision(now));
