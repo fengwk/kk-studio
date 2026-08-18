@@ -510,11 +510,18 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
     }
     boolean compactionInvocation = invocation.request().compaction() != null;
-    if (((TurnStartPayload) turnStart.payload()).reason()
-        == TurnStartReason.COMPACTION
-        != compactionInvocation) {
+    TurnStartPayload turnStartPayload = (TurnStartPayload) turnStart.payload();
+    if (turnStartPayload.reason() == TurnStartReason.COMPACTION != compactionInvocation) {
       throw new IllegalArgumentException(
           "TURN_START reason COMPACTION must match the invocation compaction purpose");
+    }
+    if (!turnStartPayload.ownerThreadId().equals(invocation.threadId())) {
+      throw new IllegalArgumentException(
+          "turn start ownerThreadId must equal the model invocation threadId");
+    }
+    if (turnStartPayload.contextWindow() == null) {
+      throw new IllegalArgumentException(
+          "model invocations require a positive turn start contextWindow");
     }
     if (invocation.status() != ModelInvocationStatus.READY || invocation.attempt() != 0) {
       throw new IllegalArgumentException("new model invocations must be READY with attempt 0");

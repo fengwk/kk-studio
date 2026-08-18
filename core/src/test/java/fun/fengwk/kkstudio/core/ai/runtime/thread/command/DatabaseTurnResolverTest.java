@@ -74,6 +74,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
@@ -961,6 +962,7 @@ class DatabaseTurnResolverTest {
     ModelDescriptor model = frozen.model();
     ModelVariant variant = frozen.variant();
     List<ToolBinding> tools = frozen.toolBindings();
+    ProviderRequest before = new ModelRequestMaterializer().materialize(path, frozen);
 
     fixture.agent.setSystemPrompt("changed system prompt");
     fixture.agentConfig.setTools(List.of());
@@ -974,6 +976,10 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of("create_goal"),
         tools.stream().map(binding -> binding.descriptor().name()).toList());
+    ProviderRequest after = new ModelRequestMaterializer().materialize(path, frozen);
+    assertEquals(before, after);
+    assertEquals(preamble, textOf(after.messages().getFirst()));
+    assertEquals(List.of("create_goal"), after.tools().stream().map(tool -> tool.name()).toList());
   }
 
   private static String textOf(ProviderMessage message) {

@@ -138,7 +138,7 @@ final class DispatcherTestSupport {
           UUID modelId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
           tx.insertThread(thread(threadId, turnStartEntryId));
           tx.insertModelInvocation(
               new ModelInvocation(
@@ -179,7 +179,7 @@ final class DispatcherTestSupport {
           UUID toolId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
           tx.insertEntry(userEntry(userEntryId, sessionId, turnStartEntryId));
           tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId));
           tx.insertThread(thread(threadId, turnStartEntryId));
@@ -564,12 +564,12 @@ final class DispatcherTestSupport {
     return new Entry(id, sessionId, null, new RootPayload(branchSettings()), NOW);
   }
 
-  private static Entry turnStartEntry(UUID id, UUID sessionId, UUID parentId) {
+  private static Entry turnStartEntry(UUID id, UUID sessionId, UUID parentId, UUID ownerThreadId) {
     return new Entry(
         id,
         sessionId,
         parentId,
-        new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID),
+        new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), ownerThreadId, 100_000),
         NOW);
   }
 
