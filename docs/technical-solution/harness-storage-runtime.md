@@ -69,12 +69,12 @@ fresh enqueue 事务：锁 Thread → 双 CAS（head/sequence）→ 可选 SET_E
 | --- | --- |
 | `thread_id` / `turn_start_entry_id` | `(thread_id, turn_start_entry_id)` 唯一 |
 | `basis_head_entry_id` | 创建时的 head |
-| `request` | 完整冻结 `ModelInvocationRequest` JSON（route/provider/tools/skills/subagentBindings/YOLO/contextWindow/可空 compaction metadata；Provider/Model 只按名称引用） |
+| `request` | compact `ModelRequestSpec` JSON（providerType/model/variant/preamble/toolBindings/skillBindings/subagentBindings/cacheControl/可空 compaction metadata；无 history messages/tools/YOLO/contextWindow；Provider/Model 只按名称引用） |
 | `status` | READY/DISPATCHING/RUNNING/SUCCEEDED/FAILED/CANCELLED/UNKNOWN |
 | `attempt` | `>= 0` |
 | `stream_checkpoint` | 当前 attempt 的单调安全 checkpoint；text/thinking 归一化为非 null，至少一侧非空且纯空白合法；retry 时归档后清空，防止跨 attempt partial 混入 |
 | `failed_attempts` | `NOT NULL` JSON array（可为空数组）；由 retry policy 驱动的 append-only `TRANSIENT` 失败前缀，无条数上限 |
-| `result` / `error` / `result_entry_id` | `result` 与 `error` 互斥；`result_entry_id` 在**本表内**唯一（partial unique index），terminal 且已挂 Entry 不再 apply |
+| `result` / `error` / `result_entry_id` | `result` 与 `error` 互斥；`result_entry_id` 在**本表内**唯一（partial unique index），只属于当前 open Tool phase——null 或指向现有 Assistant head；closed turn 后本行必须不存在 |
 
 `failed_attempts` 的每项固定为 `{attempt,sequence,text,thinking,error,failedAt,retryAt}`：attempt 必须连续 `1..N`、不超过 invocation attempt，时间不得倒退，`retryAt >= failedAt`。`RUNNING -> READY` 每次只追加当前 attempt 一项并清除 checkpoint；active snapshot 直接投影该数组。最终 apply/Stop 在同一 EntryPath 上先按序写 `MODEL_ATTEMPT_FAILURE`（`Entry.createdAt=failedAt`），再写唯一 Assistant 结果；挂 `result_entry_id` 时 invocation 同步清空已物化的 checkpoint/failed_attempts。Compaction invocation 不物化这类 UI 审计 Entry。
 
@@ -83,11 +83,11 @@ fresh enqueue 事务：锁 Thread → 双 CAS（head/sequence）→ 可选 SET_E
 | 列 | 语义 |
 | --- | --- |
 | `model_invocation_id` / `assistant_entry_id` / `ordinal` | `(assistant_entry_id, ordinal)` 唯一；siblings 按 ordinal 连续 |
-| `request` | 冻结 binding（descriptor/type/route/plugin provenance/state accesses）+ arguments |
+| `call` / `binding` | `call`（ToolCall JSON：id/name/arguments）非 null；`binding` 可空——READY 及之后状态非空（frozen descriptor/type/environment/plugin provenance/state accesses），unknown tool 的 immediate FAILED 为 null |
 | `status` | WAITING_APPROVAL/READY/DISPATCHING/RUNNING/SUCCEEDED/FAILED/CANCELLED/UNKNOWN |
 | `approval` | durable `{decision: ALLOWED|DENIED, decisionId, decidedAt, ...}` |
 | `effects` | 非空 JSON object；有序 `ToolEffectBatch`，仅 `SUCCEEDED` 可非空，terminal immutable |
-| `result` / `error` / `result_entry_id` | 同 Model 表约束 |
+| `result` / `error` | `result` 与 `error` 互斥；无 `result_entry_id` 列（terminal Tool 行始终表示 outcome 尚未进入 Entry，batch apply 后本行删除） |
 
 ## 6. `harness_work` 与调度协议
 
@@ -149,7 +149,7 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 - 每个 `HarnessRuntime` 方法恰好一个事务；snapshot 单事务一致读取。
 - Tool success 的 `result + effects + SUCCEEDED` 由同一次 `updateToolInvocations` 原子提交；effects 校验必须早于 Resource externalize 与该 durable update。
 - Model terminal attach 的 `updateModelInvocation` 必须通过 `ModelAttemptMaterialization`：结果 path 精确包含全部且仅包含该 invocation 的失败 attempt，payload/error/createdAt/retryAt 与 stored `failed_attempts` 逐项一致；terminal `ASSISTANT_ERROR.attempt` 或 direct Stop barrier 必须与 stored terminal/checkpoint 精确一致。InMemory 与 PostgreSQL Store 共用同一校验器。
-- Tool terminal apply 只经 `ToolOutcomeAppender`：按 effects 顺序追加 CUSTOM，再追加 Tool Result、推进 head 并把 `result_entry_id` 指向 Tool Result；正常 apply 与 Stop 共用该实现。
+- Tool terminal apply 只经 `ToolOutcomeAppender`：按 effects 顺序追加 CUSTOM，再追加 Tool Result、推进 head，并追加 `TURN_END(COMPLETED, continueModel=true)`、请求 THREAD Work，随后删除全部 Tool siblings 再删除父 ModelInvocation（closed turn 不保留 Invocation 行）；正常 apply 与 Stop 共用该实现。
 - Stop 与未决 Approval 决策把 mutation 时间戳 clamp 到最新锁定 durable fact，容忍本地时钟回拨与节点间 skew；对应 Work
   request/lease 仍使用未抬升的本地调度时钟。
 - 丢失/过期 lease 的 callback 通过 token/attempt/terminal CAS 拒绝，绝不产生带 durable mutation 的 LOST 提交。

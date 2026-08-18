@@ -6,13 +6,13 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **74** 个 API case；标准入口默认执行免费的 **L1 62** 个 case（其中
+当前注册 **75** 个 API case；标准入口默认执行免费的 **L1 63** 个 case（其中
 `canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约）。Canvas
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI E2E
-由 `scripts/e2e.sh --ui` 另行附加，默认注册 37 个免费 UI case；`--with-tools --ui` 再追加 1 个 Environment/Workspace 创建 case。这些 UI case 不计入 74 个 Node API case。
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 37 个免费 UI case；`--with-tools --ui` 再追加 1 个 Environment/Workspace 创建 case。这些 UI case 不计入 75 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -88,7 +88,7 @@ env \
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 ```
 
-该命令选择 66 个免费 API case 和 37 个免费 UI case，不启用真实 Provider、Tool 或
+该命令选择 67 个免费 API case 和 37 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
 rebuild；不得为这条回归追加 `--real`。
 
@@ -121,7 +121,7 @@ FunctionRun，不下载或导入视频。它只准备页面，不触发生成；
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（注册 66，默认 62）
+### L1（注册 67，默认 63）
 
 ```text
 seed.structured_model_config

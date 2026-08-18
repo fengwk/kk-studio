@@ -214,6 +214,8 @@ lock Thread
        更新 Thread（advanceHead，revision +1）并清理/唤醒 Work
 ```
 
+Stop 成功关闭 live Turn 的同一事务内：先净化 Work mailbox（deleteWork 的 owner 校验反查 Model/Tool Invocation 行），再删除全部 Tool Invocations、删除父 ModelInvocation（删除前执行与 `ModelAttemptMaterialization` 等价的严格校验），advance Thread；closed turn 不保留任何 Invocation 行，迟到 callback 因行已删除或 claim 失效而 no-op。
+
 `StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 revision +1，不写 durable stop 标记；无 queued 时真正 no-op）、`REPLAYED`（精确重放先前 Stop，不取消命令）。客户端重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedRevision`；服务端 replay 先于 CAS，因此原始 revision 重试恒安全。
 
 ## 8. Tool approval
@@ -237,30 +239,33 @@ durable `approval` JSON 使用领域枚举 `ALLOWED` / `DENIED`（不是输入�
 - 已决定请求按 `(threadId, toolInvocationId, decisionId)` 精确 replay：返回当前锁定 Invocation（原 `decidedAt` 保留），无 revision bump、无 Work 请求；不一致 → `APPROVAL_DECISION_MISMATCH` 409。
 - 前端对同一 decision 复用同一 `decisionId`；切换 decision 时 mint 新 ID。
 
-## 9. Invocation 冻结请求
+## 9. Invocation 持久化与请求重建
 
-`ModelInvocationRequest`：
+ModelInvocation 持久化 `basisHeadEntryId + compact ModelRequestSpec`，完整 ProviderRequest 只在 MODEL attempt 内存中存在：
 
 ```java
-public record ModelInvocationRequest(
-    EnvironmentBinding environment,  // 本请求的单一 Environment binding（可 null）
-    ProviderRequest providerRequest,  // exact Provider transport payload
+public record ModelRequestSpec(
+    ProviderType providerType,
+    ModelDescriptor model,
+    ModelVariant variant,
+    List<AgentMessage> preambleMessages,
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
     List<SubagentBinding> subagentBindings,
-    boolean yoloEnabled,
-    int contextWindow,
+    ProviderCacheControl cacheControl,
     CompactionRequest compaction) {}
 ```
 
-- `providerRequest.tools` 与 `toolBindings` 必须数量、顺序、名称一一对应；tool/skill/subagent binding 名称各自不得重复；每个 environment-bound tool/skill 必须引用本请求 route。
-- `SubagentBinding(name, description)`：`name` 是 canonical 非空短名（≤64 字符），`description` 是可空展示描述快照（≤512 字符）；随 request 冻结，task 执行绝不依据后续 Agent 配置扩权。
-- `contextWindow` 是创建时冻结的正 int；threshold、retention 与 overflow retry 均使用该值，不受后续 Model config 修改影响。
-- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent/provider tools 必须全部为空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix。`tokensBefore` 是 JSON number，三个 Entry ID 是 canonical UUID strings。
+- `providerType` 随 invocation 冻结：每次 attempt 仍读取当前 Provider 行的 credential/base URL/timeout，但当前行的 type 必须与 spec 一致，不一致时本次 attempt 确定性失败（禁止在同一 invocation 中切换协议）。不持久化完整 history `messages`、可由 `toolBindings` 派生的 `ProviderRequest.tools`、顶层 Environment、YOLO、contextWindow 与 attempt-only Resource URL。
+- `preambleMessages` 只保存不能从 EntryPath 重建的 Resolver 输出（composed Agent system prompt、`<current_environment>`/date/note 投影、skill/subagent prompt 描述、插件 ContextProjector 输出）；普通对话历史由 EntryPath 重建，preamble 是 bounded 非历史上下文。
+- tool/skill/subagent binding 名称各自不得重复；每个 environment-bound tool/skill 必须引用同一 Environment route。
+- `SubagentBinding(name, description)`：`name` 是 canonical 非空短名（≤64 字符），`description` 是可空展示描述快照（≤512 字符）；随 spec 冻结，task 执行绝不依据后续 Agent 配置扩权。
+- `contextWindow` 只在 `TurnStartPayload` 中持久化（见 §2），不在 spec 中重复保存。
+- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent bindings 必须全为空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix。`tokensBefore` 是 JSON number，三个 Entry ID 是 canonical UUID strings。
 - `ToolBinding(descriptor, type, environment, plugin)`：`PLATFORM` binding 的 environment 为 null，`ENVIRONMENT` binding 指向具体 binding（可为 null）；descriptor 的 type 与 binding type 一致。
-- `plugin` 为 null 或 `PluginToolBinding(pluginId, contributionLocalName, stateAccesses)`；仅 `PLATFORM` 可携带 plugin，identifier 必须 canonical，state accesses 按 customType 唯一且 mode 仅 `READ` / `WRITE`。该 provenance 随 request 冻结，retry 不按工具名重新归属。
+- `plugin` 为 null 或 `PluginToolBinding(pluginId, contributionLocalName, stateAccesses)`；仅 `PLATFORM` 可携带 plugin，identifier 必须 canonical，state accesses 按 customType 唯一且 mode 仅 `READ` / `WRITE`。该 provenance 随 spec 冻结，retry 不按工具名重新归属。
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
-- retry 重放同一份 frozen request；当前失败 attempt 的 text/thinking/error 不修改该 request。后续 turn 的 `DatabaseTurnResolver` 只白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 ContextProjector，`MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR` 永不进入 Provider messages。ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
+- 每次 MODEL attempt 由唯一 `ModelRequestMaterializer` 在有效 claim 内从 immutable `EntryPath + spec` 纯重建内存 `ProviderRequest`（preamble + compaction-aware Entry 历史投影 → `ProviderMessageProjector` → messages；Provider tools 由 `toolBindings` 派生）。它不访问 catalog、Environment registry 或插件 ContextProjector，也不持有事务。retry 重放同一 spec；当前失败 attempt 的 text/thinking/error 不修改该 spec。后续 turn 的 `DatabaseTurnResolver` 仍白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 ContextProjector，`MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR` 永不进入 Provider messages。ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
 - JSON codec 只接受固定顶层字段并严格校验嵌套结构（未知字段拒绝）。
 
 ### Tool success effects
@@ -284,7 +289,7 @@ public record ModelInvocationRequest(
 - `customEntries` 有序且最多 16 项；普通 Tool 使用空 batch。
 - 只有 `SUCCEEDED` 可携带非空 effects；`FAILED` / `CANCELLED` / `UNKNOWN` 与所有非 terminal 状态必须为空。
 - success 的 `result + effects + status` 在同一次 Store update 中原子持久化；terminal transition 不得修改 effects。
-- apply 时唯一 `ToolOutcomeAppender` 先按 effects 顺序追加 CUSTOM，再追加 Tool Result Entry；`resultEntryId` 始终指向 Tool Result，而不是最后一个 CUSTOM。正常 Thread apply 与 Stop winner 共用该实现。
+- apply 时唯一 `ToolOutcomeAppender` 先按 effects 顺序追加 CUSTOM，再追加 Tool Result Entry；ToolInvocation 无 `resultEntryId`（terminal Tool 行始终表示 outcome 尚未进入 Entry，batch apply 后同事务删除全部 Tool siblings 再删除父 ModelInvocation）。正常 Thread apply 与 Stop winner 共用该实现。
 - 同一 Assistant sibling 的 frozen state accesses 按 ordinal 静态检查：某个 `(pluginId, customType)` 出现 WRITE 后，后续 READ/WRITE invocation 直接成为 `FAILED(kind=SIBLING_STATE_CONFLICT)`，不 dispatch；READ+READ、READ→WRITE、不同 key、不同 pluginId 均允许。
 
 ### task 工具契约
@@ -306,6 +311,10 @@ public record ProviderResponse(
     String requestId, String serviceTier, String rawUsageJson) {}
 ```
 
+- `GenerationStopReason` 固定为 `COMPLETE` / `LENGTH` / `FILTERED`，不存在 `TOOL_CALLS`：`COMPLETE` 可以有或没有 calls，`LENGTH` 可以有或没有已观测 calls，`FILTERED` 的 calls 必须为空。Provider adapter 各自显式做 finish mapping，公共层不得根据 `hasToolCalls` 覆盖 stop reason。
+- terminal `resultJson` 由 `ModelResponseValidator`（canonical 不变量）与纯函数 `ModelResponsePlanner`（先 stop reason、再 binding lookup、再 schema validation）处理：`COMPLETE` 无 calls → completed；`COMPLETE` 有效 calls → 每 call 一个 READY ToolInvocation + TOOL Work；schema-invalid / unknown → immediate FAILED 槽位；`LENGTH` 无 calls → `FAILED/OUTPUT_TRUNCATED`，有 calls → 每 call FAILED（不执行）；`FILTERED` → `FAILED/CONTENT_FILTERED`；null/unknown/impossible response → `INVALID_RESPONSE` 并按 InvocationRetryPolicy 重试。
+- `ToolResult` 不携带 terminate 标志；普通 Tool batch 完成后固定反馈模型，主 Agent 是否结束只由后续模型结果或显式控制事实决定。
+
 ### Durable compaction
 
 - `TurnStartReason.COMPACTION` 消费零 Command，candidate path 只追加 TURN_START；`CompactionPreparation` 作为 transient plan 事实传给 Resolver，并与 frozen `CompactionRequest` 逐字段机械比对。
@@ -322,11 +331,11 @@ public record ProviderResponse(
 sealed interface TurnResolver.Result
     permits Resolved, Rejected {}
 
-record Resolved(ModelInvocationRequest request) {}
+record Resolved(ModelRequestSpec spec) {}
 record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable barrier
 ```
 
-- 同步、无副作用、事务外：`resolve(threadId, candidatePath, yoloEnabled, compactionPreparation)`；调用方在短事务内锁 Thread、捕获 Command 快照与 YOLO、分配 Entry ID 并构造 candidate path 后调用；实现只读最新 Catalog/Environment 事实，不写 Store、不持有行锁、不得按 candidate Entry ID 回查 Store。
+- 同步、无副作用、事务外：`resolve(threadId, candidatePath, compactionPreparation)`；调用方在短事务内锁 Thread、捕获 Command 快照、分配 Entry ID 并构造 candidate path 后调用；实现只读最新 Catalog/Environment 事实，不写 Store、不持有行锁、不得按 candidate Entry ID 回查 Store。YOLO 不参与 Resolver（它是 Thread 运行时策略，由直接控制面维护，不使进行中的 plan 失效）。
 - 抛异常表示临时基础设施失败，由 Processor reschedule；`Rejected` 产生 `AssistantError` barrier（`ASSISTANT_ERROR` + `FAILED` TURN_END），不产生 ModelInvocation。
 - 所有确定性拒绝共用稳定 `AssistantError` code `PLANNING_FAILED`，message 携带具体原因。
 - **Environment route 规则（工具）**：ENVIRONMENT 工具一律按最新 `BranchSettings.environment()` 完整 binding 绑定（可为 null/缺失/未 READY），规划阶段**绝不拒绝**；实际 Tool start 时按冻结 binding 确定性判定——null binding 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 正常收敛。绝不回看更旧的 branch settings。
