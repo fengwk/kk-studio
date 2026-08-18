@@ -12,8 +12,6 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedClosedTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedModelInvocation;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedOpenInputTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
@@ -38,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -510,45 +507,6 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
 
     assertEquals(1, path(fixture.store, baseline.threadId()).entries().size());
     assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
-  }
-
-  @Test
-  void stepLimitReschedulesWorkWithoutSilentDrop() {
-    Fixture fixture = fixture(1);
-    var baseline = seedOpenInputTurn(fixture.store);
-    seedModelInvocation(
-        fixture.store,
-        baseline.threadId(),
-        baseline.turnStartEntryId(),
-        baseline.userEntryId(),
-        ModelInvocationStatus.SUCCEEDED,
-        plainRequest(),
-        ThreadProcessorTestSupport.successResponse(List.of(), "bash"),
-        null);
-    UUID userCommand =
-        seedCommand(
-            fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
-    requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
-    ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
-
-    // step 1 应用 terminal Model；step limit 用尽 -> reschedule，不丢 Work。
-    assertEquals(ThreadProcessResult.RESCHEDULED, fixture.processor.process(claim));
-    assertEquals(5, path(fixture.store, baseline.threadId()).entries().size());
-    Work threadWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-    assertNotNull(threadWork);
-    assertNull(threadWork.leaseToken());
-
-    // 到期后重新 claim：继续处理 queued input，最终 SUSPENDED。
-    fixture.clock.advance(RESOLVE_FAILURE_DELAY);
-    ClaimedWork nextClaim =
-        claimThreadWork(fixture.store, baseline.threadId(), fixture.clock.instant());
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(nextClaim));
-    assertEquals(
-        ThreadCommandState.APPLIED,
-        command(fixture.store, baseline.threadId(), userCommand).state());
-    assertEquals(7, path(fixture.store, baseline.threadId()).entries().size());
   }
 
   @Test

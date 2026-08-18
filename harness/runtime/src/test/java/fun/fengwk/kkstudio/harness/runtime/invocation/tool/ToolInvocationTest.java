@@ -417,11 +417,11 @@ class ToolInvocationTest {
   }
 
   private static ToolResult result() {
-    return new ToolResult(CALL_ID, List.of(), false, "{}", false);
+    return new ToolResult(CALL_ID, List.of(), false, "{}");
   }
 
   private static ToolResult mismatchedResult() {
-    return new ToolResult("other-call", List.of(), false, "{}", false);
+    return new ToolResult("other-call", List.of(), false, "{}");
   }
 
   private static ToolInvocationError error() {

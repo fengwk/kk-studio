@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.Fixture;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.STEP_LIMIT;
 
 import org.junit.jupiter.api.AfterEach;
 
@@ -33,16 +32,12 @@ abstract class ThreadProcessorTestBase {
   }
 
   protected final Fixture fixture() {
-    return fixture(STEP_LIMIT);
-  }
-
-  protected final Fixture fixture(int stepLimit) {
-    return fixture(stepLimit, null);
+    return fixture(null);
   }
 
   /** {@code processorStore} 非空时 processor 使用包装 store（seed / 断言仍用 {@code fixture.store}）。 */
-  protected final Fixture fixture(int stepLimit, HarnessStore processorStore) {
-    Fixture fixture = new Fixture(stepLimit, processorStore);
+  protected final Fixture fixture(HarnessStore processorStore) {
+    Fixture fixture = new Fixture(processorStore);
     fixtures.add(fixture);
     return fixture;
   }

@@ -91,8 +91,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。Resolved
  * 请求在提交前先经 {@link ResolvedRequestValidator} 按 candidate branch 事实（yolo / route / model / variant /
  * tools）做机械一致性 校验，不一致即抛错且零 durable mutation（绝不转 typed rejection）。任何 CAS / claim 损失一律 完整 no-op 返回
- * LOST_OWNERSHIP；Resolver 异常 / null / heartbeat 调度失败与 step limit 按单一正失败延迟 reschedule， 绝不静默丢弃
- * Work。duplicate / stale THREAD claim 是 no-op。
+ * LOST_OWNERSHIP；Resolver 异常 / null / heartbeat 调度失败按单一正失败延迟 reschedule，绝不静默丢弃 Work。duplicate /
+ * stale THREAD claim 是 no-op。
  *
  * <p>锁序与 final fence：Model terminal apply / Tool sibling batch / resolve commit 都在同一事务内先完成全部低序
  * mutation（Thread -&gt; Commands -&gt; ModelInvocation -&gt; ToolInvocation siblings），claimed
@@ -163,9 +163,9 @@ public final class ThreadProcessor {
    * 处理一次 dispatcher 已 claim 的 THREAD Work。
    *
    * <p>先用 Work-only 短事务验证 claim 当前真实 owned，再进 per-thread admission guard（同一 claim 重复 / 并发投递一律 LOST
-   * no-op；不同新 token 抢占 guard）。随后运行有界步骤循环：终端应用 / Tool batch / rejected 提交继续同 claim 循环， blocker /
-   * resolved / quiescent 完成 claim，step limit 或 Resolver 临时失败按延迟 reschedule。事务内 final fence 丢失抛出的
-   * {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为 LOST_OWNERSHIP。
+   * no-op；不同新 token 抢占 guard）。随后运行当前 claim 的步骤循环：终端应用 / Tool batch / rejected 提交继续同 claim，blocker /
+   * resolved / quiescent 完成 claim，Resolver 临时失败按延迟 reschedule。本循环不设可配置步数上限；后续 reducer 切片会拆掉内部 run
+   * loop。事务内 final fence 丢失抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为 LOST_OWNERSHIP。
    */
   public ThreadProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
@@ -191,44 +191,34 @@ public final class ThreadProcessor {
   }
 
   private ThreadProcessResult runLoop(ClaimedWork claim) {
-    for (int step = 0; step < config.stepLimit(); step++) {
-      LoopStep outcome = step(claim);
-      if (outcome instanceof LoopStep.Continue) {
-        continue;
-      }
-      if (outcome instanceof LoopStep.Plan plan) {
-        switch (resolveAndCommit(claim, plan.plan())) {
-          case RESOLVED_COMMITTED -> {
-            return ThreadProcessResult.SUSPENDED;
-          }
-          case REJECTED_COMMITTED -> {
-            continue;
-          }
-          case RESCHEDULED -> {
-            return ThreadProcessResult.RESCHEDULED;
-          }
-          case LOST -> {
-            return ThreadProcessResult.LOST_OWNERSHIP;
+    while (true) {
+      switch (step(claim)) {
+        case LoopStep.Continue ignored -> {}
+        case LoopStep.Plan plan -> {
+          switch (resolveAndCommit(claim, plan.plan())) {
+            case RESOLVED_COMMITTED -> {
+              return ThreadProcessResult.SUSPENDED;
+            }
+            case REJECTED_COMMITTED -> {}
+            case RESCHEDULED -> {
+              return ThreadProcessResult.RESCHEDULED;
+            }
+            case LOST -> {
+              return ThreadProcessResult.LOST_OWNERSHIP;
+            }
           }
         }
-      }
-      if (outcome instanceof LoopStep.Suspend) {
-        return ThreadProcessResult.SUSPENDED;
-      }
-      if (outcome instanceof LoopStep.Quiescent) {
-        return ThreadProcessResult.QUIESCENT;
-      }
-      if (outcome instanceof LoopStep.Lost) {
-        return ThreadProcessResult.LOST_OWNERSHIP;
+        case LoopStep.Suspend ignored -> {
+          return ThreadProcessResult.SUSPENDED;
+        }
+        case LoopStep.Quiescent ignored -> {
+          return ThreadProcessResult.QUIESCENT;
+        }
+        case LoopStep.Lost ignored -> {
+          return ThreadProcessResult.LOST_OWNERSHIP;
+        }
       }
     }
-    log.warn(
-        "thread {} hit the step limit of {}; rescheduling its work",
-        claim.target().id(),
-        config.stepLimit());
-    return rescheduleIfOwned(claim, config.resolveFailureDelay())
-        ? ThreadProcessResult.RESCHEDULED
-        : ThreadProcessResult.LOST_OWNERSHIP;
   }
 
   /** 单步短事务：锁 Thread -&gt;（Model -&gt; Tool）-&gt; Work，按固定优先级决定并执行一个动作。 */

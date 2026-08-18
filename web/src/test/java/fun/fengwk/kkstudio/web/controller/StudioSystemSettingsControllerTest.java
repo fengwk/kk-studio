@@ -49,7 +49,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(
             jsonPath("$.data.integrations.openCliHub.baseUrl").value("http://vps-opencli-hub:8080"))
         .andExpect(jsonPath("$.data.storageMedia.s3Enabled").value(false))
-        .andExpect(jsonPath("$.data.advanced.threadStepLimit").value(16))
+        .andExpect(jsonPath("$.data.advanced.dispatcherMaxDispatchTasks").value(64))
         .andExpect(jsonPath("$.data.createTime").exists())
         .andExpect(jsonPath("$.data.updateTime").exists());
   }

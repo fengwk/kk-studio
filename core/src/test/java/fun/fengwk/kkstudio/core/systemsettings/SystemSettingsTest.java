@@ -106,7 +106,6 @@ class SystemSettingsTest {
     assertEquals(16L * 1024 * 1024, advanced.resourceMaxBytes());
     assertEquals(30_000L, advanced.processorLeaseDurationMillis());
     assertEquals(10_000L, advanced.processorHeartbeatIntervalMillis());
-    assertEquals(16, advanced.threadStepLimit());
     assertEquals(64, advanced.dispatcherMaxDispatchTasks());
     assertEquals(16, advanced.dispatcherWorkerConcurrency());
     assertEquals(64, advanced.dispatcherWorkerQueueCapacity());
@@ -247,7 +246,6 @@ class SystemSettingsTest {
                 base.resourceMaxBytes(),
                 30_000L,
                 30_000L,
-                base.threadStepLimit(),
                 base.threadResolveFailureDelayMillis(),
                 base.modelDispatchBusyFallbackDelayMillis(),
                 base.toolPreflightFailureDelayMillis(),

@@ -134,19 +134,16 @@ class ToolContractTest {
     assertEquals(Duration.ofSeconds(10), request.effectiveTimeout());
   }
 
-  /** 结果 details 必须是 JSON object，terminate 只作为 runtime 内存提示保留。 */
+  /** 结果 details 必须是 JSON object；空白 details 归一为 {}，非 object 拒绝。 */
   @Test
-  void validatesStructuredDetailsAndPreservesTerminateHint() {
+  void validatesStructuredDetails() {
     ToolResult result =
-        new ToolResult(
-            "call-1", List.of(new TextToolContent("done")), false, "{\"exitCode\":0}", true);
+        new ToolResult("call-1", List.of(new TextToolContent("done")), false, "{\"exitCode\":0}");
 
     assertEquals("{\"exitCode\":0}", result.detailsJson());
-    assertEquals(true, result.terminate());
-    assertEquals("{}", new ToolResult("call-1", List.of(), false, null, false).detailsJson());
+    assertEquals("{}", new ToolResult("call-1", List.of(), false, null).detailsJson());
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolResult("call-1", List.of(), false, "[]", false));
+        IllegalArgumentException.class, () -> new ToolResult("call-1", List.of(), false, "[]"));
   }
 
   /** invocation 生命周期消息必须带 invocation ID，连接级消息则无需该字段。 */

@@ -561,7 +561,7 @@ public final class TaskTool implements Tool {
     String statusJson = status.toString();
     listener.onPartial(
         new ToolResult(
-            call.id(), List.of(new TextToolContent(statusJson + "\n")), false, statusJson, false));
+            call.id(), List.of(new TextToolContent(statusJson + "\n")), false, statusJson));
   }
 
   private static List<SubagentRunRegistry.RelayedApproval> pendingApprovals(
@@ -806,8 +806,7 @@ public final class TaskTool implements Tool {
             call.id(),
             List.of(new TextToolContent(text)),
             state != RunState.COMPLETED,
-            details.toString(),
-            false));
+            details.toString()));
   }
 
   private HarnessRuntime requireRuntime() {

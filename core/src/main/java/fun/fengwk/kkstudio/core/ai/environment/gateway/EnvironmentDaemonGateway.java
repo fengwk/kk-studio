@@ -558,8 +558,7 @@ public class EnvironmentDaemonGateway
             environment.maxResourceBytes(),
             false);
     ToolResult mapped =
-        new ToolResult(
-            active.call.id(), result.contents(), result.error(), result.detailsJson(), false);
+        new ToolResult(active.call.id(), result.contents(), result.error(), result.detailsJson());
     deferred.add(() -> active.listener.onPartial(mapped));
   }
 
@@ -572,8 +571,7 @@ public class EnvironmentDaemonGateway
         resultCodec.decodeResultForInvocation(
             envelope.payloadJson(), wireInvocationId(active), environment.maxResourceBytes(), true);
     ToolResult mapped =
-        new ToolResult(
-            active.call.id(), result.contents(), result.error(), result.detailsJson(), false);
+        new ToolResult(active.call.id(), result.contents(), result.error(), result.detailsJson());
     deferred.add(() -> active.listener.onComplete(mapped));
   }
 

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.Fixture;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.STEP_LIMIT;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.insertAssistantWithCalls;
@@ -184,12 +183,12 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     succeedToolWith(
         fixture.store,
         chain.toolInvocationIds().get(0),
-        new ToolResult("call-1", List.of(new TextToolContent("first")), false, "{}", false),
+        new ToolResult("call-1", List.of(new TextToolContent("first")), false, "{}"),
         effects);
     succeedToolWith(
         fixture.store,
         chain.toolInvocationIds().get(1),
-        new ToolResult("call-2", List.of(new TextToolContent("second")), false, "{}", false));
+        new ToolResult("call-2", List.of(new TextToolContent("second")), false, "{}"));
     requestThreadWork(fixture.store, chain.turn().threadId());
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
 
@@ -524,7 +523,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   @Test
   void lostClaimAtToolBatchFenceRollsBackAllMutations() {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
-    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    Fixture fixture = fixture(claimLosingStore(real, 2));
     var chain =
         seedToolChain(
             real,
@@ -573,8 +572,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             "call-1",
             List.of(new BinaryToolContent("application/octet-stream", new byte[] {1, 2})),
             false,
-            "{}",
-            false));
+            "{}"));
     requestThreadWork(fixture.store, baseline.threadId());
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 

@@ -116,7 +116,7 @@ public final class LoadSkillTool implements Tool {
               complete(
                   handle,
                   new ToolResult(
-                      callId, List.of(new TextToolContent(loaded.content())), false, "{}", false));
+                      callId, List.of(new TextToolContent(loaded.content())), false, "{}"));
             } else if (result instanceof SkillBodyLoader.SkillBodyLoadResult.Failed failed) {
               complete(handle, error(callId, failed.message()));
             } else {
@@ -164,7 +164,7 @@ public final class LoadSkillTool implements Tool {
 
   private static ToolResult error(String callId, String message) {
     String detail = message == null || message.isBlank() ? "tool execution failed" : message;
-    return new ToolResult(callId, List.of(new TextToolContent(detail)), true, "{}", false);
+    return new ToolResult(callId, List.of(new TextToolContent(detail)), true, "{}");
   }
 
   private static String failureMessage(String skillName, Throwable error) {

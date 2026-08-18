@@ -71,7 +71,7 @@ class CoreToolGatewayCallbackTest {
   void binaryContentIsExternalizedBeforeTerminalDelivery() {
     ToolResult result =
         new ToolResult(
-            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}", true);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
@@ -81,7 +81,7 @@ class CoreToolGatewayCallbackTest {
     assertEquals("image/png", put.mediaType());
     assertEquals("demo-result-1", put.name());
     assertArrayEquals(BINARY_BYTES, put.content());
-    // 交付结果只剩 ResourceToolContent，原始语义 error/terminate 保持不变（terminate 由 Runtime 归一）。
+    // 交付结果只剩 ResourceToolContent，原始 error 语义保持不变。
     assertEquals(1, succeeded.result().contents().size());
     ResourceToolContent externalized =
         assertInstanceOf(ResourceToolContent.class, succeeded.result().contents().get(0));
@@ -89,7 +89,6 @@ class CoreToolGatewayCallbackTest {
     assertEquals(ToolGatewayTestSupport.sha256(BINARY_BYTES), externalized.resource().sha256());
     assertNull(externalized.preview());
     assertFalse(succeeded.result().error());
-    assertTrue(succeeded.result().terminate());
   }
 
   @Test
@@ -102,8 +101,7 @@ class CoreToolGatewayCallbackTest {
                 new TextToolContent(LARGE_TEXT),
                 new JsonToolContent(LARGE_JSON)),
             false,
-            "{}",
-            false);
+            "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
@@ -136,8 +134,7 @@ class CoreToolGatewayCallbackTest {
             "call-1",
             List.of(new TextToolContent(atThreshold), new TextToolContent(atThreshold + "x")),
             false,
-            "{}",
-            false);
+            "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
     // 恰好 8192 字节保持内联；8193 字节外部化。
     assertEquals(1, listener.store.puts.size());
@@ -154,7 +151,7 @@ class CoreToolGatewayCallbackTest {
     String text = "x".repeat(ResourceRef.MAX_PREVIEW_UTF8_BYTES);
     ToolGatewayTestSupport.RecordingListener listener =
         runPlatformSyncComplete(
-            new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}", false));
+            new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}"));
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
 
@@ -178,10 +175,10 @@ class CoreToolGatewayCallbackTest {
 
     ToolGatewayTestSupport.RecordingListener first =
         runPlatformSyncComplete(
-            new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}", false));
+            new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}"));
     ToolGatewayTestSupport.RecordingListener second =
         runPlatformSyncComplete(
-            new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}", false));
+            new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}"));
     ResourceToolContent firstResource =
         (ResourceToolContent)
             ((ToolGatewayTestSupport.RecordingListener.Event.Succeeded) first.events.get(0))
@@ -209,7 +206,7 @@ class CoreToolGatewayCallbackTest {
     assertEquals(9926, text.getBytes(StandardCharsets.UTF_8).length);
     ToolGatewayTestSupport.RecordingListener listener =
         runPlatformSyncComplete(
-            new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}", false));
+            new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}"));
     ToolResult externalized =
         ((ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0))
             .result();
@@ -260,7 +257,7 @@ class CoreToolGatewayCallbackTest {
     ResourceToolContent existingContent = new ResourceToolContent(ref, "existing preview");
     ToolResult result =
         new ToolResult(
-            "call-1", List.of(existingContent, new TextToolContent("inline")), false, "{}", false);
+            "call-1", List.of(existingContent, new TextToolContent("inline")), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
     assertTrue(listener.store.puts.isEmpty());
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
@@ -275,8 +272,7 @@ class CoreToolGatewayCallbackTest {
             "call-1",
             List.of(new BinaryToolContent("application/octet-stream", BINARY_BYTES)),
             true,
-            "{}",
-            false);
+            "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
@@ -288,11 +284,7 @@ class CoreToolGatewayCallbackTest {
   void partialWithBinaryIsRejectedWithoutAnyStoreIo() {
     ToolResult partial =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformPartial(partial);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
@@ -312,7 +304,7 @@ class CoreToolGatewayCallbackTest {
             (long) existing.length,
             ToolGatewayTestSupport.sha256(existing));
     ToolResult partial =
-        new ToolResult("call-1", List.of(new ResourceToolContent(ref)), false, "{}", false);
+        new ToolResult("call-1", List.of(new ResourceToolContent(ref)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformPartial(partial);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
@@ -323,7 +315,7 @@ class CoreToolGatewayCallbackTest {
   @Test
   void plainPartialIsForwardedAsIs() {
     ToolResult partial =
-        new ToolResult("call-1", List.of(new TextToolContent("progress")), false, "{}", false);
+        new ToolResult("call-1", List.of(new TextToolContent("progress")), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformPartial(partial);
     ToolGatewayTestSupport.RecordingListener.Event.Partial delivered =
         (ToolGatewayTestSupport.RecordingListener.Event.Partial) listener.events.get(0);
@@ -336,11 +328,7 @@ class CoreToolGatewayCallbackTest {
     store.putFailure = new IllegalStateException("disk full");
     ToolResult result =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result, store);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
@@ -353,11 +341,7 @@ class CoreToolGatewayCallbackTest {
     store.referenceFailure = new IllegalArgumentException("content too large");
     ToolResult result =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result, store);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
@@ -372,11 +356,7 @@ class CoreToolGatewayCallbackTest {
     store.putFailure = new IllegalArgumentException("store contract violation");
     ToolResult result =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result, store);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
@@ -392,8 +372,7 @@ class CoreToolGatewayCallbackTest {
                 new BinaryToolContent("Image/PNG", BINARY_BYTES),
                 new BinaryToolContent("image/png", BINARY_BYTES)),
             false,
-            "{}",
-            false);
+            "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
     // 全有或全无：第一个合法 put 之前就因非法 mediaType 拒绝，零存储副作用。
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
@@ -500,18 +479,10 @@ class CoreToolGatewayCallbackTest {
   void duplicateAndLateTerminalAreIgnoredAfterFirstTerminal() {
     ToolResult first =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolResult second =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", new byte[] {9, 9})),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", new byte[] {9, 9})), false, "{}");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.handler =
         (request, listener) -> {
@@ -677,8 +648,7 @@ class CoreToolGatewayCallbackTest {
                     "call-1",
                     List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
                     false,
-                    "{}",
-                    false));
+                    "{}"));
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
@@ -731,18 +701,10 @@ class CoreToolGatewayCallbackTest {
   void invalidPartialTerminallyFailsAndPreventsLaterResourceWrites() {
     ToolResult partial =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolResult complete =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     // 非法 partial 后 Tool 继续投递 terminal success：桥已 terminal，success 绝不外部化、绝不投递。
     tool.handler =
@@ -781,18 +743,10 @@ class CoreToolGatewayCallbackTest {
       throws Exception {
     ToolResult first =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolResult second =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", new byte[] {9, 9})),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", new byte[] {9, 9})), false, "{}");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.handler =
         (request, listener) -> {
@@ -978,8 +932,7 @@ class CoreToolGatewayCallbackTest {
                         "call-1",
                         List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
                         false,
-                        "{}",
-                        false)));
+                        "{}")));
     // terminal 选择（Succeeded）已经发生：恰好一次 terminal 调用；外部化照常完成；listener 拒绝只记录，绝不追加 UNKNOWN。
     assertEquals(1, run.listener.terminalInvocations.get());
     assertEquals(1, run.store.puts.size());
@@ -1108,8 +1061,7 @@ class CoreToolGatewayCallbackTest {
             "call-1",
             List.of(new TextToolContent("prefix\uD800suffix"), new TextToolContent("ok")),
             false,
-            "{}",
-            false);
+            "{}");
     ToolGatewayTestSupport.RecordingListener listener =
         runPlatformSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
@@ -1122,14 +1074,10 @@ class CoreToolGatewayCallbackTest {
   @Test
   void wrongCallPartialThenBinaryTerminalYieldsOneInvalidPartialWithZeroPuts() {
     ToolResult partial =
-        new ToolResult("wrong-call", List.of(new TextToolContent("progress")), false, "{}", false);
+        new ToolResult("wrong-call", List.of(new TextToolContent("progress")), false, "{}");
     ToolResult complete =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     // 非法 partial 后 Tool 继续投递二进制 terminal：桥已 terminal，success 绝不外部化、绝不投递。
     tool.handler =
@@ -1176,15 +1124,10 @@ class CoreToolGatewayCallbackTest {
                 new TextToolContent(
                     "x".repeat(ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES))),
             false,
-            "{}",
-            false);
+            "{}");
     ToolResult complete =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.handler =
         (request, listener) -> {
@@ -1224,11 +1167,7 @@ class CoreToolGatewayCallbackTest {
   void wrongCallBinaryTerminalIsInvalidResultWithZeroPuts() {
     ToolResult complete =
         new ToolResult(
-            "wrong-call",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "wrong-call", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener =
         runPlatformSyncComplete(complete, new ToolGatewayTestSupport.FakeResourceStore());
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
@@ -1246,14 +1185,14 @@ class CoreToolGatewayCallbackTest {
   @Test
   void projectedResultExceedingOneMiBIsRejectedBeforeAnyPut() {
     // 全部内联文本（63 × 8 KiB ≈ 504 KiB）+ 600 KiB detailsJson + 一个本会被外部化的二进制项：
-    // 投影结果（外部化后 + terminate 归一）超过 canonical JSON 上限，必须在第一个 put 之前确定性拒绝。
+    // 投影结果（外部化后）超过 canonical JSON 上限，必须在第一个 put 之前确定性拒绝。
     List<ToolContent> contents = new ArrayList<>(64);
     for (int i = 0; i < 63; i++) {
       contents.add(new TextToolContent("x".repeat(8 * 1024)));
     }
     contents.add(new BinaryToolContent("image/png", BINARY_BYTES));
     String details = "{\"data\":\"" + "y".repeat(600 * 1024) + "\"}";
-    ToolResult result = new ToolResult("call-1", contents, false, details, false);
+    ToolResult result = new ToolResult("call-1", contents, false, details);
     ToolGatewayTestSupport.RecordingListener listener =
         runPlatformSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
@@ -1276,7 +1215,7 @@ class CoreToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
 
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncComplete(new ToolResult("call-1", contents, false, "{}", false), store);
+        runPlatformSyncComplete(new ToolResult("call-1", contents, false, "{}"), store);
 
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.getFirst();
@@ -1291,11 +1230,7 @@ class CoreToolGatewayCallbackTest {
     store.mismatchReturnedRef = true;
     ToolResult result =
         new ToolResult(
-            "call-1",
-            List.of(new BinaryToolContent("image/png", BINARY_BYTES)),
-            false,
-            "{}",
-            false);
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result, store);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
@@ -1392,8 +1327,7 @@ class CoreToolGatewayCallbackTest {
             "call-1",
             List.of(new TextToolContent("x".repeat(maxBytes + 1)), new TextToolContent("small")),
             false,
-            "{}",
-            false);
+            "{}");
     ToolGatewayTestSupport.RecordingListener listener =
         runPlatformSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore(), maxBytes);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =

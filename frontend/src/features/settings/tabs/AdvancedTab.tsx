@@ -33,12 +33,6 @@ export function AdvancedTab({ value, onChange }: SectionEditorProps<SystemSettin
           onChange={(next) => onChange({ ...value, processorHeartbeatIntervalMillis: next })}
         />
         <SettingsNumberField
-          label={t('settings.field.advanced.threadStepLimit')}
-          value={value.threadStepLimit}
-          min={1}
-          onChange={(next) => onChange({ ...value, threadStepLimit: next })}
-        />
-        <SettingsNumberField
           label={t('settings.field.advanced.threadResolveFailureDelayMillis')}
           value={value.threadResolveFailureDelayMillis}
           min={1}

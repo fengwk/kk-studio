@@ -155,8 +155,7 @@ class EnvironmentDaemonGatewayFinalTest {
                 INVOCATION_ID.toString(),
                 List.of(new BinaryToolContent("text/plain", new byte[] {1, 2})),
                 false,
-                "{}",
-                false),
+                "{}"),
             inlineResourceStore(new byte[] {1, 2}));
     fixture.gateway.receive(connection.connectionId(), partial(4, resourcePayload));
     assertTrue(connection.closed);
@@ -175,8 +174,7 @@ class EnvironmentDaemonGatewayFinalTest {
                 INVOCATION_ID.toString(),
                 List.of(new BinaryToolContent("text/plain", new byte[] {7, 8})),
                 false,
-                "{}",
-                false),
+                "{}"),
             inlineResourceStore(new byte[] {7, 8}));
     fixture.gateway.receive(connection.connectionId(), completed(2, payload));
     BinaryToolContent binary = (BinaryToolContent) listener.completed.contents().get(0);
@@ -1305,8 +1303,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
   private String resultPayload(String text) {
     return resultCodec.encodeCompleted(
-        new ToolResult(
-            INVOCATION_ID.toString(), List.of(new TextToolContent(text)), false, "{}", false),
+        new ToolResult(INVOCATION_ID.toString(), List.of(new TextToolContent(text)), false, "{}"),
         inlineResourceStore(new byte[0]));
   }
 

@@ -728,8 +728,6 @@ public enum ThreadProcessResult {
 - ThreadProcessor 内部 run loop
 - LoopStep
 - Continue
-- ThreadProcessorConfig.stepLimit
-- `advanced.threadStepLimit`
 
 ## 15. Work、lease 与 crash recovery
 

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.Fixture;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.STEP_LIMIT;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.insertAssistantWithCalls;
@@ -445,7 +444,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
   @Test
   void lostClaimAtModelApplyFenceRollsBackAllMutations() {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
-    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    Fixture fixture = fixture(claimLosingStore(real, 2));
     var baseline = seedOpenInputTurn(real);
     UUID modelId =
         seedModelInvocation(

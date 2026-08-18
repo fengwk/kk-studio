@@ -13,8 +13,6 @@ public class SystemSettingsAdvancedDTO {
 
   private Long processorHeartbeatIntervalMillis;
 
-  private Integer threadStepLimit;
-
   private Long threadResolveFailureDelayMillis;
 
   private Long modelDispatchBusyFallbackDelayMillis;

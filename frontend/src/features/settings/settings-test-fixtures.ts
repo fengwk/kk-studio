@@ -99,7 +99,6 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       resourceMaxBytes: '16777216',
       processorLeaseDurationMillis: '30000',
       processorHeartbeatIntervalMillis: '10000',
-      threadStepLimit: 16,
       threadResolveFailureDelayMillis: '1000',
       modelDispatchBusyFallbackDelayMillis: '1000',
       toolPreflightFailureDelayMillis: '1000',

@@ -111,7 +111,6 @@ final class ThreadProcessorTestSupport {
   static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   static final Duration RESOLVE_FAILURE_DELAY = Duration.ofSeconds(7);
-  static final int STEP_LIMIT = 8;
 
   /** 测试请求统一的冻结上下文窗口。 */
   static final int CONTEXT_WINDOW = 100_000;
@@ -949,7 +948,7 @@ final class ThreadProcessorTestSupport {
   }
 
   static ToolResult successToolResult(String callId) {
-    return new ToolResult(callId, List.of(new TextToolContent("tool ok")), false, "{}", false);
+    return new ToolResult(callId, List.of(new TextToolContent("tool ok")), false, "{}");
   }
 
   static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {
@@ -1119,19 +1118,18 @@ final class ThreadProcessorTestSupport {
     final ThreadProcessor processor;
     ClaimedWork claim;
 
-    Fixture(int stepLimit) {
-      this(stepLimit, null);
+    Fixture() {
+      this(null);
     }
 
     /** {@code processorStore} 非空时 processor 使用包装 store（seed/断言仍用 {@link #store}）。 */
-    Fixture(int stepLimit, HarnessStore processorStore) {
+    Fixture(HarnessStore processorStore) {
       this.scheduler = newScheduler();
       this.processor =
           new ThreadProcessor(
               processorStore == null ? store : processorStore,
               resolver,
-              new ThreadProcessorConfig(
-                  LEASE_CONFIG, stepLimit, RESOLVE_FAILURE_DELAY, COMPACTION_CONFIG),
+              new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, COMPACTION_CONFIG),
               clock,
               scheduler);
     }

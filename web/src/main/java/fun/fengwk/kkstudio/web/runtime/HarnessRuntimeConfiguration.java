@@ -186,7 +186,6 @@ public class HarnessRuntimeConfiguration {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ThreadProcessorConfig(
         leaseConfig,
-        advanced.threadStepLimit(),
         Duration.ofMillis(advanced.threadResolveFailureDelayMillis()),
         compactionConfig);
   }

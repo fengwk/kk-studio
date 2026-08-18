@@ -55,7 +55,7 @@ class RemoteToolTest {
 
     listenerRef
         .get()
-        .onComplete(new ToolResult("c1", List.of(new TextToolContent("ok")), false, "{}", false));
+        .onComplete(new ToolResult("c1", List.of(new TextToolContent("ok")), false, "{}"));
     assertEquals("ok", ((TextToolContent) listener.completed.contents().get(0)).text());
   }
 

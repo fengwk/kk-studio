@@ -89,6 +89,6 @@ final class GoalToolSupport {
   }
 
   private static ToolResult success(String callId, String text) {
-    return new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}", false);
+    return new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}");
   }
 }

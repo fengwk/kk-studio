@@ -37,10 +37,9 @@ import java.util.regex.Pattern;
  * 计划阶段用 {@link ResourceRef#utf8LengthUpTo} 做 bounded UTF-8 长度测量（严格 Resource 语义：未配对 surrogate 确定性拒绝，
  * 不物化任何 UTF-8 byte[]）逐项校验 {@code resourceMaxBytes} 上限，超限即确定性拒绝；对每个待存项流式计算 SHA-256（Text/Json 走严格
  * UTF-8 流式编码摘要，Binary 一次一项拷贝），经无副作用的 {@link ResourceStore#reference} 计划精确 ResourceRef，构造「外部化后 +
- * terminate 归一 false」的精确投影 {@link ToolResult} 并用 {@link
- * ToolResultJsonCodec#exceedsEncodedUtf8Bytes} 验证 canonical JSON ≤ {@link
- * ToolResultSizeLimits#MAX_TERMINAL_RESULT_UTF8_BYTES}——即 Runtime 持久化前会做的同一校验，全部在第一个 put 之前完成。
- * 编码只发生在写入循环里、一次一项；每次 put 返回的引用必须与计划引用精确相等，不等即存储契约违反。确定性非法输入（含 store 的 {@link
+ * 外部化后」的精确投影 {@link ToolResult} 并用 {@link ToolResultJsonCodec#exceedsEncodedUtf8Bytes} 验证 canonical
+ * JSON ≤ {@link ToolResultSizeLimits#MAX_TERMINAL_RESULT_UTF8_BYTES}——即 Runtime 持久化前会做的同一校验，全部在第一个
+ * put 之前完成。 编码只发生在写入循环里、一次一项；每次 put 返回的引用必须与计划引用精确相等，不等即存储契约违反。确定性非法输入（含 store 的 {@link
  * IllegalArgumentException}）返回 {@link Outcome.Invalid}；store 存储/IO 失败或契约违反（外部 Tool 可能已完成） 返回 {@link
  * Outcome.StoreFailed}，调用方映射为 onUnknown 而非可重试协议失败。
  */
@@ -113,12 +112,7 @@ final class ToolResultExternalizer {
       contents.add(new ResourceToolContent(returned, store.preview()));
     }
     return Outcome.success(
-        new ToolResult(
-            result.toolCallId(),
-            contents,
-            result.error(),
-            result.detailsJson(),
-            result.terminate()));
+        new ToolResult(result.toolCallId(), contents, result.error(), result.detailsJson()));
   }
 
   /**
@@ -171,10 +165,9 @@ final class ToolResultExternalizer {
         }
       }
     }
-    // 精确投影（与 Runtime 持久化前归一完全一致：terminate=false）：第一个 put 之前验证 canonical JSON 尺寸，
-    // 保证确定性 INVALID_RESULT 绝不发生在 store 副作用之后。
+    // 精确投影：第一个 put 之前验证 canonical JSON 尺寸，保证确定性 INVALID_RESULT 绝不发生在 store 副作用之后。
     ToolResult projectedResult =
-        new ToolResult(result.toolCallId(), projected, result.error(), result.detailsJson(), false);
+        new ToolResult(result.toolCallId(), projected, result.error(), result.detailsJson());
     if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
         projectedResult, ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES)) {
       throw new IllegalArgumentException(

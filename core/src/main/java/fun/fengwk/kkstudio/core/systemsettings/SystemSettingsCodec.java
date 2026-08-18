@@ -312,7 +312,6 @@ public class SystemSettingsCodec {
             dto.getProcessorLeaseDurationMillis(), "advanced.processorLeaseDurationMillis"),
         requiredMillis(
             dto.getProcessorHeartbeatIntervalMillis(), "advanced.processorHeartbeatIntervalMillis"),
-        requiredInt(dto.getThreadStepLimit(), "advanced.threadStepLimit"),
         requiredMillis(
             dto.getThreadResolveFailureDelayMillis(), "advanced.threadResolveFailureDelayMillis"),
         requiredMillis(
@@ -540,7 +539,6 @@ public class SystemSettingsCodec {
     dto.setResourceMaxBytes(advanced.resourceMaxBytes());
     dto.setProcessorLeaseDurationMillis(advanced.processorLeaseDurationMillis());
     dto.setProcessorHeartbeatIntervalMillis(advanced.processorHeartbeatIntervalMillis());
-    dto.setThreadStepLimit(advanced.threadStepLimit());
     dto.setThreadResolveFailureDelayMillis(advanced.threadResolveFailureDelayMillis());
     dto.setModelDispatchBusyFallbackDelayMillis(advanced.modelDispatchBusyFallbackDelayMillis());
     dto.setToolPreflightFailureDelayMillis(advanced.toolPreflightFailureDelayMillis());

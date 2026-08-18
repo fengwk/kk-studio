@@ -66,7 +66,7 @@ class RedisRealtimeEventSinkIntegrationTest {
             id(1L),
             id(99L),
             2,
-            new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}", false),
+            new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}"),
             NOW);
     assertEquals(CODEC.encode(event), publishAndRead(event.threadId(), event));
   }

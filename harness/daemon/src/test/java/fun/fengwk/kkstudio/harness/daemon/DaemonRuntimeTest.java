@@ -411,14 +411,14 @@ class DaemonRuntimeTest {
       List<DaemonEnvelope> started = transport.takeMessages(2);
       assertMessageTypes(started, ACK, STARTED);
       assertEquals(root.toRealPath(), tool.request.workdir());
-      tool.complete(new ToolResult("workspace-root", List.of(), false, "{}", false));
+      tool.complete(new ToolResult("workspace-root", List.of(), false, "{}"));
       transport.takeMessages(1);
 
       transport.receive(
           invokeWithWorkspace("workspace-nested", 2, "test", "1.0.0", 100, "projects/web"));
       assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
       assertEquals(nested.toRealPath(), tool.request.workdir());
-      tool.complete(new ToolResult("workspace-nested", List.of(), false, "{}", false));
+      tool.complete(new ToolResult("workspace-nested", List.of(), false, "{}"));
       transport.takeMessages(1);
 
       // 形状非法（非空但非 canonical）在 workspace canonicalize 层收敛为 FAILED。
@@ -844,11 +844,11 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.executions.get());
 
     tool.complete(
-        new ToolResult("invocation-1", List.of(new TextToolContent("done")), false, "{}", false));
+        new ToolResult("invocation-1", List.of(new TextToolContent("done")), false, "{}"));
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
     assertTrue(terminal.get(0).payloadJson().contains("done"));
-    tool.complete(new ToolResult("invocation-1", List.of(), false, "{}", false));
+    tool.complete(new ToolResult("invocation-1", List.of(), false, "{}"));
     assertFalse(transport.hasMessages());
 
     transport.disconnect();
@@ -878,7 +878,7 @@ class DaemonRuntimeTest {
     assertMessageTypes(terminal, DaemonMessageType.FAILED);
     assertTrue(terminal.get(0).payloadJson().contains("timed out"));
     assertEquals(1, tool.handle.cancelCalls.get());
-    tool.complete(new ToolResult("timeout", List.of(), false, "{}", false));
+    tool.complete(new ToolResult("timeout", List.of(), false, "{}"));
     assertFalse(transport.hasMessages());
   }
 
@@ -931,7 +931,7 @@ class DaemonRuntimeTest {
     transport.receive(invoke("zero-timeout", 1, "test", "1.0.0", 0));
     transport.takeMessages(2);
     assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
-    tool.complete(new ToolResult("zero-timeout", List.of(), false, "{}", false));
+    tool.complete(new ToolResult("zero-timeout", List.of(), false, "{}"));
     assertMessageTypes(transport.takeMessages(1), COMPLETED);
 
     transport.receive(invoke("cancel-before-timeout", 2, "test", "1.0.0", 30));
@@ -973,7 +973,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(invoke("complete-before-timeout", 1, "test", "1.0.0", 50));
     transport.takeMessages(2);
-    tool.complete(new ToolResult("complete-before-timeout", List.of(), false, "{}", false));
+    tool.complete(new ToolResult("complete-before-timeout", List.of(), false, "{}"));
 
     assertMessageTypes(transport.takeMessages(1), COMPLETED);
     assertFalse(transport.awaitMessage(Duration.ofMillis(100)));
@@ -1000,8 +1000,7 @@ class DaemonRuntimeTest {
             "structured-content",
             List.of(new JsonToolContent("[1,2]"), new TextToolContent("hi")),
             false,
-            "{}",
-            false));
+            "{}"));
 
     List<DaemonEnvelope> messages = transport.takeMessages(1);
     assertMessageTypes(messages, PARTIAL);
@@ -1016,7 +1015,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     tool.partial(
         new ToolResult(
-            "structured-content-2", List.of(new ResourceToolContent(stored)), false, "{}", false));
+            "structured-content-2", List.of(new ResourceToolContent(stored)), false, "{}"));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
@@ -1039,8 +1038,7 @@ class DaemonRuntimeTest {
     transport.receive(invoke("resource-rewrite", 1));
     transport.takeMessages(2);
     tool.complete(
-        new ToolResult(
-            "resource-rewrite", List.of(new ResourceToolContent(stored)), false, "{}", false));
+        new ToolResult("resource-rewrite", List.of(new ResourceToolContent(stored)), false, "{}"));
 
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
@@ -1083,8 +1081,7 @@ class DaemonRuntimeTest {
             "binary-content",
             List.of(new BinaryToolContent("application/octet-stream", data)),
             false,
-            "{}",
-            false));
+            "{}"));
 
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
@@ -1133,16 +1130,14 @@ class DaemonRuntimeTest {
 
     // PARTIAL 失败必须收敛为 FAILED，且不再发出 PARTIAL 或 COMPLETED。
     tool.partial(
-        new ToolResult(
-            "resource-fail", List.of(new ResourceToolContent(local)), false, "{}", false));
+        new ToolResult("resource-fail", List.of(new ResourceToolContent(local)), false, "{}"));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
 
     // FAILED 之后迟到的 COMPLETED 必须被忽略（由 journal 守卫）。
     tool.complete(
-        new ToolResult(
-            "resource-fail", List.of(new ResourceToolContent(local)), false, "{}", false));
+        new ToolResult("resource-fail", List.of(new ResourceToolContent(local)), false, "{}"));
     assertFalse(transport.hasMessages());
 
     // 现在一次带 COMPLETED 失败的独立 invocation 也必须收敛为 FAILED。
@@ -1156,8 +1151,7 @@ class DaemonRuntimeTest {
                     new ResourceRef(
                         "file:///export/local-2", "text/plain", null, 1L, "0".repeat(64)))),
             false,
-            "{}",
-            false));
+            "{}"));
     List<DaemonEnvelope> completeFailure = transport.takeMessages(1);
     assertMessageTypes(completeFailure, DaemonMessageType.FAILED);
     assertTrue(completeFailure.get(0).payloadJson().contains("cannot complete"));
@@ -1189,8 +1183,7 @@ class DaemonRuntimeTest {
                         0L,
                         "0".repeat(64)))),
             false,
-            "{}",
-            false));
+            "{}"));
 
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, DaemonMessageType.FAILED);
@@ -1218,7 +1211,7 @@ class DaemonRuntimeTest {
 
     transport.receive(invoke("wrong-result", 2));
     transport.takeMessages(2);
-    tool.complete(new ToolResult("another-id", List.of(), false, "{}", false));
+    tool.complete(new ToolResult("another-id", List.of(), false, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.FAILED);
   }
 
@@ -1238,7 +1231,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     tool.partial(
-        new ToolResult("invocation-2", List.of(new TextToolContent("chunk")), false, "{}", false));
+        new ToolResult("invocation-2", List.of(new TextToolContent("chunk")), false, "{}"));
     List<DaemonEnvelope> partial = transport.takeMessages(1);
     assertMessageTypes(partial, PARTIAL);
     assertTrue(partial.get(0).payloadJson().contains("chunk"));
@@ -1248,7 +1241,7 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.handle.cancelCalls.get());
 
     tool.complete(
-        new ToolResult("invocation-2", List.of(new TextToolContent("late")), false, "{}", false));
+        new ToolResult("invocation-2", List.of(new TextToolContent("late")), false, "{}"));
     assertFalse(transport.hasMessages());
   }
 
@@ -1582,8 +1575,7 @@ class DaemonRuntimeTest {
     assertEquals(
         DaemonInvocationState.CANCELLED, journal.find("shutdown-invocation").orElseThrow().state());
     tool.complete(
-        new ToolResult(
-            "shutdown-invocation", List.of(new TextToolContent("late")), false, "{}", false));
+        new ToolResult("shutdown-invocation", List.of(new TextToolContent("late")), false, "{}"));
     assertFalse(transport.hasMessages());
 
     runtime.start();
@@ -2289,7 +2281,7 @@ class DaemonRuntimeTest {
     }
 
     private void complete() {
-      listener.onComplete(new ToolResult(request.call().id(), List.of(), false, "{}", false));
+      listener.onComplete(new ToolResult(request.call().id(), List.of(), false, "{}"));
     }
   }
 

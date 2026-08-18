@@ -278,7 +278,7 @@ public final class DaemonToolResultCodec {
       index++;
     }
     try {
-      return new ToolResult(toolCallId, List.copyOf(contents), error, detailsJson, false);
+      return new ToolResult(toolCallId, List.copyOf(contents), error, detailsJson);
     } catch (IllegalArgumentException invalid) {
       // ToolResult 构造期的有界输入校验（如 detailsJson 超限/非法 Unicode）按协议错误拒绝。
       throw new DaemonProtocolException("result fields are invalid", invalid);

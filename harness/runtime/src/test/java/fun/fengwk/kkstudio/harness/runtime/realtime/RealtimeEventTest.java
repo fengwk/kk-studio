@@ -101,7 +101,7 @@ class RealtimeEventTest {
   void toolPartialExposesIdentityAndRejectsInvalidValues() {
     Instant now = Instant.parse("2026-07-23T00:00:00Z");
     ToolResult partial =
-        new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}", false);
+        new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}");
     RealtimeEvent.ToolPartial event =
         new RealtimeEvent.ToolPartial(
             UUID.fromString("00000000-0000-0000-0000-000000000001"),

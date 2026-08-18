@@ -16,26 +16,24 @@ class ToolResultTest {
   @Test
   void boundsDetailsJsonBeforeParsing() {
     String atLimit = "{\"d\":\"" + "a".repeat(ToolResult.MAX_DETAILS_JSON_UTF8_BYTES - 8) + "\"}";
-    assertEquals(atLimit, new ToolResult("c", List.of(), false, atLimit, false).detailsJson());
+    assertEquals(atLimit, new ToolResult("c", List.of(), false, atLimit).detailsJson());
 
     String overLimit = "{\"d\":\"" + "a".repeat(ToolResult.MAX_DETAILS_JSON_UTF8_BYTES - 7) + "\"}";
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolResult("c", List.of(), false, overLimit, false));
+        IllegalArgumentException.class, () -> new ToolResult("c", List.of(), false, overLimit));
 
     // 未配对代理项：在树解析前拒绝。
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolResult("c", List.of(), false, "{\"d\":\"\uD800\"}", false));
+        () -> new ToolResult("c", List.of(), false, "{\"d\":\"\uD800\"}"));
   }
 
   /** toolCallId 必须非空；error 工厂构造标准错误结果。 */
   @Test
   void validatesToolCallIdAndBuildsErrorResults() {
+    assertThrows(IllegalArgumentException.class, () -> new ToolResult(" ", List.of(), false, "{}"));
     assertThrows(
-        IllegalArgumentException.class, () -> new ToolResult(" ", List.of(), false, "{}", false));
-    assertThrows(
-        IllegalArgumentException.class, () -> new ToolResult(null, List.of(), false, "{}", false));
+        IllegalArgumentException.class, () -> new ToolResult(null, List.of(), false, "{}"));
 
     ToolResult error = ToolResult.error("call-1", "boom");
     assertEquals("call-1", error.toolCallId());
@@ -52,22 +50,20 @@ class ToolResultTest {
       atLimit.add(new TextToolContent("x"));
     }
     assertEquals(
-        ToolResult.MAX_CONTENT_ITEMS,
-        new ToolResult("c", atLimit, false, "{}", false).contents().size());
+        ToolResult.MAX_CONTENT_ITEMS, new ToolResult("c", atLimit, false, "{}").contents().size());
 
     List<ToolContent> overLimit = new ArrayList<>(atLimit);
     overLimit.add(new TextToolContent("x"));
     IllegalArgumentException error =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> new ToolResult("c", overLimit, false, "{}", false));
+            IllegalArgumentException.class, () -> new ToolResult("c", overLimit, false, "{}"));
     assertTrue(error.getMessage().contains(String.valueOf(ToolResult.MAX_CONTENT_ITEMS)));
 
-    assertThrows(NullPointerException.class, () -> new ToolResult("c", null, false, "{}", false));
+    assertThrows(NullPointerException.class, () -> new ToolResult("c", null, false, "{}"));
 
     List<ToolContent> withNullElement = new ArrayList<>();
     withNullElement.add(null);
     assertThrows(
-        NullPointerException.class, () -> new ToolResult("c", withNullElement, false, "{}", false));
+        NullPointerException.class, () -> new ToolResult("c", withNullElement, false, "{}"));
   }
 }
