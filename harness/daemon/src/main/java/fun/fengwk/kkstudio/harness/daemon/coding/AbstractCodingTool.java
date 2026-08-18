@@ -120,12 +120,12 @@ abstract class AbstractCodingTool implements Tool {
   }
 
   static ToolResult success(String id, String text) {
-    return new ToolResult(id, List.of(new TextToolContent(text)), false, "{}", false);
+    return new ToolResult(id, List.of(new TextToolContent(text)), false, "{}");
   }
 
   static ToolResult error(String id, String message) {
     String detail = message == null || message.isBlank() ? "tool execution failed" : message;
-    return new ToolResult(id, List.of(new TextToolContent("Error: " + detail)), true, "{}", false);
+    return new ToolResult(id, List.of(new TextToolContent("Error: " + detail)), true, "{}");
   }
 
   /** 可变执行状态，其终态回调保证恰好执行一次。 */

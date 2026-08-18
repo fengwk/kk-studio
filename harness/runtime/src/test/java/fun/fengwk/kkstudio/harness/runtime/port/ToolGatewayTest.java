@@ -136,7 +136,7 @@ class ToolGatewayTest {
           @Override
           public void onUnknown(ToolInvocationError error) {}
         };
-    listener.onPartial(new ToolResult("call-1", List.of(), false, "{}", false));
+    listener.onPartial(new ToolResult("call-1", List.of(), false, "{}"));
     listener.onSucceeded((ToolSuccess) null);
     listener.onFailed(null);
     listener.onCancelled(null);

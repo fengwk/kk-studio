@@ -45,11 +45,11 @@ import java.util.function.Consumer;
  * content 校验（拒绝 Binary / Resource content，partial 不可持久资源）与 canonical JSON 256 KiB 编码尺寸上限（bounded
  * 编码器测量，超限即中止，不物化完整 JSON），再在校验 RUNNING + attempt 与 claim ownership 的短事务中确认（无 durable
  * mutation），commit 后才 best-effort 发布 {@link RealtimeEvent.ToolPartial}；sink 失败不影响执行。terminal 回调一次
- * 生效，success 强制把 terminate 归一 false（拒绝 BinaryToolContent——Gateway 必须先外部化为稳定 ResourceToolContent
- * ref），随后对「即将持久化的规范化对象」做 bounded 编码尺寸校验，超过 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入 PostgreSQL）；retryable
- * 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT 且 retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate /
- * late / stale 一律 no-op；lost ownership 立即关 gate、cancel handle 并停止 heartbeat，且不反写 任何 durable 状态。
- * {@code handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN terminal，激活前缓冲的信号全部丢弃。
+ * 生效（拒绝 BinaryToolContent——Gateway 必须先外部化为稳定 ResourceToolContent ref），随后对即将持久化的结果做 bounded
+ * 编码尺寸校验，超过 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入 PostgreSQL）；retryable 失败只在 sideEffect 为 READ_ONLY /
+ * IDEMPOTENT 且 retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate / late / stale 一律 no-op；lost
+ * ownership 立即关 gate、cancel handle 并停止 heartbeat，且不反写 任何 durable 状态。 {@code handle.activate()}
+ * 抛异常即激活失败：恰好一次 UNKNOWN terminal，激活前缓冲的信号全部丢弃。
  */
 @Slf4j
 final class ToolExecution implements ToolGateway.Listener {
@@ -376,8 +376,8 @@ final class ToolExecution implements ToolGateway.Listener {
 
   /**
    * Terminal success：先做基础校验（非空 / toolCallId 匹配 / 拒绝 BinaryToolContent——Gateway 必须先外部化为稳定
-   * ResourceToolContent ref）；terminate 归一 false 后，对「即将持久化的规范化对象」用 bounded 编码器测量 canonical JSON
-   * UTF-8 字节（不物化完整 JSON），超过 1 MiB 确定性 INVALID_RESULT（N×data URI / 超大 details/text 不得撑爆 PostgreSQL）。
+   * ResourceToolContent ref），再用 bounded 编码器测量即将持久化结果的 canonical JSON UTF-8 字节（不物化完整 JSON），超过 1 MiB
+   * 确定性 INVALID_RESULT（N×data URI / 超大 details/text 不得撑爆 PostgreSQL）。
    */
   private Applied finishSuccessLocked(ToolSuccess success, List<Publish> publishes) {
     ToolResult result = success == null ? null : success.result();
@@ -387,11 +387,8 @@ final class ToolExecution implements ToolGateway.Listener {
           new ToolGateway.Failure(new ToolInvocationError("INVALID_RESULT", validation), false),
           publishes);
     }
-    ToolResult normalized =
-        new ToolResult(
-            result.toolCallId(), result.contents(), result.error(), result.detailsJson(), false);
     if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
-        normalized, ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES)) {
+        result, ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES)) {
       return finishFailureLocked(
           new ToolGateway.Failure(
               new ToolInvocationError(
@@ -402,7 +399,7 @@ final class ToolExecution implements ToolGateway.Listener {
               false),
           publishes);
     }
-    boolean committed = safeTerminal(() -> commitSuccess(normalized, success.effects()));
+    boolean committed = safeTerminal(() -> commitSuccess(result, success.effects()));
     if (!committed) {
       return Applied.LOST;
     }
@@ -475,9 +472,7 @@ final class ToolExecution implements ToolGateway.Listener {
     return null;
   }
 
-  /**
-   * Terminal result 基础校验：非空、toolCallId 匹配 request、不得携带 BinaryToolContent。编码尺寸校验在 terminate 归一后进行。
-   */
+  /** Terminal result 基础校验：非空、toolCallId 匹配 request、不得携带 BinaryToolContent。编码尺寸校验在基础校验之后进行。 */
   private String validateTerminalResult(ToolResult result) {
     if (result == null) {
       return "result must not be null";

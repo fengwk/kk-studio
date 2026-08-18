@@ -23,7 +23,7 @@ import java.util.List;
 
 class ToolResultJsonCodecTest {
 
-  /** 每种可持久化的 Tool 内容变体都支持 round-trip，且不会保留内存中的 terminate hint。 */
+  /** 每种可持久化的 Tool 内容变体都支持 round-trip。 */
   @Test
   void roundTripsTextAndJsonContents() {
     ToolResult source =
@@ -35,15 +35,13 @@ class ToolResultJsonCodecTest {
                 new ResourceToolContent(
                     new ResourceRef("https://example.com/a", "text/plain", null, null, null))),
             true,
-            "{\"code\":7}",
-            true);
+            "{\"code\":7}");
 
     ToolResult decoded = ToolResultJsonCodec.decode(ToolResultJsonCodec.encode(source));
 
     assertEquals("call", decoded.toolCallId());
     assertEquals(true, decoded.error());
     assertEquals("{\"code\":7}", decoded.detailsJson());
-    assertEquals(false, decoded.terminate());
     assertEquals("text", ((TextToolContent) decoded.contents().get(0)).text());
     assertEquals("{\"answer\":42}", ((JsonToolContent) decoded.contents().get(1)).json());
     assertEquals(
@@ -56,7 +54,7 @@ class ToolResultJsonCodecTest {
   void roundTripsEmptySuccessfulResult() {
     ToolResult decoded =
         ToolResultJsonCodec.decode(
-            ToolResultJsonCodec.encode(new ToolResult("call", List.of(), false, "{}", false)));
+            ToolResultJsonCodec.encode(new ToolResult("call", List.of(), false, "{}")));
 
     assertEquals(List.of(), decoded.contents());
     assertEquals(false, decoded.error());
@@ -80,8 +78,7 @@ class ToolResultJsonCodecTest {
                     "call",
                     List.of(new ResourceToolContent(resource, "hello preview")),
                     false,
-                    "{}",
-                    false)));
+                    "{}")));
 
     ResourceToolContent decodedResource = (ResourceToolContent) decoded.contents().getFirst();
     assertEquals(resource, decodedResource.resource());
@@ -98,8 +95,7 @@ class ToolResultJsonCodecTest {
                 new ResourceToolContent(
                     new ResourceRef("https://example.com/a", "text/plain", null, null, null))),
             false,
-            "{}",
-            false);
+            "{}");
 
     assertEquals(
         "{\"toolCallId\":\"call\",\"contents\":[{\"type\":\"resource\","
@@ -204,7 +200,7 @@ class ToolResultJsonCodecTest {
     ToolResult decoded =
         ToolResultJsonCodec.decode(
             ToolResultJsonCodec.encode(
-                new ToolResult("call", List.of(new TextToolContent("")), false, "{}", false)));
+                new ToolResult("call", List.of(new TextToolContent("")), false, "{}")));
 
     assertEquals("", ((TextToolContent) decoded.contents().getFirst()).text());
   }
@@ -293,15 +289,14 @@ class ToolResultJsonCodecTest {
   /** bounded 编码辅助必须按 UTF-8 字节（而非字符）精确计数，并在恰好临界/超一字节处正确判定。 */
   @Test
   void exceedsEncodedUtf8BytesRespectsExactUtf8Boundary() {
-    ToolResult ascii =
-        new ToolResult("call", List.of(new TextToolContent("x")), false, "{}", false);
+    ToolResult ascii = new ToolResult("call", List.of(new TextToolContent("x")), false, "{}");
     int asciiExact = ToolResultJsonCodec.encode(ascii).getBytes(StandardCharsets.UTF_8).length;
     assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(ascii, asciiExact));
     assertTrue(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(ascii, asciiExact - 1));
     assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(ascii, asciiExact + 1));
 
     // 多字节字符：字节级计数（UTF-8 字节数 > UTF-16 字符数），一字节越界即判定超限。
-    ToolResult cjk = new ToolResult("call", List.of(new TextToolContent("中")), false, "{}", false);
+    ToolResult cjk = new ToolResult("call", List.of(new TextToolContent("中")), false, "{}");
     int cjkExact = ToolResultJsonCodec.encode(cjk).getBytes(StandardCharsets.UTF_8).length;
     assertTrue(cjkExact > ToolResultJsonCodec.encode(cjk).length());
     assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(cjk, cjkExact));
@@ -322,7 +317,7 @@ class ToolResultJsonCodecTest {
   void exceedsEncodedUtf8BytesStopsAtLimitOnHugeText() {
     ToolResult huge =
         new ToolResult(
-            "call", List.of(new TextToolContent("a".repeat(24 * 1024 * 1024))), false, "{}", false);
+            "call", List.of(new TextToolContent("a".repeat(24 * 1024 * 1024))), false, "{}");
     assertTrue(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(huge, 16 * 1024 * 1024));
     assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(huge, 24 * 1024 * 1024 + 1024));
   }
@@ -330,7 +325,7 @@ class ToolResultJsonCodecTest {
   /** 通用 bounded 编码：未超限返回与 {@link #encode} 完全一致的文本，超限返回 null。 */
   @Test
   void encodeBoundedUtf8ReturnsNullAboveLimitAndExactTextWithin() {
-    ToolResult base = new ToolResult("call", List.of(new TextToolContent("x")), false, "{}", false);
+    ToolResult base = new ToolResult("call", List.of(new TextToolContent("x")), false, "{}");
     JsonNode node = ToolResultJsonCodec.encodeNode(base);
     int exact = ToolResultJsonCodec.encode(base).getBytes(StandardCharsets.UTF_8).length;
     assertEquals(
@@ -348,7 +343,7 @@ class ToolResultJsonCodecTest {
     for (int index = 0; index < ToolResult.MAX_CONTENT_ITEMS; index++) {
       contents.add(new JsonToolContent(oneMiBJson));
     }
-    ToolResult huge = new ToolResult("call", contents, false, "{}", false);
+    ToolResult huge = new ToolResult("call", contents, false, "{}");
     assertTrue(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(huge, 16 * 1024 * 1024));
     assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(huge, 64 * 1024 * 1024 + 4096));
   }
@@ -360,7 +355,7 @@ class ToolResultJsonCodecTest {
     for (int index = 0; index < ToolResult.MAX_CONTENT_ITEMS; index++) {
       contents.add(new TextToolContent("x"));
     }
-    ToolResult result = new ToolResult("call", contents, true, "{\"k\":\"v\"}", false);
+    ToolResult result = new ToolResult("call", contents, true, "{\"k\":\"v\"}");
     int exact = ToolResultJsonCodec.encode(result).getBytes(StandardCharsets.UTF_8).length;
     assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(result, exact));
     assertTrue(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(result, exact - 1));
@@ -387,8 +382,7 @@ class ToolResultJsonCodecTest {
                 new ResourceToolContent(
                     new ResourceRef("https://example.com/b", "text/plain", null, null, null))),
             true,
-            "{\"error\":\"boom\",\"arr\":[null,true]}",
-            false);
+            "{\"error\":\"boom\",\"arr\":[null,true]}");
     int exact = ToolResultJsonCodec.encode(result).getBytes(StandardCharsets.UTF_8).length;
     assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(result, exact));
     assertTrue(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(result, exact - 1));
@@ -399,14 +393,14 @@ class ToolResultJsonCodecTest {
   void exceedsEncodedUtf8BytesRejectsBinaryAndStrictParseErrorsLikeEncode() {
     ToolResult binary =
         new ToolResult(
-            "c", List.of(new BinaryToolContent("text/plain", new byte[] {1})), false, "{}", false);
+            "c", List.of(new BinaryToolContent("text/plain", new byte[] {1})), false, "{}");
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolResultJsonCodec.exceedsEncodedUtf8Bytes(binary, 1024));
 
     // 构造期宽松校验放行（readTree 忽略尾随/重复），codec 严格解析必须与 encode 一样拒绝。
     ToolResult trailing =
-        new ToolResult("c", List.of(new JsonToolContent("{\"a\":1} trailing")), false, "{}", false);
+        new ToolResult("c", List.of(new JsonToolContent("{\"a\":1} trailing")), false, "{}");
     assertThrows(IllegalArgumentException.class, () -> ToolResultJsonCodec.encode(trailing));
     assertThrows(
         IllegalArgumentException.class,
@@ -414,14 +408,14 @@ class ToolResultJsonCodecTest {
 
     // 尾随 token 本身是合法 JSON 值时同样拒绝（严格 parser 只接受单个值）。
     ToolResult trailingValue =
-        new ToolResult("c", List.of(new JsonToolContent("{\"a\":1} 5")), false, "{}", false);
+        new ToolResult("c", List.of(new JsonToolContent("{\"a\":1} 5")), false, "{}");
     assertThrows(IllegalArgumentException.class, () -> ToolResultJsonCodec.encode(trailingValue));
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolResultJsonCodec.exceedsEncodedUtf8Bytes(trailingValue, 1024));
 
     ToolResult duplicate =
-        new ToolResult("c", List.of(new JsonToolContent("{\"a\":1,\"a\":2}")), false, "{}", false);
+        new ToolResult("c", List.of(new JsonToolContent("{\"a\":1,\"a\":2}")), false, "{}");
     assertThrows(IllegalArgumentException.class, () -> ToolResultJsonCodec.encode(duplicate));
     assertThrows(
         IllegalArgumentException.class,

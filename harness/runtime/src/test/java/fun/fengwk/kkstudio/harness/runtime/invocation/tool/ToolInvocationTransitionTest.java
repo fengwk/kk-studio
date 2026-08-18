@@ -92,7 +92,7 @@ class ToolInvocationTransitionTest {
   }
 
   private static ToolResult result() {
-    return new ToolResult(CALL_ID, List.of(), false, "{}", false);
+    return new ToolResult(CALL_ID, List.of(), false, "{}");
   }
 
   private static ToolInvocationError error() {
@@ -531,7 +531,7 @@ class ToolInvocationTransitionTest {
             succeeded.status(),
             succeeded.attempt(),
             succeeded.approval(),
-            new ToolResult(CALL_ID, List.of(new TextToolContent("different")), false, "{}", false),
+            new ToolResult(CALL_ID, List.of(new TextToolContent("different")), false, "{}"),
             succeeded.error(),
             succeeded.resultEntryId(),
             succeeded.createdAt(),

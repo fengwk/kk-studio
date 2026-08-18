@@ -160,8 +160,7 @@ class HistoryPayloadMapperTest {
                 "call-1",
                 List.of(new TextToolContent("plain"), new JsonToolContent("{\"a\":1}")),
                 false,
-                "{}",
-                false));
+                "{}"));
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
@@ -195,8 +194,7 @@ class HistoryPayloadMapperTest {
                 "call-1",
                 List.of(new ResourceToolContent(resource, "complete preview")),
                 false,
-                "{}",
-                false));
+                "{}"));
     // 无物化端口时 Resource 引用 fail-closed：瞬时 URI / ResourceStore 引用绝不进入持久化 message。
     assertThrows(IllegalArgumentException.class, () -> MAPPER.toolResultPayload(invocation));
   }
@@ -205,7 +203,7 @@ class HistoryPayloadMapperTest {
   void toolResultPayloadSucceededUsesMaterializedContents() {
     ToolInvocation invocation =
         succeededInvocation(
-            new ToolResult("call-1", List.of(new TextToolContent("")), false, "{}", false));
+            new ToolResult("call-1", List.of(new TextToolContent("")), false, "{}"));
     MessagePayload payload =
         MAPPER.toolResultPayload(
             invocation,
@@ -223,7 +221,7 @@ class HistoryPayloadMapperTest {
   void toolResultPayloadSucceededWithUnmappableContentFallsBackToEmptyText() {
     ToolInvocation invocation =
         succeededInvocation(
-            new ToolResult("call-1", List.of(new TextToolContent("")), false, "{}", false));
+            new ToolResult("call-1", List.of(new TextToolContent("")), false, "{}"));
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
@@ -262,7 +260,7 @@ class HistoryPayloadMapperTest {
   @Test
   void toolResultPayloadSucceededWithEmptyContentsFallsBackToEmptyText() {
     ToolInvocation invocation =
-        succeededInvocation(new ToolResult("call-1", List.of(), false, "{}", false));
+        succeededInvocation(new ToolResult("call-1", List.of(), false, "{}"));
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
@@ -274,7 +272,7 @@ class HistoryPayloadMapperTest {
   void toolResultPayloadSucceededPreservesResultErrorFlag() {
     ToolInvocation invocation =
         succeededInvocation(
-            new ToolResult("call-1", List.of(new TextToolContent("boom")), true, "{}", false));
+            new ToolResult("call-1", List.of(new TextToolContent("boom")), true, "{}"));
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
@@ -290,8 +288,7 @@ class HistoryPayloadMapperTest {
                 "call-1",
                 List.of(new BinaryToolContent("application/octet-stream", new byte[] {1, 2})),
                 false,
-                "{}",
-                false));
+                "{}"));
     assertThrows(IllegalArgumentException.class, () -> MAPPER.toolResultPayload(invocation));
   }
 

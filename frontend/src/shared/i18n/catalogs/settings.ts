@@ -680,10 +680,6 @@ export const settingsCatalog = {
     'en-US': 'Processor heartbeat (ms)',
     'zh-CN': '处理器心跳间隔（毫秒）',
   },
-  'settings.field.advanced.threadStepLimit': {
-    'en-US': 'Thread step limit',
-    'zh-CN': 'Thread 步数上限',
-  },
   'settings.field.advanced.threadResolveFailureDelayMillis': {
     'en-US': 'Resolve failure delay (ms)',
     'zh-CN': '解析失败延迟（毫秒）',

@@ -82,8 +82,7 @@ public final class FindTool extends AbstractCodingTool {
               "text/plain",
               config),
           false,
-          "{}",
-          false);
+          "{}");
     }
     String preview = String.join("\n", previewLines);
     byte[] previewBytes = preview.getBytes(StandardCharsets.UTF_8);
@@ -101,6 +100,6 @@ public final class FindTool extends AbstractCodingTool {
                 .store(
                     String.join("\n", completeLines).getBytes(StandardCharsets.UTF_8),
                     "text/plain")));
-    return new ToolResult(callId, contents, false, "{}", false);
+    return new ToolResult(callId, contents, false, "{}");
   }
 }

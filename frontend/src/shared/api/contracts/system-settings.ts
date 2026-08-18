@@ -124,7 +124,6 @@ export interface SystemSettingsAdvancedDTO {
   resourceMaxBytes: DecimalLong
   processorLeaseDurationMillis: DecimalLong
   processorHeartbeatIntervalMillis: DecimalLong
-  threadStepLimit: number
   threadResolveFailureDelayMillis: DecimalLong
   modelDispatchBusyFallbackDelayMillis: DecimalLong
   toolPreflightFailureDelayMillis: DecimalLong

@@ -1328,8 +1328,7 @@ public abstract class HarnessStoreInvocationContract {
                 new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}"),
                 new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"verify\"}")));
     ToolResult result =
-        new ToolResult(
-            "call-1", List.of(new TextToolContent("ok")), false, "{\"done\":true}", false);
+        new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{\"done\":true}");
     updateTool(TestIds.id(10), tool -> tool.succeed(result, effects, T3));
 
     ToolInvocation stored =

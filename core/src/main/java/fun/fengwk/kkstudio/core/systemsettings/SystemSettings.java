@@ -470,7 +470,6 @@ public record SystemSettings(
       long resourceMaxBytes,
       long processorLeaseDurationMillis,
       long processorHeartbeatIntervalMillis,
-      int threadStepLimit,
       long threadResolveFailureDelayMillis,
       long modelDispatchBusyFallbackDelayMillis,
       long toolPreflightFailureDelayMillis,
@@ -498,7 +497,6 @@ public record SystemSettings(
             16L * 1024 * 1024,
             30_000L,
             10_000L,
-            16,
             1_000L,
             1_000L,
             1_000L,
@@ -532,7 +530,6 @@ public record SystemSettings(
             "advanced.processorHeartbeatIntervalMillis must be less than"
                 + " processorLeaseDurationMillis");
       }
-      SystemSettingsValidation.requireAtLeast(threadStepLimit, 1, "advanced.threadStepLimit");
       SystemSettingsValidation.requirePositiveMillis(
           threadResolveFailureDelayMillis, "advanced.threadResolveFailureDelayMillis");
       SystemSettingsValidation.requirePositiveMillis(

@@ -122,7 +122,6 @@ export interface SystemSettingsAdvancedDraft {
   resourceMaxBytes: DraftNumericField
   processorLeaseDurationMillis: DraftNumericField
   processorHeartbeatIntervalMillis: DraftNumericField
-  threadStepLimit: DraftNumericField
   threadResolveFailureDelayMillis: DraftNumericField
   modelDispatchBusyFallbackDelayMillis: DraftNumericField
   toolPreflightFailureDelayMillis: DraftNumericField
@@ -209,7 +208,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       resourceMaxBytes: dto.advanced.resourceMaxBytes,
       processorLeaseDurationMillis: dto.advanced.processorLeaseDurationMillis,
       processorHeartbeatIntervalMillis: dto.advanced.processorHeartbeatIntervalMillis,
-      threadStepLimit: String(dto.advanced.threadStepLimit),
       threadResolveFailureDelayMillis: dto.advanced.threadResolveFailureDelayMillis,
       modelDispatchBusyFallbackDelayMillis: dto.advanced.modelDispatchBusyFallbackDelayMillis,
       toolPreflightFailureDelayMillis: dto.advanced.toolPreflightFailureDelayMillis,
@@ -474,7 +472,6 @@ export function assembleSettingsUpdate(
       processorHeartbeatIntervalMillis: requiredLong(
         draft.advanced.processorHeartbeatIntervalMillis,
       ),
-      threadStepLimit: requiredInt(draft.advanced.threadStepLimit),
       threadResolveFailureDelayMillis: requiredLong(
         draft.advanced.threadResolveFailureDelayMillis,
       ),

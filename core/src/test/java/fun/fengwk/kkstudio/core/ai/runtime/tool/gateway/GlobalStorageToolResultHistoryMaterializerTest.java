@@ -111,8 +111,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                         "call-1",
                         List.of(new ResourceToolContent(ref, "inline preview")),
                         false,
-                        "{}",
-                        false)));
+                        "{}")));
 
     ResourceMessageContent resource =
         assertInstanceOf(ResourceMessageContent.class, contents.get(0));
@@ -168,11 +167,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                     materializer.materialize(
                         SESSION,
                         new ToolResult(
-                            "call-1",
-                            List.of(new ResourceToolContent(fileRef)),
-                            false,
-                            "{}",
-                            false)))
+                            "call-1", List.of(new ResourceToolContent(fileRef)), false, "{}")))
             .stream()
             .map(ResourceMessageContent.class::cast)
             .findFirst()
@@ -185,11 +180,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                     materializer.materialize(
                         SESSION,
                         new ToolResult(
-                            "call-2",
-                            List.of(new ResourceToolContent(httpRef)),
-                            false,
-                            "{}",
-                            false)))
+                            "call-2", List.of(new ResourceToolContent(httpRef)), false, "{}")))
             .stream()
             .map(ResourceMessageContent.class::cast)
             .findFirst()
@@ -219,8 +210,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
             status ->
                 materializer.materialize(
                     SESSION,
-                    new ToolResult(
-                        "call-1", List.of(new ResourceToolContent(ref)), false, "{}", false)));
+                    new ToolResult("call-1", List.of(new ResourceToolContent(ref)), false, "{}")));
     ResourceMessageContent resource =
         assertInstanceOf(ResourceMessageContent.class, contents.get(0));
     assertArrayEquals(
@@ -246,8 +236,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                                 "call-2",
                                 List.of(new ResourceToolContent(foreign)),
                                 false,
-                                "{}",
-                                false))));
+                                "{}"))));
     assertTrue(error.getMessage().contains("bucket"), "actual: " + error.getMessage());
   }
 
@@ -272,8 +261,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
                             new ResourceToolContent(ref),
                             new TextToolContent("last")),
                         false,
-                        "{}",
-                        false)));
+                        "{}")));
 
     assertEquals(3, contents.size());
     assertEquals("first", assertInstanceOf(TextMessageContent.class, contents.get(0)).text());
@@ -301,8 +289,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
         () ->
             materializer.materialize(
                 SESSION,
-                new ToolResult(
-                    "call-1", List.of(new ResourceToolContent(ref)), false, "{}", false)));
+                new ToolResult("call-1", List.of(new ResourceToolContent(ref)), false, "{}")));
   }
 
   private static String sha256Hex(byte[] bytes) {

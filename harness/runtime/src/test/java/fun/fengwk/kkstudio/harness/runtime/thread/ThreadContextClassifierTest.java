@@ -820,7 +820,7 @@ class ThreadContextClassifierTest {
         status == ToolInvocationStatus.READY || status == ToolInvocationStatus.FAILED ? 0 : 1;
     ToolResult result =
         status == ToolInvocationStatus.SUCCEEDED
-            ? new ToolResult(callId, List.of(new TextToolContent("tool ok")), false, "{}", false)
+            ? new ToolResult(callId, List.of(new TextToolContent("tool ok")), false, "{}")
             : null;
     ToolInvocationError error =
         status == ToolInvocationStatus.FAILED ? new ToolInvocationError("FAILED", "boom") : null;

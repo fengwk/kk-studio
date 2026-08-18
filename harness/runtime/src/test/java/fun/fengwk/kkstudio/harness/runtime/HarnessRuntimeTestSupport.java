@@ -437,8 +437,7 @@ final class HarnessRuntimeTestSupport {
                       tool.request().call().id(),
                       List.of(new TextToolContent("real result")),
                       false,
-                      "{}",
-                      false),
+                      "{}"),
                   effects,
                   T3);
           tx.updateToolInvocations(List.of(updated));

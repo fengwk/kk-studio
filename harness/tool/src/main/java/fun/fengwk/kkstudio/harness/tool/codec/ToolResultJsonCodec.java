@@ -205,8 +205,7 @@ public final class ToolResultJsonCodec {
           text(node, "toolCallId"),
           contents,
           bool(node, "error"),
-          OBJECT_MAPPER.writeValueAsString(requireObject(node.get("details"), "details")),
-          false);
+          OBJECT_MAPPER.writeValueAsString(requireObject(node.get("details"), "details")));
     } catch (JsonProcessingException exception) {
       throw new IllegalArgumentException("malformed tool result", exception);
     }

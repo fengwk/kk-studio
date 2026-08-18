@@ -83,7 +83,7 @@ class ToolOutcomeAppenderMaterializerTest {
     succeedToolWith(
         store,
         chain.toolInvocationIds().getFirst(),
-        new ToolResult("call-1", List.of(new TextToolContent("raw")), false, "{}", false));
+        new ToolResult("call-1", List.of(new TextToolContent("raw")), false, "{}"));
     ToolInvocation invocation = tool(store, chain.toolInvocationIds().getFirst());
     var before = path(store, chain.turn().threadId());
 

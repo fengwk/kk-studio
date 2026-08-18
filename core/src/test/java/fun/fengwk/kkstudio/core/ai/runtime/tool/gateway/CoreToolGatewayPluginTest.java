@@ -168,7 +168,7 @@ class CoreToolGatewayPluginTest {
   }
 
   private static ToolResult result(List<ToolContent> contents) {
-    return new ToolResult("call-1", contents, false, "{}", false);
+    return new ToolResult("call-1", contents, false, "{}");
   }
 
   private static Fixture fixture(PluginTool tool) {

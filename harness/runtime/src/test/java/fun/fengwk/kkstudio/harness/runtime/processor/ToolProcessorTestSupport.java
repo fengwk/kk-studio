@@ -427,15 +427,11 @@ final class ToolProcessorTestSupport {
   }
 
   static ToolResult partialResult(String toolCallId) {
-    return new ToolResult(toolCallId, List.of(new TextToolContent("partial")), false, "{}", false);
+    return new ToolResult(toolCallId, List.of(new TextToolContent("partial")), false, "{}");
   }
 
   static ToolResult successResult(String toolCallId, ToolContent... contents) {
-    return successResult(toolCallId, false, contents);
-  }
-
-  static ToolResult successResult(String toolCallId, boolean terminate, ToolContent... contents) {
-    return new ToolResult(toolCallId, List.of(contents), false, "{}", terminate);
+    return new ToolResult(toolCallId, List.of(contents), false, "{}");
   }
 
   private static ToolBinding platformBinding(ToolSideEffect sideEffect) {
