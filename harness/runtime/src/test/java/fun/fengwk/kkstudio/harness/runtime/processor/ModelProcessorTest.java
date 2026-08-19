@@ -13,19 +13,23 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptFailurePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -821,6 +825,128 @@ class ModelProcessorTest {
     assertEquals(1, model.attempt());
     assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /**
+   * retry 的持久化 failedAt 以当前已锁定 durable 事实为下界（leaseNow / thread.updatedAt / model.updatedAt / 上一
+   * retryAt 的最大值）：attempt 执行期间 clock 回拨时，第二次 MODEL_ATTEMPT_FAILURE 的 failedAt 仍单调推进， terminal
+   * materialization 的 failedAttempts 不变量与 Entry 链时间顺序都能通过，retry -&gt; terminal -&gt; THREAD
+   * materialization 全链路一次跑通。旧实现直接用回拨的 clock 采样（低于上一 retryAt），ModelInvocation 构造即以 "a failed attempt
+   * must not precede the previous retry schedule" 抛异常，retry 事务回滚且 invocation 卡在 RUNNING。
+   */
+  @Test
+  void retryFailedAtUsesDurableFloorAcrossClockRollbackAndMaterializesMonotonically() {
+    InvocationRetryPolicy retryPolicy =
+        new InvocationRetryPolicy(
+            2, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(5), Duration.ofSeconds(5));
+    MutableClock clock = new MutableClock(NOW);
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    FakeGateway gateway = new FakeGateway();
+    RecordingSink sink = new RecordingSink();
+    ModelProcessor modelProcessor =
+        new ModelProcessor(
+            store,
+            gateway,
+            sink,
+            new ModelProcessorConfig(LEASE_CONFIG, retryPolicy, FALLBACK_DELAY),
+            clock,
+            newScheduler());
+    // 与生产一致的最小链：ROOT + TURN_START(INPUT) + USER，Thread head 与 invocation basis 指向 USER。
+    UserBasis baseline = seedUserBasis(store);
+    UUID invocationId = seedUserBasisInvocation(store, baseline, request(), NOW);
+
+    // attempt 1：N 启动，N+2 失败 -> retry（failure#1 failedAt=N+2 / retryAt=N+7）。
+    gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(ProcessResult.STARTED, modelProcessor.process(claim(store, invocationId, NOW)));
+    clock.advance(Duration.ofSeconds(2));
+    gateway
+        .listener(invocationId)
+        .onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "first"));
+    ModelInvocation afterFirst = model(store, invocationId);
+    assertEquals(ModelInvocationStatus.READY, afterFirst.status());
+    assertEquals(1, afterFirst.failedAttempts().size());
+    assertEquals(NOW.plusSeconds(2), afterFirst.failedAttempts().getFirst().failedAt());
+    assertEquals(NOW.plusSeconds(7), afterFirst.failedAttempts().getFirst().retryAt());
+
+    // attempt 2：N+10 启动（durable 抬升到 N+10），随后把 clock 回拨到 N+4（低于上一 retryAt）再失败。
+    clock.advance(Duration.ofSeconds(8));
+    gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED, modelProcessor.process(claim(store, invocationId, clock.instant())));
+    clock.set(NOW.plusSeconds(4));
+    gateway
+        .listener(invocationId)
+        .onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "second"));
+
+    ModelInvocation afterSecond = model(store, invocationId);
+    assertEquals(ModelInvocationStatus.READY, afterSecond.status(), "回拨后的 retry 必须仍然成功落地");
+    assertEquals(2, afterSecond.failedAttempts().size());
+    assertEquals(
+        NOW.plusSeconds(10),
+        afterSecond.failedAttempts().get(1).failedAt(),
+        "failedAt 必须抬升到 N+10（thread/model durable 下界，而非回拨的 N+4）");
+    assertEquals(NOW.plusSeconds(15), afterSecond.failedAttempts().get(1).retryAt());
+
+    // attempt 3：N+16 启动，retry 预算耗尽 -> FAILED terminal + THREAD wake。
+    clock.advance(Duration.ofSeconds(12));
+    gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED, modelProcessor.process(claim(store, invocationId, clock.instant())));
+    gateway
+        .listener(invocationId)
+        .onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "third"));
+    assertEquals(ModelInvocationStatus.FAILED, model(store, invocationId).status());
+    assertNull(work(store, new WorkTarget(WorkTargetType.MODEL, invocationId)));
+
+    // 同一 store 上的 ThreadProcessor 消费 THREAD claim：MODEL_ATTEMPT_FAILURE 按单调 failedAt 物化、
+    // TURN_END 关闭 turn、Model 行严格校验后物理删除。
+    ThreadProcessor threadProcessor =
+        new ThreadProcessor(
+            store,
+            (threadId, path, preparation) -> null,
+            new ThreadProcessorConfig(
+                LEASE_CONFIG, FALLBACK_DELAY, new CompactionConfig(false, 16_384, 20_000)),
+            clock,
+            newScheduler());
+    assertEquals(
+        ThreadProcessResult.COMPLETED,
+        threadProcessor.process(
+            ThreadProcessorTestSupport.claimThreadWork(
+                store, baseline.threadId(), clock.instant())));
+
+    ThreadState thread = thread(store, baseline.threadId());
+    EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
+    assertEquals(
+        7, path.entries().size(), "ROOT+TURN_START+USER+2xFAILURE+AssistantError+TURN_END");
+    assertEquals(NOW, path.entries().get(0).createdAt());
+    assertEquals(NOW.plusMillis(1), path.entries().get(1).createdAt());
+    assertEquals(NOW.plusMillis(2), path.entries().get(2).createdAt());
+    assertTrue(path.entries().get(2).payload() instanceof MessagePayload);
+    ModelAttemptFailurePayload firstFailure =
+        (ModelAttemptFailurePayload) path.entries().get(3).payload();
+    assertEquals(1, firstFailure.attempt().attempt());
+    assertEquals(NOW.plusSeconds(2), path.entries().get(3).createdAt());
+    ModelAttemptFailurePayload secondFailure =
+        (ModelAttemptFailurePayload) path.entries().get(4).payload();
+    assertEquals(2, secondFailure.attempt().attempt());
+    assertEquals(NOW.plusSeconds(10), path.entries().get(4).createdAt());
+    assertTrue(
+        path.entries().get(3).createdAt().isBefore(path.entries().get(4).createdAt()),
+        "MODEL_ATTEMPT_FAILURE 时间必须单调推进");
+    assertEquals(NOW.plusSeconds(16), path.entries().get(5).createdAt());
+    assertTrue(path.entries().get(5).payload() instanceof AssistantErrorPayload);
+    assertEquals(NOW.plusSeconds(16), path.entries().get(6).createdAt());
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(6).payload();
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
+    assertEquals(TurnEndReason.TURN_FAILED, end.reason());
+    assertEquals(
+        path.entries().get(6).id(),
+        thread(store, baseline.threadId()).headEntryId(),
+        "TURN_END 必须关闭 turn 并成为新 head");
+    assertEquals(10, thread(store, baseline.threadId()).revision());
+    assertNull(
+        store.transaction(tx -> tx.findModelInvocation(invocationId).orElse(null)),
+        "closed turn 的 ModelInvocation 必须被物理删除");
   }
 
   /** Stop deleteWork 后到达的 late UNKNOWN / 不可重试失败：terminal 事务 ownership 校验失败，保持 RUNNING。 */
@@ -1634,6 +1760,132 @@ class ModelProcessorTest {
     assertEquals(0, model.attempt());
     assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).revision());
     assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /**
+   * abandon 在 activation 开始前获胜（本地 cancel 抢占 markRunning 事务，markRunning 仍 commit）：durable RUNNING
+   * 保持，但 {@code handle.activate()} 绝不调用（旧实现会先 CANCEL 再调用 ACTIVATE，产生破坏性调用序）。
+   */
+  @Test
+  void cancelWinningDuringMarkRunningSkipsActivateAndCancelsHandle() throws Exception {
+    Fixture fixture = fixture();
+    FakeHandle handle = new FakeHandle();
+    CountDownLatch inStart = new CountDownLatch(1);
+    CountDownLatch proceed = new CountDownLatch(1);
+    fixture.gateway.beforeReturn =
+        listener -> {
+          inStart.countDown();
+          try {
+            proceed.await(5, TimeUnit.SECONDS);
+          } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+          }
+        };
+    fixture.gateway.queue(new ModelGateway.Started(handle));
+
+    AtomicReference<ProcessResult> result = new AtomicReference<>();
+    Thread processThread =
+        new Thread(
+            () ->
+                result.set(
+                    fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW))));
+    processThread.start();
+    assertTrue(inStart.await(5, TimeUnit.SECONDS), "process must be inside gateway.start");
+
+    // 测试线程抢 store monitor：让 process 的 markRunning 事务阻塞在其上。
+    CountDownLatch holding = new CountDownLatch(1);
+    CountDownLatch releaseMonitor = new CountDownLatch(1);
+    Thread holdStore =
+        new Thread(
+            () ->
+                fixture.store.transaction(
+                    ignored -> {
+                      holding.countDown();
+                      try {
+                        releaseMonitor.await(10, TimeUnit.SECONDS);
+                      } catch (InterruptedException failure) {
+                        Thread.currentThread().interrupt();
+                      }
+                      return null;
+                    }));
+    holdStore.start();
+    assertTrue(holding.await(5, TimeUnit.SECONDS));
+
+    proceed.countDown();
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (processThread.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+      Thread.sleep(10);
+    }
+    assertTrue(
+        System.nanoTime() < deadline, "process must block on the store monitor (markRunning)");
+    assertTrue(fixture.processor.cancel(fixture.invocationId));
+
+    releaseMonitor.countDown();
+    holdStore.join(5000);
+    processThread.join(5000);
+
+    assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
+    assertEquals(0, handle.activates.get(), "abandon 先获胜时 handle.activate 绝不调用");
+    assertTrue(handle.isCancelled());
+    assertFalse(fixture.processor.hasActiveExecution());
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+    assertEquals(1, model.attempt());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+  }
+
+  /**
+   * abandon 在 activation 期间获胜（{@code handle.activate()} 已开始）：abandon 必须推迟 handle cancel 直到 activate
+   * 返回，外部调用序恒为 ACTIVATE -&gt; CANCEL，cancel 绝不丢失（旧实现直接 CANCEL 后再 ACTIVATE）。
+   */
+  @Test
+  void cancelWinningDuringActivationDefersCancelUntilActivateReturns() throws Exception {
+    Fixture fixture = fixture();
+    List<String> order = new CopyOnWriteArrayList<>();
+    CountDownLatch inActivate = new CountDownLatch(1);
+    CountDownLatch releaseActivate = new CountDownLatch(1);
+    ModelGateway.Handle blockingHandle =
+        new ModelGateway.Handle() {
+          @Override
+          public void cancel() {
+            order.add("cancel");
+          }
+
+          @Override
+          public void activate() {
+            order.add("activate");
+            inActivate.countDown();
+            try {
+              releaseActivate.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException failure) {
+              Thread.currentThread().interrupt();
+            }
+          }
+        };
+    fixture.gateway.queue(new ModelGateway.Started(blockingHandle));
+
+    AtomicReference<ProcessResult> result = new AtomicReference<>();
+    Thread processThread =
+        new Thread(
+            () ->
+                result.set(
+                    fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW))));
+    processThread.start();
+    assertTrue(inActivate.await(5, TimeUnit.SECONDS), "handle.activate must have begun");
+
+    assertTrue(fixture.processor.cancel(fixture.invocationId));
+    assertFalse(fixture.processor.hasActiveExecution());
+    assertEquals(List.of("activate"), order, "activation 中的 abandon 必须推迟 cancel");
+
+    releaseActivate.countDown();
+    processThread.join(5000);
+
+    assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
+    assertEquals(List.of("activate", "cancel"), order, "外部调用序必须保持 ACTIVATE -> CANCEL");
+    assertFalse(fixture.processor.hasActiveExecution());
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+    assertEquals(1, model.attempt());
   }
 
   /** 顺序重复投递同一 claim（同 token）：LOST no-op，不 cancel、不 mutation，合法 RUNNING 不受影响。 */
@@ -2627,6 +2879,70 @@ class ModelProcessorTest {
 
   private record Baseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
 
+  /** 带 USER 输入的 open turn 基线：Thread head 与 invocation basis 指向 USER。 */
+  private record UserBasis(
+      UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID userEntryId, UUID threadId) {}
+
+  /** Session + ROOT + TURN_START(INPUT) + USER；Thread head 指向 USER。 */
+  private static UserBasis seedUserBasis(InMemoryHarnessStore store) {
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertEntry(
+              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.insertEntry(
+              new Entry(
+                  turnStartEntryId,
+                  sessionId,
+                  rootEntryId,
+                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), threadId, 100_000),
+                  NOW.plusMillis(1)));
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
+                  sessionId,
+                  turnStartEntryId,
+                  userMessagePayload(),
+                  NOW.plusMillis(2)));
+          tx.insertThread(new ThreadState(threadId, userEntryId, false, 1L, 0L, NOW, NOW));
+          return new UserBasis(sessionId, rootEntryId, turnStartEntryId, userEntryId, threadId);
+        });
+  }
+
+  /** 以 USER 为 basis 插入 READY ModelInvocation + THREAD / MODEL Work（materialization 全链测试用）。 */
+  private static UUID seedUserBasisInvocation(
+      InMemoryHarnessStore store, UserBasis baseline, ModelRequestSpec request, Instant now) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          UUID id = tx.nextId();
+          tx.insertModelInvocation(
+              new ModelInvocation(
+                  id,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.userEntryId(),
+                  request,
+                  ModelInvocationStatus.READY,
+                  0,
+                  null,
+                  null,
+                  null,
+                  null,
+                  List.of(),
+                  now,
+                  now));
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), now);
+          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id), now);
+          return id;
+        });
+  }
+
   private static Baseline seedBaseline(InMemoryHarnessStore store, Instant now) {
     return seedBaseline(store, now, TurnStartReason.INPUT);
   }
@@ -2944,10 +3260,16 @@ class ModelProcessorTest {
 
   static class FakeHandle implements ModelGateway.Handle {
     final AtomicInteger cancels = new AtomicInteger();
+    final AtomicInteger activates = new AtomicInteger();
 
     @Override
     public void cancel() {
       cancels.incrementAndGet();
+    }
+
+    @Override
+    public void activate() {
+      activates.incrementAndGet();
     }
 
     boolean isCancelled() {

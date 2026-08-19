@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -976,7 +977,8 @@ class ToolProcessorRecoveryTest {
 
   /**
    * 本地 cancel 在 Started 的 markRunning 事务期间获胜：markRunning 仍 commit（durable RUNNING），但 activate 观察到
-   * abandoned 后必须返回 LOST 并取消 handle；lease 到期后由 dispatcher 恢复 UNKNOWN。
+   * abandoned 后必须返回 LOST 且绝不调用 {@code handle.activate()}（旧实现在 abandon 后仍调用 activate，产生 CANCEL -&gt;
+   * ACTIVATE），并由 abandon best-effort cancel handle；lease 到期后由 dispatcher 恢复 UNKNOWN。
    */
   @Test
   void cancelWinningDuringMarkRunningReturnsLostAndCancelsHandle() throws Exception {
@@ -1045,6 +1047,7 @@ class ToolProcessorRecoveryTest {
     processThread.join(5000);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
+    assertEquals(0, handle.activates.get(), "abandon 先获胜时 handle.activate 绝不调用");
     assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
@@ -1054,6 +1057,70 @@ class ToolProcessorRecoveryTest {
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
         2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+  }
+
+  /**
+   * 本地 cancel 在 handle.activate 已经开始之后获胜：abandon 必须推迟 handle cancel 直到 activate 返回，外部调用序 只能是
+   * ACTIVATE -&gt; CANCEL（旧实现直接在激活期间 CANCEL，产生 CANCEL -&gt; ACTIVATE 的破坏性顺序），cancel 绝不丢失。
+   */
+  @Test
+  void cancelWinningDuringActivationDefersCancelUntilActivateReturns() throws Exception {
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
+    ToolProcessorTestSupport.transition(
+        fixture.store,
+        fixture.toolInvocationId,
+        tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
+    List<String> order = new CopyOnWriteArrayList<>();
+    CountDownLatch inActivate = new CountDownLatch(1);
+    CountDownLatch releaseActivate = new CountDownLatch(1);
+    ToolGateway.Handle blockingHandle =
+        new ToolGateway.Handle() {
+          @Override
+          public void cancel() {
+            order.add("cancel");
+          }
+
+          @Override
+          public void activate() {
+            order.add("activate");
+            inActivate.countDown();
+            try {
+              releaseActivate.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException failure) {
+              Thread.currentThread().interrupt();
+            }
+          }
+        };
+    fixture.gateway.queueStart(new ToolGateway.Started(blockingHandle));
+
+    AtomicReference<ProcessResult> result = new AtomicReference<>();
+    Thread processThread =
+        new Thread(
+            () ->
+                result.set(
+                    fixture.processor.process(
+                        ToolProcessorTestSupport.claim(
+                            fixture.store,
+                            fixture.toolInvocationId,
+                            ToolProcessorTestSupport.NOW))));
+    processThread.start();
+    assertTrue(inActivate.await(5, TimeUnit.SECONDS), "handle.activate must have begun");
+
+    assertTrue(fixture.processor.cancel(fixture.toolInvocationId));
+    assertFalse(fixture.processor.hasActiveExecution());
+    assertEquals(List.of("activate"), order, "activation 中的 abandon 必须推迟 cancel");
+
+    releaseActivate.countDown();
+    processThread.join(5000);
+
+    assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
+    assertEquals(List.of("activate", "cancel"), order, "外部调用序必须保持 ACTIVATE -> CANCEL");
+    assertFalse(fixture.processor.hasActiveExecution());
+    assertEquals(
+        ToolInvocationStatus.RUNNING,
+        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    assertEquals(
+        1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
   }
 
   /**
