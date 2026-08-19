@@ -753,7 +753,9 @@ Model request materialization发生在有效 MODEL claim 内，但不持有长�
 
 ### 16.1 Stop
 
-Stop 继续使用 `(threadId, stopRequestId)` durable replay key 与 revision CAS。
+Stop 的 durable replay key 是「被关闭 turn 的 TURN_START.ownerThreadId + closeRequestId」：Thread 锁内 Session 级
+不可变查找使 owning Thread 在 head move 到同 Session 的兄弟分支后仍能精确 replay，另一 Thread 的相同 raw id 被忽略
+而非冲突；revision 只用于未 replay 的首发 CAS。
 
 Stop 成功关闭 live turn 的同一事务必须：
 

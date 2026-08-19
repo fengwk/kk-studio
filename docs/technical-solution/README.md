@@ -61,7 +61,7 @@ flowchart TD
 - Thread `nextCommandSequence` 从 1 开始；每次可见状态变化 `revision` 恰好 +1。
 - Agent Loop 重构目标固定 6 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS`；YOLO 由 Thread 直接控制 API 修改，不进入 command batch。
 - MOVE_HEAD 只允许**同 Session** 历史 Entry，revision CAS、要求 quiescent 且无 queued command；不能指向 `continueModel=true` 的 TURN_END。
-- Stop 先按 `(threadId, stopRequestId)` durable key 精确 replay，再做 revision CAS；`STOPPED` / `IDLE`（no-op）/ `REPLAYED` 三态。
+- Stop 先按「被关闭 turn 的 TURN_START `ownerThreadId` + `closeRequestId`」durable key 精确 replay（Thread 锁内 Session 级查找），再做 revision CAS；`STOPPED` / `IDLE`（无 marker，no-op）/ `REPLAYED` 三态。
 - Tool approval 输入 `ALLOW` / `DENY`，durable 值为 `ALLOWED` / `DENIED`；`ALLOWED` 恢复执行，`DENIED` 终结失败；ToolProcessor 在 permission preflight 前读取当前 Thread YOLO，true 时直接 Allow。
 - AgentDefinitionConfigDTO 的 `tools`/`skills`/`subagents` 三个列表必填：`tools`/`skills` 是短名集合，`subagents` 是 Agent 名称 allowlist（引用锁定，被引用 Agent 不可删除）；branch `activeTools` 由 config.tools + skills 非空时的内部 `load_skill` + subagents 非空时的内部 `task` 派生（子 Agent 在最大深度处省略 `task`）。
 - `load_skill` 与 `task` 是两个内部 `PLATFORM` Tool，绝不出现在 `GET /api/ai/catalog/tools`；`task` 以普通 durable Harness Thread 运行子 Agent（ROOT 冻结 `subagentContext`），复用 ToolInvocation/approval/stop/Work 与既有 Thread，无新表/新状态机/新调度器。

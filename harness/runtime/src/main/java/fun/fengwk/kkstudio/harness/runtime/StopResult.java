@@ -8,8 +8,9 @@ import java.util.UUID;
 /**
  * 不可变 Stop 结果。
  *
- * <p>{@link Status#IDLE} 表示未创建被停止的 Turn，但 {@code cancelledCommandCount} 仍可能为正。 {@link
- * Status#REPLAYED} 标识先前已停止的 TURN_END，而返回的 Thread 可能已指向更新的 Turn。
+ * <p>{@link Status#IDLE} 表示未创建被停止的 Turn（刻意不写任何 stop marker），但 {@code cancelledCommandCount} 仍可能
+ * 为正。{@link Status#REPLAYED} 标识先前已 STOPPED 的 TURN_END：仅 owning Thread 在 Session 级命中（TURN_START
+ * ownerThreadId + closeRequestId），且返回的 Thread 可能已指向更新的 Turn。
  */
 public record StopResult(
     Status status, ThreadState thread, UUID stoppedTurnEndEntryId, int cancelledCommandCount) {

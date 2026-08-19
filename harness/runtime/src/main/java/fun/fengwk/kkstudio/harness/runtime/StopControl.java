@@ -40,15 +40,17 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
  * 特性本地的同步 Stop transaction。
  *
- * <p>这并非 Store use-case 方法，也不是通用 workflow。它承担 Stop 所需的唯一一次原子分支收尾： thread-scoped 精确 replay、Command
- * 取消、Model/Tool 收敛、Entry append、Thread revision 一次递增 以及最终的 Work fencing。
+ * <p>这并非 Store use-case 方法，也不是通用 workflow。它承担 Stop 所需的唯一一次原子分支收尾： 按被停止 Turn 的 ownerThreadId 做
+ * Session 级精确 replay、Command 取消、Model/Tool 收敛、Entry append、Thread revision 一次递增 以及最终的 Work fencing。
  */
 final class StopControl {
 
@@ -90,7 +92,7 @@ final class StopControl {
                     new HarnessRuntimeNotFoundException(
                         "thread " + command.threadId() + " does not exist"));
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
-    StopResult replay = findReplay(path, command.stopRequestId(), thread);
+    StopResult replay = findReplay(tx, path, command.stopRequestId(), thread);
     if (replay != null) {
       return new Commit(replay, null, List.of());
     }
@@ -165,19 +167,38 @@ final class StopControl {
     return new Commit(result, modelExecutionId, toolExecutionIds);
   }
 
-  private StopResult findReplay(EntryPath path, UUID stopRequestId, ThreadState thread) {
+  private StopResult findReplay(
+      HarnessStore.Transaction tx, EntryPath path, UUID stopRequestId, ThreadState thread) {
+    // 在 Thread 锁内做 Session 级不可变查找：raw closeRequestId 必须按被引用 TURN_START 的 ownerThreadId 界定，
+    // 使 owning Thread 在 head move 到同 Session 的兄弟分支后仍能精确 replay，同时绝不吞掉另一 Thread 的同 raw id。
+    List<Entry> sessionEntries = tx.loadEntriesBySessionId(path.root().sessionId());
+    Map<UUID, TurnStartPayload> turnStarts = new HashMap<>();
+    for (Entry entry : sessionEntries) {
+      if (entry.payload() instanceof TurnStartPayload start) {
+        turnStarts.put(entry.id(), start);
+      }
+    }
     Entry match = null;
     TurnEndPayload matchedEnd = null;
-    for (Entry entry : path.entries()) {
-      if (entry.payload() instanceof TurnEndPayload end
-          && stopRequestId.equals(end.closeRequestId())) {
-        if (match != null) {
-          throw new IllegalStateException(
-              "stop request id " + stopRequestId + " appears more than once on the current path");
-        }
-        match = entry;
-        matchedEnd = end;
+    for (Entry entry : sessionEntries) {
+      if (!(entry.payload() instanceof TurnEndPayload end)
+          || !stopRequestId.equals(end.closeRequestId())) {
+        continue;
       }
+      TurnStartPayload start = requiredTurnStart(turnStarts, end);
+      if (!thread.id().equals(start.ownerThreadId())) {
+        // 另一 Thread 拥有的 raw id：忽略而非冲突。
+        continue;
+      }
+      if (match != null) {
+        throw new IllegalStateException(
+            "stop request id "
+                + stopRequestId
+                + " appears more than once for thread "
+                + thread.id());
+      }
+      match = entry;
+      matchedEnd = end;
     }
     if (match == null) {
       return null;
@@ -186,9 +207,25 @@ final class StopControl {
         || matchedEnd.reason() != TurnEndReason.USER_STOP) {
       throw conflict(
           HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED,
-          "stop request id " + stopRequestId + " was used by another close operation");
+          "stop request id "
+              + stopRequestId
+              + " was used by another close operation of thread "
+              + thread.id());
     }
     return new StopResult(StopResult.Status.REPLAYED, thread, match.id(), 0);
+  }
+
+  /** TURN_END 引用的 TURN_START 必须存在于同一 Session；解析失败是 durable 结构不变量破坏。 */
+  private static TurnStartPayload requiredTurnStart(
+      Map<UUID, TurnStartPayload> turnStarts, TurnEndPayload end) {
+    TurnStartPayload start = turnStarts.get(end.turnStartEntryId());
+    if (start == null) {
+      throw new IllegalStateException(
+          "TURN_END with turnStartEntryId "
+              + end.turnStartEntryId()
+              + " references a missing TURN_START entry");
+    }
+    return start;
   }
 
   private static List<WorkTarget> workTargets(ThreadState thread, ThreadContext context) {
