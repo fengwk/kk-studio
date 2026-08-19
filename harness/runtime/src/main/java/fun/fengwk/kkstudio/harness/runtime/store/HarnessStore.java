@@ -70,6 +70,18 @@ public interface HarnessStore {
     Optional<Session> findSession(UUID id);
 
     /**
+     * 锁定 Session 行并返回（FOR KEY SHARE：只防删除/改键，不串行化同 Session 的 sibling Thread）； 不存在返回 {@link
+     * Optional#empty()} 且不产生锁。要求 Session -&gt; Thread 锁序：必须先锁 Session 再锁 Thread。
+     */
+    Optional<Session> lockSessionForKeyShare(UUID id);
+
+    /**
+     * 锁定 Session 行并返回（FOR UPDATE：串行化该 Session 的创建类写操作）；不存在返回 {@link Optional#empty()} 且不产生锁。要求
+     * Session -&gt; Thread 锁序。仅用于需要串行化同 Session 新建/重放的操作（如 ENTRY），不得用于 sibling Thread 的正常执行路径。
+     */
+    Optional<Session> lockSessionForUpdate(UUID id);
+
+    /**
      * 追加一个不可变 Entry。约束：session 必须存在；每个 Session 至多一个 ROOT 且 ROOT 必须先于其他 Entry；写入前用 ROOT 单元素链或 {@code
      * parent path + new entry} 构造完整 {@link EntryPath} 校验（parent 连续、同 Session、 createdAt 顺序与 turn /
      * tool-prefix 结构），非法序列不能进入 store。违反抛 {@link IllegalArgumentException}。
@@ -91,20 +103,30 @@ public interface HarnessStore {
      */
     List<Entry> loadEntriesBySessionId(UUID sessionId);
 
-    /** 插入新 Thread；head Entry 必须存在，id 冲突抛 {@link IllegalArgumentException}。插入后本事务内可更新。 */
+    /**
+     * 插入新 Thread；head Entry 必须存在且属于 {@code thread.sessionId} 的 Session（Session 到 head 的同一 Session
+     * 索引强制），id 冲突抛 {@link IllegalArgumentException}。插入后本事务内可更新。
+     */
     void insertThread(ThreadState thread);
 
     /** 按 id 读取 Thread；不存在返回 {@link Optional#empty()}。 */
     Optional<ThreadState> findThread(UUID id);
 
-    /** 锁定 Thread 行并返回；不存在返回 {@link Optional#empty()} 且不产生锁。 */
+    /** 锁定 Thread 行并返回（FOR UPDATE）；不存在返回 {@link Optional#empty()} 且不产生锁。 */
     Optional<ThreadState> lockThread(UUID id);
 
     /**
+     * 读取指定 Session 的全部 Thread（当前 projection），按确定性 id 序返回不可变列表。Session 不存在抛 {@link
+     * IllegalArgumentException}。
+     */
+    List<ThreadState> listThreadsBySession(UUID sessionId);
+
+    /**
      * 更新 Thread current state。要求行存在且已在本事务锁定（{@link #lockThread} 或同事务 {@link #insertThread}），并通过共享
-     * transition validation（{@link ThreadState#validateTransition}）：id / createdAt 不得改变，headEntryId
-     * 必须指向已存在 Entry，nextCommandSequence / revision / updatedAt 不得回退，任何对外字段变化必须 revision 精确 +1。未锁定抛
-     * {@link IllegalStateException}，行不存在、身份改变、非法 transition 或 head 不存在抛 {@link
+     * transition validation（{@link ThreadState#validateTransition}）：id / sessionId /
+     * materializationHash / createdAt 不得改变，headEntryId 必须指向已存在 Entry 且属于 Thread 的
+     * Session，nextCommandSequence / revision / updatedAt 不得回退，任何对外字段变化必须 revision 精确 +1。未锁定抛 {@link
+     * IllegalStateException}，行不存在、身份改变、非法 transition 或 head 不存在/跨 Session 抛 {@link
      * IllegalArgumentException}。
      */
     void updateThread(ThreadState thread);
@@ -119,6 +141,9 @@ public interface HarnessStore {
      */
     List<ThreadCommand> loadQueuedCommands(UUID threadId);
 
+    /** 读取该 Thread 的全部 Command（QUEUED/APPLIED/CANCELLED，含历史），按 sequence 升序；不产生锁。返回不可变列表。 */
+    List<ThreadCommand> loadCommandsByThread(UUID threadId);
+
     /**
      * 批量插入新 Command；每条 command 的 thread 必须存在且已在本事务锁定（锁序 Thread -&gt; commands），初始状态必须为 QUEUED（无任何
      * terminal marker），并逐条校验 {@code (thread, sequence)}、{@code (thread, clientCommandId)} 唯一性后按
@@ -128,13 +153,14 @@ public interface HarnessStore {
     void insertCommands(List<ThreadCommand> commands);
 
     /**
-     * 批量更新 Command 的生命周期。threadId / payload / clientCommandId / sequence / createdAt 必须与已存储
-     * 行一致；QUEUED 行只能推进为 APPLIED（设置 consumedTurnStartEntryId）或 CANCELLED（设置 cancelledAt）， terminal
-     * 行只接受 exact-idempotent 重放（相同 marker），禁止 terminal-&gt;QUEUED、APPLIED&lt;-&gt;CANCELLED 或
-     * terminal marker 改变；consumedTurnStartEntryId 必须指向 TURN_START Entry 且该 Entry 的 path session 与
-     * Command Thread 当前 head 的 path session 一致。要求每行已在本事务锁定（{@link #loadQueuedCommands} 或 {@link
-     * #insertCommands}），且每条 command 的 thread 已在本事务锁定（锁序 Thread -&gt; commands）。未锁定抛 {@link
-     * IllegalStateException}，身份 / 生命周期 / consumed 引用违反或行 不存在抛 {@link IllegalArgumentException}。
+     * 批量更新 Command 的生命周期。threadId / payload / clientCommandId / requestHash / sequence / createdAt
+     * 必须与 已存储行一致；QUEUED 行只能推进为 APPLIED（设置 consumedTurnStartEntryId）或 CANCELLED（设置 cancelRequestId 与
+     * cancelledAt 成对），terminal 行只接受 exact-idempotent 重放（相同 marker），禁止 terminal-&gt;QUEUED、
+     * APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变；consumedTurnStartEntryId 必须指向 TURN_START
+     * Entry、属于 Command Thread 的 Session，且被引用 TURN_START 的 ownerThreadId 等于 command 的
+     * threadId。要求每行已在本事务锁定 （{@link #loadQueuedCommands} 或 {@link #insertCommands}），且每条 command 的
+     * thread 已在本事务锁定（锁序 Thread -&gt; commands）。未锁定抛 {@link IllegalStateException}，身份 / 生命周期 /
+     * consumed 引用违反或行不存在抛 {@link IllegalArgumentException}。
      */
     void updateCommands(List<ThreadCommand> commands);
 

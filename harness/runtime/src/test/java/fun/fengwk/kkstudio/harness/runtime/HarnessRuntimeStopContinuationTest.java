@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedContinuationChain;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedQueuedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedYoloThreadAt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -55,16 +55,18 @@ class HarnessRuntimeStopContinuationTest {
   @Test
   void continuationStopAppendsExactlyThreeEntriesWithBaseSettingsAndCancelsConfigCommands() {
     HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
-    UUID threadId = seedYoloThreadAt(store, chain.turnEndEntryId());
+    // chain.threadId 是 owner-aware 分类器下该 CONTINUATION obligation 的唯一 owner；直接在其上冻结 YOLO。
+    UUID threadId = chain.threadId();
+    runtime.setThreadYolo(new SetThreadYoloCommand(threadId, 1, true));
     // 配置 Command 本会被 CONTINUATION 计划应用进 TURN_START settings；Stop 必须取消它而不是应用。
     seedQueuedCommand(
         store, threadId, 1L, new SetAgentCommandPayload("other-agent"), TestIds.id(1));
     seedThreadWork(store, threadId);
 
-    StopResult result = runtime.stop(new StopCommand(threadId, TestIds.id(1), 0));
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    StopResult result = runtime.stop(new StopCommand(threadId, TestIds.id(1), 2));
+    assertStopped(result);
     assertEquals(1, result.cancelledCommandCount());
-    assertEquals(1L, result.thread().revision());
+    assertEquals(3L, result.thread().revision());
     assertTrue(result.thread().yoloEnabled());
 
     ThreadState stored = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
@@ -106,7 +108,7 @@ class HarnessRuntimeStopContinuationTest {
   void continuationStopWithoutCommandsStillClosesTheObligation() {
     HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
     StopResult result = runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 1));
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertStopped(result);
     assertEquals(0, result.cancelledCommandCount());
     ThreadState stored = store.transaction(tx -> tx.lockThread(chain.threadId()).orElseThrow());
     assertEquals(2L, stored.revision());

@@ -230,7 +230,17 @@ class WorkHeartbeatTest {
                                 new ModelSelection("provider", "model", "v1"),
                                 List.of())),
                         NOW));
-                tx.insertThread(new ThreadState(threadIdValue, rootEntryId, false, 1, 0, NOW, NOW));
+                tx.insertThread(
+                    new ThreadState(
+                        threadIdValue,
+                        sessionId,
+                        rootEntryId,
+                        ThreadProcessorTestSupport.MATERIALIZATION_HASH,
+                        false,
+                        1,
+                        0,
+                        NOW,
+                        NOW));
                 tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadIdValue), NOW);
                 return threadIdValue;
               });

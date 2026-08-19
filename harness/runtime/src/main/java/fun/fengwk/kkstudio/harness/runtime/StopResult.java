@@ -2,41 +2,33 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
  * 不可变 Stop 结果。
  *
- * <p>{@link Status#IDLE} 表示未创建被停止的 Turn（刻意不写任何 stop marker），但 {@code cancelledCommandCount} 仍可能
- * 为正。{@link Status#REPLAYED} 标识先前已 STOPPED 的 TURN_END：仅 owning Thread 在 Session 级命中（TURN_START
- * ownerThreadId + closeRequestId），且返回的 Thread 可能已指向更新的 Turn。
+ * <p>{@code replayed=true} 表示重放了一次先前 Stop 的 durable receipt（live receipt：本 Thread 拥有并关闭的 TURN_END 的
+ * {@code closeRequestId}；queued-only receipt：本 Thread 上带该 {@code cancelRequestId} 的已取消
+ * Command），本次调用不写任何 marker、不触碰 revision。{@code stoppedTurnEndEntryId} 在停止了一个 live Turn 时非 null；纯
+ * queued-only / 未创建 Turn 时（包括 queued-only replay）为 null。{@code thread} 始终是当前 Thread
+ * projection，{@code cancelledUserMessages} 按 sequence 升序返回被取消的 user-like 消息内容（SET_* 与 SYSTEM
+ * steering 不返回）。
  */
 public record StopResult(
-    Status status, ThreadState thread, UUID stoppedTurnEndEntryId, int cancelledCommandCount) {
+    boolean replayed,
+    ThreadState thread,
+    UUID stoppedTurnEndEntryId,
+    int cancelledCommandCount,
+    List<CancelledUserMessage> cancelledUserMessages) {
 
   public StopResult {
-    status = Objects.requireNonNull(status, "status");
     thread = Objects.requireNonNull(thread, "thread");
     if (cancelledCommandCount < 0) {
       throw new IllegalArgumentException("cancelledCommandCount must not be negative");
     }
-    if (status == Status.IDLE) {
-      if (stoppedTurnEndEntryId != null) {
-        throw new IllegalArgumentException("IDLE must not carry a stopped TURN_END id");
-      }
-    } else if (stoppedTurnEndEntryId == null) {
-      throw new IllegalArgumentException("STOPPED/REPLAYED require a stopped TURN_END id");
-    }
-    if (status == Status.REPLAYED && cancelledCommandCount != 0) {
-      throw new IllegalArgumentException("REPLAYED must not cancel commands");
-    }
-  }
-
-  /** 本次调用是停止了一个 Turn、未存在 live Turn，还是重放了一次先前的 Stop。 */
-  public enum Status {
-    STOPPED,
-    IDLE,
-    REPLAYED
+    cancelledUserMessages =
+        List.copyOf(Objects.requireNonNull(cancelledUserMessages, "cancelledUserMessages"));
   }
 }

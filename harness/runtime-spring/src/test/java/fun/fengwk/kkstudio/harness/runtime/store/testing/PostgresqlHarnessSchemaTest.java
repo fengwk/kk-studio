@@ -56,7 +56,9 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "id",
+            "session_id",
             "head_entry_id",
+            "materialization_hash",
             "yolo_enabled",
             "next_command_sequence",
             "revision",

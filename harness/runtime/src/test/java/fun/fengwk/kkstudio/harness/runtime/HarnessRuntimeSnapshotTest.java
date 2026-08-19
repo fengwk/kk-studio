@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 
 import java.lang.reflect.Proxy;
@@ -147,13 +146,16 @@ class HarnessRuntimeSnapshotTest {
   @Test
   void queuedCommandsAreReturnedImmutableAndInSequence() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    runtime.enqueueCommands(
-        new ThreadCommandBatch(
-            baseline.threadId(),
-            baseline.rootEntryId(),
-            1,
-            List.of(
-                userMessageCommand(TestIds.id(1), "a"), userMessageCommand(TestIds.id(2), "b"))));
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                baseline.threadId(),
+                baseline.rootEntryId(),
+                1,
+                List.of(
+                    userMessageCommand(TestIds.id(1), "a"),
+                    userMessageCommand(TestIds.id(2), "b")))),
+        AcceptancePreflight.IDENTITY);
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(
         List.of(1L, 2L), snapshot.queuedCommands().stream().map(c -> c.sequence()).toList());
@@ -196,19 +198,24 @@ class HarnessRuntimeSnapshotTest {
                 barrier.await();
                 return runtime.getThreadSnapshot(baseline.threadId());
               });
-      Future<List<ThreadCommand>> enqueueFuture =
+      Future<ThreadCommand> enqueueFuture =
           pool.submit(
               () -> {
                 barrier.await();
-                return runtime.enqueueCommands(
-                    new ThreadCommandBatch(
-                        baseline.threadId(),
-                        baseline.rootEntryId(),
-                        1,
-                        List.of(userMessageCommand(TestIds.id(1), "a"))));
+                return runtime
+                    .acceptCommands(
+                        new AcceptCommandsCommand(
+                            new AcceptCommandsTarget.Thread(
+                                baseline.threadId(),
+                                baseline.rootEntryId(),
+                                1,
+                                List.of(userMessageCommand(TestIds.id(1), "a")))),
+                        AcceptancePreflight.IDENTITY)
+                    .commands()
+                    .getFirst();
               });
       snapshotFuture.get();
-      assertEquals(1, enqueueFuture.get().size());
+      assertEquals(1L, enqueueFuture.get().sequence());
     } finally {
       pool.shutdownNow();
     }

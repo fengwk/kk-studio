@@ -163,6 +163,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
   /** 行锁 key，用于每个 transaction 的 update tracking。 */
   private enum LockRank {
+    SESSION,
     THREAD,
     COMMAND,
     MODEL,
@@ -171,6 +172,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
   }
 
   private record LockKey(LockRank rank, String key) {
+    static LockKey session(UUID id) {
+      return new LockKey(LockRank.SESSION, "session:" + id);
+    }
+
     static LockKey thread(UUID id) {
       return new LockKey(LockRank.THREAD, "thread:" + id);
     }
@@ -374,6 +379,23 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public Optional<Session> lockSessionForKeyShare(UUID id) {
+      checkOpen();
+      requireCanLockRank(LockRank.SESSION);
+      Session session = state.sessions.get(id);
+      if (session != null) {
+        lock(LockKey.session(id));
+      }
+      return Optional.ofNullable(session);
+    }
+
+    @Override
+    public Optional<Session> lockSessionForUpdate(UUID id) {
+      // 单 monitor 参考实现没有真正的并发，但为与生产实现一致的锁序记账，FOR UPDATE 与 KEY SHARE 走同一路径。
+      return lockSessionForKeyShare(id);
+    }
+
+    @Override
     public void insertEntry(Entry entry) {
       checkOpen();
       Objects.requireNonNull(entry, "entry");
@@ -458,9 +480,25 @@ public final class InMemoryHarnessStore implements HarnessStore {
       requireMillisecondPrecision(thread.updatedAt());
       requireAbsent(state.threads, thread.id(), "thread");
       requireExistingEntry(thread.headEntryId());
+      requireThreadHeadInSession(thread);
       requireCanLockThread(thread.id());
       state.threads.put(thread.id(), thread);
       recordThreadLock(thread.id());
+    }
+
+    /** Thread 的 head Entry 必须属于 Thread 持久化的 Session（Session -&gt; head 同一 Session 约束）。 */
+    private void requireThreadHeadInSession(ThreadState thread) {
+      if (!state.sessions.containsKey(thread.sessionId())) {
+        throw new IllegalArgumentException("session " + thread.sessionId() + " does not exist");
+      }
+      Entry head = state.entries.get(thread.headEntryId());
+      if (head == null || !head.sessionId().equals(thread.sessionId())) {
+        throw new IllegalArgumentException(
+            "thread head entry "
+                + thread.headEntryId()
+                + " must belong to thread session "
+                + thread.sessionId());
+      }
     }
 
     @Override
@@ -481,6 +519,19 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public List<ThreadState> listThreadsBySession(UUID sessionId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      if (!state.sessions.containsKey(sessionId)) {
+        throw new IllegalArgumentException("session " + sessionId + " does not exist");
+      }
+      return state.threads.values().stream()
+          .filter(thread -> thread.sessionId().equals(sessionId))
+          .sorted(Comparator.comparing(ThreadState::id, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
     public void updateThread(ThreadState thread) {
       checkOpen();
       Objects.requireNonNull(thread, "thread");
@@ -493,6 +544,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       ThreadState.validateTransition(stored, thread);
       requireExistingEntry(thread.headEntryId());
+      requireThreadHeadInSession(thread);
       state.threads.put(thread.id(), thread);
     }
 
@@ -527,6 +579,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
         lock(LockKey.command(command.threadId(), command.sequence()));
       }
       return queued;
+    }
+
+    @Override
+    public List<ThreadCommand> loadCommandsByThread(UUID threadId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      return state.commands.values().stream()
+          .filter(command -> command.threadId().equals(threadId))
+          .sorted(Comparator.comparingLong(ThreadCommand::sequence))
+          .toList();
     }
 
     @Override
@@ -621,8 +683,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * consumedTurnStartEntryId（若有）必须指向 TURN_START Entry，且该 Entry 的 path session 与 Thread 当前 head
-     * 一致。
+     * consumedTurnStartEntryId（若有）必须指向 TURN_START Entry，该 Entry 的 path session 与 Command Thread 的
+     * Session 一致，且被引用 TURN_START 的 ownerThreadId 等于 command 的 threadId。
      */
     private void requireValidConsumedTurnStart(ThreadCommand command) {
       UUID consumedTurnStartEntryId = command.consumedTurnStartEntryId();
@@ -635,11 +697,18 @@ public final class InMemoryHarnessStore implements HarnessStore {
             "consumedTurnStartEntryId must reference a TURN_START entry");
       }
       UUID turnStartSessionId = loadEntryPath(consumedTurnStartEntryId).root().sessionId();
-      UUID threadSessionId =
-          loadEntryPath(state.threads.get(command.threadId()).headEntryId()).root().sessionId();
-      if (!turnStartSessionId.equals(threadSessionId)) {
+      ThreadState thread = state.threads.get(command.threadId());
+      if (thread == null) {
+        throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
+      }
+      if (!turnStartSessionId.equals(thread.sessionId())) {
         throw new IllegalArgumentException(
-            "consumed turn start must be in the command thread's current head session");
+            "consumed turn start must be in the command thread's session");
+      }
+      TurnStartPayload turnStartPayload = (TurnStartPayload) turnStart.payload();
+      if (!command.threadId().equals(turnStartPayload.ownerThreadId())) {
+        throw new IllegalArgumentException(
+            "consumed turn start ownerThreadId must equal the command threadId");
       }
     }
 
@@ -669,10 +738,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
       if (!stored.threadId().equals(command.threadId())
           || !stored.payload().equals(command.payload())
           || !stored.clientCommandId().equals(command.clientCommandId())
+          || !stored.requestHash().equals(command.requestHash())
           || stored.sequence() != command.sequence()
           || !stored.createdAt().equals(command.createdAt())) {
         throw new IllegalArgumentException(
-            "command identity (thread/payload/clientCommandId/sequence/createdAt) must not change");
+            "command identity (thread/payload/clientCommandId/requestHash/sequence/createdAt) must not change");
       }
     }
 

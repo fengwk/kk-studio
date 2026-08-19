@@ -52,6 +52,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
                       ThreadCommandPayloadJsonCodec.requestHash(userMessagePayload("late")),
                       null,
                       null,
+                      null,
                       T6)));
           ModelInvocation model = tx.lockModelInvocation(baseline.modelId()).orElseThrow();
           tx.updateModelInvocation(withUpdatedAt(model, T5));

@@ -100,6 +100,7 @@ class CommandHarvestReducerTest {
             id(3L),
             ThreadCommandPayloadJsonCodec.requestHash(new SetAgentCommandPayload("coding")),
             null,
+            id(3L),
             CREATED.plusSeconds(1),
             CREATED);
     assertThrows(
@@ -149,6 +150,7 @@ class CommandHarvestReducerTest {
         ThreadCommandPayloadJsonCodec.requestHash(payload),
         null,
         null,
+        null,
         CREATED);
   }
 
@@ -161,6 +163,7 @@ class CommandHarvestReducerTest {
         id,
         ThreadCommandPayloadJsonCodec.requestHash(payload),
         id(99L),
+        null,
         null,
         CREATED);
   }
