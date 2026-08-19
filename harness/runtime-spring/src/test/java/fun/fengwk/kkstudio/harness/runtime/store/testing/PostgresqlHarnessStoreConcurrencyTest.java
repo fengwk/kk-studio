@@ -92,7 +92,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.rootEntryId()));
+              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
               return id;
             });
     WorkTarget firstTarget = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
@@ -147,7 +147,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.rootEntryId()));
+              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
               return id;
             });
     CountDownLatch firstLocksAcquired = new CountDownLatch(2);
@@ -163,6 +163,102 @@ class PostgresqlHarnessStoreConcurrencyTest {
       assertTrue(ascending.get(10, TimeUnit.SECONDS));
       assertFalse(descending.get(10, TimeUnit.SECONDS));
     }
+  }
+
+  /**
+   * 同一 Session 内的两个 sibling Thread：acceptCommands 的锁序是 Session KEY SHARE -&gt; Thread FOR UPDATE。
+   * KEY SHARE 锁彼此兼容，因此两个事务能同时持有同一 Session 的 KEY SHARE 与各自 Thread 的 FOR UPDATE 锁 —— 证明 sibling
+   * acceptance 不会被 Session 级锁串行化（若误用 FOR UPDATE 锁 Session，第二个事务会在此处死等而非双方都到达 barrier）。
+   */
+  @Test
+  void siblingThreadsKeyShareTheSameSessionAndLockTheirOwnThreadsConcurrently() throws Exception {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID siblingId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
+              return id;
+            });
+
+    CountDownLatch bothAcquired = new CountDownLatch(2);
+    CountDownLatch releaseBoth = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<Boolean> first =
+          executor.submit(
+              () ->
+                  store.transaction(
+                      tx -> {
+                        tx.lockSessionForKeyShare(baseline.sessionId()).orElseThrow();
+                        tx.lockThread(baseline.threadId()).orElseThrow();
+                        bothAcquired.countDown();
+                        await(releaseBoth);
+                        // 按 accept 阻塞式取回自己的 Thread 行锁完成收尾。
+                        tx.lockThread(baseline.threadId()).orElseThrow();
+                        return true;
+                      }));
+      Future<Boolean> second =
+          executor.submit(
+              () ->
+                  store.transaction(
+                      tx -> {
+                        tx.lockSessionForKeyShare(baseline.sessionId()).orElseThrow();
+                        tx.lockThread(siblingId).orElseThrow();
+                        bothAcquired.countDown();
+                        await(releaseBoth);
+                        tx.lockThread(siblingId).orElseThrow();
+                        return true;
+                      }));
+      // 双方都拿到同一 Session 的 KEY SHARE + 各自 Thread 的 FOR UPDATE：sibling 不互斥、不 deadlock。
+      assertTrue(bothAcquired.await(10, TimeUnit.SECONDS));
+      releaseBoth.countDown();
+      assertTrue(first.get(10, TimeUnit.SECONDS));
+      assertTrue(second.get(10, TimeUnit.SECONDS));
+    }
+  }
+
+  /** 同 Session 两个 ENTRY materialization：KEY SHARE 锁彼此兼容，新 Thread 各自插入、互不串行化。 */
+  @Test
+  void concurrentEntryMaterializationsKeyShareTheSameSessionWithoutSerialization()
+      throws Exception {
+    Baseline baseline = seedThreadBaseline(store);
+    CountDownLatch bothAcquired = new CountDownLatch(2);
+    CountDownLatch releaseBoth = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<UUID> first =
+          executor.submit(
+              () ->
+                  materializeEntry(
+                      baseline.sessionId(), baseline.rootEntryId(), bothAcquired, releaseBoth));
+      Future<UUID> second =
+          executor.submit(
+              () ->
+                  materializeEntry(
+                      baseline.sessionId(), baseline.rootEntryId(), bothAcquired, releaseBoth));
+      // 双方都拿到同一 Session 的 KEY SHARE 并各自插入新 Thread：若误用 FOR UPDATE 锁 Session，第二个事务会在此处死等。
+      assertTrue(bothAcquired.await(10, TimeUnit.SECONDS));
+      releaseBoth.countDown();
+      first.get(10, TimeUnit.SECONDS);
+      second.get(10, TimeUnit.SECONDS);
+    }
+    // 两个新 Thread 都落库，且属于同一 Session。
+    assertEquals(3, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
+  }
+
+  private UUID materializeEntry(
+      UUID sessionId, UUID rootEntryId, CountDownLatch bothAcquired, CountDownLatch releaseBoth) {
+    return store.transaction(
+        tx -> {
+          // ENTRY 新建路径：KEY SHARE Session（不 FOR UPDATE），新 Thread 直接指向既有 Entry（不复制 Entry）。
+          tx.lockSessionForKeyShare(sessionId).orElseThrow();
+          UUID threadId = tx.nextId();
+          tx.insertThread(thread(threadId, sessionId, rootEntryId));
+          bothAcquired.countDown();
+          await(releaseBoth);
+          // 收尾：阻塞式取回自己的 Thread 行锁（与接受路径的锁持有语义一致）。
+          tx.lockThread(threadId).orElseThrow();
+          return threadId;
+        });
   }
 
   @Test

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.command;
@@ -22,7 +23,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -82,6 +82,7 @@ public abstract class HarnessStoreCommandContract {
             canonical.clientCommandId(),
             canonical.requestHash(),
             canonical.consumedTurnStartEntryId(),
+            canonical.cancelRequestId(),
             canonical.cancelledAt(),
             canonical.createdAt().plusNanos(1));
 
@@ -102,7 +103,9 @@ public abstract class HarnessStoreCommandContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(new ThreadState(id, baseline.rootEntryId(), false, 1, 0, T1, T1));
+              tx.insertThread(
+                  StoreTestSupport.threadState(
+                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
               return id;
             });
     inTransaction(
@@ -134,7 +137,9 @@ public abstract class HarnessStoreCommandContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.insertEntry(
+                  turnStartEntry(
+                      id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
               return id;
             });
     inTransaction(
@@ -145,7 +150,7 @@ public abstract class HarnessStoreCommandContract {
           tx.updateCommands(
               List.of(
                   withConsumedTurnStart(queued.get(0), turnStartEntryId),
-                  withCancelledAt(queued.get(1), T2)));
+                  withCancelledAt(queued.get(1), TestIds.id(1), T2)));
         });
     assertTrue(
         store.<Boolean>transaction(
@@ -165,6 +170,12 @@ public abstract class HarnessStoreCommandContract {
             .transaction(
                 tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(2)).orElseThrow())
             .state());
+    ThreadCommand cancelled =
+        store.transaction(
+            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(2)).orElseThrow());
+    // cancelRequestId 回单原样持久化（PostgreSQL cancel_request_id 列映射）。
+    assertEquals(TestIds.id(1), cancelled.cancelRequestId());
+    assertEquals(T2, cancelled.cancelledAt());
   }
 
   @Test
@@ -230,7 +241,9 @@ public abstract class HarnessStoreCommandContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(new ThreadState(id, baseline.rootEntryId(), false, 1, 0, T1, T1));
+              tx.insertThread(
+                  StoreTestSupport.threadState(
+                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
               return id;
             });
     inTransaction(
@@ -312,6 +325,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.requestHash(),
                 null,
                 null,
+                null,
                 stored.createdAt()),
             new ThreadCommand(
                 stored.threadId(),
@@ -321,6 +335,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.requestHash(),
                 null,
                 null,
+                null,
                 stored.createdAt()),
             new ThreadCommand(
                 stored.threadId(),
@@ -328,6 +343,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.payload(),
                 TestIds.id(888), // different clientCommandId
                 stored.requestHash(),
+                null,
                 null,
                 null,
                 stored.createdAt()),
@@ -345,6 +361,7 @@ public abstract class HarnessStoreCommandContract {
                             List.of(new TextMessageContent("other message"))))),
                 null,
                 null,
+                null,
                 stored.createdAt()),
             new ThreadCommand(
                 stored.threadId(),
@@ -352,6 +369,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.payload(),
                 stored.clientCommandId(),
                 stored.requestHash(),
+                null,
                 null,
                 null,
                 T1));
@@ -378,7 +396,7 @@ public abstract class HarnessStoreCommandContract {
           tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
           ThreadCommand inserted =
               tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow();
-          tx.updateCommands(List.of(withCancelledAt(inserted, T2)));
+          tx.updateCommands(List.of(withCancelledAt(inserted, TestIds.id(1), T2)));
           return null;
         });
     assertEquals(
@@ -472,7 +490,9 @@ public abstract class HarnessStoreCommandContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.insertEntry(
+                  turnStartEntry(
+                      id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
               return id;
             });
     // QUEUED -> QUEUED 不是生命周期转换
@@ -491,7 +511,9 @@ public abstract class HarnessStoreCommandContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.insertEntry(
+                  turnStartEntry(
+                      id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
               return id;
             });
     inTransaction(
@@ -506,7 +528,7 @@ public abstract class HarnessStoreCommandContract {
           // APPLIED -> CANCELLED（跨到 CANCELLED）
           assertThrows(
               IllegalArgumentException.class,
-              () -> tx.updateCommands(List.of(withCancelledAt(applied, T2))));
+              () -> tx.updateCommands(List.of(withCancelledAt(applied, TestIds.id(1), T2))));
           // APPLIED 改为带不同 consumed marker 的同 session TURN_START
           assertThrows(
               IllegalArgumentException.class,
@@ -522,7 +544,7 @@ public abstract class HarnessStoreCommandContract {
           tx.lockThread(baseline.threadId());
           tx.insertCommands(List.of(command(baseline.threadId(), 2, TestIds.id(2))));
           ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
-          ThreadCommand cancelled = withCancelledAt(queued, T2);
+          ThreadCommand cancelled = withCancelledAt(queued, TestIds.id(1), T2);
           tx.updateCommands(List.of(cancelled));
           tx.updateCommands(List.of(cancelled));
         });
@@ -538,7 +560,8 @@ public abstract class HarnessStoreCommandContract {
   void insertCommandsAcceptsOnlyQueuedCommands() {
     ThreadCommand applied =
         withConsumedTurnStart(command(baseline.threadId(), 1, TestIds.id(1)), TestIds.id(77));
-    ThreadCommand cancelled = withCancelledAt(command(baseline.threadId(), 2, TestIds.id(2)), T2);
+    ThreadCommand cancelled =
+        withCancelledAt(command(baseline.threadId(), 2, TestIds.id(2)), TestIds.id(1), T2);
     assertThrows(
         IllegalArgumentException.class,
         () -> inTransaction(store, tx -> tx.insertCommands(List.of(applied))));
@@ -550,7 +573,8 @@ public abstract class HarnessStoreCommandContract {
   @Test
   void caughtLateInsertValidationFailureDoesNotCommitAnEarlierBatchItem() {
     ThreadCommand valid = command(baseline.threadId(), 1, TestIds.id(1));
-    ThreadCommand invalid = withCancelledAt(command(baseline.threadId(), 2, TestIds.id(2)), T2);
+    ThreadCommand invalid =
+        withCancelledAt(command(baseline.threadId(), 2, TestIds.id(2)), TestIds.id(1), T2);
     store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -582,7 +606,9 @@ public abstract class HarnessStoreCommandContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.insertEntry(
+                  turnStartEntry(
+                      id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
               return id;
             });
 
@@ -664,7 +690,9 @@ public abstract class HarnessStoreCommandContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.insertEntry(
+                  turnStartEntry(
+                      id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
               return id;
             });
     inTransaction(
@@ -680,5 +708,110 @@ public abstract class HarnessStoreCommandContract {
             .transaction(
                 tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow())
             .state());
+  }
+
+  /**
+   * loadCancelledCommandsByRequest：只返回 (threadId, cancelRequestId) 精确匹配的 CANCELLED 行，且按 sequence
+   * 升序。
+   */
+  @Test
+  void loadCancelledCommandsByRequestIsScopedByThreadRequestAndOrdered() {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(
+              List.of(
+                  command(baseline.threadId(), 1, TestIds.id(1)),
+                  command(baseline.threadId(), 2, TestIds.id(2)),
+                  command(baseline.threadId(), 3, TestIds.id(3)),
+                  command(baseline.threadId(), 4, TestIds.id(4))));
+        });
+    UUID otherThreadId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertThread(
+                  StoreTestSupport.threadState(
+                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
+              return id;
+            });
+    UUID turnStartEntryId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  turnStartEntry(
+                      id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
+              tx.lockThread(otherThreadId);
+              ThreadCommand foreign = command(otherThreadId, 1, TestIds.id(9));
+              tx.insertCommands(List.of(foreign));
+              tx.updateCommands(List.of(withCancelledAt(foreign, TestIds.id(1), T2)));
+              return id;
+            });
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          List<ThreadCommand> queued = tx.loadQueuedCommands(baseline.threadId());
+          // seq1 -> APPLIED；seq2 与 seq3 -> 同一 stop；seq4 -> 另一 stop。
+          tx.updateCommands(
+              List.of(
+                  withConsumedTurnStart(queued.get(0), turnStartEntryId),
+                  withCancelledAt(queued.get(1), TestIds.id(1), T2),
+                  withCancelledAt(queued.get(2), TestIds.id(1), T2),
+                  withCancelledAt(queued.get(3), TestIds.id(2), T2)));
+        });
+    assertEquals(
+        List.of(
+            command(baseline.threadId(), 2, TestIds.id(2)).cancel(TestIds.id(1), T2),
+            command(baseline.threadId(), 3, TestIds.id(3)).cancel(TestIds.id(1), T2)),
+        store.transaction(
+            tx -> tx.loadCancelledCommandsByRequest(baseline.threadId(), TestIds.id(1))));
+    // 另一 stop 的取消行不混入；另一 Thread 的相同 raw id 不混入。
+    assertEquals(
+        List.of(command(baseline.threadId(), 4, TestIds.id(4)).cancel(TestIds.id(2), T2)),
+        store.transaction(
+            tx -> tx.loadCancelledCommandsByRequest(baseline.threadId(), TestIds.id(2))));
+    assertTrue(
+        store
+            .<Boolean>transaction(
+                tx ->
+                    tx.loadCancelledCommandsByRequest(otherThreadId, TestIds.id(1)).stream()
+                        .allMatch(c -> c.threadId().equals(otherThreadId)))
+            .equals(Boolean.TRUE));
+  }
+
+  /** listThreadsBySession：按 (created_at, id) 确定性序返回同 Session 的 Thread，跨 Session 不混入。 */
+  @Test
+  void listThreadsBySessionOrdersByCreatedAtThenId() {
+    UUID laterThreadId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertThread(
+                  StoreTestSupport.threadState(
+                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
+              return id;
+            });
+    UUID sameTimeHigherId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertThread(
+                  StoreTestSupport.threadState(
+                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T0, T0));
+              return id;
+            });
+    Baseline other = seedThreadBaseline(store);
+    // createdAt 相同时按 id 升序，随后 createdAt 更大的排后；其他 Session 不列出。
+    assertEquals(
+        List.of(baseline.threadId(), sameTimeHigherId, laterThreadId),
+        store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).stream()
+            .map(thread -> thread.id())
+            .toList());
+    assertTrue(
+        store.transaction(tx -> tx.listThreadsBySession(other.sessionId())).stream()
+            .noneMatch(thread -> thread.sessionId().equals(baseline.sessionId())));
   }
 }

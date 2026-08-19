@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.cancelTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.inTransaction;
@@ -97,7 +98,7 @@ class HarnessRuntimeStopToolTest {
     }
 
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertStopped(result);
     assertEquals(0, result.cancelledCommandCount());
     assertEquals(2L, result.thread().revision());
 

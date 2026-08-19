@@ -71,7 +71,9 @@ final class PostgresqlHarnessRows {
       (resultSet, rowNumber) ->
           new ThreadState(
               uuid(resultSet, "id"),
+              uuid(resultSet, "session_id"),
               uuid(resultSet, "head_entry_id"),
+              resultSet.getString("materialization_hash"),
               resultSet.getBoolean("yolo_enabled"),
               resultSet.getLong("next_command_sequence"),
               resultSet.getLong("revision"),
@@ -88,6 +90,7 @@ final class PostgresqlHarnessRows {
             uuid(resultSet, "client_command_id"),
             resultSet.getString("request_hash"),
             nullableUuid(resultSet, "consumed_turn_start_entry_id"),
+            nullableUuid(resultSet, "cancel_request_id"),
             nullableInstant(resultSet, "cancelled_at"),
             instant(resultSet, "created_at"));
       };

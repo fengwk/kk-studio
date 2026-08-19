@@ -51,7 +51,7 @@ public abstract class HarnessStoreEntryTreeContract {
               rootEntry(baseline.rootEntryId(), baseline.sessionId()),
               tx.findEntry(baseline.rootEntryId()).orElseThrow());
           assertEquals(
-              thread(baseline.threadId(), baseline.rootEntryId()),
+              thread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId()),
               tx.findThread(baseline.threadId()).orElseThrow());
           return null;
         });
@@ -88,8 +88,14 @@ public abstract class HarnessStoreEntryTreeContract {
                             baseline.rootEntryId(),
                             T1.plusNanos(1)))));
     ThreadState thread =
-        new ThreadState(
-            TestIds.id(101), baseline.rootEntryId(), false, 1, 0, T0.plusNanos(1), T0.plusNanos(1));
+        StoreTestSupport.threadState(
+            TestIds.id(101),
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            1,
+            0,
+            T0.plusNanos(1),
+            T0.plusNanos(1));
     assertThrows(
         IllegalArgumentException.class, () -> inTransaction(store, tx -> tx.insertThread(thread)));
   }
@@ -272,7 +278,9 @@ public abstract class HarnessStoreEntryTreeContract {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            inTransaction(store, tx -> tx.insertThread(thread(TestIds.id(100), TestIds.id(999)))));
+            inTransaction(
+                store,
+                tx -> tx.insertThread(thread(TestIds.id(100), TestIds.id(888), TestIds.id(999)))));
   }
 
   @Test
@@ -282,7 +290,11 @@ public abstract class HarnessStoreEntryTreeContract {
         IllegalArgumentException.class,
         () ->
             inTransaction(
-                store, tx -> tx.insertThread(thread(baseline.threadId(), baseline.rootEntryId()))));
+                store,
+                tx ->
+                    tx.insertThread(
+                        thread(
+                            baseline.threadId(), baseline.sessionId(), baseline.rootEntryId()))));
   }
 
   @Test
@@ -299,7 +311,11 @@ public abstract class HarnessStoreEntryTreeContract {
         IllegalStateException.class,
         () ->
             inTransaction(
-                store, tx -> tx.updateThread(thread(baseline.threadId(), baseline.rootEntryId()))));
+                store,
+                tx ->
+                    tx.updateThread(
+                        thread(
+                            baseline.threadId(), baseline.sessionId(), baseline.rootEntryId()))));
   }
 
   @Test
@@ -310,8 +326,9 @@ public abstract class HarnessStoreEntryTreeContract {
         tx -> {
           ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
           tx.updateThread(
-              new ThreadState(
+              StoreTestSupport.threadState(
                   locked.id(),
+                  locked.sessionId(),
                   locked.headEntryId(),
                   true,
                   3,
@@ -338,8 +355,9 @@ public abstract class HarnessStoreEntryTreeContract {
                 tx -> {
                   ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
                   tx.updateThread(
-                      new ThreadState(
+                      StoreTestSupport.threadState(
                           locked.id(),
+                          locked.sessionId(),
                           locked.headEntryId(),
                           locked.yoloEnabled(),
                           locked.nextCommandSequence(),
@@ -356,11 +374,12 @@ public abstract class HarnessStoreEntryTreeContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.rootEntryId()));
+              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
               ThreadState inserted = tx.findThread(id).orElseThrow();
               tx.updateThread(
-                  new ThreadState(
+                  StoreTestSupport.threadState(
                       inserted.id(),
+                      inserted.sessionId(),
                       inserted.headEntryId(),
                       true,
                       inserted.nextCommandSequence(),
@@ -445,7 +464,14 @@ public abstract class HarnessStoreEntryTreeContract {
                 tx -> {
                   tx.lockThread(baseline.threadId());
                   tx.updateThread(
-                      new ThreadState(baseline.threadId(), TestIds.id(999), false, 1, 1, T0, T2));
+                      StoreTestSupport.threadState(
+                          baseline.threadId(),
+                          baseline.sessionId(),
+                          TestIds.id(999),
+                          1,
+                          1,
+                          T0,
+                          T2));
                 }));
     // 将 head 迁移到一个已存在 entry 是允许的
     UUID turnStartEntryId =
@@ -460,7 +486,8 @@ public abstract class HarnessStoreEntryTreeContract {
         tx -> {
           tx.lockThread(baseline.threadId());
           tx.updateThread(
-              new ThreadState(baseline.threadId(), turnStartEntryId, false, 1, 1, T0, T2));
+              StoreTestSupport.threadState(
+                  baseline.threadId(), baseline.sessionId(), turnStartEntryId, 1, 1, T0, T2));
         });
     UUID committedHead =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().headEntryId());

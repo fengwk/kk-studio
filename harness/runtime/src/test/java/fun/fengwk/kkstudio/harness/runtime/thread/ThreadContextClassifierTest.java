@@ -80,7 +80,10 @@ class ThreadContextClassifierTest {
   private static final UUID ERROR_ID = id(5);
   private static final UUID TURN_END_ID = id(6);
   private static final UUID MODEL_ID = id(20);
+  private static final UUID OTHER_THREAD_ID = id(999);
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
+  private static final String MATERIALIZATION_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private final ThreadContextClassifier classifier = new ThreadContextClassifier();
 
@@ -114,6 +117,36 @@ class ThreadContextClassifierTest {
     // 携带 head TURN_END 身份，调用方无需重新发现。
     assertEquals(TURN_END_ID, context.turnEnd().id());
     assertEquals(TURN_START_ID, ((TurnEndPayload) context.turnEnd().payload()).turnStartEntryId());
+  }
+
+  /**
+   * owner-aware continuation：被引用 TURN_START 的 ownerThreadId 不等于当前 Thread 时义务归另一 Thread，本 Thread
+   * 视为历史。
+   */
+  @Test
+  void foreignContinuationIsHistoricalNotContinuationDue() {
+    EntryPath foreignPath =
+        new EntryPath(
+            List.of(
+                entry(ROOT_ID, null, new RootPayload(branchSettings())),
+                entry(
+                    TURN_START_ID,
+                    ROOT_ID,
+                    new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), OTHER_THREAD_ID)),
+                entry(USER_ID, TURN_START_ID, userMessage()),
+                entry(ASSISTANT_ID, USER_ID, assistantMessage(List.of())),
+                entry(
+                    TURN_END_ID,
+                    ASSISTANT_ID,
+                    new TurnEndPayload(
+                        TURN_START_ID, TurnEndOutcome.COMPLETED, true, null, null))));
+    assertEquals(
+        ThreadContext.IdleOrHistorical.class,
+        classifier.classify(thread(TURN_END_ID), foreignPath, null, List.of()).getClass());
+    // owner 精确匹配时才承担该 CONTINUATION obligation（对照组）。
+    assertEquals(
+        ThreadContext.ContinuationDue.class,
+        classifier.classify(thread(TURN_END_ID), closedTurnPath(true), null, List.of()).getClass());
   }
 
   @Test
@@ -632,7 +665,8 @@ class ThreadContextClassifierTest {
   // -----------------------------------------------------------------------------------------------
 
   private static ThreadState thread(UUID headEntryId) {
-    return new ThreadState(THREAD_ID, headEntryId, false, 1, 0, NOW, NOW);
+    return new ThreadState(
+        THREAD_ID, SESSION_ID, headEntryId, MATERIALIZATION_HASH, false, 1, 0, NOW, NOW);
   }
 
   private static Entry entry(UUID id, UUID parentId, EntryPayload payload) {

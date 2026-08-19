@@ -7,6 +7,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,7 +48,8 @@ class HarnessRuntimeStopIdleTest {
   void idleWithoutCommandsOrWorkIsZeroEffect() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertEquals(StopResult.Status.IDLE, result.status());
+    assertFalse(result.replayed());
+    assertNull(result.stoppedTurnEndEntryId());
     assertEquals(0, result.cancelledCommandCount());
     assertEquals(0L, result.thread().revision());
     assertEquals(baseline.rootEntryId(), result.thread().headEntryId());
@@ -59,7 +61,8 @@ class HarnessRuntimeStopIdleTest {
     seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("a"), TestIds.id(1));
     seedQueuedCommand(store, baseline.threadId(), 2L, userMessagePayload("b"), TestIds.id(2));
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertEquals(StopResult.Status.IDLE, result.status());
+    assertFalse(result.replayed());
+    assertNull(result.stoppedTurnEndEntryId());
     assertEquals(2, result.cancelledCommandCount());
     assertEquals(1L, result.thread().revision());
     assertEquals(1L, result.thread().nextCommandSequence());
@@ -87,7 +90,8 @@ class HarnessRuntimeStopIdleTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     seedThreadWork(store, baseline.threadId());
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertEquals(StopResult.Status.IDLE, result.status());
+    assertFalse(result.replayed());
+    assertNull(result.stoppedTurnEndEntryId());
     assertEquals(0, result.cancelledCommandCount());
     assertEquals(0L, result.thread().revision());
     assertFalse(

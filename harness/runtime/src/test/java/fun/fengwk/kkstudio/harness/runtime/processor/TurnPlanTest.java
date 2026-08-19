@@ -115,6 +115,7 @@ class TurnPlanTest {
                 new CustomMessageCommandPayload(AgentMessage.system("finish now"))),
             null,
             null,
+            null,
             Instant.EPOCH);
     ThreadCommand user =
         new ThreadCommand(
@@ -124,6 +125,7 @@ class TurnPlanTest {
             TestIds.id(6),
             ThreadCommandPayloadJsonCodec.requestHash(
                 new CustomMessageCommandPayload(AgentMessage.user("later input"))),
+            null,
             null,
             null,
             Instant.EPOCH);

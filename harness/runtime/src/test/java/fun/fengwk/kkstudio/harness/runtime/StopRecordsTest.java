@@ -1,7 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.MATERIALIZATION_HASH;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,7 +34,15 @@ class StopRecordsTest {
 
   private static final ThreadState THREAD =
       new ThreadState(
-          id(1L), id(2L), false, 1, 0, Instant.ofEpochMilli(1), Instant.ofEpochMilli(1));
+          id(1L),
+          id(2L),
+          id(3L),
+          MATERIALIZATION_HASH,
+          false,
+          1,
+          0,
+          Instant.ofEpochMilli(1),
+          Instant.ofEpochMilli(1));
 
   private InMemoryHarnessStore store;
   private HarnessRuntime runtime;
@@ -59,42 +70,35 @@ class StopRecordsTest {
 
   @Test
   void stopResultRejectsInvalidShapes() {
-    assertThrows(NullPointerException.class, () -> new StopResult(null, THREAD, null, 0));
+    assertThrows(NullPointerException.class, () -> new StopResult(true, null, null, 0, List.of()));
     assertThrows(
-        NullPointerException.class, () -> new StopResult(StopResult.Status.IDLE, null, null, 0));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new StopResult(StopResult.Status.IDLE, THREAD, null, -1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new StopResult(StopResult.Status.IDLE, THREAD, id(3L), 0));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new StopResult(StopResult.Status.STOPPED, THREAD, null, 0));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new StopResult(StopResult.Status.REPLAYED, THREAD, null, 0));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new StopResult(StopResult.Status.REPLAYED, THREAD, id(3L), 1));
+        IllegalArgumentException.class, () -> new StopResult(false, THREAD, null, -1, List.of()));
+    assertThrows(NullPointerException.class, () -> new StopResult(false, THREAD, null, 0, null));
   }
 
   @Test
   void stopResultValidShapesRoundTrip() {
-    StopResult idle = new StopResult(StopResult.Status.IDLE, THREAD, null, 0);
-    assertEquals(StopResult.Status.IDLE, idle.status());
+    StopResult idle = new StopResult(false, THREAD, null, 0, List.of());
+    assertFalse(idle.replayed());
     assertEquals(THREAD, idle.thread());
     assertNull(idle.stoppedTurnEndEntryId());
     assertEquals(0, idle.cancelledCommandCount());
 
-    StopResult stopped = new StopResult(StopResult.Status.STOPPED, THREAD, id(3L), 2);
+    StopResult stopped = new StopResult(false, THREAD, id(3L), 2, List.of());
+    assertFalse(stopped.replayed());
     assertEquals(id(3L), stopped.stoppedTurnEndEntryId());
     assertEquals(2, stopped.cancelledCommandCount());
+
+    // live receipt replay：replayed=true 且 stoppedTurnEndEntryId 非 null（queued-only replay 则可为
+    // null）。
+    StopResult replayed = new StopResult(true, THREAD, id(3L), 0, List.of());
+    assertTrue(replayed.replayed());
+    assertEquals(id(3L), replayed.stoppedTurnEndEntryId());
   }
 
   @Test
   void stopCommitRejectsInvalidLocalCancellationMetadata() {
-    StopResult idle = new StopResult(StopResult.Status.IDLE, THREAD, null, 0);
+    StopResult idle = new StopResult(false, THREAD, null, 0, List.of());
     // Model 与 Tool 执行不能同时取消。
     assertThrows(
         IllegalArgumentException.class,
@@ -110,7 +114,7 @@ class StopRecordsTest {
         HarnessRuntimeTestSupport.seedModel(store, ModelInvocationStatus.READY);
     UUID stopRequestId = id(8L);
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), stopRequestId, 0));
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertStopped(result);
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(result.thread().headEntryId()));
     TurnEndPayload end = (TurnEndPayload) path.head().payload();
     assertEquals(stopRequestId, end.closeRequestId());

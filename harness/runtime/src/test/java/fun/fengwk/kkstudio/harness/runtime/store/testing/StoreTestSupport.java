@@ -85,6 +85,10 @@ final class StoreTestSupport {
   static final Instant T4 = Instant.ofEpochMilli(5000);
   static final Instant T5 = Instant.ofEpochMilli(6000);
 
+  /** 测试种子线程的合法 64 位小写 SHA-256 materialization hash（非 accept 路径的固定身份键）。 */
+  static final String MATERIALIZATION_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
   private StoreTestSupport() {}
 
   /** 运行 void transaction 体，便于测试使用 statement lambda。 */
@@ -110,7 +114,7 @@ final class StoreTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertThread(thread(threadId, rootEntryId));
+          tx.insertThread(thread(threadId, sessionId, rootEntryId));
           return new Baseline(sessionId, rootEntryId, threadId);
         });
   }
@@ -131,7 +135,7 @@ final class StoreTestSupport {
                   rootEntryId,
                   resolvedTurnStartPayload(threadId),
                   T1));
-          tx.insertThread(thread(threadId, turnStartEntryId));
+          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
           return new TurnBaseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
   }
@@ -157,6 +161,14 @@ final class StoreTestSupport {
 
   static Entry turnStartEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {
     return new Entry(id, sessionId, parentId, turnStartPayload(), createdAt);
+  }
+
+  /**
+   * 带 owner Thread 的 TURN_START，用于满足「consumed turn start ownerThreadId 必须等于 command threadId」的新契约。
+   */
+  static Entry turnStartEntry(
+      UUID id, UUID sessionId, UUID parentId, UUID ownerThreadId, Instant createdAt) {
+    return new Entry(id, sessionId, parentId, resolvedTurnStartPayload(ownerThreadId), createdAt);
   }
 
   static Entry assistantEntry(
@@ -305,8 +317,43 @@ final class StoreTestSupport {
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
-  static ThreadState thread(UUID id, UUID headEntryId) {
-    return new ThreadState(id, headEntryId, false, 1, 0, T0, T0);
+  static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId) {
+    return threadState(id, sessionId, headEntryId, 1, 0, T0, T0);
+  }
+
+  /** 允许显式指定 next sequence / revision 与时间的 ThreadState 构造（契约测试模拟已推进的 Thread）。 */
+  static ThreadState threadState(
+      UUID id,
+      UUID sessionId,
+      UUID headEntryId,
+      long nextCommandSequence,
+      long revision,
+      Instant createdAt,
+      Instant updatedAt) {
+    return threadState(
+        id, sessionId, headEntryId, false, nextCommandSequence, revision, createdAt, updatedAt);
+  }
+
+  /** 允许显式指定 YOLO runtime policy、next sequence / revision 与时间的 ThreadState 构造。 */
+  static ThreadState threadState(
+      UUID id,
+      UUID sessionId,
+      UUID headEntryId,
+      boolean yoloEnabled,
+      long nextCommandSequence,
+      long revision,
+      Instant createdAt,
+      Instant updatedAt) {
+    return new ThreadState(
+        id,
+        sessionId,
+        headEntryId,
+        MATERIALIZATION_HASH,
+        yoloEnabled,
+        nextCommandSequence,
+        revision,
+        createdAt,
+        updatedAt);
   }
 
   /**
@@ -326,6 +373,7 @@ final class StoreTestSupport {
         ThreadCommandPayloadJsonCodec.requestHash(payload),
         null,
         null,
+        null,
         T0);
   }
 
@@ -339,11 +387,13 @@ final class StoreTestSupport {
         command.requestHash(),
         turnStartEntryId,
         null,
+        null,
         command.createdAt());
   }
 
-  /** 返回仅设置了 cancelled marker 的 command；其余身份信息保持不变。 */
-  static ThreadCommand withCancelledAt(ThreadCommand command, Instant cancelledAt) {
+  /** 返回仅设置了 cancelled marker（cancelRequestId + cancelledAt 成对）的 command；其余身份信息保持不变。 */
+  static ThreadCommand withCancelledAt(
+      ThreadCommand command, UUID cancelRequestId, Instant cancelledAt) {
     return new ThreadCommand(
         command.threadId(),
         command.sequence(),
@@ -351,6 +401,7 @@ final class StoreTestSupport {
         command.clientCommandId(),
         command.requestHash(),
         null,
+        cancelRequestId,
         cancelledAt,
         command.createdAt());
   }
