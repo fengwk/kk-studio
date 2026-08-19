@@ -393,6 +393,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                 fixture,
                 tx -> tx.findModelInvocationByTurn(baseline.threadId(), path.entries().get(1).id()))
             .isEmpty());
+    // 无 deferred message、闭合也未触发 compaction（ROOT 无历史）-> 不保留 THREAD Work。
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
   /**
