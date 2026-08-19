@@ -75,9 +75,7 @@ final class ToolExecution implements ToolGateway.Listener {
   private boolean gateOpen;
   private ToolGateway.Handle handle;
 
-  /**
-   * 两阶段激活仲裁标记（monitor 保护）：activation 期间 abandon 只推迟 handle cancel，保证外部调用序 ACTIVATE -&gt; CANCEL。
-   */
+  /** monitor 保护；activation 期间 abandon 推迟 handle cancel。 */
   private boolean activationInProgress;
 
   ToolExecution(
@@ -310,17 +308,14 @@ final class ToolExecution implements ToolGateway.Listener {
       return;
     }
     heartbeat.stop();
-    boolean deferCancel;
+    boolean cancelNow;
     synchronized (monitor) {
       pending.clear();
-      deferCancel = activationInProgress;
+      cancelNow = !activationInProgress;
     }
-    if (deferCancel) {
-      // 激活已开始：cancel 由 activate() 在 activation 返回后补上（外部调用序 ACTIVATE -> CANCEL）；本地清理仍立即完成。
-      ownerRelease.accept(this);
-      return;
+    if (cancelNow) {
+      cancelHandle();
     }
-    cancelHandle();
     ownerRelease.accept(this);
   }
 

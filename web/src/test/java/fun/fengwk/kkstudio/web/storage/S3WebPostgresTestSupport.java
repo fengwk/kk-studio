@@ -14,12 +14,11 @@ import java.sql.SQLException;
 public abstract class S3WebPostgresTestSupport extends WebPostgresTestSupport {
 
   @DynamicPropertySource
-  static void enableS3BeforeContextCreation(DynamicPropertyRegistry registry) {
+  static void enableS3BeforeContextCreation(DynamicPropertyRegistry ignored) {
     try {
       enableS3InSystemSettings();
     } catch (SQLException exception) {
       throw new ExceptionInInitializerError(exception);
     }
-    registry.add("kk-studio.test.system-settings.s3-enabled", () -> "true");
   }
 }

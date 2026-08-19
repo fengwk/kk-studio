@@ -125,8 +125,7 @@ public class SystemSettingsCodec {
    * 重编码与存储树对比即暴露形状差异；null 引用字段被 canonical 编码省略，属合法省略，不受影响。
    *
    * <p>不启用 FAIL_ON_MISSING_CREATOR_PROPERTIES / FAIL_ON_NULL_CREATOR_PROPERTIES：jackson 2.19.0
-   * 下这两个开关会连同 nullable 引用 creator 属性一起拒绝，破坏 canonical 的省略 null 语义；这里以「已解码聚合的 canonical 重编码」作为必须存在
-   * 的字段契约，是唯一同时满足「缺失 required 拒绝」与「nullable 引用可省略」的最小方案。
+   * 下这两个开关会连同 nullable 引用 creator 属性一起拒绝，破坏 canonical 的省略 null 语义；因此以已解码聚合的 canonical 重编码定义必须存在的字段。
    */
   private void assertRequiredFieldsStored(SystemSettings settings, String storedJson)
       throws JsonProcessingException {

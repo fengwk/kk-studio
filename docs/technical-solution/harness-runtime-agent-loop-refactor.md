@@ -1,6 +1,6 @@
-# Harness Runtime 长程 Agent Loop 重构方案
+# Harness Runtime 长程 Agent Loop
 
-本文定义 Harness Runtime Agent Loop 的规范性重构目标。涉及本文范围的后续实现、schema、测试和文档更新均以本文为准；未覆盖的能力继续遵循现有 Harness Runtime 文档。
+本文定义 Harness Runtime Agent Loop 当前生效的 durable reducer、持久化形状、执行协议与验证约束；未覆盖的能力继续遵循其他 Harness Runtime 文档。
 
 ## 1. 目标
 
@@ -878,7 +878,7 @@ Provider fatal error / retry exhausted
 
 不增加 doom-loop fingerprint、连续 LENGTH 阈值、重复 Tool error 阈值或 `shouldStopAfterTurn`。Provider/Tool transport retry 仍受已有 retry policy 限制。
 
-## 21. Persistence target
+## 21. Persistence shape
 
 表数量保持七张。
 

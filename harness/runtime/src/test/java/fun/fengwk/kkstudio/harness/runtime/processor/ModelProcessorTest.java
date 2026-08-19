@@ -831,8 +831,7 @@ class ModelProcessorTest {
    * retry 的持久化 failedAt 以当前已锁定 durable 事实为下界（leaseNow / thread.updatedAt / model.updatedAt / 上一
    * retryAt 的最大值）：attempt 执行期间 clock 回拨时，第二次 MODEL_ATTEMPT_FAILURE 的 failedAt 仍单调推进， terminal
    * materialization 的 failedAttempts 不变量与 Entry 链时间顺序都能通过，retry -&gt; terminal -&gt; THREAD
-   * materialization 全链路一次跑通。旧实现直接用回拨的 clock 采样（低于上一 retryAt），ModelInvocation 构造即以 "a failed attempt
-   * must not precede the previous retry schedule" 抛异常，retry 事务回滚且 invocation 卡在 RUNNING。
+   * materialization 全链路一次跑通。
    */
   @Test
   void retryFailedAtUsesDurableFloorAcrossClockRollbackAndMaterializesMonotonically() {
@@ -1735,7 +1734,7 @@ class ModelProcessorTest {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // 主审修正：handle race / duplicate fencing / null start / lease margin / closed
+  // Handle fencing / duplicate admission / null start / lease margin / close
   // ---------------------------------------------------------------------------------------------
 
   /**
@@ -1764,7 +1763,7 @@ class ModelProcessorTest {
 
   /**
    * abandon 在 activation 开始前获胜（本地 cancel 抢占 markRunning 事务，markRunning 仍 commit）：durable RUNNING
-   * 保持，但 {@code handle.activate()} 绝不调用（旧实现会先 CANCEL 再调用 ACTIVATE，产生破坏性调用序）。
+   * 保持，但 {@code handle.activate()} 绝不调用。
    */
   @Test
   void cancelWinningDuringMarkRunningSkipsActivateAndCancelsHandle() throws Exception {
@@ -1836,7 +1835,7 @@ class ModelProcessorTest {
 
   /**
    * abandon 在 activation 期间获胜（{@code handle.activate()} 已开始）：abandon 必须推迟 handle cancel 直到 activate
-   * 返回，外部调用序恒为 ACTIVATE -&gt; CANCEL，cancel 绝不丢失（旧实现直接 CANCEL 后再 ACTIVATE）。
+   * 返回，外部调用序恒为 ACTIVATE -&gt; CANCEL，cancel 绝不丢失。
    */
   @Test
   void cancelWinningDuringActivationDefersCancelUntilActivateReturns() throws Exception {

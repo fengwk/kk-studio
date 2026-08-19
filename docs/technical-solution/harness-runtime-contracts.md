@@ -217,7 +217,7 @@ lock Thread
 
 Stop 成功关闭 live Turn 的同一事务内：先净化 Work mailbox（deleteWork 的 owner 校验反查 Model/Tool Invocation 行），再删除全部 Tool Invocations、删除父 ModelInvocation（删除前执行与 `ModelAttemptMaterialization` 等价的严格校验），advance Thread；closed turn 不保留任何 Invocation 行，迟到 callback 因行已删除或 claim 失效而 no-op。
 
-`StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 revision +1，**不写 durable stop 标记**；无 queued 时真正 no-op，同 `stopRequestId` 再调用仍是 IDLE 而非 REPLAYED）、`REPLAYED`（精确重放先前 STOPPED，不取消命令）。durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」，在 Thread 锁内做 Session 级不可变查找：同 raw `stopRequestId` 只在自己的 turn 上产生 replay，另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到同 Session 的兄弟分支后仍可命中。客户端重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedRevision`；服务端 replay 先于 CAS，因此原始 revision 重试恒安全。
+`StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 revision +1，**不写 durable stop 标记**；无 queued 时真正 no-op，同 `stopRequestId` 再调用仍是 IDLE 而非 REPLAYED）、`REPLAYED`（精确重放先前 STOPPED，不取消命令）。durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」，在 Thread 锁内做 Session 级不可变查找：同 raw `stopRequestId` 只在自己的 turn 上产生 replay，另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到同 Session 的兄弟分支后仍可命中。STOPPED 的不确定重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedRevision`，服务端 replay 先于 CAS；marker-free IDLE 若已取消 queued 并推进 revision，响应丢失后的旧 revision 重试可返回 `STALE_REVISION`，客户端按权威 snapshot 的 basis fence 收敛。
 
 ## 8. Tool approval
 
