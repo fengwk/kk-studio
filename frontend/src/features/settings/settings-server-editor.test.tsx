@@ -7,6 +7,7 @@ import type {
   SystemSettingsDTO,
   SystemSettingsUpdateDTO,
 } from '@/shared/api/contracts/system-settings'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { makeSettingsDto } from '@/features/settings/settings-test-fixtures'
 import { SettingsPage } from '@/features/settings/SettingsPage'
@@ -203,6 +204,44 @@ describe('system settings server editor', () => {
 
     await userEvent.click(within(reopened).getByRole('button', { name: '重新加载' }))
     expect(reloadPage).toHaveBeenCalledOnce()
+  })
+
+  it('sends the draft snapshot base version after a background refetch advanced the authoritative version', async () => {
+    const backend = createBackend()
+    mocks.get.mockImplementation(backend.get)
+    mocks.update.mockImplementation(backend.update)
+    const { queryClient } = renderSettings()
+
+    // 以 v0 权威 hydration，然后编辑一个字段。
+    await userEvent.click(serverTab('AI 运行时'))
+    const delay = await screen.findByLabelText('基础延迟（毫秒）')
+    await userEvent.clear(delay)
+    await userEvent.type(delay, '3000')
+
+    // 另一写入者把后端推进到 v1，并改动了用户未触碰的字段（最大重试次数 3 -> 9）。
+    const concurrent = makeSettingsDto({ version: '1' })
+    concurrent.aiRuntime.retryMaxRetries = 9
+    backend.setState(concurrent)
+
+    // 后台 refetch：客户端权威变为 v1，但 draft 仍是 v0 快照（未触碰字段仍显示 v0 值）。
+    await queryClient.refetchQueries({ queryKey: queryKeys.systemSettings.all })
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2))
+    expect((await backend.get()).version).toBe('1')
+    expect(screen.getByLabelText('最大重试次数')).toHaveValue(3)
+    expect(delay).toHaveValue(3000)
+
+    // 保存必须携带 draft 快照的 baseVersion=0，而不是权威的 v1，否则会静默覆盖并发修改。
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    const dialog = await screen.findByRole('alertdialog', { name: '设置已在其他位置修改' })
+    expect(dialog).toHaveTextContent('当前未保存的修改将会丢失')
+    expect(mocks.update).toHaveBeenCalledTimes(1)
+    const sent = mocks.update.mock.calls[0]![0] as SystemSettingsUpdateDTO
+    expect(sent.expectedVersion).toBe('0')
+    // 409 拒绝后后端未被旧 draft 覆盖：并发写入的 v1 字段仍然存在，版本未推进。
+    const backendState = await backend.get()
+    expect(backendState.aiRuntime.retryMaxRetries).toBe(9)
+    expect(backendState.version).toBe('1')
   })
 
   it('resets the draft back to the authoritative aggregate', async () => {

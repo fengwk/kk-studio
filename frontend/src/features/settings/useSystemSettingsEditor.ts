@@ -15,11 +15,18 @@ import {
 } from '@/features/settings/system-settings-draft'
 import { useI18n } from '@/shared/i18n'
 
+/** draft 与其 CAS base version 的单一快照：两者总是从同一权威派生点一起捕获/更新。 */
+interface DraftSnapshot {
+  sections: SystemSettingsSectionsDraft
+  baseVersion: string
+}
+
 /**
  * 全局 system settings 聚合的读取 / draft / 完整聚合 CAS 保存控制器。
  *
- * - 权威 GET 是唯一事实源：首次成功后派生 draft，之后查询刷新绝不静默覆盖 draft；
- * - 保存发送「完整聚合 + expectedVersion」；成功后以 PUT 响应作为权威并 refetch；
+ * - 权威 GET 是唯一事实源：首次成功后以「sections + version」派生 draft 快照，之后查询刷新绝不静默覆盖 draft；
+ * - draft 与 base version 是一个快照生命周期：保存发送「快照 sections + 快照 baseVersion」，后台刷新只推进权威、
+ *   不推进快照的 baseVersion；重置与 PUT 成功以当时的权威/响应重新捕获整个快照；
  * - 409（version conflict）只打开冲突确认弹窗，不刷新或覆盖 draft；用户确认后由页面执行完整刷新，
  *   重新读取最新权威聚合；
  * - draft 数值字段全程字符串（非有损），组装请求体时校验并转换。
@@ -33,19 +40,24 @@ export function useSystemSettingsEditor() {
     queryFn: () => systemSettingsService.get(),
   })
 
-  const [draft, setDraft] = useState<SystemSettingsSectionsDraft | null>(null)
+  const [draftSnapshot, setDraftSnapshot] = useState<DraftSnapshot | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [staleConflict, setStaleConflict] = useState(false)
   const [draftError, setDraftError] = useState<DraftValidationReason | null>(null)
 
   const authoritative = query.data ?? null
+  const draft = draftSnapshot?.sections ?? null
 
-  // 只在还没有 draft 时从权威数据派生（首次 hydration）；后台刷新绝不静默覆盖用户正在编辑的 draft。
+  // 只在还没有快照时从权威数据派生（首次 hydration，捕获当时的 version 作为 baseVersion）；
+  // 后台刷新既不复位 baseVersion，也不覆盖用户正在编辑的 draft。
   useEffect(() => {
-    if (authoritative && draft === null) {
-      setDraft(settingsSectionsToDraft(authoritative))
+    if (authoritative && draftSnapshot === null) {
+      setDraftSnapshot({
+        sections: settingsSectionsToDraft(authoritative),
+        baseVersion: authoritative.version,
+      })
     }
-  }, [authoritative, draft])
+  }, [authoritative, draftSnapshot])
 
   const authoritativeSections = useMemo<SystemSettingsSectionsDraft | null>(() => {
     return authoritative ? settingsSectionsToDraft(authoritative) : null
@@ -61,16 +73,18 @@ export function useSystemSettingsEditor() {
   const version = authoritative?.version ?? null
 
   const mutation = useMutation({
-    mutationFn: async (sections: SystemSettingsSectionsDraft) => {
-      if (version == null) {
-        throw new Error('system settings are not loaded')
-      }
-      return systemSettingsService.update(assembleSettingsUpdate(sections, version))
+    mutationFn: async (payload: { sections: SystemSettingsSectionsDraft; baseVersion: string }) => {
+      return systemSettingsService.update(
+        assembleSettingsUpdate(payload.sections, payload.baseVersion),
+      )
     },
     onSuccess: async (updated: SystemSettingsDTO) => {
-      // PUT 返回更新后的 GET 形状：先当权威落缓存，再 refetch 对齐服务器。
+      // PUT 返回更新后的 GET 形状：先当权威落缓存，再 refetch 对齐服务器；快照以响应重新捕获。
       queryClient.setQueryData(queryKeys.systemSettings.all, updated)
-      setDraft(settingsSectionsToDraft(updated))
+      setDraftSnapshot({
+        sections: settingsSectionsToDraft(updated),
+        baseVersion: updated.version,
+      })
       setSaveError(null)
       setStaleConflict(false)
       setDraftError(null)
@@ -94,7 +108,7 @@ export function useSystemSettingsEditor() {
   })
 
   const save = useCallback(async () => {
-    if (!draft) {
+    if (!draftSnapshot) {
       return
     }
     // 每次保存从干净状态开始，呈现本次操作的真实结果。
@@ -102,15 +116,23 @@ export function useSystemSettingsEditor() {
     setStaleConflict(false)
     setDraftError(null)
     try {
-      await mutation.mutateAsync(draft)
+      // sections 与 baseVersion 出自同一快照：后台刷新把权威推进到新版本也不会让旧 draft 携带新版本提交。
+      await mutation.mutateAsync({
+        sections: draftSnapshot.sections,
+        baseVersion: draftSnapshot.baseVersion,
+      })
     } catch {
       // 错误已由 mutation onError 写入 UI 状态；这里吞掉避免未处理的 promise 拒绝。
     }
-  }, [draft, mutation])
+  }, [draftSnapshot, mutation])
 
   const reset = useCallback(() => {
     if (authoritative) {
-      setDraft(settingsSectionsToDraft(authoritative))
+      // 重置以当前权威为新的派生点：sections 与 baseVersion 一起捕获。
+      setDraftSnapshot({
+        sections: settingsSectionsToDraft(authoritative),
+        baseVersion: authoritative.version,
+      })
     }
     setSaveError(null)
     setStaleConflict(false)
@@ -123,7 +145,10 @@ export function useSystemSettingsEditor() {
 
   const updateSection = useCallback(
     <K extends keyof SystemSettingsSectionsDraft>(section: K, value: SystemSettingsSectionsDraft[K]) => {
-      setDraft((prev) => (prev ? { ...prev, [section]: value } : prev))
+      // 只替换 section 内容，baseVersion 保持快照原值不动。
+      setDraftSnapshot((prev) =>
+        prev ? { ...prev, sections: { ...prev.sections, [section]: value } } : prev,
+      )
     },
     [],
   )
