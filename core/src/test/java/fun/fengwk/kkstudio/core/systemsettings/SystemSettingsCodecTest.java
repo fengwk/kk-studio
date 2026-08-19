@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import java.util.Map;
 class SystemSettingsCodecTest {
 
   private final SystemSettingsCodec codec = new SystemSettingsCodec();
+  private final ObjectMapper mapper = new ObjectMapper();
 
   @Test
   void canonicalRoundTripIsIdentity() {
@@ -123,6 +125,108 @@ class SystemSettingsCodecTest {
   }
 
   @Test
+  void rejectsMissingRequiredPrimitiveCreatorProperties() throws Exception {
+    // canonical 中删除 required primitive 后解码必须失败，而不是静默回退到 false/0（损坏 JSON 的典型形态）。
+    String canonical = codec.encode(SystemSettings.DEFAULT);
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode(withoutAiRuntimeField(canonical, "compactionEnabled")),
+        "missing compactionEnabled");
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode(withoutAiRuntimeField(canonical, "retryMaxRetries")),
+        "missing retryMaxRetries");
+  }
+
+  @Test
+  void rejectsNullRequiredPrimitiveCreatorProperties() throws Exception {
+    // 显式 null 的 required primitive 解码必须失败；null 引用字段是合法省略/未配置语义，保持可解码。
+    String canonical = codec.encode(SystemSettings.DEFAULT);
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode(withAiRuntimeField(canonical, "compactionEnabled", mapper.nullNode())),
+        "null compactionEnabled");
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode(withAiRuntimeField(canonical, "retryMaxRetries", mapper.nullNode())),
+        "null retryMaxRetries");
+  }
+
+  @Test
+  void rejectsBooleanScalarCoercionFromStringIntegerAndFloat() throws Exception {
+    // 布尔字段只接受 JSON true/false；string/整数/浮点标量（jackson 2.19.0 默认强制转换）一律拒绝。
+    String canonical = codec.encode(SystemSettings.DEFAULT);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            codec.decode(
+                withAiRuntimeField(
+                    canonical, "compactionEnabled", mapper.getNodeFactory().textNode("true"))),
+        "string boolean");
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            codec.decode(
+                withAiRuntimeField(
+                    canonical, "compactionEnabled", mapper.getNodeFactory().numberNode(1))),
+        "integer boolean");
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            codec.decode(
+                withAiRuntimeField(
+                    canonical, "compactionEnabled", mapper.getNodeFactory().numberNode(1.5))),
+        "float boolean");
+  }
+
+  @Test
+  void omittedNullableReferencesStillRoundTrip() {
+    // 构造全部 nullable 引用（subagentMaxTotalConcurrency、baseUrl、workspaceId、minimaxH3 身份字段）为 null 的配置：
+    // canonical 编码必须省略这些字段，严格解码不得误报缺失，且重编码保持幂等。
+    SystemSettings settings =
+        new SystemSettings(
+            SystemSettings.DEFAULT.tool(),
+            SystemSettings.DEFAULT.aiRuntime(),
+            SystemSettings.DEFAULT.environment(),
+            new SystemSettings.Integrations(
+                new SystemSettings.Comfyui(
+                    false, null, 10_000L, 30_000L, 1_800_000L, 50L * 1024 * 1024),
+                new SystemSettings.OpenCliHub(
+                    false, null, 5_000L, 120_000L, 130_000L, 16 * 1024, 512 * 1024, 4096, 65_535),
+                SystemSettings.DEFAULT.integrations().seedance(),
+                SystemSettings.DEFAULT.integrations().gptImage2(),
+                new SystemSettings.MiniMaxH3(
+                    false, null, null, 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L)),
+            SystemSettings.DEFAULT.storageMedia(),
+            SystemSettings.DEFAULT.advanced());
+    String canonical = codec.encode(settings);
+    assertTrue(!canonical.contains("subagentMaxTotalConcurrency"), canonical);
+    assertTrue(!canonical.contains("\"baseUrl\""), canonical);
+    assertTrue(!canonical.contains("\"workspaceId\""), canonical);
+    assertEquals(settings, codec.decode(canonical));
+    assertEquals(canonical, codec.encode(codec.decode(canonical)));
+  }
+
+  @Test
+  void explicitNullNullableReferencesStillDecode() throws Exception {
+    // 显式 null 的 nullable 引用（语义等于 canonical 省略）必须仍可解码为同一聚合。
+    ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+    ((ObjectNode) root.get("aiRuntime")).set("subagentMaxTotalConcurrency", mapper.nullNode());
+    assertEquals(SystemSettings.DEFAULT, codec.decode(mapper.writeValueAsString(root)));
+    ((ObjectNode) ((ObjectNode) root.get("integrations")).get("comfyui"))
+        .set("baseUrl", mapper.nullNode());
+    assertEquals(SystemSettings.DEFAULT, codec.decode(mapper.writeValueAsString(root)));
+  }
+
+  @Test
+  void caseInsensitiveEnumStillDecodes() throws Exception {
+    // canonical 现网格式保存大写枚举名；小写别名必须仍可解码（ACCEPT_CASE_INSENSITIVE_ENUMS 保持不变）。
+    ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+    ((ObjectNode) root.get("aiRuntime")).put("retryBackoffStrategy", "exponential");
+    assertEquals(SystemSettings.DEFAULT, codec.decode(mapper.writeValueAsString(root)));
+  }
+
+  @Test
   void rejectsForbiddenPermissionPatternsAtSaveValidation() {
     // 领域构造（fromDto 的必经路径）在持久化前拒绝 negation 形态；已构造的合法聚合不可能携带非法 pattern。
     SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
@@ -201,5 +305,20 @@ class SystemSettingsCodecTest {
       reordered.set(names.get(i), root.get(names.get(i)));
     }
     return mapper.writeValueAsString(reordered);
+  }
+
+  /** 从 canonical 文本删除 aiRuntime 的指定字段后重新序列化（基于解析后的 ObjectNode，避免脆弱字符串替换）。 */
+  private String withoutAiRuntimeField(String canonical, String field) throws Exception {
+    ObjectNode root = (ObjectNode) mapper.readTree(canonical);
+    ((ObjectNode) root.get("aiRuntime")).remove(field);
+    return mapper.writeValueAsString(root);
+  }
+
+  /** 把 canonical 文本中 aiRuntime 的指定字段替换为给定节点后重新序列化。 */
+  private String withAiRuntimeField(String canonical, String field, JsonNode value)
+      throws Exception {
+    ObjectNode root = (ObjectNode) mapper.readTree(canonical);
+    ((ObjectNode) root.get("aiRuntime")).set(field, value);
+    return mapper.writeValueAsString(root);
   }
 }
