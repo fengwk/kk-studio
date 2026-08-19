@@ -72,7 +72,7 @@ class HarnessRuntimeSessionEntriesTest {
         List.of(baseline.rootEntryId(), activeTurnStartId, activeUserId),
         snapshot.entryPath().entries().stream().map(Entry::id).toList());
 
-    List<Entry> entries = runtime.getThreadSessionEntries(baseline.threadId());
+    List<Entry> entries = runtime.getSessionEntries(baseline.sessionId());
     assertEquals(
         List.of(baseline.rootEntryId(), activeTurnStartId, inactiveTurnStartId, activeUserId),
         entries.stream().map(Entry::id).toList());
@@ -82,17 +82,16 @@ class HarnessRuntimeSessionEntriesTest {
   }
 
   @Test
-  void missingThreadIsNotFoundAndDoesNotMutateStore() {
+  void missingSessionIsNotFoundAndDoesNotMutateStore() {
     assertThrows(
-        HarnessRuntimeNotFoundException.class,
-        () -> runtime.getThreadSessionEntries(TestIds.id(999)));
+        HarnessRuntimeNotFoundException.class, () -> runtime.getSessionEntries(TestIds.id(999)));
   }
 
   @Test
   void sessionEntryQueryDoesNotBumpRevision() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    runtime.getThreadSessionEntries(baseline.threadId());
-    runtime.getThreadSessionEntries(baseline.threadId());
+    runtime.getSessionEntries(baseline.sessionId());
+    runtime.getSessionEntries(baseline.sessionId());
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(0L, thread.revision());
   }

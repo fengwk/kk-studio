@@ -15,6 +15,9 @@ import java.util.UUID;
 class ThreadStateTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
+  private static final String MATERIALIZATION_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  private static final UUID SESSION_ID = id(1_000_000L);
 
   @Test
   void acceptsValidDurableFields() {
@@ -142,7 +145,15 @@ class ThreadStateTest {
             ThreadState.validateTransition(
                 stored,
                 new ThreadState(
-                    id(7), id(42), false, 3L, 5L, CREATED.plusSeconds(1), CREATED.plusSeconds(1))));
+                    id(7),
+                    SESSION_ID,
+                    id(42),
+                    MATERIALIZATION_HASH,
+                    false,
+                    3L,
+                    5L,
+                    CREATED.plusSeconds(1),
+                    CREATED.plusSeconds(1))));
   }
 
   @Test
@@ -210,6 +221,14 @@ class ThreadStateTest {
       long revision,
       Instant updatedAt) {
     return new ThreadState(
-        id, headEntryId, yoloEnabled, nextCommandSequence, revision, CREATED, updatedAt);
+        id,
+        SESSION_ID,
+        headEntryId,
+        MATERIALIZATION_HASH,
+        yoloEnabled,
+        nextCommandSequence,
+        revision,
+        CREATED,
+        updatedAt);
   }
 }

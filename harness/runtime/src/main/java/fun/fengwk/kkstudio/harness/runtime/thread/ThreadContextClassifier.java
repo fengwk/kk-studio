@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -64,7 +65,13 @@ public final class ThreadContextClassifier {
       requireNoModelOrSiblings(model, toolSiblings, "without an open turn");
       Entry head = path.head();
       if (head.payload() instanceof TurnEndPayload end && end.continueModel()) {
-        return new ThreadContext.ContinuationDue(head);
+        // owner-aware continuation：只有被引用 TURN_START 的 ownerThreadId 等于当前 Thread 时才承担该
+        // obligation；foreign continuation（另一 Thread 创建的 obligation）对本 Thread 视为历史。
+        TurnStartPayload start = referencedTurnStart(path, end);
+        if (thread.id().equals(start.ownerThreadId())) {
+          return new ThreadContext.ContinuationDue(head);
+        }
+        return new ThreadContext.IdleOrHistorical();
       }
       return new ThreadContext.IdleOrHistorical();
     }
@@ -181,6 +188,20 @@ public final class ThreadContextClassifier {
       throw new IllegalStateException("a model is incompatible " + context);
     }
     requireEmptySiblings(toolSiblings, context);
+  }
+
+  /** 解析 TURN_END 引用的 TURN_START；路径结构不变量保证其必须位于同一 path 上，缺失视为破坏。 */
+  private static TurnStartPayload referencedTurnStart(EntryPath path, TurnEndPayload end) {
+    for (Entry entry : path.entries()) {
+      if (entry.id().equals(end.turnStartEntryId())
+          && entry.payload() instanceof TurnStartPayload start) {
+        return start;
+      }
+    }
+    throw new IllegalStateException(
+        "TURN_END with turnStartEntryId "
+            + end.turnStartEntryId()
+            + " references a TURN_START not on its own path");
   }
 
   private static void requireEmptySiblings(List<ToolInvocation> toolSiblings, String context) {

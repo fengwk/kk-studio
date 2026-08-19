@@ -1,5 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -41,6 +46,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
@@ -86,6 +92,11 @@ final class HarnessRuntimeTestSupport {
   static final Instant T3 = Instant.ofEpochMilli(4_000);
   static final Instant T5 = Instant.ofEpochMilli(6_000);
   static final Instant T6 = Instant.ofEpochMilli(7_000);
+
+  /** 测试种子用的合法 64 位小写 SHA-256 materialization hash（非 NEW_SESSION/ENTRY 路径的任意固定值）。 */
+  static final String MATERIALIZATION_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
   static final EnvironmentBinding ENV = EnvironmentBindings.binding("env-1");
   static final EnvironmentBinding ENV2 = EnvironmentBindings.binding("env-2");
 
@@ -156,7 +167,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertThread(thread(threadId, rootEntryId));
+          tx.insertThread(thread(threadId, sessionId, rootEntryId));
           return new Baseline(sessionId, rootEntryId, threadId);
         });
   }
@@ -172,7 +183,7 @@ final class HarnessRuntimeTestSupport {
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
-          tx.insertThread(thread(threadId, turnStartEntryId));
+          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
           return new TurnBaseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
   }
@@ -188,7 +199,7 @@ final class HarnessRuntimeTestSupport {
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
-          tx.insertThread(thread(threadId, turnStartEntryId));
+          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
@@ -215,7 +226,7 @@ final class HarnessRuntimeTestSupport {
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
-          ThreadState thread = thread(threadId, userEntryId);
+          ThreadState thread = thread(threadId, sessionId, userEntryId);
           tx.insertThread(thread);
           UUID modelId = tx.nextId();
           ModelInvocation model =
@@ -251,7 +262,7 @@ final class HarnessRuntimeTestSupport {
                   rootEntryId,
                   new TurnStartPayload(TurnStartReason.CONTINUATION, settings(), threadId, 100_000),
                   T1));
-          ThreadState thread = thread(threadId, turnStartEntryId);
+          ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
           tx.insertThread(thread);
           UUID modelId = tx.nextId();
           ModelInvocation model =
@@ -274,7 +285,7 @@ final class HarnessRuntimeTestSupport {
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
-          tx.insertThread(thread(threadId, turnStartEntryId));
+          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
@@ -321,7 +332,7 @@ final class HarnessRuntimeTestSupport {
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
-          ThreadState thread = thread(threadId, turnStartEntryId);
+          ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
           tx.insertThread(thread);
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
@@ -472,7 +483,8 @@ final class HarnessRuntimeTestSupport {
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
-          ThreadState thread = thread(threadId, headAtTurnEnd ? turnStartEntryId : rootEntryId);
+          ThreadState thread =
+              thread(threadId, sessionId, headAtTurnEnd ? turnStartEntryId : rootEntryId);
           tx.insertThread(thread);
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
@@ -506,7 +518,8 @@ final class HarnessRuntimeTestSupport {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
-          tx.insertThread(thread(id, headEntryId));
+          UUID sessionId = tx.loadEntryPath(headEntryId).root().sessionId();
+          tx.insertThread(thread(id, sessionId, headEntryId));
           return id;
         });
   }
@@ -516,7 +529,8 @@ final class HarnessRuntimeTestSupport {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
-          tx.insertThread(thread(id, headEntryId, true));
+          UUID sessionId = tx.loadEntryPath(headEntryId).root().sessionId();
+          tx.insertThread(thread(id, sessionId, headEntryId, true));
           return id;
         });
   }
@@ -619,6 +633,7 @@ final class HarnessRuntimeTestSupport {
                       payload,
                       clientCommandId,
                       ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
                       null,
                       null,
                       T1)));
@@ -738,12 +753,13 @@ final class HarnessRuntimeTestSupport {
         createdAt);
   }
 
-  static ThreadState thread(UUID id, UUID headEntryId) {
-    return thread(id, headEntryId, false);
+  static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId) {
+    return thread(id, sessionId, headEntryId, false);
   }
 
-  static ThreadState thread(UUID id, UUID headEntryId, boolean yoloEnabled) {
-    return new ThreadState(id, headEntryId, yoloEnabled, 1, 0, T0, T0);
+  static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId, boolean yoloEnabled) {
+    return new ThreadState(
+        id, sessionId, headEntryId, MATERIALIZATION_HASH, yoloEnabled, 1, 0, T0, T0);
   }
 
   static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {
@@ -755,14 +771,30 @@ final class HarnessRuntimeTestSupport {
         command.requestHash(),
         turnStartEntryId,
         null,
+        null,
         command.createdAt());
   }
 
   /** 使用给定的稳定 client id 与文本构造一条 USER_MESSAGE command。 */
   static NewThreadCommand userMessageCommand(UUID clientCommandId, String text) {
     UserMessageCommandPayload payload = userMessagePayload(text);
+    return new NewThreadCommand(payload, clientCommandId);
+  }
+
+  /** 使用给定的稳定 client id 与文本构造一条 USER role 的 CUSTOM_MESSAGE command。 */
+  static NewThreadCommand userCustomMessageCommand(UUID clientCommandId, String text) {
     return new NewThreadCommand(
-        payload, clientCommandId, ThreadCommandPayloadJsonCodec.requestHash(payload));
+        new CustomMessageCommandPayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)))),
+        clientCommandId);
+  }
+
+  /** 使用给定的稳定 client id 与文本构造一条 SYSTEM role 的 CUSTOM_MESSAGE command。 */
+  static NewThreadCommand systemCustomMessageCommand(UUID clientCommandId, String text) {
+    return new NewThreadCommand(
+        new CustomMessageCommandPayload(
+            new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent(text)))),
+        clientCommandId);
   }
 
   static UserMessageCommandPayload userMessagePayload(String text) {
@@ -982,5 +1014,22 @@ final class HarnessRuntimeTestSupport {
           body.accept(tx);
           return null;
         });
+  }
+
+  /** Stop 结果为 STOPPED（非 replay，且落盘了 STOPPED TURN_END）。 */
+  static void assertStopped(StopResult result) {
+    assertFalse(result.replayed());
+    assertNotNull(result.stoppedTurnEndEntryId());
+  }
+
+  /** Stop 结果为 IDLE（非 replay，未落盘任何 TURN_END）。 */
+  static void assertIdle(StopResult result) {
+    assertFalse(result.replayed());
+    assertNull(result.stoppedTurnEndEntryId());
+  }
+
+  /** Stop 结果为 replay（幂等重放既有 STOPPED 事实）。 */
+  static void assertReplayed(StopResult result) {
+    assertTrue(result.replayed());
   }
 }

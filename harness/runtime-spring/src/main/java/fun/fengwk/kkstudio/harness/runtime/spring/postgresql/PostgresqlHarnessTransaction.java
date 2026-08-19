@@ -147,6 +147,32 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public Optional<Session> lockSessionForKeyShare(UUID id) {
+    checkOpen();
+    requireCanLockRank(LockRank.SESSION);
+    Optional<Session> session =
+        queryOne(
+            "select * from harness_session where id = ? for key share",
+            PostgresqlHarnessRows.SESSION,
+            id);
+    session.ifPresent(ignored -> lock(LockKey.session(id)));
+    return session;
+  }
+
+  @Override
+  public Optional<Session> lockSessionForUpdate(UUID id) {
+    checkOpen();
+    requireCanLockRank(LockRank.SESSION);
+    Optional<Session> session =
+        queryOne(
+            "select * from harness_session where id = ? for update",
+            PostgresqlHarnessRows.SESSION,
+            id);
+    session.ifPresent(ignored -> lock(LockKey.session(id)));
+    return session;
+  }
+
+  @Override
   public void insertEntry(Entry entry) {
     checkOpen();
     Objects.requireNonNull(entry, "entry");
@@ -232,23 +258,51 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   public void insertThread(ThreadState thread) {
     checkOpen();
     Objects.requireNonNull(thread, "thread");
-    requireExistingEntry(thread.headEntryId());
+    requireThreadHeadInSession(thread);
     requireCanLockThread(thread.id());
     update(
         """
         insert into harness_thread (
-            id, head_entry_id, yolo_enabled, next_command_sequence, revision,
-            created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?)
+            id, session_id, head_entry_id, materialization_hash, yolo_enabled,
+            next_command_sequence, revision, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         thread.id(),
+        thread.sessionId(),
         thread.headEntryId(),
+        thread.materializationHash(),
         thread.yoloEnabled(),
         thread.nextCommandSequence(),
         thread.revision(),
         PostgresqlHarnessRows.timestamp(thread.createdAt()),
         PostgresqlHarnessRows.timestamp(thread.updatedAt()));
     recordThreadLock(thread.id());
+  }
+
+  /** Thread 的 head Entry 必须属于 Thread 持久化的 Session（由同一 Session 的复合 FK 强制，这里给出更早的显式检查）。 */
+  private void requireThreadHeadInSession(ThreadState thread) {
+    if (findSession(thread.sessionId()).isEmpty()) {
+      throw new IllegalArgumentException("session " + thread.sessionId() + " does not exist");
+    }
+    Boolean sameSession =
+        queryForObject(
+            """
+            select exists (
+                select 1
+                from harness_entry
+                where id = ? and session_id = ?
+            )
+            """,
+            Boolean.class,
+            thread.headEntryId(),
+            thread.sessionId());
+    if (!Boolean.TRUE.equals(sameSession)) {
+      throw new IllegalArgumentException(
+          "thread head entry "
+              + thread.headEntryId()
+              + " must belong to thread session "
+              + thread.sessionId());
+    }
   }
 
   @Override
@@ -271,6 +325,24 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public List<ThreadState> listThreadsBySession(UUID sessionId) {
+    checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    if (findSession(sessionId).isEmpty()) {
+      throw new IllegalArgumentException("session " + sessionId + " does not exist");
+    }
+    return queryList(
+        """
+        select *
+        from harness_thread
+        where session_id = ?
+        order by id
+        """,
+        PostgresqlHarnessRows.THREAD,
+        sessionId);
+  }
+
+  @Override
   public void updateThread(ThreadState thread) {
     checkOpen();
     Objects.requireNonNull(thread, "thread");
@@ -280,7 +352,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             .orElseThrow(
                 () -> new IllegalArgumentException("thread " + thread.id() + " does not exist"));
     ThreadState.validateTransition(stored, thread);
-    requireExistingEntry(thread.headEntryId());
+    requireThreadHeadInSession(thread);
     int updated =
         update(
             """
@@ -341,6 +413,21 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public List<ThreadCommand> loadCommandsByThread(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    return queryList(
+        """
+        select *
+        from harness_thread_command
+        where thread_id = ?
+        order by sequence
+        """,
+        PostgresqlHarnessRows.COMMAND,
+        threadId);
+  }
+
+  @Override
   public void insertCommands(List<ThreadCommand> commands) {
     checkOpen();
     List<ThreadCommand> copied = List.copyOf(commands).stream().sorted(COMMAND_LOCK_ORDER).toList();
@@ -380,8 +467,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           """
           insert into harness_thread_command (
               thread_id, sequence, command_type, payload, client_command_id,
-              request_hash, consumed_turn_start_entry_id, cancelled_at, created_at
-          ) values (?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, ?)
+              request_hash, consumed_turn_start_entry_id, cancel_request_id,
+              cancelled_at, created_at
+          ) values (?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, ?, ?)
           """,
           command.threadId(),
           command.sequence(),
@@ -390,6 +478,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           command.clientCommandId(),
           command.requestHash(),
           command.consumedTurnStartEntryId(),
+          command.cancelRequestId(),
           PostgresqlHarnessRows.timestamp(command.cancelledAt()),
           PostgresqlHarnessRows.timestamp(command.createdAt()));
       lock(LockKey.command(command.threadId(), command.sequence()));
@@ -424,10 +513,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           update(
               """
               update harness_thread_command
-              set consumed_turn_start_entry_id = ?, cancelled_at = ?
+              set consumed_turn_start_entry_id = ?, cancel_request_id = ?, cancelled_at = ?
               where thread_id = ? and sequence = ?
               """,
               command.consumedTurnStartEntryId(),
+              command.cancelRequestId(),
               PostgresqlHarnessRows.timestamp(command.cancelledAt()),
               command.threadId(),
               command.sequence());
@@ -1181,10 +1271,14 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 () ->
                     new IllegalArgumentException(
                         "thread " + command.threadId() + " does not exist"));
-    UUID threadSessionId = loadEntryPath(thread.headEntryId()).root().sessionId();
-    if (!turnStartSessionId.equals(threadSessionId)) {
+    if (!turnStartSessionId.equals(thread.sessionId())) {
       throw new IllegalArgumentException(
-          "consumed turn start must be in the command thread's current head session");
+          "consumed turn start must be in the command thread's session");
+    }
+    TurnStartPayload turnStartPayload = (TurnStartPayload) turnStart.payload();
+    if (!command.threadId().equals(turnStartPayload.ownerThreadId())) {
+      throw new IllegalArgumentException(
+          "consumed turn start ownerThreadId must equal the command threadId");
     }
   }
 
@@ -1760,6 +1854,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private enum LockRank {
+    SESSION,
     THREAD,
     COMMAND,
     MODEL,
@@ -1768,6 +1863,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private record LockKey(LockRank rank, String key) {
+    static LockKey session(UUID id) {
+      return new LockKey(LockRank.SESSION, "session:" + id);
+    }
+
     static LockKey thread(UUID id) {
       return new LockKey(LockRank.THREAD, "thread:" + id);
     }

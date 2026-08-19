@@ -34,6 +34,10 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     PARTIAL_COMMAND_REPLAY,
     /** Ordered replay：id 存在且 payload 相等，但 sequence 在请求顺序中不连续。 */
     COMMAND_REPLAY_ORDER_MISMATCH,
+    /** NEW_SESSION / ENTRY：预分配的 threadId 已被不同 materialization（不同 hash 或不同 Session）占用。 */
+    MATERIALIZATION_ID_REUSED,
+    /** 命令 batch 形状非法（SET_* 前缀顺序 / user-like 消息数量 / SYSTEM steering 位置等）。 */
+    INVALID_COMMAND_BATCH,
     /** Thread 存在 live work、已入队输入 commands 或 THREAD Work 行，必须先 quiesce。 */
     THREAD_NOT_QUIESCENT,
     /** Thread 存在等待原子 apply 的 terminal Model/Tool result。 */

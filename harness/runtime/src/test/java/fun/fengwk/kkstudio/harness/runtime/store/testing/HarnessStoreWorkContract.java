@@ -173,7 +173,7 @@ public abstract class HarnessStoreWorkContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.rootEntryId()));
+              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
               return id;
             });
     store.transaction(
@@ -311,14 +311,14 @@ public abstract class HarnessStoreWorkContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.rootEntryId()));
+              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
               return id;
             });
     UUID thread3 =
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, baseline.rootEntryId()));
+              tx.insertThread(thread(id, baseline.sessionId(), baseline.rootEntryId()));
               return id;
             });
     inTransaction(

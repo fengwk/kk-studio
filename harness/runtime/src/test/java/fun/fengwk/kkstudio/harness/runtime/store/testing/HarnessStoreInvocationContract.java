@@ -542,7 +542,7 @@ public abstract class HarnessStoreInvocationContract {
         response,
         assistantEntryId,
         T1);
-    inTransaction(store, tx -> tx.insertThread(thread(thread5, turnStartB)));
+    inTransaction(store, tx -> tx.insertThread(thread(thread5, baseline.sessionId(), turnStartB)));
     insertTerminalModel(
         TestIds.id(5),
         thread5,
@@ -551,7 +551,7 @@ public abstract class HarnessStoreInvocationContract {
         ModelInvocationStatus.FAILED,
         errorEntryId,
         T2);
-    inTransaction(store, tx -> tx.insertThread(thread(thread6, turnStartC)));
+    inTransaction(store, tx -> tx.insertThread(thread(thread6, baseline.sessionId(), turnStartC)));
     insertTerminalModel(
         TestIds.id(6),
         thread6,
@@ -569,7 +569,8 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   UUID thread7 = tx.nextId();
-                  tx.insertThread(thread(thread7, baseline.turnStartEntryId()));
+                  tx.insertThread(
+                      thread(thread7, baseline.sessionId(), baseline.turnStartEntryId()));
                   tx.insertModelInvocation(
                       modelInvocation(
                           TestIds.id(7),
@@ -681,7 +682,9 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.updateThread(new ThreadState(baseline.threadId(), toolResultA, false, 1, 1, T0, T2));
+          tx.updateThread(
+              StoreTestSupport.threadState(
+                  baseline.threadId(), baseline.sessionId(), toolResultA, 1, 1, T0, T2));
         });
     // assistantA 与 basis 处于同一 turn，但位于 basis 的祖先一侧：sibling branch 仍会被拒绝，
     // 即便它本身是合法的 assistant result entry
@@ -727,7 +730,9 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.updateThread(new ThreadState(baseline.threadId(), assistantA, false, 1, 1, T0, T2));
+          tx.updateThread(
+              StoreTestSupport.threadState(
+                  baseline.threadId(), baseline.sessionId(), assistantA, 1, 1, T0, T2));
         });
     inTransaction(
         store,
@@ -794,20 +799,21 @@ public abstract class HarnessStoreInvocationContract {
         });
     ModelInvocation committed =
         store.transaction(tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow());
-    // 将 thread head 迁移到另一个 session 中无关 branch
-    Baseline other = seedThreadBaseline(store);
+    // 将 thread head 迁移到同一 session 中无关 branch（Session -> head 必须同 Session 的新契约）。
     UUID otherTurnStart =
-        insertChildEntry(store, other.sessionId(), other.rootEntryId(), turnStartPayload());
+        insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
     UUID otherUser =
-        insertChildEntry(store, other.sessionId(), otherTurnStart, userMessagePayload());
+        insertChildEntry(store, baseline.sessionId(), otherTurnStart, userMessagePayload());
     UUID otherAssistant =
-        insertChildEntry(store, other.sessionId(), otherUser, mappedAssistant(request, response));
+        insertChildEntry(
+            store, baseline.sessionId(), otherUser, mappedAssistant(request, response));
     inTransaction(
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
           tx.updateThread(
-              new ThreadState(baseline.threadId(), otherAssistant, false, 1, 1, T0, T2));
+              StoreTestSupport.threadState(
+                  baseline.threadId(), baseline.sessionId(), otherAssistant, 1, 1, T0, T2));
         });
     // relocation 之后 terminal exact replay 仍合法，不依赖当前 head
     inTransaction(

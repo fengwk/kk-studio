@@ -61,7 +61,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -1001,7 +1000,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       TurnEndReason.TURN_FAILED,
                       null),
                   NOW));
-          tx.insertThread(new ThreadState(threadId, secondTurnEndEntryId, false, 1, 0, NOW, NOW));
+          tx.insertThread(
+              ThreadProcessorTestSupport.threadState(
+                  threadId, sessionId, secondTurnEndEntryId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
@@ -1054,7 +1055,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       TurnEndReason.USER_STOP,
                       id(1L)),
                   NOW));
-          tx.insertThread(new ThreadState(threadId, turnEndEntryId, false, 1, 0, NOW, NOW));
+          tx.insertThread(
+              ThreadProcessorTestSupport.threadState(threadId, sessionId, turnEndEntryId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
@@ -1143,8 +1145,11 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       null),
                   NOW));
           // 两个 Thread 都指向同一 closed head（共享历史由 immutable Entry 事实承载，而非 foreign active model）。
-          tx.insertThread(new ThreadState(threadId, secondUserEntryId, false, 1, 0, NOW, NOW));
-          tx.insertThread(new ThreadState(otherThreadId, secondUserEntryId, false, 1, 0, NOW, NOW));
+          tx.insertThread(
+              ThreadProcessorTestSupport.threadState(threadId, sessionId, secondUserEntryId, NOW));
+          tx.insertThread(
+              ThreadProcessorTestSupport.threadState(
+                  otherThreadId, sessionId, secondUserEntryId, NOW));
           tx.insertEntry(
               new Entry(
                   secondAssistantEntryId,

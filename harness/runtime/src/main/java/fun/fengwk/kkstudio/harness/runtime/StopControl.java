@@ -31,7 +31,9 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -92,7 +94,7 @@ final class StopControl {
                     new HarnessRuntimeNotFoundException(
                         "thread " + command.threadId() + " does not exist"));
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
-    StopResult replay = findReplay(tx, path, command.stopRequestId(), thread);
+    StopResult replay = findReplay(tx, thread.sessionId(), command.stopRequestId(), thread);
     if (replay != null) {
       return new Commit(replay, null, List.of());
     }
@@ -129,10 +131,14 @@ final class StopControl {
     Instant now = effectiveNow(clock.instant(), thread, path, queued, context);
 
     List<ThreadCommand> cancelledCommands =
-        queued.stream().map(commandToCancel -> commandToCancel.cancel(now)).toList();
+        queued.stream()
+            .map(commandToCancel -> commandToCancel.cancel(command.stopRequestId(), now))
+            .toList();
     if (!cancelledCommands.isEmpty()) {
       tx.updateCommands(cancelledCommands);
     }
+    List<CancelledUserMessage> cancelledUserMessages = cancelledUserMessages(cancelledCommands);
+    int cancelledCommandCount = cancelledCommands.size();
     UUID modelExecutionId =
         context instanceof ThreadContext.ModelActive active ? active.model().id() : null;
     List<UUID> toolExecutionIds =
@@ -146,19 +152,33 @@ final class StopControl {
     StopResult result =
         switch (context) {
           case ThreadContext.IdleOrHistorical ignored -> stopIdle(
-              tx, thread, cancelledCommands.size(), now);
+              tx, thread, cancelledCommandCount, cancelledUserMessages, now);
           case ThreadContext.ContinuationDue ignored -> stopContinuation(
-              tx, thread, path, command.stopRequestId(), cancelledCommands.size(), now);
+              tx,
+              thread,
+              path,
+              command.stopRequestId(),
+              cancelledCommandCount,
+              cancelledUserMessages,
+              now);
           case ThreadContext.ModelActive active -> stopModel(
               tx,
               thread,
               path,
               active.model(),
               command.stopRequestId(),
-              cancelledCommands.size(),
+              cancelledCommandCount,
+              cancelledUserMessages,
               now);
           case ThreadContext.ToolActive active -> stopTools(
-              tx, thread, path, active, command.stopRequestId(), cancelledCommands.size(), now);
+              tx,
+              thread,
+              path,
+              active,
+              command.stopRequestId(),
+              cancelledCommandCount,
+              cancelledUserMessages,
+              now);
           case ThreadContext.ModelTerminalPending ignored -> throw new IllegalStateException(
               "terminal Model context escaped the Stop guard");
           case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
@@ -167,11 +187,20 @@ final class StopControl {
     return new Commit(result, modelExecutionId, toolExecutionIds);
   }
 
+  /**
+   * 在 Thread 锁内做 Stop 的 durable receipt 查找，replay 先于 revision CAS：
+   *
+   * <ol>
+   *   <li>live receipt：Session 级查找 closeRequestId 被引用 TURN_START 的 ownerThreadId == 本 Thread 的
+   *       TURN_END；raw id 归另一 Thread 所有时忽略而非冲突。
+   *   <li>queued-only receipt：本 Thread 上带该 cancelRequestId 的已取消 Command（未创建 Turn 时的幂等键）。
+   * </ol>
+   *
+   * 任一命中都返回 replayed 结果且不写任何 marker。
+   */
   private StopResult findReplay(
-      HarnessStore.Transaction tx, EntryPath path, UUID stopRequestId, ThreadState thread) {
-    // 在 Thread 锁内做 Session 级不可变查找：raw closeRequestId 必须按被引用 TURN_START 的 ownerThreadId 界定，
-    // 使 owning Thread 在 head move 到同 Session 的兄弟分支后仍能精确 replay，同时绝不吞掉另一 Thread 的同 raw id。
-    List<Entry> sessionEntries = tx.loadEntriesBySessionId(path.root().sessionId());
+      HarnessStore.Transaction tx, UUID sessionId, UUID stopRequestId, ThreadState thread) {
+    List<Entry> sessionEntries = tx.loadEntriesBySessionId(sessionId);
     Map<UUID, TurnStartPayload> turnStarts = new HashMap<>();
     for (Entry entry : sessionEntries) {
       if (entry.payload() instanceof TurnStartPayload start) {
@@ -200,19 +229,32 @@ final class StopControl {
       match = entry;
       matchedEnd = end;
     }
-    if (match == null) {
-      return null;
+    if (match != null) {
+      if (matchedEnd.outcome() != TurnEndOutcome.STOPPED
+          || matchedEnd.reason() != TurnEndReason.USER_STOP) {
+        throw conflict(
+            HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED,
+            "stop request id "
+                + stopRequestId
+                + " was used by another close operation of thread "
+                + thread.id());
+      }
+      return new StopResult(true, thread, match.id(), 0, List.of());
     }
-    if (matchedEnd.outcome() != TurnEndOutcome.STOPPED
-        || matchedEnd.reason() != TurnEndReason.USER_STOP) {
-      throw conflict(
-          HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED,
-          "stop request id "
-              + stopRequestId
-              + " was used by another close operation of thread "
-              + thread.id());
+    // queued-only receipt：未创建 Turn 的先前 Stop 以 (threadId, cancelRequestId) 作幂等键。
+    List<ThreadCommand> cancelledWithRequest =
+        tx.loadCommandsByThread(thread.id()).stream()
+            .filter(command -> stopRequestId.equals(command.cancelRequestId()))
+            .toList();
+    if (!cancelledWithRequest.isEmpty()) {
+      return new StopResult(
+          true,
+          thread,
+          null,
+          cancelledWithRequest.size(),
+          cancelledUserMessages(cancelledWithRequest));
     }
-    return new StopResult(StopResult.Status.REPLAYED, thread, match.id(), 0);
+    return null;
   }
 
   /** TURN_END 引用的 TURN_START 必须存在于同一 Session；解析失败是 durable 结构不变量破坏。 */
@@ -284,13 +326,17 @@ final class StopControl {
   }
 
   private static StopResult stopIdle(
-      HarnessStore.Transaction tx, ThreadState thread, int cancelledCommandCount, Instant now) {
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      int cancelledCommandCount,
+      List<CancelledUserMessage> cancelledUserMessages,
+      Instant now) {
     ThreadState current = thread;
     if (cancelledCommandCount > 0) {
       current = thread.touchRevision(now);
       tx.updateThread(current);
     }
-    return new StopResult(StopResult.Status.IDLE, current, null, cancelledCommandCount);
+    return new StopResult(false, current, null, cancelledCommandCount, cancelledUserMessages);
   }
 
   private static StopResult stopContinuation(
@@ -299,6 +345,7 @@ final class StopControl {
       EntryPath path,
       UUID stopRequestId,
       int cancelledCommandCount,
+      List<CancelledUserMessage> cancelledUserMessages,
       Instant now) {
     UUID sessionId = path.root().sessionId();
     UUID turnStartId = tx.nextId();
@@ -324,7 +371,7 @@ final class StopControl {
             turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
     ThreadState stopped = thread.advanceHead(turnEndId, now);
     tx.updateThread(stopped);
-    return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
+    return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
   }
 
   private StopResult stopModel(
@@ -334,6 +381,7 @@ final class StopControl {
       ModelInvocation model,
       UUID stopRequestId,
       int cancelledCommandCount,
+      List<CancelledUserMessage> cancelledUserMessages,
       Instant now) {
     StreamCheckpoint checkpoint = model.streamCheckpoint();
     EntryPayload barrier = modelStopBarrier(checkpoint);
@@ -358,7 +406,7 @@ final class StopControl {
     tx.updateThread(stopped);
     // 严格校验通过后同事务删除 ModelInvocation（closed turn 不保留 Invocation；Work 由调用方删除）。
     tx.deleteModelInvocation(model.id());
-    return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
+    return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
   }
 
   private StopResult stopTools(
@@ -368,6 +416,7 @@ final class StopControl {
       ThreadContext.ToolActive active,
       UUID stopRequestId,
       int cancelledCommandCount,
+      List<CancelledUserMessage> cancelledUserMessages,
       Instant now) {
     // 删除 parent 前的严格物化校验：attached Assistant/result 与已物化失败 attempt 前缀必须与 immutable 事实一致。
     ModelAttemptMaterialization.validateAttached(active.model(), path);
@@ -397,7 +446,32 @@ final class StopControl {
     // children 先于 parent 删除（FK 顺序）；Work 由调用方删除。
     tx.deleteToolInvocationsByIds(active.siblings().stream().map(ToolInvocation::id).toList());
     tx.deleteModelInvocation(active.model().id());
-    return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
+    return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
+  }
+
+  /**
+   * 按 sequence 升序还原被取消的 user-like 消息内容（USER_MESSAGE 与 USER role 的 CUSTOM_MESSAGE）；SET_* 与 SYSTEM
+   * steering 不返回。
+   */
+  private static List<CancelledUserMessage> cancelledUserMessages(List<ThreadCommand> cancelled) {
+    List<CancelledUserMessage> messages = new ArrayList<>();
+    for (ThreadCommand command : cancelled) {
+      AgentMessage message =
+          switch (command.payload()) {
+            case UserMessageCommandPayload user -> user.message();
+            case CustomMessageCommandPayload custom -> custom.message().role()
+                    == AgentMessageRole.USER
+                ? custom.message()
+                : null;
+            default -> null;
+          };
+      if (message != null) {
+        messages.add(
+            new CancelledUserMessage(
+                command.sequence(), command.clientCommandId(), message.contents()));
+      }
+    }
+    return List.copyOf(messages);
   }
 
   private static EntryPayload modelStopBarrier(StreamCheckpoint checkpoint) {
