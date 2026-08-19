@@ -12,6 +12,9 @@ import java.util.UUID;
  * continueModel=false、reason=TURN_FAILED / OUTPUT_TRUNCATED / CONTENT_FILTERED、closeRequestId null；
  * STOPPED 必须 reason=USER_STOP、continueModel=false、closeRequestId 非 null；CANCELLED 必须
  * reason=HISTORY_CUT 或 CANCELLED、continueModel=false，closeRequestId 可为 null。
+ *
+ * <p>STOPPED 的 {@code closeRequestId} 是客户端 stop 幂等键，作用域按被引用的 TURN_START {@code ownerThreadId}
+ * 界定（Runtime 做 Session 级查找），raw 值可在不同 Thread 上独立复用。
  */
 public record TurnEndPayload(
     UUID turnStartEntryId,
