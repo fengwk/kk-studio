@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedContinuationChain;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -44,7 +46,7 @@ class HarnessRuntimeStopConcurrencyTest {
 
     StopResult stopped = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 2));
 
-    assertEquals(StopResult.Status.STOPPED, stopped.status());
+    assertStopped(stopped);
     // stopTools 在同一事务删除 tool 行；后续 decision replay 因找不到 durable row 而业务冲突拒绝。
     assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
     HarnessRuntimeConflictException replayError =
@@ -108,40 +110,51 @@ class HarnessRuntimeStopConcurrencyTest {
     }
   }
 
+  /**
+   * 同 Thread 上的两个并发 acceptCommands（相同 cursor、不同 client id）：Thread 行锁串行化后恰好一个赢得 cursor
+   * admission，败者必然 STALE_COMMAND_CURSOR，最终 nextCommandSequence 精确推进一次。
+   */
   @Test
-  void concurrentStopAndMoveHeadHaveExactlyOneRevisionCasWinner() throws Exception {
+  void concurrentAcceptsOnSameThreadHaveExactlyOneCursorWinner() throws Exception {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntime runtime = runtime(store);
-    HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     CyclicBarrier barrier = new CyclicBarrier(2);
     ExecutorService pool = Executors.newFixedThreadPool(2);
     try {
-      Future<Attempt> stop =
-          pool.submit(
-              attempt(
-                  barrier,
-                  () -> runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 1))));
-      Future<Attempt> move =
+      Future<Attempt> first =
           pool.submit(
               attempt(
                   barrier,
                   () ->
-                      runtime.moveHead(
-                          new MoveHeadCommand(chain.threadId(), chain.rootEntryId(), 1))));
-      Attempt stopAttempt = stop.get();
-      Attempt moveAttempt = move.get();
-      assertEquals(1, successCount(stopAttempt, moveAttempt));
-      ThreadState thread = store.transaction(tx -> tx.lockThread(chain.threadId()).orElseThrow());
-      assertEquals(2L, thread.revision());
-      if (stopAttempt.error() == null) {
-        assertConflict(moveAttempt, Reason.STALE_REVISION);
-        StopResult result = (StopResult) stopAttempt.value();
-        assertEquals(result.stoppedTurnEndEntryId(), thread.headEntryId());
-      } else {
-        assertConflict(stopAttempt, Reason.STALE_REVISION);
-        assertNull(moveAttempt.error());
-        assertEquals(chain.rootEntryId(), thread.headEntryId());
-      }
+                      runtime.acceptCommands(
+                          new AcceptCommandsCommand(
+                              new AcceptCommandsTarget.Thread(
+                                  baseline.threadId(), baseline.rootEntryId(), 1),
+                              List.of(userMessageCommand(TestIds.id(1), "a"))),
+                          AcceptancePreflight.IDENTITY)));
+      Future<Attempt> second =
+          pool.submit(
+              attempt(
+                  barrier,
+                  () ->
+                      runtime.acceptCommands(
+                          new AcceptCommandsCommand(
+                              new AcceptCommandsTarget.Thread(
+                                  baseline.threadId(), baseline.rootEntryId(), 1),
+                              List.of(userMessageCommand(TestIds.id(2), "b"))),
+                          AcceptancePreflight.IDENTITY)));
+      Attempt one = first.get();
+      Attempt two = second.get();
+      assertEquals(1, successCount(one, two));
+      Attempt winner = one.error() == null ? one : two;
+      Attempt loser = one.error() == null ? two : one;
+      assertConflict(loser, Reason.STALE_COMMAND_CURSOR);
+      assertEquals(1, ((AcceptedCommands) winner.value()).acceptedCommands().size());
+      ThreadState thread =
+          store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+      assertEquals(2L, thread.nextCommandSequence());
+      assertEquals(1L, thread.revision());
     } finally {
       pool.shutdownNow();
     }

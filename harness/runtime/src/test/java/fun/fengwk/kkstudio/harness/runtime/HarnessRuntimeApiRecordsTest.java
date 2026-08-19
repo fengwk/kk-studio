@@ -2,7 +2,10 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,50 +15,394 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reaso
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 
+import java.util.ArrayList;
 import java.util.List;
 
-/** 根控制面 API 的 Value-record 校验分支与类型化异常。 */
+/** 根控制面 API 的 Value-record 校验分支、类型化异常与最终 record 形状。 */
 class HarnessRuntimeApiRecordsTest {
 
   @Test
-  void createThreadCommandRequiresBranchSettings() {
-    assertThrows(NullPointerException.class, () -> new CreateThreadCommand(null, false));
-    assertEquals(settings(), new CreateThreadCommand(settings(), false).branchSettings());
-    assertTrue(new CreateThreadCommand(settings(), true).yoloEnabled());
+  void acceptCommandsTargetsValidateTheirShapes() {
+    // NEW_SESSION 必需字段。
+    assertThrows(
+        NullPointerException.class,
+        () -> new AcceptCommandsTarget.NewSession(null, TestIds.id(2), settings(), null, false));
+    assertThrows(
+        NullPointerException.class,
+        () -> new AcceptCommandsTarget.NewSession(TestIds.id(1), null, settings(), null, false));
+    assertThrows(
+        NullPointerException.class,
+        () -> new AcceptCommandsTarget.NewSession(TestIds.id(1), TestIds.id(2), null, null, false));
+
+    // ENTRY 必需字段。
+    assertThrows(
+        NullPointerException.class,
+        () -> new AcceptCommandsTarget.Entry(null, TestIds.id(3), TestIds.id(4), false));
+    assertThrows(
+        NullPointerException.class,
+        () -> new AcceptCommandsTarget.Entry(TestIds.id(1), null, TestIds.id(4), false));
+
+    // THREAD cursor 必须为正。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AcceptCommandsTarget.Thread(TestIds.id(1), TestIds.id(2), 0));
+    assertThrows(
+        NullPointerException.class, () -> new AcceptCommandsTarget.Thread(null, TestIds.id(2), 1));
+    assertThrows(
+        NullPointerException.class, () -> new AcceptCommandsTarget.Thread(TestIds.id(1), null, 1));
+
+    // target 只保存定位 / materialization 语义，不携带 commands。
+    AcceptCommandsTarget.NewSession target =
+        new AcceptCommandsTarget.NewSession(TestIds.id(1), TestIds.id(2), settings(), null, true);
+    assertEquals(TestIds.id(1), target.sessionId());
+    assertEquals(TestIds.id(2), target.threadId());
+    assertTrue(target.yoloEnabled());
   }
 
   @Test
-  void createdThreadRequiresAllThreeFacts() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
-    CreatedThread created =
-        store.transaction(
-            tx -> {
-              Session session = new Session(TestIds.id(1), T0);
-              Entry root =
-                  new Entry(TestIds.id(2), TestIds.id(1), null, new RootPayload(settings()), T0);
-              ThreadState thread =
-                  new ThreadState(TestIds.id(3), TestIds.id(2), false, 1, 0, T0, T0);
-              return new CreatedThread(session, root, thread);
-            });
-    assertEquals(TestIds.id(1), created.session().id());
-    assertEquals(TestIds.id(2), created.rootEntry().id());
-    assertEquals(TestIds.id(3), created.thread().id());
+  void acceptCommandsCommandRequiresATargetAndCommandBatch() {
     assertThrows(
         NullPointerException.class,
-        () -> new CreatedThread(null, created.rootEntry(), created.thread()));
+        () -> new AcceptCommandsCommand(null, List.of(userMessageCommand(TestIds.id(1), "a"))));
+    // 空命令 batch 被拒。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(TestIds.id(1), TestIds.id(2), 5), List.of()));
+    // 重复 clientCommandId 被拒。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(TestIds.id(1), TestIds.id(2), 5),
+                List.of(
+                    userMessageCommand(TestIds.id(1), "a"),
+                    userMessageCommand(TestIds.id(1), "b"))));
+    // 防御性拷贝：外部 List 变更不影响已构造 command。
+    List<NewThreadCommand> mutable =
+        new ArrayList<>(List.of(userMessageCommand(TestIds.id(1), "a")));
+    AcceptCommandsCommand command =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(TestIds.id(1), TestIds.id(2), 5), mutable);
+    mutable.clear();
+    assertEquals(1, command.commands().size());
+    AcceptCommandsTarget.Thread target = (AcceptCommandsTarget.Thread) command.target();
+    assertEquals(5L, target.expectedNextCommandSequence());
+    assertEquals(TestIds.id(2), target.expectedHeadEntryId());
+  }
+
+  @Test
+  void acceptedCommandsValidatesConsistencyAndCopiesCommands() {
+    Session session = new Session(TestIds.id(1), T0);
+    Entry root = new Entry(TestIds.id(2), TestIds.id(1), null, new RootPayload(settings()), T0);
+    ThreadState thread =
+        HarnessRuntimeTestSupport.thread(TestIds.id(3), TestIds.id(1), TestIds.id(2));
+    ThreadCommand inserted =
+        new ThreadCommand(
+            thread.id(),
+            1,
+            userMessagePayload("a"),
+            TestIds.id(1),
+            ThreadCommandPayloadJsonCodec.requestHash(userMessagePayload("a")),
+            null,
+            null,
+            null,
+            T0);
+    List<ThreadCommand> commands = new ArrayList<>(List.of(inserted));
+    AcceptedCommands result = new AcceptedCommands(session, root, thread, commands, false);
+    commands.clear();
+    // 防御性拷贝：外部 List 变更不影响结果。
+    assertEquals(1, result.acceptedCommands().size());
+    assertEquals(session, result.session());
+    assertEquals(root, result.rootEntry());
+    assertEquals(thread, result.thread());
     assertThrows(
         NullPointerException.class,
-        () -> new CreatedThread(created.session(), null, created.thread()));
+        () -> new AcceptedCommands(null, root, thread, List.of(inserted), false));
     assertThrows(
         NullPointerException.class,
-        () -> new CreatedThread(created.session(), created.rootEntry(), null));
+        () -> new AcceptedCommands(session, null, thread, List.of(inserted), false));
+    assertThrows(
+        NullPointerException.class,
+        () -> new AcceptedCommands(session, root, null, List.of(inserted), false));
+    // 空 acceptedCommands 被拒。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AcceptedCommands(session, root, thread, List.of(), false));
+    // 不属于返回 thread 的 command 被拒。
+    ThreadCommand foreign =
+        new ThreadCommand(
+            TestIds.id(99),
+            1,
+            userMessagePayload("a"),
+            TestIds.id(1),
+            ThreadCommandPayloadJsonCodec.requestHash(userMessagePayload("a")),
+            null,
+            null,
+            null,
+            T0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AcceptedCommands(session, root, thread, List.of(foreign), false));
+    // root 必须属于结果 session。
+    Session other = new Session(TestIds.id(50), T0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AcceptedCommands(other, root, thread, List.of(inserted), false));
+    // root 必须是 ROOT payload（非 ROOT entry 被拒）。
+    Entry nonRoot =
+        HarnessRuntimeTestSupport.userMessageEntry(TestIds.id(5), TestIds.id(1), TestIds.id(2), T0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AcceptedCommands(session, nonRoot, thread, List.of(inserted), false));
+    // thread 必须属于结果 session。
+    ThreadState foreignSessionThread =
+        HarnessRuntimeTestSupport.thread(TestIds.id(3), TestIds.id(51), TestIds.id(2));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AcceptedCommands(session, root, foreignSessionThread, List.of(inserted), false));
+    // acceptedCommands sequence 必须严格递增。
+    ThreadCommand later =
+        new ThreadCommand(
+            thread.id(),
+            5,
+            userMessagePayload("later"),
+            TestIds.id(2),
+            ThreadCommandPayloadJsonCodec.requestHash(userMessagePayload("later")),
+            null,
+            null,
+            null,
+            T0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AcceptedCommands(session, root, thread, List.of(later, inserted), false));
+  }
+
+  /** CancelledUserMessage：sequence 必须为正，内容防御性拷贝。 */
+  @Test
+  void cancelledUserMessageValidatesShape() {
+    List<AgentMessageContent> contents = new ArrayList<>(List.of(new TextMessageContent("hi")));
+    CancelledUserMessage message = new CancelledUserMessage(3L, TestIds.id(7), contents);
+    contents.clear();
+    assertEquals(3L, message.sequence());
+    assertEquals(TestIds.id(7), message.clientCommandId());
+    assertEquals(1, message.contents().size());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CancelledUserMessage(0L, TestIds.id(7), List.of()));
+    assertThrows(NullPointerException.class, () -> new CancelledUserMessage(1L, null, List.of()));
+    assertThrows(
+        NullPointerException.class, () -> new CancelledUserMessage(1L, TestIds.id(7), null));
+  }
+
+  /** StopResult 最终形状：replayed + 可空 stoppedTurnEndEntryId + 取消回单。 */
+  @Test
+  void stopResultFinalShapeRoundTrips() {
+    ThreadState thread = storeThread();
+    StopResult stopped = new StopResult(false, thread, TestIds.id(2), 1, List.of());
+    assertEquals(false, stopped.replayed());
+    assertEquals(TestIds.id(2), stopped.stoppedTurnEndEntryId());
+    assertEquals(1, stopped.cancelledCommandCount());
+
+    StopResult queuedReplay =
+        new StopResult(
+            true,
+            thread,
+            null,
+            2,
+            List.of(
+                new CancelledUserMessage(
+                    1L, TestIds.id(9), List.<AgentMessageContent>of(new TextMessageContent("x")))));
+    assertTrue(queuedReplay.replayed());
+    assertEquals(2, queuedReplay.cancelledCommandCount());
+    assertEquals(TestIds.id(9), queuedReplay.cancelledUserMessages().getFirst().clientCommandId());
+    assertThrows(
+        IllegalArgumentException.class, () -> new StopResult(false, thread, null, -1, List.of()));
+    // cancelledUserMessages 必须 sequence 严格递增（旧实现允许乱序/非单调，新不变量拒绝）。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new StopResult(
+                false,
+                thread,
+                null,
+                2,
+                List.of(
+                    new CancelledUserMessage(2L, TestIds.id(9), List.<AgentMessageContent>of()),
+                    new CancelledUserMessage(1L, TestIds.id(9), List.<AgentMessageContent>of()))));
+    // 数量不得超过 cancelledCommandCount。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new StopResult(
+                false,
+                thread,
+                null,
+                0,
+                List.of(
+                    new CancelledUserMessage(1L, TestIds.id(9), List.<AgentMessageContent>of()))));
+  }
+
+  /** ThreadState 最终形状：materializationHash/sessionId 不可变，任何可见变更 revision 严格 +1。 */
+  @Test
+  void threadStateFinalShapeIsImmutableAndHashGuarded() {
+    ThreadState thread = storeThread();
+    // 非法 hash 被拒。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                thread.id(),
+                thread.sessionId(),
+                thread.headEntryId(),
+                "not-a-hash",
+                false,
+                1,
+                0,
+                thread.createdAt(),
+                thread.updatedAt()));
+    // exact replay 被接受，身份字段变更被拒。
+    ThreadState equal =
+        new ThreadState(
+            thread.id(),
+            thread.sessionId(),
+            thread.headEntryId(),
+            thread.materializationHash(),
+            false,
+            1,
+            0,
+            thread.createdAt(),
+            thread.updatedAt());
+    ThreadState.validateTransition(thread, equal);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                thread,
+                new ThreadState(
+                    thread.id(),
+                    TestIds.id(99),
+                    thread.headEntryId(),
+                    thread.materializationHash(),
+                    false,
+                    1,
+                    0,
+                    thread.createdAt(),
+                    thread.updatedAt())));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                thread,
+                new ThreadState(
+                    thread.id(),
+                    thread.sessionId(),
+                    thread.headEntryId(),
+                    "9999999999999999999999999999999999999999999999999999999999999999",
+                    false,
+                    1,
+                    0,
+                    thread.createdAt(),
+                    thread.updatedAt())));
+    // 任何可见变更（YOLO/head/seq）都必须 revision +1；setYoloEnabled 自身恰好 bump 一次是可接受的精确迁移。
+    ThreadState bumped = thread.setYoloEnabled(true, T0.plusMillis(1));
+    assertEquals(1L, bumped.revision());
+    ThreadState.validateTransition(thread, bumped);
+    // 显式构造 yolo 变更但 revision 未 +1 的候选必须被拒。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                thread,
+                new ThreadState(
+                    thread.id(),
+                    thread.sessionId(),
+                    thread.headEntryId(),
+                    thread.materializationHash(),
+                    true,
+                    1,
+                    0,
+                    thread.createdAt(),
+                    T0.plusMillis(1))));
+    assertEquals(thread.sessionId(), bumped.sessionId());
+    assertEquals(thread.materializationHash(), bumped.materializationHash());
+  }
+
+  /** ThreadCommand 最终形状：cancelRequestId 取消回单与 QUEUED→CANCELLED 迁移。 */
+  @Test
+  void threadCommandFinalShapePairsCancelReceipt() {
+    ThreadCommand queued =
+        new ThreadCommand(
+            TestIds.id(1),
+            1,
+            userMessagePayload("a"),
+            TestIds.id(2),
+            ThreadCommandPayloadJsonCodec.requestHash(userMessagePayload("a")),
+            null,
+            null,
+            null,
+            T0);
+    assertEquals(ThreadCommandState.QUEUED, queued.state());
+    assertNotEquals(queued.requestHash(), "");
+
+    ThreadCommand cancelled = queued.cancel(TestIds.id(9), T0.plusMillis(1));
+    assertEquals(ThreadCommandState.CANCELLED, cancelled.state());
+    assertEquals(TestIds.id(9), cancelled.cancelRequestId());
+    assertEquals(T0.plusMillis(1), cancelled.cancelledAt());
+
+    // 取消与消费 marker 互斥。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadCommand(
+                TestIds.id(1),
+                1,
+                userMessagePayload("a"),
+                TestIds.id(2),
+                queued.requestHash(),
+                TestIds.id(3),
+                TestIds.id(9),
+                T0.plusMillis(1),
+                T0));
+    // cancelRequestId 必须与 cancelledAt 成对。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadCommand(
+                TestIds.id(1),
+                1,
+                userMessagePayload("a"),
+                TestIds.id(2),
+                queued.requestHash(),
+                null,
+                TestIds.id(9),
+                null,
+                T0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadCommand(
+                TestIds.id(1),
+                1,
+                userMessagePayload("a"),
+                TestIds.id(2),
+                queued.requestHash(),
+                null,
+                null,
+                T0.plusMillis(1),
+                T0));
   }
 
   @Test
@@ -69,10 +416,10 @@ class HarnessRuntimeApiRecordsTest {
             new ThreadCommand(
                 thread.id(),
                 1,
-                HarnessRuntimeTestSupport.userMessagePayload("a"),
+                userMessagePayload("a"),
                 TestIds.id(1),
-                ThreadCommandPayloadJsonCodec.requestHash(
-                    HarnessRuntimeTestSupport.userMessagePayload("a")),
+                ThreadCommandPayloadJsonCodec.requestHash(userMessagePayload("a")),
+                null,
                 null,
                 null,
                 T0));
@@ -108,9 +455,17 @@ class HarnessRuntimeApiRecordsTest {
     assertEquals("gone", new HarnessRuntimeNotFoundException("gone").getMessage());
   }
 
-  @Test
-  void moveHeadCommandValidationIsExact() {
-    assertEquals(7L, new MoveHeadCommand(TestIds.id(1), TestIds.id(2), 7).expectedRevision());
-    assertThrows(NullPointerException.class, () -> new MoveHeadCommand(null, TestIds.id(2), 0));
+  private static ThreadState storeThread() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    return store.transaction(
+        tx -> {
+          tx.insertSession(new Session(TestIds.id(1), T0));
+          tx.insertEntry(
+              new Entry(TestIds.id(2), TestIds.id(1), null, new RootPayload(settings()), T0));
+          ThreadState thread =
+              HarnessRuntimeTestSupport.thread(TestIds.id(3), TestIds.id(1), TestIds.id(2));
+          tx.insertThread(thread);
+          return thread;
+        });
   }
 }

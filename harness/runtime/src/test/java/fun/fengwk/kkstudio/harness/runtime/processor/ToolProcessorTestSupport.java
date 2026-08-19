@@ -228,7 +228,16 @@ final class ToolProcessorTestSupport {
                       .assistantPayload(response, modelRequest.toolBindings()),
                   now.plusMillis(3)));
           tx.insertThread(
-              new ThreadState(threadId, turnStartEntryId, yoloEnabled, 1L, 0L, now, now));
+              new ThreadState(
+                  threadId,
+                  sessionId,
+                  turnStartEntryId,
+                  ThreadProcessorTestSupport.MATERIALIZATION_HASH,
+                  yoloEnabled,
+                  1L,
+                  0L,
+                  now,
+                  now));
           return new Baseline(
               sessionId, rootEntryId, turnStartEntryId, userEntryId, assistantEntryId, threadId);
         });

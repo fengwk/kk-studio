@@ -83,6 +83,11 @@ final class DispatcherTestSupport {
 
   static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
+
+  /** 测试种子线程的合法 64 位小写 SHA-256 materialization hash。 */
+  private static final String MATERIALIZATION_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
   static final Duration THREAD_LEASE = Duration.ofSeconds(30);
   static final Duration MODEL_LEASE = Duration.ofSeconds(45);
   static final Duration TOOL_LEASE = Duration.ofSeconds(60);
@@ -118,7 +123,7 @@ final class DispatcherTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertThread(thread(threadId, rootEntryId));
+          tx.insertThread(thread(threadId, sessionId, rootEntryId));
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), NOW);
           return new ThreadSeed(threadId);
         });
@@ -138,7 +143,7 @@ final class DispatcherTestSupport {
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
-          tx.insertThread(thread(threadId, turnStartEntryId));
+          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -186,7 +191,7 @@ final class DispatcherTestSupport {
           ProviderResponse response = toolResponse();
           tx.insertEntry(
               assistantEntry(assistantEntryId, sessionId, userEntryId, request, response));
-          tx.insertThread(thread(threadId, turnStartEntryId));
+          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -598,8 +603,8 @@ final class DispatcherTestSupport {
         NOW);
   }
 
-  private static ThreadState thread(UUID id, UUID headEntryId) {
-    return new ThreadState(id, headEntryId, false, 1, 0, NOW, NOW);
+  private static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId) {
+    return new ThreadState(id, sessionId, headEntryId, MATERIALIZATION_HASH, false, 1, 0, NOW, NOW);
   }
 
   private static BranchSettings branchSettings() {

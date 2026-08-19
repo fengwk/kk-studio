@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
@@ -66,7 +67,7 @@ class HarnessRuntimeStopLocalCancellationTest {
 
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
 
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertStopped(result);
     assertEquals(List.of(baseline.modelId()), modelCalls);
     assertTrue(toolCalls.isEmpty());
   }
@@ -150,7 +151,7 @@ class HarnessRuntimeStopLocalCancellationTest {
 
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
 
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertStopped(result);
     assertEquals(baseline.toolIds(), calls);
     // 本地取消失败仅记日志：durable Stop 仍然删除全部 child Tool 行并 append CANCELLED ToolResult Entries。
     for (UUID id : baseline.toolIds()) {

@@ -2908,7 +2908,8 @@ class ModelProcessorTest {
                   turnStartEntryId,
                   userMessagePayload(),
                   NOW.plusMillis(2)));
-          tx.insertThread(new ThreadState(threadId, userEntryId, false, 1L, 0L, NOW, NOW));
+          tx.insertThread(
+              ThreadProcessorTestSupport.threadState(threadId, sessionId, userEntryId, NOW));
           return new UserBasis(sessionId, rootEntryId, turnStartEntryId, userEntryId, threadId);
         });
   }
@@ -2994,7 +2995,8 @@ class ModelProcessorTest {
                   parentId,
                   new TurnStartPayload(reason, branchSettings(), threadId, 100_000),
                   turnStartAt));
-          tx.insertThread(new ThreadState(threadId, turnStartEntryId, false, 1, 0, now, now));
+          tx.insertThread(
+              ThreadProcessorTestSupport.threadState(threadId, sessionId, turnStartEntryId, now));
           return new Baseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
   }

@@ -119,7 +119,17 @@ final class ThreadProcessorTestSupport {
   /** 测试用默认压缩配置（开启、16_384 预留、20_000 保留）。 */
   static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(true, 16_384, 20_000);
 
+  /** 测试种子线程的合法 64 位小写 SHA-256 materialization hash（非 accept 路径的固定身份键）。 */
+  static final String MATERIALIZATION_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
   private ThreadProcessorTestSupport() {}
+
+  /** 构造有合法 materializationHash 的 ThreadState：revision 0 / nextCommandSequence 1。 */
+  static ThreadState threadState(UUID threadId, UUID sessionId, UUID headEntryId, Instant now) {
+    return new ThreadState(
+        threadId, sessionId, headEntryId, MATERIALIZATION_HASH, false, 1L, 0L, now, now);
+  }
 
   // -----------------------------------------------------------------------------------------------
   // ids / fixtures（标识 / 测试基座）
@@ -158,7 +168,7 @@ final class ThreadProcessorTestSupport {
           tx.insertSession(new Session(sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertThread(new ThreadState(threadId, rootEntryId, false, 1L, 0L, NOW, NOW));
+          tx.insertThread(threadState(threadId, sessionId, rootEntryId, NOW));
           return new Baseline(sessionId, rootEntryId, threadId);
         });
   }
@@ -181,7 +191,7 @@ final class ThreadProcessorTestSupport {
           tx.insertEntry(
               new Entry(
                   userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
-          tx.insertThread(new ThreadState(threadId, userEntryId, false, 1L, 0L, NOW, NOW));
+          tx.insertThread(threadState(threadId, sessionId, userEntryId, NOW));
           return new OpenTurnBaseline(
               sessionId, rootEntryId, turnStartEntryId, userEntryId, threadId);
         });
@@ -218,7 +228,7 @@ final class ThreadProcessorTestSupport {
                   new TurnEndPayload(
                       turnStartEntryId, TurnEndOutcome.COMPLETED, continueModel, null, null),
                   NOW));
-          tx.insertThread(new ThreadState(threadId, turnEndEntryId, false, 1L, 0L, NOW, NOW));
+          tx.insertThread(threadState(threadId, sessionId, turnEndEntryId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
@@ -274,7 +284,7 @@ final class ThreadProcessorTestSupport {
                     NOW));
             headEntryId = resultId;
           }
-          tx.insertThread(new ThreadState(threadId, headEntryId, false, 1L, 0L, NOW, NOW));
+          tx.insertThread(threadState(threadId, sessionId, headEntryId, NOW));
           return new HistoricalBaseline(
               sessionId,
               rootEntryId,
@@ -292,7 +302,7 @@ final class ThreadProcessorTestSupport {
     return store.transaction(
         tx -> {
           UUID threadId = tx.nextId();
-          tx.insertThread(new ThreadState(threadId, assistantEntryId, false, 1L, 0L, NOW, NOW));
+          tx.insertThread(threadState(threadId, sessionId, assistantEntryId, NOW));
           return new HistoricalBaseline(
               sessionId,
               TestIds.id(1_000_000L),
@@ -319,6 +329,7 @@ final class ThreadProcessorTestSupport {
                       payload,
                       clientCommandId,
                       ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
                       null,
                       null,
                       NOW)));
@@ -922,7 +933,7 @@ final class ThreadProcessorTestSupport {
                   new TurnEndPayload(
                       secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
                   NOW));
-          tx.insertThread(new ThreadState(threadId, secondTurnEndId, false, 1L, 0L, NOW, NOW));
+          tx.insertThread(threadState(threadId, sessionId, secondTurnEndId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,

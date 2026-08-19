@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
@@ -506,7 +507,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                   tx.lockThread(baseline.threadId());
                   List<ThreadCommand> cancelled = new ArrayList<>();
                   for (ThreadCommand queued : tx.loadQueuedCommands(baseline.threadId())) {
-                    cancelled.add(queued.cancel(NOW.plusSeconds(1)));
+                    cancelled.add(queued.cancel(TestIds.id(1), NOW.plusSeconds(1)));
                   }
                   tx.updateCommands(cancelled);
                   return null;

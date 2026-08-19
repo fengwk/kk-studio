@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModelWork;
@@ -72,7 +73,7 @@ class HarnessRuntimeStopModelTest {
     seedModelWork(store, baseline.modelId());
 
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertStopped(result);
     assertEquals(1, result.cancelledCommandCount());
     // Model row 在 stopModel 同一事务内被物理删除；改用 Entry path 验证 barrier 与 STOPPED TURN_END。
     assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
@@ -107,7 +108,7 @@ class HarnessRuntimeStopModelTest {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.DISPATCHING);
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertStopped(result);
     // Model row 在 stopModel 同一事务内被物理删除；只能通过 Entry path 校验 barrier + STOPPED TURN_END。
     assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
     EntryPath path = pathOf(baseline.threadId());
@@ -121,7 +122,7 @@ class HarnessRuntimeStopModelTest {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.RUNNING);
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertStopped(result);
     assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
     EntryPath path = pathOf(baseline.threadId());
     Entry barrier = path.entries().get(3);
@@ -201,7 +202,7 @@ class HarnessRuntimeStopModelTest {
     HarnessRuntimeTestSupport.ModelBaseline baseline = seedRunningContinuationModel(store);
     seedModelWork(store, baseline.modelId());
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertStopped(result);
     EntryPath path = pathOf(baseline.threadId());
     assertEquals(4, path.entries().size());
     Entry barrier = path.entries().get(2);

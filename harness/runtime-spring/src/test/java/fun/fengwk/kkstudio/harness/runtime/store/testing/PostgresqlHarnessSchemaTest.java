@@ -56,7 +56,9 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "id",
+            "session_id",
             "head_entry_id",
+            "materialization_hash",
             "yolo_enabled",
             "next_command_sequence",
             "revision",
@@ -109,7 +111,9 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "idx_harness_entry_parent",
+            "idx_harness_thread_command_cancel_request",
             "idx_harness_thread_command_queued",
+            "idx_harness_thread_session",
             "idx_harness_work_available",
             "idx_harness_work_lease_until",
             "uk_harness_entry_session_id",
@@ -123,10 +127,15 @@ class PostgresqlHarnessSchemaTest {
     String modelResult = indexDefinition("uk_harness_model_invocation_result");
     String workAvailable = indexDefinition("idx_harness_work_available");
     String workLease = indexDefinition("idx_harness_work_lease_until");
+    String threadSession = indexDefinition("idx_harness_thread_session");
+    String cancelRequest = indexDefinition("idx_harness_thread_command_cancel_request");
     assertTrue(modelResult.contains("WHERE (result_entry_id IS NOT NULL)"));
     assertTrue(workAvailable.contains("(available_at, target_type, target_id)"));
     assertTrue(workLease.contains("(lease_until, target_type, target_id)"));
     assertTrue(workLease.contains("WHERE (lease_until IS NOT NULL)"));
+    assertTrue(threadSession.contains("(session_id, created_at, id)"));
+    assertTrue(cancelRequest.contains("(thread_id, cancel_request_id, sequence)"));
+    assertTrue(cancelRequest.contains("WHERE (cancel_request_id IS NOT NULL)"));
   }
 
   private String indexDefinition(String indexName) {

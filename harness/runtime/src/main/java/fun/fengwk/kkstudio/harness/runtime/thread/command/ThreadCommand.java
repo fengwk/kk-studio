@@ -11,6 +11,9 @@ import java.util.regex.Pattern;
  * <p>身份为 {@code (threadId, sequence)}，不携带 surrogate id。生命周期 state 由两个 nullable terminal marker
  * 派生；不存储 status 或 appliedAt 投影。{@code requestHash} 是客户端 raw 命令（含 ordered contents 与 uploadId）的
  * canonical SHA-256，与 {@code clientCommandId} 一起构成幂等键：同 id + 同 hash 精确重放，同 id + 不同 hash 冲突。
+ *
+ * <p>CANCELLED 必须 {@code cancelRequestId} 与 {@code cancelledAt} 成对出现且 consumed 为空：{@code
+ * cancelRequestId} 是取消它的那次 Stop 的 stopRequestId（queued-only receipt 的幂等键）。
  */
 public record ThreadCommand(
     UUID threadId,
@@ -19,6 +22,7 @@ public record ThreadCommand(
     UUID clientCommandId,
     String requestHash,
     UUID consumedTurnStartEntryId,
+    UUID cancelRequestId,
     Instant cancelledAt,
     Instant createdAt) {
 
@@ -34,9 +38,20 @@ public record ThreadCommand(
     if (requestHash == null || !REQUEST_HASH_PATTERN.matcher(requestHash).matches()) {
       throw new IllegalArgumentException("requestHash must be 64 lowercase hexadecimal characters");
     }
+    if (consumedTurnStartEntryId != null && cancelRequestId != null) {
+      throw new IllegalArgumentException(
+          "consumedTurnStartEntryId and cancelRequestId must not both be present");
+    }
     if (consumedTurnStartEntryId != null && cancelledAt != null) {
       throw new IllegalArgumentException(
           "consumedTurnStartEntryId and cancelledAt must not both be present");
+    }
+    if (cancelRequestId != null && cancelledAt == null) {
+      throw new IllegalArgumentException(
+          "cancelRequestId must be paired with a non-null cancelledAt");
+    }
+    if (cancelledAt != null && cancelRequestId == null) {
+      throw new IllegalArgumentException("cancelRequestId must be present when cancelled");
     }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     if (cancelledAt != null && cancelledAt.isBefore(createdAt)) {
@@ -77,22 +92,32 @@ public record ThreadCommand(
         requestHash,
         turnStartEntryId,
         null,
+        null,
         createdAt);
   }
 
   /**
-   * 纯 QUEUED -&gt; CANCELLED 迁移：附加取消时间并清空 consumed marker。只有 QUEUED 状态的 command 可被 cancel；{@code
-   * cancelledAt} 不得早于 command 的创建时间。
+   * 纯 QUEUED -&gt; CANCELLED 迁移：附加取消该 command 的 stopRequestId 与取消时间并清空 consumed marker。只有 QUEUED 状态
+   * 的 command 可被 cancel；{@code cancelledAt} 不得早于 command 的创建时间。
    */
-  public ThreadCommand cancel(Instant cancelledAt) {
+  public ThreadCommand cancel(UUID stopRequestId, Instant cancelledAt) {
     if (state() != ThreadCommandState.QUEUED) {
       throw new IllegalStateException("only QUEUED commands can be cancelled");
     }
+    Objects.requireNonNull(stopRequestId, "stopRequestId");
     Objects.requireNonNull(cancelledAt, "cancelledAt");
     if (cancelledAt.isBefore(createdAt)) {
       throw new IllegalArgumentException("cancelledAt must not precede createdAt");
     }
     return new ThreadCommand(
-        threadId, sequence, payload, clientCommandId, requestHash, null, cancelledAt, createdAt);
+        threadId,
+        sequence,
+        payload,
+        clientCommandId,
+        requestHash,
+        null,
+        stopRequestId,
+        cancelledAt,
+        createdAt);
   }
 }

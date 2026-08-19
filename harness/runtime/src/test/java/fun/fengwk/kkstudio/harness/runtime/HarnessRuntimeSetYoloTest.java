@@ -103,7 +103,8 @@ class HarnessRuntimeSetYoloTest {
   }
 
   private void assertNoCommandsEntriesOrWork(UUID threadId) {
-    assertEquals(1, runtime.getThreadSessionEntries(threadId).size());
+    ThreadState thread = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
+    assertEquals(1, runtime.getSessionEntries(thread.sessionId()).size());
     boolean noWork =
         store.transaction(
             tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)).isEmpty());
