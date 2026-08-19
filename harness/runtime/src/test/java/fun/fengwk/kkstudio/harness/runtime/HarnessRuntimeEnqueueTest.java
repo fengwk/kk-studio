@@ -99,6 +99,28 @@ class HarnessRuntimeEnqueueTest {
     assertEquals(T0, work.availableAt());
   }
 
+  /** findThreadCommand 按 Thread 隔离 durable replay identity，并明确区分缺失 command 与缺失 Thread。 */
+  @Test
+  void findsThreadCommandByScopedClientId() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadCommand inserted =
+        runtime
+            .enqueueCommands(
+                new ThreadCommandBatch(
+                    baseline.threadId(),
+                    baseline.rootEntryId(),
+                    1,
+                    List.of(userMessageCommand(TestIds.id(1), "hello"))))
+            .getFirst();
+
+    assertEquals(
+        inserted, runtime.findThreadCommand(baseline.threadId(), TestIds.id(1)).orElseThrow());
+    assertTrue(runtime.findThreadCommand(baseline.threadId(), TestIds.id(999)).isEmpty());
+    assertThrows(
+        HarnessRuntimeNotFoundException.class,
+        () -> runtime.findThreadCommand(TestIds.id(999), TestIds.id(1)));
+  }
+
   @Test
   void replayReturnsExistingQueuedRowsIgnoringStaleCursorAndLifecycle() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
