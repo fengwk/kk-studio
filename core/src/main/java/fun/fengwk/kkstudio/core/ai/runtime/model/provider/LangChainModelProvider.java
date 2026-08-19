@@ -42,6 +42,8 @@ import dev.langchain4j.model.output.FinishReason;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ContextPressureDetector;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ContextPressureFacts;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
@@ -183,7 +185,7 @@ abstract class LangChainModelProvider implements ModelProvider {
                     // 保留完整 cause chain 细节（而非通用常量），同时附上原始 Throwable 供诊断。
                     handler.onError(
                         new ProviderException(
-                            classify(error, stream), userFacingMessage(error), error),
+                            classify(providerType, error, stream), userFacingMessage(error), error),
                         stream);
                   }
                 }
@@ -540,21 +542,28 @@ abstract class LangChainModelProvider implements ModelProvider {
     };
   }
 
-  static ProviderErrorKind classify(Throwable error, ProviderStream stream) {
+  /**
+   * Provider 错误分类。CANCELLED 由调用方先行排除；context pressure 一律通过 {@link ProviderErrorFactsExtractor} +
+   * {@link ContextPressureDetector} 判定（不再散落 {@code 413} / {@code context length} / {@code too
+   * large} 子串）。rate limit（429/ throttling）与普通 400 invalid 即使消息含 context 字样也 不得返回
+   * OVERFLOW；authentication / billing / invalid / transient 语义保持不变，且绝不新增 LENGTH kind。
+   */
+  static ProviderErrorKind classify(
+      ProviderType providerType, Throwable error, ProviderStream stream) {
     if (stream.isCancelled()) {
       return ProviderErrorKind.CANCELLED;
     }
-    String message = errorMessages(error).toLowerCase(Locale.ROOT);
+    ContextPressureFacts facts = ProviderErrorFactsExtractor.extract(providerType, error);
+    if (ContextPressureDetector.detect(facts)) {
+      return ProviderErrorKind.OVERFLOW;
+    }
+    String message =
+        facts.errorMessage() == null ? "" : facts.errorMessage().toLowerCase(Locale.ROOT);
     if (message.contains("401") || message.contains("403") || message.contains("auth")) {
       return ProviderErrorKind.AUTHENTICATION;
     }
     if (message.contains("402") || message.contains("billing") || message.contains("quota")) {
       return ProviderErrorKind.BILLING;
-    }
-    if (message.contains("413")
-        || message.contains("context length")
-        || message.contains("too large")) {
-      return ProviderErrorKind.OVERFLOW;
     }
     // 确定性的 client/route 错误不得进入自动重试。nginx 的 404 HTML 与 405 方法不匹配对当前请求
     // 配置是永久性的。
@@ -568,18 +577,6 @@ abstract class LangChainModelProvider implements ModelProvider {
     }
     // 429 / 5xx / 网络失败有意作为 TRANSIENT 落入。
     return ProviderErrorKind.TRANSIENT;
-  }
-
-  private static String errorMessages(Throwable error) {
-    StringBuilder messages = new StringBuilder();
-    Throwable current = error;
-    for (int depth = 0; current != null && depth < 8; depth++, current = current.getCause()) {
-      if (messages.length() > 0) {
-        messages.append(' ');
-      }
-      messages.append(String.valueOf(current.getMessage()));
-    }
-    return messages.toString();
   }
 
   /**
