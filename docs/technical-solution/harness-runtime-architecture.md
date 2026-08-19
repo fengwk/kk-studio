@@ -236,9 +236,9 @@ TURN_START(COMPACTION)
 ModelProcessor 消费 MODEL Work：
 
 1. claim 校验（fake/expired lease token → `LOST_OWNERSHIP` no-op，绝不 cancel 合法 active execution）；
-2. 两阶段激活：先由 `ModelRequestMaterializer` 在有效 MODEL claim 内从 `basisHeadEntryId + compact spec` 重建内存 ProviderRequest（不持有长事务、不访问 catalog/Environment/插件）；随后 `ModelGateway.start` 返回 `Started` 后由 Processor 在 durable `markRunning` 之后调用 `Handle.activate` 打开回调 gate；`start` 返回 `Busy` 稍后重试；`Rejected` 确定性终结；`Indeterminate` 收敛为 `UNKNOWN`；
+2. 两阶段激活：先由 `ModelRequestMaterializer` 在有效 MODEL claim 内从 `basisHeadEntryId + compact spec` 重建内存 ProviderRequest（不持有长事务、不访问 catalog/Environment/插件）；随后 `ModelGateway.start` 返回 `Started` 后由 Processor 在 durable `markRunning` 之后调用 `Handle.activate` 打开回调 gate。`activate` 与 abandon 由单一 monitor 仲裁：abandon 先于 activation 则不调用 activate，activation 已开始则把 cancel 推迟到 activate 返回，外部调用序只能是 ACTIVATE → CANCEL。`start` 返回 `Busy` 稍后重试；`Rejected` 确定性终结；`Indeterminate` 收敛为 `UNKNOWN`；
 3. 回调（serialized FIFO 单 drainer）：`MODEL_DELTA` 节流写 `stream_checkpoint`（text/thinking 归一化为非 null；至少一侧非空，纯空白合法；首个 safe delta 立即 flush；tool-call fragment 只推 sequence 不入 checkpoint），**commit 后才 best-effort 发布 Redis realtime delta**；
-4. retryable `TRANSIENT` terminal 在同一短事务把 accumulator 的完整 text/thinking、最后已提交 sequence、error、`failedAt/retryAt` 追加为 `failedAttempts`，清除 checkpoint，`RUNNING -> READY` 并 reschedule；terminal/duplicate/stale 回调仍严格 fire-once/no-op；
+4. retryable `TRANSIENT` terminal 在同一短事务把 accumulator 的完整 text/thinking、最后已提交 sequence、error、`failedAt/retryAt` 追加为 `failedAttempts`，清除 checkpoint，`RUNNING -> READY` 并 reschedule；lease fence 使用原始本地时钟，`failedAt` 则抬升到 Thread/Model durable 时间与上一 `retryAt` 的下界，保证时钟回拨后仍可物化为单调 Entry；terminal/duplicate/stale 回调仍严格 fire-once/no-op；
 5. 最终 `resultJson`（ProviderResponse 全量 `{text, thinking, toolCalls, stopReason, usage, cost, requestId, serviceTier, rawUsageJson}`）或 `errorJson` 写入 Invocation，并请求 THREAD Work 做 apply。Provider resolution 校验当前 Provider 行的 type 等于 spec 冻结的 type 后方可 start；credential/endpoint/timeout 与 Resource signed URL 保持 attempt-time live。
 
 ## 7. ToolProcessor 与结果外部化边界
@@ -246,7 +246,7 @@ ModelProcessor 消费 MODEL Work：
 ToolProcessor 消费 TOOL Work：
 
 1. claim 校验（lost/stale → 完整 no-op）；
-2. `ToolGateway.start` 两阶段激活与 Model 同构；`ToolGateway` 先做 preflight（未取消/未过期、冻结 `name@version` 命中固定目录、arguments 是 JSON object），admission 不确定收敛 `UNKNOWN`；
+2. `ToolGateway.start` 两阶段激活及 activate/abandon 仲裁与 Model 同构；`ToolGateway` 先做 preflight（未取消/未过期、冻结 `name@version` 命中固定目录、arguments 是 JSON object），admission 不确定收敛 `UNKNOWN`；
 3. **ToolProcessor 接收已验证、已外部化的 `ToolSuccess(result, effects)`**，先做领域校验（toolCallId、禁止 inline Binary、canonical size、effects 上限与 payload 等），再在短事务内做严格 terminal CAS（fire-once、attempt/claim ownership 校验），以一次 Store update 同时落 `SUCCEEDED + result + effects`，不做任何存储外部化；
 4. terminal 后请求 THREAD Work 做 sibling apply。本地执行取消（Stop 后）通过 process-local `modelExecutionCanceller` / `toolExecutionCanceller` best-effort 回调。
 

@@ -284,10 +284,7 @@ class HarnessRuntimeStopReplayTest {
     assertTrue(error.getMessage().contains("more than once"));
   }
 
-  /**
-   * owning Thread 迁移到不含该 raw key 的兄弟分支后，Session 级 owner 查找仍命中自己的 STOPPED TURN_END：旧实现只扫描 当前 head
-   * 路径，此处会误报 STALE_REVISION 丢失 replay。
-   */
+  /** owning Thread 迁移到不含该 raw key 的兄弟分支后，Session 级 owner 查找仍命中自己的 STOPPED TURN_END。 */
   @Test
   void owningThreadReplaySurvivesMoveToASiblingBranch() {
     HarnessRuntimeTestSupport.ModelBaseline baseline =

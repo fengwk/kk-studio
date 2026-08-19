@@ -977,8 +977,8 @@ class ToolProcessorRecoveryTest {
 
   /**
    * 本地 cancel 在 Started 的 markRunning 事务期间获胜：markRunning 仍 commit（durable RUNNING），但 activate 观察到
-   * abandoned 后必须返回 LOST 且绝不调用 {@code handle.activate()}（旧实现在 abandon 后仍调用 activate，产生 CANCEL -&gt;
-   * ACTIVATE），并由 abandon best-effort cancel handle；lease 到期后由 dispatcher 恢复 UNKNOWN。
+   * abandoned 后必须返回 LOST 且绝不调用 {@code handle.activate()}，并由 abandon best-effort cancel handle；lease
+   * 到期后由 dispatcher 恢复 UNKNOWN。
    */
   @Test
   void cancelWinningDuringMarkRunningReturnsLostAndCancelsHandle() throws Exception {
@@ -1060,8 +1060,8 @@ class ToolProcessorRecoveryTest {
   }
 
   /**
-   * 本地 cancel 在 handle.activate 已经开始之后获胜：abandon 必须推迟 handle cancel 直到 activate 返回，外部调用序 只能是
-   * ACTIVATE -&gt; CANCEL（旧实现直接在激活期间 CANCEL，产生 CANCEL -&gt; ACTIVATE 的破坏性顺序），cancel 绝不丢失。
+   * 本地 cancel 在 handle.activate 已经开始之后获胜：abandon 必须推迟 handle cancel 直到 activate 返回，外部调用序只能是
+   * ACTIVATE -&gt; CANCEL，cancel 绝不丢失。
    */
   @Test
   void cancelWinningDuringActivationDefersCancelUntilActivateReturns() throws Exception {
