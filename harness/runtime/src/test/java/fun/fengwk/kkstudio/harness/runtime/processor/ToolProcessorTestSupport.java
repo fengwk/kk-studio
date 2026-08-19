@@ -631,10 +631,16 @@ final class ToolProcessorTestSupport {
 
   static class FakeHandle implements ToolGateway.Handle {
     final AtomicInteger cancels = new AtomicInteger();
+    final AtomicInteger activates = new AtomicInteger();
 
     @Override
     public void cancel() {
       cancels.incrementAndGet();
+    }
+
+    @Override
+    public void activate() {
+      activates.incrementAndGet();
     }
 
     boolean isCancelled() {
