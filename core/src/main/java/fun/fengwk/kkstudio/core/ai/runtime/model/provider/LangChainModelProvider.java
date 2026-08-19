@@ -42,6 +42,8 @@ import dev.langchain4j.model.output.FinishReason;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ContextPressureDetector;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ContextPressureFacts;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
@@ -76,11 +78,18 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 /** LangChain4j SDK 留在 model adapter 内的标准 Provider 流桥接。 */
 abstract class LangChainModelProvider implements ModelProvider {
 
   private final ProviderType providerType;
+
+  /** HTTP status 数字只在独立 token 上匹配，避免把 token 计数（如 {@code 1401}）误判为 auth/billing status。 */
+  private static final Pattern HTTP_STATUS_401 = Pattern.compile("\\b401\\b");
+
+  private static final Pattern HTTP_STATUS_402 = Pattern.compile("\\b402\\b");
+  private static final Pattern HTTP_STATUS_403 = Pattern.compile("\\b403\\b");
 
   /**
    * 绑定 Adapter 自身对应的 {@link ProviderType}，由 {@link ProviderUsageNormalizer} 决定七类语义与 raw usage JSON
@@ -183,7 +192,7 @@ abstract class LangChainModelProvider implements ModelProvider {
                     // 保留完整 cause chain 细节（而非通用常量），同时附上原始 Throwable 供诊断。
                     handler.onError(
                         new ProviderException(
-                            classify(error, stream), userFacingMessage(error), error),
+                            classify(providerType, error, stream), userFacingMessage(error), error),
                         stream);
                   }
                 }
@@ -540,20 +549,31 @@ abstract class LangChainModelProvider implements ModelProvider {
     };
   }
 
-  static ProviderErrorKind classify(Throwable error, ProviderStream stream) {
+  /**
+   * Provider 错误分类。优先级：CANCELLED → authentication / billing（typed status 或明确 message 标记）→ rate limit
+   * 保持 TRANSIENT → context pressure 经 {@link ProviderErrorFactsExtractor} + {@link
+   * ContextPressureDetector} 判定（不再散落 {@code 413} / {@code context length} / {@code too large} 子串）→
+   * 普通 invalid / transient。401/402/403 即使消息同时提到 context 字样也不得返回 OVERFLOW；HTTP 429 与普通 400 invalid
+   * 同样不误判；绝不新增 LENGTH kind。
+   */
+  static ProviderErrorKind classify(
+      ProviderType providerType, Throwable error, ProviderStream stream) {
     if (stream.isCancelled()) {
       return ProviderErrorKind.CANCELLED;
     }
-    String message = errorMessages(error).toLowerCase(Locale.ROOT);
-    if (message.contains("401") || message.contains("403") || message.contains("auth")) {
+    ContextPressureFacts facts = ProviderErrorFactsExtractor.extract(providerType, error);
+    String message =
+        facts.errorMessage() == null ? "" : facts.errorMessage().toLowerCase(Locale.ROOT);
+    if (authenticationFailure(facts, message)) {
       return ProviderErrorKind.AUTHENTICATION;
     }
-    if (message.contains("402") || message.contains("billing") || message.contains("quota")) {
+    if (billingFailure(facts, message)) {
       return ProviderErrorKind.BILLING;
     }
-    if (message.contains("413")
-        || message.contains("context length")
-        || message.contains("too large")) {
+    if (ContextPressureDetector.isRateLimited(facts)) {
+      return ProviderErrorKind.TRANSIENT;
+    }
+    if (ContextPressureDetector.detect(facts)) {
       return ProviderErrorKind.OVERFLOW;
     }
     // 确定性的 client/route 错误不得进入自动重试。nginx 的 404 HTML 与 405 方法不匹配对当前请求
@@ -566,20 +586,28 @@ abstract class LangChainModelProvider implements ModelProvider {
         || message.contains("invalid")) {
       return ProviderErrorKind.INVALID_REQUEST;
     }
-    // 429 / 5xx / 网络失败有意作为 TRANSIENT 落入。
+    // 5xx / 网络失败有意作为 TRANSIENT 落入。
     return ProviderErrorKind.TRANSIENT;
   }
 
-  private static String errorMessages(Throwable error) {
-    StringBuilder messages = new StringBuilder();
-    Throwable current = error;
-    for (int depth = 0; current != null && depth < 8; depth++, current = current.getCause()) {
-      if (messages.length() > 0) {
-        messages.append(' ');
-      }
-      messages.append(String.valueOf(current.getMessage()));
+  private static boolean authenticationFailure(ContextPressureFacts facts, String message) {
+    Integer status = facts.httpStatus();
+    if (status != null && (status == 401 || status == 403)) {
+      return true;
     }
-    return messages.toString();
+    return HTTP_STATUS_401.matcher(message).find()
+        || HTTP_STATUS_403.matcher(message).find()
+        || message.contains("auth");
+  }
+
+  private static boolean billingFailure(ContextPressureFacts facts, String message) {
+    Integer status = facts.httpStatus();
+    if (status != null && status == 402) {
+      return true;
+    }
+    return HTTP_STATUS_402.matcher(message).find()
+        || message.contains("billing")
+        || message.contains("quota");
   }
 
   /**
