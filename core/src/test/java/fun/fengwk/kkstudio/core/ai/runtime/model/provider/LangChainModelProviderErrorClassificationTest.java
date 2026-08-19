@@ -150,6 +150,41 @@ class LangChainModelProviderErrorClassificationTest {
             ProviderType.OPENAI, new HttpException(400, "HTTP 400 Bad Request"), active));
   }
 
+  /** 端到端：typed status 401/402/403 或明确 auth/billing message 即使同时提到 context 字样也优先分类，绝不 OVERFLOW。 */
+  @Test
+  void authAndBillingWinOverContextText() {
+    ProviderStream active = activeStream();
+    assertEquals(
+        ProviderErrorKind.AUTHENTICATION,
+        LangChainModelProvider.classify(
+            ProviderType.OPENAI,
+            new RuntimeException(
+                "HTTP 401 Unauthorized: this model's maximum context length is 1000 tokens"),
+            active));
+    assertEquals(
+        ProviderErrorKind.AUTHENTICATION,
+        LangChainModelProvider.classify(
+            ProviderType.OPENAI, new HttpException(403, "Forbidden"), active));
+    assertEquals(
+        ProviderErrorKind.AUTHENTICATION,
+        LangChainModelProvider.classify(
+            ProviderType.OPENAI,
+            new RuntimeException("auth failed: maximum prompt length is 60000"),
+            active));
+    assertEquals(
+        ProviderErrorKind.BILLING,
+        LangChainModelProvider.classify(
+            ProviderType.OPENAI,
+            new RuntimeException("HTTP 402 Payment Required: maximum context length exceeded"),
+            active));
+    assertEquals(
+        ProviderErrorKind.BILLING,
+        LangChainModelProvider.classify(
+            ProviderType.OPENAI,
+            new RuntimeException("quota exhausted while trimming to the context window"),
+            active));
+  }
+
   /** 用户可见错误必须保留 cause 链详情，而不是硬编码 provider request failed。 */
   @Test
   void userFacingMessageKeepsNestedProviderDetailAndRedactsSecrets() {

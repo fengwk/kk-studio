@@ -23,8 +23,8 @@ public record ContextPressureFacts(
 
   public ContextPressureFacts {
     providerType = Objects.requireNonNull(providerType, "providerType");
-    if (httpStatus != null && httpStatus < 100) {
-      throw new IllegalArgumentException("httpStatus must be a valid HTTP status when present");
+    if (httpStatus != null && (httpStatus < 100 || httpStatus > 599)) {
+      throw new IllegalArgumentException("httpStatus must be in [100, 599] when present");
     }
     providerErrorCodeOrType = blankToNull(providerErrorCodeOrType);
     errorMessage = blankToNull(errorMessage);
