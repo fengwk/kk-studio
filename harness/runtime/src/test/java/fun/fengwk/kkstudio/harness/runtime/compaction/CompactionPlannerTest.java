@@ -26,9 +26,10 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -50,8 +51,9 @@ import java.util.UUID;
  * / 2), 20_000)，因此用窗口控制 cut 位置。
  */
 class CompactionPlannerTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
-  private static final CompactionConfig CONFIG = CompactionConfig.DEFAULTS;
+  private static final CompactionConfig CONFIG = new CompactionConfig(true, 16_384, 20_000);
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 
   @Test
@@ -190,6 +192,23 @@ class CompactionPlannerTest {
     assertEquals(CompactionTrigger.THRESHOLD, prefix.trigger());
     assertEquals(1, prefix.messagesToSummarize().size());
     assertTrue(contentText(prefix.messagesToSummarize().get(0)).contains("split turn"));
+
+    CompactionSummaryInput reconstructedHistory =
+        CompactionPlanner.reconstructSummaryInput(path.path(), requestOf(history));
+    assertEquals(history.messagesToSummarize(), reconstructedHistory.messages());
+    assertNull(reconstructedHistory.previousSummary());
+    CompactionSummaryInput reconstructedPrefix =
+        CompactionPlanner.reconstructSummaryInput(
+            path.path(),
+            new CompactionRequest(
+                CompactionPhase.TURN_PREFIX,
+                prefix.trigger(),
+                prefix.tokensBefore(),
+                prefix.firstKeptEntryId(),
+                prefix.cutEntryId(),
+                prefix.turnPrefixStartEntryId()));
+    assertEquals(prefix.messagesToSummarize(), reconstructedPrefix.messages());
+    assertNull(reconstructedPrefix.previousSummary());
   }
 
   @Test
@@ -418,6 +437,32 @@ class CompactionPlannerTest {
                 + 3L)
             / 4L;
     assertEquals(wrapperTokens + 75L, preparation.tokensBefore());
+    CompactionSummaryInput reconstructed =
+        CompactionPlanner.reconstructSummaryInput(path.path(), requestOf(preparation));
+    assertEquals(preparation.messagesToSummarize(), reconstructed.messages());
+    assertEquals("carried summary", reconstructed.previousSummary());
+  }
+
+  @Test
+  void reconstructSummaryInputDoesNotReselectCutAfterLaterMessages() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("first");
+    path.assistant("first reply");
+    path.closeTurn();
+    path.turn("second");
+    path.assistant("second reply");
+    CompactionPreparation preparation = plan(path, 80L).orElseThrow();
+    CompactionRequest request = requestOf(preparation);
+
+    path.closeTurn();
+    path.turn("later user");
+    path.assistant("later reply");
+
+    CompactionSummaryInput reconstructed =
+        CompactionPlanner.reconstructSummaryInput(path.path(), request);
+    assertEquals(preparation.messagesToSummarize(), reconstructed.messages());
+    assertEquals(preparation.cutEntryId(), request.cutEntryId());
   }
 
   @Test
@@ -522,6 +567,16 @@ class CompactionPlannerTest {
     return planner().prepare(path.path(), CompactionTrigger.THRESHOLD, contextWindow);
   }
 
+  private static CompactionRequest requestOf(CompactionPreparation preparation) {
+    return new CompactionRequest(
+        preparation.phase(),
+        preparation.trigger(),
+        preparation.tokensBefore(),
+        preparation.firstKeptEntryId(),
+        preparation.cutEntryId(),
+        preparation.turnPrefixStartEntryId());
+  }
+
   private static String contentText(AgentMessage message) {
     StringBuilder sb = new StringBuilder();
     for (AgentMessageContent content : message.contents()) {
@@ -555,7 +610,7 @@ class CompactionPlannerTest {
               id(cur),
               id(100L),
               parentId(),
-              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
+              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
               BASE));
       return cur;
     }
@@ -568,7 +623,7 @@ class CompactionPlannerTest {
               id(startId),
               id(100L),
               parentId(),
-              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
+              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
               BASE));
       entries.add(
           new Entry(
@@ -606,8 +661,8 @@ class CompactionPlannerTest {
         contents.add(new ToolCallMessageContent(callId, "read", "read", "{\"path\":\"a.txt\"}"));
       }
       contents.add(new TextMessageContent(text(assistantText)));
-      ProviderStopReason stopReason =
-          callIds.length == 0 ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+      GenerationStopReason stopReason =
+          callIds.length == 0 ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
       entries.add(
           new Entry(
               id(nextId++),
@@ -731,7 +786,7 @@ class CompactionPlannerTest {
               id(cur),
               id(100L),
               parentId(),
-              new TurnStartPayload(TurnStartReason.CONTINUATION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.CONTINUATION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       return cur;
     }
@@ -759,7 +814,7 @@ class CompactionPlannerTest {
               id(startId),
               id(100L),
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       entries.add(
           new Entry(
@@ -803,7 +858,7 @@ class CompactionPlannerTest {
               id(startId),
               id(100L),
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       entries.add(
           new Entry(
@@ -838,7 +893,7 @@ class CompactionPlannerTest {
               id(startId),
               id(100L),
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       aborted(abortedText);
       long endId = nextId++;

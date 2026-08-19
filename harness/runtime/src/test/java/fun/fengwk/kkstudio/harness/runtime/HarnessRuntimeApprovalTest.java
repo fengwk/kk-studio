@@ -283,7 +283,7 @@ class HarnessRuntimeApprovalTest {
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(thread.advanceHead(baseline.rootEntryId(), thread.yoloEnabled(), T6));
+          tx.updateThread(thread.advanceHead(baseline.rootEntryId(), T6));
           return null;
         });
     HarnessRuntimeConflictException error =

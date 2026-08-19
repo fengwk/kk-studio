@@ -9,7 +9,15 @@ import java.time.Instant;
  * ModelInvocation 查询投影（model_invocation 表）；实体 id 均为 canonical UUID string。
  *
  * <p>{@code streamCheckpointJson} / {@code resultJson} / {@code errorJson} 为 canonical runtime
- * codec JSON，仅对应阶段非 null；{@code resultEntryId} 为 TURN_END 应用后的结果 Entry。
+ * codec JSON，仅对应阶段非 null；{@code resultEntryId} 只属于当前 open Tool phase：
+ *
+ * <ul>
+ *   <li>{@code null}：model outcome 尚未被 Thread apply；
+ *   <li>等于当前 ASSISTANT head：Assistant 已写入，模型 SUCCEEDED 且响应含 tool calls，正等待 Tool batch。
+ * </ul>
+ *
+ * <p>Closed turn 不保留 Model 行：TURN_END 应用包含产物后在同一个事务删除该行，因此快照中的 Model 一定处于 ModelActive /
+ * ModelTerminalPending / ToolActive / ToolTerminalPending 阶段。
  */
 @Data
 public class ModelInvocationDTO {
@@ -51,7 +59,7 @@ public class ModelInvocationDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String errorJson;
 
-  /** 结果挂载的 Entry 主键：canonical UUID string；TURN_END 应用后非 null（{@code @JsonInclude(ALWAYS)}）。 */
+  /** 结果挂载的 Entry 主键：canonical UUID string；仅 active Tool phase（等于当前 ASSISTANT head）非 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String resultEntryId;
 

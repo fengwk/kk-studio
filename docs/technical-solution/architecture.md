@@ -105,9 +105,9 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 | Session | 一棵 append-only Entry Tree 的边界；由 Chat-scoped Thread 创建事务产生 |
 | Entry | 对话与运行审计事实，只允许十种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
-| ThreadCommand | 有序 mailbox，只允许七类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)） |
-| ModelInvocation | 一次冻结的 `ModelInvocationRequest`（route/provider/tools/skills/subagentBindings/YOLO/contextWindow/可空 compaction metadata）及其状态、attempt-local checkpoint、连续 `failedAttempts` 与 terminal 事实 |
-| ToolInvocation | 一次 ToolCall 的冻结 binding、approval、状态、结果与 `effects`；插件 provenance/access 随 binding 冻结，非空 effects 只允许出现在 `SUCCEEDED` 且 terminal immutable |
+| ThreadCommand | 有序 mailbox，只允许六类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)）；YOLO 是 Thread 直接控制面 |
+| ModelInvocation | 一次持久化 `basisHeadEntryId + compact ModelRequestSpec`（providerType/model/variant/preamble/toolBindings/skillBindings/subagentBindings/cacheControl/可空 compaction metadata；无 messages/tools/YOLO/contextWindow）的 Provider 执行及其状态、attempt-local checkpoint、连续 `failedAttempts` 与 terminal 事实；完整 ProviderRequest 每次 attempt 由 Materializer 从 EntryPath + spec 内存重建 |
+| ToolInvocation | 一次 ToolCall（`call` + 可空 `binding`）的 approval、状态、结果与 `effects`；插件 provenance/access 随 binding 冻结，unknown tool 槽位 binding 为 null，非空 effects 只允许出现在 `SUCCEEDED` 且 terminal immutable |
 | SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；task id/session_id 即子 ThreadId（canonical UUID） |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
 | Goal state | `goal` 插件拥有的 branch-scoped 完整快照：`CUSTOM(pluginId=goal, customType=state, schemaVersion=1)`；只取当前分支最近快照，无独立 Goal 表 |
@@ -127,12 +127,12 @@ Blank first send:
   POST /api/ai/runtime/threads/{threadId}/commands  -> 原子 USER_MESSAGE-only batch（202）
 
 绑定 Pane 的每次发送:
-  构造 SET_* diff batch（ENV→AGENT→MODEL→TOOLS→YOLO）+ USER_MESSAGE
+  构造 SET_* diff batch（ENV→AGENT→MODEL→TOOLS）+ USER_MESSAGE（YOLO 走直接控制面 PUT /yolo）
   -> POST /commands（expectedHeadEntryId + expectedNextCommandSequence CAS，202）
   -> ThreadProcessor 收割 queued Commands（全量已存在 id 时是 ordered replay）
   -> TurnPlanBuilder 追加 TURN_START(INPUT) + Message Entries
-  -> TurnResolver 读取最新 Catalog/Environment 并冻结 ModelInvocationRequest（fail closed；Agent/Model 修改下一 turn 生效）
-  -> ModelProcessor / Provider（每次 attempt 按 providerName 重读当前 agent_provider 行，见 harness-capability-wiring）
+  -> TurnResolver 读取最新 Catalog/Environment 并冻结 compact ModelRequestSpec（fail closed；Agent/Model 修改下一 turn 生效）
+  -> ModelProcessor（有效 claim 内从 basisHeadEntryId + spec 重建内存 ProviderRequest；每次 attempt 按 providerName 重读当前 agent_provider 行，见 harness-capability-wiring）
   -> 失败 attempt 审计 Entry（0..N）+ Assistant Entry + 可选 ToolInvocation -> ToolProcessor -> Tool Result Entry
   -> TURN_END(COMPLETED, continueModel=true) -> continuation，直到 Model 无 ToolCall
 ```
@@ -169,7 +169,7 @@ cache 覆盖连续版本时返回 Patch；任何 gap、损坏或 Redis 不可用
 `task` 是内部 `PLATFORM` Tool（`rendererKey=task`、`NON_IDEMPOTENT`）：Model 调用后，Core 的 `TaskTool` 以普通 durable Harness Thread 创建子 Agent Session，复用现有 ToolInvocation/approval/stop/Work 与 Thread 状态机——**没有新表、新状态机或新调度器**。关键事实：
 
 - 子 Thread ROOT payload 携带可选 `subagentContext {parentThreadId, rootThreadId, taskInvocationId, depth}`；`task` 的 id/session_id 是子 ThreadId（canonical UUID）。
-- 委派权限在父 ModelInvocationRequest 冻结为 `subagentBindings`（Agent 名称 + 描述 allowlist）；执行绝不重读父 Agent 配置扩权。子 Agent branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且未达最大深度时 task`）。
+- 委派权限在父 ModelRequestSpec 冻结为 `subagentBindings`（Agent 名称 + 描述 allowlist）；执行绝不重读父 Agent 配置扩权。子 Agent branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且未达最大深度时 task`）。
 - 运行期控制全部是配置（`SubagentConfig`）：`maxDepth`、每父/每根并发上限、idle 超时、`maxTurns` 软预算、轮询间隔；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth。恢复（`session_id`）要求同 parent/root 归属且子 Thread quiescent；Stop/取消保留可恢复 Session。
 - 进度经非 durable Redis `TOOL_PARTIAL` 心跳（约 1s）发布完整 JSON 快照（`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）；`descendants` 是进程内 relay 的扁平活动子树状态，使根 Thread 可直接处理任意深度审批，且不参与调度或终态判定。前端整帧替换而非增量合并。最终 ToolResult 是 `<task id state>` envelope（`<task_result>` / `<task_error>`），`details.kind=task.result`。
 

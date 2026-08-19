@@ -16,6 +16,8 @@ import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryFailureCode;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -153,8 +155,7 @@ class EnvironmentDaemonGatewayFinalTest {
                 INVOCATION_ID.toString(),
                 List.of(new BinaryToolContent("text/plain", new byte[] {1, 2})),
                 false,
-                "{}",
-                false),
+                "{}"),
             inlineResourceStore(new byte[] {1, 2}));
     fixture.gateway.receive(connection.connectionId(), partial(4, resourcePayload));
     assertTrue(connection.closed);
@@ -173,8 +174,7 @@ class EnvironmentDaemonGatewayFinalTest {
                 INVOCATION_ID.toString(),
                 List.of(new BinaryToolContent("text/plain", new byte[] {7, 8})),
                 false,
-                "{}",
-                false),
+                "{}"),
             inlineResourceStore(new byte[] {7, 8}));
     fixture.gateway.receive(connection.connectionId(), completed(2, payload));
     BinaryToolContent binary = (BinaryToolContent) listener.completed.contents().get(0);
@@ -360,7 +360,11 @@ class EnvironmentDaemonGatewayFinalTest {
     gatewayProperties.setDaemonToken(GATEWAY_TOKEN);
     EnvironmentDaemonGateway gateway =
         new EnvironmentDaemonGateway(
-            registry, gatewayProperties, Clock.fixed(NOW, ZoneOffset.UTC), environmentName -> {});
+            registry,
+            gatewayProperties,
+            new SystemSettingsSnapshot(SystemSettings.DEFAULT),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            environmentName -> {});
     FakeConnection connection = new FakeConnection("connection-race");
     gateway.open(connection);
     Thread receiveThread =
@@ -1299,8 +1303,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
   private String resultPayload(String text) {
     return resultCodec.encodeCompleted(
-        new ToolResult(
-            INVOCATION_ID.toString(), List.of(new TextToolContent(text)), false, "{}", false),
+        new ToolResult(INVOCATION_ID.toString(), List.of(new TextToolContent(text)), false, "{}"),
         inlineResourceStore(new byte[0]));
   }
 
@@ -1447,6 +1450,7 @@ class EnvironmentDaemonGatewayFinalTest {
           new EnvironmentDaemonGateway(
               environmentRegistry,
               gatewayProperties,
+              new SystemSettingsSnapshot(SystemSettings.DEFAULT),
               new Clock() {
                 @Override
                 public ZoneId getZone() {

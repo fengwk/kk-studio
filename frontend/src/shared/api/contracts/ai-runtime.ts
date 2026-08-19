@@ -127,7 +127,6 @@ export type HarnessThreadCommandCreateDTO =
   | { type: 'SET_AGENT'; clientCommandId: string; agentName: string }
   | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
   | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
-  | { type: 'SET_YOLO'; clientCommandId: string; yoloEnabled: boolean }
   | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environment: EnvironmentBindingDTO | null }
 
 /** 原子化的 Thread mailbox 入队请求；期望游标来自最新的 thread DTO。 */
@@ -148,6 +147,15 @@ export interface HarnessThreadCreateDTO {
 export interface HarnessThreadHeadUpdateDTO {
   targetEntryId: string
   expectedRevision: string
+}
+
+/**
+ * Thread YOLO policy 直接更新请求；expectedRevision 是精确的 revision CAS 游标
+ * （同值请求在任何 CAS 之前即成功 no-op）。
+ */
+export interface HarnessThreadYoloUpdateDTO {
+  expectedRevision: string
+  yoloEnabled: boolean
 }
 
 /** Thread 停止请求；stopRequestId 是稳定的幂等键。 */
@@ -197,8 +205,10 @@ export interface ModelInvocationDTO {
 
 /**
  * ToolInvocation 查询投影；id 均为 canonical UUID string。
- * approvalJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段
- * 非 null；environment 是可空的完整 Environment binding。
+ * toolCallId / toolName / argumentsJson 恒来自 durable ToolCall；toolVersion / toolType /
+ * environment 仅 binding 非 null 时有值（unknown tool 槽位为 null），rendererKey 恒有值
+ *（binding null 时固定回退为 "tool"）。approvalJson / resultJson / errorJson 是规范的运行时
+ * codec JSON，仅在其对应阶段非 null。
  */
 export interface ToolInvocationDTO {
   id: string
@@ -209,15 +219,14 @@ export interface ToolInvocationDTO {
   attempt: number
   toolCallId: string
   toolName: string
-  toolVersion: string
+  toolVersion: string | null
   rendererKey: string
-  toolType: string
+  toolType: string | null
   environment: EnvironmentBindingDTO | null
   argumentsJson: string
   approvalJson: string | null
   resultJson: string | null
   errorJson: string | null
-  resultEntryId: string | null
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }

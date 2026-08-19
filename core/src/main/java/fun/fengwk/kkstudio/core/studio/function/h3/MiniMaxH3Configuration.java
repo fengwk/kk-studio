@@ -2,15 +2,18 @@ package fun.fengwk.kkstudio.core.studio.function.h3;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 
-/** MiniMax-H3 Ref2VA adapter 装配。 */
+import java.time.Duration;
+
+/** MiniMax-H3 Ref2VA adapter 装配；availability 与运行配置来自 SystemSettings.integrations.minimaxH3。 */
 @Configuration
 @EnableConfigurationProperties(MiniMaxH3Properties.class)
 public class MiniMaxH3Configuration {
@@ -31,24 +34,24 @@ public class MiniMaxH3Configuration {
   }
 
   @Bean
-  @ConditionalOnProperty(
-      prefix = "kk-studio.canvas.function.minimax-h3",
-      name = "enabled",
-      havingValue = "true")
   public StandardComfyuiClient standardH3ComfyuiClient(
-      MiniMaxH3Properties properties, ObjectMapper objectMapper) {
-    properties.validateEnabled();
+      MiniMaxH3Properties properties, SystemSettingsSnapshot snapshot, ObjectMapper objectMapper) {
+    SystemSettings.MiniMaxH3 settings = snapshot.get().integrations().minimaxH3();
+    if (!settings.enabled()) {
+      return null;
+    }
+    properties.requireBearerToken();
     return new StandardComfyuiClient(
-        properties.getComfyBaseUrl(),
+        settings.comfyBaseUrl(),
         properties.getComfyBearerToken(),
-        properties.getComfyConnectTimeout(),
-        properties.getComfyRequestTimeout(),
+        Duration.ofMillis(settings.comfyConnectTimeoutMillis()),
+        Duration.ofMillis(settings.comfyRequestTimeoutMillis()),
         objectMapper);
   }
 
   @Bean
   public MiniMaxH3CanvasFunctionAdapter miniMaxH3CanvasFunctionAdapter(
-      MiniMaxH3Properties properties,
+      SystemSettingsSnapshot snapshot,
       H3MediaPreflight mediaPreflight,
       H3PromptRequestBuilder promptBuilder,
       HarnessOneShotService oneShotService,
@@ -57,7 +60,7 @@ public class MiniMaxH3Configuration {
       ObjectProvider<StorageBlobIngestService> ingestServices,
       ObjectMapper objectMapper) {
     return new MiniMaxH3CanvasFunctionAdapter(
-        properties,
+        snapshot,
         mediaPreflight,
         promptBuilder,
         oneShotService,

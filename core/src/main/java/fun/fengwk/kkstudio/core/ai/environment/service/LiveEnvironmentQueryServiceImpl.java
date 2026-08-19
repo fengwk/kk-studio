@@ -2,9 +2,10 @@ package fun.fengwk.kkstudio.core.ai.environment.service;
 
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpToolDescriptor;
@@ -16,6 +17,7 @@ import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentSkillDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentToolDTO;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -25,15 +27,13 @@ import java.util.Objects;
 public class LiveEnvironmentQueryServiceImpl implements LiveEnvironmentQueryService {
 
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final EnvironmentGatewayProperties gatewayProperties;
+  private final SystemSettings.Environment environmentSettings;
   private final Clock clock;
 
   public LiveEnvironmentQueryServiceImpl(
-      LiveEnvironmentRegistry environmentRegistry,
-      EnvironmentGatewayProperties gatewayProperties,
-      Clock clock) {
+      LiveEnvironmentRegistry environmentRegistry, SystemSettingsSnapshot snapshot, Clock clock) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.gatewayProperties = Objects.requireNonNull(gatewayProperties, "gatewayProperties");
+    this.environmentSettings = Objects.requireNonNull(snapshot, "snapshot").get().environment();
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -50,7 +50,9 @@ public class LiveEnvironmentQueryServiceImpl implements LiveEnvironmentQueryServ
     LiveEnvironmentDTO dto = new LiveEnvironmentDTO();
     dto.setName(environment.name().value());
     dto.setStatus(environment.status().name());
-    dto.setReady(environment.isReady(clock.instant(), gatewayProperties.requireHeartbeatTimeout()));
+    dto.setReady(
+        environment.isReady(
+            clock.instant(), Duration.ofMillis(environmentSettings.heartbeatTimeoutMillis())));
     dto.setLastSeen(environment.lastSeenAt());
     List<LiveEnvironmentToolDTO> tools = new ArrayList<>();
     for (ToolDescriptor tool : environment.tools()) {

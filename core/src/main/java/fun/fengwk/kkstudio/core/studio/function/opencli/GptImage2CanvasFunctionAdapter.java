@@ -4,6 +4,8 @@ import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.Executi
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.ExecutionResource;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.ExecutionStatus;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.HubResourceStream;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionExecutionContext;
@@ -44,18 +46,12 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
                   "auto",
                   List.of("auto", "1:1", "3:4", "9:16", "4:3", "16:9"))));
 
-  private final OpenCliHubProperties hubProperties;
-  private final GptImage2CanvasProperties properties;
+  private final SystemSettings.Integrations integrations;
   private final OpenCliHubClient client;
   private final OpenCliReferenceUploader uploader;
 
-  public GptImage2CanvasFunctionAdapter(
-      OpenCliHubProperties hubProperties,
-      GptImage2CanvasProperties properties,
-      OpenCliHubClient client) {
-    this.hubProperties = Objects.requireNonNull(hubProperties, "hubProperties");
-    this.properties = Objects.requireNonNull(properties, "properties");
-    properties.validate();
+  public GptImage2CanvasFunctionAdapter(SystemSettingsSnapshot snapshot, OpenCliHubClient client) {
+    this.integrations = Objects.requireNonNull(snapshot, "snapshot").get().integrations();
     this.client = Objects.requireNonNull(client, "client");
     uploader = new OpenCliReferenceUploader(client);
   }
@@ -67,7 +63,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public boolean enabled() {
-    return hubProperties.isEnabled() && properties.isPaidEnabled();
+    return integrations.openCliHub().enabled() && integrations.gptImage2().paidEnabled();
   }
 
   @Override
@@ -111,7 +107,8 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
       state = uploadResult.state();
       context.checkpoint("GPT_IMAGE_SUBMITTING", state);
       Execution submitted =
-          client.execute(buildArgv(run, uploads), properties.getHubExecutionTimeout().toMillis());
+          client.execute(
+              buildArgv(run, uploads), integrations.gptImage2().hubExecutionTimeoutMillis());
       executionId = submitted.id();
       state.put(OpenCliAdapterState.EXECUTION_ID, executionId);
       context.checkpoint("GPT_IMAGE_POLLING", state);
@@ -120,7 +117,9 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
       requireCompleteUploads(run, uploads);
     }
 
-    Execution execution = awaitTerminal(context, executionId, properties.getMaxWait());
+    Execution execution =
+        awaitTerminal(
+            context, executionId, Duration.ofMillis(integrations.gptImage2().maxWaitMillis()));
     if (execution.status() != ExecutionStatus.SUCCEEDED) {
       throw new OpenCliHubException("GPT Image Hub execution ended as " + execution.status());
     }
@@ -176,7 +175,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
       argv.add(upload.resourcePath());
     }
     argv.add("--timeout");
-    argv.add(Integer.toString(properties.getAskTimeoutSeconds()));
+    argv.add(Integer.toString(integrations.gptImage2().askTimeoutSeconds()));
     return List.copyOf(argv);
   }
 

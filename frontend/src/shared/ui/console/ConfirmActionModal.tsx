@@ -1,4 +1,4 @@
-import { Trash2 } from 'lucide-react'
+import { RefreshCw, Trash2 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
@@ -72,7 +72,7 @@ export function ConfirmActionModal({
         <ModalHeader title={modal.title} onClose={effectiveClose} closeDisabled={pending} />
         <div className="modal-body confirm-modal-body">
           <div className={`confirm-modal-icon ${modal.tone === 'danger' ? 'danger' : ''}`} aria-hidden="true">
-            <Trash2 />
+            {modal.icon === 'refresh' ? <RefreshCw /> : <Trash2 />}
           </div>
           <p className="confirm-modal-description">{modal.description}</p>
         </div>

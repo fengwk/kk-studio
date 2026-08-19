@@ -1,0 +1,128 @@
+import type { SystemSettingsDTO } from '@/shared/api/contracts/system-settings'
+
+/**
+ * 测试基座：与 share DTO / V1 默认行一致的完整 GET {@code /api/settings} 响应形状。
+ *
+ * 仅用于前端测试验证「严格契约字段映射 / 聚合 hydration / 完整聚合 CAS PUT」，
+ * 不是前端运行时默认值（生产 draft 只从 GET 权威数据派生）。
+ */
+export function makeSettingsDto(overrides: { version?: string } = {}): SystemSettingsDTO {
+  return {
+    tool: {
+      permission: {
+        write: [{ pattern: '*', action: 'ask' }],
+        edit: [{ pattern: '*', action: 'ask' }],
+        bash: [{ pattern: '*', action: 'ask' }],
+      },
+      defaultYolo: false,
+      modelGatewayBusyRetryMillis: '5000',
+      toolGatewayBusyRetryMillis: '1000',
+      toolGatewayOverloadRetryMillis: '5000',
+      skillLoadTimeoutMillis: '30000',
+    },
+    aiRuntime: {
+      retryMaxRetries: 3,
+      retryBackoffStrategy: 'EXPONENTIAL',
+      retryBaseDelayMillis: '2000',
+      retryMaxDelayMillis: '60000',
+      compactionEnabled: true,
+      compactionReserveTokens: 16384,
+      compactionMaxRecentTokens: 20000,
+      subagentMaxDepth: 2,
+      subagentMaxConcurrency: 10,
+      subagentMaxTotalConcurrency: null,
+      subagentIdleTimeoutMillis: '0',
+      subagentMaxTurns: 50,
+    },
+    environment: {
+      maxResourceBytes: '8388608',
+      maxMessageBytes: '16777216',
+      heartbeatTimeoutMillis: '60000',
+      directoryListTimeoutMillis: '10000',
+    },
+    integrations: {
+      comfyui: {
+        enabled: false,
+        baseUrl: null,
+        connectTimeoutMillis: '10000',
+        readTimeoutMillis: '30000',
+        websocketTimeoutMillis: '1800000',
+        maxInputFileBytes: '52428800',
+      },
+      openCliHub: {
+        enabled: false,
+        baseUrl: 'http://vps-opencli-hub:8080',
+        connectTimeoutMillis: '5000',
+        requestTimeoutMillis: '120000',
+        longPollTimeoutMillis: '130000',
+        streamBufferBytes: 16384,
+        maxJsonResponseBytes: 524288,
+        maxErrorResponseBytes: 4096,
+        maxOutputChars: 65535,
+      },
+      seedance: {
+        enabled: false,
+        workspaceId: null,
+        retry: 0,
+        hubExecutionTimeoutMillis: '600000',
+        statusPollIntervalMillis: '30000',
+        maxWaitMillis: '1800000',
+      },
+      gptImage2: {
+        paidEnabled: false,
+        askTimeoutSeconds: 900,
+        hubExecutionTimeoutMillis: '960000',
+        maxWaitMillis: '1200000',
+      },
+      minimaxH3: {
+        enabled: false,
+        promptAgentName: null,
+        promptEnvironmentName: null,
+        promptMaxWaitMillis: '600000',
+        comfyBaseUrl: null,
+        comfyConnectTimeoutMillis: '10000',
+        comfyRequestTimeoutMillis: '30000',
+        comfyPollIntervalMillis: '2000',
+        comfyMaxWaitMillis: '1800000',
+      },
+    },
+    storageMedia: {
+      uploadExpiresSeconds: '3600',
+      s3Enabled: false,
+      s3PresignDefaultExpiresSeconds: '600',
+      s3PresignMaxExpiresSeconds: '3600',
+      canvasMediaProcessTimeoutMillis: '30000',
+      thumbnailMaxDimension: 512,
+      thumbnailQuality: 80,
+    },
+    advanced: {
+      resourceMaxBytes: '16777216',
+      processorLeaseDurationMillis: '30000',
+      processorHeartbeatIntervalMillis: '10000',
+      threadResolveFailureDelayMillis: '1000',
+      modelDispatchBusyFallbackDelayMillis: '1000',
+      toolPreflightFailureDelayMillis: '1000',
+      toolDispatchBusyFallbackDelayMillis: '1000',
+      dispatcherLeaseDurationMillis: '30000',
+      dispatcherPollIntervalMillis: '1000',
+      dispatcherRejectionDelayMillis: '1000',
+      dispatcherMaxDispatchTasks: 64,
+      dispatcherWorkerConcurrency: 16,
+      dispatcherWorkerQueueCapacity: 64,
+      canvasRealtimeMaxLength: '5000',
+      canvasFunctionExecutorCoreSize: 2,
+      canvasFunctionExecutorMaxSize: 4,
+      canvasFunctionExecutorQueueCapacity: 64,
+      applicationEventQueueCapacity: 512,
+      applicationEventMaxBytes: '2097152',
+      applicationEventSendTimeoutMillis: '10000',
+      applicationEventHeartbeatIntervalMillis: '20000',
+      postgresqlWorkNotificationPollMillis: '5000',
+      postgresqlWorkReconnectBackoffMillis: '1000',
+      redisRealtimeRetryDelayMillis: '1000',
+    },
+    version: overrides.version ?? '0',
+    createTime: '2026-01-01T00:00:00Z',
+    updateTime: '2026-01-01T00:00:00Z',
+  }
+}

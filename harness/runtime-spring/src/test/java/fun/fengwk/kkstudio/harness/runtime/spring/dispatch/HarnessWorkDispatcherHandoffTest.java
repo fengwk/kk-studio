@@ -352,11 +352,11 @@ class HarnessWorkDispatcherHandoffTest {
     ThreadProcessor threadProcessor =
         new ThreadProcessor(
             store,
-            (threadId, path, yoloEnabled, preparation) -> {
+            (threadId, path, preparation) -> {
               throw new AssertionError("resolver must not be called for a quiescent thread");
             },
             new ThreadProcessorConfig(
-                leaseConfig, 10, Duration.ofSeconds(1), new CompactionConfig(true, 16_384, 20_000)),
+                leaseConfig, Duration.ofSeconds(1), new CompactionConfig(true, 16_384, 20_000)),
             clock,
             processorScheduler);
     ModelProcessor modelProcessor =
@@ -656,7 +656,7 @@ class HarnessWorkDispatcherHandoffTest {
     private final AtomicInteger preflightCalls = new AtomicInteger();
 
     @Override
-    public PreflightResult preflight(ToolInvocationRequest request, boolean yoloEnabled) {
+    public PreflightResult preflight(ToolInvocationRequest request) {
       preflightCalls.incrementAndGet();
       return new ToolGateway.Allow();
     }

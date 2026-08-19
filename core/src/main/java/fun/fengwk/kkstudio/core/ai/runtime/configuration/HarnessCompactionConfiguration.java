@@ -1,27 +1,29 @@
 package fun.fengwk.kkstudio.core.ai.runtime.configuration;
 
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 
 /**
- * Core 侧的 Harness 自动对话压缩配置：绑定 {@link HarnessRuntimeProperties} 并提供唯一的压缩配置事实。
+ * Core 侧的 Harness 自动对话压缩配置：从共享启动快照 {@link SystemSettingsSnapshot} 的 {@code aiRuntime.compaction*}
+ * 提供唯一的压缩配置事实。
  *
  * <p>{@link CompactionConfig} 同时被 core 的 {@code DatabaseTurnResolver} 与 web 组合根的 {@code
- * ThreadProcessorConfig} 消费，因此放在 core 作为唯一定义点；web 不再重复声明。
+ * ThreadProcessorConfig} 消费，因此放在 core 作为唯一定义点；web 不再重复声明。快照在装配期一次 DB 读取（DB 变更需重启生效）。
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(HarnessRuntimeProperties.class)
 public class HarnessCompactionConfiguration {
 
   /** 自动对话压缩配置：开关、预留 token 预算与保留的最近上下文 token 上限。 */
   @Bean
-  public CompactionConfig compactionConfig(HarnessRuntimeProperties properties) {
+  public CompactionConfig compactionConfig(SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
     return new CompactionConfig(
-        properties.isCompactionEnabled(),
-        properties.getCompactionReserveTokens(),
-        properties.getCompactionMaxRecentTokens());
+        aiRuntime.compactionEnabled(),
+        aiRuntime.compactionReserveTokens(),
+        aiRuntime.compactionMaxRecentTokens());
   }
 }

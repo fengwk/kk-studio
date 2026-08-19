@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.core.studio.resource;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.core.storage.S3ObjectMetadata;
@@ -41,8 +39,6 @@ import java.util.UUID;
  * 资源行 insertIfAbsent）→ 提交后 best-effort 预览。相同 resourceId 幂等返回既有资源；并发竞争时失败方 释放自己刚创建的 blob 引用并返回胜者的资源。
  */
 @Slf4j
-@Component
-@ConditionalOnProperty(prefix = "kk-studio.storage.s3", name = "enabled", havingValue = "true")
 public class CanvasBlobResourceMaterializer implements CanvasResourceMaterializer {
 
   private static final long MAX_MATERIALIZE_SIZE = 512L * 1024 * 1024;

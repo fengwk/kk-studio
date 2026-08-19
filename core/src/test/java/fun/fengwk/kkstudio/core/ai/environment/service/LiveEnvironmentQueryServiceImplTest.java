@@ -9,10 +9,11 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
@@ -86,7 +87,8 @@ class LiveEnvironmentQueryServiceImplTest {
     when(registry.list()).thenReturn(List.of(environment));
 
     LiveEnvironmentQueryService service =
-        new LiveEnvironmentQueryServiceImpl(registry, new EnvironmentGatewayProperties(), CLOCK);
+        new LiveEnvironmentQueryServiceImpl(
+            registry, new SystemSettingsSnapshot(SystemSettings.DEFAULT), CLOCK);
     List<LiveEnvironmentDTO> listed = service.listEnvironments();
 
     assertEquals(1, listed.size());
@@ -126,13 +128,13 @@ class LiveEnvironmentQueryServiceImplTest {
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION, ENVIRONMENT_INFO, List.of(), List.of()),
             NOW.minus(Duration.ofSeconds(120)));
-    EnvironmentGatewayProperties properties = new EnvironmentGatewayProperties();
-    properties.setHeartbeatTimeout(Duration.ofSeconds(60));
+    // 默认 heartbeatTimeout 为 60 秒，与 SystemSettings.DEFAULT 一致；120 秒前的 READY 应投影为不可用。
     LiveEnvironmentRegistry registry = mock(LiveEnvironmentRegistry.class);
     when(registry.list()).thenReturn(List.of(stale));
 
     LiveEnvironmentQueryService service =
-        new LiveEnvironmentQueryServiceImpl(registry, properties, CLOCK);
+        new LiveEnvironmentQueryServiceImpl(
+            registry, new SystemSettingsSnapshot(SystemSettings.DEFAULT), CLOCK);
     LiveEnvironmentDTO dto = service.listEnvironments().get(0);
     assertFalse(dto.isReady());
   }

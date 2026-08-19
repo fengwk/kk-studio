@@ -8,14 +8,13 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -28,23 +27,20 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -93,6 +89,7 @@ import java.util.function.Function;
 final class ToolProcessorTestSupport {
 
   static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
+  static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
   static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
@@ -140,8 +137,8 @@ final class ToolProcessorTestSupport {
         ScheduledExecutorService scheduler) {
       this.scheduler = scheduler;
       this.request = toolRequest("call-1", sideEffect);
-      this.baseline = seedToolBaseline(store, NOW);
-      Seeded seeded = seedTool(store, baseline, request, yoloEnabled, NOW);
+      this.baseline = seedToolBaseline(store, NOW, yoloEnabled);
+      Seeded seeded = seedTool(store, baseline, request, NOW);
       this.modelInvocationId = seeded.modelInvocationId();
       this.toolInvocationId = seeded.toolInvocationId();
       this.processor =
@@ -158,7 +155,7 @@ final class ToolProcessorTestSupport {
     /** 额外种子第二条完整 Tool 链（复用同一 request 的 call-1）。 */
     Seeded seedExtraTool() {
       Baseline extraBaseline = seedToolBaseline(store, NOW);
-      return seedTool(store, extraBaseline, request, false, NOW);
+      return seedTool(store, extraBaseline, request, NOW);
     }
   }
 
@@ -188,6 +185,10 @@ final class ToolProcessorTestSupport {
   }
 
   static Baseline seedToolBaseline(InMemoryHarnessStore store, Instant now) {
+    return seedToolBaseline(store, now, false);
+  }
+
+  static Baseline seedToolBaseline(InMemoryHarnessStore store, Instant now, boolean yoloEnabled) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -196,6 +197,11 @@ final class ToolProcessorTestSupport {
           UUID userEntryId = tx.nextId();
           UUID assistantEntryId = tx.nextId();
           UUID threadId = tx.nextId();
+          // live attached tool baseline：assistant 由同一 frozen request + response 经 mapper 生成，与
+          // seedTool 的
+          // model request/successResponse 严格一致（renderer bash 来自 model request 的 bash binding）。
+          ModelRequestSpec modelRequest = modelRequest();
+          ProviderResponse response = successResponse("call-1");
           tx.insertSession(new Session(sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
@@ -204,7 +210,7 @@ final class ToolProcessorTestSupport {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), threadId, 100_000),
                   now.plusMillis(1)));
           tx.insertEntry(
               new Entry(
@@ -218,9 +224,11 @@ final class ToolProcessorTestSupport {
                   assistantEntryId,
                   sessionId,
                   userEntryId,
-                  assistantPayload("call-1"),
+                  new HistoryPayloadMapper()
+                      .assistantPayload(response, modelRequest.toolBindings()),
                   now.plusMillis(3)));
-          tx.insertThread(new ThreadState(threadId, turnStartEntryId, false, 1L, 0L, now, now));
+          tx.insertThread(
+              new ThreadState(threadId, turnStartEntryId, yoloEnabled, 1L, 0L, now, now));
           return new Baseline(
               sessionId, rootEntryId, turnStartEntryId, userEntryId, assistantEntryId, threadId);
         });
@@ -231,17 +239,13 @@ final class ToolProcessorTestSupport {
    * + READY ToolInvocation + THREAD / TOOL Work。
    */
   static Seeded seedTool(
-      InMemoryHarnessStore store,
-      Baseline baseline,
-      ToolInvocationRequest request,
-      boolean yoloEnabled,
-      Instant now) {
+      InMemoryHarnessStore store, Baseline baseline, ToolInvocationRequest request, Instant now) {
     return store.transaction(
         tx -> {
           UUID modelId = tx.nextId();
           UUID toolId = tx.nextId();
           tx.lockThread(baseline.threadId());
-          ModelInvocationRequest modelRequest = modelRequest(yoloEnabled);
+          ModelRequestSpec modelRequest = modelRequest();
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -263,7 +267,7 @@ final class ToolProcessorTestSupport {
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.markRunning(now));
           current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.succeed(successResponse("call-1"), now));
+          tx.updateModelInvocation(current.succeed(successResponse(request.call().id()), now));
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.attachResultEntry(baseline.assistantEntryId(), now));
           tx.insertToolInvocations(
@@ -273,10 +277,10 @@ final class ToolProcessorTestSupport {
                       modelId,
                       baseline.assistantEntryId(),
                       0,
-                      request,
+                      request.call(),
+                      request.binding(),
                       ToolInvocationStatus.READY,
                       0,
-                      null,
                       null,
                       null,
                       null,
@@ -285,22 +289,6 @@ final class ToolProcessorTestSupport {
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), now);
           tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), now);
           return new Seeded(modelId, toolId);
-        });
-  }
-
-  /** 在 ASSISTANT 下插入匹配的 TOOL result Entry 并返回其 id（供 resultEntryId 链接场景）。 */
-  static UUID insertToolResultEntry(InMemoryHarnessStore store, Baseline baseline, Instant now) {
-    return store.transaction(
-        tx -> {
-          UUID id = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  id,
-                  baseline.sessionId(),
-                  baseline.assistantEntryId(),
-                  toolResultPayload(baseline.assistantEntryId(), 0, "call-1"),
-                  now.plusMillis(10)));
-          return id;
         });
   }
 
@@ -425,15 +413,11 @@ final class ToolProcessorTestSupport {
   }
 
   static ToolResult partialResult(String toolCallId) {
-    return new ToolResult(toolCallId, List.of(new TextToolContent("partial")), false, "{}", false);
+    return new ToolResult(toolCallId, List.of(new TextToolContent("partial")), false, "{}");
   }
 
   static ToolResult successResult(String toolCallId, ToolContent... contents) {
-    return successResult(toolCallId, false, contents);
-  }
-
-  static ToolResult successResult(String toolCallId, boolean terminate, ToolContent... contents) {
-    return new ToolResult(toolCallId, List.of(contents), false, "{}", terminate);
+    return new ToolResult(toolCallId, List.of(contents), false, "{}");
   }
 
   private static ToolBinding platformBinding(ToolSideEffect sideEffect) {
@@ -452,9 +436,18 @@ final class ToolProcessorTestSupport {
         Duration.ofSeconds(30));
   }
 
-  private static ModelInvocationRequest modelRequest(boolean yoloEnabled) {
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(), List.of(), List.of(), yoloEnabled, 100_000, null);
+  private static ModelRequestSpec modelRequest() {
+    ProviderRequest provider = providerRequest();
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        provider.model(),
+        provider.variant(),
+        List.of(),
+        List.of(platformBinding(ToolSideEffect.READ_ONLY)),
+        List.of(),
+        List.of(),
+        provider.cacheControl(),
+        null);
   }
 
   private static ProviderRequest providerRequest() {
@@ -499,31 +492,6 @@ final class ToolProcessorTestSupport {
         null);
   }
 
-  private static EntryPayload assistantPayload(String... toolCallIds) {
-    List<AgentMessageContent> contents = new ArrayList<>();
-    for (String toolCallId : toolCallIds) {
-      contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
-    }
-    contents.add(new TextMessageContent("assistant reply"));
-    ProviderStopReason stopReason =
-        toolCallIds.length > 0 ? ProviderStopReason.TOOL_CALLS : ProviderStopReason.COMPLETED;
-    return new MessagePayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-        new AssistantMessageMetadata(
-            stopReason,
-            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)),
-        null);
-  }
-
   private static ProviderResponse successResponse(String... toolCallIds) {
     List<ProviderToolCall> calls = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
@@ -533,7 +501,7 @@ final class ToolProcessorTestSupport {
         "assistant reply",
         "",
         calls,
-        calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
+        calls.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
         new ModelCost(
             "USD",
@@ -547,18 +515,6 @@ final class ToolProcessorTestSupport {
         "req-1",
         null,
         "{}");
-  }
-
-  private static EntryPayload toolResultPayload(
-      UUID assistantEntryId, int ordinal, String toolCallId) {
-    ToolResultMessageContent content =
-        new ToolResultMessageContent(
-            toolCallId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
-    ToolResultMetadata metadata =
-        new ToolResultMetadata(
-            assistantEntryId, toolCallId, ordinal, ToolResultStatus.SUCCEEDED, false, null);
-    return new MessagePayload(
-        new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
   /** 从 READY / approval null 构造 required undecided approval（WAITING_APPROVAL 前置）。 */
@@ -623,9 +579,9 @@ final class ToolProcessorTestSupport {
     }
 
     @Override
-    public PreflightResult preflight(ToolInvocationRequest request, boolean yoloEnabled) {
+    public PreflightResult preflight(ToolInvocationRequest request) {
       preflightCallsCount++;
-      PreflightCall call = new PreflightCall(request, yoloEnabled);
+      PreflightCall call = new PreflightCall(request);
       preflightCalls.add(call);
       Object result = preflightResults.poll();
       if (result == null) {
@@ -671,14 +627,20 @@ final class ToolProcessorTestSupport {
     }
   }
 
-  record PreflightCall(ToolInvocationRequest request, boolean yoloEnabled) {}
+  record PreflightCall(ToolInvocationRequest request) {}
 
   static class FakeHandle implements ToolGateway.Handle {
     final AtomicInteger cancels = new AtomicInteger();
+    final AtomicInteger activates = new AtomicInteger();
 
     @Override
     public void cancel() {
       cancels.incrementAndGet();
+    }
+
+    @Override
+    public void activate() {
+      activates.incrementAndGet();
     }
 
     boolean isCancelled() {

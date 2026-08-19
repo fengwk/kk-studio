@@ -45,8 +45,7 @@ public final class ReadTool extends AbstractCodingTool {
               "text/plain",
               config),
           false,
-          "{}",
-          false);
+          "{}");
     }
     byte[] bytes = Files.readAllBytes(path);
     TextFileCodec.Decoded decoded;
@@ -58,8 +57,7 @@ public final class ReadTool extends AbstractCodingTool {
             request.call().id(),
             OutputLimiter.limit(bytes, "application/octet-stream", config),
             false,
-            "{}",
-            false);
+            "{}");
       }
       throw error;
     }
@@ -105,8 +103,7 @@ public final class ReadTool extends AbstractCodingTool {
         OutputLimiter.limit(
             String.join("\n", output).getBytes(StandardCharsets.UTF_8), "text/plain", config),
         false,
-        "{}",
-        false);
+        "{}");
   }
 
   private static String directoryEntryName(Path entry) {

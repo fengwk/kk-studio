@@ -11,8 +11,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 
 import java.math.BigDecimal;
@@ -131,11 +131,11 @@ public final class ProviderResponseJsonCodec {
     for (JsonNode item : toolCalls) {
       toolCallList.add(decodeToolCall(item));
     }
-    ProviderStopReason stopReason;
+    GenerationStopReason stopReason;
     try {
-      stopReason = ProviderStopReason.valueOf(text(node, "stopReason"));
+      stopReason = GenerationStopReason.valueOf(text(node, "stopReason"));
     } catch (IllegalArgumentException exception) {
-      throw new IllegalArgumentException("unknown provider stop reason", exception);
+      throw new IllegalArgumentException("unknown generation stop reason", exception);
     }
     ModelUsage usage = decodeUsage(node.get("usage"));
     ModelCost cost = decodeCost(node.get("cost"));

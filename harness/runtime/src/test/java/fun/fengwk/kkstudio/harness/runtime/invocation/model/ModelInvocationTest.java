@@ -8,7 +8,6 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -51,7 +50,7 @@ class ModelInvocationTest {
     assertEquals(id(1L), ready.threadId());
     assertEquals(id(1L), ready.turnStartEntryId());
     assertEquals(id(1L), ready.basisHeadEntryId());
-    assertTrue(ready.request().yoloEnabled());
+    assertEquals(InvocationTestData.request(), ready.request());
 
     ModelInvocation readyRetryWaiting =
         invocation(ModelInvocationStatus.READY, 1, null, null, null, null);

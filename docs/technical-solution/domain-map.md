@@ -47,10 +47,10 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Entry | 语义持久事实：`ROOT`、`TURN_START`、`MESSAGE`、`CUSTOM`、`MODEL_ATTEMPT_FAILURE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`、`COMPACTION`、`TURN_END` |
 | BranchSettings | Entry 分支的完整不可变设置快照（environment binding/agentName/model；历史 activeTools 只作投影，不是新 turn 的能力事实） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
-| ThreadCommand | 有序 mailbox，七类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO` |
-| ModelInvocation | 一次冻结 `ModelInvocationRequest`（route/provider/tools/skills/subagentBindings/YOLO）的 Provider 调用；`failedAttempts` 保存尚未物化的连续瞬态失败审计 |
-| ToolInvocation | 按冻结 ToolBinding 执行的一次 ToolCall durable 事实（approval/status/result/effects）；插件 binding 冻结 owner、contribution 与 state accesses，非空 effects 只允许属于 terminal `SUCCEEDED` |
-| SubagentBinding | 冻结在 ModelInvocationRequest 中的子 Agent 名称 + 描述 allowlist 快照；task 执行绝不依据后续 Agent 配置扩权 |
+| ThreadCommand | 有序 mailbox，六类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS`；YOLO 是 Thread 直接控制面 |
+| ModelInvocation | 一次持久化 `basisHeadEntryId + compact ModelRequestSpec`（providerType/model/variant/preamble/tool/skill/subagent bindings/cacheControl）的 Provider 执行；完整 ProviderRequest 每次 attempt 由 Materializer 从 EntryPath + spec 内存重建；`failedAttempts` 保存尚未物化的连续瞬态失败审计 |
+| ToolInvocation | 按 `call` + 可空 `binding` 执行的一次 ToolCall durable 事实（approval/status/result/effects）；插件 binding 冻结 owner、contribution 与 state accesses，unknown tool 槽位 binding 为 null，非空 effects 只允许属于 terminal `SUCCEEDED` |
+| SubagentBinding | 冻结在父 ModelRequestSpec 中的子 Agent 名称 + 描述 allowlist 快照；task 执行绝不依据后续 Agent 配置扩权 |
 | SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；rootThreadId 在整棵委派树中不变 |
 | task | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：以普通 durable Harness Thread 运行子 Agent，`task` 的 id/session_id 即子 ThreadId（canonical UUID）；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
@@ -59,7 +59,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentName`（bounded 小写路由名称）唯一，状态为 CONNECTING/READY；可用性 = READY + 连接打开 + 心跳未过期 |
 | Realtime projection | Redis Streams 中有界、可丢失的输出覆盖层（非 durable） |
 
-Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`DatabaseTurnResolver` 从 `BranchSettings` 读取 agent/model/environment 引用，再读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route，并把插件 `ContextProjector` 基于当前 candidate branch 产生的消息注入 Provider context（Agent/Model 修改下一 turn 生效）。直接工具按最新 `Agent.config.tools` 的顺序绑定；skills 非空时追加内部 `load_skill`；subagents 非空且 Session depth 小于 `maxDepth` 时追加内部 `task`。历史 `BranchSettings.activeTools` 不得限制或扩张新 turn。每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。立即 retry 重放 Invocation 冻结的同一 request；后续 turn 的上下文只白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 projector，`MODEL_ATTEMPT_FAILURE`、`ASSISTANT_ERROR` 及其中的 partial/error 永不进入 Provider context。ENVIRONMENT 工具按最新 `EnvironmentBinding` 绑定、规划不拒绝；Agent skills 必须由最新选中且 live 的 Environment 精确提供。subagent 名称 + 描述冻结进 `subagentBindings`，执行绝不重读父 Agent 配置扩权。所有确定性 planning 拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
+Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`DatabaseTurnResolver` 从 `BranchSettings` 读取 agent/model/environment 引用，再读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route，并把插件 `ContextProjector` 基于当前 candidate branch 产生的消息注入 preamble（Agent/Model 修改下一 turn 生效）。直接工具按最新 `Agent.config.tools` 的顺序绑定；skills 非空时追加内部 `load_skill`；subagents 非空且 Session depth 小于 `maxDepth` 时追加内部 `task`。历史 `BranchSettings.activeTools` 不得限制或扩张新 turn。结果冻结为 compact `ModelRequestSpec`（无 YOLO/contextWindow/messages）；每次 Model attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存 ProviderRequest，再由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。后续 turn 的上下文只白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 projector，`MODEL_ATTEMPT_FAILURE`、`ASSISTANT_ERROR` 及其中的 partial/error 永不进入 Provider context。ENVIRONMENT 工具按最新 `EnvironmentBinding` 绑定、规划不拒绝；Agent skills 必须由最新选中且 live 的 Environment 精确提供。subagent 名称 + 描述冻结进 `subagentBindings`，执行绝不重读父 Agent 配置扩权。所有确定性 planning 拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
 
 ## 4. Chat、Thread 与前端映射
 
@@ -104,7 +104,8 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | `POST /api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT、Thread 并关联 Chat |
 | `GET /api/ai/runtime/threads/{threadId}/snapshot` | 单一 Thread 一致投影 |
 | `GET /api/ai/runtime/threads/{threadId}/entries` | Thread 所属 Session 的完整 immutable Entry Tree |
-| `POST /api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（七类），202 |
+| `POST /api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（六类），202 |
+| `PUT /api/ai/runtime/threads/{threadId}/yolo` | Thread YOLO policy 直接更新（revision CAS；同值 no-op 先于 CAS） |
 | `PUT /api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
 | `POST /api/ai/runtime/threads/{threadId}/stop` | stopRequestId + revision CAS |
 | `POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval` | Tool approval 决定（父/子 Thread 同一端点） |
@@ -129,5 +130,5 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 
 Harness 以 Session Entry Tree 记录语义事实（含插件 `CUSTOM` branch state），以 head 非空的 Thread
 记录执行控制面（revision CAS + 命令 mailbox），以 `BranchSettings` 驱动逐轮
-Catalog/Environment/插件上下文解析并冻结请求，以 Model/Tool Invocation + Work 支持恢复；全局 Blob
+Catalog/Environment/插件上下文解析并冻结 compact spec，以 Model/Tool Invocation + Work 支持恢复；全局 Blob
 Storage 为 Chat、Harness history 与 Canvas 提供统一内容身份，Canvas 可绑定一个 Harness 根 Thread。

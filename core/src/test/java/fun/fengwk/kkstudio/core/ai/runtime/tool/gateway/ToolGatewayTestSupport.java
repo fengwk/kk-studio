@@ -220,6 +220,7 @@ final class ToolGatewayTestSupport {
         new FixedToolSettingsProvider(settings),
         store,
         properties,
+        RESOURCE_MAX_BYTES,
         executor,
         CONFIG);
   }
@@ -229,7 +230,7 @@ final class ToolGatewayTestSupport {
   }
 
   static ToolResult result(String callId, String text) {
-    return new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}", false);
+    return new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}");
   }
 
   static final class FixedToolSettingsProvider implements ToolSettingsProvider {
@@ -334,7 +335,7 @@ final class ToolGatewayTestSupport {
           for (int i = 0; i < syncPartialCount; i++) {
             listener.onPartial(
                 new ToolResult(
-                    "call-1", List.of(new TextToolContent("progress-" + i)), false, "{}", false));
+                    "call-1", List.of(new TextToolContent("progress-" + i)), false, "{}"));
           }
           break;
         case THROW_BUSY:

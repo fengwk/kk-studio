@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -30,20 +31,26 @@ final class PortTestData {
 
   private PortTestData() {}
 
-  static ModelInvocationRequest modelRequest() {
-    return new ModelInvocationRequest(
-        ENV_ID,
-        new ProviderRequest(
-            modelDescriptor(),
-            new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
-            List.of(),
-            List.of(),
-            ProviderCacheControl.none()),
+  static ModelRequestSpec modelRequest() {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor(),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
         List.of(),
         List.of(),
-        false,
-        100_000,
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
         null);
+  }
+
+  static ProviderRequest providerRequest() {
+    return new ProviderRequest(
+        modelDescriptor(),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none());
   }
 
   static ToolInvocationRequest toolRequest() {

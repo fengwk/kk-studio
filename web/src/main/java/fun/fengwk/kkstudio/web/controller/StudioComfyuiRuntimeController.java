@@ -30,9 +30,9 @@ import java.nio.charset.StandardCharsets;
 /**
  * ComfyUI 无状态任务 API。
  *
- * <p>控制器总是注册的；{@link ComfyuiRuntimeService} 也是总是可注入的 bean。 当 {@code
- * kk-studio.comfyui.enabled=false} 或没有 {@code ComfyUIClient} 时，运行期方法会抛 {@link
- * IllegalStateException}， 本控制器将其翻译为 HTTP 503，明确告诉调用方服务未启用，而非 404。
+ * <p>控制器总是注册的；{@link ComfyuiRuntimeService} 也是总是可注入的 bean。当启动快照中的 {@code
+ * integrations.comfyui.enabled=false} 或没有 {@code ComfyUIClient} 时，运行期方法会抛 {@link
+ * IllegalStateException}，本控制器将其翻译为 HTTP 503，明确告诉调用方服务未启用，而非 404。
  *
  * <p>{@code runId} 直接等于 ComfyUI prompt / job id，不在后端持久化。 输出下载只能按当前 job outputs 中的 node/media/index
  * 精确解析。

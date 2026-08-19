@@ -21,6 +21,8 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.TextSegment;
@@ -31,7 +33,6 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionResourceStream;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -50,39 +51,64 @@ class MiniMaxH3CanvasFunctionAdapterTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
   private HarnessOneShotService oneShot;
-
-  @SuppressWarnings("rawtypes")
-  private ObjectProvider ingestServices;
+  private ObjectProvider<StorageBlobIngestService> ingestServices;
 
   private StandardComfyuiClient comfy;
   private MiniMaxH3CanvasFunctionAdapter adapter;
-  private MiniMaxH3Properties properties;
+  private SystemSettingsSnapshot snapshot;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
     oneShot = mock(HarnessOneShotService.class);
     comfy = mock(StandardComfyuiClient.class);
+    snapshot = new SystemSettingsSnapshot(settings(h3Settings(true, 1L, 1_000L)));
+    adapter = newAdapter(snapshot);
+  }
+
+  private MiniMaxH3CanvasFunctionAdapter newAdapter(SystemSettingsSnapshot snapshot) {
     ObjectProvider<StandardComfyuiClient> clients = mock(ObjectProvider.class);
     when(clients.getIfAvailable()).thenReturn(comfy);
-    properties = new MiniMaxH3Properties();
-    properties.setEnabled(true);
-    properties.setPromptAgentName("h3-agent");
-    properties.setPromptEnvironmentName("h3-prompt");
-    properties.setComfyPollInterval(Duration.ofMillis(1));
-    properties.setComfyMaxWait(Duration.ofSeconds(1));
     ingestServices = mock(ObjectProvider.class);
     when(ingestServices.getIfAvailable()).thenReturn(mock(StorageBlobIngestService.class));
-    adapter =
-        new MiniMaxH3CanvasFunctionAdapter(
-            properties,
-            new H3MediaPreflight(),
-            new H3PromptRequestBuilder(),
-            oneShot,
-            new H3WorkflowBuilder(mapper),
-            clients,
-            ingestServices,
-            mapper);
+    return new MiniMaxH3CanvasFunctionAdapter(
+        snapshot,
+        new H3MediaPreflight(),
+        new H3PromptRequestBuilder(),
+        oneShot,
+        new H3WorkflowBuilder(mapper),
+        clients,
+        ingestServices,
+        mapper);
+  }
+
+  private static SystemSettings settings(SystemSettings.MiniMaxH3 minimaxH3) {
+    return new SystemSettings(
+        SystemSettings.Tool.DEFAULT,
+        SystemSettings.AiRuntime.DEFAULT,
+        SystemSettings.Environment.DEFAULT,
+        new SystemSettings.Integrations(
+            SystemSettings.Comfyui.DEFAULT,
+            SystemSettings.OpenCliHub.DEFAULT,
+            SystemSettings.Seedance.DEFAULT,
+            SystemSettings.GptImage2.DEFAULT,
+            minimaxH3),
+        SystemSettings.StorageMedia.DEFAULT,
+        SystemSettings.Advanced.DEFAULT);
+  }
+
+  private static SystemSettings.MiniMaxH3 h3Settings(
+      boolean enabled, long comfyPollIntervalMillis, long comfyMaxWaitMillis) {
+    return new SystemSettings.MiniMaxH3(
+        enabled,
+        "h3-agent",
+        "h3-prompt",
+        600_000L,
+        "http://127.0.0.1:8188",
+        10_000L,
+        30_000L,
+        comfyPollIntervalMillis,
+        comfyMaxWaitMillis);
   }
 
   @Test
@@ -181,13 +207,14 @@ class MiniMaxH3CanvasFunctionAdapterTest {
 
   @Test
   void disabledModelRemainsRegisteredAsUnavailableAndCompleteNeedsNoClient() {
-    properties.setEnabled(false);
-    assertFalse(adapter.enabled());
-    assertEquals(MiniMaxH3CanvasFunctionAdapter.MODEL_KEY, adapter.models().get(0).key());
-    assertFalse(adapter.unavailableReason().isBlank());
+    MiniMaxH3CanvasFunctionAdapter disabledAdapter =
+        newAdapter(new SystemSettingsSnapshot(settings(h3Settings(false, 1L, 1_000L))));
+    assertFalse(disabledAdapter.enabled());
+    assertEquals(MiniMaxH3CanvasFunctionAdapter.MODEL_KEY, disabledAdapter.models().get(0).key());
+    assertFalse(disabledAdapter.unavailableReason().isBlank());
     assertEquals(
         List.of(TARGET),
-        adapter.execute(
+        disabledAdapter.execute(
             new RecordingContext(),
             run(
                 MiniMaxH3CanvasFunctionAdapter.COMPLETE,
@@ -209,11 +236,12 @@ class MiniMaxH3CanvasFunctionAdapterTest {
                 run(MiniMaxH3CanvasFunctionAdapter.COMFY_WAITING, waiting.encode())));
 
     when(comfy.history("p1")).thenReturn(H3ComfyHistory.pending());
-    properties.setComfyMaxWait(Duration.ofNanos(1));
+    MiniMaxH3CanvasFunctionAdapter tinyWaitAdapter =
+        newAdapter(new SystemSettingsSnapshot(settings(h3Settings(true, 1L, 2L))));
     assertThrows(
         IllegalStateException.class,
         () ->
-            adapter.execute(
+            tinyWaitAdapter.execute(
                 new RecordingContext(),
                 run(MiniMaxH3CanvasFunctionAdapter.COMFY_WAITING, waiting.encode())));
 

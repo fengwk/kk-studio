@@ -12,14 +12,17 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 
 /**
  * web 模块 SpringBoot 测试的共享 PostgreSQL 支持。
  *
- * <p>使用进程级单例容器（而非 {@code @Container}），从而跨测试类复用缓存 Spring 上下文时 JDBC URL 保持稳定。每个测试都会重置 {@code public}
- * 并显式执行 baseline 与 dev seed 的迁移。
+ * <p>使用进程级单例容器（而非 {@code @Container}），从而跨测试类复用缓存 Spring 上下文时 JDBC URL 保持稳定。本类在静态初始化阶段 即执行 baseline
+ * 与 dev seed 迁移，保证任何 Spring 上下文创建前 {@code system_setting} 等表与默认行已经存在 （SystemSettingsSnapshot
+ * 在上下文启动时读取权威配置）。每个测试前 {@link #resetAndApplySchema} 再次重置并迁移，保持隔离。
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
 public abstract class WebPostgresTestSupport {
@@ -33,6 +36,14 @@ public abstract class WebPostgresTestSupport {
 
   static {
     POSTGRES.start();
+    // SystemSettingsSnapshot 作为共享启动快照，在上下文创建期读取一次 system_setting 默认行；任何 Spring 测试上下文加载前
+    // 都必须先有 baseline + dev seed 迁移，否则缺行上下文启动失败。@BeforeEach 仍负责每个测试前的
+    // reset+remigrate。
+    try (Connection conn = newConnection()) {
+      resetAndMigrateDevDatabase(conn);
+    } catch (SQLException error) {
+      throw new ExceptionInInitializerError(error);
+    }
   }
 
   @DynamicPropertySource
@@ -47,22 +58,50 @@ public abstract class WebPostgresTestSupport {
 
   @BeforeEach
   final void resetAndApplySchema() throws Exception {
-    try (Connection conn =
-        DriverManager.getConnection(
-            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
-      try (Statement st = conn.createStatement()) {
-        st.execute("drop schema public cascade");
-        st.execute("create schema public");
+    try (Connection conn = newConnection()) {
+      resetAndMigrateDevDatabase(conn);
+      verifyDevSeed(conn);
+    }
+  }
+
+  /**
+   * 供 S3 场景测试在 Spring 上下文创建前把 {@code system_setting} 的 {@code storageMedia.s3Enabled} 置为 true， 使 S3
+   * 服务族 flush 装配（而非返回 null）。
+   */
+  public static void enableS3InSystemSettings() throws SQLException {
+    try (Connection conn = newConnection();
+        PreparedStatement statement =
+            conn.prepareStatement(
+                "update system_setting set config ="
+                    + " jsonb_set(config, '{storageMedia,s3Enabled}', 'true'::jsonb)"
+                    + " where id = 1")) {
+      if (statement.executeUpdate() != 1) {
+        throw new IllegalStateException("system_setting baseline row is missing");
       }
-      migrateDevDatabase(conn);
-      try (Statement st = conn.createStatement();
-          ResultSet rs =
-              st.executeQuery(
-                  "select count(*) from agent_definition where name = 'default-assistant'")) {
-        if (!rs.next() || rs.getLong(1) != 1L) {
-          throw new IllegalStateException(
-              "dev seed did not insert agent_definition default-assistant");
-        }
+    }
+  }
+
+  private static Connection newConnection() throws SQLException {
+    return DriverManager.getConnection(
+        POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+  }
+
+  private static void resetAndMigrateDevDatabase(Connection conn) throws SQLException {
+    try (Statement st = conn.createStatement()) {
+      st.execute("drop schema public cascade");
+      st.execute("create schema public");
+    }
+    migrateDevDatabase(conn);
+  }
+
+  private static void verifyDevSeed(Connection conn) throws SQLException {
+    try (Statement st = conn.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "select count(*) from agent_definition where name = 'default-assistant'")) {
+      if (!rs.next() || rs.getLong(1) != 1L) {
+        throw new IllegalStateException(
+            "dev seed did not insert agent_definition default-assistant");
       }
     }
   }

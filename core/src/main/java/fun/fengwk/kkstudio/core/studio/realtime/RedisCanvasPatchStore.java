@@ -6,6 +6,7 @@ import org.springframework.data.redis.connection.RedisStreamCommands.XAddOptions
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.studio.canvas.CanvasPatch;
 
 import java.util.ArrayList;
@@ -26,14 +27,17 @@ public final class RedisCanvasPatchStore implements CanvasPatchStore {
 
   private final StringRedisTemplate stringRedisTemplate;
   private final CanvasRealtimeProperties properties;
+  private final SystemSettings.Advanced advanced;
   private final CanvasPatchJsonCodec codec;
 
   public RedisCanvasPatchStore(
       StringRedisTemplate stringRedisTemplate,
       CanvasRealtimeProperties properties,
+      SystemSettings.Advanced advanced,
       CanvasPatchJsonCodec codec) {
     this.stringRedisTemplate = Objects.requireNonNull(stringRedisTemplate, "stringRedisTemplate");
     this.properties = Objects.requireNonNull(properties, "properties");
+    this.advanced = Objects.requireNonNull(advanced, "advanced");
     this.codec = Objects.requireNonNull(codec, "codec");
   }
 
@@ -46,7 +50,7 @@ public final class RedisCanvasPatchStore implements CanvasPatchStore {
         .add(
             properties.key(canvasId.toString()),
             Map.of(PATCH_FIELD, codec.encode(patch)),
-            XAddOptions.maxlen(properties.getRedisMaxLength()));
+            XAddOptions.maxlen(advanced.canvasRealtimeMaxLength()));
   }
 
   @Override

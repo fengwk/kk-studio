@@ -74,10 +74,8 @@ class HarnessRuntimeStopModelTest {
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.STOPPED, result.status());
     assertEquals(1, result.cancelledCommandCount());
-    ModelInvocation model = storedModel(baseline.modelId());
-    assertEquals(ModelInvocationStatus.CANCELLED, model.status());
-    assertEquals(0, model.attempt());
-    assertNull(model.streamCheckpoint());
+    // Model row 在 stopModel 同一事务内被物理删除；改用 Entry path 验证 barrier 与 STOPPED TURN_END。
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
 
     EntryPath path = pathOf(baseline.threadId());
     assertEquals(5, path.entries().size());
@@ -86,7 +84,6 @@ class HarnessRuntimeStopModelTest {
     assertTrue(barrier.payload() instanceof AssistantErrorPayload);
     AssistantError error = ((AssistantErrorPayload) barrier.payload()).error();
     assertEquals("CANCELLED", error.code());
-    assertEquals(barrier.id(), model.resultEntryId());
     assertStoppedEnd(turnEnd, path, barrier, baseline.threadId(), TestIds.id(1));
 
     ThreadCommand command =
@@ -106,24 +103,33 @@ class HarnessRuntimeStopModelTest {
   }
 
   @Test
-  void dispatchingModelStopAdvancesAttemptByOne() {
+  void dispatchingModelStopAppendsBarrierAndDeletesTheModelRow() {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.DISPATCHING);
-    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    ModelInvocation model = storedModel(baseline.modelId());
-    assertEquals(ModelInvocationStatus.CANCELLED, model.status());
-    assertEquals(1, model.attempt());
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
+    assertEquals(StopResult.Status.STOPPED, result.status());
+    // Model row 在 stopModel 同一事务内被物理删除；只能通过 Entry path 校验 barrier + STOPPED TURN_END。
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
+    EntryPath path = pathOf(baseline.threadId());
+    assertTrue(path.entries().get(3).payload() instanceof AssistantErrorPayload);
+    assertTrue(path.head().payload() instanceof TurnEndPayload);
+    assertEquals(TurnEndOutcome.STOPPED, ((TurnEndPayload) path.head().payload()).outcome());
   }
 
   @Test
-  void runningModelStopKeepsTheConfirmedAttempt() {
+  void runningModelStopAppendsBarrierWithCANCELLEDErrorAndDeletesTheModelRow() {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.RUNNING);
-    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    ModelInvocation model = storedModel(baseline.modelId());
-    assertEquals(ModelInvocationStatus.CANCELLED, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals(ProviderErrorKind.CANCELLED, model.error().kind());
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
+    assertEquals(StopResult.Status.STOPPED, result.status());
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
+    EntryPath path = pathOf(baseline.threadId());
+    Entry barrier = path.entries().get(3);
+    assertTrue(barrier.payload() instanceof AssistantErrorPayload);
+    AssistantError barrierError = ((AssistantErrorPayload) barrier.payload()).error();
+    assertEquals(ProviderErrorKind.CANCELLED.name(), barrierError.code());
+    assertTrue(path.head().payload() instanceof TurnEndPayload);
+    assertEquals(TurnEndOutcome.STOPPED, ((TurnEndPayload) path.head().payload()).outcome());
   }
 
   @Test
@@ -139,9 +145,8 @@ class HarnessRuntimeStopModelTest {
                   new StreamCheckpoint(1, 1, "partial text", "  partial thinking  "), T5));
         });
     runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    ModelInvocation model = storedModel(baseline.modelId());
-    assertEquals(ModelInvocationStatus.CANCELLED, model.status());
-    assertNull(model.streamCheckpoint());
+    // Model row 在 stopModel 同一事务内被物理删除；改用 Entry path 校验 barrier 内容。
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
 
     EntryPath path = pathOf(baseline.threadId());
     Entry barrier = path.entries().get(3);
@@ -153,7 +158,6 @@ class HarnessRuntimeStopModelTest {
     assertEquals("  partial thinking  ", ((ThinkingMessageContent) contents.get(0)).text());
     assertTrue(contents.get(1) instanceof TextMessageContent);
     assertEquals("partial text", ((TextMessageContent) contents.get(1)).text());
-    assertEquals(barrier.id(), model.resultEntryId());
   }
 
   @Test

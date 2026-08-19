@@ -38,7 +38,6 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class LoadSkillTool implements Tool {
   public static final String NAME = "load_skill";
   public static final String VERSION = "1";
-  public static final Duration DEFAULT_LOAD_TIMEOUT = Duration.ofSeconds(30);
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final ToolDescriptor DESCRIPTOR =
@@ -60,10 +59,7 @@ public final class LoadSkillTool implements Tool {
   private final SkillBodyLoader skillBodyLoader;
   private final Duration loadTimeout;
 
-  public LoadSkillTool(ThreadSelectedSkillLookup skillLookup, SkillBodyLoader skillBodyLoader) {
-    this(skillLookup, skillBodyLoader, DEFAULT_LOAD_TIMEOUT);
-  }
-
+  /** 无默认超时：加载超时必须由生产装配从 SystemSettings 快照显式传入（test 基座同样显式传 fixture 值）。 */
   public LoadSkillTool(
       ThreadSelectedSkillLookup skillLookup,
       SkillBodyLoader skillBodyLoader,
@@ -120,7 +116,7 @@ public final class LoadSkillTool implements Tool {
               complete(
                   handle,
                   new ToolResult(
-                      callId, List.of(new TextToolContent(loaded.content())), false, "{}", false));
+                      callId, List.of(new TextToolContent(loaded.content())), false, "{}"));
             } else if (result instanceof SkillBodyLoader.SkillBodyLoadResult.Failed failed) {
               complete(handle, error(callId, failed.message()));
             } else {
@@ -168,7 +164,7 @@ public final class LoadSkillTool implements Tool {
 
   private static ToolResult error(String callId, String message) {
     String detail = message == null || message.isBlank() ? "tool execution failed" : message;
-    return new ToolResult(callId, List.of(new TextToolContent(detail)), true, "{}", false);
+    return new ToolResult(callId, List.of(new TextToolContent(detail)), true, "{}");
   }
 
   private static String failureMessage(String skillName, Throwable error) {

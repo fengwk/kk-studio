@@ -2,11 +2,14 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -61,6 +64,7 @@ public final class ModelProcessor implements AutoCloseable {
   private final ScheduledExecutorService scheduler;
   private final ConcurrentHashMap<UUID, ModelExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
+  private final ModelRequestMaterializer materializer = new ModelRequestMaterializer();
   private volatile boolean closed;
 
   public ModelProcessor(
@@ -223,8 +227,28 @@ public final class ModelProcessor implements AutoCloseable {
           ? ProcessResult.RESCHEDULED
           : ProcessResult.LOST_OWNERSHIP;
     }
-    // stale-start fence：Gateway.start 的确切 admission 边界。再校验 durable 仍 DISPATCHING + attempt 匹配 +
-    // claim 仍 owned（覆盖跨实例 recovery：另一 JVM 的 processor 恢复 UNKNOWN 后本实例的本地 abandoned 检查看不到）。
+    ProviderRequest providerRequest;
+    try {
+      providerRequest = materializeRequest(claim, dispatched);
+    } catch (ClaimLostSignal lost) {
+      execution.abandon();
+      return ProcessResult.LOST_OWNERSHIP;
+    } catch (IllegalArgumentException | IllegalStateException setupFailure) {
+      log.warn(
+          "model request materialization failed for invocation {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(setupFailure));
+      execution.abandon();
+      ModelInvocationError error =
+          new ModelInvocationError(
+              ProviderErrorKind.INVALID_REQUEST,
+              messageOrClass(setupFailure, "cannot materialize provider request"));
+      return rejectDispatch(claim, dispatched, error)
+          ? ProcessResult.TERMINATED
+          : ProcessResult.LOST_OWNERSHIP;
+    }
+    // stale-start fence：Gateway.start 的确切 admission 边界。materialize 之后再校验 durable 仍 DISPATCHING +
+    // attempt 匹配 + claim 仍 owned（覆盖 materialize 期间 Stop / 跨实例 recovery 删除或改写 invocation/work）。
     // 失败立即 abandon 并 LOST，绝不调用 Gateway；此检查之后并发 Stop / recovery 属于 DISPATCHING 不确定窗口，
     // 由 Gateway 的 Indeterminate / Started 后 markRunning 校验等现有 UNKNOWN / CANCEL 协议处理。
     if (!checkStartBoundary(claim, dispatched)) {
@@ -235,7 +259,11 @@ public final class ModelProcessor implements AutoCloseable {
     try {
       result =
           gateway.start(
-              new ModelGateway.Execution(invocationId, proposedAttempt, dispatched.request()),
+              new ModelGateway.Execution(
+                  invocationId,
+                  proposedAttempt,
+                  dispatched.request().providerType(),
+                  providerRequest),
               execution);
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 Gateway 肯定未接受，可安全转 READY 并 reschedule（attempt 不变）。
@@ -319,7 +347,27 @@ public final class ModelProcessor implements AutoCloseable {
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
     tx.updateModelInvocation(model.beginDispatch(now));
     tx.updateThread(thread.touchRevision(now));
-    return new Prepare.Dispatched(thread.id(), model.attempt(), model.request());
+    return new Prepare.Dispatched(
+        thread.id(), model.basisHeadEntryId(), model.attempt(), model.request());
+  }
+
+  /** 在 MODEL claim 仍 owned 期间加载不可变 basis EntryPath，并纯重建内存 ProviderRequest。 */
+  private ProviderRequest materializeRequest(ClaimedWork claim, Prepare.Dispatched dispatched) {
+    Instant now = clock.instant();
+    EntryPath path =
+        store.transaction(
+            tx -> {
+              if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                throw new ClaimLostSignal();
+              }
+              return tx.loadEntryPath(dispatched.basisHeadEntryId());
+            });
+    return materializer.materialize(path, dispatched.request());
+  }
+
+  private static String messageOrClass(RuntimeException error, String fallback) {
+    String detail = error.getMessage();
+    return detail == null || detail.isBlank() ? fallback : detail;
   }
 
   /**
@@ -474,7 +522,7 @@ public final class ModelProcessor implements AutoCloseable {
 
     record Lost() implements Prepare {}
 
-    record Dispatched(UUID threadId, int attempt, ModelInvocationRequest request)
+    record Dispatched(UUID threadId, UUID basisHeadEntryId, int attempt, ModelRequestSpec request)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

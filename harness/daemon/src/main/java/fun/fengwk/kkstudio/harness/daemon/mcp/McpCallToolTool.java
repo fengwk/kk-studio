@@ -53,9 +53,9 @@ public final class McpCallToolTool extends AbstractMcpBridgeTool {
     String id = request.call().id();
     String text = outcome.text();
     if (isJsonValue(text)) {
-      return new ToolResult(id, List.of(new JsonToolContent(text)), false, "{}", false);
+      return new ToolResult(id, List.of(new JsonToolContent(text)), false, "{}");
     }
-    return new ToolResult(id, List.of(new TextToolContent(text)), false, "{}", false);
+    return new ToolResult(id, List.of(new TextToolContent(text)), false, "{}");
   }
 
   private boolean isJsonValue(String text) {

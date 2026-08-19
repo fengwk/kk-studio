@@ -1,6 +1,6 @@
 # 技术方案
 
-本文档目录维护 `kk-studio` 当前实现，只描述现行职责、结构、协议与约束。代码、Controller、DTO、schema 与测试是事实源；文档只做自洽的当前态描述，不保存历史方案或会话过程。
+本文档目录维护 `kk-studio` 当前生效的架构、协议与实现约束，以代码、Controller、DTO、schema 与测试为事实源。文档保持自洽，不保存会话过程。
 
 ## 文档地图
 
@@ -10,6 +10,7 @@ flowchart TD
     A --> B[architecture.md<br/>架构与模块边界]
     A --> O[domain-map.md<br/>领域词汇与映射]
     A --> Q[harness-runtime-architecture.md<br/>Harness Runtime 架构]
+    A --> Y[harness-runtime-agent-loop-refactor.md<br/>Agent Loop durable reducer]
     A --> X[harness-runtime-contracts.md<br/>Runtime 公共契约]
     A --> S[harness-storage-runtime.md<br/>PostgreSQL durable facts 与 Work/Redis]
     A --> D[backend-implementation-design.md<br/>后端实现]
@@ -34,21 +35,22 @@ flowchart TD
 | 1 | [architecture.md](architecture.md) | 模块拓扑、依赖方向与所有权 |
 | 2 | [domain-map.md](domain-map.md) | Harness/Studio 词汇与前后端映射 |
 | 3 | [harness-runtime-architecture.md](harness-runtime-architecture.md) | Entry/Thread/Command/Invocation/Work、Agent Loop 与 processor |
-| 4 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | JSON/DTO、命令 batch、CAS、replay、snapshot 与异常 wire |
-| 5 | [harness-storage-runtime.md](harness-storage-runtime.md) | HarnessStore 事务/锁序、7 表、Work wake 协议与 Redis overlay |
-| 6 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 composition root 与 HTTP 边界 |
-| 7 | [storage-models.md](storage-models.md) | 全应用表结构；Harness 精确 7 表 |
-| 8 | [frontend-implementation-design.md](frontend-implementation-design.md) | Chat defaults、BranchDraft、first send、batch、replay 与 Pane 门禁 |
-| 9 | [harness-capability-wiring.md](harness-capability-wiring.md) | BranchSettings → Resolver → Model/Tool Gateway 装配 |
-| 10 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage/cost 冻结与 metadata |
-| 11 | [s3-presign.md](s3-presign.md) | S3 预签名直传与直下载 |
-| 12 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流与运行 API |
-| 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment registry、Daemon v3 与 Resource 边界 |
-| 14 | [environment-workspace-binding.md](environment-workspace-binding.md) | `{name, workspacePath}\|null` 原子绑定、canonical 规则与目录隐私 |
-| 15 | [application-event-channel.md](application-event-channel.md) | `/api/events/v1` WebSocket 事件通道帧协议与恢复 |
-| 16 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
-| 17 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
-| 18 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
+| 4 | [harness-runtime-agent-loop-refactor.md](harness-runtime-agent-loop-refactor.md) | Agent Loop durable reducer、持久化形状与执行协议 |
+| 5 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | JSON/DTO、命令 batch、CAS、replay、snapshot 与异常 wire |
+| 6 | [harness-storage-runtime.md](harness-storage-runtime.md) | HarnessStore 事务/锁序、7 表、Work wake 协议与 Redis overlay |
+| 7 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 composition root 与 HTTP 边界 |
+| 8 | [storage-models.md](storage-models.md) | 全应用表结构；Harness 精确 7 表 |
+| 9 | [frontend-implementation-design.md](frontend-implementation-design.md) | Chat defaults、BranchDraft、first send、batch、replay 与 Pane 门禁 |
+| 10 | [harness-capability-wiring.md](harness-capability-wiring.md) | BranchSettings → Resolver → Model/Tool Gateway 装配 |
+| 11 | [prompt-cache-usage-cost.md](prompt-cache-usage-cost.md) | cache control、usage/cost 冻结与 metadata |
+| 12 | [s3-presign.md](s3-presign.md) | S3 预签名直传与直下载 |
+| 13 | [comfyui-workflow-api.md](comfyui-workflow-api.md) | ComfyUI 工作流与运行 API |
+| 14 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment registry、Daemon v3 与 Resource 边界 |
+| 15 | [environment-workspace-binding.md](environment-workspace-binding.md) | `{name, workspacePath}\|null` 原子绑定、canonical 规则与目录隐私 |
+| 16 | [application-event-channel.md](application-event-channel.md) | `/api/events/v1` WebSocket 事件通道帧协议与恢复 |
+| 17 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
+| 18 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
+| 19 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
 
 ## 贯穿约束
 
@@ -57,10 +59,10 @@ flowchart TD
 - PostgreSQL 是唯一 durable truth；`harness_work` 是唯一调度 mailbox（`wake_version` + lease）；Redis/NOTIFY 永非 correctness truth。
 - 所有 Runtime 实体 id（Thread/Session/Entry/Invocation/Command）在 HTTP wire 上是 canonical UUID strings；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal strings，前端以 `DecimalLong=string` 接收并按字段领域约束严格校验。
 - Thread `nextCommandSequence` 从 1 开始；每次可见状态变化 `revision` 恰好 +1。
-- 7 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO`；前端 diff 顺序固定为 ENV → AGENT → MODEL → TOOLS → YOLO，再追加 `USER_MESSAGE`。
+- Agent Loop 固定 6 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS`；YOLO 由 Thread 直接控制 API 修改，不进入 command batch。
 - MOVE_HEAD 只允许**同 Session** 历史 Entry，revision CAS、要求 quiescent 且无 queued command；不能指向 `continueModel=true` 的 TURN_END。
-- Stop 先按 `(threadId, stopRequestId)` durable key 精确 replay，再做 revision CAS；`STOPPED` / `IDLE`（no-op）/ `REPLAYED` 三态。
-- Tool approval 输入 `ALLOW` / `DENY`，durable 值为 `ALLOWED` / `DENIED`；`ALLOWED` 恢复执行，`DENIED` 终结失败；YOLO 在加载权限 settings/evaluator 之前直接短路 Allow。
+- Stop 先按「被关闭 turn 的 TURN_START `ownerThreadId` + `closeRequestId`」durable key 精确 replay（Thread 锁内 Session 级查找），再做 revision CAS；`STOPPED` / `IDLE`（无 marker，可取消 queued）/ `REPLAYED` 三态。
+- Tool approval 输入 `ALLOW` / `DENY`，durable 值为 `ALLOWED` / `DENIED`；`ALLOWED` 恢复执行，`DENIED` 终结失败；ToolProcessor 在 permission preflight 前读取当前 Thread YOLO，true 时直接 Allow。
 - AgentDefinitionConfigDTO 的 `tools`/`skills`/`subagents` 三个列表必填：`tools`/`skills` 是短名集合，`subagents` 是 Agent 名称 allowlist（引用锁定，被引用 Agent 不可删除）；branch `activeTools` 由 config.tools + skills 非空时的内部 `load_skill` + subagents 非空时的内部 `task` 派生（子 Agent 在最大深度处省略 `task`）。
 - `load_skill` 与 `task` 是两个内部 `PLATFORM` Tool，绝不出现在 `GET /api/ai/catalog/tools`；`task` 以普通 durable Harness Thread 运行子 Agent（ROOT 冻结 `subagentContext`），复用 ToolInvocation/approval/stop/Work 与既有 Thread，无新表/新状态机/新调度器。
 - Tool terminal success 的 `effects` 与 `SUCCEEDED` 同行原子持久化且 terminal immutable；唯一 `ToolOutcomeAppender` 按 `CUSTOM effects -> Tool Result` 顺序推进 Entry/head。
@@ -73,7 +75,7 @@ flowchart TD
 
 | 规则 | 说明 |
 | --- | --- |
-| 状态准确 | Runtime 以 [harness-runtime-architecture.md](harness-runtime-architecture.md) 与 [harness-runtime-contracts.md](harness-runtime-contracts.md) 为事实源；存储与 Work/Redis 以 [harness-storage-runtime.md](harness-storage-runtime.md) 为事实源 |
+| 状态准确 | Agent Loop 以 [harness-runtime-agent-loop-refactor.md](harness-runtime-agent-loop-refactor.md)、[harness-runtime-architecture.md](harness-runtime-architecture.md) 与 [harness-runtime-contracts.md](harness-runtime-contracts.md) 为事实源，存储与 Work/Redis 以 [harness-storage-runtime.md](harness-storage-runtime.md) 为事实源 |
 | 上下文无关 | 文档可独立阅读，不依赖讨论过程；不写否决项、迁移历史或旧方案 |
 | 分层清晰 | 架构、Runtime、存储、前后端实现分别维护 |
-| 当前态 | 只描述当前实现，目录、API 与 E2E case 以仓库现状为准 |
+| 当前态 | 所有技术方案只描述当前仓库已生效的职责、结构、协议与约束 |

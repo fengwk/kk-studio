@@ -45,8 +45,7 @@ class DaemonToolResultCodecTest {
                 new JsonToolContent("{\"a\":1}"),
                 new JsonToolContent("null")),
             false,
-            "{}",
-            false);
+            "{}");
 
     String payload = codec.encodeCompleted(result, new NoopStore());
 
@@ -71,7 +70,7 @@ class DaemonToolResultCodecTest {
     ResourceRef local =
         new ResourceRef(EXPORT_URI, "text/plain", "kk.txt", (long) data.length, sha256Hex(data));
     ToolResult result =
-        new ToolResult("call-2", List.of(new ResourceToolContent(local)), false, "{}", false);
+        new ToolResult("call-2", List.of(new ResourceToolContent(local)), false, "{}");
 
     String payload =
         codec.encodeCompleted(
@@ -117,8 +116,7 @@ class DaemonToolResultCodecTest {
             DaemonProtocolException.class,
             () ->
                 codec.encodeCompleted(
-                    new ToolResult(
-                        "c", List.of(new ResourceToolContent(wrongSize)), false, "{}", false),
+                    new ToolResult("c", List.of(new ResourceToolContent(wrongSize)), false, "{}"),
                     new StubStore(data, null)));
     assertTrue(sizeMismatch.getMessage().contains("store size mismatch"));
 
@@ -137,8 +135,7 @@ class DaemonToolResultCodecTest {
             DaemonProtocolException.class,
             () ->
                 codec.encodeCompleted(
-                    new ToolResult(
-                        "c", List.of(new ResourceToolContent(wrongSha)), false, "{}", false),
+                    new ToolResult("c", List.of(new ResourceToolContent(wrongSha)), false, "{}"),
                     new StubStore(data, null)));
     assertTrue(shaMismatch.getMessage().contains("store sha256 mismatch"));
 
@@ -147,7 +144,7 @@ class DaemonToolResultCodecTest {
             DaemonProtocolException.class,
             () ->
                 codec.encodeCompleted(
-                    new ToolResult("c", List.of(new ResourceToolContent(ref)), false, "{}", false),
+                    new ToolResult("c", List.of(new ResourceToolContent(ref)), false, "{}"),
                     new StubStore(null, new IOException("resource gone"))));
     assertTrue(readFailure.getMessage().contains("cannot read resource bytes"));
   }
@@ -163,8 +160,7 @@ class DaemonToolResultCodecTest {
             "call-b",
             List.of(new BinaryToolContent("application/octet-stream", data)),
             false,
-            "{}",
-            false);
+            "{}");
 
     String payload =
         codec.encodeCompleted(
@@ -251,8 +247,7 @@ class DaemonToolResultCodecTest {
                 new ResourceToolContent(
                     new ResourceRef(EXPORT_URI, "text/plain", null, 2L, sha256Hex(data)))),
             false,
-            "{}",
-            false);
+            "{}");
     String payload = codec.encodeCompleted(result, new StubStore(data, null));
     DaemonProtocolException error =
         assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(payload, 1024, false));
@@ -270,8 +265,7 @@ class DaemonToolResultCodecTest {
                 new ResourceToolContent(
                     new ResourceRef(EXPORT_URI, "text/plain", null, 8L, sha256Hex(data)))),
             false,
-            "{}",
-            false);
+            "{}");
     String payload = codec.encodeCompleted(result, new StubStore(data, null));
     assertThrows(DaemonProtocolException.class, () -> codec.decodeResult(payload, 4, true));
   }
@@ -616,15 +610,14 @@ class DaemonToolResultCodecTest {
     for (int index = 0; index < ToolResult.MAX_CONTENT_ITEMS; index++) {
       atLimit.add(new TextToolContent("x"));
     }
-    ToolResult result = new ToolResult("c", atLimit, false, "{}", false);
+    ToolResult result = new ToolResult("c", atLimit, false, "{}");
     assertEquals(ToolResult.MAX_CONTENT_ITEMS, result.contents().size());
     codec.encodeCompleted(result, new NoopStore());
     codec.encodePartial(result, new NoopStore());
 
     List<ToolContent> overLimit = new ArrayList<>(atLimit);
     overLimit.add(new TextToolContent("x"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new ToolResult("c", overLimit, false, "{}", false));
+    assertThrows(IllegalArgumentException.class, () -> new ToolResult("c", overLimit, false, "{}"));
   }
 
   /** 编码 ResourceToolContent 必须携带 size/sha256：wire 不允许 null 声明。 */
@@ -634,7 +627,7 @@ class DaemonToolResultCodecTest {
     ResourceRef noSizeSha =
         new ResourceRef("https://example.com/a", "text/plain", null, null, null);
     ToolResult result =
-        new ToolResult("c", List.of(new ResourceToolContent(noSizeSha)), false, "{}", false);
+        new ToolResult("c", List.of(new ResourceToolContent(noSizeSha)), false, "{}");
     DaemonProtocolException error =
         assertThrows(
             DaemonProtocolException.class,
@@ -660,11 +653,7 @@ class DaemonToolResultCodecTest {
   void encodePartialAcceptsTextAndJsonAndRejectsResourceOrBinaryBeforeAnyStoreCall() {
     ToolResult partial =
         new ToolResult(
-            "p",
-            List.of(new TextToolContent("hi"), new JsonToolContent("[1]")),
-            false,
-            "{}",
-            false);
+            "p", List.of(new TextToolContent("hi"), new JsonToolContent("[1]")), false, "{}");
     String payload = codec.encodePartial(partial, new NoopStore());
     assertTrue(payload.contains("\"type\":\"text\""));
     assertTrue(payload.contains("\"type\":\"json\""));
@@ -676,14 +665,14 @@ class DaemonToolResultCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.encodePartial(
-                new ToolResult("p", List.of(new ResourceToolContent(ref)), false, "{}", false),
+                new ToolResult("p", List.of(new ResourceToolContent(ref)), false, "{}"),
                 new NoopStore()));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.encodePartial(
                 new ToolResult(
-                    "p", List.of(new BinaryToolContent("text/plain", data)), false, "{}", false),
+                    "p", List.of(new BinaryToolContent("text/plain", data)), false, "{}"),
                 new NoopStore()));
   }
 
@@ -697,8 +686,7 @@ class DaemonToolResultCodecTest {
                 new TextToolContent("ok"),
                 new BinaryToolContent("application/octet-stream", new byte[5])),
             false,
-            "{}",
-            false);
+            "{}");
     DaemonProtocolException binaryError =
         assertThrows(
             DaemonProtocolException.class,
@@ -713,8 +701,7 @@ class DaemonToolResultCodecTest {
                 new ResourceToolContent(
                     new ResourceRef(EXPORT_URI, "text/plain", null, 5L, sha256Hex(new byte[5])))),
             false,
-            "{}",
-            false);
+            "{}");
     DaemonProtocolException resourceError =
         assertThrows(
             DaemonProtocolException.class,
@@ -729,8 +716,7 @@ class DaemonToolResultCodecTest {
                 new BinaryToolContent("application/octet-stream", new byte[3]),
                 new BinaryToolContent("application/octet-stream", new byte[3])),
             false,
-            "{}",
-            false);
+            "{}");
     assertThrows(
         DaemonProtocolException.class,
         () -> codec.encodeCompleted(aggregateOver, 4, new NoopStore()));
@@ -744,8 +730,7 @@ class DaemonToolResultCodecTest {
             "c",
             List.of(new TextToolContent("a".repeat(DaemonToolResultCodec.MAX_PAYLOAD_UTF8_BYTES))),
             false,
-            "{}",
-            false);
+            "{}");
     DaemonProtocolException error =
         assertThrows(
             DaemonProtocolException.class, () -> codec.encodeCompleted(huge, new NoopStore()));
@@ -755,7 +740,7 @@ class DaemonToolResultCodecTest {
   /** COMPLETED 编码的预算参数必须为正；store 返回的 binary ref 必须携带 size/sha。 */
   @Test
   void encodeCompletedValidatesBudgetAndStoreReturnedRefs() {
-    ToolResult text = new ToolResult("c", List.of(new TextToolContent("x")), false, "{}", false);
+    ToolResult text = new ToolResult("c", List.of(new TextToolContent("x")), false, "{}");
     assertThrows(
         IllegalArgumentException.class, () -> codec.encodeCompleted(text, 0, new NoopStore()));
     assertThrows(
@@ -763,7 +748,7 @@ class DaemonToolResultCodecTest {
 
     byte[] data = new byte[] {1};
     ToolResult binary =
-        new ToolResult("c", List.of(new BinaryToolContent("text/plain", data)), false, "{}", false);
+        new ToolResult("c", List.of(new BinaryToolContent("text/plain", data)), false, "{}");
     DaemonProtocolException noSizeSha =
         assertThrows(
             DaemonProtocolException.class,
@@ -891,9 +876,9 @@ class DaemonToolResultCodecTest {
     ResourceRef ref =
         new ResourceRef(EXPORT_URI, "text/plain", null, (long) data.length, sha256Hex(data));
     ToolResult resourceResult =
-        new ToolResult("c", List.of(new ResourceToolContent(ref)), false, "{}", false);
+        new ToolResult("c", List.of(new ResourceToolContent(ref)), false, "{}");
     ToolResult binaryResult =
-        new ToolResult("c", List.of(new BinaryToolContent("text/plain", data)), false, "{}", false);
+        new ToolResult("c", List.of(new BinaryToolContent("text/plain", data)), false, "{}");
 
     assertThrows(NullPointerException.class, () -> codec.encodeCompleted(null, new NoopStore()));
     assertThrows(NullPointerException.class, () -> codec.encodeCompleted(resourceResult, null));
@@ -945,7 +930,7 @@ class DaemonToolResultCodecTest {
   /** detailsJson 为 null 时编码为空对象 details，text/json 内容不触碰 store。 */
   @Test
   void encodesNullDetailsJsonAsEmptyDetailsObject() {
-    ToolResult result = new ToolResult("c", List.of(new TextToolContent("hi")), false, null, false);
+    ToolResult result = new ToolResult("c", List.of(new TextToolContent("hi")), false, null);
     assertTrue(codec.encodeCompleted(result, new NoopStore()).contains("\"details\":{}"));
   }
 

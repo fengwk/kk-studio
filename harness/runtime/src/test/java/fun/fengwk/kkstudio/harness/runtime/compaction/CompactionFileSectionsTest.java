@@ -24,7 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -44,6 +44,7 @@ import java.util.UUID;
  * turnPrefixStartEntryId；引用缺失/顺序非法 fail closed。
  */
 class CompactionFileSectionsTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
@@ -280,7 +281,7 @@ class CompactionFileSectionsTest {
               id(cur),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
+              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
               BASE));
       return cur;
     }
@@ -321,7 +322,7 @@ class CompactionFileSectionsTest {
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
                   new AssistantMessageMetadata(
-                      ProviderStopReason.TOOL_CALLS,
+                      GenerationStopReason.COMPLETE,
                       new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
                       new ModelCost(
                           "USD",
@@ -395,7 +396,7 @@ class CompactionFileSectionsTest {
               id(startId),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
               BASE));
       entries.add(
           new Entry(

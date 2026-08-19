@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
@@ -16,11 +17,10 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultReason;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -30,11 +30,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -75,6 +76,8 @@ import java.util.function.Consumer;
 final class StoreTestSupport {
 
   static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
+  static final UUID OWNER_THREAD_ID = TestIds.id(10L);
+  static final int CONTEXT_WINDOW = 100_000;
   static final Instant T0 = Instant.ofEpochMilli(1000);
   static final Instant T1 = Instant.ofEpochMilli(2000);
   static final Instant T2 = Instant.ofEpochMilli(3000);
@@ -121,7 +124,13 @@ final class StoreTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(
+              new Entry(
+                  turnStartEntryId,
+                  sessionId,
+                  rootEntryId,
+                  resolvedTurnStartPayload(threadId),
+                  T1));
           tx.insertThread(thread(threadId, turnStartEntryId));
           return new TurnBaseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
@@ -176,7 +185,12 @@ final class StoreTestSupport {
   }
 
   static EntryPayload turnStartPayload() {
-    return new TurnStartPayload(TurnStartReason.INPUT, branchSettings());
+    return new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID);
+  }
+
+  static EntryPayload resolvedTurnStartPayload(UUID ownerThreadId) {
+    return new TurnStartPayload(
+        TurnStartReason.INPUT, branchSettings(), ownerThreadId, CONTEXT_WINDOW);
   }
 
   /** ASSISTANT MESSAGE payload；{@code toolCallIds} 会按顺序变成 ToolCall 内容。 */
@@ -186,8 +200,8 @@ final class StoreTestSupport {
       contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
-    ProviderStopReason stopReason =
-        toolCallIds.length > 0 ? ProviderStopReason.TOOL_CALLS : ProviderStopReason.COMPLETED;
+    GenerationStopReason stopReason =
+        toolCallIds.length > 0 ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         assistantMetadata(stopReason),
@@ -201,7 +215,7 @@ final class StoreTestSupport {
             List.of(
                 new ToolCallMessageContent(toolCallId, "bash", "bash", argumentsJson),
                 new TextMessageContent("assistant reply"))),
-        assistantMetadata(ProviderStopReason.TOOL_CALLS),
+        assistantMetadata(GenerationStopReason.COMPLETE),
         null);
   }
 
@@ -214,7 +228,7 @@ final class StoreTestSupport {
         "assistant reply",
         "",
         calls,
-        calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
+        calls.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
         new ModelCost(
             "USD",
@@ -371,7 +385,9 @@ final class StoreTestSupport {
         createdAt);
   }
 
-  /** READY（非 terminal）或 CANCELLED（terminal，可携带 resultEntryId）的 tool invocation。 */
+  /**
+   * READY（非 terminal）或 CANCELLED（terminal）的 tool invocation；不再持有 resultEntryId（batch apply 后行物理删除）。
+   */
   static ToolInvocation toolInvocation(
       UUID id,
       UUID modelInvocationId,
@@ -379,7 +395,6 @@ final class StoreTestSupport {
       int ordinal,
       String toolCallId,
       ToolInvocationStatus status,
-      UUID resultEntryId,
       Instant createdAt) {
     if (status != ToolInvocationStatus.READY && status != ToolInvocationStatus.CANCELLED) {
       throw new IllegalArgumentException("fixture supports READY and CANCELLED only");
@@ -390,20 +405,20 @@ final class StoreTestSupport {
         modelInvocationId,
         assistantEntryId,
         ordinal,
-        toolRequest(toolCallId),
+        toolCall(toolCallId),
+        platformBinding(),
         status,
         0,
         null,
         null,
         error,
-        resultEntryId,
         createdAt,
         createdAt);
   }
 
   /** 复制 invocation，仅替换冻结 binding 的 rendererKey。 */
   static ToolInvocation withRendererKey(ToolInvocation invocation, String rendererKey) {
-    ToolDescriptor descriptor = invocation.request().binding().descriptor();
+    ToolDescriptor descriptor = invocation.binding().descriptor();
     ToolBinding binding =
         new ToolBinding(
             new ToolDescriptor(
@@ -415,22 +430,22 @@ final class StoreTestSupport {
                 descriptor.inputSchema(),
                 descriptor.sideEffect(),
                 descriptor.timeout()),
-            invocation.request().binding().type(),
-            invocation.request().binding().environment(),
-            invocation.request().binding().plugin());
+            invocation.binding().type(),
+            invocation.binding().environment(),
+            invocation.binding().plugin());
     return new ToolInvocation(
         invocation.id(),
         invocation.modelInvocationId(),
         invocation.assistantEntryId(),
         invocation.ordinal(),
-        new ToolInvocationRequest(invocation.request().call(), binding),
+        invocation.call(),
+        binding,
         invocation.status(),
         invocation.attempt(),
         invocation.approval(),
         invocation.result(),
         invocation.effects(),
         invocation.error(),
-        invocation.resultEntryId(),
         invocation.createdAt(),
         invocation.updatedAt());
   }
@@ -440,21 +455,49 @@ final class StoreTestSupport {
         ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), List.of());
   }
 
-  static ModelInvocationRequest modelRequest() {
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(), List.of(), List.of(), false, 100_000, null);
+  static ModelRequestSpec modelRequest() {
+    ProviderRequest provider = providerRequest();
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        provider.model(),
+        provider.variant(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        provider.cacheControl(),
+        null);
   }
 
-  static ToolInvocationRequest toolRequest(String toolCallId) {
-    return toolRequest(toolCallId, "{}");
+  /** SUCCEEDED live-attach 的机械请求：单一 bash binding（renderer 由 binding 派生，与 assistant ToolCall 全等）。 */
+  static ModelRequestSpec succeededRequest() {
+    ModelRequestSpec base = modelRequest();
+    return new ModelRequestSpec(
+        base.providerType(),
+        base.model(),
+        base.variant(),
+        base.preambleMessages(),
+        List.of(platformBinding()),
+        List.of(),
+        List.of(),
+        base.cacheControl(),
+        null);
   }
 
-  static ToolInvocationRequest toolRequest(String toolCallId, String argumentsJson) {
-    return new ToolInvocationRequest(
-        new ToolCall(toolCallId, "bash", argumentsJson), platformBinding());
+  /** SUCCEEDED assistant payload：由同一 request/response 经 mapper 机械派生（strict attach 校验要求全等）。 */
+  static MessagePayload mappedAssistant(ModelRequestSpec request, ProviderResponse response) {
+    return new HistoryPayloadMapper().assistantPayload(response, request.toolBindings());
   }
 
-  private static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {
+  static ToolCall toolCall(String toolCallId) {
+    return toolCall(toolCallId, "{}");
+  }
+
+  static ToolCall toolCall(String toolCallId, String argumentsJson) {
+    return new ToolCall(toolCallId, "bash", argumentsJson);
+  }
+
+  private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
     return new AssistantMessageMetadata(
         stopReason,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
@@ -507,7 +550,7 @@ final class StoreTestSupport {
             BigDecimal.ZERO));
   }
 
-  private static ToolBinding platformBinding() {
+  static ToolBinding platformBinding() {
     return new ToolBinding(toolDescriptor("bash"), ToolType.PLATFORM, null);
   }
 

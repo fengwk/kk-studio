@@ -51,6 +51,20 @@ class HarnessRuntimeDtoContractTest {
   }
 
   @Test
+  void yoloUpdateDtoExposesDecimalRevisionStringAndBooleanPolicy() {
+    HarnessThreadYoloUpdateDTO dto = new HarnessThreadYoloUpdateDTO();
+    assertNull(dto.getExpectedRevision());
+    assertNull(dto.getYoloEnabled());
+
+    dto.setExpectedRevision("9223372036854775807");
+    dto.setYoloEnabled(true);
+    assertEquals("9223372036854775807", dto.getExpectedRevision());
+    assertEquals(Boolean.TRUE, dto.getYoloEnabled());
+    assertEquals(String.class, fieldType(HarnessThreadYoloUpdateDTO.class, "expectedRevision"));
+    assertEquals(Boolean.class, fieldType(HarnessThreadYoloUpdateDTO.class, "yoloEnabled"));
+  }
+
+  @Test
   void sessionEntryDtoCarriesSessionIdAndInstantCreateTime() {
     HarnessSessionEntryDTO dto = new HarnessSessionEntryDTO();
     dto.setEntryId("1");
@@ -134,7 +148,6 @@ class HarnessRuntimeDtoContractTest {
     typed.setRole("USER");
     typed.setAgentName("assistant");
     typed.setModel(new HarnessModelSelectionDTO());
-    typed.setYoloEnabled(false);
     typed.setEnvironment(null);
     assertEquals("USER_MESSAGE", typed.getType());
     assertEquals("cmd-1", typed.getClientCommandId());
@@ -145,7 +158,6 @@ class HarnessRuntimeDtoContractTest {
     assertTrue(attachment.hasUploadIdField());
     assertEquals("USER", typed.getRole());
     assertEquals("assistant", typed.getAgentName());
-    assertEquals(Boolean.FALSE, typed.getYoloEnabled());
     assertNull(typed.getEnvironment());
     // 显式 null（无论 JSON 还是 setter）置位 presence marker：null 与缺省可区分。
     assertTrue(typed.hasEnvironmentField());
@@ -200,7 +212,6 @@ class HarnessRuntimeDtoContractTest {
     tool.setApprovalJson(null);
     tool.setResultJson(null);
     tool.setErrorJson(null);
-    tool.setResultEntryId(null);
     tool.setCreateTime(createTime);
     tool.setUpdateTime(updateTime);
 
@@ -216,7 +227,6 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("env-1", tool.getEnvironment().getName());
     assertEquals("{}", tool.getArgumentsJson());
     assertNull(tool.getApprovalJson());
-    assertNull(tool.getResultEntryId());
     assertEquals(createTime, tool.getCreateTime());
     assertEquals(updateTime, tool.getUpdateTime());
     assertEquals(Instant.class, fieldType(ToolInvocationDTO.class, "createTime"));

@@ -49,6 +49,7 @@ class ApplicationEventWebSocketHandlerTest {
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY =
       new ResourceKey(ResourceKind.CANVAS, new UUID(0L, 2L));
+  private static final int DEFAULT_SENDER_CAPACITY = 512;
 
   private ThreadRevisionEventSource revisionSource;
   private RealtimeEventSource realtimeSource;
@@ -67,8 +68,8 @@ class ApplicationEventWebSocketHandlerTest {
     when(revisionSource.subscribe(any(), any())).thenReturn(new SourceSubscribed(5L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});
     when(versionSource.subscribe(any(), any())).thenReturn(new SourceSubscribed(3L, () -> {}));
-    hub = new ApplicationEventHub(revisionSource, realtimeSource, versionSource);
-    rebuildHandler(AsyncTextSender.DEFAULT_CAPACITY);
+    hub = new ApplicationEventHub(revisionSource, realtimeSource, versionSource, 512);
+    rebuildHandler(DEFAULT_SENDER_CAPACITY);
   }
 
   /** 用给定 sender 容量重建 handler 与 recorder mock（容量小可驱动 backpressure 路径）。 */

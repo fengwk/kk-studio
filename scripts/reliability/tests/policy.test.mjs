@@ -408,7 +408,7 @@ function messageEntry(entryId, message, assistantMetadata = null) {
 
 function metadata(inputTokens, outputTokens, cacheReadTokens, total) {
   return {
-    stopReason: 'TOOL_CALLS',
+    stopReason: 'COMPLETE',
     usage: {
       inputTokens,
       outputTokens,

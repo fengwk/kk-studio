@@ -141,26 +141,16 @@ export function useHarnessThreadRealtime(
     modelStreamRef.current = next
     setModelStream(next)
 
-    // 用持久化 snapshot 对账 tool overlay。终态 invocation
-    // （resultJson/errorJson）仅在持久化 result Entry 到达前以完整形式投影：
-    // resultEntryId 是持久化事实游标，因此该 Entry 一到（或 invocation 消失）就删除流。
-    // 终态投影会取代部分片段；RUNNING 的 invocation 保留同 attempt 的部分内容。
+    // 用持久化 snapshot 对账 tool overlay。ToolResult Entry 写入与 invocation 删除
+    // 在同一事务原子提交：invocation 仍存在时，终态 resultJson/errorJson 以完整形式
+    // 投影并取代部分片段；invocation 从 snapshot 消失时才删除流。RUNNING 的
+    // invocation 保留同 attempt 的部分内容。
     const streams = new Map(toolStreamsRef.current)
     const activeIds = new Set<string>()
     for (const invocation of toolInvocations) {
-      if (invocation.resultEntryId != null) {
-        streams.delete(invocation.id)
-        continue
-      }
       activeIds.add(invocation.id)
       const existing = streams.get(invocation.id)
-      const seeded = snapshotToolStream(invocation, threadId)
-      if (seeded == null) {
-        if (existing != null && !isRealtimeToolStreamActive(existing, invocation)) {
-          streams.delete(invocation.id)
-        }
-        continue
-      }
+      const seeded = snapshotToolStream(invocation, threadId)!
       if (invocation.resultJson != null || invocation.errorJson != null) {
         // 持久化终态投影优先于部分片段。
         streams.set(invocation.id, seeded)
@@ -176,14 +166,10 @@ export function useHarnessThreadRealtime(
       }
     }
     // 精确去重指纹只作用于活跃的同 attempt invocation：attempt
-    // 变化、终态 snapshot、已挂接的 result Entry 和消失的 invocation 都会淘汰它们。
+    // 变化、终态 snapshot 和消失的 invocation 都会淘汰它们。
     const fingerprints = new Map<string, Set<string>>()
     for (const invocation of toolInvocations) {
-      if (
-        invocation.resultEntryId == null
-        && invocation.resultJson == null
-        && invocation.errorJson == null
-      ) {
+      if (invocation.resultJson == null && invocation.errorJson == null) {
         const key = `${threadId}:${invocation.id}:${invocation.attempt}`
         const existing = toolPartialFingerprintsRef.current.get(key)
         if (existing != null) {
@@ -276,9 +262,10 @@ export function useHarnessThreadRealtime(
         return
       }
       // Snapshot 优先：只有 invocation 在持久化 snapshot 中仍然活跃时
-      // （同 attempt、无终态 result、无已挂接 result Entry）才聚合 partial。一旦
-      // 终态 resultJson/errorJson（或 result Entry）成为权威，迟到的或
-      // 重复的 Redis partial 绝不能追加到完整的终态投影上。
+      // （同 attempt、无终态 result/error）才聚合 partial。一旦终态
+      // resultJson/errorJson 成为权威（ToolResult Entry 与 invocation 删除原子
+      // 提交：Entry 落地即 invocation 消失），迟到的或重复的 Redis partial
+      // 绝不能追加到完整的终态投影上。
       const invocation = toolInvocationsRef.current.find(
         (item) => item.id === partial.invocationId,
       )
@@ -287,7 +274,6 @@ export function useHarnessThreadRealtime(
         || invocation.attempt !== partial.attempt
         || invocation.resultJson != null
         || invocation.errorJson != null
-        || invocation.resultEntryId != null
       ) {
         return
       }

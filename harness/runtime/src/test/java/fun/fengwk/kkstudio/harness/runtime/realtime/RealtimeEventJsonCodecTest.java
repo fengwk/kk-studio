@@ -129,7 +129,7 @@ class RealtimeEventJsonCodecTest {
             UUID.fromString("00000000-0000-0000-0000-000000000007"),
             UUID.fromString("00000000-0000-0000-0000-000000000063"),
             2,
-            new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}", false),
+            new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}"),
             now);
     String canonical =
         "{\"threadId\":\"00000000-0000-0000-0000-000000000007\","

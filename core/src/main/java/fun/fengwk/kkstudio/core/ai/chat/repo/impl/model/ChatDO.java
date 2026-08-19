@@ -24,7 +24,7 @@ public class ChatDO {
   /** 可空的默认分支 Environment workspace path（与 {@code environmentName} 同存同空）。 */
   private String workspacePath;
 
-  /** YOLO 模式开关：true 时工具调用跳过权限评估直接 Allow；创建时未显式指定则取部署级 ToolSettings 的 defaultYolo。 */
+  /** YOLO 模式开关：true 时工具调用跳过权限评估直接 Allow；创建时未显式指定则捕获当时数据库 SystemSettings.Tool.defaultYolo。 */
   private boolean yoloEnabled;
 
   /** 乐观锁行版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据。 */

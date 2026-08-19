@@ -3,12 +3,14 @@ package fun.fengwk.kkstudio.web;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.postgresql.Driver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -17,7 +19,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import javax.sql.DataSource;
 
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 
 /** 验证 Spring Boot 的 Flyway 自动配置会迁移应用的多数据源。 */
@@ -31,6 +35,20 @@ class FlywayAutoConfigurationIntegrationTest {
 
   static {
     POSTGRES.start();
+    // 上下文创建期装配 bean 会读取 system_setting 默认行：按测试注入的 Flyway 位置（V1+dev seed）预先迁移，
+    // 保证缺行不导致启动失败；Boot 自动迁移随后对已应用版本是幂等 no-op。
+    try (Connection conn =
+        DriverManager.getConnection(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
+      Flyway.configure()
+          .dataSource(new SingleConnectionDataSource(conn, true))
+          .locations("classpath:db/migration", "classpath:db/seed/dev")
+          .validateMigrationNaming(true)
+          .load()
+          .migrate();
+    } catch (SQLException error) {
+      throw new ExceptionInInitializerError(error);
+    }
   }
 
   @Autowired private DataSource dataSource;

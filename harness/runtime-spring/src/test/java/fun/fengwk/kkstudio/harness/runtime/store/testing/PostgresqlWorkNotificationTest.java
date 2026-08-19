@@ -162,9 +162,14 @@ class PostgresqlWorkNotificationTest {
   @Test
   void listenerConfigurationRejectsInvalidIntervalsAndNullDependencies() {
     Runnable wake = () -> {};
-    assertThrows(NullPointerException.class, () -> new PostgresqlWorkListener(null, wake));
     assertThrows(
-        NullPointerException.class, () -> new PostgresqlWorkListener(dataSource, (Runnable) null));
+        NullPointerException.class,
+        () -> new PostgresqlWorkListener(null, wake, Duration.ofMillis(1), Duration.ofMillis(1)));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new PostgresqlWorkListener(
+                dataSource, (Runnable) null, Duration.ofMillis(1), Duration.ofMillis(1)));
     assertThrows(
         NullPointerException.class,
         () -> new PostgresqlWorkListener(dataSource, wake, null, Duration.ofMillis(1)));

@@ -36,9 +36,9 @@ import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 
 /**
- * ToolProcessor callback 行为：RUNNING 后 partial 校验与 sink 隔离、success normalize（terminate 归一 false /
- * binary 拒绝 / toolCallId 匹配）、retry 决策（retryable + sideEffect + policy）、cancel / unknown、duplicate /
- * late / stale / deleteWork / new-wake。
+ * ToolProcessor callback 行为：RUNNING 后 partial 校验与 sink 隔离、success normalize（binary 拒绝 / toolCallId
+ * 匹配）、retry 决策（retryable + sideEffect + policy）、cancel / unknown、duplicate / late / stale /
+ * deleteWork / new-wake。
  */
 class ToolProcessorCallbackTest {
 
@@ -124,8 +124,7 @@ class ToolProcessorCallbackTest {
             "call-1",
             List.of(new BinaryToolContent("application/octet-stream", new byte[] {1, 2})),
             false,
-            "{}",
-            false));
+            "{}"));
 
     assertEquals(
         ToolInvocationStatus.FAILED,
@@ -148,8 +147,7 @@ class ToolProcessorCallbackTest {
                 new ResourceToolContent(
                     new ResourceRef("https://example.com/a", "text/plain", null, null, null))),
             false,
-            "{}",
-            false));
+            "{}"));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
@@ -178,19 +176,18 @@ class ToolProcessorCallbackTest {
     assertTrue(fixture.sink.events.isEmpty());
   }
 
-  /** success：terminate 强制归一 false 后写 SUCCEEDED，THREAD wake + complete。 */
+  /** success：写 SUCCEEDED，THREAD wake + complete。 */
   @Test
-  void successNormalizesTerminateAndWakesThread() {
+  void successWakesThread() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", true, new TextToolContent("done")));
+        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("done")));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
     assertEquals(1, tool.attempt());
-    assertFalse(tool.result().terminate(), "terminate must be normalized to false");
     assertEquals("done", ((TextToolContent) tool.result().contents().get(0)).text());
     assertEquals(
         3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
@@ -305,8 +302,7 @@ class ToolProcessorCallbackTest {
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onPartial(
-        new ToolResult(
-            "call-1", List.of(new TextToolContent("a".repeat(300_000))), false, "{}", false));
+        new ToolResult("call-1", List.of(new TextToolContent("a".repeat(300_000))), false, "{}"));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
@@ -325,7 +321,7 @@ class ToolProcessorCallbackTest {
       refs.add(dataResource("data:text/plain,", 60_000));
     }
 
-    listener.onSucceeded(new ToolResult("call-1", new ArrayList<>(refs), false, "{}", false));
+    listener.onSucceeded(new ToolResult("call-1", new ArrayList<>(refs), false, "{}"));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
@@ -360,8 +356,7 @@ class ToolProcessorCallbackTest {
             "call-1",
             List.of(new TextToolContent("b".repeat(200_000))),
             false,
-            "{\"x\":\"" + "a".repeat(900_000) + "\"}",
-            false));
+            "{\"x\":\"" + "a".repeat(900_000) + "\"}"));
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());

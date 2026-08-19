@@ -23,8 +23,8 @@
 | `write` | `path`, `content` | `workdir` | 无隐式 cwd 之外的路径 | 保留现有编码/BOM，父目录按需创建，同文件 mutation 串行 |
 | `edit` | `path`, `old_string`, `new_string` | `replace_all`, `workdir` | `replace_all=false` | 在 LF 归一空间精确匹配；保留未修改区域 CR/LF/CRLF；拒绝不唯一、重叠和 no-op，与 pi-base 编辑语义对齐 |
 | `bash` | `command` | `workdir`, `timeout_seconds` | 120s，最大 3600s | 流式 partial、exit code、超时、取消和进程树终止；本地 Daemon 明确使用 bash |
-| `grep` | `pattern`, `path` | `workdir`, `include`, `ignore_case`, `literal`, `multiline`, `limit`, `timeout_seconds` | limit=100；timeout=15s | Java NIO/regex 实现，不依赖宿主 `rg`；遵守 `.gitignore`、跳过 binary、支持取消 |
-| `find` | `pattern`, `path` | `workdir`, `limit`, `timeout_seconds` | limit=1000；无默认 timeout | `path` 必填，不存在隐式搜索根；Java glob、`.gitignore`、稳定排序与取消 |
+| `grep` | `pattern`, `path` | `workdir`, `include`, `ignore_case`, `literal`, `multiline`, `limit`, `timeout_seconds` | limit=100；timeout=15s | Java NIO/regex 实现，不依赖宿主 `rg`；通过 JGit 遵守 `.gitignore`、跳过 binary、支持取消 |
+| `find` | `pattern`, `path` | `workdir`, `limit`, `timeout_seconds` | limit=1000；无默认 timeout | `path` 必填，不存在隐式搜索根；Java glob、JGit `.gitignore`、稳定排序与取消 |
 | `lsp_goto_definition` | `path`, `line` | `workdir`, `character` | character=0；2min | schema 与 pi-base 对齐；通过可选本机 LSP bridge，缺失时明确失败 |
 | `lsp_workspace_symbols` | `path`, `query` | `workdir`, `limit` | limit=50，最大 500；2min | schema 与 pi-base 对齐；通过同一 LSP bridge |
 | `lsp_java_decompile` | `path`, `target` | `workdir` | 2min | 优先 LSP bridge；可解析 class 目标允许 `javap` fallback |

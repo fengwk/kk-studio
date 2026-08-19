@@ -53,7 +53,7 @@ export function ToolApprovalBar({
       </button>
       <button
         type="button"
-        className="ghost-btn"
+        className="ghost-btn danger"
         disabled={context.approvalPending}
         onClick={() => onDecideApproval(message, 'DENY')}
       >

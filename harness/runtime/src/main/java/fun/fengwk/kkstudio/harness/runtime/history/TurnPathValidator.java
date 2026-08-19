@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
@@ -111,7 +112,27 @@ final class TurnPathValidator {
         }
         case FAILED -> {
           requireInput("a failed turn");
-          if (!(assistantResultEntry != null
+          if (end.reason() == TurnEndReason.OUTPUT_TRUNCATED
+              || end.reason() == TurnEndReason.CONTENT_FILTERED) {
+            // 截断/过滤的 failed turn 以 ASSISTANT MESSAGE 结果结束：保留 partial 内容与 generation metadata，
+            // 且必须与 reason 匹配（LENGTH->OUTPUT_TRUNCATED、FILTERED->CONTENT_FILTERED）并零 tool call。
+            if (!(assistantResultEntry != null
+                && assistantResultEntry.payload() instanceof MessagePayload message)) {
+              throw new IllegalArgumentException(
+                  "truncated or filtered turns require an ASSISTANT MESSAGE result");
+            }
+            if (message.assistantMetadata() == null
+                || message.assistantMetadata().stopReason() != expectedStopReason(end.reason())) {
+              throw new IllegalArgumentException(
+                  "truncated or filtered turns require a matching assistant stop reason");
+            }
+            for (AgentMessageContent content : message.message().contents()) {
+              if (content instanceof ToolCallMessageContent) {
+                throw new IllegalArgumentException(
+                    "truncated or filtered turns must not contain tool calls");
+              }
+            }
+          } else if (!(assistantResultEntry != null
               && assistantResultEntry.payload() instanceof AssistantErrorPayload)) {
             throw new IllegalArgumentException("failed turns require an ASSISTANT_ERROR result");
           }
@@ -219,6 +240,14 @@ final class TurnPathValidator {
         && assistantResultEntry.payload() instanceof MessagePayload)) {
       throw new IllegalArgumentException(context + " turns require an ASSISTANT MESSAGE result");
     }
+  }
+
+  private static GenerationStopReason expectedStopReason(TurnEndReason reason) {
+    return switch (reason) {
+      case OUTPUT_TRUNCATED -> GenerationStopReason.LENGTH;
+      case CONTENT_FILTERED -> GenerationStopReason.FILTERED;
+      default -> throw new IllegalArgumentException("unexpected failed turn reason " + reason);
+    };
   }
 
   private void requireCompleteToolResults(String context) {

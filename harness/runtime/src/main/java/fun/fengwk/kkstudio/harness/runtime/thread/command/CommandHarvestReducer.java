@@ -14,10 +14,7 @@ import java.util.UUID;
 public final class CommandHarvestReducer {
 
   public CommandHarvestResult reduce(
-      UUID threadId,
-      BranchSettings baseSettings,
-      boolean yoloEnabled,
-      List<ThreadCommand> eligibleCommands) {
+      UUID threadId, BranchSettings baseSettings, List<ThreadCommand> eligibleCommands) {
     Objects.requireNonNull(threadId, "threadId");
     BranchSettings settings = Objects.requireNonNull(baseSettings, "baseSettings");
     Objects.requireNonNull(eligibleCommands, "eligibleCommands");
@@ -53,11 +50,10 @@ public final class CommandHarvestReducer {
         case SetModelCommandPayload value -> settings = settings.withModel(value.model());
         case SetActiveToolsCommandPayload value -> settings =
             settings.withActiveTools(value.activeTools());
-        case SetYoloCommandPayload value -> yoloEnabled = value.yoloEnabled();
         case SetEnvironmentCommandPayload value -> settings =
             settings.withEnvironment(value.environment());
       }
     }
-    return new CommandHarvestResult(settings, yoloEnabled);
+    return new CommandHarvestResult(settings);
   }
 }

@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -10,9 +12,9 @@ import java.util.UUID;
 /**
  * 一次 Tool invocation 的 durable 当前状态。
  *
- * <p>{@code attempt} 统计执行端实际接受的执行次数；BUSY/OVERLOADED 或执行前的本地拒绝不会增加它。 {@code resultEntryId} 链接
- * ToolResult Entry，且仅（在某些情况下）出现于 terminal 状态。result 与 error 在任何状态上都互斥；非 terminal 状态永远不携带 terminal
- * 事实。
+ * <p>直接持有冻结的 {@code call} 与可空 {@code binding}，不保留任何 durable request 包装。{@code attempt}
+ * 统计执行端实际接受的执行次数；BUSY/OVERLOADED 或执行前的本地拒绝不会增加它。result 与 error 在任何状态上都互斥；非 terminal 状态永远不携带
+ * terminal 事实。Terminal Tool 行始终表示 outcome 尚未进入 ToolResult Entry：batch apply 后行被物理删除。
  *
  * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受执行尚未被 durable
  * 确认。纯转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}；Store 仍必须在每次 {@code update*} 写入前调用 {@link
@@ -23,14 +25,14 @@ public record ToolInvocation(
     UUID modelInvocationId,
     UUID assistantEntryId,
     int ordinal,
-    ToolInvocationRequest request,
+    ToolCall call,
+    ToolBinding binding,
     ToolInvocationStatus status,
     int attempt,
     ToolApproval approval,
     ToolResult result,
     ToolEffectBatch effects,
     ToolInvocationError error,
-    UUID resultEntryId,
     Instant createdAt,
     Instant updatedAt) {
 
@@ -40,13 +42,13 @@ public record ToolInvocation(
       UUID modelInvocationId,
       UUID assistantEntryId,
       int ordinal,
-      ToolInvocationRequest request,
+      ToolCall call,
+      ToolBinding binding,
       ToolInvocationStatus status,
       int attempt,
       ToolApproval approval,
       ToolResult result,
       ToolInvocationError error,
-      UUID resultEntryId,
       Instant createdAt,
       Instant updatedAt) {
     this(
@@ -54,14 +56,14 @@ public record ToolInvocation(
         modelInvocationId,
         assistantEntryId,
         ordinal,
-        request,
+        call,
+        binding,
         status,
         attempt,
         approval,
         result,
         ToolEffectBatch.EMPTY,
         error,
-        resultEntryId,
         createdAt,
         updatedAt);
   }
@@ -73,13 +75,14 @@ public record ToolInvocation(
     if (ordinal < 0) {
       throw new IllegalArgumentException("ordinal must not be negative");
     }
-    request = Objects.requireNonNull(request, "request");
+    call = Objects.requireNonNull(call, "call");
     status = Objects.requireNonNull(status, "status");
     if (attempt < 0) {
       throw new IllegalArgumentException("attempt must not be negative");
     }
     effects = Objects.requireNonNull(effects, "effects");
-    validateStatusFields(status, attempt, approval, result, effects, error, resultEntryId, request);
+    validateStatusFields(status, attempt, approval, result, effects, error, call);
+    validateBindingConstraint(status, attempt, call, binding);
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
     if (updatedAt.isBefore(createdAt)) {
@@ -88,12 +91,11 @@ public record ToolInvocation(
   }
 
   /**
-   * 校验 {@code next} 是已存储行 {@code stored} 的合法转换：identity 与 request 不可变，updatedAt 不允许回退， attempt
+   * 校验 {@code next} 是已存储行 {@code stored} 的合法转换：identity 与 call/binding 不可变，updatedAt 不允许回退， attempt
    * 仅在已确认启动（DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN）时恰好 +1；approval 仅能以 {@code
    * not-required} 引入到 READY-&gt;READY，或以 required undecided request 引入到
    * READY-&gt;WAITING_APPROVAL；undecided approval 仅能被决定（ALLOWED -&gt; READY，DENIED -&gt; FAILED）
-   * 或精确 replay；已决定 / non-required approval 不可变；terminal 事实不可变（仅 {@code resultEntryId} 可从 null
-   * 附加为正数）。精确 replay 始终被接受。
+   * 或精确 replay；已决定 / non-required approval 不可变；terminal 事实不可变。精确 replay 始终被接受。
    */
   public static void validateTransition(ToolInvocation stored, ToolInvocation next) {
     Objects.requireNonNull(stored, "stored");
@@ -122,11 +124,12 @@ public record ToolInvocation(
         || !stored.modelInvocationId().equals(next.modelInvocationId())
         || !stored.assistantEntryId().equals(next.assistantEntryId())
         || stored.ordinal() != next.ordinal()
-        || !stored.request().equals(next.request())
+        || !stored.call().equals(next.call())
+        || !Objects.equals(stored.binding(), next.binding())
         || !stored.createdAt().equals(next.createdAt())) {
       throw new IllegalArgumentException(
           "tool invocation identity"
-              + " (id/modelInvocation/assistantEntry/ordinal/request/createdAt) must not change");
+              + " (id/modelInvocation/assistantEntry/ordinal/call/binding/createdAt) must not change");
     }
   }
 
@@ -249,14 +252,6 @@ public record ToolInvocation(
         || !Objects.equals(stored.error(), next.error())) {
       throw new IllegalArgumentException("terminal tool invocation facts must not change");
     }
-    UUID storedResultEntryId = stored.resultEntryId();
-    UUID nextResultEntryId = next.resultEntryId();
-    if (storedResultEntryId == null) {
-      return;
-    }
-    if (!Objects.equals(storedResultEntryId, nextResultEntryId)) {
-      throw new IllegalArgumentException("terminal resultEntryId must not change");
-    }
   }
 
   /**
@@ -274,7 +269,6 @@ public record ToolInvocation(
         null,
         ToolEffectBatch.EMPTY,
         null,
-        null,
         now);
   }
 
@@ -290,7 +284,6 @@ public record ToolInvocation(
         ToolApproval.request(effectiveNow, reason),
         null,
         ToolEffectBatch.EMPTY,
-        null,
         null,
         effectiveNow);
   }
@@ -319,7 +312,6 @@ public record ToolInvocation(
           null,
           ToolEffectBatch.EMPTY,
           null,
-          null,
           now);
     }
     return withState(
@@ -329,7 +321,6 @@ public record ToolInvocation(
         null,
         ToolEffectBatch.EMPTY,
         new ToolInvocationError("DENIED", reason == null ? "denied by user" : reason),
-        null,
         now);
   }
 
@@ -348,7 +339,6 @@ public record ToolInvocation(
         null,
         ToolEffectBatch.EMPTY,
         null,
-        null,
         now);
   }
 
@@ -362,14 +352,7 @@ public record ToolInvocation(
       throw new IllegalArgumentException("rejectDispatch requires DISPATCHING status");
     }
     return withState(
-        ToolInvocationStatus.FAILED,
-        attempt,
-        approval,
-        null,
-        ToolEffectBatch.EMPTY,
-        error,
-        null,
-        now);
+        ToolInvocationStatus.FAILED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
   }
 
   /** DISPATCHING -&gt; READY：BUSY/OVERLOADED admission；attempt 不变。仅进行中的 dispatch 能被弹回 READY。 */
@@ -378,14 +361,7 @@ public record ToolInvocation(
       throw new IllegalArgumentException("dispatchBusy requires DISPATCHING status");
     }
     return withState(
-        ToolInvocationStatus.READY,
-        attempt,
-        approval,
-        null,
-        ToolEffectBatch.EMPTY,
-        null,
-        null,
-        now);
+        ToolInvocationStatus.READY, attempt, approval, null, ToolEffectBatch.EMPTY, null, now);
   }
 
   /** DISPATCHING -&gt; RUNNING：Gateway 已确认启动；attempt 恰好 +1。 */
@@ -397,7 +373,6 @@ public record ToolInvocation(
         null,
         ToolEffectBatch.EMPTY,
         null,
-        null,
         now);
   }
 
@@ -407,22 +382,14 @@ public record ToolInvocation(
       throw new IllegalArgumentException("retryReady requires RUNNING status");
     }
     return withState(
-        ToolInvocationStatus.READY,
-        attempt,
-        approval,
-        null,
-        ToolEffectBatch.EMPTY,
-        null,
-        null,
-        now);
+        ToolInvocationStatus.READY, attempt, approval, null, ToolEffectBatch.EMPTY, null, now);
   }
 
   /** RUNNING -&gt; SUCCEEDED，并附带完整的 ToolResult；attempt 必须为正数。 */
   public ToolInvocation succeed(ToolResult result, ToolEffectBatch effects, Instant now) {
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(effects, "effects");
-    return withState(
-        ToolInvocationStatus.SUCCEEDED, attempt, approval, result, effects, null, null, now);
+    return withState(ToolInvocationStatus.SUCCEEDED, attempt, approval, result, effects, null, now);
   }
 
   /** RUNNING -&gt; SUCCEEDED，且不产生 branch effects。 */
@@ -443,14 +410,7 @@ public record ToolInvocation(
               + " and a DISPATCHING invocation must use rejectDispatch");
     }
     return withState(
-        ToolInvocationStatus.FAILED,
-        attempt,
-        approval,
-        null,
-        ToolEffectBatch.EMPTY,
-        error,
-        null,
-        now);
+        ToolInvocationStatus.FAILED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
   }
 
   /**
@@ -464,14 +424,7 @@ public record ToolInvocation(
           "a DISPATCHING tool invocation must terminate as UNKNOWN, not CANCELLED");
     }
     return withState(
-        ToolInvocationStatus.CANCELLED,
-        attempt,
-        approval,
-        null,
-        ToolEffectBatch.EMPTY,
-        error,
-        null,
-        now);
+        ToolInvocationStatus.CANCELLED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
   }
 
   /**
@@ -489,16 +442,10 @@ public record ToolInvocation(
         null,
         ToolEffectBatch.EMPTY,
         error,
-        null,
         now);
   }
 
-  /** Terminal -&gt; 同一 terminal 状态，并链接 ToolResult Entry；其他 terminal 事实保持不变。 */
-  public ToolInvocation attachResultEntry(UUID resultEntryId, Instant now) {
-    return withState(status, attempt, approval, result, effects, error, resultEntryId, now);
-  }
-
-  /** 仅替换给定的当前状态字段来复制本行，并在同一处校验转换；identity、frozen request 与 createdAt 通过构造得以保留。 */
+  /** 仅替换给定的当前状态字段来复制本行，并在同一处校验转换；identity、frozen call/binding 与 createdAt 通过构造得以保留。 */
   private ToolInvocation withState(
       ToolInvocationStatus status,
       int attempt,
@@ -506,7 +453,6 @@ public record ToolInvocation(
       ToolResult result,
       ToolEffectBatch effects,
       ToolInvocationError error,
-      UUID resultEntryId,
       Instant now) {
     ToolInvocation next =
         new ToolInvocation(
@@ -514,14 +460,14 @@ public record ToolInvocation(
             modelInvocationId,
             assistantEntryId,
             ordinal,
-            request,
+            call,
+            binding,
             status,
             attempt,
             approval,
             result,
             effects,
             error,
-            resultEntryId,
             createdAt,
             effectiveMutationTime(now));
     validateTransition(this, next);
@@ -538,6 +484,34 @@ public record ToolInvocation(
     return candidate.isBefore(updatedAt) ? updatedAt : candidate;
   }
 
+  /**
+   * binding/call durable 不变量：binding 只在 immediate FAILED（attempt=0）槽位可空（unknown tool / 输出截断）； 非空
+   * binding 必须匹配 call 的 toolName；除 immediate FAILED 外的所有状态（READY / WAITING_APPROVAL / DISPATCHING /
+   * RUNNING / SUCCEEDED / CANCELLED / UNKNOWN 与 attempt&gt;0 的 FAILED）必须通过 binding schema 校验 —— 只有
+   * immediate FAILED 可以表示 INVALID_TOOL_ARGUMENTS / MODEL_OUTPUT_TRUNCATED 而绕过 schema。
+   */
+  private static void validateBindingConstraint(
+      ToolInvocationStatus status, int attempt, ToolCall call, ToolBinding binding) {
+    if (binding == null) {
+      if (status != ToolInvocationStatus.FAILED || attempt != 0) {
+        throw new IllegalArgumentException(
+            "binding is only nullable on immediate FAILED invocations (attempt 0)");
+      }
+      return;
+    }
+    if (!binding.descriptor().name().equals(call.toolName())) {
+      throw new IllegalArgumentException("binding descriptor name must match the call toolName");
+    }
+    if (status != ToolInvocationStatus.FAILED || attempt != 0) {
+      try {
+        ToolArgumentsValidator.validate(call.argumentsJson(), binding.descriptor().inputSchema());
+      } catch (IllegalArgumentException schemaFailure) {
+        throw new IllegalArgumentException(
+            "call arguments must conform to the binding tool schema", schemaFailure);
+      }
+    }
+  }
+
   private static void validateStatusFields(
       ToolInvocationStatus status,
       int attempt,
@@ -545,12 +519,7 @@ public record ToolInvocation(
       ToolResult result,
       ToolEffectBatch effects,
       ToolInvocationError error,
-      UUID resultEntryId,
-      ToolInvocationRequest request) {
-    boolean terminal = status.isTerminal();
-    if (!terminal && resultEntryId != null) {
-      throw new IllegalArgumentException("resultEntryId is only allowed on terminal states");
-    }
+      ToolCall call) {
     if (status == ToolInvocationStatus.WAITING_APPROVAL) {
       if (approval == null || !approval.required() || !approval.isUndecided()) {
         throw new IllegalArgumentException(
@@ -582,9 +551,9 @@ public record ToolInvocation(
       if (result == null) {
         throw new IllegalArgumentException("SUCCEEDED requires a result");
       }
-      if (!result.toolCallId().equals(request.call().id())) {
+      if (!result.toolCallId().equals(call.id())) {
         throw new IllegalArgumentException(
-            "SUCCEEDED result toolCallId must match the request call");
+            "SUCCEEDED result toolCallId must match the invocation call");
       }
       if (error != null) {
         throw new IllegalArgumentException("SUCCEEDED must not carry an error");

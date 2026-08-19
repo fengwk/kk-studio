@@ -2,11 +2,9 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.Fixture;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.STEP_LIMIT;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.command;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.model;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestThreadWork;
@@ -20,6 +18,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -69,10 +68,11 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
             null);
     requestThreadWork(fixture.store, baseline.threadId());
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.QUIESCENT, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
     // 同一 claim 再次投递：Work 已完成删除，claimOwned 失败 -> LOST no-op。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
-    assertNotNull(model(fixture.store, modelId).resultEntryId());
+    // SUCCEEDED-no-calls 关闭 turn 后 Model 行被物理删除。
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
   }
 
   @Test
@@ -105,7 +105,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
     // resolve 期间重入投递同一 claim：admission guard 拒绝 -> LOST no-op；外层继续完成提交。
     fixture.resolver.onResolve =
         () ->
@@ -113,7 +113,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
                 ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(fixture.claim));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
     fixture.claim = claim;
-    assertEquals(ThreadProcessResult.SUSPENDED, fixture.processor.process(claim));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
     assertEquals(
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
@@ -122,7 +122,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
   @Test
   void nonterminalModelBlockerWithLostClaimIsLostNoOp() {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
-    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    Fixture fixture = fixture(claimLosingStore(real, 2));
     var baseline = seedOpenInputTurn(real);
     seedModelInvocation(
         real,
@@ -136,7 +136,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     requestThreadWork(real, baseline.threadId());
     ClaimedWork claim = claimThreadWork(real, baseline.threadId());
 
-    // fence 调用序列：claimOwned（1）-> ModelActive blocker 的 Work fence（2）丢失 -> LoopStep.Lost -> LOST
+    // fence 调用序列：claimOwned（1）-> ModelActive blocker 的 Work fence（2）丢失 -> ClaimLostSignal -> LOST
     // no-op。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
     assertEquals(3, path(real, baseline.threadId()).entries().size());
@@ -147,7 +147,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
   @Test
   void nonterminalToolSiblingsWithLostClaimIsLostNoOp() {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
-    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    Fixture fixture = fixture(claimLosingStore(real, 2));
     var chain =
         seedToolChain(
             real,
@@ -167,7 +167,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
   @Test
   void quiescentClaimLostAtFinalFenceIsLostNoOp() {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
-    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    Fixture fixture = fixture(claimLosingStore(real, 2));
     var baseline = seedBaseline(real);
     requestThreadWork(real, baseline.threadId());
     ClaimedWork claim = claimThreadWork(real, baseline.threadId());
@@ -181,55 +181,22 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
   @Test
   void planClaimLostAtPlanFenceIsLostNoOp() {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
-    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    Fixture fixture = fixture(claimLosingStore(real, 2));
     var baseline = seedBaseline(real);
     seedCommand(real, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(real, baseline.threadId());
     ClaimedWork claim = claimThreadWork(real, baseline.threadId());
 
-    // fence 调用序列：claimOwned（1）-> planStep 的 claim fence（2）丢失 -> LoopStep.Lost，resolver 不被调用。
+    // fence 调用序列：claimOwned（1）-> planStep 的 claim fence（2）丢失 -> ClaimLostSignal，resolver 不被调用。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
     assertEquals(1, path(real, baseline.threadId()).entries().size());
     assertEquals(0, fixture.resolver.calls);
   }
 
   @Test
-  void stepLimitRescheduleWithLostClaimIsLostNoOp() {
-    InMemoryHarnessStore real = new InMemoryHarnessStore();
-    Fixture fixture = fixture(1, claimLosingStore(real, 3));
-    var baseline = seedOpenInputTurn(real);
-    UUID modelId =
-        seedModelInvocation(
-            real,
-            baseline.threadId(),
-            baseline.turnStartEntryId(),
-            baseline.userEntryId(),
-            ModelInvocationStatus.SUCCEEDED,
-            plainRequest(),
-            successResponse(List.of(), "bash"),
-            null);
-    requestThreadWork(real, baseline.threadId());
-    ClaimedWork claim = claimThreadWork(real, baseline.threadId());
-
-    // fence 调用序列：claimOwned（1）-> applyModel 的 final fence（2）通过（apply 已提交）-> step limit 后
-    // reschedule 的 claim fence（3）丢失 -> 本调用返回 LOST，但已提交的 apply 是幂等事实，不会重复 apply。
-    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
-    assertEquals(5, path(real, baseline.threadId()).entries().size());
-    assertNotNull(model(real, modelId).resultEntryId());
-    assertEquals(
-        path(real, baseline.threadId()).entries().get(4).id(),
-        thread(real, baseline.threadId()).headEntryId());
-    // 到期后由普通 processor（共享同一 real store）重新 claim：已挂结果的模型不再 applicable，直接 quiescent 完成 Work。
-    Fixture healing = fixture(STEP_LIMIT, real);
-    fixture.clock.advance(Duration.ofSeconds(61));
-    ClaimedWork nextClaim = claimThreadWork(real, baseline.threadId(), fixture.clock.instant());
-    assertEquals(ThreadProcessResult.QUIESCENT, healing.processor.process(nextClaim));
-  }
-
-  @Test
   void heartbeatSchedulingFailureWithLostRescheduleIsLostNoOp() {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
-    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 3));
+    Fixture fixture = fixture(claimLosingStore(real, 3));
     var baseline = seedBaseline(real);
     UUID userCommand =
         seedCommand(real, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
@@ -250,7 +217,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
   @Test
   void resolverNullWithLostRescheduleIsLostNoOp() {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
-    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 3));
+    Fixture fixture = fixture(claimLosingStore(real, 3));
     var baseline = seedBaseline(real);
     UUID userCommand =
         seedCommand(real, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));

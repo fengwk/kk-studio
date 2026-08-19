@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeWebMapper;
@@ -112,7 +113,7 @@ public class StudioHarnessThreadController {
   }
 
   /**
-   * 将一个 typed command batch 原子入队（应用 use-case 事务：幂等 hash 重放优先，新命令消费附件后入队）；202 仅表示已接受， 不代表模型已完成。所有 7
+   * 将一个 typed command batch 原子入队（应用 use-case 事务：幂等 hash 重放优先，新命令消费附件后入队）；202 仅表示已接受， 不代表模型已完成。所有 6
    * 类命令由 mapper 按 discriminator 严格校验后映射为一个 {@link ThreadCommandBatch}。
    */
   @PostMapping("/{threadId}/commands")
@@ -142,6 +143,23 @@ public class StudioHarnessThreadController {
               ThreadState moved =
                   runtime.moveHead(HarnessRuntimeWebMapper.toMoveHeadCommand(threadId, request));
               return HarnessRuntimeWebMapper.toThreadDto(runtime.getThreadSnapshot(moved.id()));
+            }));
+  }
+
+  /**
+   * 直接更新 Thread YOLO policy（revision CAS）：相同值在任何 CAS 之前 no-op 成功，值变化时 revision 精确 +1；不创建
+   * Command/Entry/Work、不唤醒 processors。返回权威当前 Thread（与 updateHead/stop 一致）。
+   */
+  @PutMapping("/{threadId}/yolo")
+  public Result<HarnessThreadDTO> updateYolo(
+      @PathVariable String threadId, @RequestBody HarnessThreadYoloUpdateDTO request) {
+    return Results.ok(
+        withRuntimeTranslation(
+            () -> {
+              ThreadState updated =
+                  runtime.setThreadYolo(
+                      HarnessRuntimeWebMapper.toSetThreadYoloCommand(threadId, request));
+              return HarnessRuntimeWebMapper.toThreadDto(runtime.getThreadSnapshot(updated.id()));
             }));
   }
 

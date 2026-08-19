@@ -35,7 +35,6 @@ class ThreadCommandPayloadTest {
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL,
             ThreadCommandType.SET_ACTIVE_TOOLS,
-            ThreadCommandType.SET_YOLO,
             ThreadCommandType.SET_ENVIRONMENT),
         List.of(
                 new UserMessageCommandPayload(user("hello")),
@@ -43,7 +42,6 @@ class ThreadCommandPayloadTest {
                 new SetAgentCommandPayload("coding"),
                 new SetModelCommandPayload(MODEL),
                 new SetActiveToolsCommandPayload(List.of("read")),
-                new SetYoloCommandPayload(true),
                 new SetEnvironmentCommandPayload(ENV))
             .stream()
             .map(ThreadCommandPayload::type)

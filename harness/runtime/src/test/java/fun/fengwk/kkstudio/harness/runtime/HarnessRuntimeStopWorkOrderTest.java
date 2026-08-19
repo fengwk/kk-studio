@@ -6,12 +6,12 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolWork;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -30,7 +30,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
-/** Stop Work 围栏顺序以及"Work 删除是最终 durable mutation"的契约。 */
+/** Stop Work 围栏顺序契约：canonical 预锁 → 立即净化 Work mailbox → 收敛（append + Thread 推进 + Invocation 删除）。 */
 class HarnessRuntimeStopWorkOrderTest {
 
   private static final Set<String> DURABLE_MUTATIONS =
@@ -43,7 +43,7 @@ class HarnessRuntimeStopWorkOrderTest {
           "deleteWork");
 
   @Test
-  void toolStopPrelocksAndDeletesWorkInCanonicalOrderWithDeletesLast() {
+  void toolStopPrelocksThenDeletesWorkInCanonicalOrderBeforeConvergence() {
     InMemoryHarnessStore delegate = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(delegate, 3);
     seedThreadWork(delegate, baseline.threadId());
@@ -78,16 +78,20 @@ class HarnessRuntimeStopWorkOrderTest {
             .toList());
 
     int firstDelete = firstIndex(calls, "deleteWork");
+    int lastDelete = lastIndex(calls, "deleteWork");
     int lastWorkLock = lastIndex(calls, "lockWork");
-    int firstNonDeleteMutation = firstNonDeleteMutation(calls);
     assertTrue(lastWorkLock >= 0);
-    assertTrue(firstNonDeleteMutation > lastWorkLock);
-    assertTrue(firstDelete >= 0);
-    for (int i = firstDelete; i < calls.size(); i++) {
-      StoreCall call = calls.get(i);
-      if (DURABLE_MUTATIONS.contains(call.method())) {
-        assertEquals("deleteWork", call.method());
-      }
+    assertTrue(firstDelete > lastWorkLock);
+    // Work 净化必须紧邻锁获取且连续完成：deleteWork 的 owner 校验反查 Model/Tool 行，因此必须在收敛
+    // （append Entry / advance Thread / 删除 Invocation）前执行。
+    for (int i = firstDelete; i <= lastDelete; i++) {
+      assertEquals("deleteWork", calls.get(i).method());
+    }
+    // deleteWork 之后不再出现任何 lockWork / deleteWork：进入收敛段（insertEntry / updateThread / delete 原语）。
+    for (int i = lastDelete + 1; i < calls.size(); i++) {
+      String method = calls.get(i).method();
+      assertTrue(
+          !method.equals("lockWork") && !method.equals("deleteWork"), "unexpected " + method);
     }
   }
 
@@ -112,11 +116,8 @@ class HarnessRuntimeStopWorkOrderTest {
     assertEquals(1L, thread.revision());
     assertEquals(baseline.assistantEntryId(), thread.headEntryId());
     for (UUID id : baseline.toolIds()) {
-      assertEquals(
-          ToolInvocationStatus.READY,
-          delegate.transaction(tx -> tx.findToolInvocation(id).orElseThrow()).status());
-      assertNull(
-          delegate.transaction(tx -> tx.findToolInvocation(id).orElseThrow()).resultEntryId());
+      ToolInvocation stored = delegate.transaction(tx -> tx.findToolInvocation(id).orElseThrow());
+      assertEquals(ToolInvocationStatus.READY, stored.status());
     }
     List<WorkTarget> expected =
         List.of(
@@ -141,16 +142,6 @@ class HarnessRuntimeStopWorkOrderTest {
   private static int lastIndex(List<StoreCall> calls, String method) {
     for (int i = calls.size() - 1; i >= 0; i--) {
       if (calls.get(i).method().equals(method)) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  private static int firstNonDeleteMutation(List<StoreCall> calls) {
-    for (int i = 0; i < calls.size(); i++) {
-      String method = calls.get(i).method();
-      if (DURABLE_MUTATIONS.contains(method) && !method.equals("deleteWork")) {
         return i;
       }
     }

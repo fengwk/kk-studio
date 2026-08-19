@@ -13,7 +13,6 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.succeedTool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,9 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -131,49 +127,27 @@ class HarnessRuntimeStopToolTest {
     assertEquals(baseline.turnStartEntryId(), end.turnStartEntryId());
     assertEquals(turnEnd.id(), stored.headEntryId());
 
-    ToolInvocation waiting = storedTool(ids.get(0));
-    assertEquals(ToolInvocationStatus.CANCELLED, waiting.status());
-    assertEquals(0, waiting.attempt());
-    assertEquals(CANCELLED_WORDING, resultText(waiting));
+    // 每个 sibling 的 ToolResult Entry 内容由其前置状态收敛（WAITING_APPROVAL/READY → CANCELLED，
+    // DISPATCHING/RUNNING → UNKNOWN，SUCCEEDED → SUCCEEDED）；attempt 不再 durable（行被物理删除），
+    // 只能通过 Entry metadata.status + 内容文本验证状态收敛。
     assertFalse(CANCELLED_WORDING.contains("never"));
-    ToolApproval approval = waiting.approval();
-    assertTrue(approval != null && approval.required() && approval.isUndecided());
-
-    ToolInvocation ready = storedTool(ids.get(1));
-    assertEquals(ToolInvocationStatus.CANCELLED, ready.status());
-    assertEquals(0, ready.attempt());
-    assertEquals(CANCELLED_WORDING, resultText(ready));
-
-    ToolInvocation dispatching = storedTool(ids.get(2));
-    assertEquals(ToolInvocationStatus.UNKNOWN, dispatching.status());
-    assertEquals(1, dispatching.attempt());
-    assertEquals(UNKNOWN_WORDING, resultText(dispatching));
-
-    ToolInvocation running = storedTool(ids.get(3));
-    assertEquals(ToolInvocationStatus.UNKNOWN, running.status());
-    assertEquals(1, running.attempt());
-    assertEquals(UNKNOWN_WORDING, resultText(running));
-
-    ToolInvocation succeeded = storedTool(ids.get(4));
-    assertEquals(ToolInvocationStatus.SUCCEEDED, succeeded.status());
-    assertEquals(1, succeeded.attempt());
-    assertEquals("real result", resultText(succeeded));
-
-    ToolInvocation cancelled = storedTool(ids.get(5));
-    assertEquals(ToolInvocationStatus.CANCELLED, cancelled.status());
-    assertEquals(0, cancelled.attempt());
-    assertEquals("cancelled", resultText(cancelled));
-
-    ToolInvocation retryReady = storedTool(ids.get(6));
-    assertEquals(ToolInvocationStatus.CANCELLED, retryReady.status());
-    assertEquals(1, retryReady.attempt());
-    assertEquals(CANCELLED_WORDING, resultText(retryReady));
-
-    // 每个 sibling 的 resultEntryId 精确指向自己的 ordinal ToolResult Entry。
+    String[] expectedTexts = {
+      CANCELLED_WORDING, // 0 WAITING_APPROVAL -> CANCELLED
+      CANCELLED_WORDING, // 1 READY -> CANCELLED
+      UNKNOWN_WORDING, // 2 DISPATCHING -> UNKNOWN
+      UNKNOWN_WORDING, // 3 RUNNING -> UNKNOWN
+      "real result", // 4 SUCCEEDED -> SUCCEEDED
+      "cancelled", // 5 CANCELLED -> CANCELLED
+      CANCELLED_WORDING, // 6 RUNNING+retry -> CANCELLED
+    };
     for (int ordinal = 0; ordinal < ids.size(); ordinal++) {
-      assertEquals(
-          path.entries().get(resultEntryIndex(ordinal)).id(),
-          storedTool(ids.get(ordinal)).resultEntryId());
+      Entry toolResult = path.entries().get(resultEntryIndex(ordinal));
+      assertEquals(expectedTexts[ordinal], resultTextOf(toolResult));
+    }
+
+    // 每个 sibling Tool 行已被 Stop 物理删除。
+    for (UUID id : ids) {
+      assertTrue(store.transaction(tx -> tx.findToolInvocation(id)).isEmpty());
     }
 
     // 全部 Work 删除：THREAD、owning MODEL 与每个 sibling TOOL。
@@ -194,11 +168,9 @@ class HarnessRuntimeStopToolTest {
               .isPresent());
     }
 
-    // Model 行未被 Stop 触碰：SUCCEEDED 且结果仍挂在 assistant。
-    ModelInvocation model =
-        store.transaction(tx -> tx.findModelInvocation(baseline.modelId()).orElseThrow());
-    assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
-    assertEquals(baseline.assistantEntryId(), model.resultEntryId());
+    // stopTools 在同一事务删除 parent Model 行（即使它是 active SUCCEEDED Tool phase），
+    // 仅 ToolResult Entry 与 STOPPED TURN_END 保留。
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
   }
 
   @Test
@@ -216,7 +188,6 @@ class HarnessRuntimeStopToolTest {
     ToolInvocation tool =
         store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
-    assertNull(tool.resultEntryId());
     ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
     assertEquals(1L, thread.revision());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
@@ -237,14 +208,8 @@ class HarnessRuntimeStopToolTest {
             .isPresent());
   }
 
-  private ToolInvocation storedTool(UUID toolId) {
-    return store.transaction(tx -> tx.findToolInvocation(toolId).orElseThrow());
-  }
-
   /** invocation 追加的 ToolResult MESSAGE entry 中唯一的文本块。 */
-  private String resultText(ToolInvocation tool) {
-    UUID resultEntryId = tool.resultEntryId();
-    Entry entry = store.transaction(tx -> tx.findEntry(resultEntryId).orElseThrow());
+  private String resultTextOf(Entry entry) {
     MessagePayload payload = (MessagePayload) entry.payload();
     ToolResultMessageContent content =
         (ToolResultMessageContent) payload.message().contents().get(0);

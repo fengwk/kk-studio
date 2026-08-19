@@ -7,6 +7,8 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime.NewCommandPreflight;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -78,7 +80,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
               CanvasFunctionParameterDefinition.integerParameter(
                   "duration", "Duration", false, 5, 4, 15)));
 
-  private final MiniMaxH3Properties properties;
+  private final SystemSettings.MiniMaxH3 settings;
   private final H3MediaPreflight mediaPreflight;
   private final H3PromptRequestBuilder promptBuilder;
   private final HarnessOneShotService oneShotService;
@@ -88,7 +90,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   private final ObjectMapper mapper;
 
   public MiniMaxH3CanvasFunctionAdapter(
-      MiniMaxH3Properties properties,
+      SystemSettingsSnapshot snapshot,
       H3MediaPreflight mediaPreflight,
       H3PromptRequestBuilder promptBuilder,
       HarnessOneShotService oneShotService,
@@ -96,7 +98,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       ObjectProvider<StandardComfyuiClient> comfyClients,
       ObjectProvider<StorageBlobIngestService> ingestServices,
       ObjectMapper mapper) {
-    this.properties = Objects.requireNonNull(properties, "properties");
+    this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().minimaxH3();
     this.mediaPreflight = Objects.requireNonNull(mediaPreflight, "mediaPreflight");
     this.promptBuilder = Objects.requireNonNull(promptBuilder, "promptBuilder");
     this.oneShotService = Objects.requireNonNull(oneShotService, "oneShotService");
@@ -113,14 +115,14 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
 
   @Override
   public boolean enabled() {
-    return properties.isEnabled();
+    return settings.enabled();
   }
 
   @Override
   public String unavailableReason() {
-    return properties.isEnabled()
+    return settings.enabled()
         ? null
-        : "MiniMax-H3 Ref2VA is disabled by kk-studio.canvas.function.minimax-h3.enabled";
+        : "MiniMax-H3 Ref2VA is disabled by kk-studio SystemSettings.integrations.minimaxH3";
   }
 
   @Override
@@ -147,10 +149,10 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       AgentMessage promptRequest = promptBuilder.userMessage(run, manifest);
       UUID threadId =
           oneShotService.submit(
-              requireText(properties.getPromptAgentName(), "promptAgentName"),
+              requireText(settings.promptAgentName(), "promptAgentName"),
               new EnvironmentBinding(
                   new EnvironmentName(
-                      requireText(properties.getPromptEnvironmentName(), "promptEnvironmentName")),
+                      requireText(settings.promptEnvironmentName(), "promptEnvironmentName")),
                   "."),
               promptBuilder.systemPrompt(),
               promptRequest,
@@ -167,9 +169,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       UUID threadId = Objects.requireNonNull(state.harnessThreadId(), "harnessThreadId");
       String enhancedPrompt =
           oneShotService.await(
-              threadId,
-              requirePositive(properties.getPromptMaxWait(), "promptMaxWait"),
-              context::isRunning);
+              threadId, Duration.ofMillis(settings.promptMaxWaitMillis()), context::isRunning);
       state = state.withEnhancedPrompt(enhancedPrompt);
       checkpoint(context, PROMPT_READY, state);
       stage = PROMPT_READY;
@@ -230,8 +230,8 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
               context,
               comfy,
               requireText(state.promptId(), "promptId"),
-              requirePositive(properties.getComfyPollInterval(), "comfyPollInterval"),
-              requirePositive(properties.getComfyMaxWait(), "comfyMaxWait"));
+              Duration.ofMillis(settings.comfyPollIntervalMillis()),
+              Duration.ofMillis(settings.comfyMaxWaitMillis()));
       state = state.withOutput(output);
       checkpoint(context, COMFY_READY, state);
       stage = COMFY_READY;
@@ -420,13 +420,6 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     }
   }
 
-  private static long requirePositive(Long value, String field) {
-    if (value == null || value <= 0L) {
-      throw new IllegalArgumentException(field + " must be positive");
-    }
-    return value;
-  }
-
   private static long requireNonnegative(Long value, String field) {
     if (value == null || value < 0L) {
       throw new IllegalArgumentException(field + " must be nonnegative");
@@ -437,13 +430,6 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   private static String requireText(String value, String field) {
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException(field + " must not be blank");
-    }
-    return value;
-  }
-
-  private static Duration requirePositive(Duration value, String field) {
-    if (value == null || value.isZero() || value.isNegative()) {
-      throw new IllegalArgumentException(field + " must be positive");
     }
     return value;
   }

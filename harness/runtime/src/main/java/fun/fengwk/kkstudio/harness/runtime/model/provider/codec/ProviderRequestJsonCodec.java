@@ -137,8 +137,19 @@ public final class ProviderRequestJsonCodec {
     for (JsonNode item : tools) {
       toolList.add(decodeToolDefinition(item));
     }
-    ProviderCacheControl cacheControl = decodeCacheControl(node.get("cacheControl"));
+    ProviderCacheControl cacheControl = decodeCacheControlNode(node.get("cacheControl"));
     return new ProviderRequest(model, variant, messageList, toolList, cacheControl);
+  }
+
+  /** 编码 {@link ProviderCacheControl} 子树，供紧凑 {@code ModelRequestSpec} 复用同一 wire。 */
+  public ObjectNode encodeCacheControlNode(ProviderCacheControl control) {
+    Objects.requireNonNull(control, "control");
+    return encodeCacheControl(control);
+  }
+
+  /** 解码 {@link ProviderCacheControl} 子树，供紧凑 {@code ModelRequestSpec} 复用同一 wire。 */
+  public ProviderCacheControl decodeCacheControlNode(JsonNode value) {
+    return decodeCacheControl(value);
   }
 
   // ---------- ProviderCacheControl ----------

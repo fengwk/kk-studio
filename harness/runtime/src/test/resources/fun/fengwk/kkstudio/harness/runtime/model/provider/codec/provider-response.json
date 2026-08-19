@@ -5,7 +5,7 @@
     {"id": "call-1", "name": "lookup", "argumentsJson": "{\n  \"q\":\"paris\"\n}"},
     {"id": "call-2", "name": "weather", "argumentsJson": "{\"city\":\"Paris\", \"units\":\"metric\"}"}
   ],
-  "stopReason": "COMPLETED",
+  "stopReason": "COMPLETE",
   "usage": {
     "inputTokens": 100,
     "outputTokens": 20,

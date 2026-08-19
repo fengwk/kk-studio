@@ -9,5 +9,9 @@ public enum TurnEndReason {
   /** branch-local 取消（如 Stop 后无安全内容时的取消 barrier）。 */
   CANCELLED,
   /** TurnResolver 或 ModelInvocation 确定失败。 */
-  TURN_FAILED
+  TURN_FAILED,
+  /** 生成被 max tokens 截断（LENGTH 无 calls 的 failed turn）。 */
+  OUTPUT_TRUNCATED,
+  /** 生成内容被 Provider 过滤（FILTERED 的 failed turn）。 */
+  CONTENT_FILTERED
 }

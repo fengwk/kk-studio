@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -46,7 +48,7 @@ public final class ModelAttemptMaterialization {
           "compaction result paths must not materialize model attempt failures");
     }
     if (stored.status().isTerminal()) {
-      requireTerminalResult(stored, resultPath.head().payload());
+      requireTerminalResult(stored, resultPath);
     } else {
       requireDirectStopResult(stored, attached, resultPath.head().payload());
     }
@@ -86,17 +88,62 @@ public final class ModelAttemptMaterialization {
     }
   }
 
-  private static void requireTerminalResult(
-      ModelInvocation invocation, EntryPayload resultPayload) {
+  /**
+   * terminal 结果的严格物化校验：SUCCEEDED 必须完整等于重放的结果 payload（normal 经 {@link HistoryPayloadMapper}，
+   * compaction 经 {@link CompactionSummaryAssembler}）；FAILED / CANCELLED 保持 exact error / checkpoint
+   * 语义不变。
+   */
+  private static void requireTerminalResult(ModelInvocation invocation, EntryPath resultPath) {
     if (invocation.status() == ModelInvocationStatus.SUCCEEDED) {
+      requireSuccessfulResult(invocation, resultPath);
       return;
     }
+    EntryPayload resultPayload = resultPath.head().payload();
     if (!(resultPayload instanceof AssistantErrorPayload actual)
         || !sameError(invocation, actual)
         || !Objects.equals(terminalAttempt(invocation), actual.attempt())) {
       throw new IllegalArgumentException(
           "materialized terminal error must match the invocation error and checkpoint");
     }
+  }
+
+  /**
+   * SUCCEEDED model 的结果 Entry payload 必须完整等于按当前 frozen 事实重放的结果：normal（无 compaction）为 {@link
+   * HistoryPayloadMapper#assistantPayload} 的 ASSISTANT payload；compaction 为 {@link
+   * CompactionSummaryAssembler#resultPayload} 的 COMPACTION payload（{@code preResultPath} 是
+   * resultPath 去掉 head 结果后的前缀，保证 TURN_PREFIX / HISTORY 组装上下文与 apply 时一致）。任何字段漂移（text / thinking /
+   * tool call renderer / metadata / summary text）都必须被拒。
+   */
+  private static void requireSuccessfulResult(ModelInvocation invocation, EntryPath resultPath) {
+    EntryPayload resultPayload = resultPath.head().payload();
+    CompactionRequest compaction = invocation.request().compaction();
+    if (compaction == null) {
+      MessagePayload expected =
+          new HistoryPayloadMapper()
+              .assistantPayload(invocation.result(), invocation.request().toolBindings());
+      if (!expected.equals(resultPayload)) {
+        throw new IllegalArgumentException(
+            "model result must materialize the exact assistant payload");
+      }
+      return;
+    }
+    CompactionPayload expected =
+        CompactionSummaryAssembler.resultPayload(
+            compaction, invocation.result().text(), preResultPath(resultPath));
+    if (!expected.equals(resultPayload)) {
+      throw new IllegalArgumentException(
+          "model result must materialize the exact compaction payload");
+    }
+  }
+
+  /** compaction 组装上下文：resultPath 去掉 head 结果后的前缀（至少保留 ROOT 与 basis 两项）。 */
+  private static EntryPath preResultPath(EntryPath resultPath) {
+    List<Entry> entries = resultPath.entries();
+    if (entries.size() < 3) {
+      throw new IllegalArgumentException(
+          "model result path must keep a non-trivial prefix before its head");
+    }
+    return new EntryPath(entries.subList(0, entries.size() - 1));
   }
 
   private static void requireDirectStopResult(
@@ -150,5 +197,94 @@ public final class ModelAttemptMaterialization {
         invocation.streamCheckpoint().sequence(),
         invocation.streamCheckpoint().text(),
         invocation.streamCheckpoint().thinking());
+  }
+
+  /**
+   * 校验已 attach 的 terminal ModelInvocation 与 immutable EntryPath 事实一致：Tool batch apply / Stop 删除
+   * parent 前的最小严格校验，绝不绕过物化校验直接 delete。
+   *
+   * <p>attach 转换本身（{@code stored.resultEntryId == null -> non-null}）已经通过 {@link #validate} 完成失败
+   * attempt 与 terminal 结果的逐条物化校验，且 Entry 与 terminal invocation 事实不可变；本方法只重放当前 durable 事实：
+   *
+   * <ul>
+   *   <li>model 必须 terminal、resultEntryId 非空、failedAttempts 已清空、streamCheckpoint 已清空（attach 形状）；
+   *   <li>resultEntryId 必须是 resultPath 的 head（Assistant 结果恰在 head 才构成活跃 Tool phase）；
+   *   <li>resultPath 必须包含 basisHeadEntryId 且严格位于 head 之前（result 必须是 basis 的严格 descendant， 不允许
+   *       attach 到 basis 自身）；
+   *   <li>非压缩 model：basis 之后 head 之前的 ModelAttemptFailurePayload 必须精确等于已确认的 attempt 前缀（attempt 从 1
+   *       连续递增且数量恰为 {@code attached.attempt() - 1}，不允许遗漏）；压缩 model：不允许出现任何失败条目；
+   *   <li>SUCCEEDED model 的 result 必须按值等价于 Assistant head：通过与 {@link
+   *       HistoryPayloadMapper#assistantPayload} 映射结果（thinking / text / tool calls renderer /
+   *       metadata usage / cost / stop reason）完整一致， 不能只比对 tool calls。
+   * </ul>
+   */
+  public static void validateAttached(ModelInvocation attached, EntryPath resultPath) {
+    Objects.requireNonNull(attached, "attached");
+    Objects.requireNonNull(resultPath, "resultPath");
+    if (attached.resultEntryId() == null
+        || !attached.status().isTerminal()
+        || !attached.failedAttempts().isEmpty()
+        || attached.streamCheckpoint() != null) {
+      throw new IllegalArgumentException(
+          "attached model validation requires a terminal model invocation with a materialized"
+              + " result entry");
+    }
+    List<Entry> entries = resultPath.entries();
+    if (entries.isEmpty()
+        || !entries.get(entries.size() - 1).id().equals(attached.resultEntryId())) {
+      throw new IllegalArgumentException(
+          "attached model resultEntryId must be the result path head");
+    }
+    if (attached.resultEntryId().equals(attached.basisHeadEntryId())) {
+      throw new IllegalArgumentException(
+          "attached model result must be a strict descendant of its basis head entry");
+    }
+    boolean afterBasis = false;
+    boolean foundBasis = false;
+    int expectedAttempt = 1;
+    for (Entry entry : entries) {
+      if (entry.id().equals(attached.basisHeadEntryId())) {
+        afterBasis = true;
+        foundBasis = true;
+        continue;
+      }
+      if (!afterBasis || entry.id().equals(attached.resultEntryId())) {
+        continue;
+      }
+      if (entry.payload() instanceof ModelAttemptFailurePayload failure) {
+        if (attached.request().compaction() != null) {
+          throw new IllegalArgumentException(
+              "compaction result paths must not materialize model attempt failures");
+        }
+        if (failure.attempt().attempt() != expectedAttempt) {
+          throw new IllegalArgumentException(
+              "materialized model attempt failures must form a consecutive prefix starting at"
+                  + " attempt 1");
+        }
+        expectedAttempt++;
+      }
+    }
+    if (!foundBasis) {
+      throw new IllegalArgumentException("model result path must contain basisHeadEntryId");
+    }
+    if (attached.request().compaction() == null && expectedAttempt - 1 != attached.attempt() - 1) {
+      throw new IllegalArgumentException(
+          "materialized model attempt failures must be exactly the confirmed attempt prefix:"
+              + " expected "
+              + (attached.attempt() - 1)
+              + " but found "
+              + (expectedAttempt - 1));
+    }
+    Entry head = entries.get(entries.size() - 1);
+    if (attached.status() != ModelInvocationStatus.SUCCEEDED || attached.result() == null) {
+      throw new IllegalArgumentException(
+          "an attached tool-phase model invocation must be SUCCEEDED with a result");
+    }
+    if (!(head.payload() instanceof MessagePayload message)
+        || message.message().role() != AgentMessageRole.ASSISTANT) {
+      throw new IllegalArgumentException(
+          "an attached tool-phase model result head must be an ASSISTANT message entry");
+    }
+    requireSuccessfulResult(attached, resultPath);
   }
 }

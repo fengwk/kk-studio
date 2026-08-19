@@ -119,8 +119,7 @@ public final class BashTool implements Tool {
           contents = new ArrayList<>(contents);
           contents.add(new TextToolContent("\nCommand exited with code " + exitCode));
         }
-        handle.complete(
-            listener, new ToolResult(request.call().id(), contents, failed, "{}", false));
+        handle.complete(listener, new ToolResult(request.call().id(), contents, failed, "{}"));
       }
     } catch (Exception error) {
       handle.complete(listener, AbstractCodingTool.error(request.call().id(), error.getMessage()));
@@ -143,8 +142,7 @@ public final class BashTool implements Tool {
   private static void emitPartial(
       String callId, ToolExecutionListener listener, BashHandle handle, String text) {
     if (!text.isEmpty() && !handle.cancelled.get() && !handle.timedOut.get()) {
-      listener.onPartial(
-          new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}", false));
+      listener.onPartial(new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}"));
     }
   }
 

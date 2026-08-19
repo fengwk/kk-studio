@@ -14,9 +14,9 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -615,7 +615,7 @@ class ModelInvocationTransitionTest {
         "different",
         null,
         List.of(),
-        ProviderStopReason.COMPLETED,
+        GenerationStopReason.COMPLETE,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
         new ModelCost(
             "USD",
@@ -709,7 +709,7 @@ class ModelInvocationTransitionTest {
         source.threadId(),
         source.turnStartEntryId(),
         source.basisHeadEntryId(),
-        request(List.of(), false),
+        request(List.of()),
         source.status(),
         source.attempt(),
         source.streamCheckpoint(),

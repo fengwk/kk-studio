@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BoundThreadPane } from '@/features/ai/chat/chat-workspace-pane/BoundThreadPane'
-import { ApplicationSettingsProvider } from '@/features/settings/application-settings'
+import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
@@ -194,7 +194,7 @@ function renderBoundPane(threadId = 't1') {
   })
   const onThreadChange = vi.fn()
   const element = (boundThreadId: string) => (
-    <ApplicationSettingsProvider>
+    <BrowserPreferencesProvider>
       <QueryClientProvider client={queryClient}>
         <BoundThreadPane
           chatId="chat-1"
@@ -211,7 +211,7 @@ function renderBoundPane(threadId = 't1') {
           onThreadSortChange={() => undefined}
         />
       </QueryClientProvider>
-    </ApplicationSettingsProvider>
+    </BrowserPreferencesProvider>
   )
   const view = render(element(threadId))
   return {

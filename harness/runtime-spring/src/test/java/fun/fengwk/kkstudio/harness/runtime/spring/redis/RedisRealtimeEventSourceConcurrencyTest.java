@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -55,6 +56,7 @@ class RedisRealtimeEventSourceConcurrencyTest {
 
   private static final RedisRealtimeConfig CONFIG = new RedisRealtimeConfig();
   private static final RealtimeEventJsonCodec CODEC = new RealtimeEventJsonCodec();
+  private static final Duration RETRY_DELAY = Duration.ofMillis(1);
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
 
   @Test
@@ -66,7 +68,8 @@ class RedisRealtimeEventSourceConcurrencyTest {
     // 会再建第三个 channel/listener（可观察：receiveLater 调用次数）。
     UUID threadId = new UUID(0L, 51L);
     FakeContainer container = new FakeContainer();
-    RedisRealtimeEventSource source = new RedisRealtimeEventSource(container, CONFIG, CODEC);
+    RedisRealtimeEventSource source =
+        new RedisRealtimeEventSource(container, CONFIG, CODEC, RETRY_DELAY);
     try {
       AutoCloseable first = source.subscribe(threadId, event -> {}, () -> {});
       assertEquals(1, container.receiveLaterCalls.get());
@@ -133,7 +136,8 @@ class RedisRealtimeEventSourceConcurrencyTest {
     // close 排空后插入存活 channel 并建立 listen。围栏把「设立 closed」与「发布 channel」串在同一把锁上后，
     // 并发 subscribe 要么在 close 前完成（随后被 close 取消 listen），要么看到 closed 被拒绝。
     FakeContainer container = new FakeContainer();
-    RedisRealtimeEventSource source = new RedisRealtimeEventSource(container, CONFIG, CODEC);
+    RedisRealtimeEventSource source =
+        new RedisRealtimeEventSource(container, CONFIG, CODEC, RETRY_DELAY);
     int workers = 8;
     ExecutorService executor = Executors.newFixedThreadPool(workers + 1);
     CountDownLatch start = new CountDownLatch(1);
@@ -195,7 +199,8 @@ class RedisRealtimeEventSourceConcurrencyTest {
     // 围栏只设立 closed：排空时 dispose 若回等待，不得再持有围栏，否则并发 subscribe 会死锁。
     UUID threadId = new UUID(0L, 70L);
     FakeContainer container = new FakeContainer();
-    RedisRealtimeEventSource source = new RedisRealtimeEventSource(container, CONFIG, CODEC);
+    RedisRealtimeEventSource source =
+        new RedisRealtimeEventSource(container, CONFIG, CODEC, RETRY_DELAY);
     AutoCloseable first = source.subscribe(threadId, event -> {}, () -> {});
     assertEquals(1, container.receiveLaterCalls.get());
     container.fluxes.get(0).armDisposeBlock();
@@ -234,7 +239,8 @@ class RedisRealtimeEventSourceConcurrencyTest {
   void subscribeAfterCloseIsRejectedAndCloseIsIdempotent() throws Exception {
     UUID threadId = new UUID(0L, 52L);
     FakeContainer container = new FakeContainer();
-    RedisRealtimeEventSource source = new RedisRealtimeEventSource(container, CONFIG, CODEC);
+    RedisRealtimeEventSource source =
+        new RedisRealtimeEventSource(container, CONFIG, CODEC, RETRY_DELAY);
     try (AutoCloseable ignored = source.subscribe(threadId, event -> {}, () -> {})) {
       assertEquals(1, container.receiveLaterCalls.get());
     }
@@ -251,7 +257,8 @@ class RedisRealtimeEventSourceConcurrencyTest {
   void failingSubscriberCallbackDoesNotBlockOtherSubscribersOrTriggerResync() throws Exception {
     UUID threadId = new UUID(0L, 53L);
     FakeContainer container = new FakeContainer();
-    RedisRealtimeEventSource source = new RedisRealtimeEventSource(container, CONFIG, CODEC);
+    RedisRealtimeEventSource source =
+        new RedisRealtimeEventSource(container, CONFIG, CODEC, RETRY_DELAY);
     try {
       AtomicInteger resyncs = new AtomicInteger();
       List<RealtimeEvent> received = new ArrayList<>();

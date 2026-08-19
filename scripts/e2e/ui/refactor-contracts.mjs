@@ -136,21 +136,22 @@ export async function runRefactorContractMatrix(ui) {
           await send.click()
           const queued = await waitForQueuedSettingsBatch(apiCtx, fixture.threadId, marker)
           assert(
-            queued.map((command) => command.type).join(',')
-              === 'SET_MODEL,SET_YOLO,USER_MESSAGE',
+            queued.map((command) => command.type).join(',') === 'SET_MODEL,USER_MESSAGE',
             `settings and message were not queued in frozen order: ${JSON.stringify(queued)}`,
           )
           const modelPayload = JSON.parse(queued[0].payloadJson)
-          const yoloPayload = JSON.parse(queued[1].payloadJson)
           assert(
             modelPayload.model?.providerName === fixture.provider.name
             && modelPayload.model?.modelName === fixture.model.name
             && modelPayload.model?.variant === 'review',
             `queued SET_MODEL does not match the UI selection: ${JSON.stringify(modelPayload)}`,
           )
+          // yolo 是直接控制面：选择 YOLO 立即 PUT /yolo（基于 snapshot revision 的 CAS），
+          // 绝不进入 command batch；Thread 快照反映权威值。
+          const fresh = await getThreadSnapshot(apiCtx, fixture.threadId)
           assert(
-            yoloPayload.yoloEnabled === true,
-            `queued SET_YOLO does not match the UI selection: ${JSON.stringify(yoloPayload)}`,
+            fresh.thread.yoloEnabled === true,
+            `direct yolo update was not reflected in the Thread snapshot: ${JSON.stringify(fresh.thread)}`,
           )
 
           await shot(caseArt, 'composer-settings-controls-batch')
@@ -272,7 +273,7 @@ export async function runRefactorContractMatrix(ui) {
 
   await run(
     'ui.chat.tool_card.streaming_layout_scroll',
-    'Tool 卡流式/稳定布局、write/edit 审批与 transcript 滚轮传播',
+    'Tool 卡流式/稳定布局、write/edit/bash 审批与 transcript 滚轮传播',
     async (caseArt) => {
       const originalViewport = page.viewportSize()
       await page.setViewportSize({ width: 720, height: 420 })
@@ -363,7 +364,18 @@ export async function runRefactorContractMatrix(ui) {
               && await approval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
               `edit did not enter approval: ${await approval.innerText()}`,
             )
-            await approval.getByRole('button', { name: '拒绝', exact: true }).click()
+            const editDeny = approval.getByRole('button', { name: '拒绝', exact: true })
+            const denyStyle = await editDeny.evaluate((element) => ({
+              borderColor: getComputedStyle(element).borderColor,
+              dangerBorder: getComputedStyle(document.documentElement)
+                .getPropertyValue('--danger-border')
+                .trim(),
+            }))
+            assert(
+              denyStyle.borderColor === denyStyle.dangerBorder,
+              `deny button does not use the danger border: ${JSON.stringify(denyStyle)}`,
+            )
+            await editDeny.click()
             await waitForQuiescentThread(apiCtx, fixture.threadId, {
               timeoutMs: 30_000,
               intervalMs: 100,
@@ -410,6 +422,28 @@ export async function runRefactorContractMatrix(ui) {
               `write did not enter approval: ${await writeCard.innerText()}`,
             )
             await writeApproval.getByRole('button', { name: '拒绝', exact: true }).click()
+            await waitForQuiescentThread(apiCtx, fixture.threadId, {
+              timeoutMs: 30_000,
+              intervalMs: 100,
+            })
+            await page.locator('.thread-working').waitFor({ state: 'hidden', timeout: 10_000 })
+
+            await fixture.start('bash')
+            await page.locator('.thread-working').waitFor({ state: 'visible', timeout: 10_000 })
+            await fixture.stream()
+            const bashCard = page.locator('.thread-tool-surface').filter({
+              has: page.locator('.thread-tool-name', { hasText: 'bash' }),
+            }).last()
+            await fixture.finish()
+            const bashApproval = bashCard.locator('.thread-tool-approval')
+            await bashApproval.waitFor({ state: 'visible', timeout: 15_000 })
+            assert(
+              await bashCard.locator('.thread-tool-name').textContent() === 'bash'
+              && await bashApproval.getByRole('button', { name: '允许', exact: true }).count() === 1
+              && await bashApproval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              `bash did not enter approval: ${await bashCard.innerText()}`,
+            )
+            await bashApproval.getByRole('button', { name: '拒绝', exact: true }).click()
             await waitForQuiescentThread(apiCtx, fixture.threadId, {
               timeoutMs: 30_000,
               intervalMs: 100,
@@ -487,6 +521,114 @@ export async function runRefactorContractMatrix(ui) {
       )
     },
   )
+
+  await run(
+    'ui.settings.system_contract_cas',
+    'Settings server tab 与 /api/settings 契约：完整聚合 CAS、冲突确认后刷新，并在收尾恢复全局状态',
+    async (caseArt) => {
+      const readSettings = async () => envelopeData((await apiCtx.call('GET', '/api/settings')).json)
+      const before = await readSettings()
+      const original = before.aiRuntime.retryBaseDelayMillis
+      // Long 在 wire 上是十进制字符串。
+      assert(
+        typeof original === 'string' && /^\d+$/.test(original),
+        `retryBaseDelayMillis must be a decimal string: ${JSON.stringify(original)}`,
+      )
+      // 确定性可逆的新值：与原始值不同的正整数字符串。
+      const changed = original === '2501' ? '2502' : '2501'
+      try {
+        await goto('/settings')
+        await page.getByRole('tab', { name: 'AI 运行时' }).click()
+        const base = page.getByLabel('基础延迟（毫秒）')
+        await base.waitFor({ state: 'visible', timeout: 10_000 })
+        // GET hydration：draft 与权威聚合一致。
+        assert(
+          (await base.inputValue()) === original,
+          `hydration mismatch: ${await base.inputValue()} !== ${original}`,
+        )
+        await base.fill(changed)
+        await page.getByRole('button', { name: '保存', exact: true }).click()
+        await page.getByText('已是最新').waitFor({ state: 'visible', timeout: 15_000 })
+        await shot(caseArt, 'settings-system-contract-cas')
+
+        const after = await readSettings()
+        assert(after.version !== before.version, 'CAS PUT must advance the version')
+        assert(after.aiRuntime.retryBaseDelayMillis === changed, `change not persisted: ${after.aiRuntime.retryBaseDelayMillis}`)
+        // 完整聚合六 section + wire 形态（Long 字符串 / version 字符串）。
+        for (const section of ['tool', 'aiRuntime', 'environment', 'integrations', 'storageMedia', 'advanced']) {
+          assert(after[section] != null, `missing section ${section} in GET response`)
+        }
+        assert(typeof after.version === 'string' && /^\d+$/.test(after.version), 'version must be a decimal string')
+        assert(typeof after.aiRuntime.retryBaseDelayMillis === 'string', 'Long field must stay a decimal string on the wire')
+
+        // 外部写入推进版本后，页面中的旧 draft 保存必须先弹窗说明；用户确认后才刷新并读取最新值。
+        const externallyChanged = '2503'
+        const staleDraft = '2504'
+        const externalUpdate = {
+          tool: after.tool,
+          aiRuntime: { ...after.aiRuntime, retryBaseDelayMillis: externallyChanged },
+          environment: after.environment,
+          integrations: after.integrations,
+          storageMedia: after.storageMedia,
+          advanced: after.advanced,
+          expectedVersion: after.version,
+        }
+        const externalRes = await apiCtx.call('PUT', '/api/settings', externalUpdate)
+        assert(externalRes.status === 200, `external settings update failed: ${externalRes.status}`)
+        await base.fill(staleDraft)
+        await page.getByRole('button', { name: '保存', exact: true }).click()
+        const conflictDialog = page.getByRole('alertdialog', { name: '设置已在其他位置修改' })
+        await conflictDialog.waitFor({ state: 'visible', timeout: 15_000 })
+        assert(
+          (await base.inputValue()) === staleDraft,
+          'stale draft must remain visible before reload confirmation',
+        )
+        await shot(caseArt, 'settings-system-conflict-dialog')
+        await Promise.all([
+          page.waitForEvent('load'),
+          conflictDialog.getByRole('button', { name: '重新加载' }).click(),
+        ])
+        await page.getByRole('tab', { name: 'AI 运行时' }).click()
+        const refreshedBase = page.getByLabel('基础延迟（毫秒）')
+        await refreshedBase.waitFor({ state: 'visible', timeout: 10_000 })
+        assert(
+          (await refreshedBase.inputValue()) === externallyChanged,
+          `reload did not hydrate latest settings: ${await refreshedBase.inputValue()}`,
+        )
+        expectNoFatal(pageErrors, consoleErrors)
+      } finally {
+        // 无论本用例产物读/断言是否失败，只要保存可能已写入都必须恢复全局聚合：在 finally 内重新强读最新
+        // settings，用最新版本做 CAS 恢复原字段；绝不留下被修改的全局状态。409（并发推进版本）时重读重试。
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const latest = await readSettings()
+          if (latest.aiRuntime.retryBaseDelayMillis === original) {
+            break
+          }
+          const restore = {
+            tool: latest.tool,
+            aiRuntime: { ...latest.aiRuntime, retryBaseDelayMillis: original },
+            environment: latest.environment,
+            integrations: latest.integrations,
+            storageMedia: latest.storageMedia,
+            advanced: latest.advanced,
+            expectedVersion: latest.version,
+          }
+          const res = await apiCtx.call('PUT', '/api/settings', restore)
+          if (res.status === 200) {
+            const restored = envelopeData(res.json)
+            assert(restored.aiRuntime.retryBaseDelayMillis === original, 'restore was not applied')
+            break
+          }
+          assert(res.status === 409, `restore PUT failed: ${res.status}`)
+        }
+        const verified = await readSettings()
+        assert(
+          verified.aiRuntime.retryBaseDelayMillis === original,
+          `restore retries exhausted without restoring retryBaseDelayMillis: ${verified.aiRuntime.retryBaseDelayMillis}`,
+        )
+      }
+    },
+  )
 }
 
 async function bindSplitThreads(page, goto, chatId, firstThreadId, secondThreadId) {
@@ -526,8 +668,8 @@ async function waitForQueuedSettingsBatch(apiCtx, threadId, marker, timeoutMs = 
     const userIndex = commands.findIndex((command) =>
       command.type === 'USER_MESSAGE' && command.payloadJson.includes(marker),
     )
-    if (userIndex >= 2) {
-      return commands.slice(userIndex - 2, userIndex + 1)
+    if (userIndex >= 0) {
+      return commands
     }
     await sleep(50)
   }
@@ -750,6 +892,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
 async function createToolCardFixture(apiCtx, stamp) {
   const suffix = cid().slice(0, 8)
   const markers = {
+    bash: `bash tool card ${stamp} ${suffix}`,
     edit: `edit tool card ${stamp} ${suffix}`,
     write: `write tool card ${stamp} ${suffix}`,
   }
@@ -810,7 +953,7 @@ async function createToolCardFixture(apiCtx, stamp) {
       systemPrompt: 'Follow each deterministic Tool request exactly once.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
-      config: { tools: ['write', 'edit'], skills: [], subagents: [] },
+      config: { tools: ['write', 'edit', 'bash'], skills: [], subagents: [] },
     })
     assert(agentResponse.status === 201, `create tool-card agent: ${JSON.stringify(agentResponse)}`)
     state.agent = envelopeData(agentResponse.json)
@@ -830,7 +973,7 @@ async function createToolCardFixture(apiCtx, stamp) {
           modelName: state.model.name,
           variant: 'default',
         },
-        { activeTools: ['write', 'edit'] },
+        { activeTools: ['write', 'edit', 'bash'] },
       ),
     })
     state.threadId = created.thread.threadId
@@ -1134,6 +1277,12 @@ class CompletingOpenAiMock {
 class ToolCardOpenAiMock {
   constructor({ markers, path, oldText, newText }) {
     this.calls = {
+      bash: {
+        marker: markers.bash,
+        argumentsJson: JSON.stringify({
+          command: 'printf "tool-card-bash-approval\\n"',
+        }),
+      },
       edit: {
         marker: markers.edit,
         argumentsJson: JSON.stringify({

@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -176,9 +176,9 @@ final class HistoryValueCodecs {
   static AssistantMessageMetadata decodeAssistantMetadata(JsonNode value) {
     ObjectNode node = requireObject(value, "assistantMetadata");
     requireExactFields(node, METADATA_FIELDS, "assistantMetadata");
-    ProviderStopReason stopReason =
+    GenerationStopReason stopReason =
         readEnum(
-            ProviderStopReason.class, text(node, "stopReason"), "assistantMetadata.stopReason");
+            GenerationStopReason.class, text(node, "stopReason"), "assistantMetadata.stopReason");
     ObjectNode usageNode = requireObject(node.get("usage"), "assistantMetadata.usage");
     requireExactFields(usageNode, USAGE_FIELDS, "assistantMetadata.usage");
     ModelUsage usage =
@@ -275,6 +275,18 @@ final class HistoryValueCodecs {
       throw new IllegalArgumentException(context + "." + field + " must be positive");
     }
     return value;
+  }
+
+  static Integer nullablePositiveInt(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() <= 0) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a positive integer or null");
+    }
+    return value.intValue();
   }
 
   static BigDecimal requiredDecimal(ObjectNode node, String field, String context) {

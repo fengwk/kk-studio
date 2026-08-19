@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.core.storage.configuration;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -35,26 +35,33 @@ import fun.fengwk.kkstudio.core.storage.service.impl.PostgresqlSessionBlobRefMan
 import fun.fengwk.kkstudio.core.storage.service.impl.PostgresqlStorageBlobIngestService;
 import fun.fengwk.kkstudio.core.storage.service.impl.PostgresqlStorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.impl.StorageUploadServiceImpl;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 
 import java.net.URI;
 import java.time.Clock;
+import java.util.Objects;
 
 /**
- * S3 存储配置.
+ * S3 存储配置。
  *
  * <p>同时提供面向服务端的 {@link S3Client}（用于内部读写）和面向浏览器直传/直下发的 {@link S3Presigner} （基于可外部访问的 {@code
  * publicEndpoint}，path-style，MinIO 兼容）。bucket 始终来自配置，调用方不能选择。
  *
+ * <p>装配开关来自 SystemSettings.storageMedia.s3Enabled（不再是 @ConfigurationProperties 属性）：关闭时整族 bean 不装配
+ * （长生命周期拓扑以启动快照为准，运行时更新需重启），无需提供任何 S3 连接/凭据；开启且 bootstrap 校验失败时启动明确报错。
+ *
  * @author fengwk
  */
-@ConditionalOnProperty(prefix = "kk-studio.storage.s3", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties({S3StorageProperties.class, StorageProperties.class})
+@EnableConfigurationProperties(S3StorageProperties.class)
 @Configuration
 public class S3StorageConfiguration {
 
   @Bean(destroyMethod = "close")
   @ConditionalOnMissingBean(S3Client.class)
-  public S3Client s3Client(S3StorageProperties properties) {
+  public S3Client s3Client(S3StorageProperties properties, SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
     validateProperties(properties);
     return S3Client.builder()
         .endpointOverride(URI.create(properties.getEndpoint()))
@@ -73,7 +80,10 @@ public class S3StorageConfiguration {
    */
   @Bean(destroyMethod = "close")
   @ConditionalOnMissingBean(S3Presigner.class)
-  public S3Presigner s3Presigner(S3StorageProperties properties) {
+  public S3Presigner s3Presigner(S3StorageProperties properties, SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
     validateProperties(properties);
     String publicEndpoint = properties.getEffectivePublicEndpoint();
     Assert.hasText(publicEndpoint, "kk-studio.storage.s3.public-endpoint must not be blank");
@@ -89,21 +99,39 @@ public class S3StorageConfiguration {
 
   @Bean
   @ConditionalOnMissingBean(S3StorageService.class)
-  public S3StorageService s3StorageService(S3StorageProperties properties, S3Client s3Client) {
-    return new S3StorageServiceImpl(properties, s3Client);
+  public S3StorageService s3StorageService(
+      S3StorageProperties properties,
+      ObjectProvider<S3Client> s3ClientProvider,
+      SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
+    return new S3StorageServiceImpl(
+        properties, Objects.requireNonNull(s3ClientProvider.getIfAvailable(), "s3Client"));
   }
 
   @Bean
   @ConditionalOnMissingBean(S3PresignService.class)
   public S3PresignService s3PresignService(
-      S3StorageProperties properties, S3Presigner s3Presigner) {
-    return new S3PresignServiceImpl(properties, s3Presigner);
+      S3StorageProperties properties,
+      ObjectProvider<S3Presigner> s3PresignerProvider,
+      SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
+    return new S3PresignServiceImpl(
+        properties,
+        Objects.requireNonNull(s3PresignerProvider.getIfAvailable(), "s3Presigner"),
+        snapshot.get().storageMedia());
   }
 
   /** 默认媒体事实探针：只记录 HEAD 元数据；后续 Canvas 媒体集成可替换为 Ffmpeg 实现。 */
   @Bean
   @ConditionalOnMissingBean(StorageMediaProbe.class)
-  public StorageMediaProbe storageMediaProbe() {
+  public StorageMediaProbe storageMediaProbe(SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
     return new HeadOnlyStorageMediaProbe();
   }
 
@@ -112,9 +140,16 @@ public class S3StorageConfiguration {
   @ConditionalOnMissingBean(StorageBlobManager.class)
   public StorageBlobManager storageBlobManager(
       StorageBlobRepository blobRepository,
-      S3StorageService s3StorageService,
-      S3PresignService s3PresignService) {
-    return new PostgresqlStorageBlobManager(blobRepository, s3StorageService, s3PresignService);
+      ObjectProvider<S3StorageService> s3StorageService,
+      ObjectProvider<S3PresignService> s3PresignService,
+      SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
+    return new PostgresqlStorageBlobManager(
+        blobRepository,
+        Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"),
+        Objects.requireNonNull(s3PresignService.getIfAvailable(), "s3PresignService"));
   }
 
   /** 上传契约服务：reserve/complete/delete 与机会式过期回收。 */
@@ -123,31 +158,35 @@ public class S3StorageConfiguration {
   public StorageUploadService storageUploadService(
       StorageUploadRepository uploadRepository,
       StorageBlobRepository blobRepository,
-      StorageBlobManager blobManager,
-      S3StorageService s3StorageService,
-      S3PresignService s3PresignService,
-      StorageMediaProbe mediaProbe,
+      ObjectProvider<StorageBlobManager> blobManager,
+      ObjectProvider<S3StorageService> s3StorageService,
+      ObjectProvider<S3PresignService> s3PresignService,
+      ObjectProvider<StorageMediaProbe> mediaProbe,
       S3StorageProperties s3Properties,
-      StorageProperties storageProperties,
+      SystemSettingsSnapshot snapshot,
       Clock clock,
       PlatformTransactionManager transactionManager) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
     return new StorageUploadServiceImpl(
         uploadRepository,
         blobRepository,
-        blobManager,
-        s3StorageService,
-        s3PresignService,
-        mediaProbe,
+        Objects.requireNonNull(blobManager.getIfAvailable(), "blobManager"),
+        Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"),
+        Objects.requireNonNull(s3PresignService.getIfAvailable(), "s3PresignService"),
+        Objects.requireNonNull(mediaProbe.getIfAvailable(), "mediaProbe"),
         s3Properties,
-        storageProperties,
+        snapshot.get().storageMedia(),
         clock,
         transactionManager);
   }
 
-  /** 启动一次性恢复：过期上传回收 + DELETING blob 清扫，无周期性后台线程。 */
+  /** 启动一次性恢复：过期上传回收 + DELETING blob 清扫，无周期性后台线程。始终注册；S3 未启用时内部感知服务缺失并跳过。 */
   @Bean
   public StorageStartupRecovery storageStartupRecovery(
-      StorageUploadService storageUploadService, StorageBlobManager storageBlobManager) {
+      ObjectProvider<StorageUploadService> storageUploadService,
+      ObjectProvider<StorageBlobManager> storageBlobManager) {
     return new StorageStartupRecovery(storageUploadService, storageBlobManager);
   }
 
@@ -155,8 +194,14 @@ public class S3StorageConfiguration {
   @Bean
   @ConditionalOnMissingBean(SessionBlobRefManager.class)
   public SessionBlobRefManager sessionBlobRefManager(
-      SessionBlobRefRepository refRepository, StorageBlobManager blobManager) {
-    return new PostgresqlSessionBlobRefManager(refRepository, blobManager);
+      SessionBlobRefRepository refRepository,
+      ObjectProvider<StorageBlobManager> blobManager,
+      SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
+    return new PostgresqlSessionBlobRefManager(
+        refRepository, Objects.requireNonNull(blobManager.getIfAvailable(), "blobManager"));
   }
 
   /** 服务端字节内容的 blob 摄入：Tool/Daemon Resource 外部化的存储入口（MANDATORY 事务）。 */
@@ -164,53 +209,65 @@ public class S3StorageConfiguration {
   @ConditionalOnMissingBean(StorageBlobIngestService.class)
   public StorageBlobIngestService storageBlobIngestService(
       StorageBlobRepository blobRepository,
-      StorageBlobManager blobManager,
-      SessionBlobRefManager refManager,
-      S3StorageService s3StorageService) {
+      ObjectProvider<StorageBlobManager> blobManager,
+      ObjectProvider<SessionBlobRefManager> refManager,
+      ObjectProvider<S3StorageService> s3StorageService,
+      SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
     return new PostgresqlStorageBlobIngestService(
-        blobRepository, blobManager, refManager, s3StorageService);
+        blobRepository,
+        Objects.requireNonNull(blobManager.getIfAvailable(), "blobManager"),
+        Objects.requireNonNull(refManager.getIfAvailable(), "refManager"),
+        Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"));
   }
 
   /** Provider attempt 的 Resource 物化端口（图片内联、其它媒体按需签名，瞬时 source 绝不持久化）。 */
   @Bean
   @ConditionalOnMissingBean(ProviderResourceMaterializer.class)
   public ProviderResourceMaterializer providerResourceMaterializer(
-      StorageBlobManager storageBlobManager, S3StorageService s3StorageService) {
-    return ProviderResourceMaterializer.withStorage(storageBlobManager, s3StorageService);
+      ObjectProvider<StorageBlobManager> storageBlobManager,
+      ObjectProvider<S3StorageService> s3StorageService,
+      SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
+    return ProviderResourceMaterializer.withStorage(
+        Objects.requireNonNull(storageBlobManager.getIfAvailable(), "storageBlobManager"),
+        Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"));
   }
 
   /** Tool outcome 的 durable history 物化端口：瞬时 Resource 引用外部化为全局 blob 后进入 history。 */
   @Bean
   @ConditionalOnMissingBean(GlobalStorageToolResultHistoryMaterializer.class)
   public GlobalStorageToolResultHistoryMaterializer globalStorageToolResultHistoryMaterializer(
-      StorageBlobIngestService ingestService,
-      S3StorageService s3StorageService,
-      S3StorageProperties s3Properties) {
+      ObjectProvider<StorageBlobIngestService> ingestService,
+      ObjectProvider<S3StorageService> s3StorageService,
+      S3StorageProperties s3Properties,
+      SystemSettingsSnapshot snapshot) {
+    if (!s3Enabled(snapshot)) {
+      return null;
+    }
     return new GlobalStorageToolResultHistoryMaterializer(
-        ingestService, s3StorageService, s3Properties);
+        Objects.requireNonNull(ingestService.getIfAvailable(), "ingestService"),
+        Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"),
+        s3Properties);
+  }
+
+  private static boolean s3Enabled(SystemSettingsSnapshot snapshot) {
+    return Objects.requireNonNull(snapshot, "snapshot").get().storageMedia().s3Enabled();
   }
 
   private S3Configuration newS3Configuration() {
     return S3Configuration.builder().pathStyleAccessEnabled(true).build();
   }
 
-  private void validateBaseProperties(S3StorageProperties properties) {
+  private void validateProperties(S3StorageProperties properties) {
     Assert.hasText(properties.getEndpoint(), "kk-studio.storage.s3.endpoint must not be blank");
     Assert.hasText(properties.getRegion(), "kk-studio.storage.s3.region must not be blank");
     Assert.hasText(properties.getBucket(), "kk-studio.storage.s3.bucket must not be blank");
     Assert.hasText(properties.getAccessKey(), "kk-studio.storage.s3.access-key must not be blank");
     Assert.hasText(properties.getSecretKey(), "kk-studio.storage.s3.secret-key must not be blank");
-  }
-
-  private void validateProperties(S3StorageProperties properties) {
-    validateBaseProperties(properties);
-    long maxExpires = properties.getEffectivePresignMaxExpiresSeconds();
-    long defaultExpires = properties.getEffectivePresignDefaultExpiresSeconds();
-    Assert.isTrue(
-        defaultExpires > 0L,
-        "kk-studio.storage.s3.presign-default-expires-seconds must be positive");
-    Assert.isTrue(
-        maxExpires >= defaultExpires,
-        "kk-studio.storage.s3.presign-max-expires-seconds must be >= default");
   }
 }

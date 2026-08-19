@@ -392,7 +392,8 @@ Blob `release` 减到 0 时在事务内转为 `DELETING`，提交后当前线程
 
 Registry 当前包含：
 
-- `fake-image` / `fake-video`：仅 S3 开启且 `kk-studio.canvas.function.fake-enabled=true` 时注册，用于免费回归；
+- `fake-image` / `fake-video`：仅启动快照 `storageMedia.s3Enabled=true` 且部署测试开关
+  `kk-studio.canvas.function.fake-enabled=true` 时注册，用于免费回归；
 - `gpt-image-2`；
 - `seedance2.0`、`seedance2.0fast`、`seedance2.0_vip`、`seedance2.0fast_vip`；
 - `minimax-h3-ref2va`。

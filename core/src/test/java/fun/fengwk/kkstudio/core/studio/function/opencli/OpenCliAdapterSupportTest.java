@@ -27,8 +27,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.net.URI;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -161,22 +159,7 @@ class OpenCliAdapterSupportTest {
   }
 
   @Test
-  void hubPropertiesEnforceOriginBufferAndTimeoutBoundaries() {
-    assertInvalidHub(properties -> properties.setBaseUrl(null));
-    assertInvalidHub(properties -> properties.setBaseUrl(URI.create("ftp://example.com")));
-    assertInvalidHub(properties -> properties.setBaseUrl(URI.create("http://example.com/base")));
-    assertInvalidHub(properties -> properties.setConnectTimeout(Duration.ZERO));
-    assertInvalidHub(properties -> properties.setRequestTimeout(Duration.ofMinutes(31)));
-    assertInvalidHub(properties -> properties.setLongPollTimeout(Duration.ofSeconds(120)));
-    assertInvalidHub(properties -> properties.setLongPollTimeout(Duration.ofMinutes(11)));
-    assertInvalidHub(properties -> properties.setStreamBufferBytes(1023));
-    assertInvalidHub(properties -> properties.setStreamBufferBytes(1024 * 1024 + 1));
-    assertInvalidHub(properties -> properties.setMaxJsonResponseBytes(1023));
-    assertInvalidHub(properties -> properties.setMaxJsonResponseBytes(4 * 1024 * 1024 + 1));
-    assertInvalidHub(properties -> properties.setMaxErrorResponseBytes(255));
-    assertInvalidHub(properties -> properties.setMaxErrorResponseBytes(64 * 1024 + 1));
-    assertInvalidHub(properties -> properties.setMaxOutputChars(1023));
-    assertInvalidHub(properties -> properties.setMaxOutputChars(1_000_001));
+  void hubPropertiesOnlyValidateInstanceIdentity() {
     assertInvalidHub(properties -> properties.setInstanceId(" "));
     assertInvalidHub(properties -> properties.setInstanceId("x".repeat(37)));
 
@@ -184,38 +167,10 @@ class OpenCliAdapterSupportTest {
     valid.setInstanceId(" instance ");
     valid.validate();
     assertEquals("instance", valid.getInstanceId());
-  }
 
-  @Test
-  void providerPropertiesEnforcePaidExecutionAndPollingBoundaries() {
-    assertInvalidGpt(properties -> properties.setAskTimeoutSeconds(0));
-    assertInvalidGpt(properties -> properties.setAskTimeoutSeconds(1741));
-    assertInvalidGpt(properties -> properties.setHubExecutionTimeout(Duration.ofSeconds(30)));
-    assertInvalidGpt(properties -> properties.setMaxWait(Duration.ZERO));
-    assertInvalidGpt(
-        properties -> {
-          properties.setAskTimeoutSeconds(900);
-          properties.setHubExecutionTimeout(Duration.ofSeconds(930));
-        });
-
-    assertInvalidSeedance(
-        properties -> {
-          properties.setEnabled(true);
-          properties.setWorkspaceId(null);
-        });
-    assertInvalidSeedance(properties -> properties.setWorkspaceId(" "));
-    assertInvalidSeedance(properties -> properties.setWorkspaceId("x".repeat(257)));
-    assertInvalidSeedance(properties -> properties.setRetry(-1));
-    assertInvalidSeedance(properties -> properties.setRetry(6));
-    assertInvalidSeedance(properties -> properties.setHubExecutionTimeout(Duration.ZERO));
-    assertInvalidSeedance(properties -> properties.setStatusPollInterval(Duration.ZERO));
-    assertInvalidSeedance(properties -> properties.setMaxWait(Duration.ofHours(5)));
-
-    SeedanceCanvasProperties valid = new SeedanceCanvasProperties();
-    valid.setEnabled(true);
-    valid.setWorkspaceId(" workspace ");
-    valid.validate();
-    assertEquals("workspace", valid.getWorkspaceId());
+    OpenCliHubProperties absent = new OpenCliHubProperties();
+    absent.validate();
+    assertNull(absent.getInstanceId());
   }
 
   private static CanvasFunctionFrozenReference image(long resourceId, String name) {
@@ -236,18 +191,6 @@ class OpenCliAdapterSupportTest {
 
   private static void assertInvalidHub(Consumer<OpenCliHubProperties> mutation) {
     OpenCliHubProperties properties = new OpenCliHubProperties();
-    mutation.accept(properties);
-    assertThrows(IllegalArgumentException.class, properties::validate);
-  }
-
-  private static void assertInvalidGpt(Consumer<GptImage2CanvasProperties> mutation) {
-    GptImage2CanvasProperties properties = new GptImage2CanvasProperties();
-    mutation.accept(properties);
-    assertThrows(IllegalArgumentException.class, properties::validate);
-  }
-
-  private static void assertInvalidSeedance(Consumer<SeedanceCanvasProperties> mutation) {
-    SeedanceCanvasProperties properties = new SeedanceCanvasProperties();
     mutation.accept(properties);
     assertThrows(IllegalArgumentException.class, properties::validate);
   }

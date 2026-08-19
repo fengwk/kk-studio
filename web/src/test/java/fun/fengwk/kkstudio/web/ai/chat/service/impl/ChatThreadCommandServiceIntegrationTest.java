@@ -33,9 +33,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJs
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.ai.chat.ChatIntegrationSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
+import fun.fengwk.kkstudio.web.storage.S3WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.nio.charset.StandardCharsets;
@@ -56,7 +56,6 @@ import java.util.concurrent.TimeUnit;
 @Import(WebStorageS3TestConfiguration.class)
 @TestPropertySource(
     properties = {
-      "kk-studio.storage.s3.enabled=true",
       "kk-studio.storage.s3.endpoint=http://minio.example.local:9000",
       "kk-studio.storage.s3.public-endpoint=https://cdn.example.com",
       "kk-studio.storage.s3.region=us-east-1",
@@ -64,7 +63,7 @@ import java.util.concurrent.TimeUnit;
       "kk-studio.storage.s3.access-key=AKIAIOSFODNN7EXAMPLE",
       "kk-studio.storage.s3.secret-key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     })
-class ChatThreadCommandServiceIntegrationTest extends WebPostgresTestSupport {
+class ChatThreadCommandServiceIntegrationTest extends S3WebPostgresTestSupport {
 
   @Autowired private ChatService chatService;
   @Autowired private ChatThreadCommandService chatThreadCommandService;

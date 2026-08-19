@@ -34,7 +34,7 @@ import java.util.concurrent.Future;
 class HarnessRuntimeStopConcurrencyTest {
 
   @Test
-  void approvalThenStopPreservesTheDecisionAndExactApprovalReplayReturnsCancelled() {
+  void approvalThenStopDeletesTheToolRowSoFurtherReplayIsNotApplicable() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntime runtime = runtime(store);
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
@@ -43,12 +43,14 @@ class HarnessRuntimeStopConcurrencyTest {
     runtime.decideToolApproval(approval);
 
     StopResult stopped = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 2));
-    ToolInvocation replay = runtime.decideToolApproval(approval);
 
     assertEquals(StopResult.Status.STOPPED, stopped.status());
-    assertEquals(ToolInvocationStatus.CANCELLED, replay.status());
-    assertEquals(ToolApprovalDecision.ALLOWED, replay.approval().decision());
-    assertEquals(TestIds.id(1), replay.approval().decisionId());
+    // stopTools 在同一事务删除 tool 行；后续 decision replay 因找不到 durable row 而业务冲突拒绝。
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
+    HarnessRuntimeConflictException replayError =
+        assertThrows(
+            HarnessRuntimeConflictException.class, () -> runtime.decideToolApproval(approval));
+    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, replayError.reason());
   }
 
   @Test
@@ -65,10 +67,8 @@ class HarnessRuntimeStopConcurrencyTest {
             () -> runtime.decideToolApproval(allow(baseline)));
 
     assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
-    ToolInvocation tool =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
-    assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
-    assertTrue(tool.approval().isUndecided());
+    // Stop 已删除 tool 行；decision 不再能 undecided WAITING_APPROVAL → READY 转换。
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
   }
 
   @Test
@@ -91,14 +91,15 @@ class HarnessRuntimeStopConcurrencyTest {
       Attempt approvalAttempt = approval.get();
       assertEquals(1, successCount(stopAttempt, approvalAttempt));
 
-      ToolInvocation tool =
-          store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
       if (stopAttempt.error() == null) {
-        assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
-        assertTrue(tool.approval().isUndecided());
+        // Stop 胜出：tool 行在同一事务被 stopTools 物理删除，approval 因 TOOL_ACTIVE 不再属于当前
+        // 上下文而被业务冲突拒绝。
+        assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
         assertConflict(approvalAttempt, Reason.APPROVAL_NOT_APPLICABLE);
       } else {
         assertConflict(stopAttempt, Reason.STALE_REVISION);
+        ToolInvocation tool =
+            store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
         assertEquals(ToolInvocationStatus.READY, tool.status());
         assertEquals(ToolApprovalDecision.ALLOWED, tool.approval().decision());
       }

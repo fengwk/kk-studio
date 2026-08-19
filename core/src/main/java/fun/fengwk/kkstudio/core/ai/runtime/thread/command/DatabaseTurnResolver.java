@@ -11,13 +11,14 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.runtime.AgentModelRuntimeConfig
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.BranchView;
 import fun.fengwk.kkstudio.harness.plugin.ContextProjectorContribution;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
@@ -27,23 +28,13 @@ import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
-import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
@@ -63,8 +54,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -80,6 +69,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -90,16 +80,16 @@ import java.util.UUID;
 
 /**
  * 生产 Core 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的 {@link
- * ModelInvocationRequest}。
+ * ModelRequestSpec} 与 contextWindow。
  *
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environment binding / agentName / {@link
- * ModelSelection}）与调用方冻结的 YOLO 开关；实现按这些精确引用读取最新 catalog / environment 事实，Agent 的
- * tools/skills/subagents 每个新 turn 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。 environment 是完整
- * binding（路由名 + workspace path），为最新 branch 的不可变事实：ENVIRONMENT 工具一律按最新 {@code
- * settings.environment()} 绑定（可为 null 或当前不可用，实际执行时失败）；Agent skills 要求最新 Environment 提供 live
- * descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch settings。配置或 Environment 不满足一律返回 {@link
- * Result.Rejected}（稳定 error code {@value #REJECTION_CODE}）；只有 repository / registry 等基础设施异常向上传播，由
- * ThreadProcessor reschedule。
+ * ModelSelection}）；实现按这些精确引用读取最新 catalog / environment 事实，Agent 的 tools/skills/subagents 每个新 turn
+ * 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。environment 是完整 binding（路由名 + workspace path），为最新
+ * branch 的不可变事实：ENVIRONMENT 工具一律按最新 {@code settings.environment()} 绑定（可为 null 或当前不可用，实际执行时
+ * 失败）；Agent skills 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch
+ * settings。配置或 Environment 不满足一律返回 {@link Result.Rejected}（稳定 error code {@value
+ * #REJECTION_CODE}）；只有 repository / registry 等基础设施异常向上传播，由 ThreadProcessor reschedule。YOLO 不进入
+ * spec。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -116,7 +106,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final ToolCatalog toolCatalog;
   private final PluginCatalog pluginCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final EnvironmentGatewayProperties environmentGatewayProperties;
+  private final SystemSettings.Environment environmentSettings;
   private final CompactionConfig compactionConfig;
   private final SubagentConfig subagentConfig;
   private final AgentPromptComposer promptComposer;
@@ -135,7 +125,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       ToolCatalog toolCatalog,
       PluginCatalog pluginCatalog,
       LiveEnvironmentRegistry environmentRegistry,
-      EnvironmentGatewayProperties environmentGatewayProperties,
+      SystemSettingsSnapshot snapshot,
       CompactionConfig compactionConfig,
       SubagentConfig subagentConfig,
       AgentPromptComposer promptComposer,
@@ -150,8 +140,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.environmentGatewayProperties =
-        Objects.requireNonNull(environmentGatewayProperties, "environmentGatewayProperties");
+    this.environmentSettings = Objects.requireNonNull(snapshot, "snapshot").get().environment();
     this.compactionConfig = Objects.requireNonNull(compactionConfig, "compactionConfig");
     this.subagentConfig = Objects.requireNonNull(subagentConfig, "subagentConfig");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
@@ -163,24 +152,19 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   @Override
   public Result resolve(
-      UUID threadId,
-      EntryPath path,
-      boolean yoloEnabled,
-      CompactionPreparation compactionPreparation) {
+      UUID threadId, EntryPath path, CompactionPreparation compactionPreparation) {
     Objects.requireNonNull(path, "path");
     try {
-      ModelInvocationRequest request =
-          compactionPreparation == null
-              ? resolveLive(path, yoloEnabled)
-              : resolveCompaction(path, yoloEnabled, compactionPreparation);
-      return new TurnResolver.Resolved(request);
+      return compactionPreparation == null
+          ? resolveLive(path)
+          : resolveCompaction(path, compactionPreparation);
     } catch (Rejection rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常原样传播。
       return rejected(rejection.getMessage());
     }
   }
 
-  private ModelInvocationRequest resolveLive(EntryPath path, boolean yoloEnabled) {
+  private Result resolveLive(EntryPath path) {
     BranchSettings settings = path.baseSettings();
     UUID sessionId = path.root().sessionId();
 
@@ -253,27 +237,24 @@ public final class DatabaseTurnResolver implements TurnResolver {
             parsedModel.tools(),
             parsedModel.reasoning(),
             parsedModel.pricing());
-    ProviderRequest providerRequest =
-        providerRequest(
+    List<AgentMessage> preamble =
+        preambleMessages(
+            agent.getSystemPrompt(), currentEnvironment, skillBindings, subagentBindings, path);
+    ProviderCacheControl cacheControl =
+        cacheControl(
+            descriptor, variant, preamble, toolBindings, sessionId, cachePolicy(providerFactory));
+    return new TurnResolver.Resolved(
+        new ModelRequestSpec(
+            providerType,
             descriptor,
             variant,
-            agent.getSystemPrompt(),
-            currentEnvironment,
+            preamble,
+            toolBindings,
             skillBindings,
             subagentBindings,
-            path,
-            toolBindings,
-            sessionId,
-            cachePolicy(providerFactory));
-    return new ModelInvocationRequest(
-        settings.environment(),
-        providerRequest,
-        toolBindings,
-        skillBindings,
-        subagentBindings,
-        yoloEnabled,
-        contextWindow(parsedModel),
-        null);
+            cacheControl,
+            null),
+        contextWindow(parsedModel));
   }
 
   /**
@@ -282,10 +263,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * SYSTEM（summarization system prompt）+ 一个 USER（conversation + summary prompt）请求；输出上限为 min(有效
    * model/variant 输出上限, floor(0.8|0.5 * reserveTokens))。
    */
-  private ModelInvocationRequest resolveCompaction(
-      EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
+  private Result resolveCompaction(EntryPath path, CompactionPreparation preparation) {
     BranchSettings settings = path.baseSettings();
     ModelSelection selection = settings.model();
+    AgentProvider provider =
+        require(
+            providerRepository.getByName(selection.providerName()),
+            "provider not found: " + selection.providerName());
+    ProviderType providerType = toProviderType(provider);
     AgentModel model =
         require(
             modelRepository.getByProviderNameAndName(
@@ -330,28 +315,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
             variant.presencePenalty(),
             variant.stopSequences(),
             variant.reasoningEffort());
-    List<AgentMessage> semanticMessages = new ArrayList<>();
-    semanticMessages.add(AgentMessage.system(CompactionPrompts.summarizationSystemPrompt()));
-    String userPrompt =
-        preparation.phase() == CompactionPhase.TURN_PREFIX
-            ? CompactionPrompts.turnPrefixUserPrompt(preparation.messagesToSummarize())
-            : CompactionPrompts.summaryUserPrompt(
-                preparation.messagesToSummarize(), preparation.previousSummary());
-    semanticMessages.add(
-        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(userPrompt))));
-    ProviderRequest providerRequest =
-        new ProviderRequest(
-            new ModelDescriptor(
-                selection.providerName(),
-                selection.modelName(),
-                parsedModel.inputModalities(),
-                parsedModel.tools(),
-                parsedModel.reasoning(),
-                parsedModel.pricing()),
-            compactionVariant,
-            messageProjector.project(semanticMessages),
-            List.of(),
-            ProviderCacheControl.none());
     CompactionRequest compactionRequest =
         new CompactionRequest(
             preparation.phase(),
@@ -360,15 +323,25 @@ public final class DatabaseTurnResolver implements TurnResolver {
             preparation.firstKeptEntryId(),
             preparation.cutEntryId(),
             preparation.turnPrefixStartEntryId());
-    // contextWindow 冻结自触发 invocation 的 preparation（model config 变更不导致触发后解析漂移 / 无限 reschedule）。
-    return new ModelInvocationRequest(
-        settings.environment(),
-        providerRequest,
-        List.of(),
-        List.of(),
-        yoloEnabled,
-        Math.toIntExact(preparation.contextWindow()),
-        compactionRequest);
+    // contextWindow 冻结自触发 turn 的 preparation（model config 变更不导致触发后解析漂移 / 无限 reschedule）。
+    return new TurnResolver.Resolved(
+        new ModelRequestSpec(
+            providerType,
+            new ModelDescriptor(
+                selection.providerName(),
+                selection.modelName(),
+                parsedModel.inputModalities(),
+                parsedModel.tools(),
+                parsedModel.reasoning(),
+                parsedModel.pricing()),
+            compactionVariant,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none(),
+            compactionRequest),
+        Math.toIntExact(preparation.contextWindow()));
   }
 
   /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */
@@ -378,36 +351,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
       throw rejection("model limit.context must be a positive int, got " + contextWindow);
     }
     return (int) contextWindow;
-  }
-
-  /** 路径上最新 complete 的压缩 payload（FULL 或 TURN_PREFIX 成功结果）；无则 null。 */
-  private static CompactionPayload latestCompleteCompaction(List<Entry> entries) {
-    CompactionPayload latest = null;
-    for (Entry entry : entries) {
-      if (entry.payload() instanceof CompactionPayload payload && payload.complete()) {
-        latest = payload;
-      }
-    }
-    return latest;
-  }
-
-  private static int indexOfId(List<Entry> entries, UUID entryId) {
-    for (int i = 0; i < entries.size(); i++) {
-      if (entries.get(i).id().equals(entryId)) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  /** 返回携带指定 payload 的 Entry 索引；不存在返回 -1。 */
-  private static int indexOfPayload(List<Entry> entries, CompactionPayload payload) {
-    for (int i = 0; i < entries.size(); i++) {
-      if (entries.get(i).payload() == payload) {
-        return i;
-      }
-    }
-    return -1;
   }
 
   private AgentDefinitionConfigDTO decodeAgentConfig(AgentDefinition agent) {
@@ -521,7 +464,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
           "agent skills require the latest selected environment which is not live: "
               + environmentName);
     }
-    if (!environment.isReady(now, environmentGatewayProperties.requireHeartbeatTimeout())) {
+    if (!environment.isReady(
+        now, Duration.ofMillis(environmentSettings.heartbeatTimeoutMillis()))) {
       throw rejection(
           "agent skills require the latest selected environment which is not ready: "
               + environmentName);
@@ -562,8 +506,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * task 由最新 Agent allowlist 且当前 Session depth 小于部署上限时绑定。名称与描述在 ModelInvocationRequest 中冻结， Tool
-   * 执行绝不依据后续 Agent 配置扩权。
+   * task 由最新 Agent allowlist 且当前 Session depth 小于部署上限时绑定。名称与描述在 ModelRequestSpec 中冻结， Tool 执行绝不依据后续
+   * Agent 配置扩权。
    */
   private List<SubagentBinding> resolveSubagents(List<String> names, EntryPath path) {
     if (names.isEmpty() || sessionDepth(path) >= subagentConfig.maxDepth()) {
@@ -602,22 +546,17 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return PromptCachePolicy.of(capability, retention);
   }
 
-  private ProviderRequest providerRequest(
-      ModelDescriptor descriptor,
-      ModelVariant variant,
+  private List<AgentMessage> preambleMessages(
       String systemPrompt,
       CurrentEnvironmentContext currentEnvironment,
       List<SkillBinding> skillBindings,
       List<SubagentBinding> subagentBindings,
-      EntryPath path,
-      List<ToolBinding> toolBindings,
-      UUID sessionId,
-      PromptCachePolicy cachePolicy) {
-    List<AgentMessage> semanticMessages = new ArrayList<>();
+      EntryPath path) {
+    List<AgentMessage> preamble = new ArrayList<>();
     String composedPrompt =
         promptComposer.compose(systemPrompt, currentEnvironment, skillBindings, subagentBindings);
     if (!composedPrompt.isBlank()) {
-      semanticMessages.add(AgentMessage.system(composedPrompt));
+      preamble.add(AgentMessage.system(composedPrompt));
     }
     BranchView branch = new BranchView(path);
     for (ContextProjectorContribution contribution : pluginCatalog.contextProjectors()) {
@@ -626,64 +565,21 @@ public final class DatabaseTurnResolver implements TurnResolver {
               contribution.projector().project(branch),
               "plugin context projector returned null: " + contribution.id());
       for (AgentMessage message : projected) {
-        semanticMessages.add(
+        preamble.add(
             Objects.requireNonNull(
                 message, "plugin context projector returned a null message: " + contribution.id()));
       }
     }
-    // 压缩感知投影（对齐 Pi defaultContextEntryTransform）：路径上存在 complete 压缩时，以最新 complete 压缩的 summary
-    // 作为单个 wrapper USER 消息，并从其 cutEntryId（首个保留上下文消息，本身保留）继续投影；之前的条目由 summary 替代。
-    // cutEntryId / firstKeptEntryId 必须位于该压缩 Entry 之前且在当前路径上，否则视为分支损坏 fail closed。
-    // COMPACTION 控制 turn（TURN_START(COMPACTION)...TURN_END）内部的任何消息都不投影（状态机抑制）。
-    List<Entry> entries = path.entries();
-    int walkStart = 0;
-    CompactionPayload latestComplete = latestCompleteCompaction(entries);
-    if (latestComplete != null) {
-      int compactionIndex = indexOfPayload(entries, latestComplete);
-      int cutIndex = indexOfId(entries, latestComplete.cutEntryId());
-      int firstKeptIndex = indexOfId(entries, latestComplete.firstKeptEntryId());
-      if (cutIndex < 0
-          || firstKeptIndex < 0
-          || compactionIndex < 0
-          || firstKeptIndex > cutIndex
-          || cutIndex >= compactionIndex) {
-        throw new IllegalStateException(
-            "complete compaction references are corrupt on the current path: firstKeptEntryId="
-                + latestComplete.firstKeptEntryId()
-                + " cutEntryId="
-                + latestComplete.cutEntryId());
-      }
-      semanticMessages.add(
-          AgentMessage.user(CompactionPrompts.compactedContext(latestComplete.summaryText())));
-      walkStart = cutIndex;
-    }
-    boolean inCompactionTurn = false;
-    for (int i = walkStart; i < entries.size(); i++) {
-      Entry entry = entries.get(i);
-      EntryPayload payload = entry.payload();
-      if (payload instanceof TurnStartPayload turnStart) {
-        if (turnStart.reason() == TurnStartReason.COMPACTION) {
-          inCompactionTurn = true;
-        }
-        continue;
-      }
-      if (payload instanceof TurnEndPayload) {
-        inCompactionTurn = false;
-        continue;
-      }
-      if (inCompactionTurn) {
-        // COMPACTION 控制 turn 内部（HISTORY/TURN_PREFIX 结果、用户可见消息等）一律不投影。
-        continue;
-      }
-      if (payload instanceof MessagePayload message) {
-        semanticMessages.add(message.message());
-      } else if (payload instanceof CustomMessagePayload message) {
-        // CUSTOM_MESSAGE 通过冻结的 AgentMessage 保持 model-visible；details 绝不投影。
-        semanticMessages.add(message.message());
-      } else if (payload instanceof AssistantAbortedPayload message) {
-        semanticMessages.add(message.message());
-      }
-    }
+    return List.copyOf(preamble);
+  }
+
+  private ProviderCacheControl cacheControl(
+      ModelDescriptor descriptor,
+      ModelVariant variant,
+      List<AgentMessage> preamble,
+      List<ToolBinding> toolBindings,
+      UUID sessionId,
+      PromptCachePolicy cachePolicy) {
     List<ProviderToolDefinition> providerTools = new ArrayList<>(toolBindings.size());
     for (ToolBinding binding : toolBindings) {
       ToolDescriptor tool = binding.descriptor();
@@ -693,16 +589,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
               tool.description(),
               toolDescriptorCodec.encodeInputSchema(tool.inputSchema())));
     }
-    ProviderRequest baseRequest =
+    ProviderRequest stub =
         new ProviderRequest(
             descriptor,
             variant,
-            messageProjector.project(semanticMessages),
+            messageProjector.project(preamble),
             providerTools,
             ProviderCacheControl.none());
-    // cache policy 由当前 ProviderFactory 显式解析并传入；不随 descriptor/request 持久化。
     return new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory)
-        .apply(baseRequest, cachePolicy);
+        .apply(stub, cachePolicy)
+        .cacheControl();
   }
 
   private static ProviderType toProviderType(AgentProvider provider) {

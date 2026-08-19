@@ -12,7 +12,7 @@
     ]
   },
   "assistantMetadata": {
-    "stopReason": "TOOL_CALLS",
+    "stopReason": "COMPLETE",
     "usage": {
       "inputTokens": 321,
       "outputTokens": 45,

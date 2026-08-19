@@ -10,10 +10,9 @@ import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -24,7 +23,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -475,22 +473,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public boolean hasModelInvocationForTurn(UUID turnStartEntryId) {
-    checkOpen();
-    return Boolean.TRUE.equals(
-        queryForObject(
-            """
-            select exists (
-                select 1
-                from harness_model_invocation
-                where turn_start_entry_id = ?
-            )
-            """,
-            Boolean.class,
-            turnStartEntryId));
-  }
-
-  @Override
   public void insertModelInvocation(ModelInvocation invocation) {
     checkOpen();
     Objects.requireNonNull(invocation, "invocation");
@@ -510,11 +492,19 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
     }
     boolean compactionInvocation = invocation.request().compaction() != null;
-    if (((TurnStartPayload) turnStart.payload()).reason()
-        == TurnStartReason.COMPACTION
-        != compactionInvocation) {
+    TurnStartPayload turnStartPayload = (TurnStartPayload) turnStart.payload();
+    if (turnStartPayload.reason() == TurnStartReason.COMPACTION != compactionInvocation) {
       throw new IllegalArgumentException(
           "TURN_START reason COMPACTION must match the invocation compaction purpose");
+    }
+    if (!turnStartPayload.ownerThreadId().equals(invocation.threadId())) {
+      throw new IllegalArgumentException(
+          "turn start ownerThreadId must equal the model invocation threadId");
+    }
+    Integer contextWindow = turnStartPayload.contextWindow();
+    if (contextWindow == null || contextWindow <= 0) {
+      throw new IllegalArgumentException(
+          "model invocations require a positive turn start contextWindow");
     }
     if (invocation.status() != ModelInvocationStatus.READY || invocation.attempt() != 0) {
       throw new IllegalArgumentException("new model invocations must be READY with attempt 0");
@@ -686,8 +676,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       if ((invocation.status() != ToolInvocationStatus.READY
               && invocation.status() != ToolInvocationStatus.FAILED)
           || invocation.attempt() != 0
-          || invocation.approval() != null
-          || invocation.resultEntryId() != null) {
+          || invocation.approval() != null) {
         throw new IllegalArgumentException(
             "new tool invocations must be READY or unattached FAILED with attempt 0 and no approval");
       }
@@ -699,25 +688,25 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       update(
           """
           insert into harness_tool_invocation (
-              id, model_invocation_id, assistant_entry_id, ordinal, request, status, attempt,
-              approval, result, effects, error, result_entry_id, created_at, updated_at
+              id, model_invocation_id, assistant_entry_id, ordinal, call, binding, status, attempt,
+              approval, result, effects, error, created_at, updated_at
           ) values (
-              ?, ?, ?, ?, cast(? as jsonb), ?, ?, cast(? as jsonb), cast(? as jsonb),
-              cast(? as jsonb), cast(? as jsonb), ?, ?, ?
+              ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb),
+              cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), ?, ?
           )
           """,
           invocation.id(),
           invocation.modelInvocationId(),
           invocation.assistantEntryId(),
           invocation.ordinal(),
-          PostgresqlHarnessRows.TOOL_REQUESTS.encode(invocation.request()),
+          PostgresqlHarnessRows.TOOL_CALLS.encode(invocation.call()),
+          encodeToolBinding(invocation),
           invocation.status().name(),
           invocation.attempt(),
           encodeToolApproval(invocation),
           encodeToolResult(invocation),
           encodeToolEffects(invocation),
           encodeToolError(invocation),
-          invocation.resultEntryId(),
           PostgresqlHarnessRows.timestamp(invocation.createdAt()),
           PostgresqlHarnessRows.timestamp(invocation.updatedAt()));
       lockTool(invocation);
@@ -730,16 +719,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     List<ToolInvocation> copied =
         List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
     Set<UUID> ids = new HashSet<>();
-    Set<UUID> resultEntryIds = new HashSet<>();
     for (ToolInvocation invocation : copied) {
       PostgresqlHarnessRows.requireMillisecondPrecision(invocation.createdAt());
       PostgresqlHarnessRows.requireMillisecondPrecision(invocation.updatedAt());
       if (!ids.add(invocation.id())) {
         throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
-      }
-      if (invocation.resultEntryId() != null && !resultEntryIds.add(invocation.resultEntryId())) {
-        throw new IllegalArgumentException(
-            "duplicate tool resultEntryId " + invocation.resultEntryId());
       }
       requireLocked(LockKey.tool(invocation.id()));
       ToolInvocation stored =
@@ -749,7 +733,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                       new IllegalArgumentException(
                           "tool invocation " + invocation.id() + " does not exist"));
       ToolInvocation.validateTransition(stored, invocation);
-      requireValidToolResultEntry(invocation);
     }
     for (ToolInvocation invocation : copied) {
       int updated =
@@ -762,7 +745,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                   result = cast(? as jsonb),
                   effects = cast(? as jsonb),
                   error = cast(? as jsonb),
-                  result_entry_id = ?,
                   updated_at = ?
               where id = ?
               """,
@@ -772,7 +754,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
               encodeToolResult(invocation),
               encodeToolEffects(invocation),
               encodeToolError(invocation),
-              invocation.resultEntryId(),
               PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
               invocation.id());
       requireSingleUpdate(updated, "tool invocation", invocation.id());
@@ -956,6 +937,52 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public int deleteToolInvocationsByIds(List<UUID> toolInvocationIds) {
+    checkOpen();
+    List<UUID> copied =
+        List.copyOf(toolInvocationIds).stream().sorted(UuidOrder.COMPARATOR).toList();
+    for (int i = 1; i < copied.size(); i++) {
+      if (copied.get(i).equals(copied.get(i - 1))) {
+        throw new IllegalArgumentException(
+            "duplicate tool invocation id " + copied.get(i) + " must not be deleted twice");
+      }
+    }
+    for (UUID toolInvocationId : copied) {
+      if (findToolInvocation(toolInvocationId).isEmpty()) {
+        throw new IllegalArgumentException(
+            "tool invocation " + toolInvocationId + " does not exist");
+      }
+      requireLocked(LockKey.tool(toolInvocationId));
+    }
+    if (copied.isEmpty()) {
+      return 0;
+    }
+    for (UUID toolInvocationId : copied) {
+      int deleted = update("delete from harness_tool_invocation where id = ?", toolInvocationId);
+      requireSingleUpdate(deleted, "tool invocation", toolInvocationId);
+    }
+    return copied.size();
+  }
+
+  @Override
+  public boolean deleteModelInvocation(UUID modelInvocationId) {
+    checkOpen();
+    Objects.requireNonNull(modelInvocationId, "modelInvocationId");
+    if (findModelInvocation(modelInvocationId).isEmpty()) {
+      throw new IllegalArgumentException(
+          "model invocation " + modelInvocationId + " does not exist");
+    }
+    requireLocked(LockKey.model(modelInvocationId));
+    if (hasToolInvocationChildren(modelInvocationId)) {
+      throw new IllegalArgumentException(
+          "model invocation " + modelInvocationId + " has tool invocation children");
+    }
+    int deleted = update("delete from harness_model_invocation where id = ?", modelInvocationId);
+    requireSingleUpdate(deleted, "model invocation", modelInvocationId);
+    return true;
+  }
+
+  @Override
   public void requestWork(WorkTarget target, Instant requestedAt) {
     checkOpen();
     Objects.requireNonNull(target, "target");
@@ -1073,6 +1100,21 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             """,
             Boolean.class,
             sessionId);
+    return Boolean.TRUE.equals(exists);
+  }
+
+  private boolean hasToolInvocationChildren(UUID modelInvocationId) {
+    Boolean exists =
+        queryForObject(
+            """
+            select exists (
+                select 1
+                from harness_tool_invocation
+                where model_invocation_id = ?
+            )
+            """,
+            Boolean.class,
+            modelInvocationId);
     return Boolean.TRUE.equals(exists);
   }
 
@@ -1231,6 +1273,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
               : "model resultEntryId must reference an assistant, assistant-error or"
                   + " assistant-aborted entry");
     }
+    if (resultEntryId.equals(invocation.basisHeadEntryId())) {
+      throw new IllegalArgumentException(
+          "model result entry must be a strict descendant of the basis head entry");
+    }
     EntryPath resultPath = loadEntryPath(resultEntryId);
     boolean onBasisPath =
         resultPath.entries().stream()
@@ -1362,7 +1408,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           "assistantEntryId must reference an assistant MESSAGE entry");
     }
     requireMatchingAssistantToolCall(invocation, assistant);
-    requireValidToolResultEntry(invocation);
   }
 
   private static void requireMatchingAssistantToolCall(ToolInvocation invocation, Entry assistant) {
@@ -1378,14 +1423,17 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           "tool ordinal " + invocation.ordinal() + " exceeds the assistant tool calls");
     }
     ToolCallMessageContent call = calls.get(invocation.ordinal());
-    ToolCall requestCall = invocation.request().call();
+    ToolCall requestCall = invocation.call();
+    String expectedRendererKey =
+        invocation.binding() == null
+            ? HistoryPayloadMapper.UNBOUND_RENDERER_KEY
+            : invocation.binding().descriptor().rendererKey();
     if (!call.toolCallId().equals(requestCall.id())
         || !call.toolName().equals(requestCall.toolName())
-        || !call.rendererKey().equals(invocation.request().binding().descriptor().rendererKey())
+        || !call.rendererKey().equals(expectedRendererKey)
         || !call.argumentsJson().equals(requestCall.argumentsJson())) {
       throw new IllegalArgumentException(
-          "tool request binding/call must exactly match the assistant tool call at the same"
-              + " ordinal");
+          "tool call/binding must exactly match the assistant tool call at the same ordinal");
     }
   }
 
@@ -1393,71 +1441,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return entry.payload().type() == EntryType.MESSAGE
         && entry.payload() instanceof MessagePayload message
         && message.message().role() == AgentMessageRole.ASSISTANT;
-  }
-
-  private void requireValidToolResultEntry(ToolInvocation invocation) {
-    UUID resultEntryId = invocation.resultEntryId();
-    if (resultEntryId == null) {
-      return;
-    }
-    Entry result = requireExistingEntry(resultEntryId);
-    if (!isToolResultEntry(result)) {
-      throw new IllegalArgumentException("tool resultEntryId must reference a TOOL MESSAGE entry");
-    }
-    ToolResultMetadata metadata = ((MessagePayload) result.payload()).toolResultMetadata();
-    ToolResultMessageContent content =
-        (ToolResultMessageContent) ((MessagePayload) result.payload()).message().contents().get(0);
-    if (!metadata.assistantEntryId().equals(invocation.assistantEntryId())
-        || metadata.ordinal() != invocation.ordinal()
-        || !metadata.toolCallId().equals(invocation.request().call().id())
-        || !content.toolCallId().equals(invocation.request().call().id())
-        || !content.toolName().equals(invocation.request().call().toolName())
-        || !content
-            .rendererKey()
-            .equals(invocation.request().binding().descriptor().rendererKey())) {
-      throw new IllegalArgumentException(
-          "tool result entry must match the invocation assistant entry, ordinal, call and"
-              + " renderer");
-    }
-    if (metadata.synthetic()) {
-      throw new IllegalArgumentException("tool result entry must not be synthetic");
-    }
-    ToolResultStatus expectedStatus =
-        switch (invocation.status()) {
-          case SUCCEEDED -> ToolResultStatus.SUCCEEDED;
-          case FAILED -> ToolResultStatus.FAILED;
-          case CANCELLED -> ToolResultStatus.CANCELLED;
-          case UNKNOWN -> ToolResultStatus.UNKNOWN;
-          default -> throw new IllegalStateException(
-              "resultEntryId requires a terminal tool invocation status");
-        };
-    if (metadata.status() != expectedStatus) {
-      throw new IllegalArgumentException(
-          "tool result status must exactly map the invocation status");
-    }
-    boolean assistantOnResultPath =
-        loadEntryPath(resultEntryId).entries().stream()
-            .anyMatch(entry -> entry.id().equals(invocation.assistantEntryId()));
-    if (!assistantOnResultPath) {
-      throw new IllegalArgumentException(
-          "tool result entry must be in the same branch as the assistant entry");
-    }
-    Boolean used =
-        queryForObject(
-            """
-            select exists (
-                select 1
-                from harness_tool_invocation
-                where result_entry_id = ? and id <> ?
-            )
-            """,
-            Boolean.class,
-            resultEntryId,
-            invocation.id());
-    if (Boolean.TRUE.equals(used)) {
-      throw new IllegalArgumentException(
-          "tool resultEntryId " + resultEntryId + " is already used");
-    }
   }
 
   private void requireWorkOwnerLocked(WorkTarget target) {
@@ -1489,12 +1472,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           }
         };
     requireLocked(LockKey.thread(threadId));
-  }
-
-  private static boolean isToolResultEntry(Entry entry) {
-    return entry.payload().type() == EntryType.MESSAGE
-        && entry.payload() instanceof MessagePayload message
-        && message.message().role() == AgentMessageRole.TOOL;
   }
 
   private void requireTargetExists(WorkTarget target) {
@@ -1562,6 +1539,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return invocation.approval() == null
         ? null
         : PostgresqlHarnessRows.TOOL_APPROVALS.encode(invocation.approval());
+  }
+
+  private static String encodeToolBinding(ToolInvocation invocation) {
+    return invocation.binding() == null
+        ? null
+        : PostgresqlHarnessRows.TOOL_BINDINGS.encode(invocation.binding());
   }
 
   private static String encodeToolResult(ToolInvocation invocation) {

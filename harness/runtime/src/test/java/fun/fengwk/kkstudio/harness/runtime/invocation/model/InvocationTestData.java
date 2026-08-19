@@ -10,11 +10,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -99,7 +100,7 @@ final class InvocationTestData {
         "hello",
         null,
         List.of(),
-        ProviderStopReason.COMPLETED,
+        GenerationStopReason.COMPLETE,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
         new ModelCost(
             "USD",
@@ -123,12 +124,21 @@ final class InvocationTestData {
     return new StreamCheckpoint(attempt, 0L, "partial", "");
   }
 
-  static ModelInvocationRequest request(List<ToolBinding> bindings, boolean yoloEnabled) {
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(bindings), bindings, List.of(), yoloEnabled, 100_000, null);
+  static ModelRequestSpec request(List<ToolBinding> bindings) {
+    ProviderRequest provider = providerRequest(bindings);
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        provider.model(),
+        provider.variant(),
+        List.of(),
+        bindings,
+        List.of(),
+        List.of(),
+        provider.cacheControl(),
+        null);
   }
 
-  static ModelInvocationRequest request() {
-    return request(List.of(platform("bash")), true);
+  static ModelRequestSpec request() {
+    return request(List.of(platform("bash")));
   }
 }

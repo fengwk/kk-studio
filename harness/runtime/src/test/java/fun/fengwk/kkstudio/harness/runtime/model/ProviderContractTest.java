@@ -5,12 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
@@ -103,19 +103,19 @@ class ProviderContractTest {
         NullPointerException.class,
         () ->
             new ProviderResponse(
-                "", "", List.of(), ProviderStopReason.COMPLETED, null, cost, null, null, "{}"));
+                "", "", List.of(), GenerationStopReason.COMPLETE, null, cost, null, null, "{}"));
     ProviderResponse response =
         new ProviderResponse(
             "",
             "",
             List.of(),
-            ProviderStopReason.TOOL_CALLS,
+            GenerationStopReason.COMPLETE,
             usage,
             cost,
             "req-1",
             "default",
             "{\"prompt_tokens\":1}");
-    assertEquals(ProviderStopReason.TOOL_CALLS, response.stopReason());
+    assertEquals(GenerationStopReason.COMPLETE, response.stopReason());
     assertEquals("req-1", response.requestId());
     assertEquals("default", response.serviceTier());
     assertEquals("{\"prompt_tokens\":1}", response.rawUsageJson());
@@ -130,13 +130,13 @@ class ProviderContractTest {
     assertEquals(
         "{}",
         new ProviderResponse(
-                "", "", List.of(), ProviderStopReason.COMPLETED, usage, cost, null, null, null)
+                "", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, null, null, null)
             .rawUsageJson());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ProviderResponse(
-                "", "", List.of(), ProviderStopReason.COMPLETED, usage, cost, null, null, "   "));
+                "", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, null, null, "   "));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -144,7 +144,7 @@ class ProviderContractTest {
                 "",
                 "",
                 List.of(),
-                ProviderStopReason.COMPLETED,
+                GenerationStopReason.COMPLETE,
                 usage,
                 cost,
                 null,
@@ -157,7 +157,7 @@ class ProviderContractTest {
                 "",
                 "",
                 List.of(),
-                ProviderStopReason.COMPLETED,
+                GenerationStopReason.COMPLETE,
                 usage,
                 cost,
                 null,
@@ -167,14 +167,14 @@ class ProviderContractTest {
         IllegalArgumentException.class,
         () ->
             new ProviderResponse(
-                "", "", List.of(), ProviderStopReason.COMPLETED, usage, cost, " ", null, "{}"));
+                "", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, " ", null, "{}"));
     assertEquals(
         "[{\"cached_tokens\":1}]",
         new ProviderResponse(
                 "",
                 "",
                 List.of(),
-                ProviderStopReason.COMPLETED,
+                GenerationStopReason.COMPLETE,
                 usage,
                 cost,
                 null,
