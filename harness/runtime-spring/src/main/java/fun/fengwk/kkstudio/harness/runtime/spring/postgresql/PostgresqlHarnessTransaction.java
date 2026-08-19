@@ -336,7 +336,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         select *
         from harness_thread
         where session_id = ?
-        order by id
+        order by created_at, id
         """,
         PostgresqlHarnessRows.THREAD,
         sessionId);
@@ -425,6 +425,23 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         """,
         PostgresqlHarnessRows.COMMAND,
         threadId);
+  }
+
+  @Override
+  public List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID cancelRequestId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(cancelRequestId, "cancelRequestId");
+    return queryList(
+        """
+        select *
+        from harness_thread_command
+        where thread_id = ? and cancel_request_id = ?
+        order by sequence
+        """,
+        PostgresqlHarnessRows.COMMAND,
+        threadId,
+        cancelRequestId);
   }
 
   @Override

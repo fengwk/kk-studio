@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
@@ -22,7 +23,10 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -52,21 +56,22 @@ class HarnessRuntimeAcceptInitialTest {
   private static AcceptCommandsCommand newSession(List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
         new AcceptCommandsTarget.NewSession(
-            TestIds.id(101), TestIds.id(102), settings(), null, true, commands));
+            TestIds.id(101), TestIds.id(102), settings(), null, true),
+        commands);
   }
 
   /** 每次 shape 校验用例使用独立预分配 id，避免与上一用例的 materialization 冲突。 */
   private static AcceptCommandsCommand newSession(
       UUID sessionId, UUID threadId, List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(
-            sessionId, threadId, settings(), null, false, commands));
+        new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+        commands);
   }
 
   private static AcceptCommandsCommand entry(
       UUID sessionId, UUID startEntryId, List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.Entry(sessionId, startEntryId, TestIds.id(203), false, commands));
+        new AcceptCommandsTarget.Entry(sessionId, startEntryId, TestIds.id(203), false), commands);
   }
 
   private static NewThreadCommand setAgent(UUID clientCommandId) {
@@ -75,14 +80,14 @@ class HarnessRuntimeAcceptInitialTest {
 
   @Test
   void newSessionAcceptsSessionRootThreadAndInitialCommandsAtomically() {
-    AcceptCommandsResult result =
+    AcceptedCommands result =
         runtime.acceptCommands(
             newSession(List.of(userMessageCommand(TestIds.id(1), "hello"))),
             AcceptancePreflight.IDENTITY);
 
     assertFalse(result.replayed());
-    assertEquals(TestIds.id(101), result.sessionId());
-    assertEquals(TestIds.id(102), result.threadId());
+    assertEquals(TestIds.id(101), result.session().id());
+    assertEquals(TestIds.id(102), result.thread().id());
 
     Session session = store.transaction(tx -> tx.findSession(TestIds.id(101)).orElseThrow());
     assertEquals(T0, session.createdAt());
@@ -125,7 +130,7 @@ class HarnessRuntimeAcceptInitialTest {
         () ->
             runtime.acceptCommands(
                 newSession(List.of(userMessageCommand(TestIds.id(1), "hello"))),
-                (tx, sessionId, commands) -> {
+                (tx, session, commands) -> {
                   throw new IllegalStateException("preflight failed");
                 }));
     assertTrue(store.<Boolean>transaction(tx -> tx.findSession(TestIds.id(101)).isEmpty()));
@@ -140,18 +145,55 @@ class HarnessRuntimeAcceptInitialTest {
   @Test
   void newSessionExactReplayReturnsExistingAcceptanceFacts() {
     AcceptCommandsCommand command = newSession(List.of(userMessageCommand(TestIds.id(1), "hello")));
-    AcceptCommandsResult first = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
-    AcceptCommandsResult replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
+    AcceptedCommands first = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
+    AcceptedCommands replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
 
     assertTrue(replay.replayed());
-    assertEquals(first.sessionId(), replay.sessionId());
-    assertEquals(first.threadId(), replay.threadId());
+    assertEquals(first.session(), replay.session());
+    assertEquals(first.thread().id(), replay.thread().id());
     assertEquals(first.thread().headEntryId(), replay.thread().headEntryId());
     assertEquals(first.thread().revision(), replay.thread().revision());
     // replay 不创建第二条命令。
     ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow());
     assertEquals(1L, thread.revision());
     assertEquals(2L, thread.nextCommandSequence());
+  }
+
+  /**
+   * 初始 replay 真实缺陷回归：materialize 第二批后，重放初始请求只按 clientCommandId 返回原始初始命令（sequence 从 1 连续）， 顺序与
+   * terminal 状态为当前值，且不产生 revision mutation（旧实现 loadCommandsByThread 会把第二批也返回）。
+   */
+  @Test
+  void newSessionReplayAfterSecondBatchReturnsOnlyTheInitialCommands() {
+    AcceptCommandsCommand initial =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewSession(
+                TestIds.id(101), TestIds.id(102), settings(), null, false),
+            List.of(setAgent(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a")));
+    AcceptedCommands first = runtime.acceptCommands(initial, AcceptancePreflight.IDENTITY);
+    // 同一 Thread 上再接受第二批（THREAD target，cursor: head=root, next=3）。
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(TestIds.id(102), first.thread().headEntryId(), 3),
+            List.of(userMessageCommand(TestIds.id(2), "c"))),
+        AcceptancePreflight.IDENTITY);
+    ThreadState before = store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow());
+    assertEquals(2L, before.revision());
+
+    AcceptedCommands replay = runtime.acceptCommands(initial, AcceptancePreflight.IDENTITY);
+    assertTrue(replay.replayed());
+    // 只返回原始初始命令（SET_AGENT + user），顺序为请求顺序、sequence 从 1 连续、状态为当前 QUEUED，第二批不混入。
+    assertEquals(
+        List.of(TestIds.id(9), TestIds.id(1)),
+        replay.acceptedCommands().stream().map(ThreadCommand::clientCommandId).toList());
+    assertEquals(
+        List.of(1L, 2L), replay.acceptedCommands().stream().map(ThreadCommand::sequence).toList());
+    assertTrue(
+        replay.acceptedCommands().stream()
+            .allMatch(command -> command.state() == ThreadCommandState.QUEUED));
+    // 无 revision mutation：replay 后 projection 与 stored 均未推进。
+    assertEquals(before, replay.thread());
+    assertEquals(before, store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow()));
   }
 
   /** 同 threadId + 不同 materialization（更改为不同文本）→ MATERIALIZATION_ID_REUSED。 */
@@ -179,12 +221,8 @@ class HarnessRuntimeAcceptInitialTest {
     AcceptCommandsCommand otherSession =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.NewSession(
-                TestIds.id(105),
-                TestIds.id(102),
-                settings(),
-                null,
-                false,
-                List.of(userMessageCommand(TestIds.id(1), "hello"))));
+                TestIds.id(105), TestIds.id(102), settings(), null, false),
+            List.of(userMessageCommand(TestIds.id(1), "hello")));
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -203,17 +241,17 @@ class HarnessRuntimeAcceptInitialTest {
             List.of(setAgent(TestIds.id(2)), userMessageCommand(TestIds.id(1), "hello"))),
         AcceptancePreflight.IDENTITY);
 
-    // 非法：没有 user-like message。
+    // 非法（请求校验错误，抛 IAE 而非业务冲突）：没有 user-like message。
     assertThrows(
-        HarnessRuntimeConflictException.class,
+        IllegalArgumentException.class,
         () ->
             runtime.acceptCommands(
                 newSession(TestIds.id(112), TestIds.id(113), List.of(setAgent(TestIds.id(3)))),
                 AcceptancePreflight.IDENTITY));
 
-    // 非法：SET_* 出现在消息之后（user-like 必须恰好一条且结尾）。
+    // 非法（IAE）：SET_* 出现在消息之后（user-like 必须恰好一条且结尾）。
     assertThrows(
-        HarnessRuntimeConflictException.class,
+        IllegalArgumentException.class,
         () ->
             runtime.acceptCommands(
                 newSession(
@@ -223,7 +261,7 @@ class HarnessRuntimeAcceptInitialTest {
                 AcceptancePreflight.IDENTITY));
 
     // 合法：前缀 SYSTEM steering + 单条 user message。
-    AcceptCommandsResult withSystem =
+    AcceptedCommands withSystem =
         runtime.acceptCommands(
             newSession(
                 TestIds.id(116),
@@ -235,11 +273,62 @@ class HarnessRuntimeAcceptInitialTest {
     assertFalse(withSystem.replayed());
   }
 
-  /** ENTRY：锁 session、验证 start Entry 同 Session、插入 Thread+Commands+Work；不复制 Entry。 */
+  /**
+   * SET_* 前缀固定顺序必须是 SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL -&gt; SET_ACTIVE_TOOLS：旧实 现把
+   * SET_ENVIRONMENT 排在最后，这里用正反两个请求证明新顺序（正向通过 / 反向 IAE）。
+   */
+  @Test
+  void setPrefixOrderRequiresEnvironmentFirst() {
+    // 合法：新顺序全前缀 + 单条 user message。
+    AcceptedCommands result =
+        runtime.acceptCommands(
+            newSession(
+                TestIds.id(120),
+                TestIds.id(121),
+                List.of(
+                    new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(1)),
+                    setAgent(TestIds.id(2)),
+                    new NewThreadCommand(
+                        new SetModelCommandPayload(new ModelSelection("acme", "gpt-x", "default")),
+                        TestIds.id(3)),
+                    new NewThreadCommand(
+                        new SetActiveToolsCommandPayload(List.of()), TestIds.id(4)),
+                    userMessageCommand(TestIds.id(5), "hi"))),
+            AcceptancePreflight.IDENTITY);
+    assertFalse(result.replayed());
+    // 非法：SET_ENVIRONMENT 出现在 SET_AGENT 之后（旧实现会错误接受）。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                newSession(
+                    TestIds.id(122),
+                    TestIds.id(123),
+                    List.of(
+                        setAgent(TestIds.id(1)),
+                        new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(2)),
+                        userMessageCommand(TestIds.id(3), "hi"))),
+                AcceptancePreflight.IDENTITY));
+    // 非法：同类型 SET_* 出现两次。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                newSession(
+                    TestIds.id(124),
+                    TestIds.id(125),
+                    List.of(
+                        setAgent(TestIds.id(1)),
+                        setAgent(TestIds.id(2)),
+                        userMessageCommand(TestIds.id(3), "hi"))),
+                AcceptancePreflight.IDENTITY));
+  }
+
+  /** ENTRY：KEY SHARE 锁 session、验证 start Entry 同 Session、插入 Thread+Commands+Work；不复制 Entry。 */
   @Test
   void entryAcceptsNewThreadUnderExistingSessionWithoutCopyingEntries() {
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
-    AcceptCommandsResult result =
+    AcceptedCommands result =
         runtime.acceptCommands(
             entry(
                 baseline.sessionId(),
@@ -248,7 +337,7 @@ class HarnessRuntimeAcceptInitialTest {
             AcceptancePreflight.IDENTITY);
 
     assertFalse(result.replayed());
-    assertEquals(baseline.sessionId(), result.sessionId());
+    assertEquals(baseline.sessionId(), result.session().id());
     ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(203)).orElseThrow());
     // head 直接指向既有 start Entry：不复制 Entry，Session 内仍只有 ROOT。
     assertEquals(baseline.rootEntryId(), thread.headEntryId());
@@ -273,8 +362,8 @@ class HarnessRuntimeAcceptInitialTest {
             baseline.sessionId(),
             baseline.rootEntryId(),
             List.of(userMessageCommand(TestIds.id(1), "hello")));
-    AcceptCommandsResult first = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
-    AcceptCommandsResult replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
+    AcceptedCommands first = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
+    AcceptedCommands replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
     assertEquals(first.thread().revision(), replay.thread().revision());
     assertEquals(first.thread().nextCommandSequence(), replay.thread().nextCommandSequence());

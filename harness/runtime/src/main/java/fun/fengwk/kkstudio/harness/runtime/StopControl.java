@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -87,12 +88,29 @@ final class StopControl {
   }
 
   private Commit stop(HarnessStore.Transaction tx, StopCommand command) {
+    // 规范锁序：immutable 快照只用于定位 Session，随后 KEY SHARE Session -> FOR UPDATE Thread 复核。
+    ThreadState immutable =
+        tx.findThread(command.threadId())
+            .orElseThrow(
+                () ->
+                    new HarnessRuntimeNotFoundException(
+                        "thread " + command.threadId() + " does not exist"));
+    Session session =
+        tx.lockSessionForKeyShare(immutable.sessionId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "session " + immutable.sessionId() + " disappeared while thread existed"));
     ThreadState thread =
         tx.lockThread(command.threadId())
             .orElseThrow(
                 () ->
                     new HarnessRuntimeNotFoundException(
                         "thread " + command.threadId() + " does not exist"));
+    if (!session.id().equals(thread.sessionId())) {
+      throw new IllegalStateException(
+          "thread " + thread.id() + " relocated to another session while stopping");
+    }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
     StopResult replay = findReplay(tx, thread.sessionId(), command.stopRequestId(), thread);
     if (replay != null) {
@@ -196,7 +214,9 @@ final class StopControl {
    *   <li>queued-only receipt：本 Thread 上带该 cancelRequestId 的已取消 Command（未创建 Turn 时的幂等键）。
    * </ol>
    *
-   * 任一命中都返回 replayed 结果且不写任何 marker。
+   * 命中任一 receipt 时，一并汇总本 Thread 上带同一 cancelRequestId 的已取消 Command，保证 live Stop 首次同时取消 queued
+   * commands 后，transport 丢失的 replay 返回一致的 cancelledCommandCount 与 sequence-ordered
+   * cancelledUserMessages （不返回 0 / 空）。任一命中都返回 replayed 结果且不写任何 marker。
    */
   private StopResult findReplay(
       HarnessStore.Transaction tx, UUID sessionId, UUID stopRequestId, ThreadState thread) {
@@ -239,13 +259,11 @@ final class StopControl {
                 + " was used by another close operation of thread "
                 + thread.id());
       }
-      return new StopResult(true, thread, match.id(), 0, List.of());
+      return cancelledReceipt(tx, thread, stopRequestId, match.id());
     }
     // queued-only receipt：未创建 Turn 的先前 Stop 以 (threadId, cancelRequestId) 作幂等键。
     List<ThreadCommand> cancelledWithRequest =
-        tx.loadCommandsByThread(thread.id()).stream()
-            .filter(command -> stopRequestId.equals(command.cancelRequestId()))
-            .toList();
+        tx.loadCancelledCommandsByRequest(thread.id(), stopRequestId);
     if (!cancelledWithRequest.isEmpty()) {
       return new StopResult(
           true,
@@ -255,6 +273,22 @@ final class StopControl {
           cancelledUserMessages(cancelledWithRequest));
     }
     return null;
+  }
+
+  /** live receipt（TURN_END）也汇总同 stopRequestId 的 queued-cancelled receipt，使 replay 字段与首次接受一致。 */
+  private static StopResult cancelledReceipt(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      UUID stopRequestId,
+      UUID stoppedTurnEndEntryId) {
+    List<ThreadCommand> cancelledWithRequest =
+        tx.loadCancelledCommandsByRequest(thread.id(), stopRequestId);
+    return new StopResult(
+        true,
+        thread,
+        stoppedTurnEndEntryId,
+        cancelledWithRequest.size(),
+        cancelledUserMessages(cancelledWithRequest));
   }
 
   /** TURN_END 引用的 TURN_START 必须存在于同一 Session；解析失败是 durable 结构不变量破坏。 */

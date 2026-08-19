@@ -130,10 +130,8 @@ class HarnessRuntimeStopConcurrencyTest {
                       runtime.acceptCommands(
                           new AcceptCommandsCommand(
                               new AcceptCommandsTarget.Thread(
-                                  baseline.threadId(),
-                                  baseline.rootEntryId(),
-                                  1,
-                                  List.of(userMessageCommand(TestIds.id(1), "a")))),
+                                  baseline.threadId(), baseline.rootEntryId(), 1),
+                              List.of(userMessageCommand(TestIds.id(1), "a"))),
                           AcceptancePreflight.IDENTITY)));
       Future<Attempt> second =
           pool.submit(
@@ -143,10 +141,8 @@ class HarnessRuntimeStopConcurrencyTest {
                       runtime.acceptCommands(
                           new AcceptCommandsCommand(
                               new AcceptCommandsTarget.Thread(
-                                  baseline.threadId(),
-                                  baseline.rootEntryId(),
-                                  1,
-                                  List.of(userMessageCommand(TestIds.id(2), "b")))),
+                                  baseline.threadId(), baseline.rootEntryId(), 1),
+                              List.of(userMessageCommand(TestIds.id(2), "b"))),
                           AcceptancePreflight.IDENTITY)));
       Attempt one = first.get();
       Attempt two = second.get();
@@ -154,7 +150,7 @@ class HarnessRuntimeStopConcurrencyTest {
       Attempt winner = one.error() == null ? one : two;
       Attempt loser = one.error() == null ? two : one;
       assertConflict(loser, Reason.STALE_COMMAND_CURSOR);
-      assertEquals(1, ((AcceptCommandsResult) winner.value()).commands().size());
+      assertEquals(1, ((AcceptedCommands) winner.value()).acceptedCommands().size());
       ThreadState thread =
           store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
       assertEquals(2L, thread.nextCommandSequence());

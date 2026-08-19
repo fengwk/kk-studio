@@ -36,16 +36,10 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     COMMAND_REPLAY_ORDER_MISMATCH,
     /** NEW_SESSION / ENTRY：预分配的 threadId 已被不同 materialization（不同 hash 或不同 Session）占用。 */
     MATERIALIZATION_ID_REUSED,
-    /** 命令 batch 形状非法（SET_* 前缀顺序 / user-like 消息数量 / SYSTEM steering 位置等）。 */
-    INVALID_COMMAND_BATCH,
     /** Thread 存在 live work、已入队输入 commands 或 THREAD Work 行，必须先 quiesce。 */
     THREAD_NOT_QUIESCENT,
     /** Thread 存在等待原子 apply 的 terminal Model/Tool result。 */
     TERMINAL_APPLY_PENDING,
-    /** MOVE_HEAD target 与当前 head 处于不同的 Session。 */
-    MOVE_TARGET_CROSS_SESSION,
-    /** MOVE_HEAD target 是 continueModel=true 的 TURN_END，会重新激活旧 obligation。 */
-    MOVE_TARGET_HAS_CONTINUATION_OBLIGATION,
     /** Stop 幂等键已被非 Stop 的关闭操作使用过。 */
     STOP_REQUEST_ID_REUSED,
     /** Approval target 缺失、不属于请求 thread 或当前不适用。 */

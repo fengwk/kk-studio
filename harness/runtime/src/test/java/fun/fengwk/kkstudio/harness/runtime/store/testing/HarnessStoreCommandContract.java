@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.command;
@@ -707,5 +708,110 @@ public abstract class HarnessStoreCommandContract {
             .transaction(
                 tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow())
             .state());
+  }
+
+  /**
+   * loadCancelledCommandsByRequest：只返回 (threadId, cancelRequestId) 精确匹配的 CANCELLED 行，且按 sequence
+   * 升序。
+   */
+  @Test
+  void loadCancelledCommandsByRequestIsScopedByThreadRequestAndOrdered() {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(
+              List.of(
+                  command(baseline.threadId(), 1, TestIds.id(1)),
+                  command(baseline.threadId(), 2, TestIds.id(2)),
+                  command(baseline.threadId(), 3, TestIds.id(3)),
+                  command(baseline.threadId(), 4, TestIds.id(4))));
+        });
+    UUID otherThreadId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertThread(
+                  StoreTestSupport.threadState(
+                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
+              return id;
+            });
+    UUID turnStartEntryId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  turnStartEntry(
+                      id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
+              tx.lockThread(otherThreadId);
+              ThreadCommand foreign = command(otherThreadId, 1, TestIds.id(9));
+              tx.insertCommands(List.of(foreign));
+              tx.updateCommands(List.of(withCancelledAt(foreign, TestIds.id(1), T2)));
+              return id;
+            });
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          List<ThreadCommand> queued = tx.loadQueuedCommands(baseline.threadId());
+          // seq1 -> APPLIED；seq2 与 seq3 -> 同一 stop；seq4 -> 另一 stop。
+          tx.updateCommands(
+              List.of(
+                  withConsumedTurnStart(queued.get(0), turnStartEntryId),
+                  withCancelledAt(queued.get(1), TestIds.id(1), T2),
+                  withCancelledAt(queued.get(2), TestIds.id(1), T2),
+                  withCancelledAt(queued.get(3), TestIds.id(2), T2)));
+        });
+    assertEquals(
+        List.of(
+            command(baseline.threadId(), 2, TestIds.id(2)).cancel(TestIds.id(1), T2),
+            command(baseline.threadId(), 3, TestIds.id(3)).cancel(TestIds.id(1), T2)),
+        store.transaction(
+            tx -> tx.loadCancelledCommandsByRequest(baseline.threadId(), TestIds.id(1))));
+    // 另一 stop 的取消行不混入；另一 Thread 的相同 raw id 不混入。
+    assertEquals(
+        List.of(command(baseline.threadId(), 4, TestIds.id(4)).cancel(TestIds.id(2), T2)),
+        store.transaction(
+            tx -> tx.loadCancelledCommandsByRequest(baseline.threadId(), TestIds.id(2))));
+    assertTrue(
+        store
+            .<Boolean>transaction(
+                tx ->
+                    tx.loadCancelledCommandsByRequest(otherThreadId, TestIds.id(1)).stream()
+                        .allMatch(c -> c.threadId().equals(otherThreadId)))
+            .equals(Boolean.TRUE));
+  }
+
+  /** listThreadsBySession：按 (created_at, id) 确定性序返回同 Session 的 Thread，跨 Session 不混入。 */
+  @Test
+  void listThreadsBySessionOrdersByCreatedAtThenId() {
+    UUID laterThreadId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertThread(
+                  StoreTestSupport.threadState(
+                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T1, T1));
+              return id;
+            });
+    UUID sameTimeHigherId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertThread(
+                  StoreTestSupport.threadState(
+                      id, baseline.sessionId(), baseline.rootEntryId(), 1, 0, T0, T0));
+              return id;
+            });
+    Baseline other = seedThreadBaseline(store);
+    // createdAt 相同时按 id 升序，随后 createdAt 更大的排后；其他 Session 不列出。
+    assertEquals(
+        List.of(baseline.threadId(), sameTimeHigherId, laterThreadId),
+        store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).stream()
+            .map(thread -> thread.id())
+            .toList());
+    assertTrue(
+        store.transaction(tx -> tx.listThreadsBySession(other.sessionId())).stream()
+            .noneMatch(thread -> thread.sessionId().equals(baseline.sessionId())));
   }
 }

@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -49,13 +50,17 @@ class HarnessRuntimeAcceptThreadTest {
   private static AcceptCommandsCommand thread(
       UUID threadId, UUID expectedHead, long expectedNext, List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.Thread(threadId, expectedHead, expectedNext, commands));
+        new AcceptCommandsTarget.Thread(threadId, expectedHead, expectedNext), commands);
+  }
+
+  private static NewThreadCommand setAgentCommand(UUID clientCommandId) {
+    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), clientCommandId);
   }
 
   @Test
   void acceptsNewBatchWithCursorGuardsAndThreadWork() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    AcceptCommandsResult result =
+    AcceptedCommands result =
         runtime.acceptCommands(
             thread(
                 baseline.threadId(),
@@ -65,9 +70,9 @@ class HarnessRuntimeAcceptThreadTest {
             AcceptancePreflight.IDENTITY);
 
     assertFalse(result.replayed());
-    assertEquals(baseline.sessionId(), result.sessionId());
-    assertEquals(1, result.commands().size());
-    assertEquals(1L, result.commands().getFirst().sequence());
+    assertEquals(baseline.sessionId(), result.session().id());
+    assertEquals(1, result.acceptedCommands().size());
+    assertEquals(1L, result.acceptedCommands().getFirst().sequence());
 
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(2L, thread.nextCommandSequence());
@@ -104,28 +109,19 @@ class HarnessRuntimeAcceptThreadTest {
   @Test
   void exactOrderedReplayReturnsExistingCommands() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    AcceptCommandsResult first =
+    // THREAD user batch 只能含恰一条 user-like：多命令 batch 用 SET_* 前缀 + 单条 user 构造。
+    List<NewThreadCommand> batch =
+        List.of(setAgentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"));
+    AcceptedCommands first =
         runtime.acceptCommands(
-            thread(
-                baseline.threadId(),
-                baseline.rootEntryId(),
-                1,
-                List.of(
-                    userMessageCommand(TestIds.id(1), "a"),
-                    userMessageCommand(TestIds.id(2), "b"))),
+            thread(baseline.threadId(), baseline.rootEntryId(), 1, batch),
             AcceptancePreflight.IDENTITY);
-    AcceptCommandsResult replay =
+    AcceptedCommands replay =
         runtime.acceptCommands(
-            thread(
-                baseline.threadId(),
-                baseline.rootEntryId(),
-                1,
-                List.of(
-                    userMessageCommand(TestIds.id(1), "a"),
-                    userMessageCommand(TestIds.id(2), "b"))),
+            thread(baseline.threadId(), baseline.rootEntryId(), 1, batch),
             AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
-    assertEquals(first.commands(), replay.commands());
+    assertEquals(first.acceptedCommands(), replay.acceptedCommands());
     ThreadState threadState =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(1L, threadState.revision());
@@ -165,8 +161,7 @@ class HarnessRuntimeAcceptThreadTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(
-                userMessageCommand(TestIds.id(1), "a"), userMessageCommand(TestIds.id(2), "b"))),
+            List.of(setAgentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"))),
         AcceptancePreflight.IDENTITY);
 
     HarnessRuntimeConflictException partial =
@@ -179,9 +174,9 @@ class HarnessRuntimeAcceptThreadTest {
                         baseline.rootEntryId(),
                         1,
                         List.of(
+                            setAgentCommand(TestIds.id(9)),
                             userMessageCommand(TestIds.id(1), "a"),
-                            userMessageCommand(TestIds.id(2), "b"),
-                            userMessageCommand(TestIds.id(3), "c"))),
+                            userMessageCommand(TestIds.id(2), "b"))),
                     AcceptancePreflight.IDENTITY));
     assertEquals(Reason.PARTIAL_COMMAND_REPLAY, partial.reason());
 
@@ -195,8 +190,8 @@ class HarnessRuntimeAcceptThreadTest {
                         baseline.rootEntryId(),
                         1,
                         List.of(
-                            userMessageCommand(TestIds.id(1), "DIFFERENT"),
-                            userMessageCommand(TestIds.id(2), "b"))),
+                            setAgentCommand(TestIds.id(9)),
+                            userMessageCommand(TestIds.id(1), "DIFFERENT"))),
                     AcceptancePreflight.IDENTITY));
     assertEquals(Reason.COMMAND_ID_REUSED, reused.reason());
   }
@@ -255,28 +250,29 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(Reason.THREAD_NOT_QUIESCENT, workError.reason());
   }
 
-  /** THREAD user batch 禁止 SYSTEM CUSTOM_MESSAGE；steering 必须是恰一条 SYSTEM CUSTOM_MESSAGE。 */
+  /**
+   * THREAD user batch 禁止 SYSTEM CUSTOM_MESSAGE 且<b>恰一条</b>末尾 user-like；steering 必须是恰一条 SYSTEM
+   * CUSTOM_MESSAGE。
+   */
   @Test
   void threadShapeRejectsSystemInUserBatchAndRequiresExactSteering() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    // 非法：user batch 携带 SYSTEM CUSTOM_MESSAGE。
-    HarnessRuntimeConflictException mixed =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () ->
-                runtime.acceptCommands(
-                    thread(
-                        baseline.threadId(),
-                        baseline.rootEntryId(),
-                        1,
-                        List.of(
-                            systemCustomMessageCommand(TestIds.id(1), "steer"),
-                            userMessageCommand(TestIds.id(2), "hi"))),
-                    AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.INVALID_COMMAND_BATCH, mixed.reason());
+    // 非法（请求校验错误，抛 IAE）：user batch 携带 SYSTEM CUSTOM_MESSAGE。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                thread(
+                    baseline.threadId(),
+                    baseline.rootEntryId(),
+                    1,
+                    List.of(
+                        systemCustomMessageCommand(TestIds.id(1), "steer"),
+                        userMessageCommand(TestIds.id(2), "hi"))),
+                AcceptancePreflight.IDENTITY));
 
     // 合法：恰一条 SYSTEM steering。
-    AcceptCommandsResult steering =
+    AcceptedCommands steering =
         runtime.acceptCommands(
             thread(
                 baseline.threadId(),
@@ -285,23 +281,42 @@ class HarnessRuntimeAcceptThreadTest {
                 List.of(systemCustomMessageCommand(TestIds.id(3), "steer"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(steering.replayed());
-    assertEquals(ThreadCommandState.QUEUED, steering.commands().getFirst().state());
+    assertEquals(ThreadCommandState.QUEUED, steering.acceptedCommands().getFirst().state());
 
-    // 非法：SYSTEM steering + 多余命令。
-    HarnessRuntimeConflictException tooMuch =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () ->
-                runtime.acceptCommands(
-                    thread(
-                        baseline.threadId(),
-                        baseline.rootEntryId(),
-                        2,
-                        List.of(
-                            systemCustomMessageCommand(TestIds.id(4), "steer"),
-                            userMessageCommand(TestIds.id(5), "hi"))),
-                    AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.INVALID_COMMAND_BATCH, tooMuch.reason());
+    // 非法（IAE）：SYSTEM steering + 多余命令。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                thread(
+                    baseline.threadId(),
+                    baseline.rootEntryId(),
+                    2,
+                    List.of(
+                        systemCustomMessageCommand(TestIds.id(4), "steer"),
+                        userMessageCommand(TestIds.id(5), "hi"))),
+                AcceptancePreflight.IDENTITY));
+  }
+
+  /** THREAD user batch 必须恰有一条末尾 user-like，不是至少一条：多条 user message 同类合并被拒（旧实现会错误接受）。 */
+  @Test
+  void threadUserBatchRejectsMultipleUserMessages() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                thread(
+                    baseline.threadId(),
+                    baseline.rootEntryId(),
+                    1,
+                    List.of(
+                        userMessageCommand(TestIds.id(1), "a"),
+                        userMessageCommand(TestIds.id(2), "b"))),
+                AcceptancePreflight.IDENTITY));
+    // 没有写入任何命令。
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.loadCommandsByThread(baseline.threadId()).isEmpty()));
   }
 
   /**
@@ -312,7 +327,7 @@ class HarnessRuntimeAcceptThreadTest {
   void siblingThreadsInSameSessionDoNotSerializeEachOther() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     UUID sibling = seedThreadAt(store, baseline.rootEntryId());
-    AcceptCommandsResult first =
+    AcceptedCommands first =
         runtime.acceptCommands(
             thread(
                 baseline.threadId(),
@@ -320,7 +335,7 @@ class HarnessRuntimeAcceptThreadTest {
                 1,
                 List.of(userMessageCommand(TestIds.id(1), "a"))),
             AcceptancePreflight.IDENTITY);
-    AcceptCommandsResult second =
+    AcceptedCommands second =
         runtime.acceptCommands(
             thread(
                 sibling,
@@ -328,8 +343,8 @@ class HarnessRuntimeAcceptThreadTest {
                 1,
                 List.of(userMessageCommand(TestIds.id(2), "b"))),
             AcceptancePreflight.IDENTITY);
-    assertEquals(1L, first.commands().getFirst().sequence());
-    assertEquals(1L, second.commands().getFirst().sequence());
+    assertEquals(1L, first.acceptedCommands().getFirst().sequence());
+    assertEquals(1L, second.acceptedCommands().getFirst().sequence());
     // 两个 sibling Thread 都在同一 Session 内建立，listThreadsBySession 返回两者（按确定 id 序）。
     assertEquals(
         List.of(baseline.threadId(), sibling),

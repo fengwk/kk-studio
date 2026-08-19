@@ -527,7 +527,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       return state.threads.values().stream()
           .filter(thread -> thread.sessionId().equals(sessionId))
-          .sorted(Comparator.comparing(ThreadState::id, UuidOrder.COMPARATOR))
+          .sorted(
+              Comparator.comparing(ThreadState::createdAt)
+                  .thenComparing(ThreadState::id, UuidOrder.COMPARATOR))
           .toList();
     }
 
@@ -587,6 +589,20 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Objects.requireNonNull(threadId, "threadId");
       return state.commands.values().stream()
           .filter(command -> command.threadId().equals(threadId))
+          .sorted(Comparator.comparingLong(ThreadCommand::sequence))
+          .toList();
+    }
+
+    @Override
+    public List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID cancelRequestId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(cancelRequestId, "cancelRequestId");
+      return state.commands.values().stream()
+          .filter(
+              command ->
+                  command.threadId().equals(threadId)
+                      && cancelRequestId.equals(command.cancelRequestId()))
           .sorted(Comparator.comparingLong(ThreadCommand::sequence))
           .toList();
     }
