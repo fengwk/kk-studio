@@ -76,8 +76,10 @@ public interface HarnessStore {
     Optional<Session> lockSessionForKeyShare(UUID id);
 
     /**
-     * 锁定 Session 行并返回（FOR UPDATE：串行化该 Session 的创建类写操作）；不存在返回 {@link Optional#empty()} 且不产生锁。要求
-     * Session -&gt; Thread 锁序。仅用于需要串行化同 Session 新建/重放的操作（如 ENTRY），不得用于 sibling Thread 的正常执行路径。
+     * 锁定 Session 行并返回（FOR UPDATE：串行化该 Session 的删除 / 归属独占类写操作）；不存在返回 {@link Optional#empty()}
+     * 且不产生锁。要求 Session -&gt; Thread 锁序。仅用于删除 / 归属独占操作，<b>不得</b>用于命令接受与 sibling Thread
+     * 的正常执行路径——NEW_SESSION / ENTRY materialization 与 THREAD 写入一律使用 {@link
+     * #lockSessionForKeyShare}，避免同 Session 的 sibling 被 Session 级锁串行化。
      */
     Optional<Session> lockSessionForUpdate(UUID id);
 
@@ -116,8 +118,8 @@ public interface HarnessStore {
     Optional<ThreadState> lockThread(UUID id);
 
     /**
-     * 读取指定 Session 的全部 Thread（当前 projection），按确定性 id 序返回不可变列表。Session 不存在抛 {@link
-     * IllegalArgumentException}。
+     * 读取指定 Session 的全部 Thread（当前 projection），按 {@code (created_at, id)} 确定性序返回不可变列表。Session 不存在抛
+     * {@link IllegalArgumentException}。
      */
     List<ThreadState> listThreadsBySession(UUID sessionId);
 
@@ -143,6 +145,12 @@ public interface HarnessStore {
 
     /** 读取该 Thread 的全部 Command（QUEUED/APPLIED/CANCELLED，含历史），按 sequence 升序；不产生锁。返回不可变列表。 */
     List<ThreadCommand> loadCommandsByThread(UUID threadId);
+
+    /**
+     * 读取该 Thread 上以指定 {@code cancelRequestId} 取消的全部 Command（CANCELLED，含历史），按 sequence 升序；不产生锁。索引用
+     * {@code idx_harness_thread_command_cancel_request}；返回不可变列表。
+     */
+    List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID cancelRequestId);
 
     /**
      * 批量插入新 Command；每条 command 的 thread 必须存在且已在本事务锁定（锁序 Thread -&gt; commands），初始状态必须为 QUEUED（无任何

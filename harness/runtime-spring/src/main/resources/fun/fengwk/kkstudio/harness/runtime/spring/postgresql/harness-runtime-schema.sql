@@ -98,6 +98,11 @@ comment on column harness_thread.revision is '并发控制版本：任何对外�
 comment on column harness_thread.created_at is 'Thread 创建时间（毫秒精度）';
 comment on column harness_thread.updated_at is 'Thread 最后更新时间（毫秒精度），不得早于 created_at';
 
+create index idx_harness_thread_session
+    on harness_thread (session_id, created_at, id);
+
+comment on index idx_harness_thread_session is 'listThreadsBySession 按 (session_id, created_at, id) 读取 Session 的 Thread 列表';
+
 create table harness_thread_command (
     thread_id uuid not null,
     sequence bigint not null check (sequence > 0),
@@ -157,6 +162,12 @@ create index idx_harness_thread_command_queued
     where consumed_turn_start_entry_id is null and cancelled_at is null;
 
 comment on index idx_harness_thread_command_queued is '按 sequence 升序读取 QUEUED Command（for update 锁序）';
+
+create index idx_harness_thread_command_cancel_request
+    on harness_thread_command (thread_id, cancel_request_id, sequence)
+    where cancel_request_id is not null;
+
+comment on index idx_harness_thread_command_cancel_request is 'Stop 幂等键：(thread_id, cancel_request_id) 按 sequence 升序汇总被该 stopRequestId 取消的 Command';
 
 create table harness_model_invocation (
     id uuid primary key,

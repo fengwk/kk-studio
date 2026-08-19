@@ -217,6 +217,50 @@ class PostgresqlHarnessStoreConcurrencyTest {
     }
   }
 
+  /** 同 Session 两个 ENTRY materialization：KEY SHARE 锁彼此兼容，新 Thread 各自插入、互不串行化。 */
+  @Test
+  void concurrentEntryMaterializationsKeyShareTheSameSessionWithoutSerialization()
+      throws Exception {
+    Baseline baseline = seedThreadBaseline(store);
+    CountDownLatch bothAcquired = new CountDownLatch(2);
+    CountDownLatch releaseBoth = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<UUID> first =
+          executor.submit(
+              () ->
+                  materializeEntry(
+                      baseline.sessionId(), baseline.rootEntryId(), bothAcquired, releaseBoth));
+      Future<UUID> second =
+          executor.submit(
+              () ->
+                  materializeEntry(
+                      baseline.sessionId(), baseline.rootEntryId(), bothAcquired, releaseBoth));
+      // 双方都拿到同一 Session 的 KEY SHARE 并各自插入新 Thread：若误用 FOR UPDATE 锁 Session，第二个事务会在此处死等。
+      assertTrue(bothAcquired.await(10, TimeUnit.SECONDS));
+      releaseBoth.countDown();
+      first.get(10, TimeUnit.SECONDS);
+      second.get(10, TimeUnit.SECONDS);
+    }
+    // 两个新 Thread 都落库，且属于同一 Session。
+    assertEquals(3, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
+  }
+
+  private UUID materializeEntry(
+      UUID sessionId, UUID rootEntryId, CountDownLatch bothAcquired, CountDownLatch releaseBoth) {
+    return store.transaction(
+        tx -> {
+          // ENTRY 新建路径：KEY SHARE Session（不 FOR UPDATE），新 Thread 直接指向既有 Entry（不复制 Entry）。
+          tx.lockSessionForKeyShare(sessionId).orElseThrow();
+          UUID threadId = tx.nextId();
+          tx.insertThread(thread(threadId, sessionId, rootEntryId));
+          bothAcquired.countDown();
+          await(releaseBoth);
+          // 收尾：阻塞式取回自己的 Thread 行锁（与接受路径的锁持有语义一致）。
+          tx.lockThread(threadId).orElseThrow();
+          return threadId;
+        });
+  }
+
   @Test
   void concurrentNewWakeSurvivesCompletionOfTheOlderClaim() throws Exception {
     Baseline baseline = seedThreadBaseline(store);

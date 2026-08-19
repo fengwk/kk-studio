@@ -42,6 +42,7 @@ class HarnessStoreContractTest {
               "lockSessionForUpdate",
               "findCommandByClientId",
               "loadCommandsByThread",
+              "loadCancelledCommandsByRequest",
               "loadQueuedCommands",
               "insertCommands",
               "updateCommands",

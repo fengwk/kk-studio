@@ -173,6 +173,44 @@ class HarnessRuntimeStopReplayTest {
     assertEquals(owner.stoppedTurnEndEntryId(), ownerReplay.stoppedTurnEndEntryId());
   }
 
+  /**
+   * live Stop 首次同时取消 queued commands 后，transport 丢失时同一 stopRequestId 的重试必须以同一 cancelledCommandCount
+   * 与同一 sequence-ordered cancelledUserMessages 返回（旧实现 live receipt 固定返回 0 / 空，会让幂等重试丢失取消事实）。
+   */
+  @Test
+  void liveStopReplayReturnsSameCancellationFactsWhenTransportLost() {
+    HarnessRuntimeTestSupport.ModelBaseline baseline =
+        seedModel(store, ModelInvocationStatus.RUNNING);
+    seedQueuedCommand(
+        store, baseline.threadId(), 1L, userMessagePayload("please stop"), TestIds.id(1));
+    seedThreadWork(store, baseline.threadId());
+    seedModelWork(store, baseline.modelId());
+
+    StopResult first = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(9), 0));
+    assertStopped(first);
+    assertNotNull(first.stoppedTurnEndEntryId());
+    assertEquals(1, first.cancelledCommandCount());
+    assertEquals(1, first.cancelledUserMessages().size());
+
+    // transport 丢失：同一 stopRequestId 重试（replay 先于 revision CAS，expectedRevision 过期也无碍）。
+    StopResult replay = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(9), 0));
+    assertReplayed(replay);
+    assertEquals(first.stoppedTurnEndEntryId(), replay.stoppedTurnEndEntryId());
+    assertEquals(first.cancelledCommandCount(), replay.cancelledCommandCount());
+    assertEquals(first.cancelledUserMessages(), replay.cancelledUserMessages());
+    // replay 不写任何新 marker：revision 与 head 保持首次 Stop 后的终态。
+    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+    assertEquals(replay.thread().revision(), thread.revision());
+    assertEquals(replay.stoppedTurnEndEntryId(), thread.headEntryId());
+    // 取消行仍以该 stopRequestId 持久化（queued-only 维度与 live receipt 一致）。
+    assertEquals(
+        1,
+        store
+            .transaction(
+                tx -> tx.loadCancelledCommandsByRequest(baseline.threadId(), TestIds.id(9)))
+            .size());
+  }
+
   @Test
   void exactKeyOnNonStoppedCloseConflicts() {
     UUID threadId = TestIds.id(11);

@@ -30,5 +30,17 @@ public record StopResult(
     }
     cancelledUserMessages =
         List.copyOf(Objects.requireNonNull(cancelledUserMessages, "cancelledUserMessages"));
+    long previous = 0L;
+    for (CancelledUserMessage message : cancelledUserMessages) {
+      if (message.sequence() <= previous) {
+        throw new IllegalArgumentException(
+            "cancelledUserMessages sequences must be strictly increasing");
+      }
+      previous = message.sequence();
+    }
+    if (cancelledUserMessages.size() > cancelledCommandCount) {
+      throw new IllegalArgumentException(
+          "cancelledUserMessages count must not exceed cancelledCommandCount");
+    }
   }
 }

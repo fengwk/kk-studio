@@ -62,13 +62,16 @@ public final class HarnessRuntime {
 
   private static final Consumer<UUID> NO_OP_CANCELLER = ignored -> {};
 
-  /** SET_* prefix 的固定顺序：每类至多一次、按此顺序出现在消息之前。 */
+  /**
+   * SET_* prefix 的固定顺序：SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL -&gt;
+   * SET_ACTIVE_TOOLS，每类至多一次、全部在消息之前。
+   */
   private static final List<ThreadCommandType> SET_PREFIX_ORDER =
       List.of(
+          ThreadCommandType.SET_ENVIRONMENT,
           ThreadCommandType.SET_AGENT,
           ThreadCommandType.SET_MODEL,
-          ThreadCommandType.SET_ACTIVE_TOOLS,
-          ThreadCommandType.SET_ENVIRONMENT);
+          ThreadCommandType.SET_ACTIVE_TOOLS);
 
   private final HarnessStore store;
   private final Clock clock;
@@ -143,17 +146,18 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 单个写原语原子接受一批 Commands 及其 Work，target 为 sealed {@link AcceptCommandsTarget}。
+   * 单个写原语原子接受一批 Commands 及其 Work：sealed {@link AcceptCommandsTarget} 定位 + ordered Commands。
    *
    * <p><b>NEW_SESSION</b>：调用方预分配 {@code sessionId}/{@code threadId}，在同一事务内插入 Session + ROOT +
    * Thread（revision 0 / nextCommandSequence 1）+ preflight + Commands（sequence 从 1 起）+ THREAD
-   * Work，最后 revision/next sequence 原子推进；任一步失败整个回滚。以 client threadId 做 materialization replay：同 hash
-   * + 同 Session 精确重放（返回现有接受事实，不写任何行），不同 hash 冲突为 {@link
+   * Work，最后 revision/next sequence 原子推进；任一步失败整个回滚。以 client threadId 做 materialization replay：命中现有
+   * Thread 后先按 immutable sessionId KEY SHARE Session、再锁 Thread 复核（禁止混合 unlocked snapshot）；同 hash +
+   * 同 Session 精确重放（返回现有接受事实，不写任何行），不同 hash 冲突为 {@link
    * HarnessRuntimeConflictException.Reason#MATERIALIZATION_ID_REUSED}。
    *
-   * <p><b>ENTRY</b>：锁既有 Session、验证 start Entry 属于该 Session、预分配 {@code threadId}，插入 Thread +
-   * preflight + Commands + Work；不复制 Entry（新 Thread head 直接指向 start Entry）。materialization replay
-   * 语义与 NEW_SESSION 相同。
+   * <p><b>ENTRY</b>：<b>KEY SHARE</b> 锁既有 Session（不串行化同 Session 的 sibling materialization）、验证 start
+   * Entry 属于该 Session、预分配 {@code threadId}，插入 Thread + preflight + Commands + Work；不复制 Entry（新
+   * Thread head 直接指向 start Entry）。materialization replay 语义与 NEW_SESSION 相同。
    *
    * <p><b>THREAD</b>：先读 immutable {@code thread.sessionId} 并 KEY SHARE Session，再锁 Thread 复核；exact
    * ordered replay 查找必须先于任何 cursor/preflight admission。全新 batch 要求精确的 expected head + next sequence
@@ -161,23 +165,26 @@ public final class HarnessRuntime {
    * Work。
    *
    * <p>初始（NEW_SESSION/ENTRY）batch 必须以恰一条 user-like message 结尾，允许固定顺序 SET_* 前缀，且只有初始 target 可在前缀携带
-   * SYSTEM CUSTOM_MESSAGE；THREAD 允许产品用户 batch（禁止 SYSTEM CUSTOM_MESSAGE）或恰一条 SYSTEM CUSTOM_MESSAGE
-   * steering。
+   * SYSTEM CUSTOM_MESSAGE；THREAD 允许产品用户 batch（禁止 SYSTEM CUSTOM_MESSAGE，<b>恰一条</b>末尾 user-like）或恰一条
+   * SYSTEM CUSTOM_MESSAGE steering。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException}。
    */
-  public AcceptCommandsResult acceptCommands(
+  public AcceptedCommands acceptCommands(
       AcceptCommandsCommand command, AcceptancePreflight preflight) {
     Objects.requireNonNull(command, "command");
     Objects.requireNonNull(preflight, "preflight");
+    List<NewThreadCommand> commands = command.commands();
     return switch (command.target()) {
-      case AcceptCommandsTarget.NewSession target -> acceptNewSession(target, preflight);
-      case AcceptCommandsTarget.Entry target -> acceptEntry(target, preflight);
-      case AcceptCommandsTarget.Thread target -> acceptOnThread(target, preflight);
+      case AcceptCommandsTarget.NewSession target -> acceptNewSession(target, commands, preflight);
+      case AcceptCommandsTarget.Entry target -> acceptEntry(target, commands, preflight);
+      case AcceptCommandsTarget.Thread target -> acceptOnThread(target, commands, preflight);
     };
   }
 
-  private AcceptCommandsResult acceptNewSession(
-      AcceptCommandsTarget.NewSession target, AcceptancePreflight preflight) {
-    validateBatchShape(target, target.commands());
+  private AcceptedCommands acceptNewSession(
+      AcceptCommandsTarget.NewSession target,
+      List<NewThreadCommand> commands,
+      AcceptancePreflight preflight) {
+    validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
           String materializationHash =
@@ -187,11 +194,11 @@ public final class HarnessRuntime {
                   target.rootSettings(),
                   target.subagentContext(),
                   target.yoloEnabled(),
-                  target.commands());
+                  commands);
           ThreadState existing = tx.findThread(target.threadId()).orElse(null);
           if (existing != null) {
             return replayInitial(
-                tx, target.sessionId(), target.threadId(), existing, materializationHash);
+                tx, target.sessionId(), target.threadId(), existing, commands, materializationHash);
           }
           Instant now = clock.instant();
           tx.insertSession(new Session(target.sessionId(), now));
@@ -215,16 +222,31 @@ public final class HarnessRuntime {
                   now,
                   now);
           tx.insertThread(thread);
-          return acceptNewCommandsOnThread(tx, thread, target.commands(), preflight, now);
+          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
         });
   }
 
-  private AcceptCommandsResult acceptEntry(
-      AcceptCommandsTarget.Entry target, AcceptancePreflight preflight) {
-    validateBatchShape(target, target.commands());
+  private AcceptedCommands acceptEntry(
+      AcceptCommandsTarget.Entry target,
+      List<NewThreadCommand> commands,
+      AcceptancePreflight preflight) {
+    validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
-          tx.lockSessionForUpdate(target.sessionId())
+          ThreadState existing = tx.findThread(target.threadId()).orElse(null);
+          if (existing != null) {
+            String materializationHash =
+                MaterializationHash.forEntry(
+                    target.sessionId(),
+                    target.startEntryId(),
+                    target.threadId(),
+                    target.yoloEnabled(),
+                    commands);
+            return replayInitial(
+                tx, target.sessionId(), target.threadId(), existing, commands, materializationHash);
+          }
+          // ENTRY 新建路径用 KEY SHARE：不串行化同 Session 的 sibling materialization。
+          tx.lockSessionForKeyShare(target.sessionId())
               .orElseThrow(
                   () ->
                       new HarnessRuntimeNotFoundException(
@@ -248,12 +270,7 @@ public final class HarnessRuntime {
                   target.startEntryId(),
                   target.threadId(),
                   target.yoloEnabled(),
-                  target.commands());
-          ThreadState existing = tx.findThread(target.threadId()).orElse(null);
-          if (existing != null) {
-            return replayInitial(
-                tx, target.sessionId(), target.threadId(), existing, materializationHash);
-          }
+                  commands);
           Instant now = clock.instant();
           ThreadState thread =
               new ThreadState(
@@ -267,12 +284,14 @@ public final class HarnessRuntime {
                   now,
                   now);
           tx.insertThread(thread);
-          return acceptNewCommandsOnThread(tx, thread, target.commands(), preflight, now);
+          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
         });
   }
 
-  private AcceptCommandsResult acceptOnThread(
-      AcceptCommandsTarget.Thread target, AcceptancePreflight preflight) {
+  private AcceptedCommands acceptOnThread(
+      AcceptCommandsTarget.Thread target,
+      List<NewThreadCommand> commands,
+      AcceptancePreflight preflight) {
     return store.transaction(
         tx -> {
           ThreadState immutable =
@@ -294,8 +313,8 @@ public final class HarnessRuntime {
                           new HarnessRuntimeNotFoundException(
                               "thread " + target.threadId() + " does not exist"));
           // exact replay 查找必须先于 cursor/preflight admission。
-          List<Optional<ThreadCommand>> existing = new ArrayList<>(target.commands().size());
-          for (NewThreadCommand request : target.commands()) {
+          List<Optional<ThreadCommand>> existing = new ArrayList<>(commands.size());
+          for (NewThreadCommand request : commands) {
             existing.add(tx.findCommandByClientId(target.threadId(), request.clientCommandId()));
           }
           long present = existing.stream().filter(Optional::isPresent).count();
@@ -311,23 +330,29 @@ public final class HarnessRuntime {
                     + " commands");
           }
           if (present == existing.size()) {
-            return replayThreadBatch(target, thread, existing);
+            return replayThreadBatch(tx, target, commands, thread, existing);
           }
-          validateThreadBatchAdmission(target, tx, thread);
-          validateBatchShape(target, target.commands());
+          validateThreadBatchAdmission(target, commands, tx, thread);
+          validateBatchShape(target, commands);
           Instant now = clock.instant();
-          return acceptNewCommandsOnThread(tx, thread, target.commands(), preflight, now);
+          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
         });
   }
 
   /** 全新 batch 的共性写入：preflight、插入 Commands、推进 revision/next sequence、请求 THREAD Work。 */
-  private static AcceptCommandsResult acceptNewCommandsOnThread(
+  private static AcceptedCommands acceptNewCommandsOnThread(
       HarnessStore.Transaction tx,
       ThreadState thread,
       List<NewThreadCommand> requests,
       AcceptancePreflight preflight,
       Instant now) {
-    List<NewThreadCommand> prepared = preflight.prepare(tx, thread.sessionId(), requests);
+    Session session =
+        tx.findSession(thread.sessionId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "session " + thread.sessionId() + " disappeared while thread existed"));
+    List<NewThreadCommand> prepared = preflight.prepare(tx, session, requests);
     requirePreflightShape(requests, prepared);
     List<ThreadCommand> inserted = new ArrayList<>(prepared.size());
     long nextSequence = thread.nextCommandSequence();
@@ -349,41 +374,113 @@ public final class HarnessRuntime {
     ThreadState advanced = thread.reserveCommandSequences(prepared.size(), now);
     tx.updateThread(advanced);
     tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
-    return new AcceptCommandsResult(
-        thread.sessionId(), thread.id(), advanced, List.copyOf(inserted), false);
+    return new AcceptedCommands(
+        session,
+        tx.loadEntryPath(advanced.headEntryId()).root(),
+        advanced,
+        List.copyOf(inserted),
+        false);
   }
 
-  /** NEW_SESSION / ENTRY：同 hash + 同 Session 的 client threadId 精确 replay。 */
-  private static AcceptCommandsResult replayInitial(
+  /**
+   * NEW_SESSION / ENTRY：同 hash + 同 Session 的 client threadId 精确 replay。
+   *
+   * <p>{@code immutable} 快照只用于在上锁前定位 Session；随后按规范锁序 KEY SHARE Session -&gt; FOR UPDATE Thread
+   * 复核后返回当前 projection（禁止混合 unlocked snapshot）。只按本请求 clientCommandId 顺序重放原始初始命令，验证 requestHash 相等且
+   * sequence 从 1 连续，绝不返回该 Thread 后续批次的历史命令。
+   */
+  private static AcceptedCommands replayInitial(
       HarnessStore.Transaction tx,
       UUID sessionId,
       UUID threadId,
-      ThreadState existing,
+      ThreadState immutable,
+      List<NewThreadCommand> requests,
       String materializationHash) {
-    if (!existing.sessionId().equals(sessionId)
-        || !existing.materializationHash().equals(materializationHash)) {
+    if (!immutable.sessionId().equals(sessionId)
+        || !immutable.materializationHash().equals(materializationHash)) {
       throw conflict(
           HarnessRuntimeConflictException.Reason.MATERIALIZATION_ID_REUSED,
           "thread "
               + threadId
               + " is already materialized with a different session/hash (session "
-              + existing.sessionId()
+              + immutable.sessionId()
               + ")");
     }
-    return new AcceptCommandsResult(
-        sessionId, threadId, existing, tx.loadCommandsByThread(threadId), true);
+    tx.lockSessionForKeyShare(immutable.sessionId())
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "session " + immutable.sessionId() + " disappeared while thread existed"));
+    ThreadState thread =
+        tx.lockThread(threadId)
+            .orElseThrow(
+                () ->
+                    new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
+    if (!thread.sessionId().equals(sessionId)
+        || !thread.materializationHash().equals(materializationHash)) {
+      throw conflict(
+          HarnessRuntimeConflictException.Reason.MATERIALIZATION_ID_REUSED,
+          "thread "
+              + threadId
+              + " is already materialized with a different session/hash (session "
+              + thread.sessionId()
+              + ")");
+    }
+    List<ThreadCommand> ordered = new ArrayList<>(requests.size());
+    for (NewThreadCommand request : requests) {
+      ThreadCommand existing =
+          tx.findCommandByClientId(threadId, request.clientCommandId())
+              .orElseThrow(
+                  () ->
+                      conflict(
+                          HarnessRuntimeConflictException.Reason.PARTIAL_COMMAND_REPLAY,
+                          "initial batch on thread "
+                              + threadId
+                              + " is missing clientCommandId "
+                              + request.clientCommandId()));
+      if (!existing.requestHash().equals(request.requestHash())) {
+        throw conflict(
+            HarnessRuntimeConflictException.Reason.COMMAND_ID_REUSED,
+            "clientCommandId "
+                + request.clientCommandId()
+                + " is reused with a different request hash on thread "
+                + threadId);
+      }
+      ordered.add(existing);
+    }
+    for (int i = 0; i < ordered.size(); i++) {
+      if (ordered.get(i).sequence() != i + 1L) {
+        throw conflict(
+            HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH,
+            "initial commands on thread "
+                + threadId
+                + " must start at sequence 1 and be contiguous in the request order");
+      }
+    }
+    Session session =
+        tx.findSession(sessionId)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "session " + sessionId + " disappeared while thread existed"));
+    return new AcceptedCommands(
+        session, tx.loadEntryPath(thread.headEntryId()).root(), thread, List.copyOf(ordered), true);
   }
 
   /**
    * Orderly command-set replay：先比较 requestHash（独立于 durable payload 形态），再按请求顺序校验 sequence 连续且首
    * sequence 等于请求的 expected next sequence；重放返回当前 Thread projection，不写任何行。
    */
-  private static AcceptCommandsResult replayThreadBatch(
-      AcceptCommandsTarget.Thread target, ThreadState thread, List<Optional<ThreadCommand>> found) {
+  private static AcceptedCommands replayThreadBatch(
+      HarnessStore.Transaction tx,
+      AcceptCommandsTarget.Thread target,
+      List<NewThreadCommand> commands,
+      ThreadState thread,
+      List<Optional<ThreadCommand>> found) {
     List<ThreadCommand> ordered = new ArrayList<>(found.size());
     for (int i = 0; i < found.size(); i++) {
       ThreadCommand existing = found.get(i).orElseThrow();
-      NewThreadCommand request = target.commands().get(i);
+      NewThreadCommand request = commands.get(i);
       if (!existing.requestHash().equals(request.requestHash())) {
         throw conflict(
             HarnessRuntimeConflictException.Reason.COMMAND_ID_REUSED,
@@ -414,8 +511,14 @@ public final class HarnessRuntime {
                 + " are not contiguous in the request order");
       }
     }
-    return new AcceptCommandsResult(
-        thread.sessionId(), thread.id(), thread, List.copyOf(ordered), true);
+    Session session =
+        tx.findSession(thread.sessionId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "session " + thread.sessionId() + " disappeared while thread existed"));
+    return new AcceptedCommands(
+        session, tx.loadEntryPath(thread.headEntryId()).root(), thread, List.copyOf(ordered), true);
   }
 
   private static void requirePreflightShape(
@@ -447,7 +550,10 @@ public final class HarnessRuntime {
    * preflight / upload 消费之前确定性拒绝。
    */
   private static void validateThreadBatchAdmission(
-      AcceptCommandsTarget.Thread target, HarnessStore.Transaction tx, ThreadState thread) {
+      AcceptCommandsTarget.Thread target,
+      List<NewThreadCommand> commands,
+      HarnessStore.Transaction tx,
+      ThreadState thread) {
     if (!thread.headEntryId().equals(target.expectedHeadEntryId())
         || thread.nextCommandSequence() != target.expectedNextCommandSequence()) {
       throw conflict(
@@ -456,7 +562,7 @@ public final class HarnessRuntime {
               + thread.id()
               + " head/next command sequence does not match the batch expectation");
     }
-    if (containsSetEnvironment(target.commands())) {
+    if (containsSetEnvironment(commands)) {
       requireQuiescentForSetEnvironment(tx, thread);
     }
   }
@@ -502,9 +608,10 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 命令 batch 的 shape admission：SET_* 必须以固定顺序、至多一次且全部出现在消息之前；初始 target 必须恰有一条 user-like message
-   * 结尾（SYSTEM CUSTOM_MESSAGE 只允许在前缀）；THREAD 要么是恰一条 SYSTEM CUSTOM_MESSAGE steering，要么是 不含 SYSTEM
-   * CUSTOM_MESSAGE 的用户 batch。
+   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL -&gt;
+   * SET_ACTIVE_TOOLS）、至多一次且全部出现在消息之前；初始 target 必须恰有一条 user-like message 结尾（SYSTEM CUSTOM_MESSAGE
+   * 只允许在前缀）；THREAD 要么是恰一条 SYSTEM CUSTOM_MESSAGE steering，要么是不含 SYSTEM CUSTOM_MESSAGE、<b>恰有一条</b>末尾
+   * user-like 的用户 batch。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException} 而非业务冲突。
    */
   private static void validateBatchShape(
       AcceptCommandsTarget target, List<NewThreadCommand> commands) {
@@ -551,8 +658,10 @@ public final class HarnessRuntime {
       }
       return;
     }
-    if (userLikeCount == 0 || !isUserLike(commands.get(commands.size() - 1))) {
-      throw invalidBatch(target, "thread user batches must end with a user-like message");
+    // THREAD user batch：恰一条末尾 user-like（不是至少一条）。
+    if (userLikeCount != 1 || !isUserLike(commands.get(commands.size() - 1))) {
+      throw invalidBatch(
+          target, "thread user batches must contain exactly one trailing user-like message");
     }
   }
 
@@ -564,11 +673,9 @@ public final class HarnessRuntime {
         && custom.message().role() == AgentMessageRole.USER;
   }
 
-  private static HarnessRuntimeConflictException invalidBatch(
+  private static IllegalArgumentException invalidBatch(
       AcceptCommandsTarget target, String message) {
-    return new HarnessRuntimeConflictException(
-        HarnessRuntimeConflictException.Reason.INVALID_COMMAND_BATCH,
-        target.getClass().getSimpleName() + " batch: " + message);
+    return new IllegalArgumentException(target.getClass().getSimpleName() + " batch: " + message);
   }
 
   /** 按 Thread + clientCommandId 读取 durable command，用于应用层精确重放校验。 */

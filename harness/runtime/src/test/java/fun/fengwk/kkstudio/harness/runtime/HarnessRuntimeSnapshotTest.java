@@ -146,15 +146,16 @@ class HarnessRuntimeSnapshotTest {
   @Test
   void queuedCommandsAreReturnedImmutableAndInSequence() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    // THREAD user batch 只能含恰一条 user-like：两条消息分两次接受。
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                baseline.threadId(),
-                baseline.rootEntryId(),
-                1,
-                List.of(
-                    userMessageCommand(TestIds.id(1), "a"),
-                    userMessageCommand(TestIds.id(2), "b")))),
+            new AcceptCommandsTarget.Thread(baseline.threadId(), baseline.rootEntryId(), 1),
+            List.of(userMessageCommand(TestIds.id(1), "a"))),
+        AcceptancePreflight.IDENTITY);
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(baseline.threadId(), baseline.rootEntryId(), 2),
+            List.of(userMessageCommand(TestIds.id(2), "b"))),
         AcceptancePreflight.IDENTITY);
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(
@@ -206,12 +207,10 @@ class HarnessRuntimeSnapshotTest {
                     .acceptCommands(
                         new AcceptCommandsCommand(
                             new AcceptCommandsTarget.Thread(
-                                baseline.threadId(),
-                                baseline.rootEntryId(),
-                                1,
-                                List.of(userMessageCommand(TestIds.id(1), "a")))),
+                                baseline.threadId(), baseline.rootEntryId(), 1),
+                            List.of(userMessageCommand(TestIds.id(1), "a"))),
                         AcceptancePreflight.IDENTITY)
-                    .commands()
+                    .acceptedCommands()
                     .getFirst();
               });
       snapshotFuture.get();
