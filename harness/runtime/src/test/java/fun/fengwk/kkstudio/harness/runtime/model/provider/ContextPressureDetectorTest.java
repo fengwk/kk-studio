@@ -16,7 +16,7 @@ import java.util.List;
  */
 class ContextPressureDetectorTest {
 
-  /** 意图：facts 是错误/响应的不可变价值对象，除 providerType 外字段可空，contextWindow 非空必须为正。 */
+  /** 意图：facts 是错误/响应的不可变价值对象，除 providerType 外字段可空，contextWindow 非空必须为正、httpStatus 必须在 100..599。 */
   @Test
   void enforcesFactsInvariants() {
     assertThrows(
@@ -31,23 +31,61 @@ class ContextPressureDetectorTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new ContextPressureFacts(ProviderType.OPENAI, 99, null, null, null, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ContextPressureFacts(ProviderType.OPENAI, 600, null, null, null, null, null));
   }
 
-  /** 意图：rate limit / throttling 永远不是 context pressure，即使消息同时含 context 字样或带 context code。 */
+  /** 意图：rate limit / throttling 永远不是 context pressure，即使消息带 context code 或同时在 429 状态。 */
   @Test
   void rateLimitAndThrottlingAreNeverContextPressure() {
-    assertFalse(detect(errorFacts(429, "context_length_exceeded", "too many requests")));
-    assertFalse(detect(errorFacts(null, null, "429 max retries: maximum context length exceeded")));
-    assertFalse(detect(errorFacts(null, null, "rate limit reached, reduce your pace")));
-    assertFalse(detect(errorFacts(null, null, "request throttled by upstream gateway")));
-    assertFalse(detect(errorFacts(null, "request_too_large", "too many requests, retry later")));
+    assertFalse(
+        detect(
+            errorFacts(ProviderType.OPENAI, 429, "context_length_exceeded", "too many requests")));
+    assertFalse(
+        detect(
+            errorFacts(
+                ProviderType.OPENAI,
+                null,
+                null,
+                "429 max retries: maximum context length exceeded")));
+    assertFalse(
+        detect(
+            errorFacts(ProviderType.OPENAI, null, null, "rate limit reached, reduce your pace")));
+    assertFalse(
+        detect(
+            errorFacts(ProviderType.OPENAI, null, null, "request throttled by upstream gateway")));
+    assertFalse(
+        detect(
+            errorFacts(
+                ProviderType.OPENAI, null, "request_too_large", "too many requests, retry later")));
   }
 
-  /** 意图：HTTP 413 是确定的 context wall，无论过期消息是否另有说明。 */
+  /** 意图：HTTP status 数字只在独立 token 上匹配；token 计数中的 429/413 子串（如 142900/141300）不得误判 status。 */
+  @Test
+  void statusNumbersRequireHttpWordBoundaries() {
+    assertFalse(
+        detect(errorFacts(ProviderType.OPENAI, null, null, "processed 142900 tokens this minute")));
+    assertFalse(
+        detect(
+            errorFacts(
+                ProviderType.OPENAI, null, null, "141300 tokens were counted for the prompt")));
+    assertFalse(
+        detect(errorFacts(ProviderType.OPENAI, null, null, "HTTP 200 OK, no errors shown")));
+    // 整数 413/429 独立出现仍是 status 语义：413 为 context wall，429 为 rate limit（永远非 context）。
+    assertTrue(
+        detect(errorFacts(ProviderType.OPENAI, null, null, "HTTP 413 payload exceeds limit")));
+    assertFalse(detect(errorFacts(ProviderType.OPENAI, null, null, "HTTP 429 too many requests")));
+  }
+
+  /** 意图：HTTP 413（typed status 或消息独立 413 token）是确定的 context wall。 */
   @Test
   void http413IsContextPressure() {
-    assertTrue(detect(errorFacts(413, null, "Request Entity Too Large")));
-    assertTrue(detect(errorFacts(null, null, "HTTP 413 average token usage is too high")));
+    assertTrue(detect(errorFacts(ProviderType.OPENAI, 413, null, "Request Entity Too Large")));
+    assertTrue(
+        detect(
+            errorFacts(
+                ProviderType.OPENAI, null, null, "HTTP 413 average token usage is too high")));
   }
 
   /** 意图：400+ 显式 context code/type 一律判定为 context pressure。 */
@@ -59,8 +97,8 @@ class ContextPressureDetectorTest {
             "request_too_large",
             "model_context_window_exceeded",
             "context_window_exceeded")) {
-      assertTrue(detect(errorFacts(400, code, null)), code);
-      assertTrue(detect(errorFacts(null, null, "body code=" + code)), code);
+      assertTrue(detect(errorFacts(ProviderType.OPENAI, 400, code, null)), code);
+      assertTrue(detect(errorFacts(ProviderType.OPENAI, null, null, "body code=" + code)), code);
     }
   }
 
@@ -69,34 +107,118 @@ class ContextPressureDetectorTest {
    */
   @Test
   void plain400IsNotContextPressure() {
-    assertFalse(detect(errorFacts(400, null, "Bad Request")));
-    assertFalse(detect(errorFacts(400, "invalid_request_error", "bad request, fix the payload")));
+    assertFalse(detect(errorFacts(ProviderType.OPENAI, 400, null, "Bad Request")));
+    assertFalse(
+        detect(
+            errorFacts(
+                ProviderType.OPENAI,
+                400,
+                "invalid_request_error",
+                "bad request, fix the payload")));
   }
 
-  /** 意图：Provider 特有消息 pattern 矩阵（case-insensitive、移植 Pi 语义）全部命中。每条对应一个真实厂商的 context 错误文本。 */
+  /**
+   * 意图：Provider 特有消息 pattern 矩阵（case-insensitive、移植 Pi 语义）按 ProviderType 分族全部命中；OpenAI
+   * compatible/MiniMax/Kimi/xAI/Groq/llama.cpp/OpenRouter/Copilot/LM Studio 归 OPENAI 族。
+   */
   @Test
-  void providerSpecificMessagesAreContextPressure() {
-    for (String message :
+  void providerMatrixMessagesAreContextPressure() {
+    for (Object[] row :
         List.of(
-            "Request body: Your prompt is too long for this model", // Anthropic
-            "anthropic error type request_too_large", // Anthropic
-            "Your input exceeds the context window of 128000 tokens", // OpenAI
-            "error code context_length_exceeded", // OpenAI
-            "This model's maximum context length is 128000 tokens", // OpenAI-compatible
-            "Input length (182301) exceeds model's maximum context length (128000)", // OpenAI-compatible
-            "Requested token count exceeds the max tokens limit", // OpenAI-compatible
-            "the input token count (90001) exceeds the maximum number of tokens", // Google
-            "INPUT TOKEN COUNT 90001 EXCEEDS THE MAXIMUM ALLOWED", // Google (case-insensitive)
-            "Your request exceeds the maximum prompt length of 60000 tokens", // xAI
-            "prompt is too large, reduce the length of the messages or completion", // Groq
-            "request past the available context size of llama server", // llama.cpp
-            "the number of tokens to keep (90000) is not enough, greater than context length", // LM
-            // Studio
-            "prompt token count exceeds limit configured for Copilot", // GitHub Copilot
-            "context window exceeds limit configured for the model", // MiniMax
-            "request exceeded model token limit")) { // Kimi
-      assertTrue(detect(errorFacts(null, null, message)), message);
+            new Object[] {
+              ProviderType.ANTHROPIC, "Request body: Your prompt is too long for this model"
+            },
+            new Object[] {
+              ProviderType.OPENAI, "Your input exceeds the context window of 128000 tokens"
+            },
+            new Object[] {
+              ProviderType.OPENAI, "This model's maximum context length is 128000 tokens"
+            },
+            new Object[] {
+              ProviderType.OPENAI,
+              "Input length (182301) exceeds model's maximum context length (128000)"
+            },
+            new Object[] {
+              ProviderType.OPENAI, "Requested token count (182301) exceeds the max tokens limit"
+            },
+            new Object[] {
+              ProviderType.GOOGLE, "the input token count (90001) exceeds the maximum allowed"
+            },
+            new Object[] {
+              ProviderType.GOOGLE, "INPUT TOKEN COUNT 90001 EXCEEDS THE MAXIMUM ALLOWED"
+            },
+            new Object[] {
+              ProviderType.OPENAI, "Your request exceeds the maximum prompt length of 60000 tokens"
+            },
+            new Object[] {
+              ProviderType.OPENAI,
+              "prompt is too large, reduce the length of the messages or completion"
+            },
+            new Object[] {
+              ProviderType.OPENAI, "request past the available context size of llama server"
+            },
+            new Object[] {
+              ProviderType.OPENAI,
+              "the number of tokens to keep (90000) is not enough, greater than context length"
+            },
+            new Object[] {
+              ProviderType.OPENAI, "prompt token count exceeds limit configured for Copilot"
+            },
+            new Object[] {
+              ProviderType.OPENAI, "context window exceeds limit configured for the model"
+            },
+            new Object[] {ProviderType.OPENAI, "request exceeded model token limit"},
+            new Object[] {ProviderType.OPENAI, "error code request_too_large in body"})) {
+      assertTrue(
+          detect(errorFacts((ProviderType) row[0], null, null, (String) row[1])),
+          String.valueOf(row[1]));
     }
+  }
+
+  /** 意图：compound pattern 需要全部 markers 同时命中，任一宽泛单一子串单独出现不触发；ProviderType 分族隔离且共享权威 code。 */
+  @Test
+  void compoundPatternsRequireAllMarkersAndFamiliesSeparate() {
+    // Google compound 需要 input token count + exceeds + maximum 同时出现（旧实现只拆单独子串会误判）。
+    assertFalse(
+        detect(
+            errorFacts(ProviderType.GOOGLE, null, null, "the input token count was 90000 tokens")));
+    assertFalse(
+        detect(
+            errorFacts(ProviderType.GOOGLE, null, null, "exceeds maximum allowed by this model")));
+    assertTrue(
+        detect(
+            errorFacts(
+                ProviderType.GOOGLE,
+                null,
+                null,
+                "the input token count (90001) exceeds the maximum allowed")));
+    // LM Studio compound 需要 tokens to keep + greater than + context length 同时出现。
+    assertFalse(
+        detect(
+            errorFacts(
+                ProviderType.OPENAI, null, null, "the number of tokens to keep is fixed at 4096")));
+    assertFalse(
+        detect(
+            errorFacts(ProviderType.OPENAI, null, null, "greater than the context length budget")));
+    assertTrue(
+        detect(
+            errorFacts(
+                ProviderType.OPENAI,
+                null,
+                null,
+                "tokens to keep (90000) greater than context length")));
+    // OpenAI 族不接受 Anthropic 专有 pattern，反之亦然；权威 code 在所有族共享。
+    assertFalse(
+        detect(
+            errorFacts(
+                ProviderType.ANTHROPIC,
+                null,
+                null,
+                "This model's maximum context length is 1000")));
+    assertFalse(detect(errorFacts(ProviderType.OPENAI, null, null, "Your prompt is too long")));
+    assertTrue(
+        detect(errorFacts(ProviderType.OPENAI, null, null, "error: context_length_exceeded")));
+    assertTrue(detect(errorFacts(ProviderType.ANTHROPIC, null, null, "error: request_too_large")));
   }
 
   /** 意图：authoritative usage 的 prompt tokens 达到/超过 window 即 silent context wall；低于 window 不命中。 */
@@ -186,9 +308,9 @@ class ContextPressureDetectorTest {
     return ContextPressureDetector.detect(facts);
   }
 
-  private static ContextPressureFacts errorFacts(Integer httpStatus, String code, String message) {
-    return new ContextPressureFacts(
-        ProviderType.OPENAI, httpStatus, code, message, null, null, null);
+  private static ContextPressureFacts errorFacts(
+      ProviderType providerType, Integer httpStatus, String code, String message) {
+    return new ContextPressureFacts(providerType, httpStatus, code, message, null, null, null);
   }
 
   private static ContextPressureFacts responseFacts(
