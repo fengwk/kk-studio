@@ -167,6 +167,27 @@ class HarnessRuntimeApiRecordsTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new AcceptedCommands(session, nonRoot, thread, List.of(inserted), false));
+    // thread 必须属于结果 session。
+    ThreadState foreignSessionThread =
+        HarnessRuntimeTestSupport.thread(TestIds.id(3), TestIds.id(51), TestIds.id(2));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AcceptedCommands(session, root, foreignSessionThread, List.of(inserted), false));
+    // acceptedCommands sequence 必须严格递增。
+    ThreadCommand later =
+        new ThreadCommand(
+            thread.id(),
+            5,
+            userMessagePayload("later"),
+            TestIds.id(2),
+            ThreadCommandPayloadJsonCodec.requestHash(userMessagePayload("later")),
+            null,
+            null,
+            null,
+            T0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AcceptedCommands(session, root, thread, List.of(later, inserted), false));
   }
 
   /** CancelledUserMessage：sequence 必须为正，内容防御性拷贝。 */
