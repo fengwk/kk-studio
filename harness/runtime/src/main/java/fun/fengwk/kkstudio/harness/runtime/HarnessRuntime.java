@@ -332,7 +332,7 @@ public final class HarnessRuntime {
           if (present == existing.size()) {
             return replayThreadBatch(tx, target, commands, thread, existing);
           }
-          validateThreadBatchAdmission(target, commands, tx, thread);
+          validateThreadBatchAdmission(target, thread);
           validateBatchShape(target, commands);
           Instant now = clock.instant();
           return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
@@ -546,14 +546,12 @@ public final class HarnessRuntime {
   }
 
   /**
-   * THREAD 全新 batch 的 admission：stale cursor（head / next sequence 不匹配）与 SET_ENVIRONMENT 非静止都必须在任何
-   * preflight / upload 消费之前确定性拒绝。
+   * THREAD 全新 batch 的 admission：stale cursor（head / next sequence 不匹配）必须确定性拒绝。SET_*（含
+   * SET_ENVIRONMENT）只入队、由 Reducer 于下一个 INPUT 边界收割，不参与 admission——即使 Thread 处于 live Model / Tool 或 有
+   * queued 消息 / THREAD Work 也照常接受。
    */
   private static void validateThreadBatchAdmission(
-      AcceptCommandsTarget.Thread target,
-      List<NewThreadCommand> commands,
-      HarnessStore.Transaction tx,
-      ThreadState thread) {
+      AcceptCommandsTarget.Thread target, ThreadState thread) {
     if (!thread.headEntryId().equals(target.expectedHeadEntryId())
         || thread.nextCommandSequence() != target.expectedNextCommandSequence()) {
       throw conflict(
@@ -561,49 +559,6 @@ public final class HarnessRuntime {
           "thread "
               + thread.id()
               + " head/next command sequence does not match the batch expectation");
-    }
-    if (containsSetEnvironment(commands)) {
-      requireQuiescentForSetEnvironment(tx, thread);
-    }
-  }
-
-  private static boolean containsSetEnvironment(List<NewThreadCommand> commands) {
-    for (NewThreadCommand command : commands) {
-      if (command.payload().type() == ThreadCommandType.SET_ENVIRONMENT) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * SET_ENVIRONMENT 在 pre-state 上的 admission：无已入队 USER/CUSTOM command，共享的已锁定分类器结果必须为
-   * IDLE_OR_HISTORICAL，且 THREAD Work 行必须完全不存在（不仅仅是 unleased），从而 fence 掉 speculative
-   * Resolver/runnable mailbox。锁序：Thread -&gt; existing Commands -&gt; applicable Model -&gt; Tool
-   * siblings -&gt; Work。
-   */
-  private static void requireQuiescentForSetEnvironment(
-      HarnessStore.Transaction tx, ThreadState thread) {
-    for (ThreadCommand queued : tx.loadQueuedCommands(thread.id())) {
-      if (queued.type().isMessage()) {
-        throw conflict(
-            HarnessRuntimeConflictException.Reason.THREAD_NOT_QUIESCENT,
-            "SET_ENVIRONMENT on thread " + thread.id() + " requires no queued USER/CUSTOM message");
-      }
-    }
-    LockedThreadContext locked = ThreadContextLock.load(tx, thread);
-    if (!(locked.context() instanceof ThreadContext.IdleOrHistorical)) {
-      throw conflict(
-          HarnessRuntimeConflictException.Reason.THREAD_NOT_QUIESCENT,
-          "SET_ENVIRONMENT on thread "
-              + thread.id()
-              + " requires an idle thread, got "
-              + contextName(locked.context()));
-    }
-    if (tx.findWork(new WorkTarget(WorkTargetType.THREAD, thread.id())).isPresent()) {
-      throw conflict(
-          HarnessRuntimeConflictException.Reason.THREAD_NOT_QUIESCENT,
-          "SET_ENVIRONMENT on thread " + thread.id() + " requires no THREAD work row");
     }
   }
 

@@ -2,12 +2,11 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedQueuedCommand;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadAt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemCustomMessageCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,6 +16,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -24,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -127,6 +134,55 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(1L, threadState.revision());
   }
 
+  /**
+   * preflight 把 raw ATTACHMENT 物化为 durable RESOURCE 后，durable command 的 requestHash 仍是 raw hash： 相同
+   * raw 请求重试能按 clientCommandId + requestHash 命中 ordered replay，且 durable payload hash 与 raw 不同。
+   */
+  @Test
+  void materializedPreflightReplayMatchesRawRequestHash() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    NewThreadCommand raw =
+        new NewThreadCommand(
+            new UserMessageCommandPayload(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(
+                        new AttachmentMessageContent(TestIds.id(77)),
+                        new TextMessageContent("please summarize")))),
+            TestIds.id(1));
+    // 模拟 attachment 物化：ATTACHMENT -> RESOURCE，保留原始幂等键（下游 core 应对 preflight 使用 withPayload）。
+    NewThreadCommand durable =
+        raw.withPayload(
+            new UserMessageCommandPayload(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(
+                        new ResourceMessageContent(TestIds.id(88), "photo.png", null),
+                        new TextMessageContent("please summarize")))));
+    AcceptancePreflight materialize = (tx, session, commands) -> List.of(durable);
+
+    AcceptedCommands first =
+        runtime.acceptCommands(
+            thread(baseline.threadId(), baseline.rootEntryId(), 1, List.of(raw)), materialize);
+    assertFalse(first.replayed());
+    // durable 命令落库：payload 已是 RESOURCE 形态（durable codec 可持久化），requestHash 仍是 raw hash。
+    assertTrue(
+        first.acceptedCommands().getFirst().payload() instanceof UserMessageCommandPayload stored
+            && stored.message().contents().stream()
+                .anyMatch(content -> content instanceof ResourceMessageContent));
+    assertEquals(raw.requestHash(), first.acceptedCommands().getFirst().requestHash());
+
+    // 相同 raw 请求重试：按 clientCommandId + raw requestHash 命中 ordered replay（不调用 preflight）。
+    AcceptedCommands replay =
+        runtime.acceptCommands(
+            thread(baseline.threadId(), baseline.rootEntryId(), 1, List.of(raw)), materialize);
+    assertTrue(replay.replayed());
+    assertEquals(first.acceptedCommands(), replay.acceptedCommands());
+    ThreadState threadState =
+        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    assertEquals(1L, threadState.revision());
+  }
+
   /** replay 校验首 sequence 必须等于 expected next：期望不匹配是 order 冲突。 */
   @Test
   void orderedReplayRequiresFirstSequenceToMatchExpectedNext() {
@@ -196,58 +252,54 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(Reason.COMMAND_ID_REUSED, reused.reason());
   }
 
-  /** SET_ENVIRONMENT 在既有 Thread 上要求静止（无 queued message / 无 THREAD Work 行）。 */
+  /**
+   * SET_ENVIRONMENT 不再有 quiescent admission：live Model / THREAD Work 期间接受 {@code SET_ENVIRONMENT +
+   * 恰一条 user message}，只入队 / 推进 cursor，不改当前 open Turn（SET_* 由 Reducer 于下一个 INPUT 边界收割）。
+   */
   @Test
-  void setEnvironmentRequiresQuiescentThread() {
-    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    NewThreadCommand setEnv =
-        new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(1));
-    // 合法：静止 thread 上 SET_ENVIRONMENT 前缀 + user message。
-    runtime.acceptCommands(
-        thread(
-            baseline.threadId(),
-            baseline.rootEntryId(),
-            1,
-            List.of(setEnv, userMessageCommand(TestIds.id(2), "hi"))),
-        AcceptancePreflight.IDENTITY);
+  void setEnvironmentDuringLiveOrWorkIsAcceptedAndOnlyAdvancesCursor() {
+    // 场景一：live MODEL_ACTIVE（当前 open Turn 在跑）+ THREAD Work 行 —— 旧实现因上下文非 Idle 拒绝。
+    HarnessRuntimeTestSupport.ModelBaseline live = seedModel(store, ModelInvocationStatus.RUNNING);
+    seedThreadWork(store, live.threadId());
+    UUID liveHead =
+        store.transaction(tx -> tx.findThread(live.threadId()).orElseThrow()).headEntryId();
+    AcceptedCommands liveResult =
+        runtime.acceptCommands(
+            thread(
+                live.threadId(),
+                liveHead,
+                1,
+                List.of(
+                    new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(1)),
+                    userMessageCommand(TestIds.id(2), "hi"))),
+            AcceptancePreflight.IDENTITY);
+    assertFalse(liveResult.replayed());
+    assertEquals(
+        List.of(1L, 2L), liveResult.acceptedCommands().stream().map(c -> c.sequence()).toList());
+    // 当前 open Turn 不被修改：head 仍是原 user entry，RUNNING Model 不受影响。
+    ModelInvocation model =
+        store.transaction(tx -> tx.findModelInvocation(live.modelId()).orElseThrow());
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
 
-    // 非法：已有 queued message 时 SET_ENVIRONMENT 被拒绝。
-    HarnessRuntimeTestSupport.Baseline busy = seedBaseline(store);
-    seedQueuedCommand(store, busy.threadId(), 1L, userMessagePayload("x"), TestIds.id(1));
-    HarnessRuntimeConflictException busyError =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () ->
-                runtime.acceptCommands(
-                    thread(
-                        busy.threadId(),
-                        busy.rootEntryId(),
-                        1,
-                        List.of(
-                            new NewThreadCommand(
-                                new SetEnvironmentCommandPayload(null), TestIds.id(2)),
-                            userMessageCommand(TestIds.id(3), "hi"))),
-                    AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.THREAD_NOT_QUIESCENT, busyError.reason());
-
-    // 非法：存在 THREAD Work 行时 SET_ENVIRONMENT 被拒绝。
-    HarnessRuntimeTestSupport.Baseline withWork = seedBaseline(store);
-    seedThreadWork(store, withWork.threadId());
-    HarnessRuntimeConflictException workError =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () ->
-                runtime.acceptCommands(
-                    thread(
-                        withWork.threadId(),
-                        withWork.rootEntryId(),
-                        1,
-                        List.of(
-                            new NewThreadCommand(
-                                new SetEnvironmentCommandPayload(null), TestIds.id(2)),
-                            userMessageCommand(TestIds.id(3), "hi"))),
-                    AcceptancePreflight.IDENTITY));
-    assertEquals(Reason.THREAD_NOT_QUIESCENT, workError.reason());
+    // 场景二：IDLE 但有 THREAD Work 行 —— 旧实现因 Work 行存在拒绝。
+    HarnessRuntimeTestSupport.Baseline idle = seedBaseline(store);
+    seedThreadWork(store, idle.threadId());
+    AcceptedCommands idleResult =
+        runtime.acceptCommands(
+            thread(
+                idle.threadId(),
+                idle.rootEntryId(),
+                1,
+                List.of(
+                    new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(3)),
+                    userMessageCommand(TestIds.id(4), "hi"))),
+            AcceptancePreflight.IDENTITY);
+    assertFalse(idleResult.replayed());
+    // 只入队 + 推进 cursor：revision +1、nextSeq 1->3、head 不变。
+    ThreadState idleThread = store.transaction(tx -> tx.lockThread(idle.threadId()).orElseThrow());
+    assertEquals(idle.rootEntryId(), idleThread.headEntryId());
+    assertEquals(3L, idleThread.nextCommandSequence());
+    assertEquals(1L, idleThread.revision());
   }
 
   /**

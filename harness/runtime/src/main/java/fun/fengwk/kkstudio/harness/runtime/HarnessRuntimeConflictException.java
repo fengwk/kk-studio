@@ -36,8 +36,6 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     COMMAND_REPLAY_ORDER_MISMATCH,
     /** NEW_SESSION / ENTRY：预分配的 threadId 已被不同 materialization（不同 hash 或不同 Session）占用。 */
     MATERIALIZATION_ID_REUSED,
-    /** Thread 存在 live work、已入队输入 commands 或 THREAD Work 行，必须先 quiesce。 */
-    THREAD_NOT_QUIESCENT,
     /** Thread 存在等待原子 apply 的 terminal Model/Tool result。 */
     TERMINAL_APPLY_PENDING,
     /** Stop 幂等键已被非 Stop 的关闭操作使用过。 */

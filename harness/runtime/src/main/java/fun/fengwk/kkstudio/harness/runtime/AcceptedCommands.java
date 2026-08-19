@@ -32,17 +32,26 @@ public record AcceptedCommands(
     if (acceptedCommands.isEmpty()) {
       throw new IllegalArgumentException("acceptedCommands must not be empty");
     }
+    if (!thread.sessionId().equals(session.id())) {
+      throw new IllegalArgumentException("thread must belong to the result session");
+    }
     if (!rootEntry.sessionId().equals(session.id())) {
       throw new IllegalArgumentException("rootEntry must belong to the result session");
     }
     if (!(rootEntry.payload() instanceof RootPayload)) {
       throw new IllegalArgumentException("rootEntry must be the session ROOT entry");
     }
+    long previousSequence = 0L;
     for (ThreadCommand accepted : acceptedCommands) {
       if (!accepted.threadId().equals(thread.id())) {
         throw new IllegalArgumentException(
             "acceptedCommands must all belong to the result thread: " + accepted.threadId());
       }
+      if (accepted.sequence() <= previousSequence) {
+        throw new IllegalArgumentException(
+            "acceptedCommands sequences must be strictly increasing");
+      }
+      previousSequence = accepted.sequence();
     }
   }
 }
