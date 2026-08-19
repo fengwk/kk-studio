@@ -16,8 +16,8 @@
 | 模块 | 角色 |
 | --- | --- |
 | `share/.../ComfyuiWorkflow*.java` | HTTP / DTO 边界 DTO；卡片 `id` 在边界以 canonical UUID string 形式暴露，持久层内部为 `uuid` |
-| `core/comfyui/ComfyuiConfiguration` | Spring 配置：`ComfyUIClient` bean 仅在 `kk-studio.comfyui.enabled=true` 时创建 |
-| `core/comfyui/ComfyuiProperties` | `kk-studio.comfyui.*` 配置属性 |
+| `core/comfyui/ComfyuiConfiguration` | Spring 配置：按启动时 SystemSettings 快照决定是否创建 `ComfyUIClient` |
+| `core/comfyui/ComfyuiProperties` | 只承载部署秘密 `kk-studio.comfyui.api-key` |
 | `core/comfyui/ComfyuiRuntimeService` | 无状态运行期：参数映射、S3 输入桥、提交、查询（按 JSONPath selector 投影规范化结果）、取消、job-scoped 输出下载 |
 | `core/comfyui/workflow_api/service/ComfyuiWorkflowApiIds` | 边界 ID 严格解析；`parseUuid` / `format` |
 | `core/comfyui/workflow_api/service/runtime/*` | binding 模型 + parser + selector validator + lookup service（runtime 入口） |
@@ -45,16 +45,9 @@ S3 直传 / 直下载见 [s3-presign.md](s3-presign.md)。
 ```yaml
 kk-studio:
   comfyui:
-    enabled: true
-    base-url: http://comfyui:8188
     api-key: ${COMFYUI_API_KEY:}
-    connect-timeout: 10s
-    read-timeout: 30s
-    websocket-timeout: 30m
-    max-input-file-size: 50MB
   storage:
     s3:
-      enabled: true                      # 启用 S3 桥
       endpoint: http://minio:9000
       public-endpoint: https://objects.example.com
       region: us-east-1
@@ -63,7 +56,10 @@ kk-studio:
       secret-key: ${S3_SECRET_KEY}
 ```
 
-`kk-studio.comfyui.max-input-file-size` 控制 S3 输入桥的最大对象字节数；超出大小的对象在 HEAD 或下载阶段都会被拒绝，避免把超大文件加载到 ComfyUI。
+ComfyUI 的启用、base URL、连接/读取/WebSocket 超时与文件上限来自
+`system_setting.config.integrations.comfyui`；S3 启用和签名预算来自
+`system_setting.config.storageMedia`。两类长生命周期客户端都使用启动快照，修改后需重启。`maxInputFileBytes`
+控制 S3 输入桥的最大对象字节数；超出大小的对象在 HEAD 或下载阶段都会被拒绝。
 
 ## 边界约束
 
@@ -91,13 +87,14 @@ kk-studio:
 3. 浏览器通过原生 `fetch` 对预签名响应的 `url` 执行 `PUT`，只设置响应 `headers` 中的头；不得设置 `Host`，也不得将对象字节发送给 kk-studio。
 4. 使用上传后的 key 提交带 file binding 的工作流。kk-studio 必须从固定 bucket 完成 HEAD、大小校验、下载和转交，ComfyUI 返回的 prompt/job id 必须原样作为 `runId`。
 5. 对该 `runId` 完成运行状态轮询、取消和 job-scoped 输出下载；输出下载只能解析该 job 返回的 filename、subfolder 和 type，不能接受调用方指定的 ComfyUI 路径。
-6. 分别验证关闭 `kk-studio.storage.s3.enabled` 或 `kk-studio.comfyui.enabled` 时，依赖相应运行期能力的 API 显式返回不可用，而不会降级为本地文件代理或持久化 ComfyUI job。
+6. 分别验证关闭 `storageMedia.s3Enabled` 或 `integrations.comfyui.enabled` 时，依赖相应运行期能力的 API 显式返回不可用，而不会降级为本地文件代理或持久化 ComfyUI job。
 
 ## 实现位置
 
 | 关注点 | 文件 |
 | --- | --- |
-| 配置 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/Comfyui{Configuration,Properties}.java` |
+| 全局行为配置 | `system_setting.config.integrations.comfyui` |
+| 装配与部署秘密 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/Comfyui{Configuration,Properties}.java` |
 | 运行服务 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/ComfyuiRuntimeService.java` |
 | 卡片实体 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/workflow_api/service/model/ComfyuiWorkflowApi.java` |
 | 仓储 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/workflow_api/repo/impl/MysqlComfyuiWorkflowApiRepository.java` 与 mapper |

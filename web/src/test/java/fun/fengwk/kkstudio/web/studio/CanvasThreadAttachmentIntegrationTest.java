@@ -28,9 +28,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.ai.chat.ChatIntegrationSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
+import fun.fengwk.kkstudio.web.storage.S3WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.nio.charset.StandardCharsets;
@@ -41,7 +41,6 @@ import java.util.UUID;
 @Import(WebStorageS3TestConfiguration.class)
 @TestPropertySource(
     properties = {
-      "kk-studio.storage.s3.enabled=true",
       "kk-studio.storage.s3.endpoint=http://minio.example.local:9000",
       "kk-studio.storage.s3.public-endpoint=https://cdn.example.com",
       "kk-studio.storage.s3.region=us-east-1",
@@ -49,7 +48,7 @@ import java.util.UUID;
       "kk-studio.storage.s3.access-key=AKIAIOSFODNN7EXAMPLE",
       "kk-studio.storage.s3.secret-key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     })
-class CanvasThreadAttachmentIntegrationTest extends WebPostgresTestSupport {
+class CanvasThreadAttachmentIntegrationTest extends S3WebPostgresTestSupport {
 
   @Autowired private CanvasCommandService canvasCommandService;
   @Autowired private CanvasThreadService canvasThreadService;

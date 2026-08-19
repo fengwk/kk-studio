@@ -1,8 +1,12 @@
 package fun.fengwk.kkstudio.core.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.StorageUploadService;
@@ -20,6 +24,8 @@ import java.util.UUID;
  *
  * <p>单行失败在批内被吞掉（返回小于上限），因此重复失败会让批次立刻低于上限并退出，不会死循环。
  *
+ * <p>S3 未启用时服务 bean 缺失：监听器必须通过 ObjectProvider 感知缺失并安全跳过（不做任何回收，也不抛异常）。
+ *
  * @author fengwk
  */
 class StorageStartupRecoveryTest {
@@ -29,7 +35,7 @@ class StorageStartupRecoveryTest {
     FakeUploadService uploads = new FakeUploadService(16, 16, 5);
     FakeBlobManager blobs = new FakeBlobManager(16, 0, 0);
 
-    new StorageStartupRecovery(uploads, blobs).onApplicationEvent(null);
+    new StorageStartupRecovery(provider(uploads), provider(blobs)).onApplicationEvent(null);
 
     assertEquals(
         3,
@@ -45,7 +51,7 @@ class StorageStartupRecoveryTest {
     FakeUploadService uploads = new FakeUploadService(0);
     FakeBlobManager blobs = new FakeBlobManager(0);
 
-    new StorageStartupRecovery(uploads, blobs).onApplicationEvent(null);
+    new StorageStartupRecovery(provider(uploads), provider(blobs)).onApplicationEvent(null);
 
     assertEquals(1, uploads.expireCalls(), "failure-drained batch must not trigger another round");
     assertEquals(1, blobs.sweepCalls());
@@ -56,7 +62,7 @@ class StorageStartupRecoveryTest {
     FakeUploadService uploads = new FakeUploadService(16, 16, 3);
     FakeBlobManager blobs = new FakeBlobManager(16, 16, 0);
 
-    new StorageStartupRecovery(uploads, blobs).onApplicationEvent(null);
+    new StorageStartupRecovery(provider(uploads), provider(blobs)).onApplicationEvent(null);
 
     assertEquals(3, uploads.expireCalls(), "expire: 16 -> 16 (sweep full) -> 3 (drained)");
     assertEquals(3, blobs.sweepCalls(), "sweep: 16 -> 16 -> 0 (drained)");
@@ -68,10 +74,29 @@ class StorageStartupRecoveryTest {
     uploads.failOnCall = 2;
     FakeBlobManager blobs = new FakeBlobManager(0);
 
-    new StorageStartupRecovery(uploads, blobs).onApplicationEvent(null);
+    new StorageStartupRecovery(provider(uploads), provider(blobs)).onApplicationEvent(null);
 
     assertEquals(2, uploads.expireCalls(), "top-level failure must abort recovery, not retry");
     assertEquals(1, blobs.sweepCalls());
+  }
+
+  @Test
+  void skipsRecoveryWhenStorageServicesAreAbsent() {
+    // S3 未启用时 StorageUploadService/StorageBlobManager 不装配：监听器必须安全跳过。
+    ObjectProvider<StorageUploadService> uploads = mock(ObjectProvider.class);
+    ObjectProvider<StorageBlobManager> blobs = mock(ObjectProvider.class);
+
+    new StorageStartupRecovery(uploads, blobs).onApplicationEvent(null);
+
+    verify(uploads).getIfAvailable();
+    verify(blobs).getIfAvailable();
+  }
+
+  private static <T> ObjectProvider<T> provider(T value) {
+    @SuppressWarnings("unchecked")
+    ObjectProvider<T> provider = mock(ObjectProvider.class);
+    when(provider.getIfAvailable()).thenReturn(value);
+    return provider;
   }
 
   /** 过期批次结果队列假件：每轮 expireOnce 返回队列中的一个值，可注入一次指定轮次的顶层失败。 */

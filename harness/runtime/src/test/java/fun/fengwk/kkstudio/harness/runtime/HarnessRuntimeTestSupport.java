@@ -5,17 +5,17 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -25,11 +25,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -78,6 +79,7 @@ import java.util.function.Function;
  */
 final class HarnessRuntimeTestSupport {
 
+  static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final Instant T0 = Instant.ofEpochMilli(1_000);
   static final Instant T1 = Instant.ofEpochMilli(2_000);
   static final Instant T2 = Instant.ofEpochMilli(3_000);
@@ -169,7 +171,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           tx.insertThread(thread(threadId, turnStartEntryId));
           return new TurnBaseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
@@ -185,7 +187,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           tx.insertThread(thread(threadId, turnStartEntryId));
           UUID modelId = tx.nextId();
           ModelInvocation model =
@@ -210,7 +212,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
           ThreadState thread = thread(threadId, userEntryId);
@@ -247,7 +249,7 @@ final class HarnessRuntimeTestSupport {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.CONTINUATION, settings()),
+                  new TurnStartPayload(TurnStartReason.CONTINUATION, settings(), threadId, 100_000),
                   T1));
           ThreadState thread = thread(threadId, turnStartEntryId);
           tx.insertThread(thread);
@@ -271,7 +273,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           tx.insertThread(thread(threadId, turnStartEntryId));
           UUID modelId = tx.nextId();
           ModelInvocation model =
@@ -318,19 +320,26 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           ThreadState thread = thread(threadId, turnStartEntryId);
           tx.insertThread(thread);
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
+          ModelRequestSpec request = tooledModelRequest(List.of("bash"));
+          ProviderResponse response = responseWithToolCalls(callIds);
           UUID assistantEntryId = tx.nextId();
-          tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId, T1, callIds));
+          // live attached fixture：assistant Entry 由同一 frozen request + ProviderResponse 经 mapper
+          // 生成，
+          // 与 validateAttached 的完整 payload 校验保持一致。
+          tx.insertEntry(
+              mappedAssistantEntry(
+                  assistantEntryId, sessionId, userEntryId, T1, request, response));
           UUID modelId = tx.nextId();
           ModelInvocation model =
-              modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
+              modelInvocationWithRequest(
+                  modelId, threadId, turnStartEntryId, turnStartEntryId, request, T1);
           tx.insertModelInvocation(model);
-          ModelInvocation succeeded =
-              model.beginDispatch(T2).markRunning(T2).succeed(responseWithToolCalls(callIds), T2);
+          ModelInvocation succeeded = model.beginDispatch(T2).markRunning(T2).succeed(response, T2);
           tx.updateModelInvocation(model.beginDispatch(T2));
           tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
           tx.updateModelInvocation(succeeded);
@@ -344,7 +353,7 @@ final class HarnessRuntimeTestSupport {
                 toolInvocation(toolId, modelId, assistantEntryId, ordinal, callIds[ordinal], T1));
           }
           tx.insertToolInvocations(invocations);
-          tx.updateThread(thread.advanceHead(assistantEntryId, thread.yoloEnabled(), T2));
+          tx.updateThread(thread.advanceHead(assistantEntryId, T2));
           return new MultiToolBaseline(
               sessionId,
               rootEntryId,
@@ -432,11 +441,7 @@ final class HarnessRuntimeTestSupport {
           ToolInvocation updated =
               tool.succeed(
                   new ToolResult(
-                      tool.request().call().id(),
-                      List.of(new TextToolContent("real result")),
-                      false,
-                      "{}",
-                      false),
+                      tool.call().id(), List.of(new TextToolContent("real result")), false, "{}"),
                   effects,
                   T3);
           tx.updateToolInvocations(List.of(updated));
@@ -466,7 +471,7 @@ final class HarnessRuntimeTestSupport {
           UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           ThreadState thread = thread(threadId, headAtTurnEnd ? turnStartEntryId : rootEntryId);
           tx.insertThread(thread);
           UUID userEntryId = tx.nextId();
@@ -478,7 +483,7 @@ final class HarnessRuntimeTestSupport {
               turnEndEntry(
                   turnEndEntryId, sessionId, assistantEntryId, T1, turnStartEntryId, true));
           if (headAtTurnEnd) {
-            tx.updateThread(thread.advanceHead(turnEndEntryId, thread.yoloEnabled(), T1));
+            tx.updateThread(thread.advanceHead(turnEndEntryId, T1));
           }
           return new ContinuationBaseline(sessionId, rootEntryId, turnEndEntryId, threadId);
         });
@@ -521,7 +526,7 @@ final class HarnessRuntimeTestSupport {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
-          tx.insertEntry(turnStartEntry(id, sessionId, parentEntryId, T1));
+          tx.insertEntry(turnStartEntry(id, sessionId, parentEntryId, T1, OWNER_THREAD_ID));
           return id;
         });
   }
@@ -673,11 +678,16 @@ final class HarnessRuntimeTestSupport {
   }
 
   static Entry turnStartEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {
+    return turnStartEntry(id, sessionId, parentId, createdAt, OWNER_THREAD_ID);
+  }
+
+  static Entry turnStartEntry(
+      UUID id, UUID sessionId, UUID parentId, Instant createdAt, UUID ownerThreadId) {
     return new Entry(
         id,
         sessionId,
         parentId,
-        new TurnStartPayload(TurnStartReason.INPUT, settings()),
+        new TurnStartPayload(TurnStartReason.INPUT, settings(), ownerThreadId, 100_000),
         createdAt);
   }
 
@@ -700,8 +710,8 @@ final class HarnessRuntimeTestSupport {
       contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
-    ProviderStopReason stopReason =
-        toolCallIds.length > 0 ? ProviderStopReason.TOOL_CALLS : ProviderStopReason.COMPLETED;
+    GenerationStopReason stopReason =
+        toolCallIds.length > 0 ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new Entry(
         id,
         sessionId,
@@ -779,6 +789,67 @@ final class HarnessRuntimeTestSupport {
         createdAt);
   }
 
+  /**
+   * READY model invocation with an explicit frozen request（live tool baseline 需要 tooled binding）。
+   */
+  static ModelInvocation modelInvocationWithRequest(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID basisHeadEntryId,
+      ModelRequestSpec request,
+      Instant createdAt) {
+    return new ModelInvocation(
+        id,
+        threadId,
+        turnStartEntryId,
+        basisHeadEntryId,
+        request,
+        ModelInvocationStatus.READY,
+        0,
+        null,
+        null,
+        null,
+        null,
+        List.of(),
+        createdAt,
+        createdAt);
+  }
+
+  /** live tool baseline 的 tooled 冻结请求：按 {@code toolNames} 构造 platform bindings。 */
+  static ModelRequestSpec tooledModelRequest(List<String> toolNames) {
+    List<ToolBinding> bindings = new ArrayList<>();
+    for (String name : toolNames) {
+      bindings.add(new ToolBinding(toolDescriptor(name), ToolType.PLATFORM, null));
+    }
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor(),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        List.of(),
+        bindings,
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
+        null);
+  }
+
+  /** 由同一 frozen request + ProviderResponse 经 HistoryPayloadMapper 精确生成 live assistant Entry。 */
+  static Entry mappedAssistantEntry(
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
+      Instant createdAt,
+      ModelRequestSpec request,
+      ProviderResponse response) {
+    return new Entry(
+        id,
+        sessionId,
+        parentId,
+        new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()),
+        createdAt);
+  }
+
   static ToolInvocation toolInvocation(
       UUID id,
       UUID modelInvocationId,
@@ -791,10 +862,10 @@ final class HarnessRuntimeTestSupport {
         modelInvocationId,
         assistantEntryId,
         ordinal,
-        toolRequest(toolCallId),
+        new ToolCall(toolCallId, "bash", "{}"),
+        platformBinding(),
         ToolInvocationStatus.READY,
         0,
-        null,
         null,
         null,
         null,
@@ -807,13 +878,18 @@ final class HarnessRuntimeTestSupport {
         ENV, "agent", new ModelSelection("provider", "model", "v1"), List.of());
   }
 
-  static ModelInvocationRequest modelRequest() {
-    return new ModelInvocationRequest(
-        ENV, providerRequest(), List.of(), List.of(), false, 100_000, null);
-  }
-
-  static ToolInvocationRequest toolRequest(String toolCallId) {
-    return new ToolInvocationRequest(new ToolCall(toolCallId, "bash", "{}"), platformBinding());
+  static ModelRequestSpec modelRequest() {
+    ProviderRequest provider = providerRequest();
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        provider.model(),
+        provider.variant(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        provider.cacheControl(),
+        null);
   }
 
   static ProviderResponse responseWithToolCalls(String... toolCallIds) {
@@ -822,7 +898,7 @@ final class HarnessRuntimeTestSupport {
       calls.add(new ProviderToolCall(toolCallId, "bash", "{}"));
     }
     return new ProviderResponse(
-        "", "", calls, ProviderStopReason.TOOL_CALLS, usage(), cost(), null, null, null);
+        "", "", calls, GenerationStopReason.COMPLETE, usage(), cost(), null, null, null);
   }
 
   static ModelInvocationError modelError() {
@@ -833,7 +909,7 @@ final class HarnessRuntimeTestSupport {
     return new ToolInvocationError("CANCELLED", "cancelled");
   }
 
-  private static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {
+  private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
     return new AssistantMessageMetadata(stopReason, usage(), cost());
   }
 

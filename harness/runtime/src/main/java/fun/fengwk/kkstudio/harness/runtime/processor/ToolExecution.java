@@ -41,15 +41,16 @@ import java.util.function.Consumer;
  * 一次 claim 的进程内 Tool execution：Gateway listener 门控缓冲、durable fence 与 lease heartbeat。
  *
  * <p>listener 回调在 durable RUNNING 落地前只进缓冲区；两阶段激活（{@link #activate}）：attach handle -&gt; 持久化
- * markRunning -&gt; {@code handle.activate()}（Gateway 打开回调 gate）成功后按到达顺序重放。partial 先做 toolCallId /
- * content 校验（拒绝 Binary / Resource content，partial 不可持久资源）与 canonical JSON 256 KiB 编码尺寸上限（bounded
- * 编码器测量，超限即中止，不物化完整 JSON），再在校验 RUNNING + attempt 与 claim ownership 的短事务中确认（无 durable
- * mutation），commit 后才 best-effort 发布 {@link RealtimeEvent.ToolPartial}；sink 失败不影响执行。terminal 回调一次
- * 生效，success 强制把 terminate 归一 false（拒绝 BinaryToolContent——Gateway 必须先外部化为稳定 ResourceToolContent
- * ref），随后对「即将持久化的规范化对象」做 bounded 编码尺寸校验，超过 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入 PostgreSQL）；retryable
- * 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT 且 retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate /
- * late / stale 一律 no-op；lost ownership 立即关 gate、cancel handle 并停止 heartbeat，且不反写 任何 durable 状态。
- * {@code handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN terminal，激活前缓冲的信号全部丢弃。
+ * markRunning -&gt; {@code handle.activate()}（Gateway 打开回调 gate）成功后按到达顺序重放。激活仲裁（abandon -&gt;
+ * activate 竞态）：activation 开始前 abandon 获胜则 activate 绝不调用；开始后 abandon 把 cancel 推迟到 activate 返回，外部调用序
+ * 恒为 ACTIVATE -&gt; CANCEL。partial 先做 toolCallId / content 校验（拒绝 Binary / Resource content，partial
+ * 不可持久资源）与 canonical JSON 256 KiB 编码尺寸上限（bounded 编码器测量，超限即中止，不物化完整 JSON），再在校验 RUNNING + attempt 与
+ * claim ownership 的短事务中确认（无 durable mutation），commit 后才 best-effort 发布 {@link
+ * RealtimeEvent.ToolPartial}；sink 失败不影响执行。terminal 回调一次 生效（拒绝 BinaryToolContent——Gateway 必须先外部化为稳定
+ * ResourceToolContent ref），随后对即将持久化的结果做 bounded 编码尺寸校验，超过 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入
+ * PostgreSQL）；retryable 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT 且 retryPolicy 允许时重试，NON_IDEMPOTENT
+ * 绝不自动重试。duplicate / late / stale 一律 no-op；lost ownership 立即关 gate、cancel handle 并停止 heartbeat，且不反写
+ * 任何 durable 状态。 {@code handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN terminal，激活前缓冲的信号全部丢弃。
  */
 @Slf4j
 final class ToolExecution implements ToolGateway.Listener {
@@ -73,6 +74,9 @@ final class ToolExecution implements ToolGateway.Listener {
   private final ArrayDeque<Pending> pending = new ArrayDeque<>();
   private boolean gateOpen;
   private ToolGateway.Handle handle;
+
+  /** monitor 保护；activation 期间 abandon 推迟 handle cancel。 */
+  private boolean activationInProgress;
 
   ToolExecution(
       HarnessStore store,
@@ -131,11 +135,11 @@ final class ToolExecution implements ToolGateway.Listener {
   }
 
   /**
-   * Gateway admission 返回 Started 后调用：先安全 attach handle（若 execution 已被 abandon / heartbeat 已 lost，
-   * 立即 best-effort cancel 且不 markRunning），再短事务重新验证 lease + DISPATCHING + proposed attempt 并
-   * markRunning + Thread revision+1，随后调用 {@code handle.activate()} 让 Gateway 打开回调 gate，最后打开
-   * listener 门并重放缓冲回调。activate 抛异常即激活失败：恰好一次 UNKNOWN terminal。失败（lost / stale / Stop 获胜）关闭 listener
-   * 并 cancel handle，不写任何 durable 状态。
+   * Gateway admission 返回 Started 后调用。先安全 attach handle + durable markRunning（失败即 abandon 并
+   * LOST），随后才 调用外部 {@code handle.activate()} 打开回调 gate。激活仲裁：monitor 内声明 activation 开始；abandon
+   * 在开始前获胜则 handle 已由 abandon 取消且 activate 绝不调用；已开始后 abandon 推迟 cancel，由本方法在 activation 返回后补上，外部调用序
+   * 恒为 ACTIVATE -&gt; CANCEL（外部 activate / cancel 绝不持 monitor）。activate 抛异常即激活失败：恰好一次 UNKNOWN
+   * terminal；lost / stale / Stop 获胜关闭 listener 并 cancel handle，不写任何 durable 状态。
    */
   ProcessResult activate(ToolGateway.Handle startedHandle) {
     if (!attachHandle(startedHandle)) {
@@ -153,11 +157,24 @@ final class ToolExecution implements ToolGateway.Listener {
       abandon();
       return ProcessResult.LOST_OWNERSHIP;
     }
+    if (!beginActivation()) {
+      // abandon 已在 activation 开始前获胜：handle 已由 abandon cancel，activate 绝不调用。
+      return ProcessResult.LOST_OWNERSHIP;
+    }
     // 两阶段激活：durable markRunning 落地之后、打开自身 listener 门之前，才允许 Gateway 打开回调 gate / 启动外部执行。
+    RuntimeException activationError = null;
     try {
       startedHandle.activate();
     } catch (RuntimeException failure) {
-      // 先收敛 durable UNKNOWN，再记录：异常渲染（toString）绝不能 bypass 状态转换。
+      activationError = failure;
+    }
+    if (finishActivation()) {
+      // activation 期间 abandon 获胜且推迟了 cancel：这里补上 deferred cancel（外部调用序 ACTIVATE -> CANCEL）。
+      cancelHandle();
+      return ProcessResult.LOST_OWNERSHIP;
+    }
+    if (activationError != null) {
+      // 异常渲染（toString）绝不能 bypass 状态转换：先收敛 durable UNKNOWN，再记录。
       ProcessResult result =
           activationFailure(
               new ToolInvocationError(
@@ -166,7 +183,7 @@ final class ToolExecution implements ToolGateway.Listener {
       log.warn(
           "tool gateway activation failed for {}: {}",
           invocationId,
-          ProcessorExceptions.describe(failure));
+          ProcessorExceptions.describe(activationError));
       return result;
     }
     List<Publish> publishes = new ArrayList<>();
@@ -177,7 +194,8 @@ final class ToolExecution implements ToolGateway.Listener {
     }
     publishAll(publishes);
     if (applied == Applied.LOST) {
-      abandon();
+      // 兜底：gate 打开前 abandon 竞态获胜时 handle 已由 abandon 取消，这里只补 deferred cancel。
+      cancelHandle();
       return ProcessResult.LOST_OWNERSHIP;
     }
     if (applied != Applied.PROGRESSED) {
@@ -186,6 +204,25 @@ final class ToolExecution implements ToolGateway.Listener {
       return applied == Applied.RETRY ? ProcessResult.RESCHEDULED : ProcessResult.TERMINATED;
     }
     return ProcessResult.STARTED;
+  }
+
+  /** monitor 内声明 activation 开始；abandon 已获胜时返回 false（activate 绝不调用，handle 已由 abandon 取消）。 */
+  private boolean beginActivation() {
+    synchronized (monitor) {
+      if (abandoned.get()) {
+        return false;
+      }
+      activationInProgress = true;
+      return true;
+    }
+  }
+
+  /** monitor 内结束 activation 阶段并返回当前是否已 abandoned；abandoned 时 handle cancel 由调用方在 monitor 外补上。 */
+  private boolean finishActivation() {
+    synchronized (monitor) {
+      activationInProgress = false;
+      return abandoned.get();
+    }
   }
 
   /**
@@ -217,7 +254,8 @@ final class ToolExecution implements ToolGateway.Listener {
   /**
    * monitor 内只做决定与赋值：若 execution 已 abandoned（heartbeat / close / cancel 竞态）或 handle 已存在则返回 false
    * （绝不 markRunning）；外部 {@link ToolGateway.Handle#cancel} 的调用**必须在 monitor 之外**（cancel 可能同步触发
-   * listener 回调 / 阻塞等待确认，锁内调用会与需要 monitor 的回调路径死锁），因此锁内只置标记，锁外统一 best-effort cancel。
+   * listener 回调 / 阻塞等待确认，锁内调用会与需要 monitor 的回调路径死锁），因此锁内只置标记，锁外统一 best-effort cancel。 activation
+   * 已开始后的 abandon 由 {@link #abandon} 推迟 cancel，与 {@link #activate} 的 deferred cancel 合计仍恰好一次。
    */
   private boolean attachHandle(ToolGateway.Handle startedHandle) {
     Objects.requireNonNull(startedHandle, "startedHandle");
@@ -261,16 +299,23 @@ final class ToolExecution implements ToolGateway.Listener {
     deliver(new Pending(PendingKind.UNKNOWN, null, null, null, error));
   }
 
-  /** 关闭 listener（丢弃缓冲）、cancel handle、停止 heartbeat 并从 registry 释放；幂等。 */
+  /**
+   * 关闭 listener（丢弃缓冲）、cancel handle（activation 已开始时推迟到 activate 返回后）、停止 heartbeat 并从 registry
+   * 释放；幂等。
+   */
   void abandon() {
     if (!abandoned.compareAndSet(false, true)) {
       return;
     }
     heartbeat.stop();
+    boolean cancelNow;
     synchronized (monitor) {
       pending.clear();
+      cancelNow = !activationInProgress;
     }
-    cancelHandle();
+    if (cancelNow) {
+      cancelHandle();
+    }
     ownerRelease.accept(this);
   }
 
@@ -376,8 +421,8 @@ final class ToolExecution implements ToolGateway.Listener {
 
   /**
    * Terminal success：先做基础校验（非空 / toolCallId 匹配 / 拒绝 BinaryToolContent——Gateway 必须先外部化为稳定
-   * ResourceToolContent ref）；terminate 归一 false 后，对「即将持久化的规范化对象」用 bounded 编码器测量 canonical JSON
-   * UTF-8 字节（不物化完整 JSON），超过 1 MiB 确定性 INVALID_RESULT（N×data URI / 超大 details/text 不得撑爆 PostgreSQL）。
+   * ResourceToolContent ref），再用 bounded 编码器测量即将持久化结果的 canonical JSON UTF-8 字节（不物化完整 JSON），超过 1 MiB
+   * 确定性 INVALID_RESULT（N×data URI / 超大 details/text 不得撑爆 PostgreSQL）。
    */
   private Applied finishSuccessLocked(ToolSuccess success, List<Publish> publishes) {
     ToolResult result = success == null ? null : success.result();
@@ -387,11 +432,8 @@ final class ToolExecution implements ToolGateway.Listener {
           new ToolGateway.Failure(new ToolInvocationError("INVALID_RESULT", validation), false),
           publishes);
     }
-    ToolResult normalized =
-        new ToolResult(
-            result.toolCallId(), result.contents(), result.error(), result.detailsJson(), false);
     if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
-        normalized, ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES)) {
+        result, ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES)) {
       return finishFailureLocked(
           new ToolGateway.Failure(
               new ToolInvocationError(
@@ -402,7 +444,7 @@ final class ToolExecution implements ToolGateway.Listener {
               false),
           publishes);
     }
-    boolean committed = safeTerminal(() -> commitSuccess(normalized, success.effects()));
+    boolean committed = safeTerminal(() -> commitSuccess(result, success.effects()));
     if (!committed) {
       return Applied.LOST;
     }
@@ -475,9 +517,7 @@ final class ToolExecution implements ToolGateway.Listener {
     return null;
   }
 
-  /**
-   * Terminal result 基础校验：非空、toolCallId 匹配 request、不得携带 BinaryToolContent。编码尺寸校验在 terminate 归一后进行。
-   */
+  /** Terminal result 基础校验：非空、toolCallId 匹配 request、不得携带 BinaryToolContent。编码尺寸校验在基础校验之后进行。 */
   private String validateTerminalResult(ToolResult result) {
     if (result == null) {
       return "result must not be null";

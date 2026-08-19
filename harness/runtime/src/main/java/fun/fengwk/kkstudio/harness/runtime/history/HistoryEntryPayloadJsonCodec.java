@@ -43,7 +43,8 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> ROOT_FIELDS = orderedSet("settings", "subagentContext");
   private static final Set<String> SUBAGENT_CONTEXT_FIELDS =
       orderedSet("parentThreadId", "rootThreadId", "taskInvocationId", "depth");
-  private static final Set<String> TURN_START_FIELDS = orderedSet("reason", "settings");
+  private static final Set<String> TURN_START_FIELDS =
+      orderedSet("reason", "settings", "ownerThreadId", "contextWindow");
   private static final Set<String> MESSAGE_FIELDS =
       orderedSet("message", "assistantMetadata", "toolResultMetadata");
   private static final Set<String> CUSTOM_FIELDS =
@@ -167,6 +168,12 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("reason", value.reason().name());
     node.set("settings", HistoryValueCodecs.encodeBranchSettings(value.settings()));
+    node.put("ownerThreadId", value.ownerThreadId().toString());
+    if (value.contextWindow() == null) {
+      node.putNull("contextWindow");
+    } else {
+      node.put("contextWindow", value.contextWindow());
+    }
     return node;
   }
 
@@ -330,7 +337,9 @@ public final class HistoryEntryPayloadJsonCodec {
     return new TurnStartPayload(
         HistoryValueCodecs.readEnum(
             TurnStartReason.class, HistoryValueCodecs.text(node, "reason"), "TURN_START.reason"),
-        HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "TURN_START.settings"));
+        HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "TURN_START.settings"),
+        HistoryValueCodecs.requiredPositiveId(node, "ownerThreadId", "TURN_START"),
+        HistoryValueCodecs.nullablePositiveInt(node, "contextWindow", "TURN_START"));
   }
 
   private static MessagePayload decodeMessage(JsonNode value) {

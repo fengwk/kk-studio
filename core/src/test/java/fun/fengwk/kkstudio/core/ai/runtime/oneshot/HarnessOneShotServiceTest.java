@@ -44,7 +44,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -70,6 +70,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** one-shot service 证明 root 配置、同批消息、恢复观察、终态文本与 timeout stop。 */
 class HarnessOneShotServiceTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final Instant NOW = Instant.parse("2026-08-10T00:00:00Z");
 
@@ -376,7 +377,11 @@ class HarnessOneShotServiceTest {
     Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
     Entry turn =
         new Entry(
-            id(4), id(1), root.id(), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), NOW);
+            id(4),
+            id(1),
+            root.id(),
+            new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+            NOW);
     Entry user =
         new Entry(
             id(5),
@@ -388,7 +393,7 @@ class HarnessOneShotServiceTest {
                 null),
             NOW);
     AssistantMessageMetadata metadata = mock(AssistantMessageMetadata.class);
-    when(metadata.stopReason()).thenReturn(ProviderStopReason.COMPLETED);
+    when(metadata.stopReason()).thenReturn(GenerationStopReason.COMPLETE);
     Entry assistant =
         new Entry(
             id(6),
@@ -419,7 +424,11 @@ class HarnessOneShotServiceTest {
     Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
     Entry turn =
         new Entry(
-            id(4), id(1), root.id(), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), NOW);
+            id(4),
+            id(1),
+            root.id(),
+            new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+            NOW);
     Entry user =
         new Entry(
             id(5),

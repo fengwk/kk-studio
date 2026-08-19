@@ -4,13 +4,13 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T5;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
@@ -274,40 +274,51 @@ class PostgresqlHarnessStoreConcurrencyTest {
   @Test
   void reversedConcurrentToolBatchesUseOneCanonicalDatabaseLockOrder() throws Exception {
     TurnBaseline baseline = seedTurnBaseline(store);
+    // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）。
+    // 请求带 bash binding，使 assistant ToolCall renderer 与 ToolInvocation binding 全等。
+    var request = succeededRequest();
+    var response = assistantResponse("call-1", "call-2");
     UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, assistantPayload("call-1", "call-2"));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
     inTransaction(
         store,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
           tx.insertModelInvocation(
-              modelInvocation(
+              new ModelInvocation(
                   id(1L),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
+                  request,
                   ModelInvocationStatus.READY,
+                  0,
                   null,
+                  null,
+                  null,
+                  null,
+                  List.of(),
+                  T1,
                   T1));
           ModelInvocation model = tx.lockModelInvocation(id(1L)).orElseThrow();
           tx.updateModelInvocation(model.beginDispatch(T1));
           model = tx.lockModelInvocation(id(1L)).orElseThrow();
           tx.updateModelInvocation(model.markRunning(T1));
           model = tx.lockModelInvocation(id(1L)).orElseThrow();
-          tx.updateModelInvocation(model.succeed(assistantResponse("call-1", "call-2"), T1));
+          tx.updateModelInvocation(model.succeed(response, T1));
           model = tx.lockModelInvocation(id(1L)).orElseThrow();
           tx.updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
         });
     ToolInvocation ordinal0 =
         toolInvocation(
-            id(10L), id(1L), assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2);
+            id(10L), id(1L), assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, T2);
     ToolInvocation ordinal1 =
         toolInvocation(
-            id(11L), id(1L), assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, null, T2);
+            id(11L), id(1L), assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, T2);
 
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);

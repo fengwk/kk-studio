@@ -40,7 +40,16 @@ final class ToolInvocationTestData {
     return new ToolBinding(descriptor(name, ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, ENV_ID);
   }
 
+  static ToolCall call(String name, String argumentsJson) {
+    return new ToolCall(CALL_ID, name, argumentsJson);
+  }
+
+  static ToolCall call(String name) {
+    return call(name, "{}");
+  }
+
+  /** transient executable request（READY Tool 边界使用；不持久化）。 */
   static ToolInvocationRequest request(String name, String argumentsJson) {
-    return new ToolInvocationRequest(new ToolCall(CALL_ID, name, argumentsJson), platform(name));
+    return new ToolInvocationRequest(call(name, argumentsJson), platform(name));
   }
 }

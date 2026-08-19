@@ -1,0 +1,4 @@
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed/dev,classpath:db/seed/canvas-test
+    validate-migration-naming: true

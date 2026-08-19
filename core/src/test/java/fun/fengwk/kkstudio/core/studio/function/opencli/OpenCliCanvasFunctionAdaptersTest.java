@@ -24,6 +24,8 @@ import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.Executi
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.ExecutionStatus;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.HubResourceStream;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.UploadedResource;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
@@ -38,7 +40,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -60,13 +61,11 @@ class OpenCliCanvasFunctionAdaptersTest {
 
   @Test
   void disabledAdaptersStillDeclareModelsWithoutLeakingConfiguration() {
-    OpenCliHubProperties hub = new OpenCliHubProperties();
     OpenCliHubClient client = mock(OpenCliHubClient.class);
     GptImage2CanvasFunctionAdapter gpt =
-        new GptImage2CanvasFunctionAdapter(hub, new GptImage2CanvasProperties(), client);
+        new GptImage2CanvasFunctionAdapter(adapterSnapshot(), client);
     SeedanceCanvasFunctionAdapter seedance =
-        new SeedanceCanvasFunctionAdapter(
-            hub, new SeedanceCanvasProperties(), client, MAPPER, ignored -> {});
+        new SeedanceCanvasFunctionAdapter(adapterSnapshot(), client, MAPPER, ignored -> {});
 
     assertFalse(gpt.enabled());
     assertEquals(1, gpt.models().size());
@@ -921,23 +920,45 @@ class OpenCliCanvasFunctionAdaptersTest {
   }
 
   private static GptImage2CanvasFunctionAdapter gptAdapter(OpenCliHubClient client) {
-    OpenCliHubProperties hub = new OpenCliHubProperties();
-    hub.setEnabled(true);
-    GptImage2CanvasProperties properties = new GptImage2CanvasProperties();
-    properties.setPaidEnabled(true);
-    return new GptImage2CanvasFunctionAdapter(hub, properties, client);
+    SystemSettings.GptImage2 gptImage2 =
+        new SystemSettings.GptImage2(true, 900, 960_000L, 1_200_000L);
+    return new GptImage2CanvasFunctionAdapter(adapterSnapshot(gptImage2), client);
   }
 
   private static SeedanceCanvasFunctionAdapter seedanceAdapter(
       OpenCliHubClient client, SeedanceCanvasFunctionAdapter.Sleeper sleeper) {
-    OpenCliHubProperties hub = new OpenCliHubProperties();
-    hub.setEnabled(true);
-    SeedanceCanvasProperties properties = new SeedanceCanvasProperties();
-    properties.setEnabled(true);
-    properties.setWorkspaceId("workspace-1");
-    properties.setRetry(2);
-    properties.setStatusPollInterval(Duration.ofMillis(5));
-    return new SeedanceCanvasFunctionAdapter(hub, properties, client, MAPPER, sleeper);
+    SystemSettings.Seedance seedance =
+        new SystemSettings.Seedance(true, "workspace-1", 2, 600_000L, 5L, 1_800_000L);
+    return new SeedanceCanvasFunctionAdapter(adapterSnapshot(seedance), client, MAPPER, sleeper);
+  }
+
+  private static SystemSettingsSnapshot adapterSnapshot() {
+    return adapterSnapshot(SystemSettings.Seedance.DEFAULT, SystemSettings.GptImage2.DEFAULT);
+  }
+
+  private static SystemSettingsSnapshot adapterSnapshot(SystemSettings.Seedance seedance) {
+    return adapterSnapshot(seedance, SystemSettings.GptImage2.DEFAULT);
+  }
+
+  private static SystemSettingsSnapshot adapterSnapshot(SystemSettings.GptImage2 gptImage2) {
+    return adapterSnapshot(SystemSettings.Seedance.DEFAULT, gptImage2);
+  }
+
+  private static SystemSettingsSnapshot adapterSnapshot(
+      SystemSettings.Seedance seedance, SystemSettings.GptImage2 gptImage2) {
+    return new SystemSettingsSnapshot(
+        new SystemSettings(
+            SystemSettings.Tool.DEFAULT,
+            SystemSettings.AiRuntime.DEFAULT,
+            SystemSettings.Environment.DEFAULT,
+            new SystemSettings.Integrations(
+                SystemSettings.Comfyui.DEFAULT,
+                SystemSettings.OpenCliHub.DEFAULT,
+                seedance,
+                gptImage2,
+                SystemSettings.MiniMaxH3.DEFAULT),
+            SystemSettings.StorageMedia.DEFAULT,
+            SystemSettings.Advanced.DEFAULT));
   }
 
   private static CanvasFunctionFrozenRun run(

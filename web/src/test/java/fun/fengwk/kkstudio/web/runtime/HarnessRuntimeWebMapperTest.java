@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.MoveHeadCommand;
+import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
@@ -39,8 +40,10 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 
 import java.util.HashMap;
 import java.util.List;
@@ -48,9 +51,9 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 映射测试：7 类 command 的严格字段规则与 canonical payload JSON、严格 decimal 解析、全部快照状态派生
+ * 映射测试：6 类 command 的严格字段规则与 canonical payload JSON、严格 decimal 解析、全部快照状态派生
  * （IDLE/CONTINUATION_DUE/MODEL_&lt;status&gt;/TOOL_&lt;status&gt;/APPLYING）与
- * create/head/stop/approval 幂等请求字段。
+ * create/head/yolo/stop/approval 幂等请求字段。
  */
 class HarnessRuntimeWebMapperTest {
 
@@ -100,6 +103,14 @@ class HarnessRuntimeWebMapperTest {
     return dto;
   }
 
+  private static HarnessModelSelectionDTO modelSelection() {
+    HarnessModelSelectionDTO selection = new HarnessModelSelectionDTO();
+    selection.setProviderName("openai");
+    selection.setModelName("gpt-5");
+    selection.setVariant("default");
+    return selection;
+  }
+
   private static HarnessUserMessageContentDTO content(String type) {
     HarnessUserMessageContentDTO dto = new HarnessUserMessageContentDTO();
     dto.setType(type);
@@ -107,7 +118,7 @@ class HarnessRuntimeWebMapperTest {
   }
 
   @Test
-  void mapsAllSevenCommandTypesToCanonicalPayloadJson() {
+  void mapsAllSixCommandTypesToCanonicalPayloadJson() {
     HarnessUserMessageContentDTO userText = content("TEXT");
     userText.setText("hello");
     HarnessThreadCommandCreateDTO user = command("USER_MESSAGE", "c-user");
@@ -130,17 +141,14 @@ class HarnessRuntimeWebMapperTest {
     HarnessThreadCommandCreateDTO tools = command("SET_ACTIVE_TOOLS", "c-tools");
     tools.setActiveTools(List.of("web_search", "code_interpreter"));
 
-    HarnessThreadCommandCreateDTO yolo = command("SET_YOLO", "c-yolo");
-    yolo.setYoloEnabled(true);
-
     HarnessThreadCommandCreateDTO environment = command("SET_ENVIRONMENT", "c-env");
     environment.setEnvironment(bindingDto("123e4567-e89b-12d3-a456-426614174000", "."));
 
     ThreadCommandBatch batch =
         HarnessRuntimeWebMapper.toCommandBatch(
-            THREAD_ID, batch(user, custom, agent, model, tools, yolo, environment));
+            THREAD_ID, batch(user, custom, agent, model, tools, environment));
 
-    assertEquals(7, batch.commands().size());
+    assertEquals(6, batch.commands().size());
     assertEquals(id(1), batch.threadId());
     assertEquals(id(3), batch.expectedHeadEntryId());
     assertEquals(4L, batch.expectedNextCommandSequence());
@@ -166,10 +174,9 @@ class HarnessRuntimeWebMapperTest {
         4,
         ThreadCommandType.SET_ACTIVE_TOOLS,
         "{\"activeTools\":[\"web_search\",\"code_interpreter\"]}");
-    assertExactPayload(batch, 5, ThreadCommandType.SET_YOLO, "{\"yoloEnabled\":true}");
     assertExactPayload(
         batch,
-        6,
+        5,
         ThreadCommandType.SET_ENVIRONMENT,
         "{\"environment\":{\"name\":\"123e4567-e89b-12d3-a456-426614174000\",\"workspacePath\":\".\"}}");
   }
@@ -299,13 +306,6 @@ class HarnessRuntimeWebMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(user)));
-
-    HarnessThreadCommandCreateDTO yolo = command("SET_YOLO", "c-2");
-    yolo.setYoloEnabled(false);
-    yolo.setEnvironment(null);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(yolo)));
   }
 
   @Test
@@ -364,13 +364,6 @@ class HarnessRuntimeWebMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(agentWithContent)));
-
-    HarnessThreadCommandCreateDTO yoloWithEnvironment = command("SET_YOLO", "c-4");
-    yoloWithEnvironment.setYoloEnabled(false);
-    yoloWithEnvironment.setEnvironment(bindingDto("123e4567-e89b-12d3-a456-426614174000", "."));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(yoloWithEnvironment)));
   }
 
   @Test
@@ -397,12 +390,6 @@ class HarnessRuntimeWebMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(noModel)));
-
-    HarnessThreadCommandCreateDTO noClientId = command("SET_YOLO", null);
-    noClientId.setYoloEnabled(true);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(noClientId)));
 
     HarnessThreadCommandCreateDTO unknownType = command("RENAME_THREAD", "c-5");
     assertThrows(
@@ -603,6 +590,23 @@ class HarnessRuntimeWebMapperTest {
   }
 
   @Test
+  void mapsUnknownToolInvocationWithoutDroppingDurableCallIdentity() throws Exception {
+    ToolInvocationDTO dto =
+        HarnessRuntimeWebMapper.toToolInvocationDto(
+            HarnessRuntimeTestFixtures.unknownToolFailedInvocation());
+    JsonNode tool = MAPPER.readTree(MAPPER.writeValueAsString(dto));
+    // durable ToolCall 身份绝不因 binding 为 null 而丢失。
+    assertEquals("call-77", tool.path("toolCallId").asText());
+    assertEquals("unknown_tool", tool.path("toolName").asText());
+    assertEquals("{\"x\":1}", tool.path("argumentsJson").asText());
+    // unknown tool 槽位：binding 派生字段显式 null 序列化，renderer 固定回退为 tool。
+    assertEquals("tool", tool.path("rendererKey").asText());
+    assertTrue(tool.path("toolVersion").isNull());
+    assertTrue(tool.path("toolType").isNull());
+    assertTrue(tool.path("environment").isNull());
+  }
+
+  @Test
   void mapsAttemptFailureSequenceAsACanonicalDecimalString() throws Exception {
     EntryPath path =
         new EntryPath(
@@ -684,6 +688,30 @@ class HarnessRuntimeWebMapperTest {
     assertEquals(id(2), move.targetEntryId());
     assertEquals(3L, move.expectedRevision());
 
+    HarnessThreadYoloUpdateDTO yolo = new HarnessThreadYoloUpdateDTO();
+    yolo.setExpectedRevision("7");
+    yolo.setYoloEnabled(true);
+    SetThreadYoloCommand yoloCommand =
+        HarnessRuntimeWebMapper.toSetThreadYoloCommand(THREAD_ID, yolo);
+    assertEquals(id(1), yoloCommand.threadId());
+    assertEquals(7L, yoloCommand.expectedRevision());
+    assertTrue(yoloCommand.enabled());
+    yolo.setYoloEnabled(false);
+    assertFalse(HarnessRuntimeWebMapper.toSetThreadYoloCommand(THREAD_ID, yolo).enabled());
+    yolo.setYoloEnabled(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toSetThreadYoloCommand(THREAD_ID, yolo));
+    yolo.setYoloEnabled(true);
+    yolo.setExpectedRevision(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toSetThreadYoloCommand(THREAD_ID, yolo));
+    yolo.setExpectedRevision("-1");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toSetThreadYoloCommand(THREAD_ID, yolo));
+
     HarnessThreadStopDTO stop = new HarnessThreadStopDTO();
     stop.setStopRequestId(idText(9));
     stop.setExpectedRevision("3");
@@ -734,8 +762,8 @@ class HarnessRuntimeWebMapperTest {
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, empty));
 
-    HarnessThreadCommandCreateDTO duplicate = command("SET_YOLO", "same-id");
-    duplicate.setYoloEnabled(true);
+    HarnessThreadCommandCreateDTO duplicate = command("SET_MODEL", "same-id");
+    duplicate.setModel(modelSelection());
     HarnessThreadCommandCreateDTO duplicateAgain = command("SET_AGENT", "same-id");
     duplicateAgain.setAgentName("default-assistant");
     assertThrows(

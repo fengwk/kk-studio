@@ -3,40 +3,40 @@ package fun.fengwk.kkstudio.harness.runtime.port;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 同步、无副作用、事务外的 turn 解析端口：把调用方传入的 candidate {@link EntryPath} 解析为冻结的 {@link ModelInvocationRequest}。
+ * 同步、无副作用、事务外的 turn 解析端口：把调用方传入的 candidate {@link EntryPath} 解析为冻结的 {@link ModelRequestSpec} 与本次
+ * turn 的 {@code contextWindow}。
  *
- * <p>调用方在短事务内锁 Thread、捕获 queued Command 快照与 frozen YOLO 开关、分配稳定 Entry ID 并构造 candidate path
- * 后，在事务外调用本端口（Resolver 执行期间 Processor 只做 lease heartbeat，本端口绝不要求也不持有任何行锁）。candidate path 是 Thread
- * 当前 head 的已持久化前缀与尚未持久化的计划 suffix（normalization / TURN_START / Message）组成的完整 root-to-head 链，已通过
- * EntryPath 全量不变量校验。实现只读取最新 catalog / environment 事实，不得写 store、不得产生副作用、 不得要求事务上下文，且不得按 candidate
- * Entry ID 回查 Store（suffix 尚未持久化）；其结果只有在 Processor 第二事务 CAS 成功后才成为 durable execution
- * fact。抛出的异常表示临时基础设施失败（DB / 网络不可用），由 Processor reschedule，绝不改写 durable invocation。
+ * <p>调用方在短事务内锁 Thread、捕获 queued Command 快照、分配稳定 Entry ID 并构造 candidate path 后，在事务外调用本端口（Resolver
+ * 执行期间 Processor 只做 lease heartbeat，本端口绝不要求也不持有任何行锁）。candidate path 是 Thread 当前 head 的已持久化前缀与尚未
+ * 持久化的计划 suffix（normalization / TURN_START / Message）组成的完整 root-to-head 链，已通过 EntryPath
+ * 全量不变量校验。实现只读取 最新 catalog / environment 事实，不得写 store、不得产生副作用、不得要求事务上下文，且不得按 candidate Entry ID 回查
+ * Store（suffix 尚未持久化）；其结果只有在 Processor 第二事务 CAS 成功后才成为 durable execution fact。抛出的异常表示临时基础设施失败（DB /
+ * 网络不可用），由 Processor reschedule，绝不改写 durable invocation。
  *
- * <p>{@code compactionPreparation} 非空当且仅当本次是 COMPACTION turn：实现必须按切分事实构造压缩请求（一个 SYSTEM + 一个 USER
- * summary 请求、零 tool/skill、不查 Agent system prompt / plugins / environment 可用性 / prompt-cache）。
+ * <p>{@code compactionPreparation} 非空当且仅当本次是 COMPACTION turn：实现必须按切分事实冻结 {@code CompactionRequest}
+ * 元数据与模型/variant，不得把 messagesToSummarize / previousSummary 写入 spec。YOLO 不进入本端口。
  */
 public interface TurnResolver {
 
   /** 解析一次 turn；临时基础设施失败以异常表达，由调用方 reschedule。 */
-  Result resolve(
-      UUID threadId,
-      EntryPath path,
-      boolean yoloEnabled,
-      CompactionPreparation compactionPreparation);
+  Result resolve(UUID threadId, EntryPath path, CompactionPreparation compactionPreparation);
 
   /** 解析结果：冻结请求或确定性拒绝。 */
   sealed interface Result permits TurnResolver.Resolved, TurnResolver.Rejected {}
 
-  /** 解析成功：请求已完全冻结（route、tools、skills、YOLO）。 */
-  record Resolved(ModelInvocationRequest request) implements Result {
+  /** 解析成功：紧凑 spec 已冻结，contextWindow 为本次 turn 冻结的正整数。 */
+  record Resolved(ModelRequestSpec spec, int contextWindow) implements Result {
     public Resolved {
-      request = Objects.requireNonNull(request, "request");
+      spec = Objects.requireNonNull(spec, "spec");
+      if (contextWindow <= 0) {
+        throw new IllegalArgumentException("contextWindow must be positive");
+      }
     }
   }
 

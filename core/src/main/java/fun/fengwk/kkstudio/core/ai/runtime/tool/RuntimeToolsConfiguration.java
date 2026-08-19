@@ -9,11 +9,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentRunRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.plugin.ToolContribution;
 import fun.fengwk.kkstudio.harness.plugin.ToolVisibility;
@@ -26,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -44,8 +46,13 @@ public class RuntimeToolsConfiguration {
   @ConditionalOnBean({ThreadSelectedSkillLookup.class, SkillBodyLoader.class})
   @ConditionalOnMissingBean
   public LoadSkillTool loadSkillTool(
-      ThreadSelectedSkillLookup skillLookup, SkillBodyLoader skillBodyLoader) {
-    return new LoadSkillTool(skillLookup, skillBodyLoader);
+      ThreadSelectedSkillLookup skillLookup,
+      SkillBodyLoader skillBodyLoader,
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    // skill 正文加载超时：读取共享启动快照的 tool.skillLoadTimeoutMillis（装配期一次 DB 读取，DB 变更需重启生效）；再无默认值。
+    Duration loadTimeout =
+        Duration.ofMillis(systemSettingsSnapshot.get().tool().skillLoadTimeoutMillis());
+    return new LoadSkillTool(skillLookup, skillBodyLoader, loadTimeout);
   }
 
   @Bean
@@ -55,14 +62,16 @@ public class RuntimeToolsConfiguration {
     return ToolFactory.singleton(loadSkillTool);
   }
 
+  /** task/subagent 的并发与预算快照：读取共享启动快照的 {@code aiRuntime.subagent*}（装配期一次 DB 读取，DB 变更需重启生效）。 */
   @Bean
-  public SubagentConfig subagentConfig(HarnessRuntimeProperties properties) {
+  public SubagentConfig subagentConfig(SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
     return new SubagentConfig(
-        properties.getSubagentMaxDepth(),
-        properties.getSubagentMaxConcurrency(),
-        properties.getSubagentMaxTotalConcurrency(),
-        properties.getSubagentIdleTimeout(),
-        properties.getSubagentMaxTurns());
+        aiRuntime.subagentMaxDepth(),
+        aiRuntime.subagentMaxConcurrency(),
+        aiRuntime.subagentMaxTotalConcurrency(),
+        Duration.ofMillis(aiRuntime.subagentIdleTimeoutMillis()),
+        aiRuntime.subagentMaxTurns());
   }
 
   @Bean

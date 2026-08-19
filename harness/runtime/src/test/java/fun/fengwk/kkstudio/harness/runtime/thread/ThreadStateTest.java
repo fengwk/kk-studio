@@ -79,22 +79,42 @@ class ThreadStateTest {
   }
 
   @Test
-  void advanceHeadAndTouchRevisionBumpRevisionByOne() {
-    ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
-    // head 与 yolo policy 在同一步原子地设置，仅 bump 一次 revision
-    ThreadState head = stored.advanceHead(id(99), true, CREATED.plusSeconds(2));
+  void advanceHeadPreservesYoloPolicyAndBumpsRevisionByOne() {
+    ThreadState stored = state(id(7), id(42), true, 3L, 5L, CREATED);
+    // head 推进恒保留当前 yolo policy（不再接受外部传入值，杜绝 terminal / resolver 路径写回过期策略），仅 bump 一次 revision。
+    ThreadState head = stored.advanceHead(id(99), CREATED.plusSeconds(2));
     assertEquals(id(99), head.headEntryId());
     assertTrue(head.yoloEnabled());
     assertEquals(6L, head.revision());
     assertEquals(3L, head.nextCommandSequence());
-    // 在 terminal apply 时重新发送当前 policy，语义保持一致
-    ThreadState replayPolicy = head.advanceHead(id(99), true, CREATED.plusSeconds(3));
-    assertEquals(7L, replayPolicy.revision());
-    ThreadState touched = replayPolicy.touchRevision(CREATED.plusSeconds(3));
-    assertEquals(8L, touched.revision());
-    assertEquals(id(99), touched.headEntryId());
-    assertTrue(touched.yoloEnabled());
-    assertEquals(3L, touched.nextCommandSequence());
+    // 再次推进同样保留 policy，不因显式传入而改写。
+    ThreadState advanced = head.advanceHead(id(99), CREATED.plusSeconds(3));
+    assertTrue(advanced.yoloEnabled());
+    assertEquals(7L, advanced.revision());
+    assertEquals(id(99), advanced.headEntryId());
+    assertEquals(3L, advanced.nextCommandSequence());
+    // false 值同样被保留。
+    ThreadState storedDisabled = state(id(7), id(42), false, 3L, 5L, CREATED);
+    ThreadState advancedDisabled = storedDisabled.advanceHead(id(99), CREATED.plusSeconds(2));
+    assertFalse(advancedDisabled.yoloEnabled());
+    assertEquals(6L, advancedDisabled.revision());
+    assertEquals(id(99), advancedDisabled.headEntryId());
+  }
+
+  @Test
+  void setYoloEnabledBumpsRevisionExactlyOnceAndPreservesCursor() {
+    ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
+    ThreadState enabled = stored.setYoloEnabled(true, CREATED.plusSeconds(2));
+    assertEquals(true, enabled.yoloEnabled());
+    assertEquals(6L, enabled.revision());
+    assertEquals(id(42), enabled.headEntryId());
+    assertEquals(3L, enabled.nextCommandSequence());
+    // 再次切换同样精确 +1；时间钳制与其它转换一致。
+    ThreadState disabled = enabled.setYoloEnabled(false, CREATED.plusSeconds(2));
+    assertEquals(false, disabled.yoloEnabled());
+    assertEquals(7L, disabled.revision());
+    assertEquals(CREATED.plusSeconds(2), enabled.updatedAt());
+    assertEquals(CREATED.plusSeconds(2), disabled.updatedAt());
   }
 
   @Test
@@ -104,8 +124,9 @@ class ThreadStateTest {
 
     // Caller wall-clock 回拨时，纯转换保留 durable 时间下界；revision/sequence/head 语义照常推进。
     assertEquals(durableNow, stored.reserveCommandSequences(1, CREATED).updatedAt());
-    assertEquals(durableNow, stored.advanceHead(id(99), true, CREATED).updatedAt());
+    assertEquals(durableNow, stored.advanceHead(id(99), CREATED).updatedAt());
     assertEquals(durableNow, stored.touchRevision(CREATED).updatedAt());
+    assertEquals(durableNow, stored.setYoloEnabled(true, CREATED).updatedAt());
   }
 
   @Test

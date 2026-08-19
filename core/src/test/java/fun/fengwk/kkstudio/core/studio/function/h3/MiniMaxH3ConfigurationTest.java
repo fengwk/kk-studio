@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.core.studio.function.h3;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 
@@ -10,13 +10,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
-import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 
-import java.time.Duration;
-import java.util.List;
-import java.util.function.Consumer;
-
-/** 配置测试覆盖默认关闭装配和启用时所有必需连接参数的 fail-fast 校验。 */
+/** 配置测试覆盖默认关闭装配、启用时的 token fail-fast 与聚合 runtime 边界。 */
 class MiniMaxH3ConfigurationTest {
 
   private final MiniMaxH3Configuration configuration = new MiniMaxH3Configuration();
@@ -24,14 +21,16 @@ class MiniMaxH3ConfigurationTest {
 
   @Test
   @SuppressWarnings("unchecked")
-  void createsAllBeansForValidConfiguration() {
-    MiniMaxH3Properties properties = validProperties();
+  void createsAllBeansForValidEnabledConfiguration() {
+    MiniMaxH3Properties properties = new MiniMaxH3Properties();
+    properties.setComfyBearerToken("token");
+    SystemSettingsSnapshot snapshot = snapshot(h3Settings(true));
+
     H3MediaPreflight preflight = configuration.h3MediaPreflight();
     H3PromptRequestBuilder promptBuilder = configuration.h3PromptRequestBuilder();
     H3WorkflowBuilder workflowBuilder = configuration.h3WorkflowBuilder(mapper);
-    StandardComfyuiClient client = configuration.standardH3ComfyuiClient(properties, mapper);
-    ObjectProvider<StandardComfyuiClient> clients = mock(ObjectProvider.class);
-    ObjectProvider<StorageBlobIngestService> ingestServices = mock(ObjectProvider.class);
+    StandardComfyuiClient client =
+        configuration.standardH3ComfyuiClient(properties, snapshot, mapper);
 
     assertNotNull(preflight);
     assertNotNull(promptBuilder);
@@ -39,115 +38,122 @@ class MiniMaxH3ConfigurationTest {
     assertNotNull(client);
     assertNotNull(
         configuration.miniMaxH3CanvasFunctionAdapter(
-            properties,
+            snapshot,
             preflight,
             promptBuilder,
             mock(HarnessOneShotService.class),
             workflowBuilder,
-            clients,
-            ingestServices,
+            mock(ObjectProvider.class),
+            mock(ObjectProvider.class),
             mapper));
   }
 
   @Test
-  void acceptsExactRuntimeBounds() {
-    MiniMaxH3Properties properties = validProperties();
-    properties.setPromptAgentName("a".repeat(MiniMaxH3Properties.MAX_AGENT_NAME_LENGTH));
-    properties.setPromptEnvironmentName("a".repeat(64));
-    properties.setPresignExpirySeconds(1L);
-    properties.setPromptMaxWait(MiniMaxH3Properties.MAX_PROMPT_WAIT);
-    properties.setComfyConnectTimeout(MiniMaxH3Properties.MAX_COMFY_CONNECT_TIMEOUT);
-    properties.setComfyRequestTimeout(MiniMaxH3Properties.MAX_COMFY_REQUEST_TIMEOUT);
-    properties.setComfyPollInterval(MiniMaxH3Properties.MAX_COMFY_POLL_INTERVAL);
-    properties.setComfyMaxWait(MiniMaxH3Properties.MAX_COMFY_WAIT);
-    assertDoesNotThrow(properties::validateEnabled);
+  @SuppressWarnings("unchecked")
+  void disabledIntegrationBootsWithoutSecretAndStillRegistersAdapter() {
+    MiniMaxH3Properties properties = new MiniMaxH3Properties();
+    SystemSettingsSnapshot snapshot = snapshot(h3Settings(false));
 
-    properties.setPresignExpirySeconds(MiniMaxH3Properties.MAX_PRESIGN_EXPIRY_SECONDS);
-    assertDoesNotThrow(properties::validateEnabled);
+    assertNull(configuration.standardH3ComfyuiClient(properties, snapshot, mapper));
+    // adapter 始终注册，enabled() 由 SystemSettings.integrations.minimaxH3 决定
+    assertNotNull(
+        configuration.miniMaxH3CanvasFunctionAdapter(
+            snapshot,
+            configuration.h3MediaPreflight(),
+            configuration.h3PromptRequestBuilder(),
+            mock(HarnessOneShotService.class),
+            configuration.h3WorkflowBuilder(mapper),
+            mock(ObjectProvider.class),
+            mock(ObjectProvider.class),
+            mapper));
   }
 
   @Test
-  void rejectsInvalidIdentityAndRuntimeBounds() {
-    List<Consumer<MiniMaxH3Properties>> invalidators =
-        List.of(
-            value -> value.setPromptAgentName(null),
-            value -> value.setPromptAgentName(""),
-            value -> value.setPromptAgentName(" h3-agent"),
-            value -> value.setPromptAgentName("h3/agent"),
-            value ->
-                value.setPromptAgentName("a".repeat(MiniMaxH3Properties.MAX_AGENT_NAME_LENGTH + 1)),
-            value -> value.setPromptEnvironmentName(null),
-            value -> value.setPromptEnvironmentName(""),
-            value -> value.setPromptEnvironmentName("H3-prompt"),
-            value -> value.setPromptEnvironmentName("h3/prompt"),
-            value -> value.setPromptEnvironmentName("-h3"),
-            value -> value.setPromptEnvironmentName("a".repeat(65)),
-            value -> value.setPresignExpirySeconds(0L),
-            value -> value.setPresignExpirySeconds(-1L),
-            value ->
-                value.setPresignExpirySeconds(MiniMaxH3Properties.MAX_PRESIGN_EXPIRY_SECONDS + 1L),
-            value -> value.setPromptMaxWait(null),
-            value -> value.setPromptMaxWait(Duration.ZERO),
-            value -> value.setPromptMaxWait(Duration.ofNanos(-1L)),
-            value -> value.setPromptMaxWait(MiniMaxH3Properties.MAX_PROMPT_WAIT.plusNanos(1L)),
-            value -> value.setComfyConnectTimeout(null),
-            value -> value.setComfyConnectTimeout(Duration.ZERO),
-            value -> value.setComfyConnectTimeout(Duration.ofNanos(-1L)),
-            value ->
-                value.setComfyConnectTimeout(
-                    MiniMaxH3Properties.MAX_COMFY_CONNECT_TIMEOUT.plusNanos(1L)),
-            value -> value.setComfyRequestTimeout(null),
-            value -> value.setComfyRequestTimeout(Duration.ZERO),
-            value -> value.setComfyRequestTimeout(Duration.ofNanos(-1L)),
-            value ->
-                value.setComfyRequestTimeout(
-                    MiniMaxH3Properties.MAX_COMFY_REQUEST_TIMEOUT.plusNanos(1L)),
-            value -> value.setComfyPollInterval(null),
-            value -> value.setComfyPollInterval(Duration.ZERO),
-            value -> value.setComfyPollInterval(Duration.ofNanos(-1L)),
-            value ->
-                value.setComfyPollInterval(
-                    MiniMaxH3Properties.MAX_COMFY_POLL_INTERVAL.plusNanos(1L)),
-            value -> value.setComfyMaxWait(null),
-            value -> value.setComfyMaxWait(Duration.ZERO),
-            value -> value.setComfyMaxWait(Duration.ofNanos(-1L)),
-            value -> value.setComfyMaxWait(MiniMaxH3Properties.MAX_COMFY_WAIT.plusNanos(1L)),
-            value -> {
-              value.setComfyPollInterval(Duration.ofSeconds(1));
-              value.setComfyMaxWait(Duration.ofSeconds(1));
-            },
-            value -> {
-              value.setComfyPollInterval(Duration.ofSeconds(2));
-              value.setComfyMaxWait(Duration.ofSeconds(1));
-            });
-    for (Consumer<MiniMaxH3Properties> invalidate : invalidators) {
-      MiniMaxH3Properties properties = validProperties();
-      invalidate.accept(properties);
-      assertThrows(IllegalArgumentException.class, properties::validateEnabled);
-    }
+  void enabledIntegrationRequiresBearerTokenSecret() {
+    MiniMaxH3Properties properties = new MiniMaxH3Properties();
+    SystemSettingsSnapshot snapshot = snapshot(h3Settings(true));
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> configuration.standardH3ComfyuiClient(properties, snapshot, mapper));
   }
 
   @Test
-  void configurationUsesTheSingleRuntimeValidationEntry() {
-    MiniMaxH3Properties properties = validProperties();
-    properties.setPromptEnvironmentName("H3-prompt");
+  void rejectsInvalidAggregateRuntimeBounds() {
+    // enabled 时必须携带 promptAgentName 与 comfyBaseUrl
     assertThrows(
         IllegalArgumentException.class,
-        () -> configuration.standardH3ComfyuiClient(properties, mapper));
+        () ->
+            new SystemSettings.MiniMaxH3(
+                true,
+                null,
+                "h3-prompt",
+                600_000L,
+                "http://127.0.0.1:8188",
+                10_000L,
+                30_000L,
+                1_000L,
+                30_000L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SystemSettings.MiniMaxH3(
+                true, "h3-agent", "h3-prompt", 600_000L, null, 10_000L, 30_000L, 1_000L, 30_000L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SystemSettings.MiniMaxH3(
+                true,
+                "h3-agent",
+                "h3-prompt",
+                0L,
+                "http://127.0.0.1:8188",
+                10_000L,
+                30_000L,
+                1_000L,
+                30_000L));
+    // comfyPollIntervalMillis 必须严格小于 comfyMaxWaitMillis
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SystemSettings.MiniMaxH3(
+                true,
+                "h3-agent",
+                "h3-prompt",
+                600_000L,
+                "http://127.0.0.1:8188",
+                10_000L,
+                30_000L,
+                30_000L,
+                30_000L));
   }
 
-  private static MiniMaxH3Properties validProperties() {
-    MiniMaxH3Properties properties = new MiniMaxH3Properties();
-    properties.setEnabled(true);
-    properties.setPromptAgentName("h3-agent");
-    properties.setPromptEnvironmentName("h3-prompt");
-    properties.setPresignExpirySeconds(600L);
-    properties.setPromptMaxWait(Duration.ofMinutes(10));
-    properties.setComfyBaseUrl("http://127.0.0.1:8188");
-    properties.setComfyConnectTimeout(Duration.ofSeconds(1));
-    properties.setComfyRequestTimeout(Duration.ofSeconds(1));
-    properties.setComfyPollInterval(Duration.ofSeconds(1));
-    properties.setComfyMaxWait(Duration.ofMinutes(1));
-    return properties;
+  private static SystemSettingsSnapshot snapshot(SystemSettings.MiniMaxH3 minimaxH3) {
+    return new SystemSettingsSnapshot(
+        new SystemSettings(
+            SystemSettings.Tool.DEFAULT,
+            SystemSettings.AiRuntime.DEFAULT,
+            SystemSettings.Environment.DEFAULT,
+            new SystemSettings.Integrations(
+                SystemSettings.Comfyui.DEFAULT,
+                SystemSettings.OpenCliHub.DEFAULT,
+                SystemSettings.Seedance.DEFAULT,
+                SystemSettings.GptImage2.DEFAULT,
+                minimaxH3),
+            SystemSettings.StorageMedia.DEFAULT,
+            SystemSettings.Advanced.DEFAULT));
+  }
+
+  private static SystemSettings.MiniMaxH3 h3Settings(boolean enabled) {
+    return new SystemSettings.MiniMaxH3(
+        enabled,
+        "h3-agent",
+        "h3-prompt",
+        600_000L,
+        "http://127.0.0.1:8188",
+        10_000L,
+        30_000L,
+        1_000L,
+        30_000L);
   }
 }

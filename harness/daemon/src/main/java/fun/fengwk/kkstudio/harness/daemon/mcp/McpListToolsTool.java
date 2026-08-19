@@ -41,8 +41,7 @@ public final class McpListToolsTool extends AbstractMcpBridgeTool {
         request.call().id(),
         List.of(new JsonToolContent(OBJECT_MAPPER.writeValueAsString(root))),
         false,
-        "{}",
-        false);
+        "{}");
   }
 
   @Override

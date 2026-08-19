@@ -97,7 +97,6 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    resultEntryId: null,
     createTime: '2026-07-28T10:00:00Z',
     updateTime: '2026-07-28T10:00:00Z',
     ...overrides,
@@ -585,7 +584,7 @@ describe('buildThreadEventTimeline', () => {
     ])
   })
 
-  it('suppresses tool overlays when the durable tool_result or resultEntryId is materialized in the same turn', () => {
+  it('suppresses tool overlays once a durable tool_result is materialized in the same turn', () => {
     const assistantToolCall = {
       type: 'tool_call' as const,
       toolCallId: 'call-1',
@@ -593,7 +592,7 @@ describe('buildThreadEventTimeline', () => {
       rendererKey: 'bash',
       argumentsJson: '{}',
     }
-    // durable tool_result 已物化（同 Turn）：overlay 消失。
+    // durable tool_result 已物化（同 Turn）：durable Entry 是权威记录，overlay 消失。
     const durable = build(
       [
         entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
@@ -606,28 +605,17 @@ describe('buildThreadEventTimeline', () => {
     )
     expect(durable.some((event) => event.source === 'active-tool')).toBe(false)
 
-    // DTO resultEntryId 已指向存在的 Entry（payload 不含可解析 toolCallId）：同样消失。
-    const byResultEntry = build(
-      [
-        entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
-        entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [assistantToolCall])),
-        entry('tool-1', 'MESSAGE', messagePayload('TOOL', [
-          { type: 'tool_result', contents: [{ type: 'text', text: 'ok' }] },
-        ])),
-      ],
-      { toolInvocations: [toolInvocation({ resultEntryId: 'tool-1' })] },
-    )
-    expect(byResultEntry.some((event) => event.source === 'active-tool')).toBe(false)
-
-    // resultEntryId 指向缺失 Entry：overlay 继续展示。
-    const missing = build(
+    // durable tool_result 尚未物化：terminal-pending overlay 继续展示。ToolResult
+    // Entry 写入与 invocation 删除原子提交，因此直到 durable Entry 落地
+    // （invocation 随 snapshot 消失）才有权威记录。
+    const pending = build(
       [
         entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
         entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [assistantToolCall])),
       ],
-      { toolInvocations: [toolInvocation({ resultEntryId: 'tool-404' })] },
+      { toolInvocations: [toolInvocation({ resultJson: '{"toolCallId":"call-1","contents":[]}' })] },
     )
-    expect(missing.some((event) => event.source === 'active-tool')).toBe(true)
+    expect(pending.some((event) => event.source === 'active-tool')).toBe(true)
   })
 
   it('falls back to appending overlay records whose anchor entry is missing', () => {

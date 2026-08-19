@@ -18,7 +18,7 @@ Environment 的选择在持久化与 wire 上都是**原子**的完整绑定 `{n
 
 ## 3. SET_ENVIRONMENT：缺省 vs 显式 null
 
-`SET_ENVIRONMENT` 命令的 `environment` 字段在 JSON 中**必须出现**，可空对象：显式 `null` 表示解绑，非 null 必须是完整 `{name, workspacePath}`。字段缺失（缺省）按 400 拒绝；其余命令类型即使提供显式 null 的 `environment` 也按 forbidden 拒绝。前端 diff 只在 binding 变化时发出该命令，固定顺序 `SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL -> SET_ACTIVE_TOOLS -> SET_YOLO`。
+`SET_ENVIRONMENT` 命令的 `environment` 字段在 JSON 中**必须出现**，可空对象：显式 `null` 表示解绑，非 null 必须是完整 `{name, workspacePath}`。字段缺失（缺省）按 400 拒绝；其余命令类型即使提供显式 null 的 `environment` 也按 forbidden 拒绝。前端 diff 只在 binding 变化时发出该命令，固定顺序 `SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL -> SET_ACTIVE_TOOLS`；YOLO 是直接控制面（`PUT /yolo`），绝不作为命令发送。
 
 ## 4. ToolInvocation 冻结
 
@@ -26,7 +26,7 @@ Environment 的选择在持久化与 wire 上都是**原子**的完整绑定 `{n
 
 ## 5. ENVIRONMENT preflight 与 daemon 执行
 
-- **preflight**（`CoreToolGateway`）：ENVIRONMENT 工具的权限路径上下文体现冻结 binding 的 workspace——以配置的 `environmentRoot` 作为逻辑 root，把 canonical `workspacePath` 纯路径解析为 effective workdir；**不查询 live registry、不做文件系统 IO**。PLATFORM 工具与 null binding 保持 server 默认 workdir；null binding 的确定性拒绝发生在 `start`（发送前 `Rejected`，绝不进入 transport，避免 null binding 变成不确定结果）。
+- **preflight**（`CoreToolGateway`）：ENVIRONMENT 工具的权限路径上下文体现冻结 binding 的 workspace——以配置的 `environmentRoot` 作为逻辑 root，把 canonical `workspacePath` 纯路径解析为 effective workdir；**不查询 live registry、不做文件系统 IO**。权限 `path` pattern 的唯一基准是该 effective workdir，`environmentRoot` 只参与 workdir 计算与边界定义，不再额外生成 Environment root 相对匹配 alias。PLATFORM 工具与 null binding 保持 server 默认 workdir；null binding 的确定性拒绝发生在 `start`（发送前 `Rejected`，绝不进入 transport，避免 null binding 变成不确定结果）。
 - **daemon 执行**（`DaemonRuntime.canonicalWorkspace`）：INVOKE 的 `workspacePath` 先过 `EnvironmentWorkspacePath` 形状校验，再相对 environment root 解析并 `toRealPath()` canonicalize；symlink 越界（real path 不在 root 内）、**路径已删除**、非目录都是确定性 FAILED，且必须在发送 `STARTED` 之前完成——绝不产生 STARTED 后再失败。root 内 symlink alias 的 real path 仍在 root 内时允许。
 
 ## 6. 目录 API 隐私

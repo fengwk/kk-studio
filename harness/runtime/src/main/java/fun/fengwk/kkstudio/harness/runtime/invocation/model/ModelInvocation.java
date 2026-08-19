@@ -26,7 +26,7 @@ public record ModelInvocation(
     UUID threadId,
     UUID turnStartEntryId,
     UUID basisHeadEntryId,
-    ModelInvocationRequest request,
+    ModelRequestSpec request,
     ModelInvocationStatus status,
     int attempt,
     StreamCheckpoint streamCheckpoint,
@@ -268,9 +268,18 @@ public record ModelInvocation(
       throw new IllegalArgumentException(
           "failed attempt must equal the current invocation attempt");
     }
-    if (appended.error().kind() != ProviderErrorKind.TRANSIENT) {
-      throw new IllegalArgumentException("failed attempt requires a TRANSIENT error");
+    if (!isRetryable(appended.error())) {
+      throw new IllegalArgumentException("failed attempt requires a retryable error");
     }
+  }
+
+  /**
+   * TRANSIENT 与 INVALID_RESPONSE 复用 {@link
+   * fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy}。
+   */
+  private static boolean isRetryable(ModelInvocationError error) {
+    return error.kind() == ProviderErrorKind.TRANSIENT
+        || error.kind() == ProviderErrorKind.INVALID_RESPONSE;
   }
 
   private static boolean isPrefix(String prefix, String value) {
@@ -328,8 +337,9 @@ public record ModelInvocation(
       throw new IllegalArgumentException(
           "failed attempt must equal the current invocation attempt");
     }
-    if (failure.error().kind() != ProviderErrorKind.TRANSIENT) {
-      throw new IllegalArgumentException("retryReady requires a TRANSIENT error");
+    if (failure.error().kind() != ProviderErrorKind.TRANSIENT
+        && failure.error().kind() != ProviderErrorKind.INVALID_RESPONSE) {
+      throw new IllegalArgumentException("retryReady requires a retryable error");
     }
     List<ModelAttemptFailure> nextFailures = new ArrayList<>(failedAttempts);
     nextFailures.add(failure);

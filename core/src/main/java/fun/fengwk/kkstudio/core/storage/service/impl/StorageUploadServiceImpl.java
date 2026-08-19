@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
-import fun.fengwk.kkstudio.core.storage.configuration.StorageProperties;
 import fun.fengwk.kkstudio.core.storage.error.StorageConflictException;
 import fun.fengwk.kkstudio.core.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.core.storage.error.StorageVerificationException;
@@ -27,6 +26,7 @@ import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageMediaFacts;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageUpload;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
@@ -66,7 +66,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private final S3PresignService s3PresignService;
   private final StorageMediaProbe mediaProbe;
   private final S3StorageProperties s3Properties;
-  private final StorageProperties storageProperties;
+  private final SystemSettings.StorageMedia storageMedia;
   private final Clock clock;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate mandatoryTransactionTemplate;
@@ -79,7 +79,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       S3PresignService s3PresignService,
       StorageMediaProbe mediaProbe,
       S3StorageProperties s3Properties,
-      StorageProperties storageProperties,
+      SystemSettings.StorageMedia storageMedia,
       Clock clock,
       PlatformTransactionManager transactionManager) {
     this.uploadRepository = Objects.requireNonNull(uploadRepository, "uploadRepository");
@@ -89,7 +89,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     this.s3PresignService = Objects.requireNonNull(s3PresignService, "s3PresignService");
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
     this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
-    this.storageProperties = Objects.requireNonNull(storageProperties, "storageProperties");
+    this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
     this.clock = Objects.requireNonNull(clock, "clock");
     PlatformTransactionManager requiredTransactionManager =
         Objects.requireNonNull(transactionManager, "transactionManager");
@@ -110,8 +110,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
 
     UUID uploadId = UUID.randomUUID();
     UUID candidateBlobId = UUID.randomUUID();
-    Instant expiresAt =
-        clock.instant().plusSeconds(storageProperties.getEffectiveUploadExpiresSeconds());
+    Instant expiresAt = clock.instant().plusSeconds(storageMedia.uploadExpiresSeconds());
     ReserveOutcome outcome =
         transactionTemplate.execute(
             status -> {
@@ -407,9 +406,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   }
 
   private long presignExpiresSeconds() {
-    return Math.min(
-        storageProperties.getEffectiveUploadExpiresSeconds(),
-        s3Properties.getEffectivePresignMaxExpiresSeconds());
+    return Math.min(storageMedia.uploadExpiresSeconds(), storageMedia.s3PresignMaxExpiresSeconds());
   }
 
   private StorageUpload newUpload(

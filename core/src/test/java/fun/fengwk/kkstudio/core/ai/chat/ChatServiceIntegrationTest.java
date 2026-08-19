@@ -25,9 +25,11 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
@@ -137,7 +139,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                               new ModelSelection("stub", "acceptance-stub", "default"),
                               List.of())),
                       Instant.parse("2026-08-02T00:00:00Z"))));
-      TurnResolver.Result resolution = turnResolver.resolve(THREAD_ID, path, false, null);
+      TurnResolver.Result resolution = turnResolver.resolve(THREAD_ID, path, null);
       TurnResolver.Rejected rejected = assertInstanceOf(TurnResolver.Rejected.class, resolution);
       assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
       assertEquals("agent not found: default-assistant", rejected.error().message());
@@ -156,13 +158,13 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       rebound.setSystemPrompt(reboundSystemPrompt);
       AgentDefinitionDTO reboundAgent = agentDefinitionService.createAgent(rebound);
       try {
-        TurnResolver.Result reboundResolution = turnResolver.resolve(THREAD_ID, path, false, null);
+        TurnResolver.Result reboundResolution = turnResolver.resolve(THREAD_ID, path, null);
         TurnResolver.Resolved resolved =
             assertInstanceOf(TurnResolver.Resolved.class, reboundResolution);
-        ProviderMessage leadingSystem = resolved.request().providerRequest().messages().get(0);
-        assertEquals(ProviderMessageRole.SYSTEM, leadingSystem.role());
+        var leading = resolved.spec().preambleMessages().get(0);
+        assertEquals(AgentMessageRole.SYSTEM, leading.role());
         assertTrue(
-            textOf(leadingSystem).contains(reboundSystemPrompt),
+            textOfPreamble(leading).contains(reboundSystemPrompt),
             "同名重建后的当前行 systemPrompt 必须出现在有效请求的 leading SYSTEM 中");
       } finally {
         agentDefinitionService.deleteAgent("default-assistant", reboundAgent.getVersion());
@@ -251,6 +253,16 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
     StringBuilder text = new StringBuilder();
     for (ProviderContentBlock content : message.contents()) {
       text.append(((ProviderTextBlock) content).text());
+    }
+    return text.toString();
+  }
+
+  private static String textOfPreamble(AgentMessage message) {
+    StringBuilder text = new StringBuilder();
+    for (var content : message.contents()) {
+      if (content instanceof TextMessageContent textContent) {
+        text.append(textContent.text());
+      }
     }
     return text.toString();
   }

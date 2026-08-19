@@ -29,9 +29,9 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * 以 PostgreSQL provider 资源为支撑的生产 {@link ModelGateway} 适配器。
  *
- * <p>{@code start} 通过 {@link ProviderResolutionService} 同步解析冻结的 {@link
- * fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest}，并向共享 虚拟线程 executor
- * 提交一个 transport 任务。任务按配置的 timeout 策略打开一个 {@link ModelProvider}， 并把 SDK 流桥接到 Runtime
+ * <p>{@code start} 通过 {@link ProviderResolutionService} 同步解析冻结 {@link
+ * fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType} 与内存 {@link ProviderRequest}，并向共享
+ * 虚拟线程 executor 提交一个 transport 任务。任务按配置的 timeout 策略打开一个 {@link ModelProvider}， 并把 SDK 流桥接到 Runtime
  * listener；gateway 绝不读写 HarnessStore。
  *
  * <p>Admission 分类：确定性解析失败（{@link IllegalArgumentException}）返回携带 {@link
@@ -88,7 +88,7 @@ public final class CoreModelGateway implements ModelGateway {
     Objects.requireNonNull(listener, "listener");
     ProviderResolutionService.ResolvedExecution resolved;
     try {
-      resolved = providerResolution.resolve(execution.request().providerRequest());
+      resolved = providerResolution.resolve(execution.providerType(), execution.request());
     } catch (IllegalArgumentException setupFailure) {
       // 提交前的确定性装配失败：终止 invocation，绝不重试。
       return new Rejected(

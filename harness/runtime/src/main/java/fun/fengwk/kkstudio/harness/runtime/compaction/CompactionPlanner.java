@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -177,9 +178,73 @@ public final class CompactionPlanner {
   }
 
   /**
+   * 按已冻结的 {@link CompactionRequest} Entry IDs 重建摘要输入，不重新运行 cut selection。
+   *
+   * <p>FULL/HISTORY 从上一份 complete 压缩的 firstKept（无则 ROOT 之后）取到 historyEnd；TURN_PREFIX 只取
+   * prefix..cut。 previousSummary 仅 FULL/HISTORY 且路径上存在 complete 压缩时非空。
+   */
+  public static CompactionSummaryInput reconstructSummaryInput(
+      EntryPath path, CompactionRequest request) {
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(request, "request");
+    List<Entry> entries = path.entries();
+    boolean[] visible = visibilityMask(entries);
+    int firstKeptIndex = indexOfId(entries, request.firstKeptEntryId());
+    int cutIndex = indexOfId(entries, request.cutEntryId());
+    if (firstKeptIndex < 0 || cutIndex < 0 || firstKeptIndex > cutIndex) {
+      throw new IllegalStateException(
+          "compaction request references are corrupt on the current path: firstKeptEntryId="
+              + request.firstKeptEntryId()
+              + " cutEntryId="
+              + request.cutEntryId());
+    }
+    int prefixIndex =
+        request.turnPrefixStartEntryId() == null
+            ? -1
+            : indexOfId(entries, request.turnPrefixStartEntryId());
+    if (request.phase() != CompactionPhase.FULL && (prefixIndex < 0 || prefixIndex >= cutIndex)) {
+      throw new IllegalStateException(
+          "split compaction request requires turnPrefixStartEntryId on the current path before cut");
+    }
+    int boundaryStart = 0;
+    String previousSummary = null;
+    for (int i = 0; i < entries.size(); i++) {
+      if (entries.get(i).payload() instanceof CompactionPayload payload && payload.complete()) {
+        int kept = indexOfId(entries, payload.firstKeptEntryId());
+        int cut = indexOfId(entries, payload.cutEntryId());
+        if (kept < 0 || cut < 0 || kept > cut || cut >= i) {
+          throw new IllegalStateException(
+              "complete compaction references are corrupt on the current path: firstKeptEntryId="
+                  + payload.firstKeptEntryId()
+                  + " cutEntryId="
+                  + payload.cutEntryId());
+        }
+        boundaryStart = kept;
+        String stripped = CompactionFileSections.stripReservedSections(payload.summaryText());
+        previousSummary = stripped.isBlank() ? null : stripped;
+      }
+    }
+    if (request.phase() == CompactionPhase.TURN_PREFIX) {
+      List<AgentMessage> messages = contextMessages(entries, visible, prefixIndex, cutIndex);
+      if (messages.isEmpty()) {
+        throw new IllegalStateException(
+            "compaction request prefix range contains no context messages");
+      }
+      return new CompactionSummaryInput(messages, null);
+    }
+    int historyEnd = request.phase() == CompactionPhase.HISTORY ? prefixIndex : cutIndex;
+    List<AgentMessage> messages = contextMessages(entries, visible, boundaryStart, historyEnd);
+    if (messages.isEmpty()) {
+      throw new IllegalStateException(
+          "compaction request history range contains no context messages");
+    }
+    return new CompactionSummaryInput(messages, previousSummary);
+  }
+
+  /**
    * 切分 HISTORY 部分成功后的机械 TURN_PREFIX 延续：所有切分事实（firstKept / cut / turnPrefixStart / tokensBefore /
    * trigger）冻结复用自 {@code incomplete} payload，绝不重新选 cut。引用缺失或前缀段为空视为分支损坏，抛 {@link
-   * IllegalStateException}；{@code contextWindow} 沿用 HISTORY invocation 冻结的窗口。
+   * IllegalStateException}；{@code contextWindow} 沿用 HISTORY turn 冻结的窗口。
    */
   public CompactionPreparation prepareTurnPrefix(
       EntryPath path, CompactionPayload incomplete, long contextWindow) {

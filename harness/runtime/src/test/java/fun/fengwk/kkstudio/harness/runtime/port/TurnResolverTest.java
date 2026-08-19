@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 
 import java.util.List;
 
@@ -24,10 +24,15 @@ class TurnResolverTest {
   }
 
   @Test
-  void resolvedRequiresARequest() {
-    TurnResolver.Resolved resolved = new TurnResolver.Resolved(PortTestData.modelRequest());
-    assertEquals(PortTestData.modelRequest(), resolved.request());
-    assertThrows(NullPointerException.class, () -> new TurnResolver.Resolved(null));
+  void resolvedRequiresASpecAndPositiveContextWindow() {
+    TurnResolver.Resolved resolved =
+        new TurnResolver.Resolved(PortTestData.modelRequest(), 100_000);
+    assertEquals(PortTestData.modelRequest(), resolved.spec());
+    assertEquals(100_000, resolved.contextWindow());
+    assertThrows(NullPointerException.class, () -> new TurnResolver.Resolved(null, 100_000));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new TurnResolver.Resolved(PortTestData.modelRequest(), 0));
   }
 
   @Test
@@ -40,19 +45,18 @@ class TurnResolverTest {
 
   @Test
   void resolveIsASynchronousNoSideEffectContractMethod() {
-    // 该 port 是单方法函数式契约，必须支持匿名实现
     TurnResolver resolver =
-        (threadId, path, yoloEnabled, preparation) ->
+        (threadId, path, preparation) ->
             new TurnResolver.Rejected(new AssistantError("PLANNING_FAILED", "rejected"));
-    TurnResolver.Result result = resolver.resolve(id(1L), null, true, null);
+    TurnResolver.Result result = resolver.resolve(id(1L), null, null);
     assertTrue(result instanceof TurnResolver.Rejected);
     assertEquals("rejected", ((TurnResolver.Rejected) result).error().message());
   }
 
   @Test
-  void modelInvocationRequestStaysFrozenInTheResult() {
-    ModelInvocationRequest request = PortTestData.modelRequest();
-    TurnResolver.Resolved resolved = new TurnResolver.Resolved(request);
-    assertEquals(request, resolved.request());
+  void modelRequestSpecStaysFrozenInTheResult() {
+    ModelRequestSpec spec = PortTestData.modelRequest();
+    TurnResolver.Resolved resolved = new TurnResolver.Resolved(spec, 100_000);
+    assertEquals(spec, resolved.spec());
   }
 }

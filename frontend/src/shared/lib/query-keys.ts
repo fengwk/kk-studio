@@ -35,6 +35,9 @@ export const queryKeys = {
   comfyui: {
     workflows: ['comfyui', 'workflows'] as const,
   },
+  systemSettings: {
+    all: ['system-settings', 'aggregate'] as const,
+  },
   studio: {
     canvases: ['studio', 'canvases'] as const,
     canvas: (canvasId: string) => ['studio', 'canvas', canvasId] as const,

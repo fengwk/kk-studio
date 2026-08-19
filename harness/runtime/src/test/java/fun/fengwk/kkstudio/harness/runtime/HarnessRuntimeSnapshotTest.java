@@ -112,7 +112,7 @@ class HarnessRuntimeSnapshotTest {
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(thread.advanceHead(baseline.rootEntryId(), thread.yoloEnabled(), T5));
+          tx.updateThread(thread.advanceHead(baseline.rootEntryId(), T5));
           return null;
         });
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());

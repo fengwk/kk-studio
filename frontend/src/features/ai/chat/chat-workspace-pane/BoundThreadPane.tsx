@@ -24,7 +24,7 @@ import {
   browserNotificationPermission,
   useThreadNotifications,
 } from '@/features/ai/runtime/thread-notifications'
-import { useApplicationSettings } from '@/features/settings/application-settings'
+import { useBrowserPreferences } from '@/features/settings/browser-preferences'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import {
   AgentSelectionPanel,
@@ -134,7 +134,7 @@ export function BoundThreadPane({
   const boundThreadIdRef = useRef<string | null>(null)
   // 全局应用设置（AppProviders mount-once）：通知开关是 SettingsPage 与所有
   // Bound 面板共享的唯一事实源，不再维护面板本地偏好。
-  const { notificationsEnabled } = useApplicationSettings()
+  const { notificationsEnabled } = useBrowserPreferences()
   // permission 每次渲染都从当前浏览器状态派生，绝不缓存 mount 时快照：
   // SettingsPage 可能在别处请求权限后置全局 enabled，已挂载面板必须立即反映
   // 真实 permission，通知 hook 不会被陈旧快照门控；Footer 不再承载通知入口。
@@ -489,9 +489,10 @@ export function BoundThreadPane({
       }
       void controller.decideApproval(invocationId, decision, targetThreadId)
     },
-    actionError: rebindBlockedReason ?? controller.actionError,
+    actionError: rebindBlockedReason ?? panel.yoloError ?? controller.actionError,
     onDismissActionError: () => {
       setRebindBlockedReason(null)
+      panel.dismissYoloError()
       controller.dismissActionError()
     },
   }

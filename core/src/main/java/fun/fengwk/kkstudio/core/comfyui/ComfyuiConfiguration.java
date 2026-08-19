@@ -6,17 +6,23 @@ import fun.fengwk.convention4j.comfyui.ComfyUIClientFactory;
 import fun.fengwk.convention4j.comfyui.ComfyUIClientOptions;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.util.Assert;
 
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiLookupService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
+
+import java.time.Duration;
+import java.util.Objects;
 
 /**
  * ComfyUI 无状态客户端与运行服务配置。
+ *
+ * <p>客户端是长生命周期拓扑，装配开关来自 SystemSettings.integrations.comfyui.enabled（不再是 properties 属性）：关闭时
+ * 不创建客户端且无需 baseUrl/apiKey（SystemSettings 仅在启用时要求 baseUrl）；启用时 bootstrap 缺失仍明确报错。
  *
  * @author fengwk
  */
@@ -26,22 +32,20 @@ public class ComfyuiConfiguration {
 
   @Bean(destroyMethod = "close")
   @ConditionalOnMissingBean(ComfyUIClient.class)
-  @ConditionalOnProperty(prefix = "kk-studio.comfyui", name = "enabled", havingValue = "true")
-  public ComfyUIClient comfyUIClient(ComfyuiProperties properties) {
-    Assert.hasText(properties.getBaseUrl(), "kk-studio.comfyui.base-url must not be blank");
-    Assert.notNull(
-        properties.getConnectTimeout(), "kk-studio.comfyui.connect-timeout must not be null");
-    Assert.notNull(properties.getReadTimeout(), "kk-studio.comfyui.read-timeout must not be null");
-    Assert.notNull(
-        properties.getWebsocketTimeout(), "kk-studio.comfyui.websocket-timeout must not be null");
+  public ComfyUIClient comfyUIClient(
+      ComfyuiProperties properties, SystemSettingsSnapshot snapshot) {
+    SystemSettings.Comfyui settings = snapshot.get().integrations().comfyui();
+    if (!settings.enabled()) {
+      return null;
+    }
     return new ComfyUIClientFactory()
         .create(
             ComfyUIClientOptions.builder()
-                .baseUrl(properties.getBaseUrl())
+                .baseUrl(Objects.requireNonNull(settings.baseUrl(), "comfyui baseUrl"))
                 .apiKey(properties.getApiKey())
-                .connectTimeout(properties.getConnectTimeout())
-                .readTimeout(properties.getReadTimeout())
-                .websocketTimeout(properties.getWebsocketTimeout())
+                .connectTimeout(Duration.ofMillis(settings.connectTimeoutMillis()))
+                .readTimeout(Duration.ofMillis(settings.readTimeoutMillis()))
+                .websocketTimeout(Duration.ofMillis(settings.websocketTimeoutMillis()))
                 .build());
   }
 
@@ -49,13 +53,13 @@ public class ComfyuiConfiguration {
   @ConditionalOnMissingBean(ComfyuiRuntimeService.class)
   public ComfyuiRuntimeService comfyuiRuntimeService(
       ComfyuiWorkflowApiLookupService workflowApiLookupService,
-      ComfyuiProperties properties,
+      SystemSettingsSnapshot snapshot,
       ObjectProvider<ComfyUIClient> comfyUIClientProvider,
       ObjectProvider<S3StorageService> s3StorageServiceProvider,
       ObjectMapper objectMapper) {
     return new ComfyuiRuntimeService(
         workflowApiLookupService,
-        properties,
+        snapshot,
         comfyUIClientProvider,
         s3StorageServiceProvider,
         objectMapper);

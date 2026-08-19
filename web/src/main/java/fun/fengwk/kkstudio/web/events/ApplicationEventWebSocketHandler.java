@@ -36,11 +36,18 @@ import java.util.concurrent.TimeUnit;
 public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler {
 
   public static final String PATH = "/api/events/v1";
-  static final long HEARTBEAT_INTERVAL_MILLIS = 20_000L;
+
+  /** 测试便捷构造使用的默认事件软策略（与 SystemSettings.Advanced 默认一致）。 */
+  private static final long TEST_MAX_BYTES = 2L * 1024 * 1024;
+
+  private static final long TEST_SEND_TIMEOUT_MILLIS = 10_000L;
+  private static final long TEST_HEARTBEAT_INTERVAL_MILLIS = 20_000L;
 
   private final ApplicationEventHub hub;
   private final EventFrameCodec codec;
   private final int senderCapacity;
+  private final long maxBytes;
+  private final long sendTimeoutMillis;
   private final Map<String, ConnectionState> connections = new ConcurrentHashMap<>();
   private final ScheduledFuture<?> heartbeatTask;
 
@@ -48,32 +55,64 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   public ApplicationEventWebSocketHandler(
       ApplicationEventHub hub,
       EventFrameCodec codec,
+      ApplicationEventSettings settings,
       @Qualifier("applicationEventHeartbeatScheduler")
           ScheduledExecutorService heartbeatScheduler) {
-    this(hub, codec, AsyncTextSender.DEFAULT_CAPACITY, heartbeatScheduler);
+    this(
+        hub,
+        codec,
+        settings.queueCapacity(),
+        settings.maxBytes(),
+        settings.sendTimeoutMillis(),
+        settings.heartbeatIntervalMillis(),
+        heartbeatScheduler);
   }
 
-  /** 测试可注入发送队列容量。 */
+  /** 测试可注入发送队列容量；其余事件软策略使用仓库默认（与 SystemSettings.Advanced 默认一致）。 */
   ApplicationEventWebSocketHandler(
       ApplicationEventHub hub, EventFrameCodec codec, int senderCapacity) {
-    this(hub, codec, senderCapacity, null);
+    this(
+        hub,
+        codec,
+        senderCapacity,
+        TEST_MAX_BYTES,
+        TEST_SEND_TIMEOUT_MILLIS,
+        TEST_HEARTBEAT_INTERVAL_MILLIS,
+        null);
   }
 
   private ApplicationEventWebSocketHandler(
       ApplicationEventHub hub,
       EventFrameCodec codec,
       int senderCapacity,
+      long maxBytes,
+      long sendTimeoutMillis,
+      long heartbeatIntervalMillis,
       ScheduledExecutorService heartbeatScheduler) {
     this.hub = Objects.requireNonNull(hub, "hub");
     this.codec = Objects.requireNonNull(codec, "codec");
+    if (senderCapacity <= 0) {
+      throw new IllegalArgumentException("senderCapacity must be positive");
+    }
+    if (maxBytes <= 0) {
+      throw new IllegalArgumentException("maxBytes must be positive");
+    }
+    if (sendTimeoutMillis <= 0) {
+      throw new IllegalArgumentException("sendTimeoutMillis must be positive");
+    }
+    if (heartbeatIntervalMillis <= 0) {
+      throw new IllegalArgumentException("heartbeatIntervalMillis must be positive");
+    }
     this.senderCapacity = senderCapacity;
+    this.maxBytes = maxBytes;
+    this.sendTimeoutMillis = sendTimeoutMillis;
     this.heartbeatTask =
         heartbeatScheduler == null
             ? null
             : heartbeatScheduler.scheduleAtFixedRate(
                 this::heartbeat,
-                HEARTBEAT_INTERVAL_MILLIS,
-                HEARTBEAT_INTERVAL_MILLIS,
+                heartbeatIntervalMillis,
+                heartbeatIntervalMillis,
                 TimeUnit.MILLISECONDS);
   }
 
@@ -82,7 +121,10 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     Session nativeSession = requireNativeSession(session);
     connections.put(
         session.getId(),
-        new ConnectionState(hub, codec, new AsyncTextSender(nativeSession, senderCapacity)));
+        new ConnectionState(
+            hub,
+            codec,
+            new AsyncTextSender(nativeSession, senderCapacity, maxBytes, sendTimeoutMillis)));
   }
 
   @Override

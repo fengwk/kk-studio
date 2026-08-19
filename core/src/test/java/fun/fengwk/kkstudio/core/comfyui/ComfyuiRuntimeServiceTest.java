@@ -26,7 +26,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.util.unit.DataSize;
 import reactor.core.publisher.Mono;
 
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindings;
@@ -34,12 +33,13 @@ import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWork
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiLookupService;
 import fun.fengwk.kkstudio.core.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunFileDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunRequestDTO;
 
-import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 
@@ -54,7 +54,7 @@ public class ComfyuiRuntimeServiceTest {
   private ComfyuiWorkflowApiLookupService lookupService;
   private ComfyUIClient client;
   private S3StorageService s3StorageService;
-  private ComfyuiProperties properties;
+  private SystemSettingsSnapshot snapshot;
   private ComfyuiRuntimeService runtimeService;
 
   @BeforeEach
@@ -67,13 +67,14 @@ public class ComfyuiRuntimeServiceTest {
     ObjectProvider<S3StorageService> s3Provider = mock(ObjectProvider.class);
     when(clientProvider.getIfAvailable()).thenReturn(client);
     when(s3Provider.getIfAvailable()).thenReturn(s3StorageService);
-    properties = new ComfyuiProperties();
-    properties.setEnabled(true);
-    properties.setReadTimeout(Duration.ofSeconds(2));
-    properties.setMaxInputFileSize(DataSize.ofBytes(1024));
+    snapshot =
+        new SystemSettingsSnapshot(
+            settings(
+                new SystemSettings.Comfyui(
+                    true, "http://127.0.0.1:8188", 10_000L, 2_000L, 1_800_000L, 1024L)));
     runtimeService =
         new ComfyuiRuntimeService(
-            lookupService, properties, clientProvider, s3Provider, objectMapper);
+            lookupService, snapshot, clientProvider, s3Provider, objectMapper);
   }
 
   @Test
@@ -266,14 +267,48 @@ public class ComfyuiRuntimeServiceTest {
 
   @Test
   public void shouldFailClearlyOnlyWhenDisabledRuntimeIsInvoked() {
-    properties.setEnabled(false);
+    ComfyuiRuntimeService disabledService =
+        new ComfyuiRuntimeService(
+            lookupService,
+            new SystemSettingsSnapshot(
+                settings(
+                    new SystemSettings.Comfyui(false, null, 10_000L, 2_000L, 1_800_000L, 1024L))),
+            clientProvider(),
+            s3Provider(),
+            objectMapper);
 
     IllegalStateException error =
-        assertThrows(IllegalStateException.class, () -> runtimeService.getJob("run-1", null));
+        assertThrows(IllegalStateException.class, () -> disabledService.getJob("run-1", null));
 
-    assertEquals(
-        "ComfyUI runtime is disabled (kk-studio.comfyui.enabled=false)", error.getMessage());
+    assertEquals("ComfyUI runtime is disabled by SystemSettings", error.getMessage());
     verifyNoInteractions(client);
+  }
+
+  private ObjectProvider<ComfyUIClient> clientProvider() {
+    ObjectProvider<ComfyUIClient> provider = mock(ObjectProvider.class);
+    when(provider.getIfAvailable()).thenReturn(client);
+    return provider;
+  }
+
+  private ObjectProvider<S3StorageService> s3Provider() {
+    ObjectProvider<S3StorageService> provider = mock(ObjectProvider.class);
+    when(provider.getIfAvailable()).thenReturn(s3StorageService);
+    return provider;
+  }
+
+  private static SystemSettings settings(SystemSettings.Comfyui comfyui) {
+    return new SystemSettings(
+        SystemSettings.Tool.DEFAULT,
+        SystemSettings.AiRuntime.DEFAULT,
+        SystemSettings.Environment.DEFAULT,
+        new SystemSettings.Integrations(
+            comfyui,
+            SystemSettings.OpenCliHub.DEFAULT,
+            SystemSettings.Seedance.DEFAULT,
+            SystemSettings.GptImage2.DEFAULT,
+            SystemSettings.MiniMaxH3.DEFAULT),
+        SystemSettings.StorageMedia.DEFAULT,
+        SystemSettings.Advanced.DEFAULT);
   }
 
   private ComfyuiWorkflowApiBindings parseBindings(

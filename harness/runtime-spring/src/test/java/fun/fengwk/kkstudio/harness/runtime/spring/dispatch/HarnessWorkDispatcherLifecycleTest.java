@@ -305,7 +305,15 @@ class HarnessWorkDispatcherLifecycleTest {
     store.release();
 
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, seed.threadId());
-    awaitTrue(() -> work(inner, target).leaseToken() == null);
+    // 初始 Work 本来就是 leaseToken=null；只等待该条件会在 drain 真正 claim/归还前提前通过。
+    // wakeVersion 与 availableAt 一起证明 ownership-fenced return transaction 已完整提交。
+    awaitTrue(
+        () -> {
+          Work current = work(inner, target);
+          return current.leaseToken() == null
+              && current.wakeVersion() == 1L
+              && current.availableAt().equals(NOW.plus(REJECTION_DELAY));
+        });
     Work returned = work(inner, target);
     assertNotNull(returned);
     // ownership-fenced 归还：按正 executorRejectionDelay 重排并清除 lease。

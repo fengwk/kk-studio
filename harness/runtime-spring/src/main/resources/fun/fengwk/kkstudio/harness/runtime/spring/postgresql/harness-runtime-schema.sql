@@ -112,7 +112,6 @@ create table harness_thread_command (
             'SET_AGENT',
             'SET_MODEL',
             'SET_ACTIVE_TOOLS',
-            'SET_YOLO',
             'SET_ENVIRONMENT'
         )
     ),
@@ -214,21 +213,19 @@ create table harness_tool_invocation (
     model_invocation_id uuid not null,
     assistant_entry_id uuid not null,
     ordinal integer not null check (ordinal >= 0),
-    request jsonb not null check (jsonb_typeof(request) = 'object'),
+    call jsonb not null check (jsonb_typeof(call) = 'object'),
+    binding jsonb check (binding is null or jsonb_typeof(binding) = 'object'),
     status varchar(32) not null,
     attempt integer not null check (attempt >= 0),
     approval jsonb check (approval is null or jsonb_typeof(approval) = 'object'),
     result jsonb check (result is null or jsonb_typeof(result) = 'object'),
     effects jsonb not null check (jsonb_typeof(effects) = 'object'),
     error jsonb check (error is null or jsonb_typeof(error) = 'object'),
-    result_entry_id uuid,
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     constraint fk_harness_tool_invocation_model foreign key (model_invocation_id)
         references harness_model_invocation (id),
     constraint fk_harness_tool_invocation_assistant foreign key (assistant_entry_id)
-        references harness_entry (id),
-    constraint fk_harness_tool_invocation_result foreign key (result_entry_id)
         references harness_entry (id),
     constraint uk_harness_tool_invocation_ordinal unique (assistant_entry_id, ordinal),
     constraint ck_harness_tool_invocation_status check (
@@ -253,27 +250,21 @@ create table harness_tool_invocation (
     constraint ck_harness_tool_invocation_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (assistant_entry_id, ordinal) 与 assistant 消息对齐';
+comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (assistant_entry_id, ordinal) 与 assistant 消息对齐；batch apply 后行被物理删除';
 comment on column harness_tool_invocation.id is 'ToolInvocation 的全局唯一 UUID';
 comment on column harness_tool_invocation.model_invocation_id is '所属 ModelInvocation';
 comment on column harness_tool_invocation.assistant_entry_id is '携带对应 ToolCall 的 Assistant MESSAGE Entry';
 comment on column harness_tool_invocation.ordinal is 'assistant 消息内 tool call 的序号（从 0 递增）';
-comment on column harness_tool_invocation.request is '冻结的 tool 请求（JSON object）';
+comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
+comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
 comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_APPROVAL）';
 comment on column harness_tool_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
 comment on column harness_tool_invocation.approval is '审批记录（JSON object，可空）';
 comment on column harness_tool_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
 comment on column harness_tool_invocation.effects is '副作用批（JSON object；非 SUCCEEDED 时必须为空批）';
 comment on column harness_tool_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
-comment on column harness_tool_invocation.result_entry_id is '结果 Entry（TOOL MESSAGE），全局唯一';
 comment on column harness_tool_invocation.created_at is '创建时间（毫秒精度）';
 comment on column harness_tool_invocation.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
-
-create unique index uk_harness_tool_invocation_result
-    on harness_tool_invocation (result_entry_id)
-    where result_entry_id is not null;
-
-comment on index uk_harness_tool_invocation_result is 'resultEntryId 全局唯一（非 null 时）';
 
 create table harness_work (
     target_type varchar(16) not null,

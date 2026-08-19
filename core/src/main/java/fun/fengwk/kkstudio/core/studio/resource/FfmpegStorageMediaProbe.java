@@ -4,14 +4,13 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.core.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageMediaFacts;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,6 +18,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -34,8 +34,6 @@ import java.util.Set;
  * HEAD 元数据（mediaType + 空尺寸），保证全局上传契约对非媒体内容依旧可用 —— Canvas 资源 DTO 的媒体事实列可空。
  */
 @Slf4j
-@Component
-@ConditionalOnProperty(prefix = "kk-studio.storage.s3", name = "enabled", havingValue = "true")
 public class FfmpegStorageMediaProbe implements StorageMediaProbe {
 
   private static final String FALLBACK_MEDIA_TYPE = "application/octet-stream";
@@ -46,18 +44,22 @@ public class FfmpegStorageMediaProbe implements StorageMediaProbe {
   private static final long MAX_PROBE_SIZE = 100L * 1024 * 1024;
 
   private final CanvasMediaProperties properties;
+  private final SystemSettings.StorageMedia storageMedia;
   private final S3StorageService storageService;
   private final ObjectMapper objectMapper;
   private final MediaProcessRunner processRunner;
 
   public FfmpegStorageMediaProbe(
       CanvasMediaProperties properties,
+      SystemSettings.StorageMedia storageMedia,
       S3StorageService storageService,
       ObjectMapper objectMapper) {
     this.properties = Objects.requireNonNull(properties, "properties");
+    this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
     this.storageService = Objects.requireNonNull(storageService, "storageService");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-    this.processRunner = new MediaProcessRunner(properties.getProcessTimeout());
+    this.processRunner =
+        new MediaProcessRunner(Duration.ofMillis(storageMedia.canvasMediaProcessTimeoutMillis()));
   }
 
   @Override

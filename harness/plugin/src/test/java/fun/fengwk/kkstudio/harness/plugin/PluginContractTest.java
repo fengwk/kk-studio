@@ -47,8 +47,7 @@ class PluginContractTest {
     CustomEntryPayload payload =
         new CustomEntryPayload("goal", "state", 1, "{\"status\":\"active\"}");
     List<AppendCustomEntry> mutable = new ArrayList<>(List.of(new AppendCustomEntry(payload)));
-    ToolResult success =
-        new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{}", false);
+    ToolResult success = new ToolResult("call-1", List.of(new TextToolContent("ok")), false, "{}");
 
     PluginToolResult result = new PluginToolResult(success, mutable);
     mutable.clear();

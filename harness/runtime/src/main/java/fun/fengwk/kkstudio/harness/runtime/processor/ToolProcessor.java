@@ -37,13 +37,14 @@ import java.util.function.BiFunction;
  * Work， 再 lockClaimed TOOL Work）与 claim ownership 校验完成，lost / stale 一律完整 no-op。
  *
  * <p>状态机：READY + approval null 在 ensure 完整 lease margin 后于事务外执行 {@link ToolGateway#preflight}
- * （preflight 期间由本地 heartbeat 维持 lease），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt; beginDispatch
- * （Thread revision 只 +1）后进入 admission；Ask 转 WAITING_APPROVAL（revision+1 + complete，不 request
- * THREAD）； Deny 转 FAILED（revision+1 + THREAD wake + complete）；preflight 抛异常保持 READY / approval null
- * / revision 不变， 按 {@code preflightFailureDelay} reschedule。READY + completed approval 同事务
- * beginDispatch + revision+1 后直接 admission。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING /
- * RUNNING 旧 lease 恢复为 UNKNOWN（DISPATCHING 消费 proposed attempt，RUNNING 保留）+ revision+1 + THREAD wake
- * + complete，绝不重放 Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump revision。
+ * （preflight 期间由本地 heartbeat 维持 lease）；锁内 YOLO 快照为 true 时跳过 preflight 直接 Allow（不调用 evaluator /
+ * gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt; beginDispatch （Thread revision 只 +1）后进入
+ * admission；Ask 转 WAITING_APPROVAL（revision+1 + complete，不 request THREAD）； Deny 转
+ * FAILED（revision+1 + THREAD wake + complete）；preflight 抛异常保持 READY / approval null / revision 不变，
+ * 按 {@code preflightFailureDelay} reschedule。READY + completed approval 同事务 beginDispatch +
+ * revision+1 后直接 admission。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING / RUNNING 旧 lease 恢复为
+ * UNKNOWN（DISPATCHING 消费 proposed attempt，RUNNING 保留）+ revision+1 + THREAD wake + complete，绝不重放
+ * Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump revision。
  *
  * <p>admission 与回调并发协议与 {@link ModelProcessor} 一致：claimOwned Work-only 前置校验 -&gt; per-invocation
  * guard -&gt; registry；Started 后 handle 先安全 attach 再短事务校验 lease + DISPATCHING + proposed attempt 后
@@ -121,6 +122,13 @@ public final class ToolProcessor implements AutoCloseable {
           case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
           case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
           case Prepare.Preflight preflight -> preflight(claim, preflight);
+          case Prepare.Allowed allowed -> applyPreflightAllow(
+              claim,
+              allowed.threadId(),
+              allowed.assistantEntryId(),
+              allowed.attempt(),
+              allowed.request(),
+              null);
           case Prepare.Dispatched dispatched -> dispatch(claim, dispatched, null);
         };
       } catch (ClaimLostSignal ignored) {
@@ -204,6 +212,9 @@ public final class ToolProcessor implements AutoCloseable {
   /**
    * READY：approval null 走 preflight（ensure 完整 lease margin 后事务外执行，期间 heartbeat 维持 lease）；completed
    * approval 同事务 beginDispatch + revision+1 后直接 admission。
+   *
+   * <p>YOLO 决策在锁内完成：锁 Thread 后读取的 {@code yoloEnabled} 为 true 时直接返回 {@link Prepare.Allowed}（一次
+   * preflight 只做一次控制决定，不调用 gateway / evaluator，后续切换不追溯已完成的 admission）；false 才走普通 gateway preflight。
    */
   private Prepare prepareReady(
       HarnessStore.Transaction tx,
@@ -218,19 +229,18 @@ public final class ToolProcessor implements AutoCloseable {
     }
     // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
+    // READY 边界临时构造 transient executable request（不持久化）。
+    ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
     if (tool.approval() == null) {
-      // yolo 策略从 source model 的冻结 request 读取：ToolInvocation 本身不携带 yolo。
-      return new Prepare.Preflight(
-          thread.id(),
-          tool.assistantEntryId(),
-          tool.attempt(),
-          tool.request(),
-          model.request().yoloEnabled());
+      if (thread.yoloEnabled()) {
+        // YOLO=true：锁内快照直接 Allow，绝不调用 permission evaluator / ToolGateway.preflight。
+        return new Prepare.Allowed(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
+      }
+      return new Prepare.Preflight(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
     }
     tx.updateToolInvocations(List.of(tool.beginDispatch(now)));
     tx.updateThread(thread.touchRevision(now));
-    return new Prepare.Dispatched(
-        thread.id(), tool.assistantEntryId(), tool.attempt(), tool.request());
+    return new Prepare.Dispatched(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
   }
 
   /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump revision、不 request THREAD。 */
@@ -262,18 +272,18 @@ public final class ToolProcessor implements AutoCloseable {
     return new Prepare.Terminated();
   }
 
-  /** terminal 行：resultEntryId 仍 null 时确保 THREAD Work 请求，然后 complete TOOL Work；不重复 bump revision。 */
+  /**
+   * terminal 行：始终确保 THREAD Work 请求（outcome 尚未物化才可能有 terminal 行），然后 complete TOOL Work；不重复 bump
+   * revision。
+   */
   private Prepare cleanupTerminal(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       ToolInvocation tool,
       Instant now) {
-    boolean needsThreadWake = tool.resultEntryId() == null;
-    if (needsThreadWake) {
-      // requestWork 同时 upsert 并锁定 THREAD Work；即使原行不存在，也能建立正确锁序。
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
-    }
+    // requestWork 同时 upsert 并锁定 THREAD Work；即使原行不存在，也能建立正确锁序。
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
@@ -319,7 +329,7 @@ public final class ToolProcessor implements AutoCloseable {
     }
     ToolGateway.PreflightResult result;
     try {
-      result = gateway.preflight(preflight.request(), preflight.yoloEnabled());
+      result = gateway.preflight(preflight.request());
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 preflight 确定无副作用（listener / Gateway start 尚未发生）。
       log.warn(
@@ -346,24 +356,39 @@ public final class ToolProcessor implements AutoCloseable {
           : ProcessResult.LOST_OWNERSHIP;
     }
     return switch (result) {
-      case ToolGateway.Allow ignored -> applyPreflightAllow(claim, preflight, execution);
+      case ToolGateway.Allow ignored -> applyPreflightAllow(
+          claim,
+          preflight.threadId(),
+          preflight.assistantEntryId(),
+          preflight.attempt(),
+          preflight.request(),
+          execution);
       case ToolGateway.Ask ask -> applyPreflightAsk(claim, preflight, execution, ask.reason());
       case ToolGateway.Deny deny -> applyPreflightDeny(claim, preflight, execution, deny.error());
     };
   }
 
   /**
-   * Allow：在同一短事务把 READY / null approval 顺序转换 markApprovalNotRequired -&gt; beginDispatch（Store 允许同
-   * tx 连续 update），Thread revision 只 +1；然后进入 admission。二次校验失败（lost / 状态被并发改写）完整 no-op。
+   * Allow（含 YOLO 直接 Allow）：在同一短事务把 READY / null approval 顺序转换 markApprovalNotRequired -&gt;
+   * beginDispatch （Store 允许同 tx 连续 update），Thread revision 只 +1；然后进入 admission。二次校验失败（lost /
+   * 状态被并发改写）完整 no-op。
+   *
+   * <p>{@code execution} 为 null 表示 YOLO 直接 Allow 路径（未创建事务外 preflight execution）：admission 段在 {@link
+   * #dispatch} 中新建。
    */
   private ProcessResult applyPreflightAllow(
-      ClaimedWork claim, Prepare.Preflight preflight, ToolExecution execution) {
+      ClaimedWork claim,
+      UUID threadId,
+      UUID assistantEntryId,
+      int attempt,
+      ToolInvocationRequest request,
+      ToolExecution execution) {
     Instant now = clock.instant();
     boolean dispatched =
         Boolean.TRUE.equals(
             store.transaction(
                 tx -> {
-                  ThreadState thread = tx.lockThread(preflight.threadId()).orElse(null);
+                  ThreadState thread = tx.lockThread(threadId).orElse(null);
                   if (thread == null) {
                     return false;
                   }
@@ -372,7 +397,7 @@ public final class ToolProcessor implements AutoCloseable {
                     return false;
                   }
                   if (tool.status() != ToolInvocationStatus.READY
-                      || tool.attempt() != preflight.attempt()
+                      || tool.attempt() != attempt
                       || tool.approval() != null) {
                     return false;
                   }
@@ -383,17 +408,13 @@ public final class ToolProcessor implements AutoCloseable {
                   return true;
                 }));
     if (!dispatched) {
-      execution.abandon();
+      if (execution != null) {
+        execution.abandon();
+      }
       return ProcessResult.LOST_OWNERSHIP;
     }
     return dispatch(
-        claim,
-        new Prepare.Dispatched(
-            preflight.threadId(),
-            preflight.assistantEntryId(),
-            preflight.attempt(),
-            preflight.request()),
-        execution);
+        claim, new Prepare.Dispatched(threadId, assistantEntryId, attempt, request), execution);
   }
 
   /**
@@ -738,16 +759,21 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   private sealed interface Prepare
-      permits Prepare.Lost, Prepare.Preflight, Prepare.Dispatched, Prepare.Terminated {
+      permits Prepare.Lost,
+          Prepare.Preflight,
+          Prepare.Allowed,
+          Prepare.Dispatched,
+          Prepare.Terminated {
 
     record Lost() implements Prepare {}
 
+    /** 普通 gateway preflight（锁内 YOLO 快照为 false）。 */
     record Preflight(
-        UUID threadId,
-        UUID assistantEntryId,
-        int attempt,
-        ToolInvocationRequest request,
-        boolean yoloEnabled)
+        UUID threadId, UUID assistantEntryId, int attempt, ToolInvocationRequest request)
+        implements Prepare {}
+
+    /** 锁内 YOLO 快照为 true 的直接 Allow：不调用 gateway preflight，transient 决策标志。 */
+    record Allowed(UUID threadId, UUID assistantEntryId, int attempt, ToolInvocationRequest request)
         implements Prepare {}
 
     record Dispatched(

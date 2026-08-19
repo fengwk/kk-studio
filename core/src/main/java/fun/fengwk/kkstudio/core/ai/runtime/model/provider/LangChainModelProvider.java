@@ -42,6 +42,7 @@ import dev.langchain4j.model.output.FinishReason;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
@@ -53,7 +54,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
@@ -163,10 +163,15 @@ abstract class LangChainModelProvider implements ModelProvider {
                     handler.onComplete(
                         toResponse(request, response, thinkTagSplitter, toolCallNormalizer),
                         stream);
+                  } catch (ProviderException providerFailure) {
+                    // 分类过的 Provider 失败（例如不可映射的 finish reason -> INVALID_RESPONSE）原样保留 kind。
+                    handler.onError(providerFailure, stream);
                   } catch (RuntimeException error) {
+                    // terminal response 归一化（toResponse / tool call 归一化 / usage/cost）失败是 invalid
+                    // provider terminal shape，不是调用方请求问题：INVALID_RESPONSE 供 Runtime 自动重试。
                     handler.onError(
                         new ProviderException(
-                            ProviderErrorKind.INVALID_REQUEST, userFacingMessage(error), error),
+                            ProviderErrorKind.INVALID_RESPONSE, userFacingMessage(error), error),
                         stream);
                   }
                 }
@@ -208,6 +213,16 @@ abstract class LangChainModelProvider implements ModelProvider {
    * 当已知模型会在文本内发出标签时（例如启用了 reasoning 的 OpenAI 兼容模型），可按请求覆盖。
    */
   protected boolean extractsThinkTags(ProviderRequest request) {
+    Objects.requireNonNull(request, "request");
+    return false;
+  }
+
+  /**
+   * 该 adapter 的 Provider 是否会把携带可执行 tool call 的完成回合上报为 OTHER/未知 finish reason。 公共映射不根据 {@code
+   * hasToolCalls} 覆盖 generation stop reason；只有确实存在该协议事实的 adapter 覆盖此钩子（例如 MiniMax 兼容端点 对带 tool call
+   * 的回合上报 OTHER），该特例只在其 adapter 内生效。
+   */
+  protected boolean reportsToolCallsWithOtherFinishReason(ProviderRequest request) {
     Objects.requireNonNull(request, "request");
     return false;
   }
@@ -460,7 +475,16 @@ abstract class LangChainModelProvider implements ModelProvider {
         ProviderUsageNormalizer.normalize(providerType, metadata);
     ModelUsage modelUsage = normalized.modelUsage();
     FinishReason finishReason = metadata == null ? null : metadata.finishReason();
-    ProviderStopReason stopReason = toStopReason(finishReason, !calls.isEmpty());
+    GenerationStopReason stopReason =
+        toStopReason(
+            finishReason, reportsToolCallsWithOtherFinishReason(request) && !calls.isEmpty());
+    if (stopReason == null) {
+      // null / unknown finish reason 不是成功 ProviderResponse：显式映射为 INVALID_RESPONSE 供 Runtime 重试。
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "cannot map provider finish reason to a canonical generation stop reason: "
+              + finishReason);
+    }
     // LangChain AiMessage.thinking()/text() 即使流式输出过 reasoning 也可能返回 null。
     // 在任何 isEmpty() 检查前先归一化，避免 completion 因 NPE 落入 "invalid provider
     // response"。
@@ -479,6 +503,10 @@ abstract class LangChainModelProvider implements ModelProvider {
         thinking = split.thinking();
       }
     }
+    if (stopReason == GenerationStopReason.FILTERED && !calls.isEmpty()) {
+      // canonical 约束：FILTERED 响应不得携带 tool calls（绝不创建 ToolInvocation）；过滤完成时丢弃残余调用。
+      calls = List.of();
+    }
     return new ProviderResponse(
         text,
         thinking,
@@ -491,21 +519,24 @@ abstract class LangChainModelProvider implements ModelProvider {
         normalized.rawUsageJson());
   }
 
-  static ProviderStopReason toStopReason(FinishReason finishReason, boolean hasToolCalls) {
-    // MiniMax 与部分 OpenAI 兼容端点对仍携带可执行 tool call 的回合上报 STOP/OTHER。
-    // 可调用响应在公共边界上必须保持可执行。
-    if (hasToolCalls) {
-      return ProviderStopReason.TOOL_CALLS;
-    }
+  /**
+   * 显式 finish reason 映射：generation stop reason 与 tool call 存在性正交，绝不根据 calls 覆盖结果。STOP 与
+   * TOOL_EXECUTION（OpenAI Chat tool_calls / Responses completed+calls / Anthropic tool_use / Gemini
+   * function）都归一为 COMPLETE；LENGTH（OpenAI length / Responses incomplete / Anthropic max_tokens /
+   * Gemini MAX_TOKENS）为 LENGTH；CONTENT_FILTER（OpenAI content_filter / Gemini safety 等）为 FILTERED。
+   * null / OTHER 返回 null，表示不可映射（INVALID_RESPONSE）；{@code otherFinishMeansToolCalls} 仅为明确存在该 协议事实的
+   * adapter（MiniMax）保留 OTHER+calls -&gt; COMPLETE 特例。
+   */
+  static GenerationStopReason toStopReason(
+      FinishReason finishReason, boolean otherFinishMeansToolCalls) {
     if (finishReason == null) {
-      return ProviderStopReason.COMPLETED;
+      return null;
     }
     return switch (finishReason) {
-      case STOP -> ProviderStopReason.COMPLETED;
-      case LENGTH -> ProviderStopReason.LENGTH;
-      case TOOL_EXECUTION -> ProviderStopReason.TOOL_CALLS;
-      case CONTENT_FILTER -> ProviderStopReason.CONTENT_FILTER;
-      case OTHER -> ProviderStopReason.OTHER;
+      case STOP, TOOL_EXECUTION -> GenerationStopReason.COMPLETE;
+      case LENGTH -> GenerationStopReason.LENGTH;
+      case CONTENT_FILTER -> GenerationStopReason.FILTERED;
+      case OTHER -> otherFinishMeansToolCalls ? GenerationStopReason.COMPLETE : null;
     };
   }
 

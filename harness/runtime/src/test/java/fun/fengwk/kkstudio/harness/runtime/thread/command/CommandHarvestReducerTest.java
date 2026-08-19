@@ -18,7 +18,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 有序 command harvest 归并，以及 branch 与 Thread 之间的 policy 隔离。 */
+/** 有序 command harvest 归并：YOLO 不经过 mailbox，reducer 只归并 branch settings。 */
 class CommandHarvestReducerTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
@@ -40,7 +40,6 @@ class CommandHarvestReducerTest {
         reducer.reduce(
             id(7L),
             BASE,
-            false,
             List.of(
                 queued(id(1L), 1L, new UserMessageCommandPayload(user("hello"))),
                 queued(id(2L), 2L, new SetAgentCommandPayload("agent-a")),
@@ -58,8 +57,7 @@ class CommandHarvestReducerTest {
                     id(6L), 6L, new SetActiveToolsCommandPayload(List.of("grep", "read", "grep"))),
                 queued(id(7L), 7L, new SetEnvironmentCommandPayload(ENV_B)),
                 queued(id(8L), 8L, new SetEnvironmentCommandPayload(null)),
-                queued(id(9L), 9L, new SetYoloCommandPayload(true)),
-                queued(id(10L), 10L, new CustomMessageCommandPayload(system("instruction")))));
+                queued(id(9L), 9L, new CustomMessageCommandPayload(system("instruction")))));
 
     assertEquals(
         new BranchSettings(
@@ -68,7 +66,6 @@ class CommandHarvestReducerTest {
             new ModelSelection("anthropic", "claude-opus", "thinking"),
             List.of("grep", "read")),
         result.branchSettings());
-    assertEquals(true, result.yoloEnabled());
   }
 
   @Test
@@ -78,7 +75,6 @@ class CommandHarvestReducerTest {
         reducer.reduce(
             id(7L),
             BASE,
-            true,
             List.of(
                 queued(id(1L), 1L, new UserMessageCommandPayload(user("hello"))),
                 queued(id(2L), 2L, new SetModelCommandPayload(replacement)),
@@ -88,12 +84,11 @@ class CommandHarvestReducerTest {
     assertEquals("coding", result.branchSettings().agentName());
     assertEquals(replacement, result.branchSettings().model());
     assertEquals(List.of("read"), result.branchSettings().activeTools());
-    assertEquals(true, result.yoloEnabled());
   }
 
   @Test
   void rejectsWrongThreadNonQueuedAndNonMonotonicCommands() {
-    assertThrows(NullPointerException.class, () -> reducer.reduce(null, BASE, false, List.of()));
+    assertThrows(NullPointerException.class, () -> reducer.reduce(null, BASE, List.of()));
 
     ThreadCommand foreign = queued(id(1L), 1L, new SetAgentCommandPayload("coding"), id(8L));
     ThreadCommand applied = applied(id(2L), 2L);
@@ -108,42 +103,36 @@ class CommandHarvestReducerTest {
             CREATED.plusSeconds(1),
             CREATED);
     assertThrows(
-        IllegalArgumentException.class,
-        () -> reducer.reduce(id(7L), BASE, false, List.of(foreign)));
+        IllegalArgumentException.class, () -> reducer.reduce(id(7L), BASE, List.of(foreign)));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> reducer.reduce(id(7L), BASE, false, List.of(applied)));
+        IllegalArgumentException.class, () -> reducer.reduce(id(7L), BASE, List.of(applied)));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> reducer.reduce(id(7L), BASE, false, List.of(cancelled)));
+        IllegalArgumentException.class, () -> reducer.reduce(id(7L), BASE, List.of(cancelled)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             reducer.reduce(
                 id(7L),
                 BASE,
-                false,
                 List.of(
                     queued(id(4L), 2L, new SetAgentCommandPayload("coding")),
-                    queued(id(5L), 1L, new SetYoloCommandPayload(true)))));
+                    queued(id(5L), 1L, new SetAgentCommandPayload("other")))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             reducer.reduce(
                 id(7L),
                 BASE,
-                false,
                 List.of(
                     queued(id(6L), 1L, new SetAgentCommandPayload("coding")),
-                    queued(id(7L), 1L, new SetYoloCommandPayload(true)))));
+                    queued(id(7L), 1L, new SetAgentCommandPayload("other")))));
   }
 
   @Test
-  void emptyCommandListLeavesBranchSettingsAndYoloUnchanged() {
-    CommandHarvestResult result = reducer.reduce(id(7L), BASE, true, List.of());
+  void emptyCommandListLeavesBranchSettingsUnchanged() {
+    CommandHarvestResult result = reducer.reduce(id(7L), BASE, List.of());
 
     assertEquals(BASE, result.branchSettings());
-    assertEquals(true, result.yoloEnabled());
   }
 
   private static ThreadCommand queued(UUID id, long sequence, ThreadCommandPayload payload) {

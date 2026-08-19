@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.eclipse.jgit.ignore.FastIgnoreRule;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -24,6 +25,10 @@ import java.util.stream.Stream;
  */
 class RuntimeModuleArchitectureTest {
 
+  private static final String JGIT_IMPORT_PREFIX = "org.eclipse.jgit.";
+  private static final String JGIT_OWNER =
+      "fun/fengwk/kkstudio/harness/runtime/permission/PermissionPathPattern.java";
+
   private static final List<String> ALLOWED_IMPORT_PREFIXES =
       List.of(
           "java.",
@@ -31,7 +36,8 @@ class RuntimeModuleArchitectureTest {
           "lombok.",
           "com.fasterxml.jackson.",
           "fun.fengwk.kkstudio.harness.runtime.",
-          "fun.fengwk.kkstudio.harness.tool.");
+          "fun.fengwk.kkstudio.harness.tool.",
+          FastIgnoreRule.class.getName());
 
   private static final List<String> FORBIDDEN_TEXT_MARKERS =
       List.of(
@@ -81,6 +87,7 @@ class RuntimeModuleArchitectureTest {
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
+            "org.eclipse.jgit:org.eclipse.jgit",
             "org.slf4j:slf4j-api"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("plugin/pom.xml"),
@@ -100,7 +107,8 @@ class RuntimeModuleArchitectureTest {
             "com.fasterxml.jackson.core:jackson-databind",
             "dev.langchain4j:langchain4j-mcp",
             "dev.langchain4j:langchain4j-skills",
-            "fun.fengwk.kk-studio:kk-studio-harness-tool"));
+            "fun.fengwk.kk-studio:kk-studio-harness-tool",
+            "org.eclipse.jgit:org.eclipse.jgit"));
 
     List<String> violations = scanViolations(main);
     assertTrue(
@@ -123,6 +131,15 @@ class RuntimeModuleArchitectureTest {
                       String imported = normalizeImport(trimmed);
                       if (!isAllowedImport(imported)) {
                         violations.add(relative(main, path) + ": disallowed import " + trimmed);
+                      }
+                      if (imported.startsWith(JGIT_IMPORT_PREFIX)
+                          && !JGIT_OWNER.equals(relative(main, path))) {
+                        violations.add(
+                            relative(main, path)
+                                + ": JGit import is owned only by "
+                                + JGIT_OWNER
+                                + ": "
+                                + trimmed);
                       }
                     }
                     for (String marker : FORBIDDEN_TEXT_MARKERS) {

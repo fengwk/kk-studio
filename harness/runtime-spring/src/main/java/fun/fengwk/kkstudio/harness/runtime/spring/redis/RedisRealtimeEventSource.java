@@ -30,19 +30,19 @@ import java.util.function.Consumer;
  * 释放时取消；重复订阅幂等。channel 消息必须且只能是 canonical realtime event JSON（解码后重编码一致）， malformed 消息对当前订阅触发 resync
  * 并丢弃。
  *
- * <p>连接失联/异常时 channel Flux 报错：若此前曾成功连接，先对受影响本地订阅触发 resync，再以固定 1s 延迟 无限重连（未连接成功过的失败只记 debug，不产生
- * resync 风暴）。{@link #lifecycleFence} 只把关闭边界与 channel 发布串在同一把锁上；排空已发布 channel 在围栏外进行。关闭后不再接受订阅，也不会在
- * destroy 之后遗留 listen。
+ * <p>连接失联/异常时 channel Flux 报错：若此前曾成功连接，先对受影响本地订阅触发 resync，再以配置的固定重连延迟（由装配方从数据库
+ * SystemSettings.Advanced 传入）无限重连（未连接成功过的失败只记 debug，不产生 resync 风暴）。{@link #lifecycleFence} 只把关闭边界与
+ * channel 发布串在同一把锁上；排空已发布 channel 在围栏外进行。关闭后不再接受订阅，也不会在 destroy 之后遗留 listen。
  */
 public final class RedisRealtimeEventSource implements RealtimeEventSource {
 
   private static final Logger LOG = LoggerFactory.getLogger(RedisRealtimeEventSource.class);
-  private static final Duration RETRY_DELAY = Duration.ofSeconds(1);
   private static final long UNBOUNDED_RETRIES = Long.MAX_VALUE;
 
   private final ReactiveRedisMessageListenerContainer container;
   private final RedisRealtimeConfig config;
   private final RealtimeEventJsonCodec eventCodec;
+  private final Duration retryDelay;
   private final Map<UUID, ChannelState> channels = new ConcurrentHashMap<>();
 
   /**
@@ -56,18 +56,25 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
   public RedisRealtimeEventSource(
       ReactiveRedisConnectionFactory connectionFactory,
       RedisRealtimeConfig config,
-      RealtimeEventJsonCodec eventCodec) {
-    this(new ReactiveRedisMessageListenerContainer(connectionFactory), config, eventCodec);
+      RealtimeEventJsonCodec eventCodec,
+      Duration retryDelay) {
+    this(
+        new ReactiveRedisMessageListenerContainer(connectionFactory),
+        config,
+        eventCodec,
+        retryDelay);
   }
 
   /** 测试可注入 listener container（fake/受控 Flux）。 */
   RedisRealtimeEventSource(
       ReactiveRedisMessageListenerContainer container,
       RedisRealtimeConfig config,
-      RealtimeEventJsonCodec eventCodec) {
+      RealtimeEventJsonCodec eventCodec,
+      Duration retryDelay) {
     this.container = Objects.requireNonNull(container, "container");
     this.config = Objects.requireNonNull(config, "config");
     this.eventCodec = Objects.requireNonNull(eventCodec, "eventCodec");
+    this.retryDelay = requirePositive(retryDelay);
   }
 
   @Override
@@ -102,7 +109,7 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
                   .doOnNext(ignored -> channel.connected.set(true))
                   .flatMapMany(flux -> flux)
                   .doOnError(error -> onChannelError(channel, error))
-                  .retryWhen(Retry.fixedDelay(UNBOUNDED_RETRIES, RETRY_DELAY))
+                  .retryWhen(Retry.fixedDelay(UNBOUNDED_RETRIES, retryDelay))
                   .subscribe(message -> dispatch(channel, message));
         }
         Subscriber subscriber = new Subscriber(onEvent, onResync);
@@ -193,6 +200,13 @@ public final class RedisRealtimeEventSource implements RealtimeEventSource {
     if (listen != null) {
       listen.dispose();
     }
+  }
+
+  private static Duration requirePositive(Duration value) {
+    if (value == null || value.isZero() || value.isNegative()) {
+      throw new IllegalArgumentException("retryDelay must be positive");
+    }
+    return value;
   }
 
   private record Subscriber(Consumer<RealtimeEvent> onEvent, Runnable onResync) {}

@@ -126,11 +126,7 @@ class BashSurfaceAnalyzerTest {
     return evaluator
         .evaluate(
             new PermissionEvaluationContext(
-                "bash",
-                arguments,
-                Path.of("/tmp/environment"),
-                Path.of("/tmp/environment"),
-                settings))
+                "bash", arguments, Path.of("/tmp/environment"), settings))
         .action();
   }
 

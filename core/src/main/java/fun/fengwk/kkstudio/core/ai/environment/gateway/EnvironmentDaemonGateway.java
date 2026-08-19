@@ -12,6 +12,8 @@ import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListR
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryLister;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoader;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -85,6 +87,7 @@ public class EnvironmentDaemonGateway
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
   private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
   private final EnvironmentGatewayProperties properties;
+  private final SystemSettings.Environment environment;
   private final Clock clock;
   private final EnvironmentReadyListener environmentReadyListener;
   private final Map<String, ConnectionState> connections = new HashMap<>();
@@ -99,13 +102,20 @@ public class EnvironmentDaemonGateway
   public EnvironmentDaemonGateway(
       LiveEnvironmentRegistry environmentRegistry,
       EnvironmentGatewayProperties properties,
+      SystemSettingsSnapshot snapshot,
       Clock clock,
       EnvironmentReadyListener environmentReadyListener) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.properties = Objects.requireNonNull(properties, "properties");
+    this.environment = Objects.requireNonNull(snapshot, "snapshot").get().environment();
     this.clock = Objects.requireNonNull(clock, "clock");
     this.environmentReadyListener =
         Objects.requireNonNull(environmentReadyListener, "environmentReadyListener");
+  }
+
+  /** 心跳过期超时（毫秒）：环境按不可用处理的租约时长。 */
+  Duration heartbeatTimeout() {
+    return Duration.ofMillis(environment.heartbeatTimeoutMillis());
   }
 
   @Override
@@ -183,8 +193,7 @@ public class EnvironmentDaemonGateway
       state = environmentConnections.get(environmentName);
       if (state == null
           || !state.isReady()
-          || !environmentRegistry.isReady(
-              environmentName, clock.instant(), properties.requireHeartbeatTimeout())) {
+          || !environmentRegistry.isReady(environmentName, clock.instant(), heartbeatTimeout())) {
         throw new RemoteToolUnavailableException(
             unavailableMessage(environmentName, request.call().toolName()));
       }
@@ -246,8 +255,7 @@ public class EnvironmentDaemonGateway
       // 与 Tool invoke/查询完全相同的可用性规则：READY + 连接打开 + 心跳未过期。
       if (state == null
           || !state.isReady()
-          || !environmentRegistry.isReady(
-              environmentName, clock.instant(), properties.requireHeartbeatTimeout())) {
+          || !environmentRegistry.isReady(environmentName, clock.instant(), heartbeatTimeout())) {
         return CompletableFuture.completedFuture(
             new EnvironmentSkillLoadResult.Failed(
                 skill, environmentName + " is offline; " + skill + " is unavailable"));
@@ -308,7 +316,7 @@ public class EnvironmentDaemonGateway
                 EnvironmentDirectoryFailureCode.ENVIRONMENT_NOT_FOUND,
                 "environment is not registered: " + environmentName));
       }
-      if (!live.isReady(clock.instant(), properties.requireHeartbeatTimeout())) {
+      if (!live.isReady(clock.instant(), heartbeatTimeout())) {
         return CompletableFuture.completedFuture(
             new EnvironmentDirectoryListResult.Failed(
                 EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
@@ -451,8 +459,7 @@ public class EnvironmentDaemonGateway
     EnvironmentName environmentName = envelope.environmentName();
     Instant now = clock.instant();
     BindResult bind =
-        environmentRegistry.tryBind(
-            environmentName, state.connection, now, properties.requireHeartbeatTimeout());
+        environmentRegistry.tryBind(environmentName, state.connection, now, heartbeatTimeout());
     if (bind instanceof BindResult.Rejected) {
       throw new DaemonNameConflictException(
           "environmentName is already held by another live daemon: " + environmentName);
@@ -548,11 +555,10 @@ public class EnvironmentDaemonGateway
         resultCodec.decodeResultForInvocation(
             envelope.payloadJson(),
             wireInvocationId(active),
-            properties.requireMaxResourceBytes(),
+            environment.maxResourceBytes(),
             false);
     ToolResult mapped =
-        new ToolResult(
-            active.call.id(), result.contents(), result.error(), result.detailsJson(), false);
+        new ToolResult(active.call.id(), result.contents(), result.error(), result.detailsJson());
     deferred.add(() -> active.listener.onPartial(mapped));
   }
 
@@ -563,13 +569,9 @@ public class EnvironmentDaemonGateway
     // 绝不属于 transport gateway。
     ToolResult result =
         resultCodec.decodeResultForInvocation(
-            envelope.payloadJson(),
-            wireInvocationId(active),
-            properties.requireMaxResourceBytes(),
-            true);
+            envelope.payloadJson(), wireInvocationId(active), environment.maxResourceBytes(), true);
     ToolResult mapped =
-        new ToolResult(
-            active.call.id(), result.contents(), result.error(), result.detailsJson(), false);
+        new ToolResult(active.call.id(), result.contents(), result.error(), result.detailsJson());
     deferred.add(() -> active.listener.onComplete(mapped));
   }
 

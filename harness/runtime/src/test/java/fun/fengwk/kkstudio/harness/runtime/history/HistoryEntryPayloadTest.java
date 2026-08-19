@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -26,9 +26,11 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** history payload record 的不变量：role/metadata 矩阵、synthetic tool result 与 turn end。 */
 class HistoryEntryPayloadTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final ToolResultMetadata TOOL_METADATA =
       new ToolResultMetadata(id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null);
@@ -39,15 +41,15 @@ class HistoryEntryPayloadTest {
         new MessagePayload(user("hello"), null, null),
         new MessagePayload(user("hello"), null, null));
     assertEquals(
-        new MessagePayload(assistant("answer"), metadata(ProviderStopReason.COMPLETED), null),
-        new MessagePayload(assistant("answer"), metadata(ProviderStopReason.COMPLETED), null));
+        new MessagePayload(assistant("answer"), metadata(GenerationStopReason.COMPLETE), null),
+        new MessagePayload(assistant("answer"), metadata(GenerationStopReason.COMPLETE), null));
     assertEquals(
         new MessagePayload(toolMessage("call-1"), null, TOOL_METADATA),
         new MessagePayload(toolMessage("call-1"), null, TOOL_METADATA));
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new MessagePayload(user("hello"), metadata(ProviderStopReason.COMPLETED), null));
+        () -> new MessagePayload(user("hello"), metadata(GenerationStopReason.COMPLETE), null));
     assertThrows(
         IllegalArgumentException.class,
         () -> new MessagePayload(user("hello"), null, TOOL_METADATA));
@@ -57,7 +59,7 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new MessagePayload(
-                assistant("answer"), metadata(ProviderStopReason.COMPLETED), TOOL_METADATA));
+                assistant("answer"), metadata(GenerationStopReason.COMPLETE), TOOL_METADATA));
     assertThrows(
         IllegalArgumentException.class,
         () -> new MessagePayload(toolMessage("call-1"), null, null));
@@ -65,12 +67,12 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new MessagePayload(
-                toolMessage("call-1"), metadata(ProviderStopReason.COMPLETED), null));
+                toolMessage("call-1"), metadata(GenerationStopReason.COMPLETE), null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new MessagePayload(
-                toolMessage("call-1"), metadata(ProviderStopReason.COMPLETED), TOOL_METADATA));
+                toolMessage("call-1"), metadata(GenerationStopReason.COMPLETE), TOOL_METADATA));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -85,28 +87,28 @@ class HistoryEntryPayloadTest {
   }
 
   @Test
-  void assistantMessagesEnforceToolCallStopReasonConsistencyAndUniqueIds() {
+  void assistantMessagesAllowAnyStopReasonWithOrWithoutToolCallsButEnforceUniqueIds() {
     AgentMessage withToolCall =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(new ToolCallMessageContent("call-1", "read", "read", "{}")));
     AgentMessage withoutToolCall = assistant("answer");
 
+    // generation stop reason 与 tool call 存在性正交：COMPLETE 可以有或没有 calls。
     assertEquals(
         AgentMessageRole.ASSISTANT,
-        new MessagePayload(withToolCall, metadata(ProviderStopReason.TOOL_CALLS), null)
+        new MessagePayload(withToolCall, metadata(GenerationStopReason.COMPLETE), null)
             .message()
             .role());
     assertEquals(
-        new MessagePayload(withoutToolCall, metadata(ProviderStopReason.COMPLETED), null),
-        new MessagePayload(withoutToolCall, metadata(ProviderStopReason.COMPLETED), null));
+        new MessagePayload(withoutToolCall, metadata(GenerationStopReason.COMPLETE), null),
+        new MessagePayload(withoutToolCall, metadata(GenerationStopReason.COMPLETE), null));
+    assertEquals(
+        AgentMessageRole.ASSISTANT,
+        new MessagePayload(withToolCall, metadata(GenerationStopReason.LENGTH), null)
+            .message()
+            .role());
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new MessagePayload(withToolCall, metadata(ProviderStopReason.COMPLETED), null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new MessagePayload(withoutToolCall, metadata(ProviderStopReason.TOOL_CALLS), null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -116,7 +118,7 @@ class HistoryEntryPayloadTest {
                     List.of(
                         new ToolCallMessageContent("call-1", "read", "read", "{}"),
                         new ToolCallMessageContent("call-1", "grep", "grep", "{}"))),
-                metadata(ProviderStopReason.TOOL_CALLS),
+                metadata(GenerationStopReason.COMPLETE),
                 null));
     assertEquals(
         AgentMessageRole.ASSISTANT,
@@ -126,7 +128,7 @@ class HistoryEntryPayloadTest {
                     List.of(
                         new ToolCallMessageContent("call-1", "read", "read", "{}"),
                         new ToolCallMessageContent("call-2", "grep", "grep", "{}"))),
-                metadata(ProviderStopReason.TOOL_CALLS),
+                metadata(GenerationStopReason.COMPLETE),
                 null)
             .message()
             .role());
@@ -247,12 +249,28 @@ class HistoryEntryPayloadTest {
   @Test
   void rootAndTurnStartPayloadsRequireNonNullValues() {
     assertThrows(NullPointerException.class, () -> new RootPayload(null));
-    assertThrows(NullPointerException.class, () -> new TurnStartPayload(null, SETTINGS));
     assertThrows(
-        NullPointerException.class, () -> new TurnStartPayload(TurnStartReason.INPUT, null));
+        NullPointerException.class, () -> new TurnStartPayload(null, SETTINGS, OWNER_THREAD_ID));
+    assertThrows(
+        NullPointerException.class,
+        () -> new TurnStartPayload(TurnStartReason.INPUT, null, OWNER_THREAD_ID));
+    assertThrows(
+        NullPointerException.class,
+        () -> new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, null));
     assertEquals(SETTINGS, new RootPayload(SETTINGS).settings());
     assertEquals(
-        TurnStartReason.INPUT, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS).reason());
+        TurnStartReason.INPUT,
+        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID).reason());
+    assertEquals(
+        4096,
+        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 4096)
+            .contextWindow());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, -1));
   }
 
   @Test
@@ -470,7 +488,11 @@ class HistoryEntryPayloadTest {
     assertEquals(
         EntryType.TURN_START,
         new Entry(
-                id(2L), id(1L), id(1L), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), TIME)
+                id(2L),
+                id(1L),
+                id(1L),
+                new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+                TIME)
             .payload()
             .type());
     assertThrows(
@@ -480,7 +502,11 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new Entry(
-                id(2L), id(1L), null, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), TIME));
+                id(2L),
+                id(1L),
+                null,
+                new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+                TIME));
     assertThrows(NullPointerException.class, () -> new Entry(id(1L), id(1L), null, null, TIME));
     assertThrows(
         NullPointerException.class,
@@ -522,7 +548,7 @@ class HistoryEntryPayloadTest {
                 toolCallId, "read", "read", List.of(new TextMessageContent("ok")), false, "{}")));
   }
 
-  private static AssistantMessageMetadata metadata(ProviderStopReason reason) {
+  private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
     ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
     ModelCost cost =
         new ModelCost(

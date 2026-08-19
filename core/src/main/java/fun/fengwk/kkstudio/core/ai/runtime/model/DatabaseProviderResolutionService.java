@@ -62,7 +62,8 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
   }
 
   @Override
-  public ResolvedExecution resolve(ProviderRequest request) {
+  public ResolvedExecution resolve(ProviderType frozenType, ProviderRequest request) {
+    Objects.requireNonNull(frozenType, "frozenType");
     Objects.requireNonNull(request, "request");
     String providerName = request.model().providerName();
     AgentProvider provider = providerRepository.getByName(providerName);
@@ -70,6 +71,10 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
       throw new IllegalArgumentException("provider not found: " + providerName);
     }
     ProviderType providerType = toProviderType(provider.getProviderType());
+    if (providerType != frozenType) {
+      throw new IllegalArgumentException(
+          "provider type drift: frozen=" + frozenType + " current=" + providerType);
+    }
     ProviderFactory factory =
         providerFactories
             .lookup(providerType)

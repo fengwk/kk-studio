@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.storage;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
 
@@ -16,22 +17,32 @@ import java.util.Objects;
  * blob。循环直到过期批次与清扫批次都低于各自上限（表示已排空）；单行失败在批内被吞掉并计为未处理，因此只要某批返回 0 或小于上限就会退出，
  * 重复失败不会造成死循环。全部为幂等操作，失败仅记录日志，不影响启动。
  *
+ * <p>S3 未启用（SystemSettings.storageMedia.s3Enabled=false）时服务 bean 不装配：本监听器始终注册，但通过 {@link
+ * ObjectProvider} 感知服务缺失并跳过，避免对 ApplicationListener 类型返回 null 触发 NullBean 注册问题。
+ *
  * @author fengwk
  */
 @Slf4j
 public class StorageStartupRecovery implements ApplicationListener<ApplicationReadyEvent> {
 
-  private final StorageUploadService uploadService;
-  private final StorageBlobManager blobManager;
+  private final ObjectProvider<StorageUploadService> uploadServices;
+  private final ObjectProvider<StorageBlobManager> blobManagers;
 
   public StorageStartupRecovery(
-      StorageUploadService uploadService, StorageBlobManager blobManager) {
-    this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
-    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
+      ObjectProvider<StorageUploadService> uploadServices,
+      ObjectProvider<StorageBlobManager> blobManagers) {
+    this.uploadServices = Objects.requireNonNull(uploadServices, "uploadServices");
+    this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
   }
 
   @Override
   public void onApplicationEvent(ApplicationReadyEvent event) {
+    StorageUploadService uploadService = uploadServices.getIfAvailable();
+    StorageBlobManager blobManager = blobManagers.getIfAvailable();
+    if (uploadService == null || blobManager == null) {
+      log.info("storage startup recovery skipped: global blob storage is disabled");
+      return;
+    }
     try {
       int expired;
       int swept;

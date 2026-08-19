@@ -1,17 +1,17 @@
 # 前端落地设计
 
-本文描述 `frontend/` 当前的 Chat 工作区、Pane、Thread snapshot、命令 batch、replay 身份与 transcript 投影。运行时类型与持久化语义见 [harness-runtime-architecture.md](harness-runtime-architecture.md)。
+本文描述 `frontend/` 当前的 Chat 工作区、Pane、Thread snapshot、命令 batch、replay 身份、transcript 投影与设置页。运行时类型与持久化语义见 [harness-runtime-architecture.md](harness-runtime-architecture.md)，全局配置契约见 [system-settings.md](system-settings.md)。
 
 ## 1. 前端摘要
 
 | 主题 | 当前实现 |
 | --- | --- |
 | 工程 | 独立 Vite/TypeScript 工程，发布时由 Maven 嵌入 `web` |
-| 服务端状态 | React Query |
-| 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位、全局 Locale 与应用设置（`kkstudio.application-settings.v1`） |
+| 服务端状态 | React Query；`/api/settings` 使用完整聚合 GET/PUT + `expectedVersion` CAS |
+| 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位、全局 Locale 与浏览器偏好（`kkstudio.browser-preferences.v1`） |
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
-| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `entries` / `commands` / `head` / `stop` / `tool-invocations/{id}/approval`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
+| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `entries` / `commands` / `yolo` / `head` / `stop` / `tool-invocations/{id}/approval`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
 | Realtime | REST snapshot first；应用事件 WebSocket（durable `revision`/`resync` + 无 cursor 的 Redis realtime overlay） |
 | 浏览器路由 | `BrowserRouter`，服务端对 SPA 路径回退 `index.html` |
 | 视觉规范 | [前端设计规范](../product-design/frontend-design-system.md) |
@@ -73,9 +73,11 @@ Create Chat 的默认 Environment 使用 `EnvironmentWorkspacePanel` 两阶段�
 
 ```text
 SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
-           SET_ACTIVE_TOOLS -> SET_YOLO）
+           SET_ACTIVE_TOOLS）
 + USER_MESSAGE（不携带 role）
 ```
+YOLO 是直接控制面（`PUT /yolo`，基于 snapshot revision 的 CAS）：Bound pane 选择 YOLO 时
+乐观更新 draft 并立即 PUT，成功只对齐 base+draft 的 yolo、失败回滚并暴露错误；绝不进入命令 batch。
 
 - batch 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 来自最新 snapshot Thread DTO。
 - `USER_MESSAGE` 之外的命令携带 pane 本地 draft 的对应字段（diff 相对 `effectiveBase`，避免重发 in-flight 设置）。
@@ -86,7 +88,7 @@ SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
 Blank Chat、Bound Thread 与 Canvas Chat 共用唯一 `ThreadComposer`：
 
 - DOM 固定分为上层输入/附件行与下层控制栏：`[+] [Default|YOLO] ... [provider/model · variant] [发送]`；空草稿输入行默认单行且文字垂直居中，内容增长后在上限内滚动；Permission 与 Model/Variant 常驻可见，Footer 不承担设置入口；
-- Permission 是 anchored listbox，仅有 `Default` / `YOLO`；Model 使用 anchored 两级 listbox（provider/model → Variant），不创建 modal/backdrop；选择只修改 pane-local draft，随下一条消息进入同一 SET_* batch；
+- Permission 是 anchored listbox，仅有 `Default` / `YOLO`；Model 使用 anchored 两级 listbox（provider/model → Variant），不创建 modal/backdrop；Model/Variant 选择只修改 pane-local draft，随下一条消息进入同一 SET_* batch；Permission（YOLO）选择经直接控制面立即 `PUT /yolo`（见 §4），绝不进入命令 batch；
 - 草稿是 ordered `TEXT/ATTACHMENT` parts；`contenteditable=false` pill 在 DOM 仅保存
   `data-part-id`、`data-upload-id`、`data-filename`，展示为完整 `[name]`，不省略且不暴露内部 upload 语法；
 - 左侧 `+` 直接打开命令表，不向草稿写入 `/`；slash 输入仍复用同一命令过滤与执行状态机；
@@ -179,7 +181,8 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
   活跃 overlay 与 durable Entry 重叠窗口（`ModelTerminalPending`/`ToolTerminalPending`）
   按 **Turn 内**身份去重（沿 entries 线性路径跟踪当前 `TURN_START.entryId`）：
   failure 用 `turnStartEntryId + attempt + sequence`，tool 只认已物化的 durable
-  `tool_result`（或 DTO `resultEntryId` 已指向已存在 Entry），身份为
+  `tool_result`（ToolInvocation 无 resultEntryId；Tool overlay 依据 invocation 存在性
+  + durable ToolResult Entry 判定），身份为
   `assistantEntryId 所在 Turn + toolCallId`——旧 Turn 的 durable 记录绝不抑制新 Turn
   相同数字/复用 toolCallId 的活跃 overlay；durable assistant `tool_call` 不抑制
   运行中的 tool invocation。活跃状态映射五态：model 优先 realtime stream error，
@@ -285,14 +288,14 @@ Agent 表单的 Tools/Skills/Subagents 只保存**名称集合**（DTO 三个必
 - **ToolOutputViewport**：完整保留 Tool 输出（全量文本仍在 DOM），默认以可滚动五行视口跟随尾部；用户向上滚动后暂停自动跟随。
 - **TaskStatusWidget**（挂载在 `ThreadWidgetStack.children`）：一次 reduce 把全部活动 task 消息按 `parentTaskLevel + depth` 聚合为层级列表（同子 Thread 只保留最新帧，深度变化移层）；`waiting_approval`/含审批项的行展示子工具名称、原因与 Allow/Deny——决策经宿主 controller 转发到**子 ThreadId** 的既有 approval 端点（`harnessService.decideApproval(targetThreadId, ...)`），**replay 身份包含 `targetThreadId + invocationId + decision`**（不同子 Thread 可能复用相同 invocationId）。
 - **浏览器通知**（`useThreadNotifications`，best-effort UI 副作用）：开关唯一来自
-  `ApplicationSettingsProvider` 的 `kkstudio.application-settings.v1.notificationsEnabled`（默认 false，
+  `BrowserPreferencesProvider` 的 `kkstudio.browser-preferences.v1.notificationsEnabled`（默认 false，
   同 Tab 经 CustomEvent、跨 Tab 经 storage 事件同步，浏览器禁用存储时仍在本 Tab 生效；非法/未知版本存储
   回退默认）。开启后汇总父 Thread、直接子 task 与 descendant relay 的**全部待决审批**（身份含实际目标
   Thread）；父/子 Agent 完成与错误通知在 working 结束后触发，deny 后 5 秒内抑制 completion；不建立第二套
   Session 状态。
 - **TaskStatusWidget 永久挂载**在共享 `ChatPanel` 的 widget zone（事件详情之后），因此 Chat Bound 与 Canvas Bound 无需调用方手工拼装；无活动 task 消息时组件自身返回 null，不占位，也不存在偏好开关。
 - **Footer 是纯只读事实视图**（`ThreadStatusFooter` → `buildThreadStatusModel`），顺序固定为 Environment/Workspace → Git branch → Branch Usage → `used/contextWindow` → cache hit。Bound Pane 只读取当前 Thread snapshot 已生效的 Environment/context，不把尚未随下一条 batch 提交的 Composer BranchDraft 伪装成当前事实。Environment 使用完整安全 wire binding；未绑定只读展示 `none env`，已绑定展示 `env:名称 · 路径`；路径文本中间省略但 title 保留完整相对路径；不可用时只标记 unavailable，不暴露 daemon 绝对路径。Branch Usage 只聚合当前 root-to-head 已关闭 `turn_usage`（未关闭 Turn、compaction 与失败残留不计入）；usage / cache 缺失时按 `0` 展示，context 在已知 contextWindow 时按 `0/total` 展示。Footer 不含 button、右键行为、Agent、Model、Permission 或 Notification。
-- **Notification 唯一设置入口**是 `/settings` 的全局开关；Bound Thread 只消费 `ApplicationSettingsProvider` 状态执行 best-effort 通知，Footer 不再提供第二个入口。
+- **Notification 唯一设置入口**是 `/settings` 的浏览器偏好开关；Bound Thread 只消费 `BrowserPreferencesProvider` 状态执行 best-effort 通知，Footer 不再提供第二个入口。
 
 ## 13. 前端目录
 
@@ -306,6 +309,7 @@ frontend/src
 │   ├── environment/
 │   └── runtime/         # useAgentThreadController / useHarnessThreadRealtime / thread-timeline / thread-events / thread-panel（transcript、event view、shortcuts、composer）/ task-status / thread-notifications
 ├── features/canvas/
+├── features/settings/      # 七个 Settings Tab；General 为浏览器偏好，其余为服务端 SystemSettings 聚合编辑器
 ├── shared/api/
 │   ├── contracts/ai-catalog.ts
 │   ├── contracts/ai-chat.ts
@@ -347,4 +351,4 @@ npm run lint
 npm run build
 ```
 
-前端 API 契约重点覆盖名称身份、Model ref、命令 batch 严格 wire、CAS、exact replay 与 409 rebuild、approval/stop 身份、snapshot-first 事件通道、attempt failure 的 active/durable/terminal 投影、stale overlay fence、whitespace 保真与 terminal 投影；task 呈现契约（`task.status` 心跳解析/规范化去重、`<task>` envelope 解析、renderer 分发、TaskStatusWidget 聚合与子审批转发、浏览器通知与应用设置）由前端单测覆盖，不依赖真实付费模型。
+前端 API 契约重点覆盖名称身份、Model ref、命令 batch 严格 wire、CAS、exact replay 与 409 rebuild、approval/stop 身份、snapshot-first 事件通道、attempt failure 的 active/durable/terminal 投影、stale overlay fence、whitespace 保真与 terminal 投影；task 呈现契约（`task.status` 心跳解析/规范化去重、`<task>` envelope 解析、renderer 分发、TaskStatusWidget 聚合与子审批转发、浏览器通知与浏览器偏好）由前端单测覆盖，不依赖真实付费模型。

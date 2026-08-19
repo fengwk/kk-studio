@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -30,6 +30,7 @@ import java.util.UUID;
 
 /** history Entry payload codec：标准形态、严格边界拒绝与老字段拒绝。 */
 class HistoryEntryPayloadJsonCodecTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final String ENV = "123e4567-e89b-12d3-a456-426614174000";
   private static final String UUID_2 = "00000000-0000-0000-0000-000000000002";
@@ -43,7 +44,7 @@ class HistoryEntryPayloadJsonCodecTest {
   void roundTripsAllPayloadTypes() {
     BranchSettings settings = settings(ENV);
     EntryPayload root = new RootPayload(settings);
-    EntryPayload turnStart = new TurnStartPayload(TurnStartReason.INPUT, settings);
+    EntryPayload turnStart = new TurnStartPayload(TurnStartReason.INPUT, settings, OWNER_THREAD_ID);
     EntryPayload user =
         new MessagePayload(
             new AgentMessage(
@@ -57,7 +58,7 @@ class HistoryEntryPayloadJsonCodecTest {
             null,
             null);
     EntryPayload assistant =
-        new MessagePayload(assistant("answer"), metadata(ProviderStopReason.COMPLETED), null);
+        new MessagePayload(assistant("answer"), metadata(GenerationStopReason.COMPLETE), null);
     EntryPayload tool =
         new MessagePayload(
             toolMessage("call-1"),
@@ -133,6 +134,15 @@ class HistoryEntryPayloadJsonCodecTest {
             + "\"activeTools\":[\"read\",\"grep\"]},"
             + "\"subagentContext\":null}",
         CODEC.encode(new RootPayload(settings(null))));
+    assertEquals(
+        "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"coding\",\"model\":{"
+            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"},"
+            + "\"activeTools\":[\"read\",\"grep\"]},"
+            + "\"ownerThreadId\":\""
+            + OWNER_THREAD_ID
+            + "\",\"contextWindow\":4096}",
+        CODEC.encode(
+            new TurnStartPayload(TurnStartReason.INPUT, settings(null), OWNER_THREAD_ID, 4096)));
     assertEquals(
         "{\"pluginId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
             + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"sys\"}]},"
@@ -898,7 +908,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolCallId, "read", "read", List.of(new TextMessageContent("ok")), false, "{}")));
   }
 
-  private static AssistantMessageMetadata metadata(ProviderStopReason reason) {
+  private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
     ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
     ModelCost cost =
         new ModelCost(

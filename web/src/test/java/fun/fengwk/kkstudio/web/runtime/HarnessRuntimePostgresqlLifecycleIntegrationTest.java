@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -15,9 +16,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.init.ScriptUtils;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -53,8 +53,6 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
   private static final UUID SESSION_ID = new UUID(0L, 9_900_000L);
   private static final UUID ROOT_ENTRY_ID = new UUID(0L, 9_900_001L);
   private static final UUID THREAD_ID = new UUID(0L, 9_900_002L);
-  private static final String SCHEMA_RESOURCE =
-      "fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql";
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =
@@ -63,10 +61,12 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
 
   static {
     POSTGRES.start();
+    // 上下文创建期装配 bean 会读取 system_setting 默认行：应用 V1 baseline（含 Harness 7 表 + system_setting 默认行），
+    // 替代纯 harness-runtime-schema.sql，否则缺行会导致上下文启动失败。
     try (Connection connection = newConnection()) {
       resetSchema(connection);
     } catch (SQLException error) {
-      throw new IllegalStateException("cannot apply Harness runtime schema", error);
+      throw new IllegalStateException("cannot apply baseline schema", error);
     }
   }
 
@@ -178,6 +178,13 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
       statement.execute("drop schema if exists public cascade");
       statement.execute("create schema public");
     }
-    ScriptUtils.executeSqlScript(connection, new ClassPathResource(SCHEMA_RESOURCE));
+    // V1 baseline 内嵌的 Harness 7 表与 harness-runtime-schema.sql 字节一致（由架构测试守护），并额外提供 system_setting
+    // 默认行。
+    Flyway.configure()
+        .dataSource(new SingleConnectionDataSource(connection, true))
+        .locations("classpath:db/migration")
+        .validateMigrationNaming(true)
+        .load()
+        .migrate();
   }
 }

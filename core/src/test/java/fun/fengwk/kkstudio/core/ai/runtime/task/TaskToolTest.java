@@ -52,17 +52,16 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -111,6 +110,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** task 平台工具对模型公开的 descriptor 契约、执行入口拒绝语义与完整观察/取消生命周期。 */
 class TaskToolTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final int DEFAULT_MAX_TURNS = 7;
   private static final Instant NOW = Instant.parse("2026-08-08T00:00:00Z");
@@ -1924,7 +1924,7 @@ class TaskToolTest {
     Entry root =
         new Entry(id(1), PARENT_SESSION_ID, null, new RootPayload(settings, rootContext), NOW);
     ThreadState thread = new ThreadState(PARENT_THREAD_ID, root.id(), true, 1L, 0L, NOW, NOW);
-    ModelInvocationRequest modelRequest = mock(ModelInvocationRequest.class);
+    ModelRequestSpec modelRequest = mock(ModelRequestSpec.class);
     when(modelRequest.subagentBindings()).thenReturn(allowedSubagents);
     ModelInvocation model = mock(ModelInvocation.class);
     when(model.request()).thenReturn(modelRequest);
@@ -1958,7 +1958,8 @@ class TaskToolTest {
             id(34),
             root.sessionId(),
             root.id(),
-            new TurnStartPayload(TurnStartReason.CONTINUATION, initial.entryPath().baseSettings()),
+            new TurnStartPayload(
+                TurnStartReason.CONTINUATION, initial.entryPath().baseSettings(), OWNER_THREAD_ID),
             NOW);
     Entry assistant = new Entry(id(35), root.sessionId(), turn.id(), assistantMessage(report), NOW);
     Entry end =
@@ -1993,7 +1994,7 @@ class TaskToolTest {
             id(32),
             root.sessionId(),
             root.id(),
-            new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
+            new TurnStartPayload(TurnStartReason.CONTINUATION, settings, OWNER_THREAD_ID),
             NOW);
     Entry assistant =
         new Entry(
@@ -2034,7 +2035,8 @@ class TaskToolTest {
             id(100),
             last.sessionId(),
             last.id(),
-            new TurnStartPayload(TurnStartReason.CONTINUATION, resumed.entryPath().baseSettings()),
+            new TurnStartPayload(
+                TurnStartReason.CONTINUATION, resumed.entryPath().baseSettings(), OWNER_THREAD_ID),
             NOW);
     Entry assistant =
         new Entry(
@@ -2103,7 +2105,7 @@ class TaskToolTest {
             id(200),
             root.sessionId(),
             root.id(),
-            new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
+            new TurnStartPayload(TurnStartReason.CONTINUATION, settings, OWNER_THREAD_ID),
             NOW);
     Entry assistant =
         new Entry(
@@ -2114,7 +2116,7 @@ class TaskToolTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("tc-1", "web_search", "web_search", "{}"))),
-                new AssistantMessageMetadata(ProviderStopReason.TOOL_CALLS, USAGE, COST),
+                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE, COST),
                 null),
             NOW);
     ThreadState thread =
@@ -2144,7 +2146,7 @@ class TaskToolTest {
             id(nextId++),
             SESSION_ID,
             parent,
-            new TurnStartPayload(TurnStartReason.COMPACTION, settings),
+            new TurnStartPayload(TurnStartReason.COMPACTION, settings, OWNER_THREAD_ID),
             NOW);
     Entry compactionEnd =
         new Entry(
@@ -2167,7 +2169,7 @@ class TaskToolTest {
               id(nextId++),
               SESSION_ID,
               parent,
-              new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
+              new TurnStartPayload(TurnStartReason.CONTINUATION, settings, OWNER_THREAD_ID),
               NOW);
       Entry assistant =
           new Entry(id(nextId++), SESSION_ID, turn.id(), assistantMessage("turn " + i), NOW);
@@ -2205,7 +2207,7 @@ class TaskToolTest {
             id(300),
             root.sessionId(),
             root.id(),
-            new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
+            new TurnStartPayload(TurnStartReason.CONTINUATION, settings, OWNER_THREAD_ID),
             NOW);
     Entry assistant =
         new Entry(id(301), root.sessionId(), turn.id(), assistantMessage("pending"), NOW);
@@ -2240,7 +2242,7 @@ class TaskToolTest {
             id(400),
             root.sessionId(),
             root.id(),
-            new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
+            new TurnStartPayload(TurnStartReason.CONTINUATION, settings, OWNER_THREAD_ID),
             NOW);
     Entry error =
         new Entry(
@@ -2281,7 +2283,7 @@ class TaskToolTest {
             id(410),
             root.sessionId(),
             root.id(),
-            new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
+            new TurnStartPayload(TurnStartReason.CONTINUATION, settings, OWNER_THREAD_ID),
             NOW);
     Entry aborted =
         new Entry(
@@ -2325,7 +2327,7 @@ class TaskToolTest {
             id(420),
             root.sessionId(),
             root.id(),
-            new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
+            new TurnStartPayload(TurnStartReason.CONTINUATION, settings, OWNER_THREAD_ID),
             NOW);
     Entry end =
         new Entry(
@@ -2348,7 +2350,7 @@ class TaskToolTest {
   }
 
   private static AssistantMessageMetadata assistantMetadata() {
-    return new AssistantMessageMetadata(ProviderStopReason.COMPLETED, USAGE, COST);
+    return new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE, COST);
   }
 
   private static ThreadCommand queuedCommand() {
@@ -2376,9 +2378,7 @@ class TaskToolTest {
   private static ToolInvocation toolInvocation(UUID id, ToolApproval approval) {
     ToolInvocation tool = mock(ToolInvocation.class);
     when(tool.id()).thenReturn(id);
-    ToolInvocationRequest request = mock(ToolInvocationRequest.class);
-    when(request.call()).thenReturn(new ToolCall("tc-" + id, "web_search", "{}"));
-    when(tool.request()).thenReturn(request);
+    when(tool.call()).thenReturn(new ToolCall("tc-" + id, "web_search", "{}"));
     when(tool.status()).thenReturn(ToolInvocationStatus.RUNNING);
     when(tool.attempt()).thenReturn(1);
     when(tool.updatedAt()).thenReturn(NOW);

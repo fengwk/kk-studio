@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
@@ -20,8 +21,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -37,11 +38,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -99,17 +101,17 @@ import java.util.function.Function;
  *
  * <p>每条链按 store 约束原子种子：Session + ROOT +（TURN_START + USER/ASSISTANT/TURN_END）+
  * Thread；ModelInvocation 只能以 READY/attempt=0 插入且 basis 必须等于 Thread 当前 head，terminal 状态通过共享
- * transition 逐级推进； ToolInvocation 只能以 READY/attempt=0/approval=null 插入且其
- * modelInvocation.resultEntryId 必须等于 assistantEntryId。
+ * transition 逐级推进； ToolInvocation 只能以 READY/attempt=0/approval=null 插入，call/binding 由基座固定绑定 bash
+ * tool。
  */
 final class ThreadProcessorTestSupport {
 
   static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
+  static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
   static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   static final Duration RESOLVE_FAILURE_DELAY = Duration.ofSeconds(7);
-  static final int STEP_LIMIT = 8;
 
   /** 测试请求统一的冻结上下文窗口。 */
   static final int CONTEXT_WINDOW = 100_000;
@@ -175,11 +177,7 @@ final class ThreadProcessorTestSupport {
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
               new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
-                  NOW));
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
           tx.insertEntry(
               new Entry(
                   userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
@@ -205,11 +203,7 @@ final class ThreadProcessorTestSupport {
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
               new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
-                  NOW));
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
           tx.insertEntry(
               new Entry(
                   userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
@@ -258,11 +252,7 @@ final class ThreadProcessorTestSupport {
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
               new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
-                  NOW));
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
           tx.insertEntry(
               new Entry(
                   userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
@@ -363,6 +353,8 @@ final class ThreadProcessorTestSupport {
       throw new IllegalArgumentException("toolStatuses must match callIds");
     }
     OpenTurnBaseline turn = seedOpenInputTurn(store);
+    ModelRequestSpec request = tooledRequest(List.of("bash"));
+    ProviderResponse response = successResponse(callIds, "bash");
     UUID modelId =
         seedModelInvocation(
             store,
@@ -370,10 +362,16 @@ final class ThreadProcessorTestSupport {
             turn.turnStartEntryId(),
             turn.userEntryId(),
             modelStatus,
-            tooledRequest(List.of("bash")),
-            successResponse(callIds, "bash"),
+            request,
+            response,
             null);
-    UUID assistantEntryId = insertAssistantWithCalls(store, turn, callIds);
+    // live attached fixture：assistant Entry 必须由同一 frozen request + ProviderResponse 经 mapper 生成，
+    // 与 validateAttached 的完整 payload 校验保持一致。
+    UUID assistantEntryId =
+        insertAssistantPayload(
+            store,
+            turn,
+            new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()));
     if (modelStatus == ModelInvocationStatus.SUCCEEDED) {
       transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     }
@@ -400,9 +398,54 @@ final class ThreadProcessorTestSupport {
           UUID id = tx.nextId();
           tx.insertEntry(
               new Entry(id, turn.sessionId(), turn.userEntryId(), assistantPayload(callIds), NOW));
-          tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, false, NOW));
+          tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, NOW));
           return id;
         });
+  }
+
+  /**
+   * 在 open Turn 的 head 后插入指定 payload 的 ASSISTANT Entry 并推进 Thread head（live attached fixture 专用）。
+   */
+  static UUID insertAssistantPayload(
+      InMemoryHarnessStore store, OpenTurnBaseline turn, EntryPayload payload) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(turn.threadId());
+          UUID id = tx.nextId();
+          tx.insertEntry(new Entry(id, turn.sessionId(), turn.userEntryId(), payload, NOW));
+          tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, NOW));
+          return id;
+        });
+  }
+
+  /**
+   * 合法 attached SUCCEEDED tool-phase 的 (assistant, model) 对：assistant 经 mapper 与同一 request/response
+   * 全等。
+   */
+  record SeededToolPhase(UUID modelInvocationId, UUID assistantEntryId) {}
+
+  /** 原子种子合法 SUCCEEDED tool-phase model + mapper 派生 assistant（strict attach 校验要求全等），返回二者 id。 */
+  static SeededToolPhase seedSucceededToolPhase(
+      InMemoryHarnessStore store, OpenTurnBaseline turn, List<String> callIds) {
+    ModelRequestSpec request = tooledRequest(List.of("bash"));
+    ProviderResponse response = successResponse(callIds, "bash");
+    UUID modelId =
+        seedModelInvocation(
+            store,
+            turn.threadId(),
+            turn.turnStartEntryId(),
+            turn.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            request,
+            response,
+            null);
+    UUID assistantEntryId =
+        insertAssistantPayload(
+            store,
+            turn,
+            new HistoryPayloadMapper().assistantPayload(response, request.toolBindings()));
+    transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
+    return new SeededToolPhase(modelId, assistantEntryId);
   }
 
   /**
@@ -415,7 +458,7 @@ final class ThreadProcessorTestSupport {
       UUID turnStartEntryId,
       UUID basisEntryId,
       ModelInvocationStatus status,
-      ModelInvocationRequest request,
+      ModelRequestSpec request,
       ProviderResponse response,
       ModelInvocationError error) {
     UUID modelId =
@@ -460,7 +503,7 @@ final class ThreadProcessorTestSupport {
     return modelId;
   }
 
-  /** 插入 READY ToolInvocation 并把状态推进到 {@code status}（terminal 且 resultEntryId 仍 null）。 */
+  /** 插入 READY ToolInvocation 并把状态推进到 {@code status}。 */
   static UUID seedToolInvocation(
       InMemoryHarnessStore store,
       UUID modelInvocationId,
@@ -472,6 +515,7 @@ final class ThreadProcessorTestSupport {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
+              ToolInvocationRequest request = toolRequest(callId);
               tx.insertToolInvocations(
                   List.of(
                       new ToolInvocation(
@@ -479,10 +523,10 @@ final class ThreadProcessorTestSupport {
                           modelInvocationId,
                           assistantEntryId,
                           ordinal,
-                          toolRequest(callId),
+                          request.call(),
+                          request.binding(),
                           ToolInvocationStatus.READY,
                           0,
-                          null,
                           null,
                           null,
                           null,
@@ -600,14 +644,14 @@ final class ThreadProcessorTestSupport {
                 tool.modelInvocationId(),
                 tool.assistantEntryId(),
                 tool.ordinal(),
-                tool.request(),
+                tool.call(),
+                tool.binding(),
                 tool.status(),
                 tool.attempt(),
                 tool.approval(),
                 tool.result(),
                 tool.effects(),
                 tool.error(),
-                tool.resultEntryId(),
                 tool.createdAt(),
                 updatedAt));
   }
@@ -670,6 +714,18 @@ final class ThreadProcessorTestSupport {
         ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), List.of());
   }
 
+  /** Resolver 成功后的 INPUT TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
+  static TurnStartPayload resolvedInputTurnStart(UUID ownerThreadId) {
+    return new TurnStartPayload(
+        TurnStartReason.INPUT, branchSettings(), ownerThreadId, CONTEXT_WINDOW);
+  }
+
+  /** Resolver 成功后的 COMPACTION TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
+  static TurnStartPayload resolvedCompactionTurnStart(UUID ownerThreadId) {
+    return new TurnStartPayload(
+        TurnStartReason.COMPACTION, branchSettings(), ownerThreadId, CONTEXT_WINDOW);
+  }
+
   static EntryPayload userMessagePayload(String text) {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))), null, null);
@@ -682,8 +738,8 @@ final class ThreadProcessorTestSupport {
       contents.add(new ToolCallMessageContent(callIds.get(i), "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
-    ProviderStopReason stopReason =
-        callIds.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+    GenerationStopReason stopReason =
+        callIds.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         assistantMetadata(stopReason),
@@ -702,53 +758,47 @@ final class ThreadProcessorTestSupport {
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
-  static ModelInvocationRequest tooledRequest(List<String> toolNames) {
+  static ModelRequestSpec tooledRequest(List<String> toolNames) {
     List<ToolBinding> bindings = new ArrayList<>();
-    List<ProviderToolDefinition> definitions = new ArrayList<>();
     for (String name : toolNames) {
       bindings.add(platformBinding(name));
-      definitions.add(new ProviderToolDefinition(name, "description of " + name, "{}"));
     }
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(definitions), bindings, List.of(), false, CONTEXT_WINDOW, null);
+    return requestWithBindings(bindings);
   }
 
-  static ModelInvocationRequest plainRequest() {
+  static ModelRequestSpec plainRequest() {
     return tooledRequest(List.of());
   }
 
-  static ModelInvocationRequest requestWithBindings(List<ToolBinding> bindings) {
-    List<ProviderToolDefinition> definitions = new ArrayList<>(bindings.size());
-    for (ToolBinding binding : bindings) {
-      definitions.add(
-          new ProviderToolDefinition(
-              binding.descriptor().name(), binding.descriptor().description(), "{}"));
-    }
-    return new ModelInvocationRequest(
-        ENV_ID, providerRequest(definitions), bindings, List.of(), false, CONTEXT_WINDOW, null);
-  }
-
-  /** 按 candidate BranchSettings 构造机械一致的 Resolved 请求（env / model / variant / activeTools / yolo）。 */
-  static ModelInvocationRequest requestFor(BranchSettings settings, boolean yoloEnabled) {
-    List<ToolBinding> bindings = new ArrayList<>();
-    List<ProviderToolDefinition> definitions = new ArrayList<>();
-    for (String name : settings.activeTools()) {
-      bindings.add(platformBinding(name));
-      definitions.add(new ProviderToolDefinition(name, "description of " + name, "{}"));
-    }
-    return new ModelInvocationRequest(
-        settings.environment(),
-        new ProviderRequest(
-            modelDescriptor(settings.model().providerName(), settings.model().modelName()),
-            new ModelVariant(
-                settings.model().variant(), null, null, null, null, null, null, List.of(), null),
-            List.of(),
-            definitions,
-            ProviderCacheControl.none()),
+  static ModelRequestSpec requestWithBindings(List<ToolBinding> bindings) {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor("provider", "model"),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        List.of(),
         bindings,
         List.of(),
-        yoloEnabled,
-        CONTEXT_WINDOW,
+        List.of(),
+        ProviderCacheControl.none(),
+        null);
+  }
+
+  /** 按 candidate BranchSettings 构造机械一致的 Resolved spec（model / variant / tools）。 */
+  static ModelRequestSpec requestFor(BranchSettings settings) {
+    List<ToolBinding> bindings = new ArrayList<>();
+    for (String name : settings.activeTools()) {
+      bindings.add(platformBinding(name));
+    }
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor(settings.model().providerName(), settings.model().modelName()),
+        new ModelVariant(
+            settings.model().variant(), null, null, null, null, null, null, List.of(), null),
+        List.of(),
+        bindings,
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
         null);
   }
 
@@ -760,19 +810,16 @@ final class ThreadProcessorTestSupport {
    * 按冻结 preparation 构造机械一致的压缩 Resolved 请求（零 tool/skill、零 provider tools、缓存 none、
    * contextWindow/tokensBefore/ids 与 preparation 逐字段一致）。
    */
-  static ModelInvocationRequest compactionRequest(CompactionPreparation preparation) {
-    return new ModelInvocationRequest(
-        ENV_ID,
-        new ProviderRequest(
-            modelDescriptor("provider", "model"),
-            new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
-            List.of(),
-            List.of(),
-            ProviderCacheControl.none()),
+  static ModelRequestSpec compactionRequest(CompactionPreparation preparation) {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelDescriptor("provider", "model"),
+        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
         List.of(),
         List.of(),
-        false,
-        Math.toIntExact(preparation.contextWindow()),
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
         new CompactionRequest(
             preparation.phase(),
             preparation.trigger(),
@@ -783,7 +830,9 @@ final class ThreadProcessorTestSupport {
   }
 
   /**
-   * 种子一条压缩可触发状态：关闭的 INPUT turn（ASSISTANT 携带 {@code usage}）+ SUCCEEDED invocation（resultEntryId 挂上）。
+   * 种子一条压缩可触发状态（closed-turn Entry-only）：关闭的两段 INPUT turn 历史 + Thread head。历史事实仅由 immutable Entry
+   * 构成：TURN_START 的 owner/contextWindow 决定 turn 归属，turn2 ASSISTANT metadata 携带 caller 指定的 {@code
+   * usage}（planner 依赖它）；不 seed/保留任何 ModelInvocation（closed turn 不保留 invocation）。
    */
   static ClosedTurnBaseline seedCompactionReadyClosedTurn(
       InMemoryHarnessStore store, ModelUsage usage) {
@@ -795,134 +844,94 @@ final class ThreadProcessorTestSupport {
     // 形状：turn1（短消息，作为可摘要历史）+ turn2（长 USER 消息 + 带 usage 的短 ASSISTANT）。
     // planner 从尾部累计：turn2 的 ASSISTANT 远小于 keepRecentTokens，长 USER 处越过 -> cut 落在 turn2 USER（非切分
     // FULL）。
-    UUID[] modelIdHolder = new UUID[1];
-    ClosedTurnBaseline baseline =
-        store.transaction(
-            tx -> {
-              UUID sessionId = tx.nextId();
-              UUID rootEntryId = tx.nextId();
-              UUID turnStartEntryId = tx.nextId(); // turn1 TURN_START
-              UUID userEntryId = tx.nextId(); // turn1 USER
-              UUID assistantEntryId = tx.nextId(); // turn1 ASSISTANT
-              UUID turnEndEntryId = tx.nextId(); // turn1 TURN_END
-              UUID secondTurnStartId = tx.nextId(); // turn2 TURN_START
-              UUID secondUserEntryId = tx.nextId(); // turn2 USER（长消息）
-              UUID secondAssistantEntryId = tx.nextId(); // turn2 ASSISTANT（携带 usage）
-              UUID secondTurnEndId = tx.nextId(); // turn2 TURN_END
-              UUID threadId = tx.nextId();
-              tx.insertSession(new Session(sessionId, NOW));
-              tx.insertEntry(
-                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-              // turn1：短消息。
-              tx.insertEntry(
-                  new Entry(
-                      turnStartEntryId,
-                      sessionId,
-                      rootEntryId,
-                      new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
-              tx.insertEntry(
-                  new Entry(
-                      assistantEntryId,
-                      sessionId,
-                      userEntryId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.ASSISTANT,
-                              List.of(new TextMessageContent("assistant reply"))),
-                          new AssistantMessageMetadata(
-                              ProviderStopReason.COMPLETED, usage(), cost()),
-                          null),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      turnEndEntryId,
-                      sessionId,
-                      assistantEntryId,
-                      new TurnEndPayload(
-                          turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
-                      NOW));
-              // turn2：长 USER + 短 ASSISTANT（usage 挂这里）。
-              tx.insertEntry(
-                  new Entry(
-                      secondTurnStartId,
-                      sessionId,
-                      turnEndEntryId,
-                      new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      secondUserEntryId,
-                      sessionId,
-                      secondTurnStartId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.USER,
-                              List.of(new TextMessageContent(compactionUserText()))),
-                          null,
-                          null),
-                      NOW));
-              // Thread head 停在 turn2 USER：invocation 的 basis 必须是插入时刻的 head（与真实流程一致）。
-              tx.insertThread(
-                  new ThreadState(threadId, secondUserEntryId, false, 1L, 0L, NOW, NOW));
-              modelIdHolder[0] = tx.nextId();
-              tx.insertModelInvocation(
-                  new ModelInvocation(
-                      modelIdHolder[0],
-                      threadId,
-                      secondTurnStartId,
-                      secondUserEntryId,
-                      plainRequest(),
-                      ModelInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      null,
-                      List.of(),
-                      NOW,
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      secondAssistantEntryId,
-                      sessionId,
-                      secondUserEntryId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.ASSISTANT,
-                              List.of(new TextMessageContent("assistant reply"))),
-                          new AssistantMessageMetadata(ProviderStopReason.COMPLETED, usage, cost()),
-                          null),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      secondTurnEndId,
-                      sessionId,
-                      secondAssistantEntryId,
-                      new TurnEndPayload(
-                          secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
-                      NOW));
-              tx.updateThread(
-                  tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndId, false, NOW));
-              return new ClosedTurnBaseline(
+    ProviderResponse response = successResponse(usage, cost(), "assistant reply");
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId(); // turn1 TURN_START
+          UUID userEntryId = tx.nextId(); // turn1 USER
+          UUID assistantEntryId = tx.nextId(); // turn1 ASSISTANT
+          UUID turnEndEntryId = tx.nextId(); // turn1 TURN_END
+          UUID secondTurnStartId = tx.nextId(); // turn2 TURN_START
+          UUID secondUserEntryId = tx.nextId(); // turn2 USER（长消息）
+          UUID secondAssistantEntryId = tx.nextId(); // turn2 ASSISTANT（携带 usage）
+          UUID secondTurnEndId = tx.nextId(); // turn2 TURN_END
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, NOW));
+          tx.insertEntry(
+              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          // turn1：短消息。
+          tx.insertEntry(
+              new Entry(
+                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
+          tx.insertEntry(
+              new Entry(
+                  userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId,
                   sessionId,
-                  rootEntryId,
+                  userEntryId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.ASSISTANT,
+                          List.of(new TextMessageContent("assistant reply"))),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
+                  turnEndEntryId,
+                  sessionId,
+                  assistantEntryId,
+                  new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+                  NOW));
+          // turn2：长 USER + 短 ASSISTANT（usage 挂这里，作为阈值触发事实）。
+          tx.insertEntry(
+              new Entry(
                   secondTurnStartId,
+                  sessionId,
+                  turnEndEntryId,
+                  resolvedInputTurnStart(threadId),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   secondUserEntryId,
+                  sessionId,
+                  secondTurnStartId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER,
+                          List.of(new TextMessageContent(compactionUserText()))),
+                      null,
+                      null),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   secondAssistantEntryId,
+                  sessionId,
+                  secondUserEntryId,
+                  new HistoryPayloadMapper().assistantPayload(response, List.of()),
+                  NOW));
+          tx.insertEntry(
+              new Entry(
                   secondTurnEndId,
-                  threadId);
-            });
-    // 插入后推进到 SUCCEEDED 并挂上 assistant 结果（与 seedModelInvocation 相同的状态机路径）。
-    UUID modelId = modelIdHolder[0];
-    transitionModel(store, modelId, m -> m.beginDispatch(NOW));
-    transitionModel(store, modelId, m -> m.markRunning(NOW));
-    transitionModel(store, modelId, m -> m.succeed(successResponse(List.of(), "bash"), NOW));
-    transitionModel(store, modelId, m -> m.attachResultEntry(baseline.assistantEntryId(), NOW));
-    return baseline;
+                  sessionId,
+                  secondAssistantEntryId,
+                  new TurnEndPayload(
+                      secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
+                  NOW));
+          tx.insertThread(new ThreadState(threadId, secondTurnEndId, false, 1L, 0L, NOW, NOW));
+          return new ClosedTurnBaseline(
+              sessionId,
+              rootEntryId,
+              secondTurnStartId,
+              secondUserEntryId,
+              secondAssistantEntryId,
+              secondTurnEndId,
+              threadId);
+        });
   }
 
   /** 长 USER 文本：估计 token（22_500）超过默认 keepRecentTokens（20_000），保证 planner 把 cut 选在 turn2 USER 上。 */
@@ -936,8 +945,8 @@ final class ThreadProcessorTestSupport {
     for (String callId : callIds) {
       calls.add(new ProviderToolCall(callId, toolName, "{}"));
     }
-    ProviderStopReason stopReason =
-        callIds.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
+    GenerationStopReason stopReason =
+        callIds.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new ProviderResponse(
         "response text", "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
   }
@@ -947,7 +956,7 @@ final class ThreadProcessorTestSupport {
         "response text",
         "",
         calls,
-        calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
+        GenerationStopReason.COMPLETE,
         usage(),
         cost(),
         "req-1",
@@ -955,11 +964,25 @@ final class ThreadProcessorTestSupport {
         "{}");
   }
 
-  static ToolResult successToolResult(String callId) {
-    return new ToolResult(callId, List.of(new TextToolContent("tool ok")), false, "{}", false);
+  /** 显式 stop reason 的 SUCCEEDED response（覆盖 LENGTH / FILTERED 等矩阵路径）。 */
+  static ProviderResponse successResponse(
+      String text, List<ProviderToolCall> calls, GenerationStopReason stopReason) {
+    return new ProviderResponse(text, "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
   }
 
-  static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {
+  /**
+   * 带显式 usage/cost 的 SUCCEEDED response：文本即 assistant 文本、metadata 随 response 快照（live attach 需全等）。
+   */
+  static ProviderResponse successResponse(ModelUsage usage, ModelCost cost, String text) {
+    return new ProviderResponse(
+        text, "", List.of(), GenerationStopReason.COMPLETE, usage, cost, "req-1", null, "{}");
+  }
+
+  static ToolResult successToolResult(String callId) {
+    return new ToolResult(callId, List.of(new TextToolContent("tool ok")), false, "{}");
+  }
+
+  static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
     return new AssistantMessageMetadata(stopReason, usage(), cost());
   }
 
@@ -1053,17 +1076,14 @@ final class ThreadProcessorTestSupport {
     boolean autoConsistent;
     UUID lastThreadId;
     EntryPath lastPath;
-    boolean lastYoloEnabled;
     CompactionPreparation lastPreparation;
     int calls;
 
     @Override
-    public Result resolve(
-        UUID threadId, EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
+    public Result resolve(UUID threadId, EntryPath path, CompactionPreparation preparation) {
       calls++;
       lastThreadId = threadId;
       lastPath = path;
-      lastYoloEnabled = yoloEnabled;
       lastPreparation = preparation;
       if (onResolve != null) {
         onResolve.run();
@@ -1072,12 +1092,10 @@ final class ThreadProcessorTestSupport {
         throw failure;
       }
       if (autoConsistent) {
-        // 按 candidate path 的最终 branch 事实自动构造一致请求（settings/yolo 与校验完全同源）；
-        // 压缩 turn 按冻结 preparation 构造零工具压缩请求。
+        // 按 candidate path 的最终 branch 事实自动构造一致 spec；压缩 turn 按冻结 preparation 构造。
         return new TurnResolver.Resolved(
-            preparation == null
-                ? requestFor(path.baseSettings(), yoloEnabled)
-                : compactionRequest(preparation));
+            preparation == null ? requestFor(path.baseSettings()) : compactionRequest(preparation),
+            CONTEXT_WINDOW);
       }
       if (results.isEmpty()) {
         return null;
@@ -1131,19 +1149,18 @@ final class ThreadProcessorTestSupport {
     final ThreadProcessor processor;
     ClaimedWork claim;
 
-    Fixture(int stepLimit) {
-      this(stepLimit, null);
+    Fixture() {
+      this(null);
     }
 
     /** {@code processorStore} 非空时 processor 使用包装 store（seed/断言仍用 {@link #store}）。 */
-    Fixture(int stepLimit, HarnessStore processorStore) {
+    Fixture(HarnessStore processorStore) {
       this.scheduler = newScheduler();
       this.processor =
           new ThreadProcessor(
               processorStore == null ? store : processorStore,
               resolver,
-              new ThreadProcessorConfig(
-                  LEASE_CONFIG, stepLimit, RESOLVE_FAILURE_DELAY, COMPACTION_CONFIG),
+              new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, COMPACTION_CONFIG),
               clock,
               scheduler);
     }
@@ -1151,6 +1168,11 @@ final class ThreadProcessorTestSupport {
     @Override
     public void close() {
       scheduler.shutdownNow();
+    }
+
+    /** claim 并处理一次指定 Thread 的 THREAD claim（single-action），返回处理结果。 */
+    ThreadProcessResult nextClaim(UUID threadId) {
+      return processor.process(claimThreadWork(store, threadId, clock.instant()));
     }
   }
 

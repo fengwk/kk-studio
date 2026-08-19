@@ -1,0 +1,90 @@
+# System Settings
+
+## 1. 职责与事实源
+
+系统级、非敏感的产品行为与运行软策略统一存放在 PostgreSQL `system_setting`。该表恒有一行
+`id=1`：
+
+- `config jsonb`：六个完整强类型 section；
+- `version bigint`：从 0 开始的 CAS 版本；
+- `created_at` / `updated_at`：创建与最后更新时间。
+
+`SystemSettings` 是领域事实，`SystemSettingsCodec` 是唯一 JSON/DTO 边界。Codec 对持久化 JSON
+执行严格解码：未知字段、缺失必填对象、错误类型、字符串与整数互相强转、尾随 token 都会失败。
+领域 record 的 canonical constructor 负责范围、跨字段和启用前提校验。数据库默认行与
+`SystemSettings.DEFAULT` 由自动化测试保持一致。
+
+## 2. HTTP 与并发写入
+
+设置 API：
+
+```text
+GET /api/settings
+PUT /api/settings
+```
+
+GET 返回六个 section、`version` 与时间戳。PUT 必须发送六个完整 section 和
+`expectedVersion`；服务端执行：
+
+```text
+严格 DTO 映射与领域校验
+-> 读取当前版本
+-> update ... where id=1 and version=expectedVersion
+-> version + 1
+-> 回读权威聚合
+```
+
+校验失败返回 400，固定行缺失返回 404，CAS 冲突返回 409 并携带 expected/actual version。
+HTTP wire 上的 Java `Long` 使用非负十进制字符串，`Integer` 使用 JSON number，避免浏览器
+整数精度损失。
+
+当前应用没有 Spring Security、用户或管理员角色。`PUT /api/settings` 只适用于受信任的
+单用户部署；开放多用户访问前必须先建立管理员鉴权，不能直接暴露全局权限与 YOLO 写入口。
+
+## 3. Section 与生效时机
+
+| Section | 内容 | 生效时机 |
+| --- | --- | --- |
+| `tool` | permission、默认 YOLO、Model/Tool Gateway 重试延迟、skill 加载超时 | permission：下一次 preflight；defaultYolo：下一次未显式指定模式的 Chat 创建；其余：重启 |
+| `aiRuntime` | invocation retry、compaction、subagent 预算 | 重启 |
+| `environment` | daemon heartbeat、目录查询和消息/资源预算 | 重启 |
+| `integrations` | ComfyUI、OpenCLI Hub、Seedance、GPT Image 2、MiniMax H3 非敏感参数 | 重启 |
+| `storageMedia` | S3 启用、上传/预签名预算、Canvas 媒体处理预算 | 重启 |
+| `advanced` | processor、dispatcher、executor、realtime 与事件通道预算 | 重启 |
+
+`SystemSettingsSnapshot` 是装配期唯一读取点；所有长生命周期 bean 共享同一个启动快照。
+`SystemSettingsToolSettingsProvider` 是唯一运行期现读通道：permission 在下一次权限预检时生效，
+defaultYolo 在下一次 Chat 创建读取默认值时生效。
+
+## 4. Settings UI
+
+`/settings` 有七个 Tab：
+
+```text
+General
+AI Runtime
+Tools & Permissions
+Environment
+Integrations
+Storage & Media
+Advanced
+```
+
+General 只管理当前浏览器的 `BrowserPreferences`，保存在
+`kkstudio.browser-preferences.v1`，不写数据库。其余六个 Tab 共享同一个服务端聚合 draft，
+保存时发送完整 CAS PUT；409 时不自动刷新或覆盖 draft，而是弹窗说明并等待用户确认，
+确认后刷新页面并重新读取最新聚合，当前未保存修改随刷新丢弃。
+
+## 5. 不进入 SystemSettings 的配置
+
+以下内容继续由部署配置或业务实体持有：
+
+- DB/Redis 连接、端口、worker 进程开关；
+- Environment root/workdir、ffmpeg/ffprobe 路径、临时目录、Redis key prefix；
+- S3 endpoint/region/bucket、OpenCLI instance identity；
+- daemon token、API key、access key/secret key、bearer token；
+- Provider/Model/Agent、Chat、Canvas function 等资源自身属性；
+- 协议帧、标识长度、持久化 payload 和 Tool result 等安全不变量；
+- Locale、Pane、Composer、Canvas viewport 等浏览器本地偏好。
+
+这条边界避免把秘密写入普通 JSONB，也避免让运行中的进程通过数据库改变文件系统、连接身份或协议安全边界。

@@ -172,7 +172,7 @@ public final class GrepTool extends AbstractCodingTool {
       contents.add(
           new ResourceToolContent(config.resourceStore().store(completeBytes, "text/plain")));
     }
-    return new ToolResult(callId, contents, false, "{}", false);
+    return new ToolResult(callId, contents, false, "{}");
   }
 
   private static Pattern compilePattern(

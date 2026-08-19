@@ -1,0 +1,198 @@
+package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+/** 一个冻结 {@link ModelRequestSpec} 的严格、确定性 JSON codec。 */
+public final class ModelRequestSpecJsonCodec {
+
+  private static final String CONTEXT = "modelRequestSpec";
+  private static final ModelDescriptorJsonCodec MODEL_CODEC = new ModelDescriptorJsonCodec();
+  private static final ProviderRequestJsonCodec PROVIDER_CODEC = new ProviderRequestJsonCodec();
+  private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
+  private static final ToolBindingJsonCodec BINDING_CODEC = new ToolBindingJsonCodec();
+
+  public String encode(ModelRequestSpec spec) {
+    return InvocationJsonSupport.write(encodeNode(spec), CONTEXT);
+  }
+
+  public ObjectNode encodeNode(ModelRequestSpec spec) {
+    Objects.requireNonNull(spec, "spec");
+    ObjectNode node = InvocationJsonSupport.NODES.objectNode();
+    node.put("providerType", spec.providerType().name());
+    node.set("model", MODEL_CODEC.encodeDescriptorNode(spec.model()));
+    node.set("variant", MODEL_CODEC.encodeVariantNode(spec.variant()));
+    ArrayNode preamble = node.putArray("preambleMessages");
+    for (AgentMessage message : spec.preambleMessages()) {
+      preamble.add(MESSAGE_CODEC.encodeNode(message));
+    }
+    ArrayNode tools = node.putArray("toolBindings");
+    for (ToolBinding binding : spec.toolBindings()) {
+      tools.add(BINDING_CODEC.encodeNode(binding));
+    }
+    ArrayNode skills = node.putArray("skillBindings");
+    for (SkillBinding skill : spec.skillBindings()) {
+      skills.add(encodeSkill(skill));
+    }
+    ArrayNode subagents = node.putArray("subagentBindings");
+    for (SubagentBinding subagent : spec.subagentBindings()) {
+      subagents.add(encodeSubagent(subagent));
+    }
+    node.set("cacheControl", PROVIDER_CODEC.encodeCacheControlNode(spec.cacheControl()));
+    if (spec.compaction() == null) {
+      node.putNull("compaction");
+    } else {
+      node.set("compaction", encodeCompaction(spec.compaction()));
+    }
+    return node;
+  }
+
+  public ModelRequestSpec decode(String json) {
+    return decodeNode(InvocationJsonSupport.parse(json, CONTEXT));
+  }
+
+  public ModelRequestSpec decodeNode(JsonNode value) {
+    ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
+    InvocationJsonSupport.requireFields(
+        node,
+        CONTEXT,
+        "providerType",
+        "model",
+        "variant",
+        "preambleMessages",
+        "toolBindings",
+        "skillBindings",
+        "subagentBindings",
+        "cacheControl",
+        "compaction");
+    ArrayNode preambleNodes =
+        InvocationJsonSupport.array(
+            InvocationJsonSupport.required(node, "preambleMessages", CONTEXT), "preambleMessages");
+    List<AgentMessage> preambleMessages = new ArrayList<>(preambleNodes.size());
+    for (JsonNode messageNode : preambleNodes) {
+      preambleMessages.add(MESSAGE_CODEC.decodeNode(messageNode));
+    }
+    ArrayNode toolNodes =
+        InvocationJsonSupport.array(
+            InvocationJsonSupport.required(node, "toolBindings", CONTEXT), "toolBindings");
+    List<ToolBinding> toolBindings = new ArrayList<>(toolNodes.size());
+    for (JsonNode toolNode : toolNodes) {
+      toolBindings.add(BINDING_CODEC.decodeNode(toolNode));
+    }
+    ArrayNode skillNodes =
+        InvocationJsonSupport.array(
+            InvocationJsonSupport.required(node, "skillBindings", CONTEXT), "skillBindings");
+    List<SkillBinding> skillBindings = new ArrayList<>(skillNodes.size());
+    for (JsonNode skillNode : skillNodes) {
+      skillBindings.add(decodeSkill(skillNode));
+    }
+    ArrayNode subagentNodes =
+        InvocationJsonSupport.array(
+            InvocationJsonSupport.required(node, "subagentBindings", CONTEXT), "subagentBindings");
+    List<SubagentBinding> subagentBindings = new ArrayList<>(subagentNodes.size());
+    for (JsonNode subagentNode : subagentNodes) {
+      subagentBindings.add(decodeSubagent(subagentNode));
+    }
+    JsonNode compactionNode = InvocationJsonSupport.declared(node, "compaction", CONTEXT);
+    CompactionRequest compaction =
+        compactionNode.isNull() ? null : decodeCompaction(compactionNode);
+    return new ModelRequestSpec(
+        InvocationJsonSupport.requiredEnum(node, "providerType", ProviderType.class, CONTEXT),
+        MODEL_CODEC.decodeDescriptorNode(InvocationJsonSupport.required(node, "model", CONTEXT)),
+        MODEL_CODEC.decodeVariantNode(InvocationJsonSupport.required(node, "variant", CONTEXT)),
+        preambleMessages,
+        toolBindings,
+        skillBindings,
+        subagentBindings,
+        PROVIDER_CODEC.decodeCacheControlNode(
+            InvocationJsonSupport.required(node, "cacheControl", CONTEXT)),
+        compaction);
+  }
+
+  private static ObjectNode encodeCompaction(CompactionRequest compaction) {
+    ObjectNode node = InvocationJsonSupport.NODES.objectNode();
+    node.put("phase", compaction.phase().name());
+    node.put("trigger", compaction.trigger().name());
+    node.put("tokensBefore", compaction.tokensBefore());
+    node.put("firstKeptEntryId", compaction.firstKeptEntryId().toString());
+    node.put("cutEntryId", compaction.cutEntryId().toString());
+    if (compaction.turnPrefixStartEntryId() == null) {
+      node.putNull("turnPrefixStartEntryId");
+    } else {
+      node.put("turnPrefixStartEntryId", compaction.turnPrefixStartEntryId().toString());
+    }
+    return node;
+  }
+
+  private static CompactionRequest decodeCompaction(JsonNode value) {
+    ObjectNode node = InvocationJsonSupport.object(value, "compaction");
+    InvocationJsonSupport.requireFields(
+        node,
+        "compaction",
+        "phase",
+        "trigger",
+        "tokensBefore",
+        "firstKeptEntryId",
+        "cutEntryId",
+        "turnPrefixStartEntryId");
+    return new CompactionRequest(
+        InvocationJsonSupport.requiredEnum(node, "phase", CompactionPhase.class, "compaction"),
+        InvocationJsonSupport.requiredEnum(node, "trigger", CompactionTrigger.class, "compaction"),
+        InvocationJsonSupport.nonNegativeLong(node, "tokensBefore", "compaction"),
+        InvocationJsonSupport.requiredUuid(node, "firstKeptEntryId", "compaction"),
+        InvocationJsonSupport.requiredUuid(node, "cutEntryId", "compaction"),
+        InvocationJsonSupport.nullableUuid(node, "turnPrefixStartEntryId", "compaction"));
+  }
+
+  private static ObjectNode encodeSkill(SkillBinding skill) {
+    ObjectNode node = InvocationJsonSupport.NODES.objectNode();
+    node.put("name", skill.name());
+    node.put("description", skill.description());
+    InvocationJsonSupport.putNullable(node, "sourceEnvironment", skill.sourceEnvironment());
+    return node;
+  }
+
+  private static SkillBinding decodeSkill(JsonNode value) {
+    ObjectNode node = InvocationJsonSupport.object(value, "skillBinding");
+    InvocationJsonSupport.requireFields(
+        node, "skillBinding", "name", "description", "sourceEnvironment");
+    return new SkillBinding(
+        InvocationJsonSupport.text(node, "name", "skillBinding"),
+        InvocationJsonSupport.text(node, "description", "skillBinding"),
+        InvocationJsonSupport.nullableEnvironmentBinding(
+            node, "sourceEnvironment", "skillBinding"));
+  }
+
+  private static ObjectNode encodeSubagent(SubagentBinding subagent) {
+    ObjectNode node = InvocationJsonSupport.NODES.objectNode();
+    node.put("name", subagent.name());
+    node.put("description", subagent.description());
+    return node;
+  }
+
+  private static SubagentBinding decodeSubagent(JsonNode value) {
+    ObjectNode node = InvocationJsonSupport.object(value, "subagentBinding");
+    InvocationJsonSupport.requireFields(node, "subagentBinding", "name", "description");
+    return new SubagentBinding(
+        InvocationJsonSupport.text(node, "name", "subagentBinding"),
+        InvocationJsonSupport.text(node, "description", "subagentBinding"));
+  }
+}

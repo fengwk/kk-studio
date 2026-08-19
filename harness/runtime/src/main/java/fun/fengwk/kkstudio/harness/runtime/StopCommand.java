@@ -6,8 +6,9 @@ import java.util.UUID;
 /**
  * 不可变的 Stop 请求。
  *
- * <p>{@code stopRequestId} 是客户端生成的幂等键。Runtime 在将其持久化到 TURN_END 之前会按 operation 与 Thread
- * 限定其作用域，因此同一外部 id 在两个 Thread 上不会发生别名冲突。
+ * <p>{@code stopRequestId} 是客户端生成的幂等键。Runtime 把它原样写入 STOPPED TURN_END 的 closeRequestId，并按被该
+ * TURN_END 引用的 TURN_START 的 {@code ownerThreadId} 界定作用域（Session 级查找）：同一 raw id 可在不同 Thread 上
+ * 独立使用，绝不在 Thread 之间产生别名冲突。
  */
 public record StopCommand(UUID threadId, UUID stopRequestId, long expectedRevision) {
 

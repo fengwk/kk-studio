@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql;
 
+import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.assertTransactionConstraintViolation;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -58,7 +59,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_tool_invocation",
           "harness_work",
           "storage_blob",
-          "storage_upload");
+          "storage_upload",
+          "system_setting");
 
   /** 精确的 runtime-spring 执行协议 + 应用层 Session blob 引用表；只有这些表能使用 harness_ 前缀。 */
   private static final Set<String> HARNESS_TABLES =
@@ -323,14 +325,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "model_invocation_id",
         "assistant_entry_id",
         "ordinal",
-        "request",
+        "call",
+        "binding",
         "status",
         "attempt",
         "approval",
         "result",
         "effects",
         "error",
-        "result_entry_id",
         "created_at",
         "updated_at");
   }
@@ -388,7 +390,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "harness_model_invocation", "result");
     assertColumnType("jsonb", "harness_model_invocation", "error");
     assertColumnType("jsonb", "harness_model_invocation", "failed_attempts");
-    assertColumnType("jsonb", "harness_tool_invocation", "request");
+    assertColumnType("jsonb", "harness_tool_invocation", "call");
+    assertColumnType("jsonb", "harness_tool_invocation", "binding");
     assertColumnType("jsonb", "harness_tool_invocation", "approval");
     assertColumnType("jsonb", "harness_tool_invocation", "result");
     assertColumnType("jsonb", "harness_tool_invocation", "effects");
@@ -472,6 +475,85 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     // 完全合法的 leased 行可插入。
     try (Connection conn = newConnection()) {
       insertWork(conn, "TOOL", uuid(920_007L), "worker", "current_timestamp");
+    }
+  }
+
+  /** system_setting 单行契约：唯一 id=1、config 必须为 object、version 非负，且 baseline 默认行与版本 CAS 语义正确。 */
+  @Test
+  void systemSettingsTableIsSingletonAndValidated() throws SQLException {
+    assertColumns("system_setting", "id", "config", "version", "created_at", "updated_at");
+    assertColumnType("jsonb", "system_setting", "config");
+    assertColumnType("timestamp with time zone", "system_setting", "created_at");
+    assertColumnType("timestamp with time zone", "system_setting", "updated_at");
+
+    // baseline 默认行：恰好一行 id=1、version=0，config 是完整聚合对象。
+    assertEquals(1L, singleLong("select count(*) from system_setting"));
+    assertEquals(1L, singleLong("select id from system_setting"));
+    assertEquals(0L, singleLong("select version from system_setting"));
+    assertTrue(
+        singleString("select config from system_setting").contains("\"aiRuntime\""),
+        "default config must contain the aiRuntime section");
+
+    // id=1 之外的任何行都被 schema check 拒绝。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn, "ck_system_setting_id", () -> insertSystemSetting(conn, 2L, "{}", 0L));
+    }
+    // config 必须是 JSON object：删除默认行并插入数组版本，两者在同一事务内一并回滚，保证默认行仍存在。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_system_setting_config_object",
+          () -> {
+            deleteDefaultRow(conn);
+            insertSystemSetting(conn, 1L, "[]", 0L);
+          });
+    }
+    // version 必须非负：同样与删除同事务回滚。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_system_setting_version_nonneg",
+          () -> {
+            deleteDefaultRow(conn);
+            insertSystemSetting(conn, 1L, "{}", -1L);
+          });
+    }
+    // 约束用例的事务回滚后默认行必须仍在，CAS 语义：只有 version 匹配才更新并 +1。
+    assertEquals(1L, singleLong("select count(*) from system_setting"));
+    try (Connection conn = newConnection()) {
+      assertEquals(1, updateSystemSetting(conn, 0L));
+      assertEquals(0, updateSystemSetting(conn, 0L));
+    }
+    assertEquals(1L, singleLong("select version from system_setting"));
+  }
+
+  private static void insertSystemSetting(Connection conn, long id, String configJson, long version)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into system_setting (id, config, version) values (?, ?::jsonb, ?)")) {
+      ps.setLong(1, id);
+      ps.setString(2, configJson);
+      ps.setLong(3, version);
+      ps.executeUpdate();
+    }
+  }
+
+  private static void deleteDefaultRow(Connection conn) throws SQLException {
+    try (Statement st = conn.createStatement()) {
+      st.executeUpdate("delete from system_setting where id = 1");
+    }
+  }
+
+  private static int updateSystemSetting(Connection conn, long expectedVersion)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "update system_setting set config = '{}'::jsonb, version = version + 1"
+                + " where id = 1 and version = ?")) {
+      ps.setLong(1, expectedVersion);
+      return ps.executeUpdate();
     }
   }
 
@@ -874,7 +956,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_harness_model_invocation_turn",
             "uk_harness_model_invocation_result",
             "uk_harness_tool_invocation_ordinal",
-            "uk_harness_tool_invocation_result",
             "uk_storage_blob_active_hash",
             "uk_storage_upload_candidate"),
         indexes,

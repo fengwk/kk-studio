@@ -490,22 +490,17 @@ function parseModelErrorPayload(json: string): { code: string; message: string }
 }
 
 /**
- * 从活动 ToolInvocation 中派生瞬态 tool-result overlay（若持久的 result Entry
- * 已应用或 invocation 已消失则返回 null）。
- *
- * 当终止态的 resultJson/errorJson 对应 resultEntryId == null 时，会在持久的
- * Tool result Entry 出现之前完整投影（text/json contents + resource attachments；
- * error message）。
+ * 从活动 ToolInvocation 中派生瞬态 tool-result overlay（invocation 已消失则返回
+ * null）。ToolResult Entry 写入与 invocation 删除在同一事务原子提交：invocation
+ * 仍存在说明持久结果尚未物化，此时终止态 resultJson/errorJson 会完整投影
+ * （text/json contents + resource attachments；error message）；Entry 落地后
+ * invocation 随即从 snapshot 消失。
  */
 export function snapshotToolStream(
   invocation: ToolInvocationDTO | null,
   threadId: string,
 ): RealtimeToolStream | null {
   if (invocation == null) {
-    return null
-  }
-  if (invocation.resultEntryId != null) {
-    // 已应用持久的 result Entry：Entry 才是 transcript 的真实来源。
     return null
   }
   const base = {

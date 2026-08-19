@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import org.eclipse.jgit.ignore.FastIgnoreRule;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +15,10 @@ import java.util.List;
  * environment root 内的分层 {@code .gitignore} 规则。
  *
  * <p>规则按祖先到后代、文件内从上到下的顺序求值并采用 last-match-wins。被忽略的目录在加载其内部规则前就会被剪枝，因此后代规则不能错误地重新包含已忽略父目录。
+ *
+ * <p>单条 pattern 的解析与匹配由 {@link FastIgnoreRule} 承担（JGit gitignore 语义）。真实目录遍历逐节点评估，使用 {@code
+ * isMatch(relativePath, directory, true)}：basename 只用末段匹配，避免 {@code !foo} 错误重包含 {@code
+ * foo/bar.log}；目录的忽略判定在父遍历中先于其后代完成。
  */
 final class GitIgnoreRules {
 
@@ -55,12 +61,7 @@ final class GitIgnoreRules {
         if (line == null) {
           break;
         }
-        Rule rule;
-        try {
-          rule = Rule.parse(directory, line);
-        } catch (IllegalArgumentException ignored) {
-          continue;
-        }
+        Rule rule = Rule.parse(directory, line);
         if (rule != null) {
           additions.add(rule);
         }
@@ -86,7 +87,7 @@ final class GitIgnoreRules {
     for (Rule rule : rules) {
       control.check();
       if (rule.matches(path, directory)) {
-        ignored = !rule.negated();
+        ignored = rule.rule().getResult();
       }
     }
     return ignored;
@@ -106,61 +107,15 @@ final class GitIgnoreRules {
 
   record Prepared(GitIgnoreRules rules, boolean searchDirectoryIgnored) {}
 
-  private record Rule(
-      Path baseDirectory,
-      boolean negated,
-      boolean directoryOnly,
-      boolean pathPattern,
-      GlobPattern pattern) {
+  private record Rule(Path baseDirectory, FastIgnoreRule rule) {
 
     private static Rule parse(Path baseDirectory, String source) {
-      String value = stripTrailingSpaces(source);
-      if (value.isEmpty()) {
+      FastIgnoreRule rule = new FastIgnoreRule(source);
+      if (rule.isEmpty()) {
+        // 空行、comment（#）或无效 pattern：git 语义下不产生任何规则。
         return null;
       }
-      boolean escapedLeading = value.startsWith("\\#") || value.startsWith("\\!");
-      if (escapedLeading) {
-        value = value.substring(1);
-      } else if (value.startsWith("#")) {
-        return null;
-      }
-      boolean negated = !escapedLeading && value.startsWith("!");
-      if (negated) {
-        value = value.substring(1);
-      }
-      if (value.isEmpty()) {
-        return null;
-      }
-      boolean directoryOnly = value.endsWith("/");
-      if (directoryOnly) {
-        value = value.substring(0, value.length() - 1);
-      }
-      boolean anchored = value.startsWith("/");
-      if (anchored) {
-        value = value.substring(1);
-      }
-      if (value.isEmpty()) {
-        return null;
-      }
-      boolean pathPattern = anchored || value.indexOf('/') >= 0;
-      return new Rule(
-          baseDirectory, negated, directoryOnly, pathPattern, GlobPattern.compile(value));
-    }
-
-    private static String stripTrailingSpaces(String source) {
-      String value = source;
-      while (value.endsWith(" ")) {
-        int slashCount = 0;
-        for (int index = value.length() - 2; index >= 0 && value.charAt(index) == '\\'; index--) {
-          slashCount++;
-        }
-        if (slashCount % 2 == 1) {
-          int escape = value.length() - slashCount - 1;
-          return value.substring(0, escape) + value.substring(escape + 1);
-        }
-        value = value.substring(0, value.length() - 1);
-      }
-      return value;
+      return new Rule(baseDirectory, rule);
     }
 
     private boolean matches(Path path, boolean directory) {
@@ -168,13 +123,7 @@ final class GitIgnoreRules {
         return false;
       }
       String relative = SearchFiles.toPosix(baseDirectory.relativize(path));
-      if (pathPattern) {
-        return (!directoryOnly || directory) && pattern.matches(relative);
-      }
-      Path basename = path.getFileName();
-      return basename != null
-          && (!directoryOnly || directory)
-          && pattern.matches(basename.toString());
+      return rule.isMatch(relative, directory, true);
     }
   }
 }

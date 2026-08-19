@@ -45,20 +45,21 @@ class PermissionContractsTest {
     }
   }
 
-  /** wildcard `?`、绝对 workdir、Environment root 外路径和空 command 使用确定候选。 */
+  /** wildcard `?`、绝对 workdir 与空 command 使用确定候选。 */
   @Test
-  void evaluatesWildcardAbsoluteAndEmptyTargets() {
+  void evaluatesWildcardWorkdirRelativeAndEmptyTargets() {
     Map<String, List<PermissionRule>> rules = new LinkedHashMap<>();
     rules.put(
         "write",
         List.of(
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("file?.txt", PermissionAction.ALLOW),
-            new PermissionRule("/outside/*", PermissionAction.DENY)));
+            new PermissionRule("secret", PermissionAction.DENY)));
     ToolSettings settings = new ToolSettings(rules, false);
 
     assertEquals(
         PermissionAction.ALLOW, evaluate("write", "{\"path\":\"file1.txt\"}", settings).action());
+    // 显式绝对 workdir 是该次调用的 effective workdir：`secret` 解析为其下相对目标并被该 workdir 相对规则命中。
     assertEquals(
         PermissionAction.DENY,
         evaluate("write", "{\"workdir\":\"/outside\",\"path\":\"secret\"}", settings).action());
@@ -80,19 +81,13 @@ class PermissionContractsTest {
         () ->
             evaluator.evaluate(
                 new PermissionEvaluationContext(
-                    "write", "[]", Path.of("."), Path.of("."), ToolSettings.DEFAULT)));
+                    "write", "[]", Path.of("."), ToolSettings.DEFAULT)));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new PermissionEvaluationContext(
-                " ", "{}", Path.of("."), Path.of("."), ToolSettings.DEFAULT));
+        () -> new PermissionEvaluationContext(" ", "{}", Path.of("."), ToolSettings.DEFAULT));
     PermissionEvaluationContext invalidWorkdir =
         new PermissionEvaluationContext(
-            "write",
-            "{\"path\":\"x\",\"workdir\":\"@\"}",
-            Path.of("."),
-            Path.of("."),
-            ToolSettings.DEFAULT);
+            "write", "{\"path\":\"x\",\"workdir\":\"@\"}", Path.of("."), ToolSettings.DEFAULT);
     assertThrows(IllegalArgumentException.class, () -> evaluator.evaluate(invalidWorkdir));
     assertEquals("<invalid-workdir>", evaluator.preview(invalidWorkdir).workdir());
     assertThrows(IllegalArgumentException.class, () -> PermissionAction.fromValue("invalid"));
@@ -107,10 +102,50 @@ class PermissionContractsTest {
     assertThrows(IllegalArgumentException.class, () -> new PermissionPromptPreview("", ".", "{}"));
   }
 
+  /** permission action 已表达 allow/ask/deny：path pattern 的 negation、comment 与无效形态必须 fail-fast。 */
+  @Test
+  void rejectsNegatedCommentAndInvalidPathPatterns() {
+    for (String invalid : List.of("!logs/", "#comment", "[unclosed-class", "\\", "logs/\\")) {
+      ToolSettings settings =
+          settings(
+              "write",
+              new PermissionRule("*", PermissionAction.ALLOW),
+              new PermissionRule(invalid, PermissionAction.DENY));
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> evaluate("write", "{\"path\":\"logs/a.log\"}", settings),
+          invalid);
+    }
+  }
+
+  /** 转义后的 literal {@code \!}/{@code \#} pattern 交由 JGit 处理并可正常匹配。 */
+  @Test
+  void supportsEscapedLiteralPathPatterns() {
+    assertEquals(
+        PermissionAction.DENY,
+        evaluate(
+                "write",
+                "{\"path\":\"!literal.txt\"}",
+                settings("write", new PermissionRule("\\!literal.txt", PermissionAction.DENY)))
+            .action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluate(
+                "write",
+                "{\"path\":\"#literal.txt\"}",
+                settings("write", new PermissionRule("\\#literal.txt", PermissionAction.DENY)))
+            .action());
+  }
+
+  private static ToolSettings settings(String tool, PermissionRule... rules) {
+    Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
+    permission.put(tool, List.of(rules));
+    return new ToolSettings(permission, false);
+  }
+
   private PermissionEvaluator.Evaluation evaluate(
       String tool, String arguments, ToolSettings settings) {
     return evaluator.evaluate(
-        new PermissionEvaluationContext(
-            tool, arguments, Path.of("/environment"), Path.of("/environment"), settings));
+        new PermissionEvaluationContext(tool, arguments, Path.of("/environment"), settings));
   }
 }

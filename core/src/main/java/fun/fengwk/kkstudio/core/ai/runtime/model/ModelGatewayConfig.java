@@ -8,10 +8,10 @@ import java.time.Duration;
 public record ModelGatewayConfig(Duration busyRetryDelay) {
 
   /**
-   * 未显式配置时，executor 拒绝提交后 {@link fun.fengwk.kkstudio.harness.runtime.port.ModelGateway.Busy} 的重试延迟。
+   * busyRetryDelay：executor 拒绝提交后 {@link
+   * fun.fengwk.kkstudio.harness.runtime.port.ModelGateway.Busy} 的重试延迟。由数据库 SystemSettings 的 {@code
+   * tool.modelGatewayBusyRetryMillis} 在装配时构造。
    */
-  public static final ModelGatewayConfig DEFAULT = new ModelGatewayConfig(Duration.ofSeconds(5));
-
   public ModelGatewayConfig {
     busyRetryDelay =
         HarnessStoreTime.requireWholeMillisecondDuration(busyRetryDelay, "busyRetryDelay");

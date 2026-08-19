@@ -15,6 +15,7 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.net.URI;
@@ -152,7 +153,7 @@ public class S3PresignServiceTest {
   @Test
   public void testPresignFallsBackToEndpointWhenPublicEndpointBlank() {
     S3StorageProperties props = newS3Properties(PUBLIC_ENDPOINT, /*publicEndpointBlank*/ true);
-    try (TestContext ctx = new TestContext(props)) {
+    try (TestContext ctx = new TestContext(props, SystemSettings.StorageMedia.DEFAULT)) {
       S3PresignedResponseDTO resp = ctx.service.presignDownload("docs/readme.md", null);
       URI uri = URI.create(resp.getUrl());
       assertEquals("minio.example.local", uri.getHost());
@@ -167,10 +168,11 @@ public class S3PresignServiceTest {
       long before = System.currentTimeMillis();
       S3PresignedResponseDTO resp = context.service.presignDownload("docs/readme.md", null);
       long delta = Instant.parse(resp.getExpiresAt()).toEpochMilli() - before;
+      long defaultExpiresMillis =
+          SystemSettings.StorageMedia.DEFAULT.s3PresignDefaultExpiresSeconds() * 1000L;
       // SDK 签名窗口存在数秒抖动，给一个 30s 的余量
       assertTrue(
-          delta >= S3StorageProperties.DEFAULT_PRESIGN_EXPIRES_SECONDS * 1000L - 30_000L
-              && delta <= S3StorageProperties.DEFAULT_PRESIGN_EXPIRES_SECONDS * 1000L + 30_000L,
+          delta >= defaultExpiresMillis - 30_000L && delta <= defaultExpiresMillis + 30_000L,
           "default expiry delta out of range: " + delta);
     }
   }
@@ -189,9 +191,9 @@ public class S3PresignServiceTest {
   @Test
   public void testRejectsExpiresOverMax() {
     S3StorageProperties props = newS3Properties(PUBLIC_ENDPOINT, false);
-    props.setPresignMaxExpiresSeconds(7200L);
-    props.setPresignDefaultExpiresSeconds(600L);
-    try (TestContext context = new TestContext(props)) {
+    SystemSettings.StorageMedia storageMedia =
+        new SystemSettings.StorageMedia(3_600L, true, 600L, 7_200L, 30_000L, 512, 80);
+    try (TestContext context = new TestContext(props, storageMedia)) {
       assertThrows(
           IllegalArgumentException.class,
           () -> context.service.presignDownload("big/file.bin", 86_400L));
@@ -322,13 +324,13 @@ public class S3PresignServiceTest {
   }
 
   private TestContext newTestContext() {
-    return new TestContext(newS3Properties(PUBLIC_ENDPOINT, false));
+    return new TestContext(
+        newS3Properties(PUBLIC_ENDPOINT, false), SystemSettings.StorageMedia.DEFAULT);
   }
 
   private static S3StorageProperties newS3Properties(
       String publicEndpoint, boolean publicEndpointBlank) {
     S3StorageProperties properties = new S3StorageProperties();
-    properties.setEnabled(true);
     properties.setEndpoint(ENDPOINT);
     if (!publicEndpointBlank) {
       properties.setPublicEndpoint(publicEndpoint);
@@ -345,7 +347,7 @@ public class S3PresignServiceTest {
     final S3PresignService service;
     final S3Presigner presigner;
 
-    TestContext(S3StorageProperties properties) {
+    TestContext(S3StorageProperties properties, SystemSettings.StorageMedia storageMedia) {
       this.presigner =
           S3Presigner.builder()
               .endpointOverride(URI.create(properties.getEffectivePublicEndpoint()))
@@ -356,7 +358,7 @@ public class S3PresignServiceTest {
                           properties.getAccessKey(), properties.getSecretKey())))
               .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
               .build();
-      this.service = new S3PresignServiceImpl(properties, presigner);
+      this.service = new S3PresignServiceImpl(properties, presigner, storageMedia);
     }
 
     @Override

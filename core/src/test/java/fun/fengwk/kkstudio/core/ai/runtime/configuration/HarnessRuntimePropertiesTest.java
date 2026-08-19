@@ -6,48 +6,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
-import java.time.Duration;
 
 class HarnessRuntimePropertiesTest {
 
-  /** 部署默认值保持 worker 开关、资源边界、Redis overlay 与 processor/dispatcher 参数有界。 */
+  /** 纯 bootstrap 默认值：worker 开关、沙箱根目录/工作目录与 Redis prefix 有界。 */
   @Test
-  void providesRuntimeDeploymentDefaults() {
+  void providesBootstrapDeploymentDefaults() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
 
     assertEquals(true, properties.isWorkersEnabled());
-    assertEquals(16 * 1024 * 1024, properties.getResourceMaxBytes());
+    assertEquals(
+        Path.of(System.getProperty("user.dir", ".")).toAbsolutePath(),
+        properties.resolvedEnvironmentRoot());
+    assertEquals(
+        Path.of(System.getProperty("user.dir", ".")).toAbsolutePath(),
+        properties.resolvedWorkdir());
     assertEquals("kk-studio:harness:realtime:", properties.getRedisPrefix());
-    assertEquals(Duration.ofSeconds(30), properties.getProcessorLeaseDuration());
-    assertEquals(Duration.ofSeconds(10), properties.getProcessorHeartbeatInterval());
-    assertEquals(16, properties.getThreadStepLimit());
-    assertEquals(Duration.ofSeconds(1), properties.getThreadResolveFailureDelay());
-    assertEquals(Duration.ofSeconds(1), properties.getModelDispatchBusyFallbackDelay());
-    assertEquals(Duration.ofSeconds(1), properties.getToolPreflightFailureDelay());
-    assertEquals(Duration.ofSeconds(1), properties.getToolDispatchBusyFallbackDelay());
-    assertEquals(Duration.ofSeconds(30), properties.getDispatcherLeaseDuration());
-    assertEquals(Duration.ofSeconds(1), properties.getDispatcherPollInterval());
-    assertEquals(Duration.ofSeconds(1), properties.getDispatcherRejectionDelay());
-    assertEquals(64, properties.getDispatcherMaxDispatchTasks());
-    assertEquals(16, properties.getDispatcherWorkerConcurrency());
-    assertEquals(64, properties.getDispatcherWorkerQueueCapacity());
-    // 自动对话压缩默认值对齐上游 Pi。
-    assertEquals(true, properties.isCompactionEnabled());
-    assertEquals(16_384, properties.getCompactionReserveTokens());
-    assertEquals(20_000, properties.getCompactionMaxRecentTokens());
-  }
-
-  /** 压缩字段可显式覆盖（属性绑定路径 kk-studio.harness.runtime.compaction-*）。 */
-  @Test
-  void supportsCompactionOverrides() {
-    HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    properties.setCompactionEnabled(false);
-    properties.setCompactionReserveTokens(4_096);
-    properties.setCompactionMaxRecentTokens(8_192);
-
-    assertEquals(false, properties.isCompactionEnabled());
-    assertEquals(4_096, properties.getCompactionReserveTokens());
-    assertEquals(8_192, properties.getCompactionMaxRecentTokens());
   }
 
   /** 相对 workdir 在 environmentRoot 下解析，越界与绝对路径逃逸必须失败。 */

@@ -16,6 +16,6 @@
  * <p>object {@code properties} 按字典序排序，{@code required} 数组按字典序排序；enum 值保留输入顺序。
  *
  * <p>descriptor list 外部顺序不属于本 codec 职责——调用方需要时自行 canonical 排序。{@link ToolResultJsonCodec} 保存
- * ToolResult 的可持久化内容与 details，但不保存进程内 terminate hint。
+ * ToolResult 的可持久化内容与 details。
  */
 package fun.fengwk.kkstudio.harness.tool.codec;

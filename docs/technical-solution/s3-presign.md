@@ -38,19 +38,26 @@
 kk-studio:
   storage:
     s3:
-      enabled: true
       endpoint: http://minio:9000           # 服务端 SDK 读写使用的 endpoint
       public-endpoint: https://objects.example.com  # 浏览器直传/直下发的可外部访问 endpoint
       region: us-east-1
       bucket: kk-studio                       # 固定 bucket，调用方不能选择
       access-key: ${S3_ACCESS_KEY}
       secret-key: ${S3_SECRET_KEY}
-      presign-default-expires-seconds: 600    # 可选
-      presign-max-expires-seconds: 3600       # 可选
       public-base-url: ...                    # 服务端合成永久直链时使用的公开基础 URL（与浏览器预签名 URL 无关）
 ```
 
-启用开关：`kk-studio.storage.s3.enabled=true` 未设置时，`S3Client`、`S3Presigner`、`S3StorageService`、`S3PresignService`、`StudioS3PresignController` 都不会被注册，部署可以安全地省略对象存储配置。
+启用与签名预算来自全局 `system_setting.config.storageMedia`：
+
+```json
+{
+  "s3Enabled": true,
+  "s3PresignDefaultExpiresSeconds": 600,
+  "s3PresignMaxExpiresSeconds": 3600
+}
+```
+
+连接、bucket 与凭据仍是部署 bootstrap/secret。启动快照中 `s3Enabled=false` 时，S3 服务 bean 不可用，HTTP 端点保持注册并返回 503；部署可以安全省略全部 S3 连接配置。该开关与长生命周期客户端拓扑在重启后生效。
 
 ## 关键约束
 
@@ -76,7 +83,8 @@ kk-studio:
 
 | 关注点 | 文件 |
 | --- | --- |
-| 配置属性 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/configuration/S3StorageProperties.java` |
+| 全局行为配置 | `system_setting.config.storageMedia` / `core/.../systemsettings/SystemSettings.java` |
+| 部署连接与秘密 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/configuration/S3StorageProperties.java` |
 | Spring 自动配置 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/configuration/S3StorageConfiguration.java` |
 | 预签名服务 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3PresignService.java` |
 | 预签名实现 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3PresignServiceImpl.java` |

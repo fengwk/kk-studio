@@ -12,8 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -23,16 +21,17 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
 import java.math.BigDecimal;
@@ -67,15 +66,8 @@ class CoreModelGatewayTest {
   private static final ModelGatewayConfig CONFIG = new ModelGatewayConfig(BUSY_DELAY);
   private static final ProviderRequest PROVIDER_REQUEST = providerRequest();
   private static final UUID INVOCATION_ID = new UUID(0L, 42L);
-  private static final ModelInvocationRequest INVOCATION_REQUEST =
-      new ModelInvocationRequest(
-          TestEnvironmentBindings.binding("env-1"),
-          PROVIDER_REQUEST,
-          List.of(),
-          List.of(),
-          false,
-          100_000,
-          null);
+  private static final ModelGateway.Execution EXECUTION =
+      new ModelGateway.Execution(INVOCATION_ID, 1, ProviderType.OPENAI, PROVIDER_REQUEST);
 
   @Test
   void startReturnsStartedImmediatelyAndBridgesStreamCallbacks() throws Exception {
@@ -955,11 +947,7 @@ class CoreModelGatewayTest {
   @Test
   void startRejectsNullArguments() {
     try (Fixture fixture = new Fixture()) {
-      assertThrows(
-          NullPointerException.class,
-          () ->
-              fixture.subject.start(
-                  new ModelGateway.Execution(INVOCATION_ID, 1, INVOCATION_REQUEST), null));
+      assertThrows(NullPointerException.class, () -> fixture.subject.start(EXECUTION, null));
       assertThrows(NullPointerException.class, () -> fixture.subject.start(null, fixture.listener));
     }
   }
@@ -1003,7 +991,7 @@ class CoreModelGatewayTest {
             BigDecimal.ZERO,
             BigDecimal.ZERO);
     return new ProviderResponse(
-        "completed", "", List.of(), ProviderStopReason.COMPLETED, usage, cost, null, null, "{}");
+        "completed", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, null, null, "{}");
   }
 
   private static void await(CountDownLatch latch, String description) {
@@ -1047,8 +1035,7 @@ class CoreModelGatewayTest {
     }
 
     private ModelGateway.StartResult start() {
-      return subject.start(
-          new ModelGateway.Execution(INVOCATION_ID, 1, INVOCATION_REQUEST), listener);
+      return subject.start(EXECUTION, listener);
     }
 
     /** 两阶段激活的标准路径：start 返回 Started 后先 activate（打开 Gateway 回调 gate）再驱动 Provider。 */
@@ -1089,7 +1076,7 @@ class CoreModelGatewayTest {
     }
 
     @Override
-    public ResolvedExecution resolve(ProviderRequest request) {
+    public ResolvedExecution resolve(ProviderType frozenType, ProviderRequest request) {
       resolveCount.incrementAndGet();
       if (resolveFailure != null) {
         throw resolveFailure;

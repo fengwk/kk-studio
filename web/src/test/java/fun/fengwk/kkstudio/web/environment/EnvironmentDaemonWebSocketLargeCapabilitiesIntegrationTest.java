@@ -11,9 +11,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -32,6 +32,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -59,7 +60,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   @LocalServerPort private int port;
 
   @Autowired private LiveEnvironmentRegistry registry;
-  @Autowired private EnvironmentGatewayProperties properties;
+  @Autowired private SystemSettingsSnapshot snapshot;
 
   @MockitoBean private ResourceStore resourceStore;
   // Gateway 的 READY 唤醒由 durable-target dispatcher 切片装配，本切片将其抑制。
@@ -111,7 +112,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
         listener.observedCloseCode,
         "server closed connection with code 1009 (frame too large) during the handshake");
     assertTrue(
-        properties.requireMaxMessageBytes() > TOMCAT_DEFAULT_TEXT_BUFFER_BYTES,
+        snapshot.get().environment().maxMessageBytes() > TOMCAT_DEFAULT_TEXT_BUFFER_BYTES,
         "premise: gateway buffer limit must be raised above the 8 KiB default");
   }
 
@@ -125,13 +126,15 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private boolean awaitReady() throws InterruptedException {
     long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    Duration heartbeatTimeout =
+        Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis());
     while (System.nanoTime() < deadlineNanos) {
-      if (registry.isReady(ENVIRONMENT_NAME, Instant.now(), properties.requireHeartbeatTimeout())) {
+      if (registry.isReady(ENVIRONMENT_NAME, Instant.now(), heartbeatTimeout)) {
         return true;
       }
       Thread.sleep(50);
     }
-    return registry.isReady(ENVIRONMENT_NAME, Instant.now(), properties.requireHeartbeatTimeout());
+    return registry.isReady(ENVIRONMENT_NAME, Instant.now(), heartbeatTimeout);
   }
 
   private static String readMessageType(String envelopeJson) throws Exception {
