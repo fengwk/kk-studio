@@ -177,15 +177,16 @@ ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，**每次 claim 恰
 按分类执行：
 
 ```text
-MODEL_TERMINAL_PENDING  -> 同一事务原子 apply Model terminal：先按 1..N 追加 MODEL_ATTEMPT_FAILURE，
+MODEL_TERMINAL_PENDING  -> 同一事务原子 apply Model terminal（锁序含 queued Commands）：先按 1..N 追加 MODEL_ATTEMPT_FAILURE，
                              再经 ModelResponsePlanner 分支：SUCCEEDED 追加 ASSISTANT Entry 并挂 Model resultEntryId；
-                             无 ToolCall 时追加 TURN_END 并删除 ModelInvocation；
+                             无 ToolCall 时追加 TURN_END、删除 ModelInvocation，再基于新 head EntryPath 判定下一步：
+                               有 queued USER/CUSTOM_MESSAGE 或 compaction actionable -> 同事务 request THREAD，否则不 wake；
                              有 ToolCall 时按 ordinal materialize ToolInvocation（每 call 一个槽位）：
                                有效 known call -> READY；schema-invalid -> FAILED；unknown -> FAILED(null binding)
                              plugin sibling WRITE 后再 READ/WRITE -> FAILED(SIBLING_STATE_CONFLICT)；
                              仅对 READY 请求 TOOL Work；全部 immediate FAILED 时同事务请求 THREAD self-wake；
                              FAILED/错误追加带可空 attempt snapshot 的 ASSISTANT_ERROR + FAILED TURN_END，
-                             并删除 ModelInvocation
+                             删除 ModelInvocation，并按同一新 head 判定 wake（不 always wake、不 self-poll）
 TOOL_TERMINAL_PENDING   -> 同一事务按 ordinal 经唯一 ToolOutcomeAppender 原子 apply 全部 terminal Tool siblings：
                              SUCCEEDED 先按 effects 顺序追加 CUSTOM，再追加 Tool Result MESSAGE Entry，
                              并追加 TURN_END(COMPLETED, continueModel=true)，请求 THREAD Work，
@@ -203,7 +204,7 @@ IDLE/HISTORICAL 且压缩到期 -> 启动 COMPACTION Turn（消费零 Command，
 Turn 启动采用 speculative plan 两段式：
 
 1. **短事务**：锁 Thread、读取 queued Command 快照与 cutoff、分配 candidate Entry ID、构造完整合法 candidate EntryPath（TURN_START + Message），**不写任何 durable 状态**；事务外调用 `TurnResolver.resolve(threadId, candidatePath, compactionPreparation)`（期间 `WorkHeartbeat` 维持 lease）。
-2. **第二短事务**：以 source head / cutoff 内 Command 精确快照 / claim ownership 做 CAS，一次性原子提交 normalization + TURN_START + Message + Command markers + Thread 更新 + ModelInvocation（compact spec）/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。第二事务推进 head 时沿用锁内读取到的当前 Thread YOLO（`advanceHead` 恒保留策略值，不写回 speculative plan 中的旧值）。
+2. **第二短事务**：以 source head / cutoff 内 Command 精确快照 / claim ownership 做 CAS，一次性原子提交 normalization + TURN_START + Message + Command markers + Thread 更新 + ModelInvocation（compact spec）/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。rejected 追加 barrier 闭合后基于新 head EntryPath 判定：有 deferred input 或 compaction actionable 才同事务 request THREAD，否则不 wake（不 always wake、不 self-poll）。第二事务推进 head 时沿用锁内读取到的当前 Thread YOLO（`advanceHead` 恒保留策略值，不写回 speculative plan 中的旧值）。
 
 Model terminal materialize Tool siblings 时，Runtime 按 ordinal 扫描 frozen plugin state accesses。对同一 `(pluginId, customType)`，`READ+READ` 与 `READ -> WRITE` 允许；已有 `WRITE` 后的 `READ` 或 `WRITE` 机械创建为 unattached `FAILED(kind=SIBLING_STATE_CONFLICT, attempt=0)`，不 dispatch、不请求 TOOL Work，也不把冲突调用登记为后续访问。不同 customType 或不同 pluginId 不冲突。
 
@@ -220,10 +221,11 @@ TURN_START(COMPACTION)
   -> TURN_END
 ```
 
-- 默认 `reserveTokens=16384`、`maxRecentTokens=20000`；最近一次 complete compaction 之后，本 Thread 最新成功 Model usage 严格大于 `contextWindow-reserveTokens` 时 threshold 触发。后续普通 FAILED/CANCELLED/UNKNOWN 或无 ModelInvocation 的 Resolver Rejected turn 不抹掉该 usage；存在其它 Thread invocation 的 shared turn 是 ownership barrier。terminal `OVERFLOW` 失败可触发一次恢复。
+- 默认 `reserveTokens=16384`、`maxRecentTokens=20000`；最近一次 complete compaction 之后，本 Thread 最新成功 Model usage 严格大于 `contextWindow-reserveTokens` 时 threshold 触发。后续普通 FAILED/CANCELLED/UNKNOWN 或无 ModelInvocation 的 Resolver Rejected turn 不抹掉该 usage；shared-history ownership barrier 是 Entry-only 事实（`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行）。terminal `OVERFLOW` 失败可触发一次恢复。
 - 有效 recent retention 为 `min(floor(contextWindow*0.5), maxRecentTokens)`；cut point 只允许 USER/ASSISTANT/CUSTOM_MESSAGE/AssistantAborted，绝不切在 ToolResult。`firstKeptEntryId` 向前包含相邻控制元数据，但不跨任何 CompactionPayload。
 - split turn 先生成 incomplete HISTORY，再以完全冻结的 ids/trigger/tokens/contextWindow 机械生成 TURN_PREFIX；没有先前 history 的 direct TURN_PREFIX 使用固定文本 `No prior history.`。
 - `TURN_START(COMPACTION)...TURN_END` 内全部对话事实对后续 planner、token estimate、Provider Context 与前端 transcript 不可见；停止压缩的 AssistantAborted 不成为未来 cut 或摘要内容。FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止原地立即重试，出现新的普通 turn 后不再充当长期 freshness barrier。
+- 闭合后的 wake 判定只在普通（非 compaction）turn 闭合时评估 compaction due（见 §5 action 列表）：threshold FULL 压缩 complete 已消费 freshness 不再 due；FAILED/STOPPED/CANCELLED/incomplete 压缩阻止立即原地重试、不从 due self-wake 自旋；HISTORY 下一阶段与 complete OVERFLOW 的 continuation 由显式 THREAD wake 驱动。
 - complete summary 在下一次正常请求中投影为一个 wrapped USER message，并从 `cutEntryId` 本身继续保留上下文。`tokensBefore` 估算 wrapper + retained suffix；文件 read/write/edit 清单从当前 branch 的完整 durable history 累计重算。`<read-files>` / `<modified-files>` 是 Runtime 保留 section：旧 summary 和模型响应中的同名 section 先剥离，最终只机械追加一份 canonical 清单，modified 覆盖 read。
 - HISTORY 与 threshold 压缩固定 `continueModel=false`；只有 complete OVERFLOW 压缩为 true。它创建一次 immediate CONTINUATION 恢复；该 retry 再次 overflow 时保留失败并停止，不进入无界压缩循环。后续新的 input/tool continuation 可独立触发压缩。
 - phase output budget 为 FULL/HISTORY `floor(0.8*reserveTokens)`、TURN_PREFIX `floor(0.5*reserveTokens)`，最终上限取该预算与有效 model/variant max output 的较小值。

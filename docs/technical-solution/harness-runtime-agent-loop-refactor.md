@@ -614,10 +614,10 @@ ThreadProcessor 每次 claim 只执行一次分类动作。
 
 ### 13.1 ModelTerminalPending
 
-同一事务：
+同一事务（锁序含 queued Commands，与 `HarnessRuntime` 全局锁序一致 `Thread → Commands → Model → Work`）：
 
 ```text
-lock Thread / Model / Work
+lock Thread / Commands / Model / Work
   -> append MODEL_ATTEMPT_FAILURE
   -> ModelResponsePlanner
   -> append Assistant / AssistantError / Compaction
@@ -625,6 +625,7 @@ lock Thread / Model / Work
        append TURN_END
        validate Model attempt/result materialization
        delete ModelInvocation
+       (基于新 head EntryPath 判定下一 action，见下「后续 wake」)
   -> tool batch:
        attach Model resultEntryId
        insert all ToolInvocations
@@ -634,17 +635,17 @@ lock Thread / Model / Work
   -> complete current THREAD Work
 ```
 
-后续 wake：
+no-tools 闭合后基于新 head EntryPath 判定下一步，actionable 则同事务 `requestWork(THREAD)`；绝不 always wake / self-poll：
 
 | 结果 | wake |
 | --- | --- |
-| COMPLETE 无 calls | 无 |
-| FILTERED | 无 |
-| LENGTH 无 calls | 无 |
-| terminal failure/cancel | 无 |
+| COMPLETE 无 calls | 无 queued `USER/CUSTOM_MESSAGE` 且无 compaction due → 无；否则 THREAD |
+| FILTERED / LENGTH 无 calls / terminal failure/cancel | 同上（普通 turn 闭合同一判定） |
 | 有 READY tools | TOOL Work |
 | 全部 immediate FAILED | THREAD self-wake |
-| compaction 下一阶段 | THREAD self-wake |
+| compaction 下一阶段（HISTORY → TURN_PREFIX） | THREAD self-wake |
+
+compaction due 判定只对普通（非 compaction）turn 闭合生效（claim 内压缩到期优先于 queued input）：threshold FULL 压缩 complete 已消费 freshness 不再 due；FAILED/STOPPED/CANCELLED/incomplete 压缩阻止立即原地重试、不得从 due self-wake 自旋；HISTORY 下一阶段与 complete OVERFLOW 的 continuation 由显式 THREAD wake 驱动。
 
 ### 13.2 ToolTerminalPending
 
@@ -695,7 +696,7 @@ transaction 2:
   complete THREAD Work
 ```
 
-Resolver Rejected 后如仍有 deferred input，则同事务 request THREAD Work；否则结束。
+Resolver Rejected 追加 barrier 闭合 turn 后：有 deferred input 或闭合后 compaction due 时同事务 request THREAD Work；否则结束（不 always wake、不 self-poll）。compaction due 分支同样遵守 threshold FULL 不 spin 规则（complete 已消费 freshness，FAILED/STOPPED 阻止立即原地重试）。
 
 第二事务推进 head 时始终保留锁内读取到的当前 Thread YOLO，不写入 speculative plan 中的控制状态。
 
@@ -830,7 +831,7 @@ Closed-turn compaction 不得读取历史 Invocation。
 
 - complete CompactionPayload 是 freshness barrier。
 - 只使用 `ownerThreadId == currentThreadId` 且 `contextWindow != null` 的成功 Assistant usage。
-- 遇到其它 Thread 拥有的 shared turn 时停止向前借用 usage。
+- 遇到 `ownerThreadId != currentThreadId` 的 shared turn 时停止向前借用 usage（Entry-only 事实，不查询其它 Thread 的 Invocation 行）。
 - threshold 为 `max(0, contextWindow - reserveTokens)`。
 
 ### 18.2 Overflow
@@ -963,13 +964,13 @@ attempt state
 ### 23.3 Reducer
 
 - one claim one action。
-- Model complete no calls：TURN_END、删除 Model、无 Work。
+- Model complete no calls：TURN_END、删除 Model；无 queued/compaction due 时无 Work，否则 THREAD。
 - Model tools：保留 parent Model、创建完整 siblings、只 request READY。
 - all immediate FAILED：THREAD self-wake。
 - mixed batch：按 ordinal 一次 apply。
 - Tool batch TURN_END：删除 children+parent，恰好建立 continuation wake。
 - active/idle claim：complete、不 reschedule。
-- Resolver rejected/deferred input。
+- Resolver rejected：deferred input 或闭合后 compaction due 时同事务 THREAD，否则无 Work。
 - compaction HISTORY/TURN_PREFIX 独立 wake。
 - concurrent newer wake 不被旧 complete 删除。
 
