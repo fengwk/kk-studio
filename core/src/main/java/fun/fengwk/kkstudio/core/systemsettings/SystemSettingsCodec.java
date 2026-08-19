@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +42,8 @@ import java.util.Objects;
  * <p>职责：
  *
  * <ul>
- *   <li>{@link #decode}：严格解码持久化的 canonical JSON（未知字段、尾随 token、错误类型全部拒绝），失败即存储数据损坏；
+ *   <li>{@link #decode}：严格解码持久化的 canonical JSON（未知字段、尾随 token、错误类型、缺失/null required 字段、Boolean
+ *       标量强制转换全部拒绝），失败即存储数据损坏；
  *   <li>{@link #encode}：把聚合编码为确定性 canonical JSON（键排序、map 键排序、省略 null），语义从不依赖键顺序；
  *   <li>{@link #fromDto} / {@link #toSections}：share 层 DTO 与领域聚合之间的显式双向映射，DTO 缺失字段给出精确的 field 级错误。
  * </ul>
@@ -63,10 +66,18 @@ public class SystemSettingsCodec {
     strictMapper.disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT);
     strictMapper.enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     strictMapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    // 显式 null 的 required primitive 必须拒绝，而不是回退到 0/false。
+    strictMapper.enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES);
     strictMapper.enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS);
     strictMapper
         .coercionConfigFor(LogicalType.Integer)
         .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
+    // 布尔只接受 JSON true/false：string/整数/浮点标量一律拒绝（jackson 2.19.0 默认允许 string->boolean 与 0/1->boolean）。
+    strictMapper
+        .coercionConfigFor(LogicalType.Boolean)
+        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
         .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
     strictMapper
         .coercionConfigFor(LogicalType.Textual)
@@ -100,11 +111,54 @@ public class SystemSettingsCodec {
       throw new IllegalStateException("stored system settings config is blank");
     }
     try {
-      return settingsReader.readValue(json);
+      SystemSettings settings = settingsReader.readValue(json);
+      assertRequiredFieldsStored(settings, json);
+      return settings;
     } catch (JsonProcessingException error) {
       throw new IllegalStateException(
           "stored system settings config is invalid: " + rootMessage(error), rootCause(error));
     }
+  }
+
+  /**
+   * 校验存储 JSON 携带聚合 canonical 重编码所需的全部字段。required primitive 缺失时会被解码为 0/false 默认值，其 canonical
+   * 重编码与存储树对比即暴露形状差异；null 引用字段被 canonical 编码省略，属合法省略，不受影响。
+   *
+   * <p>不启用 FAIL_ON_MISSING_CREATOR_PROPERTIES / FAIL_ON_NULL_CREATOR_PROPERTIES：jackson 2.19.0
+   * 下这两个开关会连同 nullable 引用 creator 属性一起拒绝，破坏 canonical 的省略 null 语义；这里以「已解码聚合的 canonical 重编码」作为必须存在
+   * 的字段契约，是唯一同时满足「缺失 required 拒绝」与「nullable 引用可省略」的最小方案。
+   */
+  private void assertRequiredFieldsStored(SystemSettings settings, String storedJson)
+      throws JsonProcessingException {
+    JsonNode stored = canonicalMapper.readTree(storedJson);
+    JsonNode required = canonicalMapper.valueToTree(settings);
+    String missing = firstMissingRequiredField(required, stored);
+    if (missing != null) {
+      throw new IllegalStateException(
+          "stored system settings config is invalid: missing required field " + missing);
+    }
+  }
+
+  /** 返回 required 树中在 actual 树里缺失或为 null 的第一个字段路径；全部覆盖返回 null。 */
+  private static String firstMissingRequiredField(JsonNode required, JsonNode actual) {
+    if (required.isObject()) {
+      if (!actual.isObject()) {
+        return null;
+      }
+      Iterator<Map.Entry<String, JsonNode>> fields = required.fields();
+      while (fields.hasNext()) {
+        Map.Entry<String, JsonNode> field = fields.next();
+        JsonNode actualValue = actual.get(field.getKey());
+        if (actualValue == null || actualValue.isNull()) {
+          return field.getKey();
+        }
+        String nested = firstMissingRequiredField(field.getValue(), actualValue);
+        if (nested != null) {
+          return field.getKey() + "." + nested;
+        }
+      }
+    }
+    return null;
   }
 
   /** 把领域聚合编码为确定性 canonical JSON。 */
