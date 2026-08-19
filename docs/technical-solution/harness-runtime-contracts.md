@@ -321,7 +321,7 @@ public record ProviderResponse(
 - 成功结果只能是 `CompactionPayload`；正常 invocation 不能挂 COMPACTION，compaction invocation 不能挂普通 Assistant MESSAGE。Store 要求 invocation 已 SUCCEEDED、payload metadata 与 request 精确相等，且 firstKept/cut/prefix 都在 result 前并满足 `firstKept <= cut`、`prefix < cut`。
 - phase/complete 固定：HISTORY 为 incomplete；FULL/TURN_PREFIX 为 complete。completed TURN_END 只有 complete OVERFLOW 允许 `continueModel=true`。
 - HISTORY 之后只读取紧邻、已完成且 metadata 匹配的 partial；TURN_PREFIX 不扫描更早 stale partial。direct TURN_PREFIX 的 history 文本固定为 `No prior history.`。
-- Threshold freshness 只被 complete CompactionPayload 消费；普通 failed invocation 与无 invocation 的 Resolver Rejected 不覆盖当前 Thread 最新成功 usage，FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止立即原地重试。shared-history ownership barrier 是 Entry-only 事实：`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行。
+- Threshold freshness 只被 complete CompactionPayload 消费；普通 FAILED/CANCELLED/UNKNOWN turn 与 Resolver Rejected turn 不覆盖当前 Thread 最新成功 usage，FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止立即原地重试。shared-history ownership barrier 是 Entry-only 事实：`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行。
 - `<read-files>` / `<modified-files>` 是 Runtime-owned reserved section：previous summary 入 prompt 前剥离，response 在 terminal success 前校验并剥离，最后只追加一次从完整 durable branch history 重算的 canonical 清单；modified 覆盖 read，空白或破坏 reserved 标签结构的 path 忽略。
 - immediate overflow recovery continuation 再次 OVERFLOW 时不再压缩；该失败 Entry/TURN_END 保持 durable。
 

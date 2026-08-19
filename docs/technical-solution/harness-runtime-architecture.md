@@ -221,7 +221,7 @@ TURN_START(COMPACTION)
   -> TURN_END
 ```
 
-- 默认 `reserveTokens=16384`、`maxRecentTokens=20000`；最近一次 complete compaction 之后，本 Thread 最新成功 Model usage 严格大于 `contextWindow-reserveTokens` 时 threshold 触发。后续普通 FAILED/CANCELLED/UNKNOWN 或无 ModelInvocation 的 Resolver Rejected turn 不抹掉该 usage；shared-history ownership barrier 是 Entry-only 事实（`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行）。terminal `OVERFLOW` 失败可触发一次恢复。
+- 默认 `reserveTokens=16384`、`maxRecentTokens=20000`；最近一次 complete compaction 之后，本 Thread 最新成功 Model usage 严格大于 `contextWindow-reserveTokens` 时 threshold 触发。后续普通 FAILED/CANCELLED/UNKNOWN turn 与 Resolver Rejected turn 不抹掉该 usage；shared-history ownership barrier 是 Entry-only 事实（`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行）。terminal `OVERFLOW` 失败可触发一次恢复。
 - 有效 recent retention 为 `min(floor(contextWindow*0.5), maxRecentTokens)`；cut point 只允许 USER/ASSISTANT/CUSTOM_MESSAGE/AssistantAborted，绝不切在 ToolResult。`firstKeptEntryId` 向前包含相邻控制元数据，但不跨任何 CompactionPayload。
 - split turn 先生成 incomplete HISTORY，再以完全冻结的 ids/trigger/tokens/contextWindow 机械生成 TURN_PREFIX；没有先前 history 的 direct TURN_PREFIX 使用固定文本 `No prior history.`。
 - `TURN_START(COMPACTION)...TURN_END` 内全部对话事实对后续 planner、token estimate、Provider Context 与前端 transcript 不可见；停止压缩的 AssistantAborted 不成为未来 cut 或摘要内容。FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止原地立即重试，出现新的普通 turn 后不再充当长期 freshness barrier。
