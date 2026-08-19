@@ -102,10 +102,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经 ToolTerminalPending 应用）；
  * closed turn（COMPLETE 无 calls / LENGTH 无 calls / FILTERED / terminal failure / cancel / unknown /
  * compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有 queued
- * message 或成功 HISTORY / OVERFLOW compaction 需要延续时请求 THREAD。Tool sibling batch 追加 outcome 后 追加
- * continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再 complete，下一 claim 才做
- * continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
- * （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 时先请求 THREAD 再 complete。
+ * message、成功 HISTORY / OVERFLOW compaction 需要延续、或闭合后用新 head path 判定立即出现 compaction action （如普通成功
+ * turn 刚越过 threshold 自动自压）时请求 THREAD；失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。 Tool sibling
+ * batch 追加 outcome 后 追加 continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再
+ * complete，下一 claim 才做 continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages
+ * 制造无意义 THREAD claim （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 或闭合即出现
+ * compaction action 时先请求 THREAD 再 complete。
  *
  * <p>durable mutation 时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、
  * complete、request 与 reschedule 始终使用未抬升的本地 lease clock，避免未来 durable 时间改变 lease 语义。
@@ -548,8 +550,10 @@ public final class ThreadProcessor {
    * parent 并 attach resultEntryId。
    *
    * <p>wake 决定：active Tool phase 只为 READY 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 经
-   * ToolTerminalPending 应用并反馈模型）；closed turn 在已有 queued message、成功 HISTORY 或 OVERFLOW compaction 需要
-   * 延续时先请求 THREAD 再 complete，由 wakeVersion 保留新 wake，其余直接 complete。新命令在事务后到达会自行 requestWork。
+   * ToolTerminalPending 应用并反馈模型）；closed turn 在新 Entries 插入、Thread advanced 后用新 head path 判定闭合是否立即
+   * 出现 compaction action（如普通成功 turn 刚越过 threshold 自动自压），只要已有 queued message、成功 HISTORY / OVERFLOW
+   * compaction 需要延续、或 compaction 立即到期就先请求 THREAD 再 complete，由 wakeVersion 保留新 wake；失败 / 停止 /
+   * complete COMPACTION 由 planner 判定不 spin，绝不 always wake。新命令在事务后到达会自行 requestWork。
    */
   private void applyModel(
       HarnessStore.Transaction tx,
@@ -698,15 +702,19 @@ public final class ThreadProcessor {
               mutationNow));
       head = turnEndId;
     }
+    ThreadState advancedThread = thread.advanceHead(head, mutationNow);
     boolean requestThread = false;
     if (!toolPhase) {
       // 关闭 turn：同事务 attach-then-delete 完成严格物化校验并删除 Model 行（closed turn 不保留 Invocation）。
       tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
       tx.deleteModelInvocation(model.id());
-      // HISTORY / OVERFLOW compaction 延续或已有 queued message 时先请求 THREAD，下一 action 才分下一 claim。
-      requestThread = hasQueuedMessage || compactionWake;
+      // 闭合后用新 head path 判断是否立即出现 compaction action（如普通成功 turn 刚越过 threshold 自动自压）；失败 /
+      // 停止 / complete 的 COMPACTION 由 planner 返回 null 保持不 spin，HISTORY / OVERFLOW 既有规则不变。绝不 always
+      // wake。
+      boolean compactionDue = compactionPreparation(advancedThread, tx.loadEntryPath(head)) != null;
+      requestThread = hasQueuedMessage || compactionWake || compactionDue;
     }
-    tx.updateThread(thread.advanceHead(head, mutationNow));
+    tx.updateThread(advancedThread);
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
@@ -890,7 +898,8 @@ public final class ThreadProcessor {
    *
    * <p>resolved：同层 Work 按 (type, id) 升序（先 THREAD wake 再 MODEL Work）只请求 MODEL Work——绝不因 deferred
    * messages 制造无意义 THREAD claim（terminal apply 会按 queued 快照重建 wake）——然后 complete。rejected：追加
-   * error+TURN_END 后，若 plan 保留了 deferred messages 则先请求 THREAD 再 complete，否则直接 complete。
+   * error+TURN_END 后，若 plan 保留了 deferred messages 或闭合后用新 head path 判定立即出现 compaction action （更早
+   * usage 超阈值）则先请求 THREAD 再 complete，否则直接 complete。
    */
   private void commit(ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
     store.transaction(
@@ -973,21 +982,26 @@ public final class ThreadProcessor {
                   TurnEndReason.TURN_FAILED,
                   null),
               mutationNow));
-      tx.updateThread(thread.advanceHead(turnEndId, mutationNow));
-    }
-    // final fence 最后执行：损失抛内部信号，整事务回滚（零 durable mutation 的 LOST）。
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
-      throw new ClaimLostSignal();
-    }
-    if (invocationId == null) {
-      // rejected：若保留 deferred messages（如 continuation 未消费的 USER）则先请求 THREAD 再 complete。
-      if (plan.hasDeferredMessages()) {
+      ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
+      tx.updateThread(advanced);
+      // 低序 mutation 完成后，final fence 前基于新 head path 判断闭合后是否立即出现 compaction action（如更早
+      // usage 已超阈值）；Rejected turn 本身（contextWindow==null）不作为触发事实。
+      boolean compactionDue = compactionPreparation(advanced, tx.loadEntryPath(turnEndId)) != null;
+      if (tx.lockClaimedWork(claim, now).isEmpty()) {
+        throw new ClaimLostSignal();
+      }
+      // rejected：保留 deferred messages 或闭合即触发 compaction 时先请求 THREAD 再 complete。
+      if (plan.hasDeferredMessages() || compactionDue) {
         tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
       }
       tx.completeWork(claim, now);
       return;
     }
-    // resolved：同层 Work 按 (type, id) 升序（先 THREAD wake 再 MODEL Work）只请求 MODEL Work 再 complete。
+    // resolved：final fence 后同层 Work 按 (type, id) 升序只请求 MODEL Work 再 complete（绝不因 deferred
+    // messages 制造无意义 THREAD claim；terminal apply 会按 queued 快照重建 wake）。
+    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+      throw new ClaimLostSignal();
+    }
     tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), now);
     tx.completeWork(claim, now);
   }

@@ -8,12 +8,14 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.compactionRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.compactionUserText;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.resolvedCompactionTurnStart;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.resolvedInputTurnStart;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCompactionReadyClosedTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedModelInvocation;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedOpenInputTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.successResponse;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
@@ -122,6 +124,83 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(CompactionPhase.FULL, compactionInvocation.request().compaction().phase());
     assertEquals(
         CompactionTrigger.THRESHOLD, compactionInvocation.request().compaction().trigger());
+  }
+
+  /**
+   * 真实普通成功 turn 的 usage 刚超过 threshold：Model apply 关闭 turn 时同事务用新 head path 判定 compaction 立即到期 ->
+   * 自动保留 THREAD Work，下一 claim 启动压缩（无任何手工 wake）。
+   */
+  @Test
+  void overThresholdSuccessfulTurnAutoWakesCompactionAfterClose() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    fixture.resolver.autoConsistent = true;
+
+    // claim1：turn1 短消息普通成功（usage 未超阈值）关闭，无 THREAD wake。
+    seedModelInvocation(
+        fixture.store,
+        baseline.threadId(),
+        baseline.turnStartEntryId(),
+        baseline.userEntryId(),
+        ModelInvocationStatus.SUCCEEDED,
+        plainRequest(),
+        successResponse(usage(), cost(), "first reply"),
+        null);
+    requestThreadWork(
+        fixture.store, baseline.threadId()); // ModelProcessor 完成时的真实 enqueue-side wake
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath afterTurn1 = path(fixture.store, baseline.threadId());
+    assertEquals(5, afterTurn1.entries().size());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+
+    // turn2：长 USER + 超阈值成功 ASSISTANT，先经 INPUT claim 落库（queued 命令进入历史）。
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new UserMessageCommandPayload(userMessage(compactionUserText())));
+    requestThreadWork(fixture.store, baseline.threadId()); // 入站命令的 enqueue-side wake
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath inputPlanned = path(fixture.store, baseline.threadId());
+    assertEquals(7, inputPlanned.entries().size());
+    Entry inputStartEntry = inputPlanned.entries().get(5);
+    TurnStartPayload inputStart = (TurnStartPayload) inputStartEntry.payload();
+    assertEquals(TurnStartReason.INPUT, inputStart.reason());
+    assertEquals(baseline.threadId(), inputStart.ownerThreadId());
+    ModelInvocation turn2Model =
+        fixture
+            .store
+            .transaction(
+                tx -> tx.findModelInvocationByTurn(baseline.threadId(), inputStartEntry.id()))
+            .orElseThrow();
+
+    // 模拟 ModelProcessor 完成 turn2 Model 并请求 THREAD（enqueue 侧调度原语，重建 Work 行 v1）。
+    transitionModel(fixture.store, turn2Model.id(), m -> m.beginDispatch(NOW));
+    transitionModel(fixture.store, turn2Model.id(), m -> m.markRunning(NOW));
+    transitionModel(
+        fixture.store,
+        turn2Model.id(),
+        m -> m.succeed(successResponse(OVER_THRESHOLD_USAGE, cost(), "second reply"), NOW));
+    requestThreadWork(fixture.store, baseline.threadId());
+
+    // claim2：closed apply（COMPLETE 无 calls）关闭 turn；闭合后 compactionPreparation 判定 THRESHOLD 立即
+    // 到期 -> 自动保留 Work（wakeVersion v1 -> v2）。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath applied = path(fixture.store, baseline.threadId());
+    assertEquals(9, applied.entries().size());
+    Work threadWork =
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+    assertNotNull(threadWork);
+    assertNull(threadWork.leaseToken());
+    assertEquals(2L, threadWork.wakeVersion());
+
+    // claim3：下一 claim 启动 threshold 压缩（无任何手工 wake）。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath planned = path(fixture.store, baseline.threadId());
+    assertEquals(10, planned.entries().size());
+    TurnStartPayload start = (TurnStartPayload) planned.entries().get(9).payload();
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    assertEquals(baseline.threadId(), start.ownerThreadId());
+    assertEquals(CONTEXT_WINDOW, start.contextWindow());
   }
 
   /** 阈值 FULL 压缩：claim1 启动，claim2 成功应用并关闭 turn（continueModel=false，无 THREAD wake）。 */
@@ -479,21 +558,15 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         m -> m.fail(new ModelInvocationError(ProviderErrorKind.OVERFLOW, "still too large"), NOW));
 
     requestThreadWork(fixture.store, baseline.threadId());
-    // 单个 claim：失败重试关闭（无 queued、非 compaction 模型 -> 无 wake）。
+    // 单个 claim：失败 overflow 重试关闭 turn；闭合后 compactionPreparation 经 isOverflowRecoveryRetry guard 返回
+    // null -> 无 wake，绝不进入无界 compaction/retry 循环（无需任何手工 wake 验证）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath failedRetry = path(fixture.store, baseline.threadId());
     assertEquals(15, failedRetry.entries().size());
     TurnEndPayload end = (TurnEndPayload) failedRetry.head().payload();
     assertEquals(TurnEndOutcome.FAILED, end.outcome());
-
-    // guard：重试仍 overflow 时，下一次显式 THREAD wake 也只 quiesce，绝不进入无界 compaction/retry 循环。
-    requestThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    assertEquals(15, path(fixture.store, baseline.threadId()).entries().size());
-    assertEquals(
-        TurnEndOutcome.FAILED,
-        ((TurnEndPayload) path(fixture.store, baseline.threadId()).head().payload()).outcome());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
   @Test
@@ -600,7 +673,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(TurnStartReason.CONTINUATION, start.reason());
   }
 
-  /** 失败的 continuation 不抹掉更早成功 usage：关闭后下一次显式 wake 触发压缩。 */
+  /** 失败的 continuation 不抹掉更早成功 usage：闭合后 compactionPreparation 自动保留 Work，下一 claim 触发压缩。 */
   @Test
   void failedContinuationDoesNotForgetEarlierOverThresholdSuccess() {
     Fixture fixture = fixture();
@@ -626,12 +699,18 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         continuation.id(),
         m -> m.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider failed"), NOW));
 
-    // 单个 claim：失败 continuation 关闭无 wake（无 queued message）。
+    // ModelProcessor 完成（失败）时的真实 enqueue-side wake；claim 由它投递。
     requestThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
-    // 显式 THREAD wake（模拟 dispatcher 轮询）：更早成功 assistant 的超阈值 usage 仍触发压缩。
-    requestThreadWork(fixture.store, baseline.threadId());
+    // claim1：失败 continuation 关闭 turn；闭合后 compactionPreparation 越过该失败 turn，命中更早超阈值 usage
+    // -> 自动保留 THREAD Work（无需任何手工 wake）。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    Work failedContinuationWork =
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+    assertNotNull(failedContinuationWork);
+    assertNull(failedContinuationWork.leaseToken());
+
+    // claim2：下一 claim 直接消费保留 wake 启动 threshold 压缩。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath compactionPlanned = path(fixture.store, baseline.threadId());
@@ -648,7 +727,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(CompactionTrigger.THRESHOLD, compaction.request().compaction().trigger());
   }
 
-  /** 被 reject 的 continuation 不抹掉更早成功 usage：下一次显式 wake 触发压缩。 */
+  /** 被 reject 的 continuation 不抹掉更早成功 usage：rejected 提交后 compactionPreparation 自动保留 Work。 */
   @Test
   void rejectedContinuationDoesNotForgetEarlierOverThresholdSuccess() {
     Fixture fixture = fixture();
@@ -658,11 +737,15 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     fixture.resolver.onResolve = () -> fixture.resolver.autoConsistent = fixture.resolver.calls > 1;
     requestThreadWork(fixture.store, baseline.threadId());
 
-    // 单个 claim：continuation 被 reject 提交（无 deferred queue -> 不 wake）。
+    // claim1：continuation 被 reject 成功提交；闭合后用新 head path 判定更早超阈值 usage 立即到期 -> 自动保留 Work。
+    // （无 deferred queue 也成立：compactionDue 独立驱动 wake。）
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    Work rejectedWork =
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+    assertNotNull(rejectedWork);
+    assertNull(rejectedWork.leaseToken());
 
-    // 显式 THREAD wake（模拟 dispatcher 轮询）：更早成功 assistant 的 usage 仍触发压缩。
-    requestThreadWork(fixture.store, baseline.threadId());
+    // claim2：下一 claim 直接消费保留 wake 启动 threshold 压缩。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
@@ -679,7 +762,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(CompactionTrigger.THRESHOLD, compaction.request().compaction().trigger());
   }
 
-  /** 失败压缩不 spin；新 INPUT 失败后下一次显式 wake 触发压缩（failed compaction 已不是 barrier）。 */
+  /** 失败压缩不 spin；新 INPUT 失败后闭合自触发压缩（failed compaction 已不是 barrier）。 */
   @Test
   void failedCompactionTurnDoesNotSpin() {
     Fixture fixture = fixture();
@@ -754,12 +837,15 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         fixture.store,
         input.id(),
         m -> m.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider failed"), NOW));
-    // 单个 claim：失败 INPUT 关闭无 wake。
+    // ModelProcessor 完成（失败）时的真实 enqueue-side wake；claim 由它投递。
     requestThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
-    // 显式 THREAD wake：更早成功 usage 触发压缩。
-    requestThreadWork(fixture.store, baseline.threadId());
+    // 单个 claim：失败 INPUT 关闭 turn；闭合后 compactionPreparation 越过失败普通 turn 与失败 COMPACTION，命中更早
+    // 超阈值 usage -> 自动保留 Work（无需手工 wake）。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+
+    // 下一 claim：消费保留 wake 启动压缩。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath retried = path(fixture.store, baseline.threadId());

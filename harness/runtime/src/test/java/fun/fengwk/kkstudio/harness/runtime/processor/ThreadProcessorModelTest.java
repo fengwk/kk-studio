@@ -113,7 +113,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
-  /** no-tool terminal 关闭 turn 但已有 queued USER：applyModel 同事务先请求 THREAD 再 complete（wake 保留）。 */
+  /** no-tool terminal 关闭 turn 但已有 queued USER：applyModel 同事务先请求 THREAD 再 complete（wake 可被消费）。 */
   @Test
   void noToolTerminalWithQueuedMessageKeepsThreadWorkForDeferredInput() {
     Fixture fixture = fixture();
@@ -132,8 +132,9 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
         baseline.threadId(),
         new UserMessageCommandPayload(userMessage("follow-up")));
     requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
 
-    // 一个 claim：closed apply（COMPLETE 无 calls）按 queued 快照先 request THREAD 再 complete。
+    // claim1：closed apply（COMPLETE 无 calls）按 queued 快照先 request THREAD 再 complete。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     // close 后无 continuation 义务，但 queued USER 使 THREAD Work 保留（lease 已清，wakeVersion 抬升）。
@@ -142,6 +143,17 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertNotNull(threadWork);
     assertNull(threadWork.leaseToken());
     assertEquals(2L, threadWork.wakeVersion());
+
+    // claim2：保留的 wake 可被消费（非丢失）-> queued USER 启动 INPUT turn，命令被 consume。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(7, path.entries().size());
+    TurnStartPayload start = (TurnStartPayload) path.entries().get(5).payload();
+    assertEquals(TurnStartReason.INPUT, start.reason());
+    MessagePayload user = (MessagePayload) path.entries().get(6).payload();
+    assertEquals(AgentMessageRole.USER, user.message().role());
+    assertEquals("follow-up", ((TextMessageContent) user.message().contents().get(0)).text());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
   @Test
