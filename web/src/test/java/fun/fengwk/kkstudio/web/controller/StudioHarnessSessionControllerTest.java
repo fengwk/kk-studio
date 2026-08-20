@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 
 import java.time.Instant;
@@ -49,7 +50,11 @@ class StudioHarnessSessionControllerTest {
     thread.setCreatedAt(Instant.parse("2026-08-10T00:00:00Z"));
     thread.setUpdatedAt(Instant.parse("2026-08-10T00:01:00Z"));
     thread.setStatus("IDLE");
-    thread.setModel("openai/gpt-5");
+    HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
+    model.setProviderName("openai");
+    model.setModelName("gpt-5");
+    model.setVariant("default");
+    thread.setModel(model);
     thread.setHeadMessagePreview("hello");
     when(harnessQueryService.listThreadSummaries(SESSION_ID)).thenReturn(List.of(thread));
 
@@ -58,7 +63,9 @@ class StudioHarnessSessionControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].threadId").value(thread.getThreadId()))
         .andExpect(jsonPath("$.data[0].status").value("IDLE"))
-        .andExpect(jsonPath("$.data[0].model").value("openai/gpt-5"))
+        .andExpect(jsonPath("$.data[0].model.providerName").value("openai"))
+        .andExpect(jsonPath("$.data[0].model.modelName").value("gpt-5"))
+        .andExpect(jsonPath("$.data[0].model.variant").value("default"))
         .andExpect(jsonPath("$.data[0].headMessagePreview").value("hello"));
     verify(harnessQueryService).listThreadSummaries(SESSION_ID);
 

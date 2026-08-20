@@ -88,10 +88,8 @@ public class HarnessSessionDeletionService {
               presentSessions.add(sessionId);
             }
           }
-          // 阶段 2：全部 Session 的 Thread 深删（THREAD rank 单调递增；children 删除不提升锁序位）。
-          for (UUID sessionId : presentSessions) {
-            deleteThreadsDeep(tx, sessionId);
-          }
+          // 阶段 2：跨全部 Session 收集并按 UUID 排序 Thread，保证 THREAD rank 全局单调递增。
+          deleteThreadsDeep(tx, presentSessions);
           // 阶段 3：blob ref 释放（无 harness 锁）与 relation/Entry/Session 清理（均不取 harness 锁）。
           SessionBlobRefManager refManager = refManagers.getIfAvailable();
           for (UUID sessionId : presentSessions) {
@@ -112,11 +110,12 @@ public class HarnessSessionDeletionService {
     return canvasDocumentMapper.getByIdForUpdate(owner.id()) != null;
   }
 
-  /**
-   * 深删一个 Session 的全部 Thread：逐 Thread 以 THREAD -&gt; children 顺序删除 Work/Tool/Model/Command/Thread 行。
-   */
-  private void deleteThreadsDeep(HarnessStore.Transaction tx, UUID sessionId) {
-    List<ThreadState> threads = new ArrayList<>(tx.listThreadsBySession(sessionId));
+  /** 深删全部目标 Session 的 Thread：全局排序后逐 Thread 以 THREAD -&gt; children 顺序删除。 */
+  private void deleteThreadsDeep(HarnessStore.Transaction tx, List<UUID> sessionIds) {
+    List<ThreadState> threads = new ArrayList<>();
+    for (UUID sessionId : sessionIds) {
+      threads.addAll(tx.listThreadsBySession(sessionId));
+    }
     threads.sort(Comparator.comparing(ThreadState::id, UuidOrder.COMPARATOR));
     for (ThreadState thread : threads) {
       UUID threadId = thread.id();
@@ -125,7 +124,10 @@ public class HarnessSessionDeletionService {
           .orElseThrow(
               () ->
                   new IllegalStateException(
-                      "thread " + threadId + " disappeared while deleting session " + sessionId));
+                      "thread "
+                          + threadId
+                          + " disappeared while deleting session "
+                          + thread.sessionId()));
       tx.deleteWorkByThread(threadId);
       tx.deleteToolInvocations(threadId);
       tx.deleteModelInvocations(threadId);

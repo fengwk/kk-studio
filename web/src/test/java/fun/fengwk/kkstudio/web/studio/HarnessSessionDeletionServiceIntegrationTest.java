@@ -131,8 +131,8 @@ class HarnessSessionDeletionServiceIntegrationTest extends S3WebPostgresTestSupp
     UUID chatId = createChat("ordered-delete");
     UUID firstSession = new UUID(0L, 2L);
     UUID secondSession = new UUID(0L, 1L);
-    UUID firstThread = new UUID(0L, 4L);
-    UUID secondThread = new UUID(0L, 3L);
+    UUID firstThread = new UUID(0L, 3L);
+    UUID secondThread = new UUID(0L, 4L);
     acceptText(new StudioOwner(StudioOwnerType.CHAT, chatId), firstSession, firstThread, "first");
     acceptText(
         new StudioOwner(StudioOwnerType.CHAT, chatId), secondSession, secondThread, "second");
@@ -147,7 +147,7 @@ class HarnessSessionDeletionServiceIntegrationTest extends S3WebPostgresTestSupp
         Timestamp.from(Instant.parse("2026-08-20T00:00:00Z")),
         secondSession);
 
-    // 归属枚举确实返回 UUID 顺序的反序；删除服务必须改用统一 UuidOrder 锁定。
+    // 归属枚举与 Session UUID 顺序相反，按 Session 分组后的 Thread 又是 4 -> 3；实现必须分别全局排序两个 rank。
     assertEquals(
         List.of(firstSession, secondSession), chatSessionRepository.listSessionIds(chatId));
     deletionService.deleteSessionsByOwner(new StudioOwner(StudioOwnerType.CHAT, chatId));

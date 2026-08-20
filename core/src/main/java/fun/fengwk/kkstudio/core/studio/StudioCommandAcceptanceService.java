@@ -100,7 +100,7 @@ public class StudioCommandAcceptanceService {
     switch (target) {
       case AcceptCommandsTarget.NewSession newSession -> {
         lockOwnerForKeyShare(owner);
-        if (sessionHasOwnership(newSession.sessionId())) {
+        if (sessionExists(newSession.sessionId())) {
           requireOwnedSession(owner, newSession.sessionId());
         }
       }
@@ -115,10 +115,9 @@ public class StudioCommandAcceptanceService {
     }
   }
 
-  /** 已有归属边时，NEW_SESSION 也必须走 owner 校验，避免借 Runtime replay 绕过归属。 */
-  private boolean sessionHasOwnership(UUID sessionId) {
-    return chatSessionRepository.findBySessionId(sessionId) != null
-        || canvasSessionRepository.findBySessionId(sessionId) != null;
+  /** Session 已存在时，NEW_SESSION 只能作为同 owner 的精确 replay，内部无归属 Session 也不得被产品 owner 接管。 */
+  private boolean sessionExists(UUID sessionId) {
+    return requireStore().transaction(tx -> tx.findSession(sessionId).isPresent());
   }
 
   /** KEY SHARE 锁定 owner 行：阻止 owner 删除（排他锁等待）但允许同 owner 的并发接受。owner 缺失即归属目标不存在，确定性拒绝。 */
