@@ -118,7 +118,7 @@ class StudioCanvasResourceControllerTest {
   }
 
   private static CanvasSnapshot snapshot() {
-    CanvasDocument document = new CanvasDocument(CANVAS, "demo", 3, null, NOW, NOW);
+    CanvasDocument document = new CanvasDocument(CANVAS, "demo", 3, NOW, NOW);
     CanvasResource media =
         new CanvasResource(MEDIA_RESOURCE, CANVAS, NODE, 0, BLOB, "a.png", null, NOW);
     CanvasResource text =

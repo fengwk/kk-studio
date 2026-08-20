@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.studio.StudioOwner;
@@ -39,7 +40,8 @@ import java.util.UUID;
 /** HTTP mapper 测试：三 target、严格 target union、产品 command shape 与 exact response mapping。 */
 class HarnessRuntimeWebMapperTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      new ObjectMapper().registerModule(new JavaTimeModule());
   private static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS =
       new ThreadCommandPayloadJsonCodec();
   private static final String THREAD_ID = idText(1);
@@ -120,7 +122,7 @@ class HarnessRuntimeWebMapperTest {
     HarnessCommandCreateDTO user = userCommand("wrong-order");
     HarnessCommandCreateDTO agent = command("SET_AGENT", "wrong-agent");
     agent.setAgentName("default-assistant");
-    HarnessCommandBatchDTO wrongOrder = request(threadTarget(), agent, user);
+    HarnessCommandBatchDTO wrongOrder = request(threadTarget(), user, agent);
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toAcceptCommandsCommand(wrongOrder));

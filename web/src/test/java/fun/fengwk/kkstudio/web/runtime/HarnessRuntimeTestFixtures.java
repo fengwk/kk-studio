@@ -53,6 +53,8 @@ public final class HarnessRuntimeTestFixtures {
 
   public static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
   private static final UUID OWNER_THREAD_ID = id(10);
+  private static final String MATERIALIZATION_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private static UUID id(long value) {
     return new UUID(0L, value);
@@ -101,11 +103,11 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   public static ThreadState thread(UUID headEntryId) {
-    return new ThreadState(id(1), headEntryId, true, 4, 3, NOW, NOW);
+    return new ThreadState(id(1), id(1), headEntryId, MATERIALIZATION_HASH, true, 4, 3, NOW, NOW);
   }
 
   public static ThreadState thread(UUID id, UUID headEntryId) {
-    return new ThreadState(id, headEntryId, true, 4, 3, NOW, NOW);
+    return new ThreadState(id, id(1), headEntryId, MATERIALIZATION_HASH, true, 4, 3, NOW, NOW);
   }
 
   public static Session session() {
@@ -240,6 +242,7 @@ public final class HarnessRuntimeTestFixtures {
         payload,
         id(50),
         ThreadCommandPayloadJsonCodec.requestHash(payload),
+        null,
         null,
         null,
         NOW);
