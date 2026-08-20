@@ -16,7 +16,6 @@ import {
   materializeNewSession,
   stopThread,
   threadTarget,
-  userMessageCommand,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig } from '../lib/fixtures.mjs'

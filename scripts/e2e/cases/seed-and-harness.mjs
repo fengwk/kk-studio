@@ -154,10 +154,10 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.chat_scoped_create_atomic',
+  id: 'thread.new_session_submission_atomic',
   level: 'L1',
   title: 'NEW_SESSION 原子物化返回完整 accepted 快照',
-  docs: 'POST /api/ai/runtime/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；thread/entry/session/command 标识全为 canonical UUID string，nextCommandSequence 从 1 开始，rootEntry 即 head；Chat owner Session 摘要包含新 Session',
+  docs: 'POST /api/ai/runtime/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、revision >= 1；accepted command 的 sequence=1、requestHash 为 64 位小写 hex；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -181,28 +181,26 @@ registerCase({
     assert(accepted.replayed === false, JSON.stringify(accepted))
     assert(String(accepted.session.sessionId) === sessionId, JSON.stringify(accepted.session))
     const thread = accepted.thread
-    assert(thread.status === 'IDLE' && thread.processing === false, JSON.stringify(thread))
+    // 首 Command sequence=1 已接受，nextCommandSequence 必须精确 2；不锁定 status（processor
+    // 可能已异步消费），revision 至少 1，head 可为 root 或其后继。
+    assert(
+      String(thread.nextCommandSequence) === '2',
+      `nextCommandSequence must be 2 after accepting the first command: ${JSON.stringify(thread)}`,
+    )
+    assert(
+      Number(thread.revision) >= 1,
+      `revision must be at least 1 after accepting the first command: ${JSON.stringify(thread)}`,
+    )
     threadIdOf(thread)
     assert(String(thread.threadId) === threadId, JSON.stringify(thread))
-    // 消费时序不锁定：accepted 快照可能在 processor 消费前后返回；断言不变量——
-    // revision/nextCommandSequence 是非负/正十进制 string，head 是 rootEntry 或其后继。
-    assert(/^\d+$/.test(String(thread.revision)), JSON.stringify(thread))
-    assert(/^[1-9]\d*$/.test(String(thread.nextCommandSequence)), JSON.stringify(thread))
-    assert(
-      String(thread.nextCommandSequence) === '1' || String(thread.nextCommandSequence) === '2',
-      `nextCommandSequence must be 1 (queued) or 2 (consumed first command): ${JSON.stringify(thread)}`,
-    )
-    assert(
-      // 合法中间态：命令已入队（sequence=2）但 processor 尚未创建 TURN_START（head 仍是 ROOT）；
-      // 或命令未入队（sequence=1, head=ROOT）；或命令已消费（head 推进, sequence=2）。
-      (String(accepted.rootEntry.entryId) === String(thread.headEntryId)
-        && ['1', '2'].includes(String(thread.nextCommandSequence)))
-        || (String(accepted.rootEntry.entryId) !== String(thread.headEntryId)
-          && String(thread.nextCommandSequence) === '2'),
-      `head/sequence consistency: ${JSON.stringify({ rootEntry: accepted.rootEntry, thread })}`,
-    )
     assert(accepted.acceptedCommands.length === 1, JSON.stringify(accepted.acceptedCommands))
-    assert(accepted.acceptedCommands[0].type === 'USER_MESSAGE', JSON.stringify(accepted.acceptedCommands[0]))
+    const acceptedCommand = accepted.acceptedCommands[0]
+    assert(acceptedCommand.type === 'USER_MESSAGE', JSON.stringify(acceptedCommand))
+    assert(String(acceptedCommand.sequence) === '1', JSON.stringify(acceptedCommand))
+    assert(
+      /^[0-9a-f]{64}$/.test(String(acceptedCommand.requestHash)),
+      `requestHash must be 64 lower hex: ${JSON.stringify(acceptedCommand)}`,
+    )
     for (const hidden of [
       'executionEpoch',
       'environment',
@@ -284,7 +282,7 @@ registerCase({
     })
     const sessionId = cid()
     const threadId = cid()
-    const created = await materializeNewSession(ctx, {
+    await materializeNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
@@ -455,7 +453,7 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.custom_message_strict_wire',
+  id: 'thread.product_http_rejects_custom_message',
   level: 'L1',
   title: '产品 HTTP 面拒绝 CUSTOM_MESSAGE 且命令 shape 严格',
   docs: 'CUSTOM_MESSAGE（SYSTEM/USER 均不可）在产品 HTTP command-batches 面确定性 400；两条 USER_MESSAGE 同一 batch、非末尾 USER_MESSAGE、乱序 SET、未知类型 => 400；同 batch 非法 shape 不推进 cursor',
@@ -690,10 +688,10 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.rebind_same_session',
+  id: 'thread.entry_materialization_same_session',
   level: 'L1',
   title: 'ENTRY 同 Session 分支物化',
-  docs: 'ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）：sessionId 不变、新 Thread head 直接指向目标 Entry；ENTRY 非法 startEntryId（不存在/跨 Session）409/400；revision 不参与 ENTRY CAS（ENTRY 是新 Thread）',
+  docs: 'ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）：sessionId 不变、accepted command sequence=1；quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER；原 Thread head/revision/nextCommandSequence 不变；ENTRY 非法 startEntryId（不存在 404/跨 Session 400）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -718,25 +716,70 @@ registerCase({
     await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     const idle = await getThreadSnapshot(ctx, threadId)
     const thread = idle.thread
+    const startEntryId = String(thread.headEntryId)
+    const mainBefore = {
+      headEntryId: String(thread.headEntryId),
+      revision: String(thread.revision),
+      nextCommandSequence: String(thread.nextCommandSequence),
+    }
     const branchThreadId = cid()
+    const branchUserText = `branch on head ${cid().slice(0, 8)}`
     const branched = await materializeEntryThread(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
-      startEntryId: thread.headEntryId,
+      startEntryId,
       threadId: branchThreadId,
       yoloEnabled: thread.yoloEnabled,
-      commands: [userMessageCommand(`branch on head ${cid().slice(0, 8)}`, cid())],
+      commands: [userMessageCommand(branchUserText, cid())],
     })
-    assert(String(branched.thread.sessionId) === String(thread.sessionId), JSON.stringify(branched.thread))
+    // ENTRY accepted 后 processor 可能已消费分支命令：不锁定 response head=startEntry；
+    // 只锁定 session/thread 归属与 accepted command sequence=1。
     assert(
-      String(branched.thread.threadId) === branchThreadId
-        && String(branched.thread.headEntryId) === String(thread.headEntryId),
+      String(branched.thread.sessionId) === String(thread.sessionId),
       JSON.stringify(branched.thread),
     )
+    assert(String(branched.thread.threadId) === branchThreadId, JSON.stringify(branched.thread))
+    assert(
+      String(branched.acceptedCommands[0].sequence) === '1'
+        && branched.acceptedCommands[0].type === 'USER_MESSAGE'
+        && branched.replayed === false,
+      JSON.stringify(branched),
+    )
     assert(branched.rootEntry.entryId === accepted.rootEntry.entryId, JSON.stringify(branched.rootEntry))
-    // 原 Thread 不受影响。
+    // 原 Thread 不受影响（head/revision/nextCommandSequence 逐字段不变）。
     const after = await getThreadSnapshot(ctx, threadId)
-    assert(String(after.thread.headEntryId) === String(thread.headEntryId), JSON.stringify(after.thread))
+    assert(
+      String(after.thread.headEntryId) === mainBefore.headEntryId
+        && String(after.thread.revision) === mainBefore.revision
+        && String(after.thread.nextCommandSequence) === mainBefore.nextCommandSequence,
+      JSON.stringify({ before: mainBefore, after: after.thread }),
+    )
+    // quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER。
+    const branchedFinal = await waitForQuiescentThread(ctx, branchThreadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    assert(branchedFinal.status === 'IDLE', JSON.stringify(branchedFinal))
+    const branchedSnapshot = await getThreadSnapshot(ctx, branchThreadId)
+    const branchedEntries = branchedSnapshot.entries || []
+    assert(
+      branchedEntries.some((entry) => String(entry.entryId) === String(startEntryId)),
+      `branch path must include startEntry ${startEntryId}: ${JSON.stringify(branchedEntries)}`,
+    )
+    assert(
+      branchedEntries.some((entry) => {
+        if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
+        const message = JSON.parse(entry.payloadJson).message
+        return (
+          message?.role === 'USER'
+          && (message.contents || []).some(
+            (content) =>
+              content?.type === 'text' && String(content.text || '').includes(branchUserText),
+          )
+        )
+      }),
+      `branch path must include the branch USER message: ${JSON.stringify(branchedEntries)}`,
+    )
 
     // 不存在的 startEntryId => 404（Runtime 找不到 Entry）。
     await expectHttpError(
@@ -867,10 +910,10 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.rebind_cross_session_rejected',
+  id: 'thread.entry_cross_session_rejected',
   level: 'L1',
   title: '跨 Session ENTRY 被拒绝',
-  docs: 'ENTRY target 使用另一 Session 的 entry id => 409（Runtime 找不到/归属不匹配）；两 Session 均不受影响',
+  docs: 'ENTRY target 使用另一 Session 的 entry id => 400（start entry 不在目标 Session）；两个原 Thread projection/session entries/thread list 均不变；预分配 rejectedThreadId 的 snapshot 404（未物化）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -881,7 +924,7 @@ registerCase({
     })
     const firstSessionId = cid()
     const firstThreadId = cid()
-    const first = await materializeNewSession(ctx, {
+    await materializeNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId: firstSessionId,
       threadId: firstThreadId,
@@ -894,7 +937,7 @@ registerCase({
     })
     const secondSessionId = cid()
     const secondThreadId = cid()
-    const second = await materializeNewSession(ctx, {
+    await materializeNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId: secondSessionId,
       threadId: secondThreadId,
@@ -905,23 +948,8 @@ registerCase({
       yoloEnabled: false,
       commands: [userMessageCommand(`cross b ${cid().slice(0, 8)}`, cid())],
     })
-    assert(
-      String(first.session.sessionId) !== String(second.session.sessionId),
-      'distinct Sessions must not collide',
-    )
-    await expectHttpError(
-      () =>
-        materializeEntryThread(ctx, {
-          owner: chatOwner(chat.id),
-          sessionId: firstSessionId,
-          startEntryId: second.rootEntry.entryId,
-          threadId: cid(),
-          yoloEnabled: false,
-          commands: [userMessageCommand('cross session entry', cid())],
-        }),
-      { status: 400, messageIncludes: /session|entry/i },
-    )
-    // 两 Session 均不受影响：拒绝前后各取一次消费后稳定态，逐字段比较。
+    assert(firstSessionId !== secondSessionId, 'distinct Sessions must not collide')
+    // 先让两个 bootstrap Thread quiescent，再捕获 before snapshots/entries/thread lists。
     const stableFirst = await waitForQuiescentThread(ctx, firstThreadId, {
       timeoutMs: 60_000,
       intervalMs: 100,
@@ -930,17 +958,64 @@ registerCase({
       timeoutMs: 60_000,
       intervalMs: 100,
     })
-    const afterFirst = await getThreadSnapshot(ctx, firstThreadId)
-    const afterSecond = await getThreadSnapshot(ctx, secondThreadId)
+    const beforeFirstEntries = await listSessionEntries(ctx, firstSessionId)
+    const beforeSecondEntries = await listSessionEntries(ctx, secondSessionId)
+    const beforeFirstThreads = await listSessionThreads(ctx, firstSessionId)
+    const beforeSecondThreads = await listSessionThreads(ctx, secondSessionId)
+    const secondRootEntryId = beforeSecondEntries.find(
+      (entry) => String(entry.entryType || '').toUpperCase() === 'ROOT',
+    )?.entryId
+    assert(secondRootEntryId, `second Session must have a ROOT entry: ${JSON.stringify(beforeSecondEntries)}`)
+
+    // 预分配 rejectedThreadId：用第二 Session 的 ROOT entry 在第一 Session 下提交错误 ENTRY => 400。
+    const rejectedThreadId = cid()
+    await expectHttpError(
+      () =>
+        materializeEntryThread(ctx, {
+          owner: chatOwner(chat.id),
+          sessionId: firstSessionId,
+          startEntryId: secondRootEntryId,
+          threadId: rejectedThreadId,
+          yoloEnabled: false,
+          commands: [userMessageCommand('cross session entry', cid())],
+        }),
+      { status: 400, messageIncludes: /session|entry/i },
+    )
+    // 两个原 Thread projection/entries/thread list 均不变。
+    const afterFirstSnapshot = await getThreadSnapshot(ctx, firstThreadId)
+    const afterSecondSnapshot = await getThreadSnapshot(ctx, secondThreadId)
     assert(
-      String(afterFirst.thread.headEntryId) === String(stableFirst.headEntryId)
-        && String(afterFirst.thread.nextCommandSequence) === String(stableFirst.nextCommandSequence),
-      JSON.stringify({ before: stableFirst, after: afterFirst.thread }),
+      String(afterFirstSnapshot.thread.headEntryId) === String(stableFirst.headEntryId)
+        && String(afterFirstSnapshot.thread.revision) === String(stableFirst.revision)
+        && String(afterFirstSnapshot.thread.nextCommandSequence) === String(stableFirst.nextCommandSequence),
+      JSON.stringify({ before: stableFirst, after: afterFirstSnapshot.thread }),
     )
     assert(
-      String(afterSecond.thread.headEntryId) === String(stableSecond.headEntryId)
-        && String(afterSecond.thread.nextCommandSequence) === String(stableSecond.nextCommandSequence),
-      JSON.stringify({ before: stableSecond, after: afterSecond.thread }),
+      String(afterSecondSnapshot.thread.headEntryId) === String(stableSecond.headEntryId)
+        && String(afterSecondSnapshot.thread.revision) === String(stableSecond.revision)
+        && String(afterSecondSnapshot.thread.nextCommandSequence) === String(stableSecond.nextCommandSequence),
+      JSON.stringify({ before: stableSecond, after: afterSecondSnapshot.thread }),
+    )
+    assert(
+      JSON.stringify(await listSessionEntries(ctx, firstSessionId)) === JSON.stringify(beforeFirstEntries),
+      'first Session entries must not change',
+    )
+    assert(
+      JSON.stringify(await listSessionEntries(ctx, secondSessionId)) === JSON.stringify(beforeSecondEntries),
+      'second Session entries must not change',
+    )
+    assert(
+      JSON.stringify(await listSessionThreads(ctx, firstSessionId)) === JSON.stringify(beforeFirstThreads),
+      'first Session thread list must not change',
+    )
+    assert(
+      JSON.stringify(await listSessionThreads(ctx, secondSessionId)) === JSON.stringify(beforeSecondThreads),
+      'second Session thread list must not change',
+    )
+    // rejectedThreadId 未物化：snapshot 404。
+    await expectHttpError(
+      () => ctx.call('GET', `/api/ai/runtime/threads/${rejectedThreadId}/snapshot`),
+      { status: 404 },
     )
   },
 })

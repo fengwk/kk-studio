@@ -15,7 +15,6 @@ import {
   canonicalUuid,
   chatOwner,
   createChat,
-  entryTarget,
   getThread,
   getThreadSnapshot,
   listEnvironments,
@@ -112,6 +111,7 @@ registerCase({
     )
     ctx.vars.realThreadId = tid
     ctx.vars.realSessionId = accepted.session.sessionId
+    ctx.vars.realChatId = chat.id
     ctx.vars.assistantEntryId = String(assistantEntry.entryId)
     ctx.vars.turnEndEntryId = String(entries[turnEndIndex].entryId)
     ctx.writeArtifact('real-turn.json', JSON.stringify(threadSnapshot, null, 2))
@@ -591,43 +591,55 @@ registerCase({
 })
 
 registerCase({
-  id: 'branch.same_session_move_head',
+  id: 'branch.same_session_entry_thread',
   level: 'L3',
-  title: '同 Session 分支：同一 Thread head 回退到历史 assistant 后继续',
+  title: 'ENTRY 同 Session 分支物化（真实分支 turn）',
   requires: ['real', 'branch'],
-  docs: '在 real.text_turn 的同一 Thread 上，从 TURN_END head 回退到该 Session 内历史 assistant Entry：sessionId 不变、revision+1、root-to-head 路径切换到分支并继续产生分支 turn（不创建另一 Thread/Session）',
+  docs: '在 real.text_turn 的同一 Session 历史 assistant Entry 下用 ENTRY target 开新 Thread（不复制 Entry）：sessionId 不变、新 Thread root-to-head 路径包含 startEntry 与分支 USER、分支 turn 继续产生独立 assistant；原 Thread head/revision/nextCommandSequence 不变',
   async run(ctx) {
     if (!ctx.vars.realThreadId) await getCase('real.text_turn').run(ctx)
     const mainTid = ctx.vars.realThreadId
     const sessionId = ctx.vars.realSessionId
+    const chatId = ctx.vars.realChatId
     const assistantEntryId = ctx.vars.assistantEntryId
     // 同 Session 分支：ENTRY 在历史 assistant MESSAGE Entry 下开新 Thread（不复制 Entry）。
     const current = await getThread(ctx, mainTid)
     assert(String(current.sessionId) === String(sessionId), JSON.stringify(current))
+    const mainBefore = {
+      headEntryId: current.headEntryId,
+      revision: current.revision,
+      nextCommandSequence: current.nextCommandSequence,
+    }
     const branchThreadId = cid()
+    const branchUserText = '在分支上只回复单词 BRANCH，不要调用工具。'
     const branched = await materializeEntryThread(ctx, {
-      owner: chatOwner(chat.id),
+      owner: chatOwner(chatId),
       sessionId,
       startEntryId: assistantEntryId,
       threadId: branchThreadId,
       yoloEnabled: current.yoloEnabled,
-      commands: [userMessageCommand('在分支上只回复单词 BRANCH，不要调用工具。', cid())],
+      commands: [userMessageCommand(branchUserText, cid())],
     })
+    // ENTRY accepted 后 processor 可能已消费分支命令：不锁定 response head=startEntry；
+    // 只锁定 session/thread 归属与 accepted command sequence=1。
     assert(String(branched.thread.sessionId) === String(sessionId), JSON.stringify(branched.thread))
-    assert(
-      String(branched.thread.headEntryId) === String(assistantEntryId),
-      JSON.stringify(branched.thread),
-    )
     assert(
       String(branched.thread.threadId) === branchThreadId,
       JSON.stringify(branched.thread),
     )
-    // 原 Thread 不动。
+    assert(
+      String(branched.acceptedCommands[0].sequence) === '1'
+        && branched.acceptedCommands[0].type === 'USER_MESSAGE'
+        && branched.replayed === false,
+      JSON.stringify(branched),
+    )
+    // 原 Thread 不动（head/revision/nextCommandSequence 逐字段不变）。
     const mainAfter = await getThread(ctx, mainTid)
     assert(
-      String(mainAfter.sessionId) === String(sessionId)
-        && String(mainAfter.headEntryId) !== String(assistantEntryId),
-      JSON.stringify(mainAfter),
+      String(mainAfter.headEntryId) === String(mainBefore.headEntryId)
+        && String(mainAfter.revision) === String(mainBefore.revision)
+        && String(mainAfter.nextCommandSequence) === String(mainBefore.nextCommandSequence),
+      JSON.stringify({ before: mainBefore, after: mainAfter }),
     )
 
     const finalThread = await waitForQuiescentThread(ctx, branchThreadId, {
@@ -636,8 +648,12 @@ registerCase({
     })
     assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
     const entries = await snapshotEntries(ctx, branchThreadId)
-    // root-to-head 路径：分支 USER 位于历史 assistant 之后，新 assistant 在其后。
-    const branchUserIndex = findUserEntryIndex(entries, '在分支上只回复单词 BRANCH')
+    // root-to-head 路径：startEntry 与分支 USER 都必须在 path 上，分支 assistant 在 USER 之后。
+    assert(
+      entries.some((entry) => String(entry.entryId) === String(assistantEntryId)),
+      `branch path must include the startEntry: ${JSON.stringify(entries)}`,
+    )
+    const branchUserIndex = findUserEntryIndex(entries, branchUserText)
     const assistantIndex = entries.findIndex(
       (entry) =>
         String(entry.entryId) === String(normalAssistantEntries(entries).at(-1)?.entryId),

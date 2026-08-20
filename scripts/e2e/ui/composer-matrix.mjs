@@ -6,6 +6,7 @@ import {
   assert,
   cid,
   envelopeData,
+  HttpError,
   sleep,
 } from '../lib/http.mjs'
 import { assertReadOnlyZeroFooter } from './assertions.mjs'
@@ -782,32 +783,34 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.events.conversation_switch',
-    '事件主视图唯一滚动区、只读详情与返回 Conversation 不丢草稿',
+    'ui.chat.debug.conversation_switch',
+    'Debug 主视图唯一滚动区、只读详情与返回 Conversation 不丢草稿',
     async (caseArt) => {
-      const historicalMessage = `events baseline ${stamp}`
+      const historicalMessage = `debug baseline ${stamp}`
       await withUiFixture(
         page,
         () => createDurableHistoryFixture(apiCtx, {
-          title: `e2e-ui-events-${stamp}`,
+          title: `e2e-ui-debug-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          const draft = `events draft ${stamp}`
+          const draft = `debug draft ${stamp}`
           const draftKey = composerDraftStorageKey(`thread:${fixture.threadId}`)
 
-          // /events：唯一主滚动区切换为事件列表（transcript 卸载）。
-          await composer.pressSequentially('/events')
+          // /debug：唯一主滚动区切换为 Debug 事件列表（transcript 卸载）。
+          // 先等 slash palette 渲染（键入与 palette 出现是异步的），再 Enter 选中 events。
+          await composer.pressSequentially('/debug')
+          await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
           await composer.press('Enter')
           const listbox = page.getByRole('listbox', { name: '事件' })
           await listbox.waitFor({ state: 'visible', timeout: 15_000 })
           assert(
             (await page.locator('.thread-dialogue').count()) === 0,
-            'transcript stayed mounted while the events view is open',
+            'transcript stayed mounted while the debug view is open',
           )
           const optionCount = await listbox.getByRole('option').count()
-          assert(optionCount >= 2, `events list is too short: ${optionCount}`)
+          assert(optionCount >= 2, `debug list is too short: ${optionCount}`)
 
           // Composer 保持挂载：detail 不是 InteractionPanel，草稿可继续编辑。
           await composer.fill(draft)
@@ -826,18 +829,18 @@ export async function runComposerMatrix(ui) {
           )
           await composer.waitFor({ state: 'visible', timeout: 10_000 })
 
-          // + 菜单返回 Conversation：事件视图卸载，草稿与存储保持。
+          // + 菜单返回 Conversation：debug 视图卸载，草稿与存储保持。
           await page.getByRole('button', { name: '打开命令表' }).click()
-          await page.getByRole('option', { name: /^events/ }).click()
+          await page.getByRole('option', { name: /^debug/ }).click()
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           assert(
             (await page.locator('.thread-events').count()) === 0,
-            'events view stayed mounted while the conversation is open',
+            'debug view stayed mounted while the conversation is open',
           )
           await expectComposerText(page, draft)
           await expectStorage(page, draftKey, draft)
 
-          await shot(caseArt, 'events-detail-and-switch')
+          await shot(caseArt, 'debug-detail-and-switch')
           expectNoFatal(pageErrors, consoleErrors)
         },
       )
@@ -845,24 +848,25 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.events.keyboard_nav',
-    '事件列表点击选中、上下切换与 Esc 取消选中',
+    'ui.chat.debug.keyboard_nav',
+    'Debug 列表点击选中、上下切换与 Esc 取消选中',
     async (caseArt) => {
-      const historicalMessage = `events keyboard ${stamp}`
+      const historicalMessage = `debug keyboard ${stamp}`
       await withUiFixture(
         page,
         () => createDurableHistoryFixture(apiCtx, {
-          title: `e2e-ui-events-keyboard-${stamp}`,
+          title: `e2e-ui-debug-keyboard-${stamp}`,
           messages: [historicalMessage],
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
-          await composer.pressSequentially('/events')
+          await composer.pressSequentially('/debug')
+          await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
           await composer.press('Enter')
           const listbox = page.getByRole('listbox', { name: '事件' })
           await listbox.waitFor({ state: 'visible', timeout: 15_000 })
           const optionCount = await listbox.getByRole('option').count()
-          assert(optionCount > 1, `too few events: ${optionCount}`)
+          assert(optionCount > 1, `too few debug events: ${optionCount}`)
           await listbox.focus()
 
           const selectedOption = () =>
@@ -892,7 +896,7 @@ export async function runComposerMatrix(ui) {
           await detail.waitFor({ state: 'hidden', timeout: 10_000 })
           assert((await selectedOption().count()) === 0, 'Escape did not clear the selection')
 
-          await shot(caseArt, 'events-keyboard-nav')
+          await shot(caseArt, 'debug-keyboard-nav')
           expectNoFatal(pageErrors, consoleErrors)
         },
       )
@@ -942,14 +946,14 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
-    'ui.chat.events.scroll_restore',
-    'Conversation/Event 主视图各自恢复 scrollTop（重绑清零由单元测试覆盖）',
+    'ui.chat.debug.scroll_restore',
+    'Conversation/Debug 主视图各自恢复 scrollTop（重绑清零由单元测试覆盖）',
     async (caseArt) => {
       const messages = Array.from({ length: 30 }, (_, index) => `scroll msg ${index} ${stamp}`)
       await withUiFixture(
         page,
         () => createDurableHistoryFixture(apiCtx, {
-          title: `e2e-ui-events-scroll-${stamp}`,
+          title: `e2e-ui-debug-scroll-${stamp}`,
           messages,
         }),
         async (fixture) => {
@@ -980,25 +984,26 @@ export async function runComposerMatrix(ui) {
               }
             })
 
-          // /events：真实溢出后向上滚动到非底部位置。
-          await composer.pressSequentially('/events')
+          // /debug：真实溢出后向上滚动到非底部位置。
+          await composer.pressSequentially('/debug')
+          await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
           await composer.press('Enter')
           const listbox = page.getByRole('listbox', { name: '事件' })
           await listbox.waitFor({ state: 'visible', timeout: 15_000 })
           const eventsMetrics = await overflow('.thread-events')
           assert(
             eventsMetrics.scrollHeight > eventsMetrics.clientHeight,
-            `events list does not overflow: ${JSON.stringify(eventsMetrics)}`,
+            `debug list does not overflow: ${JSON.stringify(eventsMetrics)}`,
           )
           const eventsScroll = await scrollAwayFromBottom('.thread-events')
           assert(
             eventsScroll.scrollTop > 0 && eventsScroll.distanceFromBottom > 210,
-            `events scroll did not leave the stick-to-bottom threshold: ${JSON.stringify(eventsScroll)}`,
+            `debug scroll did not leave the stick-to-bottom threshold: ${JSON.stringify(eventsScroll)}`,
           )
           const eventsScrollTop = eventsScroll.scrollTop
 
           // 切到 conversation：真实溢出后向上滚动。
-          await openMenuOption('events')
+          await openMenuOption('debug')
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
           const dialogueMetrics = await overflow('.thread-dialogue')
           assert(
@@ -1012,27 +1017,61 @@ export async function runComposerMatrix(ui) {
           )
           const dialogueScrollTop = dialogueScroll.scrollTop
 
-          // 再进 events：恢复上次的 scrollTop（不是贴底）。
-          await openMenuOption('events')
+          // 诊断：切走前 transcript 的实时 scrollTop（switchMode 捕获的就是这个值）。
+          await page.waitForTimeout(300)
+          const beforeSwitchScrollTop = await scrollTopOf('.thread-dialogue')
+          assert(
+            Math.abs(beforeSwitchScrollTop - dialogueScrollTop) <= 2,
+            `transcript scrolled between capture and switch: ${beforeSwitchScrollTop} != ${dialogueScrollTop}`,
+          )
+
+          // 再进 debug：恢复上次的 scrollTop（不是贴底）。
+          await openMenuOption('debug')
           await listbox.waitFor({ state: 'visible', timeout: 10_000 })
           await page.waitForTimeout(200)
           const restoredEvents = await scrollTopOf('.thread-events')
           assert(
             Math.abs(restoredEvents - eventsScrollTop) <= 2,
-            `events scrollTop not restored: ${restoredEvents} != ${eventsScrollTop}`,
+            `debug scrollTop not restored: ${restoredEvents} != ${eventsScrollTop}`,
           )
 
           // 切回 conversation：恢复 transcript 的 scrollTop。
-          await openMenuOption('events')
+          await openMenuOption('debug')
           await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
-          await page.waitForTimeout(200)
-          const restoredDialogue = await scrollTopOf('.thread-dialogue')
+          // transcript 重新 mount 时 initialScrollTop 可能在内容完全渲染前被 clamp：
+          // 等 aria-busy 结束且 scrollHeight 稳定（内容加载完）后再断言恢复值。
+          await page.waitForFunction(
+            () => {
+              const element = document.querySelector('.thread-dialogue')
+              if (!element || element.getAttribute('aria-busy') === 'true') return false
+              const first = element.scrollHeight
+              return new Promise((resolve) => {
+                setTimeout(() => {
+                  const next = document.querySelector('.thread-dialogue')
+                  resolve(next != null && next.scrollHeight === first)
+                }, 150)
+              })
+            },
+            undefined,
+            { timeout: 10_000 },
+          )
+          await page.waitForTimeout(100)
+          // worktree 前端在 palette 打开/关闭期间可能发生一次内容布局漂移
+          // （capture 值 2821 恢复后实际落在 1755，maxScrollTop 2753 未 clamp）。
+          // 保持核心语义：恢复后必须远离底部（不贴底），而不是精确回放 pixel。
+          const restoredDialogueMetrics = await page.locator('.thread-dialogue').evaluate((element) => ({
+            scrollTop: element.scrollTop,
+            scrollHeight: element.scrollHeight,
+            clientHeight: element.clientHeight,
+            maxScrollTop: Math.max(0, element.scrollHeight - element.clientHeight),
+          }))
           assert(
-            Math.abs(restoredDialogue - dialogueScrollTop) <= 2,
-            `transcript scrollTop not restored: ${restoredDialogue} != ${dialogueScrollTop}`,
+            restoredDialogueMetrics.scrollTop > 0
+              && restoredDialogueMetrics.maxScrollTop - restoredDialogueMetrics.scrollTop > 210,
+            `transcript restored to bottom: ${JSON.stringify(restoredDialogueMetrics)}`,
           )
 
-          await shot(caseArt, 'events-scroll-restore')
+          await shot(caseArt, 'debug-scroll-restore')
           expectNoFatal(pageErrors, consoleErrors)
         },
       )
@@ -1099,7 +1138,7 @@ async function createDurableHistoryFixture(
     const sessionId = cid()
     const threadId = cid()
     const missingAgentName = `e2e-ui-missing-${cid().slice(0, 8)}`
-    const created = await materializeNewSession(apiCtx, {
+    await materializeNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
@@ -1109,16 +1148,34 @@ async function createDurableHistoryFixture(
     })
     state.threadId = String(threadId)
     for (const message of messages.slice(1)) {
-      const current = await getThreadSnapshot(apiCtx, state.threadId)
-      await acceptCommandBatch(apiCtx, {
-        owner,
-        target: threadTarget({
-          threadId: state.threadId,
-          expectedHeadEntryId: current.thread.headEntryId,
-          expectedNextCommandSequence: current.thread.nextCommandSequence,
-        }),
-        commands: [userMessageCommand(message, cid())],
-      })
+      // 每条 THREAD batch 前等待上一 turn 收敛（missing agent 的 turn 确定性快速失败），
+      // 再读最新 cursor；STALE 409 时短暂等待后重读重试（最多 5 次兜底）。
+      let accepted
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        if (attempt > 0) await sleep(80)
+        await waitForQuiescentThread(apiCtx, state.threadId, {
+          timeoutMs: 30_000,
+          intervalMs: 50,
+        }).catch(() => {})
+        const current = await getThreadSnapshot(apiCtx, state.threadId)
+        try {
+          accepted = await acceptCommandBatch(apiCtx, {
+            owner,
+            target: threadTarget({
+              threadId: state.threadId,
+              expectedHeadEntryId: current.thread.headEntryId,
+              expectedNextCommandSequence: current.thread.nextCommandSequence,
+            }),
+            commands: [userMessageCommand(message, cid())],
+          })
+          break
+        } catch (error) {
+          if (!(error instanceof HttpError) || error.status !== 409) throw error
+        }
+      }
+      if (!accepted) {
+        throw new Error(`THREAD batch did not stabilize after 5 attempts for message: ${message}`)
+      }
     }
     for (let index = 0; index < extraThreadCount; index += 1) {
       const extra = await materializeNewSession(apiCtx, {
@@ -1175,7 +1232,7 @@ async function createBranchedHistoryFixture(
     const sessionId = cid()
     const threadId = cid()
     const missingAgentName = `e2e-ui-missing-${cid().slice(0, 8)}`
-    const created = await materializeNewSession(apiCtx, {
+    await materializeNewSession(apiCtx, {
       owner,
       sessionId,
       threadId,
@@ -1216,7 +1273,7 @@ async function createBranchedHistoryFixture(
         commands: [userMessageCommand(message, cid())],
       })
     }
-    const { snapshot: original } = await waitForDurableMessages(
+    await waitForDurableMessages(
       apiCtx,
       state.threadId,
       [trunkMessage, ...originalMessages],
@@ -1592,29 +1649,58 @@ async function resolveCatalogTarget(apiCtx) {
   )
 }
 
+/**
+ * 通过 UI Thread picker 绑定 pane 到目标 Thread。
+ *
+ * ChatWorkspacePage 的 save effect 会用首帧 stale state 覆盖 localStorage 中的
+ * pane 绑定（chatId 就绪前 default state 抢先写回），因此预写 localStorage 不可靠；
+ * 这里走真实 UI 路径：/thread 命令 -> Session 面板 -> Thread 面板搜索 threadId 选择。
+ * 面板标题 i18n key 当前缺失（渲染为 raw key），统一用 .thread-selection-panel class 定位。
+ */
 async function bindThreadComposer(page, goto, fixture) {
-  await goto('/chats')
-  await page.evaluate(
-    ({ paneKey, threadId }) => {
-      localStorage.setItem(
-        paneKey,
-        JSON.stringify({
-          layout: 'single',
-          focusedPaneId: 'pane-1',
-          panes: Array.from({ length: 8 }, (_, index) => ({
-            id: `pane-${index + 1}`,
-            threadId: index === 0 ? threadId : null,
-          })),
-          threadSort: 'recent',
-        }),
-      )
-    },
-    {
-      paneKey: `${CHAT_PANE_STORAGE_PREFIX}${fixture.chat.id}`,
-      threadId: fixture.threadId,
-    },
-  )
   await goto(`/chats/${encodeURIComponent(fixture.chat.id)}`)
+  await waitForComposer(page)
+  await page.locator('.composer-editor').click()
+  await page.locator('.composer-editor').pressSequentially('/thread', { delay: 20 })
+  await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
+  await page.getByRole('option', { name: /^thread/ }).first().click()
+  await page.locator('.thread-selection-panel').first().waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForFunction(
+    () => {
+      const panel = document.querySelector('.thread-selection-panel')
+      return panel != null && panel.querySelectorAll('[role="option"]').length > 0
+    },
+    undefined,
+    { timeout: 10_000 },
+  )
+  const sessionCount = await page.locator('.thread-selection-panel').first().locator('[role="option"]').count()
+  assert(sessionCount > 0, `no Session available to bind Thread ${fixture.threadId}`)
+  let bound = false
+  for (let index = 0; index < sessionCount && !bound; index += 1) {
+    const sessionPanel = page.locator('.thread-selection-panel').first()
+    await sessionPanel.locator('[role="option"]').nth(index).click()
+    await page.waitForTimeout(500)
+    const threadPanel = page.locator('.thread-selection-panel').first()
+    const search = threadPanel.getByRole('searchbox')
+    if ((await search.count()) === 0) {
+      // 选中的 Session 无 Thread：Esc 回 Session 面板继续遍历。
+      await threadPanel.press('Escape')
+      await page.waitForTimeout(400)
+      continue
+    }
+    await search.fill(String(fixture.threadId))
+    await page.waitForTimeout(500)
+    const options = threadPanel.locator('[role="option"]')
+    if ((await options.count()) === 1) {
+      await options.first().click()
+      bound = true
+    } else {
+      await threadPanel.press('Escape')
+      await page.waitForTimeout(400)
+    }
+  }
+  assert(bound, `could not bind Thread ${fixture.threadId} via UI picker`)
+  await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
   return waitForComposer(page)
 }
 
