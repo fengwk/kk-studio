@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioComfyuiRuntimeController;
 import fun.fengwk.kkstudio.web.controller.StudioComfyuiWorkflowApiController;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -30,6 +31,7 @@ import java.util.Map;
       StudioChatController.class,
       StudioComfyuiRuntimeController.class,
       StudioComfyuiWorkflowApiController.class,
+      StudioHarnessSessionController.class,
       StudioHarnessThreadController.class
     })
 public class StudioResponseStatusErrorAdvice {
