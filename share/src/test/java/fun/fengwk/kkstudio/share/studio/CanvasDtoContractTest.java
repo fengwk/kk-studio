@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.studio;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.junit.jupiter.api.Test;
@@ -12,7 +13,6 @@ import java.lang.reflect.Field;
 class CanvasDtoContractTest {
 
   private static final String[] REQUIRED_NULLABLE_FIELDS = {
-    "CanvasDocumentDTO.threadId",
     "CanvasResourceNodeDTO.groupId",
     "CanvasResourceNodeDTO.function",
     "CanvasResourceNodeDTO.run",
@@ -28,8 +28,7 @@ class CanvasDtoContractTest {
     "CanvasFunctionModelDTO.unavailableReason",
     "CanvasFunctionParameterDefinitionDTO.defaultValue",
     "CanvasFunctionParameterDefinitionDTO.min",
-    "CanvasFunctionParameterDefinitionDTO.max",
-    "CanvasThreadBranchSettingsDTO.environment"
+    "CanvasFunctionParameterDefinitionDTO.max"
   };
 
   private static final String[] VERSION_STRING_FIELDS = {
@@ -62,6 +61,14 @@ class CanvasDtoContractTest {
           include.value(),
           field + " must explicitly emit null even under the global NON_NULL default");
     }
+  }
+
+  @Test
+  void canvasDocumentDoesNotExposeThreadBinding() {
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> CanvasDocumentDTO.class.getDeclaredField("threadId"),
+        "Canvas document ownership is represented by canvas_session relations");
   }
 
   private static Field field(String ownerAndField) throws NoSuchFieldException {

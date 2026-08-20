@@ -64,9 +64,11 @@ public class HarnessSessionDeletionService {
     }
     UUID ownerId = owner.id();
     List<UUID> sessionIds =
-        owner.type() == StudioOwnerType.CHAT
-            ? chatSessionRepository.listSessionIds(ownerId)
-            : canvasSessionRepository.listSessionIds(ownerId);
+        new ArrayList<>(
+            owner.type() == StudioOwnerType.CHAT
+                ? chatSessionRepository.listSessionIds(ownerId)
+                : canvasSessionRepository.listSessionIds(ownerId));
+    sessionIds.sort(UuidOrder.COMPARATOR);
     if (sessionIds.isEmpty()) {
       return;
     }

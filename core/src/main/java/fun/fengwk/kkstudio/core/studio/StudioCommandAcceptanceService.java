@@ -92,10 +92,18 @@ public class StudioCommandAcceptanceService {
     return runtime.acceptCommands(command, preflight);
   }
 
-  /** 调用 Runtime 前完成 owner 授权：NEW_SESSION 只要求 owner 存在；ENTRY/THREAD 要求目标 Session 已被该 owner 持有。 */
+  /**
+   * 调用 Runtime 前完成 owner 授权：NEW_SESSION 对新 Session 只要求 owner 存在，但对已有 Session（包括 Runtime 精确
+   * replay）要求目标 Session 已由该 owner 持有；ENTRY/THREAD 始终要求目标 Session 已由该 owner 持有。
+   */
   private void authorize(StudioOwner owner, AcceptCommandsTarget target) {
     switch (target) {
-      case AcceptCommandsTarget.NewSession ignored -> lockOwnerForKeyShare(owner);
+      case AcceptCommandsTarget.NewSession newSession -> {
+        lockOwnerForKeyShare(owner);
+        if (sessionHasOwnership(newSession.sessionId())) {
+          requireOwnedSession(owner, newSession.sessionId());
+        }
+      }
       case AcceptCommandsTarget.Entry entry -> {
         lockOwnerForKeyShare(owner);
         requireOwnedSession(owner, entry.sessionId());
@@ -105,6 +113,12 @@ public class StudioCommandAcceptanceService {
         requireOwnedSession(owner, findSessionId(thread.threadId()));
       }
     }
+  }
+
+  /** 已有归属边时，NEW_SESSION 也必须走 owner 校验，避免借 Runtime replay 绕过归属。 */
+  private boolean sessionHasOwnership(UUID sessionId) {
+    return chatSessionRepository.findBySessionId(sessionId) != null
+        || canvasSessionRepository.findBySessionId(sessionId) != null;
   }
 
   /** KEY SHARE 锁定 owner 行：阻止 owner 删除（排他锁等待）但允许同 owner 的并发接受。owner 缺失即归属目标不存在，确定性拒绝。 */

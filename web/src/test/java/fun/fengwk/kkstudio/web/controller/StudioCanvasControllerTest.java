@@ -23,7 +23,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
@@ -31,20 +30,11 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.core.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.core.studio.realtime.CanvasRealtimeService;
-import fun.fengwk.kkstudio.core.studio.thread.CanvasThreadService;
-import fun.fengwk.kkstudio.core.studio.thread.CanvasThreadService.CanvasFirstSendCommand;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasCommandDTO;
-import fun.fengwk.kkstudio.share.studio.CanvasThreadBranchSettingsDTO;
-import fun.fengwk.kkstudio.share.studio.CanvasThreadFirstSendRequestDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasTransformDTO;
 import fun.fengwk.kkstudio.share.studio.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.studio.canvas.CanvasChanges;
@@ -79,7 +69,6 @@ class StudioCanvasControllerTest {
 
   private static final Instant NOW = Instant.parse("2026-08-10T00:00:00Z");
   private static final UUID CANVAS = new UUID(0L, 1L);
-  private static final UUID THREAD = new UUID(0L, 7L);
   private static final UUID NODE_1 = new UUID(0L, 2L);
   private static final UUID NODE_2 = new UUID(0L, 3L);
   private static final UUID RESOURCE_1 = new UUID(0L, 4L);
@@ -93,7 +82,7 @@ class StudioCanvasControllerTest {
   private CanvasQueryService queryService;
   private CanvasCommandService commandService;
   private CanvasRealtimeService realtimeService;
-  private CanvasThreadService threadService;
+  private StudioHarnessQueryService harnessQueryService;
   private StorageBlobManager blobManager;
 
   @BeforeEach
@@ -105,7 +94,7 @@ class StudioCanvasControllerTest {
     queryService = mock(CanvasQueryService.class);
     commandService = mock(CanvasCommandService.class);
     realtimeService = mock(CanvasRealtimeService.class);
-    threadService = mock(CanvasThreadService.class);
+    harnessQueryService = mock(StudioHarnessQueryService.class);
     blobManager = mock(StorageBlobManager.class);
     FixedObjectProvider<StorageBlobManager> blobManagers = new FixedObjectProvider<>(blobManager);
     StorageBlob blob = new StorageBlob();
@@ -121,7 +110,7 @@ class StudioCanvasControllerTest {
                     queryService,
                     commandService,
                     realtimeService,
-                    threadService,
+                    harnessQueryService,
                     new StudioWebMapper(blobManagers)))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
@@ -138,7 +127,6 @@ class StudioCanvasControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].id").value(CANVAS.toString()))
             .andExpect(jsonPath("$.data[0].version").value("3"))
-            .andExpect(jsonPath("$.data[0].threadId").value(THREAD.toString()))
             .andExpect(jsonPath("$.data[0].graphRevision").doesNotExist())
             .andReturn();
     JsonNode listJson = readTree(list);
@@ -184,12 +172,31 @@ class StudioCanvasControllerTest {
   }
 
   @Test
+  void listCanvasSessionsReturnsOwnerSummaries() throws Exception {
+    HarnessSessionSummaryDTO summary = new HarnessSessionSummaryDTO();
+    summary.setSessionId(new UUID(0L, 10L).toString());
+    summary.setCreatedAt(NOW);
+    summary.setLastActivityAt(NOW.plusSeconds(3));
+    summary.setFirstMessagePreview("canvas prompt");
+    summary.setThreadCount(1);
+    when(harnessQueryService.listCanvasSessions(CANVAS)).thenReturn(List.of(summary));
+
+    mockMvc
+        .perform(get("/api/canvases/" + CANVAS + "/sessions"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].sessionId").value(summary.getSessionId()))
+        .andExpect(jsonPath("$.data[0].firstMessagePreview").value("canvas prompt"))
+        .andExpect(jsonPath("$.data[0].threadCount").value(1));
+    verify(harnessQueryService).listCanvasSessions(CANVAS);
+  }
+
+  @Test
   void textResourceHasNoBlobFactsAndCreateKeepsDocumentContract() throws Exception {
     when(queryService.findSnapshot(CANVAS))
         .thenReturn(
             Optional.of(
                 new CanvasSnapshot(
-                    new CanvasDocument(CANVAS, "demo", 3, null, NOW, NOW),
+                    new CanvasDocument(CANVAS, "demo", 3, NOW, NOW),
                     List.of(
                         new CanvasResourceNode(
                             NODE_1,
@@ -210,7 +217,6 @@ class StudioCanvasControllerTest {
         .perform(get("/api/canvases/" + CANVAS))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.document.version").value("3"))
-        .andExpect(jsonPath("$.data.document.threadId").value(nullValue()))
         .andExpect(jsonPath("$.data.nodes[0].resources[0].kind").value("TEXT"))
         .andExpect(jsonPath("$.data.nodes[0].resources[0].textContent").value("hello"))
         .andExpect(jsonPath("$.data.nodes[0].resources[0].blobId").value(nullValue()))
@@ -230,7 +236,7 @@ class StudioCanvasControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value("CREATED"))
         .andExpect(jsonPath("$.data.version").value("3"))
-        .andExpect(jsonPath("$.data.threadId").value(THREAD.toString()));
+        .andExpect(jsonPath("$.data.id").value(CANVAS.toString()));
     verify(commandService).createCanvas("board");
 
     mockMvc
@@ -430,108 +436,6 @@ class StudioCanvasControllerTest {
     verify(commandService).deleteCanvas(CANVAS);
   }
 
-  @Test
-  void firstSendMapsRequestToNarrowPortAndReturnsThreadDocument() throws Exception {
-    CanvasThreadService.CanvasFirstSendResult result =
-        new CanvasThreadService.CanvasFirstSendResult(THREAD, document());
-    when(threadService.sendFirstMessage(eq(CANVAS), any(CanvasFirstSendCommand.class)))
-        .thenReturn(result);
-    CanvasThreadFirstSendRequestDTO request = new CanvasThreadFirstSendRequestDTO();
-    request.setCommandId(COMMAND.toString());
-    CanvasThreadBranchSettingsDTO branchSettings = new CanvasThreadBranchSettingsDTO();
-    EnvironmentBindingDTO environment = new EnvironmentBindingDTO();
-    environment.setName("default");
-    environment.setWorkspacePath(".");
-    branchSettings.setEnvironment(environment);
-    branchSettings.setAgentName("assistant");
-    CanvasThreadBranchSettingsDTO.CanvasThreadModelSelectionDTO model =
-        new CanvasThreadBranchSettingsDTO.CanvasThreadModelSelectionDTO();
-    model.setProviderName("openai");
-    model.setModelName("gpt-4o");
-    model.setVariant("default");
-    branchSettings.setModel(model);
-    branchSettings.setActiveTools(List.of("read"));
-    request.setBranchSettings(branchSettings);
-    request.setYoloEnabled(true);
-    HarnessUserMessageContentDTO content = new HarnessUserMessageContentDTO();
-    content.setType("TEXT");
-    content.setText("hello");
-    request.setContents(List.of(content));
-
-    mockMvc
-        .perform(
-            post("/api/canvases/" + CANVAS + "/thread/messages")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    """
-                    {"commandId":"%s",
-                     "branchSettings":{"environment":{"name":"default","workspacePath":"."},"agentName":"assistant",
-                       "model":{"providerName":"openai","modelName":"gpt-4o","variant":"default"},
-                       "activeTools":["read"]},
-                     "yoloEnabled":true,
-                     "contents":[{"type":"TEXT","text":"hello"}]}
-                    """
-                        .formatted(COMMAND)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.code").value("CREATED"))
-        .andExpect(jsonPath("$.data.threadId").value(THREAD.toString()))
-        .andExpect(jsonPath("$.data.document.id").value(CANVAS.toString()));
-
-    ArgumentCaptor<CanvasFirstSendCommand> captor =
-        ArgumentCaptor.forClass(CanvasFirstSendCommand.class);
-    verify(threadService).sendFirstMessage(eq(CANVAS), captor.capture());
-    CanvasFirstSendCommand command = captor.getValue();
-    assertEquals(COMMAND.toString(), command.commandId());
-    assertEquals(true, command.yoloEnabled());
-    assertEquals(
-        new BranchSettings(
-            new EnvironmentBinding(new EnvironmentName("default"), "."),
-            "assistant",
-            new ModelSelection("openai", "gpt-4o", "default"),
-            List.of("read")),
-        command.branchSettings());
-    assertEquals(List.of(new TextMessageContent("hello")), command.contents());
-  }
-
-  @Test
-  void firstSendRejectsIncompleteEnvironmentBindingAsBadRequest() throws Exception {
-    // binding 嵌套字段缺失必须稳定 400（IAE），绝不能把 NPE 漏成 500。
-    String missingName =
-        """
-        {"commandId":"%s",
-         "branchSettings":{"environment":{"workspacePath":"."},"agentName":"assistant",
-           "model":{"providerName":"openai","modelName":"gpt-4o","variant":"default"},
-           "activeTools":["read"]},
-         "yoloEnabled":true,
-         "contents":[{"type":"TEXT","text":"hello"}]}
-        """
-            .formatted(COMMAND);
-    mockMvc
-        .perform(
-            post("/api/canvases/" + CANVAS + "/thread/messages")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(missingName))
-        .andExpect(status().isBadRequest());
-
-    String missingPath =
-        """
-        {"commandId":"%s",
-         "branchSettings":{"environment":{"name":"default"},"agentName":"assistant",
-           "model":{"providerName":"openai","modelName":"gpt-4o","variant":"default"},
-           "activeTools":["read"]},
-         "yoloEnabled":true,
-         "contents":[{"type":"TEXT","text":"hello"}]}
-        """
-            .formatted(COMMAND);
-    mockMvc
-        .perform(
-            post("/api/canvases/" + CANVAS + "/thread/messages")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(missingPath))
-        .andExpect(status().isBadRequest());
-    verify(threadService, never()).sendFirstMessage(eq(CANVAS), any(CanvasFirstSendCommand.class));
-  }
-
   private String validCommandJson() {
     return """
         {"expectedVersion":"3","commandId":"%s",
@@ -557,7 +461,7 @@ class StudioCanvasControllerTest {
   }
 
   private CanvasDocument document() {
-    return new CanvasDocument(CANVAS, "demo", 3, THREAD, NOW, NOW);
+    return new CanvasDocument(CANVAS, "demo", 3, NOW, NOW);
   }
 
   private CanvasSnapshot snapshot() {
