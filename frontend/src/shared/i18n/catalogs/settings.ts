@@ -93,18 +93,9 @@ export const settingsCatalog = {
     'en-US': 'Failed to save settings.',
     'zh-CN': '设置保存失败。',
   },
-  'settings.conflict.title': {
-    'en-US': 'Settings changed elsewhere',
-    'zh-CN': '设置已在其他位置修改',
-  },
-  'settings.conflict.description': {
-    'en-US':
-      'Reload the page to get the latest settings. Your current unsaved changes will be discarded.',
-    'zh-CN': '请重新加载页面以获取最新设置。当前未保存的修改将会丢失。',
-  },
-  'settings.conflict.reload': {
-    'en-US': 'Reload',
-    'zh-CN': '重新加载',
+  'settings.error.schema': {
+    'en-US': 'The settings form metadata is invalid; cannot render the editor.',
+    'zh-CN': '设置表单元数据无效，无法渲染编辑器。',
   },
   'settings.error.permissionToolNameRequired': {
     'en-US': 'Tool name is required.',
@@ -121,6 +112,10 @@ export const settingsCatalog = {
   'settings.error.numericFieldRequired': {
     'en-US': 'A required numeric field is empty; fill it in before saving.',
     'zh-CN': '存在为空的其他必需数值字段，请填写后再保存。',
+  },
+  'settings.error.partialModelSelection': {
+    'en-US': 'The fallback model selection is incomplete; fill in all three fields or clear all of them.',
+    'zh-CN': '回退模型选择不完整，请填齐三个字段或全部清空。',
   },
 
   // --- General / notifications / shortcuts ---
@@ -191,6 +186,10 @@ export const settingsCatalog = {
   },
 
   // --- AI Runtime ---
+  'settings.section.aiRuntime.description': {
+    'en-US': 'Shared invocation retry, compaction fallback and subagent budgets.',
+    'zh-CN': '共享调用重试、压缩回退与子代理预算。',
+  },
   'settings.section.aiRuntime.retry.title': {
     'en-US': 'Invocation retry',
     'zh-CN': '调用重试',
@@ -231,17 +230,30 @@ export const settingsCatalog = {
     'en-US': 'Max delay (ms)',
     'zh-CN': '最大延迟（毫秒）',
   },
-  'settings.field.aiRuntime.compactionEnabled': {
-    'en-US': 'Enable compaction',
-    'zh-CN': '启用压缩',
-  },
-  'settings.field.aiRuntime.compactionReserveTokens': {
-    'en-US': 'Reserved tokens',
-    'zh-CN': '预留 token',
-  },
-  'settings.field.aiRuntime.compactionMaxRecentTokens': {
+  'settings.field.aiRuntime.compactionKeepRecentTokens': {
     'en-US': 'Recent tokens to keep',
     'zh-CN': '保留最近 token',
+  },
+  'settings.field.aiRuntime.compactionFallbackModel': {
+    'en-US': 'Compaction fallback model',
+    'zh-CN': '压缩回退模型',
+  },
+  'settings.field.aiRuntime.compactionFallbackModel.hint': {
+    'en-US':
+      'Optional model used when the configured model cannot satisfy a compaction turn. Leave all three fields empty to disable the fallback.',
+    'zh-CN': '可选：配置的模型无法完成压缩轮次时使用的回退模型。三个字段全部留空表示禁用回退。',
+  },
+  'settings.field.aiRuntime.compactionFallbackModel.providerName': {
+    'en-US': 'Provider',
+    'zh-CN': 'Provider',
+  },
+  'settings.field.aiRuntime.compactionFallbackModel.modelName': {
+    'en-US': 'Model',
+    'zh-CN': '模型',
+  },
+  'settings.field.aiRuntime.compactionFallbackModel.variant': {
+    'en-US': 'Variant',
+    'zh-CN': '变体',
   },
   'settings.field.aiRuntime.subagentMaxDepth': {
     'en-US': 'Max depth',
@@ -281,6 +293,10 @@ export const settingsCatalog = {
   },
 
   // --- Tools & Permissions ---
+  'settings.section.tool.description': {
+    'en-US': 'Tool permission rules, default YOLO and gateway/skill loading budgets.',
+    'zh-CN': '工具权限规则、默认 YOLO 与网关/技能加载预算。',
+  },
   'settings.section.tool.permission.title': {
     'en-US': 'Permission rules',
     'zh-CN': '权限规则',
@@ -421,6 +437,10 @@ export const settingsCatalog = {
   },
 
   // --- Integrations ---
+  'settings.section.integrations.description': {
+    'en-US': 'Non-sensitive runtime parameters for external media and generation integrations.',
+    'zh-CN': '外部媒体/生成集成的非敏感运行参数。',
+  },
   'settings.section.integrations.comfyui.title': {
     'en-US': 'ComfyUI',
     'zh-CN': 'ComfyUI',
@@ -599,6 +619,10 @@ export const settingsCatalog = {
   },
 
   // --- Storage & Media ---
+  'settings.section.storageMedia.description': {
+    'en-US': 'Upload, S3 presigning and canvas media processing budgets.',
+    'zh-CN': '上传、S3 预签名与 Canvas 媒体处理预算。',
+  },
   'settings.section.storageMedia.upload.title': {
     'en-US': 'Uploads & S3 presigning',
     'zh-CN': '上传与 S3 预签名',
@@ -644,29 +668,57 @@ export const settingsCatalog = {
     'zh-CN': '缩略图质量',
   },
   // --- Advanced ---
+  'settings.section.advanced.description': {
+    'en-US': 'Process-level runtime budgets for processor, dispatcher, executors and work notification.',
+    'zh-CN': '处理器/分发器/执行器/工作通知的进程级运行预算。',
+  },
   'settings.section.advanced.resource.title': {
     'en-US': 'Resource budget',
     'zh-CN': '资源预算',
+  },
+  'settings.section.advanced.resource.description': {
+    'en-US': 'Per-request resource budgets.',
+    'zh-CN': '单次请求的资源预算。',
   },
   'settings.section.advanced.processor.title': {
     'en-US': 'Processor',
     'zh-CN': '处理器',
   },
+  'settings.section.advanced.processor.description': {
+    'en-US': 'Lease and heartbeat budgets for thread processors.',
+    'zh-CN': '线程处理器的租约与心跳预算。',
+  },
   'settings.section.advanced.dispatcher.title': {
     'en-US': 'Dispatcher',
     'zh-CN': '分发器',
+  },
+  'settings.section.advanced.dispatcher.description': {
+    'en-US': 'Dispatch concurrency, queue and rejection budgets.',
+    'zh-CN': '分发并发、队列与拒绝预算。',
   },
   'settings.section.advanced.canvas.title': {
     'en-US': 'Canvas runtime',
     'zh-CN': '画布运行时',
   },
+  'settings.section.advanced.canvas.description': {
+    'en-US': 'Canvas realtime and function executor budgets.',
+    'zh-CN': '画布实时通道与函数执行器预算。',
+  },
   'settings.section.advanced.applicationEvent.title': {
     'en-US': 'Application events',
     'zh-CN': '应用事件',
   },
+  'settings.section.advanced.applicationEvent.description': {
+    'en-US': 'Application event channel budgets.',
+    'zh-CN': '应用事件通道预算。',
+  },
   'settings.section.advanced.workNotification.title': {
     'en-US': 'Work notification',
     'zh-CN': '工作通知',
+  },
+  'settings.section.advanced.workNotification.description': {
+    'en-US': 'Work notification polling and reconnection budgets.',
+    'zh-CN': '工作通知轮询与重连预算。',
   },
   'settings.field.advanced.resourceMaxBytes': {
     'en-US': 'Max resource bytes',

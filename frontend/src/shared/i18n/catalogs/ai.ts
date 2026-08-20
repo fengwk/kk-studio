@@ -1890,22 +1890,6 @@ export const aiCatalog = {
     'en-US': 'A previous acceptance is still awaiting a definite result',
     'zh-CN': '上一条接受请求仍在等待确定结果',
   },
-  'ai.runtime.conflict.title': {
-    'en-US': 'The durable state changed',
-    'zh-CN': '持久状态已变化',
-  },
-  'ai.runtime.conflict.reason': {
-    'en-US': 'Reason: {{reason}}',
-    'zh-CN': '原因：{{reason}}',
-  },
-  'ai.runtime.conflict.refresh': {
-    'en-US': 'Refresh',
-    'zh-CN': '刷新',
-  },
-  'ai.runtime.conflict.retry': {
-    'en-US': 'Retry',
-    'zh-CN': '重试',
-  },
   'ai.environment.loading': {
     'en-US': 'Loading Environments',
     'zh-CN': '正在加载 Environments',

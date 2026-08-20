@@ -4366,6 +4366,13 @@ div.is-error {
   gap: 18px;
 }
 
+.settings-section-description {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
 .settings-card-title-row {
   display: flex;
   align-items: center;

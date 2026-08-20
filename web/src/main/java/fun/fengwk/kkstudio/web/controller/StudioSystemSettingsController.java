@@ -9,8 +9,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSchemaProvider;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
 /** 全局 system settings 聚合的 GET / PUT HTTP 边界。 */
@@ -20,10 +22,16 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 public class StudioSystemSettingsController {
 
   private final SystemSettingsService systemSettingsService;
+  private final SystemSettingsSchemaProvider systemSettingsSchemaProvider;
 
   @GetMapping
   public Result<SystemSettingsDTO> get() {
     return Results.ok(systemSettingsService.get());
+  }
+
+  @GetMapping("/schema")
+  public Result<SystemSettingsSchemaDTO> schema() {
+    return Results.ok(systemSettingsSchemaProvider.get());
   }
 
   @PutMapping

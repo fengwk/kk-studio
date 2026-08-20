@@ -14,6 +14,11 @@ import {
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
 import { useI18n } from '@/shared/i18n'
+import { validateSystemSettingsSchema } from '@/features/settings/system-settings-schema-validation'
+import {
+  presentConflict,
+  type ConflictPresentation,
+} from '@/shared/conflict/conflict-presenter'
 
 /** draft 与其 CAS base version 的单一快照：两者总是从同一权威派生点一起捕获/更新。 */
 interface DraftSnapshot {
@@ -39,14 +44,19 @@ export function useSystemSettingsEditor() {
     queryKey: queryKeys.systemSettings.all,
     queryFn: () => systemSettingsService.get(),
   })
+  const schemaQuery = useQuery({
+    queryKey: queryKeys.systemSettings.schema,
+    queryFn: () => systemSettingsService.getSchema(),
+  })
 
   const [draftSnapshot, setDraftSnapshot] = useState<DraftSnapshot | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [staleConflict, setStaleConflict] = useState(false)
+  const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   const [draftError, setDraftError] = useState<DraftValidationReason | null>(null)
 
   const authoritative = query.data ?? null
   const draft = draftSnapshot?.sections ?? null
+  const rawSchema = schemaQuery.data ?? null
 
   // 只在还没有快照时从权威数据派生（首次 hydration，捕获当时的 version 作为 baseVersion）；
   // 后台刷新既不复位 baseVersion，也不覆盖用户正在编辑的 draft。
@@ -70,6 +80,15 @@ export function useSystemSettingsEditor() {
     return JSON.stringify(draft) !== JSON.stringify(authoritativeSections)
   }, [authoritativeSections, draft])
 
+  // 只有通过 fail-closed 校验的 schema 才交给 UI：SettingsPage 拿到的 schema 为 null 时
+  // 不会构建任何 server tab，invalid schema 永远进不了渲染器。
+  const schema = useMemo(() => {
+    if (rawSchema == null || draft == null) {
+      return null
+    }
+    return validateSystemSettingsSchema(rawSchema, draft) == null ? rawSchema : null
+  }, [draft, rawSchema])
+
   const version = authoritative?.version ?? null
 
   const mutation = useMutation({
@@ -86,7 +105,7 @@ export function useSystemSettingsEditor() {
         baseVersion: updated.version,
       })
       setSaveError(null)
-      setStaleConflict(false)
+      setConflict(null)
       setDraftError(null)
       await queryClient.invalidateQueries({ queryKey: queryKeys.systemSettings.all })
     },
@@ -94,15 +113,15 @@ export function useSystemSettingsEditor() {
       if (error instanceof DraftValidationError) {
         setDraftError(error.reason)
         setSaveError(null)
-        setStaleConflict(false)
+        setConflict(null)
         return
       }
       if (isConflictError(error)) {
-        setStaleConflict(true)
+        setConflict(presentConflict(error))
         setSaveError(null)
         return
       }
-      setStaleConflict(false)
+      setConflict(null)
       setSaveError(toSaveErrorMessage(error, t('settings.error.saveFailed')))
     },
   })
@@ -113,7 +132,7 @@ export function useSystemSettingsEditor() {
     }
     // 每次保存从干净状态开始，呈现本次操作的真实结果。
     setSaveError(null)
-    setStaleConflict(false)
+    setConflict(null)
     setDraftError(null)
     try {
       // sections 与 baseVersion 出自同一快照：后台刷新把权威推进到新版本也不会让旧 draft 携带新版本提交。
@@ -135,52 +154,61 @@ export function useSystemSettingsEditor() {
       })
     }
     setSaveError(null)
-    setStaleConflict(false)
+    setConflict(null)
     setDraftError(null)
   }, [authoritative])
 
-  const dismissStaleConflict = useCallback(() => {
-    setStaleConflict(false)
+  const dismissConflict = useCallback(() => {
+    setConflict(null)
   }, [])
 
-  const updateSection = useCallback(
-    <K extends keyof SystemSettingsSectionsDraft>(section: K, value: SystemSettingsSectionsDraft[K]) => {
-      // 只替换 section 内容，baseVersion 保持快照原值不动。
-      setDraftSnapshot((prev) =>
-        prev ? { ...prev, sections: { ...prev.sections, [section]: value } } : prev,
-      )
-    },
-    [],
-  )
+  const updateDraft = useCallback((sections: SystemSettingsSectionsDraft) => {
+    setDraftSnapshot((prev) => (prev ? { ...prev, sections } : prev))
+  }, [])
 
   const retryLoad = useCallback(() => {
-    void queryClient.refetchQueries({ queryKey: queryKeys.systemSettings.all })
+    void Promise.all([
+      queryClient.refetchQueries({ queryKey: queryKeys.systemSettings.all }),
+      queryClient.refetchQueries({ queryKey: queryKeys.systemSettings.schema }),
+    ])
   }, [queryClient])
 
   // 权威数据缺失（初始加载失败）才视为整页加载错误；draft 存在时后台刷新失败不打断编辑。
   const loadError = useMemo(() => {
-    if (query.isError && draft === null) {
+    if ((query.isError || schemaQuery.isError) && draft === null) {
       return t('settings.error.load')
     }
     return null
-  }, [draft, query.isError, t])
+  }, [draft, query.isError, schemaQuery.isError, t])
+
+  const schemaError = useMemo(() => {
+    if (schemaQuery.isError) {
+      return t('settings.error.schema')
+    }
+    // schema 已经过 fail-closed 校验（无效时为 null）：只要加载成功但 UI 拿不到 schema，就是无效。
+    if (rawSchema != null && draft != null && schema == null) {
+      return t('settings.error.schema')
+    }
+    return null
+  }, [draft, rawSchema, schema, schemaQuery.isError, t])
 
   return {
-    loading: query.isLoading && draft === null,
+    loading: (query.isLoading || schemaQuery.isLoading) && draft === null,
     loadError,
+    schemaError,
     retryLoad,
     dirty,
     saving: mutation.isPending,
     save,
     reset,
     saveError,
-    staleConflict,
-    dismissStaleConflict,
+    conflict,
+    dismissConflict,
     draftError,
     version,
     draft,
-    updateSection,
-    authoritativeSections,
+    updateDraft,
+    schema,
   }
 }
 

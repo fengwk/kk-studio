@@ -42,7 +42,7 @@ import { translate, useI18n } from '@/shared/i18n'
 import {
   presentConflict,
   type ConflictPresentation,
-} from '@/features/ai/runtime/conflict-presenter'
+} from '@/shared/conflict/conflict-presenter'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {

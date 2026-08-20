@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.hamcrest.Matchers.contains;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -52,6 +53,65 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.advanced.dispatcherMaxDispatchTasks").value(64))
         .andExpect(jsonPath("$.data.createTime").exists())
         .andExpect(jsonPath("$.data.updateTime").exists());
+  }
+
+  @Test
+  public void schemaReturnsOrderedSectionsGroupsAndFields() throws Exception {
+    mockMvc
+        .perform(get("/api/settings/schema"))
+        .andExpect(status().isOk())
+        // section 顺序沿用原 tabs/cards：aiRuntime -> tool -> environment -> integrations
+        // -> storageMedia -> advanced（General 是前端本地 tab，不在 server schema）。
+        .andExpect(jsonPath("$.data.sections[0].key").value("aiRuntime"))
+        .andExpect(jsonPath("$.data.sections[1].key").value("tool"))
+        .andExpect(jsonPath("$.data.sections[2].key").value("environment"))
+        .andExpect(jsonPath("$.data.sections[3].key").value("integrations"))
+        .andExpect(jsonPath("$.data.sections[4].key").value("storageMedia"))
+        .andExpect(jsonPath("$.data.sections[5].key").value("advanced"))
+        // 精确顺序断言：每个 section 的完整 key 序列必须与基线 tabs 完全一致。
+        .andExpect(
+            jsonPath("$.data.sections[*].key")
+                .value(
+                    contains(
+                        "aiRuntime",
+                        "tool",
+                        "environment",
+                        "integrations",
+                        "storageMedia",
+                        "advanced")))
+        // 两个 custom atomic leaf 各为单个 field。
+        .andExpect(jsonPath("$.data.sections[1].groups[0].fields[0].path").value("tool.permission"))
+        .andExpect(
+            jsonPath("$.data.sections[0].groups[1].fields[1].path")
+                .value("aiRuntime.compactionFallbackModel"))
+        // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
+        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].type").value("INTEGER"))
+        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].min").value(1))
+        .andExpect(jsonPath("$.data.sections[3].groups[1].fields[3].max").value(1800000))
+        // 领域上界映射：promptEnvironmentName 受 EnvironmentName.MAX_LENGTH=64 约束。
+        .andExpect(jsonPath("$.data.sections[3].groups[4].fields[1].max").value(64))
+        // ENUM options 由 server 表达。
+        .andExpect(jsonPath("$.data.sections[0].groups[0].fields[1].type").value("ENUM"))
+        .andExpect(
+            jsonPath("$.data.sections[0].groups[0].fields[1].options[0].value").value("FIXED"))
+        .andExpect(
+            jsonPath("$.data.sections[0].groups[0].fields[1].options[1].value")
+                .value("EXPONENTIAL"))
+        // PERMISSION options 由 server 表达。
+        .andExpect(
+            jsonPath("$.data.sections[1].groups[0].fields[0].options[0].value").value("allow"))
+        .andExpect(jsonPath("$.data.sections[1].groups[0].fields[0].options[1].value").value("ask"))
+        .andExpect(
+            jsonPath("$.data.sections[1].groups[0].fields[0].options[2].value").value("deny"))
+        // nullable fallback model 输出为 true。
+        .andExpect(jsonPath("$.data.sections[0].groups[1].fields[1].nullable").value(true))
+        // group 最小结构：key/labelKey/restartRequired。
+        .andExpect(jsonPath("$.data.sections[1].groups[0].key").value("tool.permission"))
+        .andExpect(jsonPath("$.data.sections[1].groups[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[0].groups[1].restartRequired").value(true))
+        // restartRequired section 标记：aiRuntime 整体重启，tool 不需要。
+        .andExpect(jsonPath("$.data.sections[0].restartRequired").value(true))
+        .andExpect(jsonPath("$.data.sections[1].restartRequired").value(false));
   }
 
   @Test

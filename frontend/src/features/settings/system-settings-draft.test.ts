@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   assembleSettingsUpdate,
+  draftLeafPaths,
   DraftValidationError,
+  getDraftValue,
+  setDraftValue,
   settingsSectionsToDraft,
 } from '@/features/settings/system-settings-draft'
 import { makeSettingsDto } from '@/features/settings/settings-test-fixtures'
@@ -97,5 +100,85 @@ describe('system settings draft codec', () => {
     expect(JSON.stringify(permission)).toBe(
       '{"__proto__":[{"pattern":"*","action":"ask"}]}',
     )
+  })
+
+  it('assembles a null fallback model as null and a complete one as a DTO', () => {
+    // null 表示禁用 one-shot fallback。
+    const nullDraft = settingsSectionsToDraft(makeSettingsDto())
+    nullDraft.aiRuntime.compactionFallbackModel = null
+    expect(assembleSettingsUpdate(nullDraft, '0').aiRuntime.compactionFallbackModel).toBeNull()
+
+    // 三个字段完整 -> DTO（trim 后）。
+    const fullDraft = settingsSectionsToDraft(makeSettingsDto())
+    fullDraft.aiRuntime.compactionFallbackModel = {
+      providerName: '  openai  ',
+      modelName: 'gpt-4o',
+      variant: 'default',
+    }
+    expect(assembleSettingsUpdate(fullDraft, '0').aiRuntime.compactionFallbackModel).toEqual({
+      providerName: 'openai',
+      modelName: 'gpt-4o',
+      variant: 'default',
+    })
+  })
+
+  it('treats an all-empty fallback model as null and rejects a partial one deterministically', () => {
+    // 全部为空 = null（与 ModelSelectionEditor 的 null 语义一致）。
+    const emptyDraft = settingsSectionsToDraft(makeSettingsDto())
+    emptyDraft.aiRuntime.compactionFallbackModel = { providerName: '', modelName: '', variant: '' }
+    expect(assembleSettingsUpdate(emptyDraft, '0').aiRuntime.compactionFallbackModel).toBeNull()
+
+    // 部分填写必须确定性报错，而不是静默丢弃或生成畸形 DTO。
+    for (const partial of [
+      { providerName: 'openai', modelName: '', variant: '' },
+      { providerName: '', modelName: 'gpt-4o', variant: '' },
+      { providerName: '', modelName: '', variant: 'default' },
+      { providerName: 'openai', modelName: 'gpt-4o', variant: '' },
+      { providerName: 'openai', modelName: '', variant: 'default' },
+      { providerName: '', modelName: 'gpt-4o', variant: 'default' },
+    ]) {
+      const draft = settingsSectionsToDraft(makeSettingsDto())
+      draft.aiRuntime.compactionFallbackModel = partial
+      expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
+        expect.objectContaining<DraftValidationError>({ reason: 'partialModelSelection' }),
+      )
+    }
+  })
+
+  it('hydrates a stored fallback model into the draft and round-trips it back', () => {
+    const dto = makeSettingsDto()
+    dto.aiRuntime.compactionFallbackModel = {
+      providerName: 'openai',
+      modelName: 'gpt-4o',
+      variant: 'default',
+    }
+    const draft = settingsSectionsToDraft(dto)
+    expect(draft.aiRuntime.compactionFallbackModel).toEqual({
+      providerName: 'openai',
+      modelName: 'gpt-4o',
+      variant: 'default',
+    })
+    expect(assembleSettingsUpdate(draft, '0').aiRuntime.compactionFallbackModel).toEqual({
+      providerName: 'openai',
+      modelName: 'gpt-4o',
+      variant: 'default',
+    })
+  })
+
+  it('get/set by path stay on the single draft mapping point', () => {
+    const draft = settingsSectionsToDraft(makeSettingsDto())
+    const next = setDraftValue(draft, 'aiRuntime.compactionKeepRecentTokens', '25000')
+    expect(next.aiRuntime.compactionKeepRecentTokens).toBe('25000')
+    expect(getDraftValue(next, 'aiRuntime.compactionKeepRecentTokens')).toBe('25000')
+    // 原 draft 未被修改（不可变写入）。
+    expect(draft.aiRuntime.compactionKeepRecentTokens).toBe('20000')
+    // 未知路径必须 fail closed。
+    expect(() => setDraftValue(draft, 'aiRuntime.bogusField', 'true')).toThrow(
+      /unknown system settings draft path/,
+    )
+    expect(() => getDraftValue(draft, 'tool.missing')).toThrow(/unknown system settings draft path/)
+    // draft leaf 枚举与 schema 语义一致：两个 custom atomic leaf 各算一个 leaf。
+    expect(draftLeafPaths(draft)).toContain('tool.permission')
+    expect(draftLeafPaths(draft)).toContain('aiRuntime.compactionFallbackModel')
   })
 })

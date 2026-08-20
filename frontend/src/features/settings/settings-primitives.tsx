@@ -29,7 +29,6 @@ export function SettingsCard({
   timing?: ApplyTiming
   children: ReactNode
 }) {
-  const { t } = useI18n()
   const titleId = useId()
   return (
     <section className="settings-card" aria-labelledby={titleId}>
@@ -38,7 +37,7 @@ export function SettingsCard({
           <h2 id={titleId}>{title}</h2>
           {timing ? <ApplyTimingBadge timing={timing} /> : null}
         </div>
-        {description ? <p>{t(description)}</p> : null}
+        {description ? <p>{description}</p> : null}
       </header>
       {children}
     </section>
@@ -63,6 +62,8 @@ export function SettingsSwitchRow({
   onChange,
   disabled = false,
   ariaLabel,
+  fieldPath,
+  nullable = false,
 }: {
   label: string
   description?: string
@@ -70,13 +71,18 @@ export function SettingsSwitchRow({
   onChange: (next: boolean) => void
   disabled?: boolean
   ariaLabel?: string
+  fieldPath?: string
+  nullable?: boolean
 }) {
-  const { t } = useI18n()
   return (
-    <div className="settings-row">
+    <div
+      className="settings-row"
+      data-settings-field-path={fieldPath}
+      data-settings-nullable={nullable}
+    >
       <div className="settings-row-text">
         <strong>{label}</strong>
-        {description ? <span className="settings-row-description">{t(description)}</span> : null}
+        {description ? <span className="settings-row-description">{description}</span> : null}
       </div>
       <button
         type="button"
@@ -101,6 +107,9 @@ export function SettingsTextField({
   disabled = false,
   type = 'text',
   hint,
+  maxLength,
+  fieldPath,
+  nullable = false,
 }: {
   label: string
   value: string
@@ -109,11 +118,17 @@ export function SettingsTextField({
   disabled?: boolean
   type?: 'text' | 'password'
   hint?: string
+  maxLength?: number
+  fieldPath?: string
+  nullable?: boolean
 }) {
   const fieldId = useId()
-  const { t } = useI18n()
   return (
-    <div className="settings-field">
+    <div
+      className="settings-field"
+      data-settings-field-path={fieldPath}
+      data-settings-nullable={nullable}
+    >
       <label className="settings-field-label" htmlFor={fieldId}>
         {label}
       </label>
@@ -123,10 +138,11 @@ export function SettingsTextField({
         type={type}
         value={value}
         placeholder={placeholder}
+        maxLength={maxLength}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       />
-      {hint ? <span className="settings-field-hint">{t(hint)}</span> : null}
+      {hint ? <span className="settings-field-hint">{hint}</span> : null}
     </div>
   )
 }
@@ -144,6 +160,8 @@ export function SettingsNumberField({
   step = 1,
   disabled = false,
   hint,
+  fieldPath,
+  nullable = false,
 }: {
   label: string
   value: string
@@ -153,11 +171,18 @@ export function SettingsNumberField({
   step?: number
   disabled?: boolean
   hint?: string
+  fieldPath?: string
+  nullable?: boolean
 }) {
   const fieldId = useId()
-  const { t } = useI18n()
   return (
-    <div className="settings-field">
+    <div
+      className="settings-field"
+      data-settings-field-path={fieldPath}
+      data-settings-nullable={nullable}
+      data-settings-min={min}
+      data-settings-max={max}
+    >
       <label className="settings-field-label" htmlFor={fieldId}>
         {label}
       </label>
@@ -173,7 +198,7 @@ export function SettingsNumberField({
         disabled={disabled}
         onChange={(event) => onChange(sanitizeIntegerInput(event.target.value))}
       />
-      {hint ? <span className="settings-field-hint">{t(hint)}</span> : null}
+      {hint ? <span className="settings-field-hint">{hint}</span> : null}
     </div>
   )
 }
@@ -189,16 +214,27 @@ export function SettingsSelectField({
   options,
   onChange,
   disabled = false,
+  hint,
+  fieldPath,
+  nullable = false,
 }: {
   label: string
   value: string
   options: SettingsSelectOption[]
   onChange: (next: string) => void
   disabled?: boolean
+  hint?: string
+  fieldPath?: string
+  nullable?: boolean
 }) {
   const fieldId = useId()
   return (
-    <div className="settings-field">
+    <div
+      className="settings-field"
+      data-settings-field-path={fieldPath}
+      data-settings-nullable={nullable}
+      data-settings-options={options.map((option) => option.value).join(',')}
+    >
       <label className="settings-field-label" htmlFor={fieldId}>
         {label}
       </label>
@@ -215,6 +251,7 @@ export function SettingsSelectField({
           </option>
         ))}
       </select>
+      {hint ? <span className="settings-field-hint">{hint}</span> : null}
     </div>
   )
 }
