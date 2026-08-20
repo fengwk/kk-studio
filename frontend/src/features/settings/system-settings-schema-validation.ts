@@ -132,7 +132,7 @@ function validateField(
       optionValues.add(option.value)
     }
   }
-  if (!matchesFieldType(field.type, value)) {
+  if (!matchesFieldType(field.type, value, field.nullable)) {
     return `settings schema type does not match draft: ${field.path}`
   }
   if (
@@ -151,7 +151,11 @@ function isFiniteBound(value: number | null): boolean {
   return value == null || (Number.isInteger(value) && Number.isFinite(value))
 }
 
-function matchesFieldType(type: SystemSettingsSchemaFieldType, value: unknown): boolean {
+function matchesFieldType(
+  type: SystemSettingsSchemaFieldType,
+  value: unknown,
+  nullable: boolean,
+): boolean {
   switch (type) {
     case 'BOOLEAN':
       return typeof value === 'boolean'
@@ -165,7 +169,7 @@ function matchesFieldType(type: SystemSettingsSchemaFieldType, value: unknown): 
     case 'PERMISSION':
       return Array.isArray(value)
     case 'MODEL_SELECTION':
-      return value == null || isModelSelectionDraft(value)
+      return value == null ? nullable : isModelSelectionDraft(value)
   }
 }
 

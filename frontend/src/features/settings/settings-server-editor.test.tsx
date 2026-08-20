@@ -94,7 +94,7 @@ describe('system settings server editor', () => {
     expect(screen.getByText('重启后生效')).toBeInTheDocument()
   })
 
-  it('shows a loading state while the aggregate is pending and renders content after it resolves', async () => {
+  it('does not expose unvalidated server tabs while the aggregate is pending', async () => {
     let resolveGet: (dto: SystemSettingsDTO) => void
     mocks.get.mockImplementation(
       () => new Promise<SystemSettingsDTO>((resolve) => {
@@ -103,10 +103,11 @@ describe('system settings server editor', () => {
     )
     renderSettings()
 
-    await userEvent.click(await serverTab('AI 运行时'))
-    expect(screen.getByRole('status')).toHaveTextContent('正在加载设置…')
+    expect(await screen.findByRole('tab', { name: '常规' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'AI 运行时' })).not.toBeInTheDocument()
 
     resolveGet!(makeSettingsDto())
+    await userEvent.click(await serverTab('AI 运行时'))
     expect(await screen.findByLabelText('最大重试次数')).toHaveValue(3)
   })
 
@@ -115,10 +116,10 @@ describe('system settings server editor', () => {
     mocks.get.mockRejectedValueOnce(new Error('network down')).mockImplementation(backend.get)
     renderSettings()
 
-    await userEvent.click(await serverTab('AI 运行时'))
     expect(await screen.findByText('设置加载失败。')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: '重试' }))
+    await userEvent.click(await serverTab('AI 运行时'))
     expect(await screen.findByLabelText('最大重试次数')).toHaveValue(3)
   })
 
@@ -131,6 +132,9 @@ describe('system settings server editor', () => {
     expect(await screen.findByRole('tab', { name: '常规' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'AI 运行时' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '工具与权限' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '设置表单元数据无效，无法渲染编辑器。',
+    )
     expect(screen.getByRole('tabpanel')).toHaveTextContent('键盘快捷键')
   })
 

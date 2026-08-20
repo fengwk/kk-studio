@@ -84,7 +84,7 @@ export function useSystemSettingsEditor() {
   // 不会构建任何 server tab，invalid schema 永远进不了渲染器。
   const schema = useMemo(() => {
     if (rawSchema == null || draft == null) {
-      return rawSchema
+      return null
     }
     return validateSystemSettingsSchema(rawSchema, draft) == null ? rawSchema : null
   }, [draft, rawSchema])
