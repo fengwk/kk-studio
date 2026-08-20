@@ -30,9 +30,7 @@ describe('chatService', () => {
       '/ai/chat/chat%20%2F1',
       { params: { expectedVersion: '5' } },
     )
-    expect((service as Record<string, unknown>).updateChat).toBeUndefined()
-    expect((service as Record<string, unknown>).createChatThread).toBeUndefined()
-    expect((service as Record<string, unknown>).associateThread).toBeUndefined()
+    expect(Object.keys(service)).toEqual(['listChats', 'createChat', 'getChat', 'deleteChat'])
   })
 
   it('keeps the complete EnvironmentBinding atomic on Chat creation', async () => {
