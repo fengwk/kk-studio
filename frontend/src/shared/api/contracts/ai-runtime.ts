@@ -103,7 +103,7 @@ export interface HarnessThreadCommandDTO {
 /**
  * 类型化的 Thread mailbox command 请求。
  *
- * USER_MESSAGE 只接受一个非空、有序的 contents 列表（TEXT/ATTACHMENT），不提供
+ * USER_MESSAGE 只接受一个非空、有序的 contents 列表（TEXT/ATTACHMENT/RESOURCE），不提供
  * 任何文本 shorthand。持久 Entry/投影仍可包含 CUSTOM_MESSAGE，但它不是创建命令。
  * clientCommandId 是稳定的幂等键。
  */
@@ -114,6 +114,8 @@ export type HarnessUserMessageContentDTO =
    * 将其原子物化为 durable RESOURCE。
    */
   | { type: 'ATTACHMENT'; uploadId: string }
+  /** 当前 Session 已拥有的 durable blob ref；用于 Stop 后 Resource pill 重提。 */
+  | { type: 'RESOURCE'; blobId: string; name: string; preview?: string | null }
 
 type HarnessUserMessageCommandDTO = {
   type: 'USER_MESSAGE'
@@ -152,6 +154,14 @@ export interface HarnessThreadStopResultDTO {
   thread: HarnessThreadDTO
   stoppedTurnEndEntryId: string | null
   cancelledCommandCount: number
+  cancelledUserMessages: HarnessCancelledUserMessageDTO[]
+}
+
+/** Stop 取消的一条 user-like 消息；messageJson 为 canonical AgentMessage JSON。 */
+export interface HarnessCancelledUserMessageDTO {
+  sequence: string
+  clientCommandId: string
+  messageJson: string
 }
 
 /** Tool 审批决定请求；decisionId 是稳定的客户端幂等键。 */

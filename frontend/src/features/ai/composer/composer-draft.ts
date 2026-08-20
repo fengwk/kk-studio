@@ -1,11 +1,11 @@
 import {
+  createResourcePart,
   createTextPart,
   hasMessageContent,
-  partsToText,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
 
-const STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v1:'
+const STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v2:'
 
 export type ComposerDraftChangeSource = 'edit' | 'history'
 
@@ -14,8 +14,8 @@ export function composerDraftStorageKey(scope: string): string {
 }
 
 /**
- * 浏览器只能可靠恢复纯文本草稿；附件上传注册表与 File 不可持久化，因此附件草稿
- * 保持当前页面会话内有效，并清理旧的纯文本持久值，避免刷新后恢复错误内容。
+ * 浏览器可靠持久化 text + durable resource；attachment 依赖页面内上传注册表与 File，
+ * 因此 attachment-bearing 草稿只在当前页面会话有效，并清理旧持久值。
  */
 export function storeComposerDraft(
   scope: string,
@@ -25,14 +25,29 @@ export function storeComposerDraft(
   if (!scope) {
     return
   }
-  const textOnly = parts.every((part) => part.type === 'text')
-  const text = textOnly ? partsToText(parts) : ''
+  const persistable = parts.every((part) => part.type !== 'attachment')
   try {
-    if (!textOnly || text.trim() === '') {
+    if (!persistable || !hasMessageContent(parts)) {
       storage.removeItem(composerDraftStorageKey(scope))
       return
     }
-    storage.setItem(composerDraftStorageKey(scope), text)
+    storage.setItem(
+      composerDraftStorageKey(scope),
+      JSON.stringify({
+        version: 2,
+        parts: parts.map((part) => {
+          if (part.type === 'text') {
+            return { type: 'text', text: part.text }
+          }
+          return {
+            type: 'resource',
+            blobId: part.blobId,
+            name: part.name,
+            ...(part.preview !== undefined ? { preview: part.preview } : {}),
+          }
+        }),
+      }),
+    )
   } catch {
     // quota/set 失败时移除旧值，避免刷新后恢复成过期草稿。
     try {
@@ -65,9 +80,23 @@ export function loadStoredComposerDraft(
     return []
   }
   try {
-    const text = storage.getItem(composerDraftStorageKey(scope))
-    return text != null && text.trim() !== '' ? [createTextPart(text)] : []
+    const key = composerDraftStorageKey(scope)
+    const raw = storage.getItem(key)
+    if (raw == null) {
+      return []
+    }
+    const parts = parseStoredDraft(raw)
+    if (!hasMessageContent(parts)) {
+      storage.removeItem(key)
+      return []
+    }
+    return parts
   } catch {
+    try {
+      storage.removeItem(composerDraftStorageKey(scope))
+    } catch {
+      // localStorage 可能被浏览器策略整体禁用。
+    }
     return []
   }
 }
@@ -80,4 +109,52 @@ export function restoreComposerDraft(
   return hasMessageContent(preferred)
     ? preferred
     : loadStoredComposerDraft(scope, storage)
+}
+
+function parseStoredDraft(raw: string): ComposerPart[] {
+  const parsed: unknown = JSON.parse(raw)
+  if (!isRecord(parsed) || parsed.version !== 2 || !Array.isArray(parsed.parts)) {
+    throw new Error('invalid composer draft')
+  }
+  if (!hasExactKeys(parsed, ['version', 'parts'])) {
+    throw new Error('invalid composer draft fields')
+  }
+  return parsed.parts.map((part) => {
+    if (!isRecord(part) || typeof part.type !== 'string') {
+      throw new Error('invalid composer draft part')
+    }
+    if (part.type === 'text') {
+      if (!hasExactKeys(part, ['type', 'text']) || typeof part.text !== 'string') {
+        throw new Error('invalid text draft part')
+      }
+      return createTextPart(part.text)
+    }
+    if (part.type === 'resource') {
+      if (
+        !hasOnlyKeys(part, ['type', 'blobId', 'name', 'preview'])
+        || typeof part.blobId !== 'string'
+        || !part.blobId.trim()
+        || typeof part.name !== 'string'
+        || !part.name.trim()
+        || (part.preview !== undefined && typeof part.preview !== 'string')
+      ) {
+        throw new Error('invalid resource draft part')
+      }
+      return createResourcePart(part.blobId, part.name, part.preview)
+    }
+    throw new Error('unknown composer draft part')
+  })
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function hasExactKeys(record: Record<string, unknown>, keys: string[]): boolean {
+  return Object.keys(record).length === keys.length && hasOnlyKeys(record, keys)
+}
+
+function hasOnlyKeys(record: Record<string, unknown>, keys: string[]): boolean {
+  const allowed = new Set(keys)
+  return Object.keys(record).every((key) => allowed.has(key))
 }

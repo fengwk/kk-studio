@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.core.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
@@ -30,8 +31,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
@@ -52,6 +55,7 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledUserMessageDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
@@ -100,6 +104,7 @@ public final class HarnessRuntimeWebMapper {
       new HistoryEntryPayloadJsonCodec();
   private static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS =
       new ThreadCommandPayloadJsonCodec();
+  private static final AgentMessageJsonCodec AGENT_MESSAGES = new AgentMessageJsonCodec();
   private static final StreamCheckpointJsonCodec STREAM_CHECKPOINTS =
       new StreamCheckpointJsonCodec();
   private static final ProviderResponseJsonCodec MODEL_RESULTS = new ProviderResponseJsonCodec();
@@ -394,6 +399,17 @@ public final class HarnessRuntimeWebMapper {
     dto.setStoppedTurnEndEntryId(
         result.stoppedTurnEndEntryId() == null ? null : result.stoppedTurnEndEntryId().toString());
     dto.setCancelledCommandCount(result.cancelledCommandCount());
+    List<HarnessCancelledUserMessageDTO> cancelled =
+        new ArrayList<>(result.cancelledUserMessages().size());
+    for (CancelledUserMessage message : result.cancelledUserMessages()) {
+      HarnessCancelledUserMessageDTO messageDto = new HarnessCancelledUserMessageDTO();
+      messageDto.setSequence(Long.toString(message.sequence()));
+      messageDto.setClientCommandId(message.clientCommandId().toString());
+      messageDto.setMessageJson(
+          AGENT_MESSAGES.encode(new AgentMessage(AgentMessageRole.USER, message.contents())));
+      cancelled.add(messageDto);
+    }
+    dto.setCancelledUserMessages(List.copyOf(cancelled));
     return dto;
   }
 
@@ -657,7 +673,8 @@ public final class HarnessRuntimeWebMapper {
   private static List<AgentMessageContent> toUserMessageContents(HarnessCommandCreateDTO dto) {
     if (!dto.hasContentsField()) {
       throw new IllegalArgumentException(
-          "USER_MESSAGE must contain exactly one non-empty contents list of TEXT/ATTACHMENT");
+          "USER_MESSAGE must contain exactly one non-empty contents list of "
+              + "TEXT/ATTACHMENT/RESOURCE");
     }
     return toUserMessageContents(dto.getContents());
   }
@@ -668,16 +685,23 @@ public final class HarnessRuntimeWebMapper {
     String type = requireText(dto.getType(), context + ".type");
     return switch (type) {
       case "TEXT" -> {
-        requireContentForbidden(dto, context, "uploadId");
+        requireContentForbidden(dto, context, "uploadId", "blobId", "name", "preview");
         yield new TextMessageContent(requireText(dto.getText(), context + ".text"));
       }
       case "ATTACHMENT" -> {
-        requireContentForbidden(dto, context, "text");
+        requireContentForbidden(dto, context, "text", "blobId", "name", "preview");
         // 瞬时 upload 引用：canonical UUID string；READY upload 由应用 use-case 在入队事务内消费。
         yield new AttachmentMessageContent(parseUuid(dto.getUploadId(), context + ".uploadId"));
       }
+      case "RESOURCE" -> {
+        requireContentForbidden(dto, context, "text", "uploadId");
+        yield new ResourceMessageContent(
+            parseUuid(dto.getBlobId(), context + ".blobId"),
+            requireText(dto.getName(), context + ".name"),
+            dto.getPreview());
+      }
       default -> throw new IllegalArgumentException(
-          context + ".type must be one of TEXT, ATTACHMENT: " + type);
+          context + ".type must be one of TEXT, ATTACHMENT, RESOURCE: " + type);
     };
   }
 
@@ -688,6 +712,9 @@ public final class HarnessRuntimeWebMapper {
           switch (field) {
             case "text" -> dto.hasTextField() ? Boolean.TRUE : null;
             case "uploadId" -> dto.hasUploadIdField() ? Boolean.TRUE : null;
+            case "blobId" -> dto.hasBlobIdField() ? Boolean.TRUE : null;
+            case "name" -> dto.hasNameField() ? Boolean.TRUE : null;
+            case "preview" -> dto.hasPreviewField() ? Boolean.TRUE : null;
             default -> throw new IllegalArgumentException("unknown content field: " + field);
           };
       if (value != null) {

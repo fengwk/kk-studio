@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.studio;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -19,12 +20,14 @@ import fun.fengwk.kkstudio.core.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -139,6 +142,81 @@ class StudioCommandAcceptanceServiceIntegrationTest extends S3WebPostgresTestSup
     assertEquals(0, count("harness_thread", "id", threadId));
     assertEquals(0, count("harness_thread_command", "thread_id", threadId));
     assertEquals(0, count("harness_work", "target_id", threadId));
+  }
+
+  @Test
+  void existingSessionResourceCanBeReusedWithoutAnotherRetain() {
+    UUID chatId = createChat("resource-reuse");
+    StudioOwner owner = new StudioOwner(StudioOwnerType.CHAT, chatId);
+    byte[] content = "durable resource".getBytes(StandardCharsets.UTF_8);
+    String uploadId = storage.completeUpload("resource.txt", content);
+    UUID sessionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    AcceptedCommands initial =
+        acceptanceService.accept(
+            owner,
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+                List.of(
+                    new NewThreadCommand(
+                        new UserMessageCommandPayload(
+                            new AgentMessage(
+                                AgentMessageRole.USER,
+                                List.of(new AttachmentMessageContent(UUID.fromString(uploadId))))),
+                        UUID.randomUUID()))));
+    UUID blobId =
+        jdbc.queryForObject(
+            "select blob_id from harness_session_blob_ref where session_id = ?",
+            UUID.class,
+            sessionId);
+    long refCountBefore =
+        jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId);
+
+    UUID entryThreadId = UUID.randomUUID();
+    ResourceMessageContent resource = new ResourceMessageContent(blobId, "resource.txt", "preview");
+    AcceptedCommands reused =
+        acceptanceService.accept(
+            owner,
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Entry(
+                    sessionId, initial.rootEntry().id(), entryThreadId, false),
+                List.of(
+                    new NewThreadCommand(
+                        new UserMessageCommandPayload(
+                            new AgentMessage(AgentMessageRole.USER, List.of(resource))),
+                        UUID.randomUUID()))));
+
+    UserMessageCommandPayload acceptedPayload =
+        assertInstanceOf(
+            UserMessageCommandPayload.class, reused.acceptedCommands().getFirst().payload());
+    assertEquals(resource, acceptedPayload.message().contents().getFirst());
+    assertEquals(
+        refCountBefore,
+        jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
+    assertEquals(1, count("harness_session_blob_ref", "session_id", sessionId));
+
+    // 同一 blob 不能被带入没有 ref 的新 Session；relation 与全部 Harness facts 必须一起回滚。
+    UUID foreignSessionId = UUID.randomUUID();
+    UUID foreignThreadId = UUID.randomUUID();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            acceptanceService.accept(
+                owner,
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.NewSession(
+                        foreignSessionId, foreignThreadId, settings(), null, false),
+                    List.of(
+                        new NewThreadCommand(
+                            new UserMessageCommandPayload(
+                                new AgentMessage(AgentMessageRole.USER, List.of(resource))),
+                            UUID.randomUUID())))));
+    assertEquals(0, count("chat_session", "session_id", foreignSessionId));
+    assertEquals(0, count("harness_session", "id", foreignSessionId));
+    assertEquals(0, count("harness_thread", "id", foreignThreadId));
+    assertEquals(
+        refCountBefore,
+        jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
   }
 
   @Test
