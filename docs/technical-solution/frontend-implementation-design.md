@@ -88,8 +88,8 @@ Blank Chat、Bound Thread 与 Canvas Chat 共用唯一 `ThreadComposer`：
 
 - DOM 固定分为上层输入/附件行与下层控制栏：`[+] [Default|YOLO] ... [provider/model · variant] [发送]`；空草稿输入行默认单行且文字垂直居中，内容增长后在上限内滚动；Permission 与 Model/Variant 常驻可见，Footer 不承担设置入口；
 - Permission 是 anchored listbox，仅有 `Default` / `YOLO`；Model 使用 anchored 两级 listbox（provider/model → Variant），不创建 modal/backdrop；Model/Variant 选择只修改 pane-local draft，随下一条消息进入同一 SET_* batch；Permission（YOLO）选择经直接控制面立即 `PUT /yolo`（见 §4），绝不进入命令 batch；
-- 草稿是 ordered `TEXT/ATTACHMENT` parts；`contenteditable=false` pill 在 DOM 仅保存
-  `data-part-id`、`data-upload-id`、`data-filename`，展示为完整 `[name]`，不省略且不暴露内部 upload 语法；
+- 草稿是 ordered `TEXT/ATTACHMENT/RESOURCE` parts；`contenteditable=false` pill 在 DOM 保存
+  `data-part-id`、`data-part-type` 与 attachment/resource 对应引用字段，展示为完整 `[name]`。RESOURCE 是当前 Session 已拥有的 durable blob ref，可在 Stop 恢复后重新提交；ATTACHMENT 仍由当前页面上传注册表管理；
 - 左侧 `+` 直接打开命令表，不向草稿写入 `/`；slash 输入仍复用同一命令过滤与执行状态机；
   `/upload` 由 Composer 本地消费并点击 `display:none` 的原生 file input；
 - editor 收到含文件的 paste 时从 `clipboardData.files` 或 `items[].getAsFile()` 取文件并走同一上传链路；
@@ -110,7 +110,7 @@ ThreadInteractionPanel(active) + Composer(hidden but mounted)
 Composer(active, focus + caret restored)
 ```
 
-- Agent、Environment、Chat-scoped Thread 使用统一 `SelectionPanel`；面板挂在 transcript 与
+- Agent、Environment、Chat Session/Thread 使用统一 `SelectionPanel`；面板挂在 transcript 与
   只读 Footer 之间，不创建 backdrop，不使用 modal。
 - 面板打开后搜索框立即获得焦点；普通字符直接过滤，`↑/↓` 移动高亮项，`Enter` 确认，
   `Esc` 返回 Composer。Thread picker 的控制行提供“最近更新/创建时间”，`Tab` 可循环切换。
@@ -233,7 +233,7 @@ mainView?.debug ?? ThreadConversationView   # 互斥：任一时刻只有一个�
 ## 8. Approval / Stop 身份
 
 - **Approval**：同一 `(invocationId, decision)` 复用同一 `decisionId`；切换 ALLOW↔DENY mint 新 ID；输入 `ALLOW`/`DENY`，durable 值 `ALLOWED`/`DENIED`；成功后 invalidate snapshot + chats。
-- **Stop**：失败后保留完整 `PendingStopOperation {stopRequestId, expectedRevision, basisHeadEntryId, basisRevision}`。重试发送**完全相同** body（同 ID + 原始 expectedRevision，绝不从新 snapshot 重推导）；成功/已知 409 清空；网络失败保留并暴露 `stopReplayPending`；**同步 basis fence**：`stopThread` 在复用前比较当前渲染 thread 的 headEntryId/revision 与 basis，任一不同立即 retire 并 mint 新 ID + 当前 expectedRevision（不依赖被动 effect）；权威 snapshot 证明 basis 变化时 effect 同样 retire。
+- **Stop**：完整 `PendingStopOperation {stopRequestId, expectedRevision, basisHeadEntryId, basisRevision}` 以 per-Thread local sidecar 保存。重试发送**完全相同** body（同 ID + 原始 expectedRevision，绝不从新 snapshot 重推导）；成功/已知 409/basis 变化时清空，网络失败或强制 rebind 保留并暴露 `stopReplayPending`。HTTP 成功结果的 ordered `cancelledUserMessages {sequence,clientCommandId,messageJson}` 被转为 TEXT/RESOURCE parts，消息之间及恢复前缀与当前草稿之间固定插入两个换行；同一 stopRequestId 最多应用一次。RESOURCE 重新提交时只允许目标 Session 已有 blob ref，不重复 retain。
 - **Manual Compaction**：`compactThread(threadId, {expectedRevision})` 以 snapshot 的 `revision` 为 CAS 提交 `POST /{threadId}/compact`；命令入口 `/compact` 由 `manualCompaction.available` 门控（disabledReason 展示原因）；成功后 invalidate snapshot。availability 是瞬时 advisory（每次 snapshot 现算），提交成功以 expectedRevision 守护。
 
 ## 9. Snapshot-first realtime / gap / terminal / duplicate
