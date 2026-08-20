@@ -30,7 +30,7 @@ import { agentPaneService } from '@/shared/api/agent-pane-service'
 import {
   presentConflict,
   type ConflictPresentation,
-} from '@/features/ai/runtime/conflict-presenter'
+} from '@/shared/conflict/conflict-presenter'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type {
   AgentRuntimeOwnerDTO,

@@ -4,10 +4,17 @@ import { useState } from 'react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { PermissionEditor } from '@/features/settings/permission/PermissionEditor'
 import type { PermissionGroupDraft } from '@/features/settings/system-settings-draft'
+import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
+
+const PERMISSION_OPTIONS: SystemSettingsSchemaOption[] = [
+  { value: 'allow', labelKey: 'settings.permission.action.allow' },
+  { value: 'ask', labelKey: 'settings.permission.action.ask' },
+  { value: 'deny', labelKey: 'settings.permission.action.deny' },
+]
 
 function Harness({ initial }: { initial: PermissionGroupDraft[] }) {
   const [groups, setGroups] = useState(initial)
-  return <PermissionEditor groups={groups} onChange={setGroups} />
+  return <PermissionEditor groups={groups} onChange={setGroups} options={PERMISSION_OPTIONS} />
 }
 
 function patternInputs(scope: HTMLElement = document.body) {

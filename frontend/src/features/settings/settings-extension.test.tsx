@@ -5,19 +5,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { settingsExtension } from '@/features/settings/settings-extension'
 import { systemSettingsService } from '@/shared/api/system-settings-service'
-import { makeSettingsDto } from '@/features/settings/settings-test-fixtures'
+import { makeSettingsDto, makeSettingsSchema } from '@/features/settings/settings-test-fixtures'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 
 vi.mock('@/shared/api/system-settings-service', () => ({
-  systemSettingsService: { get: vi.fn(), update: vi.fn() },
-  createSystemSettingsService: () => ({ get: vi.fn(), update: vi.fn() }),
+  systemSettingsService: { get: vi.fn(), getSchema: vi.fn(), update: vi.fn() },
+  createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))
 
 describe('settings extension architecture', () => {
   beforeEach(() => {
     vi.mocked(systemSettingsService.get).mockResolvedValue(makeSettingsDto())
+    vi.mocked(systemSettingsService.getSchema).mockResolvedValue(makeSettingsSchema())
   })
 
   it('registers the /settings page through an independent extension', () => {

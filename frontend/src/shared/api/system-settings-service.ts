@@ -1,6 +1,7 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   SystemSettingsDTO,
+  SystemSettingsSchemaDTO,
   SystemSettingsUpdateDTO,
 } from '@/shared/api/contracts/system-settings'
 
@@ -14,6 +15,8 @@ import type {
 export function createSystemSettingsService(client: HttpClient = apiClient) {
   return {
     get: (): Promise<SystemSettingsDTO> => client.get<SystemSettingsDTO>('/settings'),
+    getSchema: (): Promise<SystemSettingsSchemaDTO> =>
+      client.get<SystemSettingsSchemaDTO>('/settings/schema'),
     update: (update: SystemSettingsUpdateDTO): Promise<SystemSettingsDTO> =>
       client.put<SystemSettingsDTO>('/settings', update),
   }

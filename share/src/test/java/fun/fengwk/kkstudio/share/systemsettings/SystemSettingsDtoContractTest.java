@@ -103,7 +103,7 @@ class SystemSettingsDtoContractTest {
         boolean pluralTokenBudget = normalized.endsWith("tokens");
         for (String forbiddenPart : forbidden) {
           if ("token".equals(forbiddenPart) && pluralTokenBudget) {
-            // compactionReserveTokens / compactionMaxRecentTokens 是 token 预算计数，不是秘密 token。
+            // compactionKeepRecentTokens 是 token 预算计数，不是秘密 token。
             continue;
           }
           if (normalized.contains(forbiddenPart)) {

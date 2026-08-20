@@ -41,4 +41,20 @@ export const sharedCatalog = {
     'en-US': 'Request failed',
     'zh-CN': '请求失败',
   },
+  'shared.conflict.title': {
+    'en-US': 'The durable state changed',
+    'zh-CN': '持久状态已变化',
+  },
+  'shared.conflict.reason': {
+    'en-US': 'Reason: {{reason}}',
+    'zh-CN': '原因：{{reason}}',
+  },
+  'shared.conflict.refresh': {
+    'en-US': 'Refresh',
+    'zh-CN': '刷新',
+  },
+  'shared.conflict.retry': {
+    'en-US': 'Retry',
+    'zh-CN': '重试',
+  },
 } satisfies LocaleCatalog

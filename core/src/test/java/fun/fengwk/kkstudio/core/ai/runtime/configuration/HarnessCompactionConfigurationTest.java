@@ -36,7 +36,7 @@ class HarnessCompactionConfigurationTest {
         .withUserConfiguration(HarnessCompactionConfiguration.class)
         .withBean(
             SystemSettingsSnapshot.class,
-            () -> new SystemSettingsSnapshot(settingsWithCompaction(false, 4_096, 8_192)))
+            () -> new SystemSettingsSnapshot(settingsWithCompaction(8_192)))
         .run(
             context -> {
               CompactionConfig config = context.getBean(CompactionConfig.class);
@@ -45,17 +45,15 @@ class HarnessCompactionConfigurationTest {
             });
   }
 
-  private static SystemSettings settingsWithCompaction(
-      boolean enabled, int reserveTokens, int maxRecentTokens) {
+  private static SystemSettings settingsWithCompaction(int keepRecentTokens) {
     SystemSettings.AiRuntime aiRuntime =
         new SystemSettings.AiRuntime(
             3,
             SystemSettings.AiRuntime.DEFAULT.retryBackoffStrategy(),
             SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
             SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
-            enabled,
-            reserveTokens,
-            maxRecentTokens,
+            keepRecentTokens,
+            null,
             SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),

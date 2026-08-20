@@ -59,6 +59,7 @@ public class StudioSystemSettingsErrorAdvice {
     Map<String, Object> errorContext = new LinkedHashMap<>();
     errorContext.put("resource", error.resource());
     if (error instanceof SystemSettingsVersionConflictException versionConflict) {
+      errorContext.put("reason", "VERSION_CONFLICT");
       errorContext.put("expectedVersion", versionConflict.expectedVersion());
       errorContext.put("actualVersion", versionConflict.actualVersion());
     }
