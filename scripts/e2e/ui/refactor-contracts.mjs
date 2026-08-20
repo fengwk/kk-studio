@@ -2,14 +2,17 @@ import { createServer } from 'node:http'
 
 import { baseModelConfig } from '../lib/fixtures.mjs'
 import {
+  acceptCommandBatch,
   branchSettingsOf,
+  chatOwner,
   createChat,
-  createChatThread,
-  customMessageCommand,
-  enqueueCommands,
   getThreadSnapshot,
+  materializeNewSession,
+  setAgentCommand,
   setEnvironmentCommand,
+  setModelCommand,
   stopThread,
+  threadTarget,
   userMessageCommand,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
@@ -742,33 +745,39 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       agentName: state.agent.name,
       yoloEnabled: false,
     })
-    const created = await createChatThread(apiCtx, state.chat.id, {
-      title: null,
-      yoloEnabled: false,
-      branchSettings: branchSettingsOf(state.agent, {
+    const owner = chatOwner(state.chat.id)
+    const threadId = cid()
+    await materializeNewSession(apiCtx, {
+      owner,
+      sessionId: cid(),
+      threadId,
+      rootSettings: branchSettingsOf(state.agent, {
         providerName: state.model.providerName,
         modelName: state.model.name,
         variant: 'default',
       }),
-    })
-    state.threadId = created.thread.threadId
-    await enqueueCommands(apiCtx, state.threadId, {
-      expectedHeadEntryId: created.thread.headEntryId,
-      expectedNextCommandSequence: created.thread.nextCommandSequence,
+      yoloEnabled: false,
       commands: [userMessageCommand(`footer usage ${stamp}`, cid())],
     })
+    state.threadId = String(threadId)
     const completed = await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 30_000,
       intervalMs: 100,
     })
-    await enqueueCommands(apiCtx, state.threadId, {
-      expectedHeadEntryId: completed.headEntryId,
-      expectedNextCommandSequence: completed.nextCommandSequence,
+    // 产品 HTTP 面不允许 SYSTEM CUSTOM_MESSAGE：环境切换经 SET_ENVIRONMENT + 用户消息表达。
+    const switched = await acceptCommandBatch(apiCtx, {
+      owner,
+      target: threadTarget({
+        threadId: state.threadId,
+        expectedHeadEntryId: completed.headEntryId,
+        expectedNextCommandSequence: completed.nextCommandSequence,
+      }),
       commands: [
         setEnvironmentCommand(state.environment, cid()),
-        customMessageCommand('SYSTEM', `footer environment ${stamp}`, cid()),
+        userMessageCommand(`footer environment ${stamp}`, cid()),
       ],
     })
+    assert(switched.acceptedCommands.at(-1).type === 'USER_MESSAGE', JSON.stringify(switched.acceptedCommands))
     await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 30_000,
       intervalMs: 100,
@@ -856,11 +865,16 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       agentName: state.parentAgent.name,
       yoloEnabled: true,
     })
-    const created = await createChatThread(apiCtx, state.chat.id, {
-      title: null,
-      yoloEnabled: true,
-      branchSettings: branchSettingsOf(
-        state.parentAgent,
+    const owner = chatOwner(state.chat.id)
+    const sessionId = cid()
+    const threadId = cid()
+    // 先用不存在的 Agent 确定性物化空闲 Thread；浏览器绑定后 start 经 THREAD batch 启动 task。
+    await materializeNewSession(apiCtx, {
+      owner,
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-ui-task-missing-${suffix}` },
         {
           providerName: state.model.providerName,
           modelName: state.model.name,
@@ -868,16 +882,37 @@ async function createActiveTaskFixture(apiCtx, stamp) {
         },
         { activeTools: ['task'] },
       ),
+      yoloEnabled: true,
+      commands: [userMessageCommand(`task materialize ${suffix}`, cid())],
     })
-    state.threadId = created.thread.threadId
+    state.threadId = String(threadId)
     return {
       ...state,
       // TOOL_PARTIAL/task.status 是 lossy realtime：浏览器先绑定 Thread，再显式启动 task。
       start: async () => {
-        await enqueueCommands(apiCtx, state.threadId, {
-          expectedHeadEntryId: created.thread.headEntryId,
-          expectedNextCommandSequence: created.thread.nextCommandSequence,
-          commands: [userMessageCommand(parentMarker, cid())],
+        const idle = await waitForQuiescentThread(apiCtx, state.threadId, {
+          timeoutMs: 60_000,
+          intervalMs: 100,
+        })
+        await acceptCommandBatch(apiCtx, {
+          owner,
+          target: threadTarget({
+            threadId: state.threadId,
+            expectedHeadEntryId: idle.headEntryId,
+            expectedNextCommandSequence: idle.nextCommandSequence,
+          }),
+          commands: [
+            setAgentCommand(state.parentAgent.name, cid()),
+            setModelCommand(
+              {
+                providerName: state.model.providerName,
+                modelName: state.model.name,
+                variant: 'default',
+              },
+              cid(),
+            ),
+            userMessageCommand(parentMarker, cid()),
+          ],
         })
         await mock.waitForChildRequest()
       },
@@ -963,11 +998,15 @@ async function createToolCardFixture(apiCtx, stamp) {
       agentName: state.agent.name,
       yoloEnabled: false,
     })
-    const created = await createChatThread(apiCtx, state.chat.id, {
-      title: null,
-      yoloEnabled: false,
-      branchSettings: branchSettingsOf(
-        state.agent,
+    const owner = chatOwner(state.chat.id)
+    const sessionId = cid()
+    const threadId = cid()
+    await materializeNewSession(apiCtx, {
+      owner,
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-ui-tool-card-missing-${suffix}` },
         {
           providerName: state.model.providerName,
           modelName: state.model.name,
@@ -975,17 +1014,37 @@ async function createToolCardFixture(apiCtx, stamp) {
         },
         { activeTools: ['write', 'edit', 'bash'] },
       ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`tool card materialize ${suffix}`, cid())],
     })
-    state.threadId = created.thread.threadId
+    state.threadId = String(threadId)
     return {
       ...state,
       start: async (toolName) => {
         assert(markers[toolName], `unknown tool-card fixture call: ${toolName}`)
-        const snapshot = await getThreadSnapshot(apiCtx, state.threadId)
-        await enqueueCommands(apiCtx, state.threadId, {
-          expectedHeadEntryId: snapshot.thread.headEntryId,
-          expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
-          commands: [userMessageCommand(markers[toolName], cid())],
+        const idle = await waitForQuiescentThread(apiCtx, state.threadId, {
+          timeoutMs: 60_000,
+          intervalMs: 100,
+        })
+        await acceptCommandBatch(apiCtx, {
+          owner,
+          target: threadTarget({
+            threadId: state.threadId,
+            expectedHeadEntryId: idle.headEntryId,
+            expectedNextCommandSequence: idle.nextCommandSequence,
+          }),
+          commands: [
+            setAgentCommand(state.agent.name, cid()),
+            setModelCommand(
+              {
+                providerName: state.model.providerName,
+                modelName: state.model.name,
+                variant: 'default',
+              },
+              cid(),
+            ),
+            userMessageCommand(markers[toolName], cid()),
+          ],
         })
         await mock.waitForCall(toolName)
       },

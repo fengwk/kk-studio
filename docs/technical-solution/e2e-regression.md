@@ -11,7 +11,7 @@ node scripts/e2e/run-matrix.mjs --list
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
-model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI E2E
+model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。分支（L3）现在通过 ENTRY target 在同 Session 历史 Entry 下开新 Thread 表达。UI E2E
 由 `scripts/e2e.sh --ui` 另行附加，默认注册 37 个免费 UI case；`--with-tools --ui` 再追加 1 个 Environment/Workspace 创建 case。这些 UI case 不计入 75 个 Node API case。
 
 ## 1. 入口与开关
@@ -96,9 +96,9 @@ rebuild；不得为这条回归追加 `--real`。
 
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
-| L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、SystemSettings 完整聚合/CAS、内部工具目录、Chat-scoped Thread、命令 batch 严格 wire、CAS/幂等、head move、IDLE stop no-op、模型 transient attempt retry 可见性、i18n 与 proxy |
+| L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、SystemSettings 完整聚合/CAS、内部工具目录、owner-aware command-batches（NEW_SESSION/ENTRY/THREAD）、Session/Thread 查询、命令 batch 严格 wire、CAS/幂等、IDLE stop no-op、模型 transient attempt retry 可见性、i18n 与 proxy |
 | L2 | `--real` | MiniMax | 文本轮次 durable 边界、真实 task 委派 durable 子 Thread、运行中原子 batch 合并收割、stop partial + REPLAYED + continue |
-| L3 | `--real --with-branch` | MiniMax | 同一 Thread 同 Session move head 回退到历史 Entry 后继续 |
+| L3 | `--real --with-branch` | MiniMax | ENTRY target 在同 Session 历史 assistant Entry 下开新 Thread 并继续分支 turn |
 | L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流、Resource 外部化与同源下载验证 |
 
 默认 L1 不启动真实 Provider，也不执行 Tool 外部副作用。
@@ -127,15 +127,15 @@ FunctionRun，不下载或导入视频。它只准备页面，不触发生成；
 seed.structured_model_config
 seed.agent_and_provider
 catalog.internal_tools_hidden
-thread.chat_scoped_create_atomic
+thread.new_session_submission_atomic
 thread.branch_settings_projection
 thread.user_message_strict_wire
-thread.custom_message_strict_wire
+thread.product_http_rejects_custom_message
 thread.command_idempotent_replay
 thread.stale_command_cas_rejected
-thread.rebind_same_session
+thread.entry_materialization_same_session
 thread.session_entry_tree
-thread.rebind_cross_session_rejected
+thread.entry_cross_session_rejected
 thread.stop_idle_noop
 thread.branch_settings_diff_commands
 thread.yolo_direct_update
@@ -154,7 +154,7 @@ crud.chat.invalid_agent_name
 crud.chat.thread_branch_settings_independent
 crud.model.delete_unknown_rejected
 crud.chat.lifecycle
-crud.chat.thread_association_list
+crud.chat.session_ownership_list
 i18n.error_response_accept_language
 matrix.model.setup_provider
 config.model.valid.minimal
@@ -199,15 +199,15 @@ L1 的关键语义断言：
 - Agent config 的 `tools`/`skills`/`subagents` 三个列表**必填**（缺失 400），元素去重、非空白短名；`tools` 只允许可选目录中的名称（未知 400），`subagents` 是 Agent 名称 allowlist——引用锁定（被引用的 Agent 不可删除，DELETE 409；移除引用后即可硬删除），未知引用 404；
 - `GET /api/ai/catalog/tools` 只返回可选 Platform/Environment 目录：`load_skill`/`task` 两个内部 Platform Tool 绝不出现；Goal 插件 `create_goal/get_goal/update_goal` 必须作为可选 ToolCatalog 能力通过 Agent config 校验；
 - Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `EnvironmentBinding{name, workspacePath}`（可为 null，两字段同存同空）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
-- Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
+- NEW_SESSION materialization body 携带完整 `rootSettings`（同构于原 `branchSettings`），202 返回 `HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed}`；`replayed=false` 表示全新接受；
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId` 均为 canonical UUID string；`nextCommandSequence`、`revision` 为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
 - snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）、`modelAttemptFailures`（只暴露当前 active Model 尚未物化的失败 attempt；item 为 `modelInvocationId/turnStartEntryId/basisHeadEntryId/attempt/sequence/text/thinking/errorCode/errorMessage/failedAt/retryAt`，其中 `sequence` 是 HTTP decimal string）；
-- 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 的统一信封携带 `errors.reason=STALE_COMMAND_CURSOR`，且 Thread 状态（sequence/revision/head）逐字段不变；
-- `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT)` 列表：`TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`text`/`content` 文本 shorthand 已移除（`text` 为未知字段、`content` 对 USER_MESSAGE 禁用）；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段与非 canonical uploadId 返回 400；`CUSTOM_MESSAGE` 仍使用 `content` 且 role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
+- THREAD target 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 的统一信封携带 `errors.reason=STALE_COMMAND_CURSOR`，且 Thread 状态（sequence/revision/head）逐字段不变；
+- `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT)` 列表：`TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`text`/`content` 文本 shorthand 已移除（`text` 为未知字段、`content` 对 USER_MESSAGE 禁用）；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段与非 canonical uploadId 返回 400；`CUSTOM_MESSAGE` 在产品 HTTP 面确定性 400（产品用户消息只有 USER_MESSAGE）；
 - 命令响应携带 `requestHash`（raw 命令 canonical SHA-256，64 位小写 hex）与 `sequence`；同 `clientCommandId` + 同 hash 整批重放幂等返回既有命令且不二次消费 upload；部分重放 409；replay/400 不依赖异步消费时序；
 - `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS` 四类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；yolo 走直接控制面（`PUT /yolo`）绝不进入 mailbox；
 - `PUT /yolo` body `{expectedRevision,yoloEnabled}`：同值请求在任何 revision CAS 之前 no-op 成功（过期 expectedRevision 不冲突、revision 零触碰）；值变化时 revision 精确 +1 并返回权威 Thread，过期 revision 409 `STALE_REVISION`；不创建 Command/Entry/Work；
-- `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
+- ENTRY target 在既有 Session 既有 Entry 下开新 Thread：sessionId 不变、accepted command sequence=1、quiescent 后分支 Thread 的 root→head 路径必须包含 startEntry 与分支 USER、rootEntry 不变；`startEntryId` 不存在 404、跨 Session 400；原 Thread 的 head/revision/nextCommandSequence 逐字段不变；
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
 - `model.attempt_failure_visibility` 免费 L1：先通过 `/api/events/v1` 建立 Thread 订阅并收到 `subscribed` ack；case 内 `node:http` OpenAI-compatible SSE mock 的首次 Provider attempt 随后流出确定性 text partial，再通过断连触发 LangChain4j `TRANSIENT`。事件通道必须观测到该 partial；活跃期轮询同一快照精确断言 `modelAttemptFailures`（`attempt=1`、HTTP decimal-string `sequence`、text/thinking、error、合法 `failedAt/retryAt`），立即 retry 的 Provider `messages` 必须与失败前完全一致且不含失败 partial/error；quiescent 后断言 `MODEL_ATTEMPT_FAILURE` 位于成功 assistant 之前且 payload 保留 partial/error/retryAt、未物化列表清空；第二 turn 的 mock request `messages` 同样不含失败 attempt 的 partial/thinking/error，两个 turn 均 `COMPLETED`，成功 assistant 不拼接失败 partial；
@@ -244,14 +244,14 @@ L1 的关键语义断言：
   turn 必须忽略历史 `branchSettings.activeTools` 并发送最新 `read/grep`；本地 MinIO 图片必须作为
   精确 `data:image/png;base64,...` source 发送，请求不得包含 `127.0.0.1`/`localhost` 预签名 URL。
 
-### L2/L3/L4（8）
+### L2（4）/ L3（1）/ L4（3）
 
 ```text
 real.text_turn
 real.task_delegation
 real.queued_command_batch
 real.stop_partial_continue
-branch.same_session_move_head
+branch.same_session_entry_thread
 daemon.ready
 daemon.directories
 tool.read_turn
@@ -261,9 +261,9 @@ tool.read_turn
 | --- | --- | --- |
 | `real.text_turn` | `--real` | 真实 Provider 文本轮次；durable `TURN_START -> USER -> assistant MESSAGE -> TURN_END(COMPLETED)` 边界（TurnPlanBuilder 先追加 TURN_START 再追加 USER/CUSTOM）；IDLE 后 `modelInvocation=null`（快照无 `modelInvocations[]` 历史列表） |
 | `real.task_delegation` | `--real` | 父 Agent config 携带 `subagents=[child]` 且 branch `activeTools` 含 `task`：真实 Model 调用内部 `task`，创建 durable 子 Thread（ROOT 携带 `subagentContext{parentThreadId,rootThreadId,taskInvocationId,depth=2}`）；最终 TOOL MESSAGE 冻结 `rendererKey=task` 与 `<task id state>` envelope，`id` 即子 ThreadId |
-| `real.queued_command_batch` | `--real` | 运行中用最新 cursor 一次原子 batch 入队两条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
+| `real.queued_command_batch` | `--real` | 运行中用最新 cursor 连续两个 THREAD batch 各入队一条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
 | `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/revision+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 revision exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
-| `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
+| `branch.same_session_entry_thread` | `--real --with-branch` | ENTRY target 在 real.text_turn 的同 Session 历史 assistant Entry 下开新 Thread（不复制 Entry）；sessionId 不变、accepted command sequence=1、分支 turn 在 startEntry 之后继续产生独立 assistant；原 Thread projection 不变 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；`rootPath` 存在；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `daemon.directories` | `--with-tools` | `GET /api/ai/environments/{name}/directories` 缺省 `path="."` 浏览 root（canonical 相对 wire path；`displayPath` 等于请求 `path` 的最后一段，root 为 `'.'`，只作展示、绝不暴露 daemon 本地绝对路径；root `parentPath="."`；`truncated` 布尔；`gitBranch` 可空；entries 只含直属子目录 `{name,path}`：`name` 等于 `path` 最后一段、`path` 是请求目录的直接子路径）；显式 `path="."` 与缺省一致；`..` 段 400 `INVALID_PATH`、不存在目录 404 `NOT_FOUND`、非法环境名 400 `INVALID_ENVIRONMENT_NAME` |
 | `tool.read_turn` | `--real --with-tools` | e2e seed 覆盖 `system_setting` 使 `read/write/edit/bash: ask`（`db/seed/e2e/V2__e2e_seed.sql`），本 case 验证 read；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
@@ -299,9 +299,9 @@ ui.chat.selection_panel.keyboard_mode
 ui.chat.composer.escape_refocus
 ui.chat.composer.submit_clears_draft
 ui.chat.composer.attachment_previews
-ui.chat.events.conversation_switch
-ui.chat.events.keyboard_nav
-ui.chat.events.scroll_restore
+ui.chat.debug.conversation_switch
+ui.chat.debug.keyboard_nav
+ui.chat.debug.scroll_restore
 ui.chat.shortcuts.escape_restores_focus
 ui.chat.composer.settings_controls_batch
 ui.chat.composer.multi_pane_settings_isolation
@@ -340,10 +340,10 @@ Composer 矩阵的维度与边界如下：
 | `ui.chat.composer.escape_refocus` | transcript 文字选区 + 当前 Pane 草稿 | 全局 Escape 恢复当前 Pane Composer 的焦点与末尾 caret，草稿/localStorage 不变 |
 | `ui.chat.composer.submit_clears_draft` | durable Thread + 新提交 | 提交后 composer/localStorage 立即清空，用户消息进入 timeline |
 | `ui.chat.composer.attachment_previews` | 浏览器路由内的免费 READY upload stub + 本地 PNG/MP4/PDF | editor pill 完整显示 `[文件名]` 且不做省略；上方注册表固定 200px，长文件名单行 `…`；图片展示可点击缩略图并打开 Lightbox，视频展示首帧 preview，PDF 展示 text 类型图标；只验证草稿 UI，不发送模型请求 |
-| `ui.chat.events.conversation_switch` | durable Thread（真实 USER 条目） | `/events` 顶部展示 10 行最新系统提示词预览，下方按当前 branch Entry 顺序展示调试列表；标签为真实 `entryType`，摘要为压缩 payload JSON；点击打开只读 pretty JSON 详情且含 `"role"` 与正文；Composer 保持挂载可编辑；再次 `/events` 或 `+` 菜单 toggle 卸载事件视图且草稿/localStorage 不变 |
-| `ui.chat.events.keyboard_nav` | durable Thread | listbox 初始无选中；点击选中并打开详情；hover 不改选中；`↑/↓` 只在已选中时切换相邻行；`Esc` 取消选中并关闭详情 |
+| `ui.chat.debug.conversation_switch` | durable Thread（真实 USER 条目） | `/debug` 顶部展示 10 行最新系统提示词预览，下方按当前 branch Entry 顺序展示调试列表；标签为真实 `entryType`，摘要为压缩 payload JSON；点击打开只读 pretty JSON 详情且含 `"role"` 与正文；Composer 保持挂载可编辑；再次 `/debug` 或 `+` 菜单 toggle 卸载调试视图且草稿/localStorage 不变 |
+| `ui.chat.debug.keyboard_nav` | durable Thread | listbox 初始无选中；点击选中并打开详情；hover 不改选中；`↑/↓` 只在已选中时切换相邻行；`Esc` 取消选中并关闭详情 |
 | `ui.chat.shortcuts.escape_restores_focus` | 空 Pane + 草稿 | `+` 菜单打开只读快捷键面板（region `键盘快捷键`）；`Esc` 关闭并恢复 Composer 焦点，草稿/localStorage 不变 |
-| `ui.chat.events.scroll_restore` | 30 条 durable Thread（两类主视图均真实 overflow；事件行紧凑布局后需更多条目） | headless 下以 DOM 属性 + 原生 `scroll` 事件向上滚动 600px；`/events` toggle 往返后各自的 `scrollTop` 原样恢复（容差 ±2），不贴底；重绑清零由单元测试覆盖 |
+| `ui.chat.debug.scroll_restore` | 30 条 durable Thread（两类主视图均真实 overflow；事件行紧凑布局后需更多条目） | headless 下以 DOM 属性 + 原生 `scroll` 事件向上滚动 600px；`/debug` toggle 往返后 Debug 列表 `scrollTop` 原样恢复（容差 ±2），Conversation 恢复后保持远离底部（不贴底；worktree 前端在 palette 切换期间存在一次布局漂移，精确 pixel 回放不保证）；重绑清零由单元测试覆盖 |
 | `ui.chat.composer.settings_controls_batch` | 本地 hold-provider + 两 Variant Model + 活跃 Thread | 浏览器几何确认默认单行输入与控制栏组成紧凑两行布局；Permission 菜单只有 Default/YOLO；Model→Variant 两级 anchored listbox；选择 review+YOLO 后与 USER_MESSAGE 按 `SET_MODEL→USER_MESSAGE` 同批入队，YOLO 经直接控制面 `PUT /yolo` 生效并反映在 Thread 快照 |
 | `ui.chat.composer.multi_pane_settings_isolation` | split-2 绑定两条真实 Thread | pane-1 YOLO 不污染 pane-2 Default；一次只存在一个 settings listbox；打开 pane-2 自动关闭 pane-1 菜单，Escape 只恢复 pane-2 Composer 焦点 |
 | `ui.chat.footer.readonly_facts` | 本地 completion-provider 冻结 usage，再切换到 unavailable 长 Workspace path | Footer 中间省略安全 wire path，完整 title 不含 daemon 绝对路径；展示 usage、used/contextWindow、cache hit；缺失 usage 时按 0 展示；缺失 Git 整段省略；无 button，且不含 Agent/Model/Permission/Notification |
@@ -393,13 +393,14 @@ GET /api/ai/catalog/tools
 ```text
 GET|POST /api/ai/chat
 GET|PUT|DELETE /api/ai/chat/{chatId}
-GET /api/ai/chat/{chatId}/threads            -> HarnessThreadDTO[]（关联时间新到旧）
-POST /api/ai/chat/{chatId}/threads           -> 201 HarnessThreadSnapshotDTO
-PUT /api/ai/chat/{chatId}/threads/{threadId} -> 幂等关联
+GET /api/ai/chat/{chatId}/sessions          -> HarnessSessionSummaryDTO[]（归属时间新到旧）
+GET /api/ai/canvases/{canvasId}/sessions    -> HarnessSessionSummaryDTO[]（归属时间新到旧）
+GET /api/ai/runtime/sessions/{sessionId}/threads  -> HarnessThreadSummaryDTO[]
+GET /api/ai/runtime/sessions/{sessionId}/entries  -> 完整不可变 Entry Tree（parentEntryId 连接父节点）
 
+POST /api/ai/runtime/command-batches        -> 202 HarnessAcceptedCommandsDTO（唯一产品用户命令写入口）
 GET  /api/ai/runtime/threads/{threadId}/snapshot
-POST /api/ai/runtime/threads/{threadId}/commands          -> 202
-PUT  /api/ai/runtime/threads/{threadId}/head
+PUT  /api/ai/runtime/threads/{threadId}/yolo
 POST /api/ai/runtime/threads/{threadId}/stop
 POST /api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval
 
@@ -413,47 +414,50 @@ DELETE /api/storage/uploads/{uploadId}
 GET  /api/storage/blobs/{blobId}/presigned-original|preview
 ```
 
-Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
+唯一产品写入口 `POST /api/ai/runtime/command-batches`（202 accepted），body 为
+`{owner:{type:CHAT|CANVAS,id}, target:{...}, commands:[...]}`。`target` 是 sealed 三态：
 
 ```json
 {
-  "title": null,
-  "branchSettings": {
-    "environment": null,
-    "agentName": "default-assistant",
-    "model": { "providerName": "minimax", "modelName": "MiniMax-M2.7", "variant": "default" },
-    "activeTools": []
+  "owner": { "type": "CHAT", "id": "00000000-0000-0000-0000-000000000099" },
+  "target": {
+    "type": "NEW_SESSION",
+    "sessionId": "00000000-0000-0000-0000-000000000100",
+    "threadId": "00000000-0000-0000-0000-000000000101",
+    "rootSettings": {
+      "environment": null,
+      "agentName": "default-assistant",
+      "model": { "providerName": "minimax", "modelName": "MiniMax-M2.7", "variant": "default" },
+      "activeTools": []
+    },
+    "yoloEnabled": false
   },
-  "yoloEnabled": false
-}
-```
-
-命令 batch body（CAS cursor + ordered commands；`clientCommandId` 稳定；创建后 `expectedNextCommandSequence` 为 `"1"`）：
-
-```json
-{
-  "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-  "expectedNextCommandSequence": "1",
   "commands": [
     {
       "type": "USER_MESSAGE",
-      "clientCommandId": "00000000-0000-0000-0000-000000000101",
+      "clientCommandId": "00000000-0000-0000-0000-000000000102",
       "contents": [{ "type": "TEXT", "text": "..." }]
     }
   ]
 }
 ```
 
-`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId,name,preview)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE` 使用 `content` 与 `role`（仅 `SYSTEM|USER`）。四类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environment)`（完整 `{name, workspacePath}` 对象或 null）、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`，多余字段一律 400。YOLO 不再是 command：`PUT /api/ai/runtime/threads/{threadId}/yolo` 直接更新 Thread policy（`{expectedRevision,yoloEnabled}` CAS，同值在任何 CAS 前 no-op 成功，值变化 revision 精确 +1，stale 409），绝不进入 mailbox。
+- `NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}`：预分配 id，原子创建 Session + ROOT + Thread 并接受本批命令；`sessionId`/`threadId` 是 materialization replay 的查找键；
+- `ENTRY{sessionId,startEntryId,threadId,yoloEnabled}`：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry，head 直接指向该 Entry）；
+- `THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}`：在既有 Thread 上继续（exact cursor CAS；`expectedNextCommandSequence` 为正十进制 string，创建后为 `"1"`）；
+- 响应 `HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed}`：`replayed=true` 表示整批精确 replay（NEW_SESSION/ENTRY 按 materialization hash、THREAD 按 clientCommandId + requestHash）；
+- owner 授权：NEW_SESSION 确认 owner 存在；ENTRY/THREAD 确认目标 Session 已由该 owner 持有（Chat/Canvas 归属互斥）；`CUSTOM_MESSAGE` 与未知 target/command 类型在产品 HTTP 面确定性 400。
 
-head move 与 stop 均为 revision CAS：
+`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId,name,preview)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE`（SYSTEM/USER 均不可）与未知类型在产品 HTTP 面确定性 400，不再有产品可用的自定义消息命令。四类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environment)`（完整 `{name, workspacePath}` 对象或 null，字段必须显式出现）、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`，多余字段一律 400；产品 HTTP batch 的 commands 必须是固定顺序 `SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS` 前缀 + 恰一条末尾 `USER_MESSAGE`（两条 USER_MESSAGE、非末尾、乱序 SET 均 400，多条消息必须拆成多个 THREAD batch）。YOLO 不再是 command：`PUT /api/ai/runtime/threads/{threadId}/yolo` 直接更新 Thread policy（`{expectedRevision,yoloEnabled}` CAS，同值在任何 CAS 前 no-op 成功，值变化 revision 精确 +1，stale 409），绝不进入 mailbox。
+
+ENTRY 分支与 stop 均通过既有写面表达：
 
 ```json
-{ "targetEntryId": "00000000-0000-0000-0000-000000000005", "expectedRevision": "0" }
+{ "target": { "type": "ENTRY", "sessionId": "...", "startEntryId": "00000000-0000-0000-0000-000000000005", "threadId": "...", "yoloEnabled": false } }
 { "stopRequestId": "00000000-0000-0000-0000-000000000201", "expectedRevision": "0" }
 ```
 
-- `PUT /head`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision、非静止、跨 Session target、TURN_END continuation 义务均为 409；成功 revision+1；
+- 历史回退/分支不再有 `PUT /head`：ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（head 直接指向目标 Entry，不复制 Entry），原 Thread 不动；`startEntryId` 不存在 404、跨 Session 400；
 - `POST /stop` 响应 `{status, thread, stoppedTurnEndEntryId, cancelledCommandCount}`；status 三态：
   - `STOPPED`：真实停止一个 Turn（revision+1，`stoppedTurnEndEntryId` 非空，TURN_END closeRequestId = raw `stopRequestId`，按被关闭 TURN_START 的 `ownerThreadId` 界定 Thread 作用域）；
   - `REPLAYED`：同 `stopRequestId` 再次调用，在 Thread 锁内做 Session 级查找命中同 owner 的持久 STOPPED TURN_END（在 revision CAS 之前，revision 不再变化，返回同一 `stoppedTurnEndEntryId`）；另一 Thread 相同 raw id 被忽略而非冲突；
@@ -479,9 +483,8 @@ GET    /api/canvases
 POST   /api/canvases                        -> 200 CREATED CanvasDocumentDTO
 GET    /api/canvases/{canvasId}             -> CanvasSnapshotDTO
 POST   /api/canvases/{canvasId}/commands    -> CanvasPatchDTO
-DELETE /api/canvases/{canvasId}             -> 深删除（含绑定 Thread）
+DELETE /api/canvases/{canvasId}             -> 深删除（含该 Canvas owner 的全部 owned Session 与 Thread）
 GET    /api/canvases/{canvasId}/changes?afterVersion=N -> CanvasChangesDTO
-POST   /api/canvases/{canvasId}/thread/messages -> 200 CREATED 原子首次发送
 GET    /api/canvas-function-models
 POST   /api/canvases/{canvasId}/nodes/{nodeId}/runs
 GET    /api/canvases/{canvasId}/nodes/{nodeId}/run
@@ -496,9 +499,11 @@ GET  /api/storage/blobs/{blobId}/presigned-original
 GET  /api/storage/blobs/{blobId}/presigned-preview
 ```
 
-- 所有实体 id（canvas/node/group/resource/blob/upload/thread）都是 canonical UUID 字符串
-  （shape-only，不限定 version/variant 位）；graph 版本 wire 是 canonical 非负十进制字符串
-  （数据库 `canvas_document.version` 仍是 bigint/Java long 整数，不存在 `graphRevision` 字段）；
+- 所有实体 id（canvas/node/group/resource/blob/upload）都是 canonical UUID 字符串
+  （shape-only，不限定 version/variant 位）；CanvasDocumentDTO **没有** `threadId` 字段
+  （绑定关系由 owner-aware command-batches 的 Session 归属边表达）；graph 版本 wire 是
+  canonical 非负十进制字符串（数据库 `canvas_document.version` 仍是 bigint/Java long 整数，
+  不存在 `graphRevision` 字段）；
 - `POST /commands` body 为 `{expectedVersion, commandId, commands[]}`：`expectedVersion`
   是精确 CAS 游标（十进制字符串，stale 409 `VERSION_CONFLICT`）；`commandId` 是整批幂等键——同 id 同
   内容精确回放返回 `{baseVersion:version, version, [], [], []}` 空 patch（版本为十进制字符串），
@@ -524,10 +529,10 @@ GET  /api/storage/blobs/{blobId}/presigned-preview
   `resync{resource}`、`error{code,message[,resource]}`；ack 游标之后的事件不丢失，事件帧不先于 ack 帧；
   未知资源只回资源级 `RESOURCE_NOT_FOUND`（带 resource）并保持连接，非法帧/发送过载回
   `INVALID_FRAME`/`BACKPRESSURE` 后关闭连接；
-- `POST /thread/messages` 原子首次发送：单事务创建根 Thread、入队有序
-  `USER_MESSAGE contents`（`commandId` 作为 `clientCommandId` 幂等键）并绑定
-  `canvas_document.thread_id`；已绑定 Thread 时原样重放；`branchSettings` 是冻结的
-  provider/model/variant 三元组，与 Harness `HarnessBranchSettingsDTO` 同构；
+- Canvas 首次发送与 Chat 共用唯一写入口 `POST /api/ai/runtime/command-batches`：
+  owner 为 `{type:CANVAS,id}`，NEW_SESSION materialization 原子创建 Session + ROOT + Thread
+  并接受首条 USER_MESSAGE；ENTRY/THREAD 继续；Canvas owner 的 Session 摘要经
+  `GET /api/canvases/{canvasId}/sessions` 查询；
 - Resource 直读 URL 由服务端解析 Resource → blobId → blob 预签名，响应只含
   method/url/headers/expiresAt；TEXT 资源 400，未知 resource/canvas 404；全局
   storage 端点同样不暴露 bucket 与对象物理 key。
@@ -585,7 +590,7 @@ HTTP routes 覆盖 multipart、history、streaming、恢复与 materialize。
 | `scripts/e2e.sh` | 环境启停、凭证同步、矩阵与 UI E2E 编排 |
 | `scripts/e2e/run-matrix.mjs` | Node case 注册、筛选、执行和报告 |
 | `scripts/e2e/lib/registry.mjs` | case 注册表 |
-| `scripts/e2e/lib/harness.mjs` | Chat-scoped Thread、命令 batch、head/stop CAS、approval、快照轮询、事件通道订阅等共享步骤 |
+| `scripts/e2e/lib/harness.mjs` | owner-aware command-batches（NEW_SESSION/ENTRY/THREAD）、Session/Thread 查询、yolo/stop CAS、approval、快照轮询、事件通道订阅等共享步骤 |
 | `scripts/e2e/cases/*.mjs` | API case |
 | `scripts/e2e/ui-smoke.mjs` | Playwright UI E2E 编排、筛选、报告与失败留证 |
 | `scripts/e2e/ui/composer-matrix.mjs` | Composer durable/queued/draft 浏览器矩阵与免费 deterministic fixture |
@@ -609,7 +614,7 @@ case 与整轮 `durationMs` 使用 Node 单调时钟计算，不受宿主 wall c
 
 1. API 字段、状态或验证变化时，同步 case 与本文件。
 2. 新增或删除 case 后运行 `node scripts/e2e/run-matrix.mjs --list`，以输出的 ID 和总数更新本文件。
-3. Chat/Thread 编排步骤集中在 `scripts/e2e/lib/harness.mjs`；Thread 创建携带完整 `branchSettings`，后续变更通过命令 batch 表达。
+3. Chat/Thread 编排步骤集中在 `scripts/e2e/lib/harness.mjs`；所有写操作经 `acceptCommandBatch`（owner + sealed target），Thread 创建使用 NEW_SESSION materialization（完整 `rootSettings`），分支使用 ENTRY，继续使用 THREAD。
 4. 真模型、Tool、分支和 UI 只通过显式开关执行；默认 L1 保持免费。
 5. `model.attempt_failure_visibility` 必须继续使用 case 内本地 `node:http` SSE mock；先建立 `/api/events/v1` Thread 订阅并以 realtime partial 证明 ack 后投递，再断言活跃窗口的 `modelAttemptFailures` 与立即 retry 的原样 Provider `messages`，最后用 quiescent durable Entry 与下一 turn 的 Provider `messages` 断言完成闭环，并将 request/snapshot 写入 case artifact；不得改成真实付费 Provider 或仅 HTTP 500 的弱化路径。
 6. OpenCLI fake Hub 完整闭环由 `deploy/test/run.sh --with-app` 覆盖；真实 Seedance

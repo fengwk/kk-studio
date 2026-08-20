@@ -1,19 +1,27 @@
 import { assert, envelopeData, sleep } from './http.mjs'
 
 /**
- * Harness Runtime 单轨契约 helper（Chat-scoped Thread + 唯一 Runtime 数据面）。
+ * Harness Runtime 单轨契约 helper（owner-aware command-batches + Session/Thread 查询）。
  *
  * 端点事实源（web 模块）：
- * - GET  /api/ai/chat/{chatId}/threads                 Chat-scoped Thread 数组（新到旧）
- * - POST /api/ai/chat/{chatId}/threads                 {title,branchSettings,yoloEnabled} → 201 snapshot
- * - GET  /api/ai/runtime/threads/{id}/snapshot         一致快照（单事务）
- * - GET  /api/ai/runtime/threads/{id}/entries          Session 完整不可变 Entry Tree
- * - POST /api/ai/runtime/threads/{id}/commands         命令 batch（202；clientCommandId 幂等 replay）
- * - PUT  /api/ai/runtime/threads/{id}/head             {targetEntryId,expectedRevision}
- * - POST /api/ai/runtime/threads/{id}/stop             {stopRequestId,expectedRevision}（同 id 幂等 replay）
+ * - POST /api/ai/runtime/command-batches          唯一产品用户命令写入口（202 accepted）
+ * - GET  /api/ai/chat/{chatId}/sessions           Chat owner 的 Session 摘要（新到旧）
+ * - GET  /api/ai/canvases/{canvasId}/sessions     Canvas owner 的 Session 摘要（新到旧）
+ * - GET  /api/ai/runtime/sessions/{sessionId}/threads   Session 下 Thread 摘要
+ * - GET  /api/ai/runtime/sessions/{sessionId}/entries   完整不可变 Entry Tree
+ * - GET  /api/ai/runtime/threads/{id}/snapshot    一致快照（单事务）
+ * - PUT  /api/ai/runtime/threads/{id}/yolo        {expectedRevision,yoloEnabled}（revision CAS）
+ * - POST /api/ai/runtime/threads/{id}/stop        {stopRequestId,expectedRevision}（同 id 幂等 replay）
  * - POST /api/ai/runtime/threads/{id}/tool-invocations/{toolInvocationId}/approval
- * - WS   /api/events/v1                               应用级 Thread/Canvas 事件订阅
- * - GET  /api/ai/environment                           只读 Environment 注册表（name = canonical 路由身份）
+ * - WS   /api/events/v1                           应用级 Thread/Canvas 事件订阅
+ * - GET  /api/ai/environment                       只读 Environment 注册表（name = canonical 路由身份）
+ *
+ * 产品 HTTP 写面只接受三种 sealed target：
+ * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
+ * - ENTRY{sessionId,startEntryId,threadId,yoloEnabled}：在既有 Session 既有 Entry 下开新 Thread
+ * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：在既有 Thread 上继续
+ * commands 必须是固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS 前缀 +
+ * 恰一条末尾 USER_MESSAGE；CUSTOM_MESSAGE 在产品 HTTP 面被拒绝。
  */
 
 function positiveDecimal(value, field) {
@@ -100,61 +108,6 @@ export async function createChat(
   return chat
 }
 
-/**
- * 以完整 branchSettings 原子创建 Thread（201 返回 HarnessThreadSnapshotDTO）。
- * branchSettings: {environment, agentName, model:{providerName,modelName,variant}, activeTools}
- */
-export async function createChatThread(ctx, chatId, { title = null, branchSettings, yoloEnabled = false }) {
-  const { status, json } = await ctx.call(
-    'POST',
-    `/api/ai/chat/${encodeURIComponent(chatId)}/threads`,
-    { title, branchSettings, yoloEnabled },
-  )
-  assert(status === 201, `create Chat thread status ${status}: ${JSON.stringify(json)}`)
-  const snapshot = envelopeData(json)
-  assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
-  threadIdOf(snapshot.thread)
-  assert(Array.isArray(snapshot.entries), JSON.stringify(snapshot))
-  assert(Array.isArray(snapshot.queuedCommands), JSON.stringify(snapshot))
-  assert(
-    snapshot.modelInvocation === null || typeof snapshot.modelInvocation === 'object',
-    JSON.stringify(snapshot),
-  )
-  assert(Array.isArray(snapshot.toolInvocations), JSON.stringify(snapshot))
-  return snapshot
-}
-
-/** 创建 Chat + Thread，返回 {chat, snapshot}（snapshot.thread 即新 Thread 投影）。 */
-export async function createConfiguredChatThread(
-  ctx,
-  {
-    agent,
-    model,
-    title,
-    yoloEnabled = false,
-    environment = null,
-    activeTools = [],
-    branchAgentName = agent?.name,
-  } = {},
-) {
-  assert(agent?.name, `agent required: ${JSON.stringify(agent)}`)
-  assert(branchAgentName && typeof branchAgentName === 'string', 'branchAgentName required')
-  const chat = await createChat(ctx, {
-    title: title ?? `e2e-${Math.random().toString(36).slice(2, 10)}`,
-    agentName: agent.name,
-    yoloEnabled,
-  })
-  const snapshot = await createChatThread(ctx, chat.id, {
-    title: null,
-    yoloEnabled,
-    branchSettings: branchSettingsOf({ name: branchAgentName }, model, {
-      environment,
-      activeTools,
-    }),
-  })
-  return { chat, snapshot }
-}
-
 /** 由 Agent + Model 引用构造完整 branchSettings（environment 是完整 binding，可 null）。 */
 export function branchSettingsOf(
   agent,
@@ -179,6 +132,257 @@ export function branchSettingsOf(
   }
 }
 
+// ---------- owner / target 构造 ----------
+
+/** Chat owner 引用（canonical chatId）。 */
+export function chatOwner(chatId) {
+  return { type: 'CHAT', id: canonicalUuid(chatId, 'chatId') }
+}
+
+/** Canvas owner 引用（canonical canvasId）。 */
+export function canvasOwner(canvasId) {
+  return { type: 'CANVAS', id: canonicalUuid(canvasId, 'canvasId') }
+}
+
+/** NEW_SESSION target：预分配 sessionId/threadId，携带 root settings 与 initial yolo。 */
+export function newSessionTarget({ sessionId, threadId, rootSettings, yoloEnabled = false }) {
+  canonicalUuid(sessionId, 'target.sessionId')
+  canonicalUuid(threadId, 'target.threadId')
+  assert(rootSettings && typeof rootSettings === 'object', `rootSettings required: ${JSON.stringify(rootSettings)}`)
+  assert(typeof yoloEnabled === 'boolean', 'target.yoloEnabled must be boolean')
+  return { type: 'NEW_SESSION', sessionId, threadId, rootSettings, yoloEnabled }
+}
+
+/** ENTRY target：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
+export function entryTarget({ sessionId, startEntryId, threadId, yoloEnabled = false }) {
+  canonicalUuid(sessionId, 'target.sessionId')
+  canonicalUuid(startEntryId, 'target.startEntryId')
+  canonicalUuid(threadId, 'target.threadId')
+  assert(typeof yoloEnabled === 'boolean', 'target.yoloEnabled must be boolean')
+  return { type: 'ENTRY', sessionId, startEntryId, threadId, yoloEnabled }
+}
+
+/** THREAD target：在既有 Thread 上继续，携带精确 cursor 期望。 */
+export function threadTarget({ threadId, expectedHeadEntryId, expectedNextCommandSequence }) {
+  canonicalUuid(threadId, 'target.threadId')
+  canonicalUuid(expectedHeadEntryId, 'target.expectedHeadEntryId')
+  positiveDecimal(expectedNextCommandSequence, 'target.expectedNextCommandSequence')
+  return {
+    type: 'THREAD',
+    threadId,
+    expectedHeadEntryId,
+    expectedNextCommandSequence: String(expectedNextCommandSequence),
+  }
+}
+
+// ---------- 唯一产品写入口 ----------
+
+/** 校验一个 202 accepted 的 HarnessAcceptedCommandsDTO 的核心形状（具体一致性由 acceptCommandBatch 完成）。 */
+function assertAcceptedCommands(accepted) {
+  assert(accepted && typeof accepted === 'object', `expected accepted object: ${JSON.stringify(accepted)}`)
+  canonicalUuid(accepted.session?.sessionId, 'accepted.session.sessionId')
+  canonicalUuid(accepted.rootEntry?.entryId, 'accepted.rootEntry.entryId')
+  assert(
+    String(accepted.rootEntry?.entryType || '').toUpperCase() === 'ROOT',
+    `rootEntry must be ROOT: ${JSON.stringify(accepted.rootEntry)}`,
+  )
+  threadIdOf(accepted.thread)
+  assert(Array.isArray(accepted.acceptedCommands), JSON.stringify(accepted))
+  assert(typeof accepted.replayed === 'boolean', JSON.stringify(accepted))
+}
+
+/**
+ * 唯一产品用户命令写入口：owner-aware command batch（202 accepted）。
+ *
+ * 自动基于请求 target/commands 严格校验响应形状（无需调用方传 options）：
+ * - 返回 threadId 必须等于 target.threadId；
+ * - NEW_SESSION/ENTRY 的 sessionId 必须等于 target.sessionId；
+ * - rootEntry.sessionId/thread.sessionId 必须等于 response session.sessionId；
+ * - acceptedCommands 的 count/type/clientCommandId/order 必须与请求 commands 一致，
+ *   且每项 threadId、positive sequence、canonical clientCommandId、64 位小写 hex requestHash 均校验。
+ */
+export async function acceptCommandBatch(ctx, { owner, target, commands }) {
+  assert(owner?.type && owner?.id, `owner required: ${JSON.stringify(owner)}`)
+  assert(owner.type === 'CHAT' || owner.type === 'CANVAS', `owner.type must be CHAT|CANVAS: ${JSON.stringify(owner)}`)
+  canonicalUuid(owner.id, 'owner.id')
+  assert(target?.type, `target required: ${JSON.stringify(target)}`)
+  assert(Array.isArray(commands) && commands.length > 0, 'commands required')
+  for (const command of commands) {
+    assert(
+      command && typeof command === 'object' && command.type && command.clientCommandId,
+      `invalid command: ${JSON.stringify(command)}`,
+    )
+  }
+  const { status, json } = await ctx.call('POST', '/api/ai/runtime/command-batches', {
+    owner,
+    target,
+    commands,
+  })
+  assert(status === 202, `accept command batch status ${status}: ${JSON.stringify(json)}`)
+  const accepted = envelopeData(json)
+  assertAcceptedCommands(accepted)
+  // target 一致性：threadId 恒等于 target.threadId。
+  assert(
+    String(accepted.thread?.threadId) === String(target.threadId),
+    `accepted threadId ${accepted.thread?.threadId} != target ${target.threadId}: ${JSON.stringify(accepted)}`,
+  )
+  if (target.type === 'NEW_SESSION' || target.type === 'ENTRY') {
+    assert(
+      String(accepted.session?.sessionId) === String(target.sessionId),
+      `accepted sessionId ${accepted.session?.sessionId} != target ${target.sessionId}: ${JSON.stringify(accepted)}`,
+    )
+  }
+  assert(
+    String(accepted.rootEntry?.sessionId) === String(accepted.session?.sessionId)
+      && String(accepted.thread?.sessionId) === String(accepted.session?.sessionId),
+    `rootEntry/thread session must equal accepted session: ${JSON.stringify(accepted)}`,
+  )
+  // acceptedCommands 与请求 commands 逐项一致。
+  assert(
+    accepted.acceptedCommands.length === commands.length,
+    `accepted command count ${accepted.acceptedCommands.length} != ${commands.length}: ${JSON.stringify(accepted)}`,
+  )
+  for (let i = 0; i < commands.length; i++) {
+    const request = commands[i]
+    const response = accepted.acceptedCommands[i]
+    assert(
+      String(response.type) === String(request.type),
+      `accepted command ${i} type ${response?.type} != ${request.type}: ${JSON.stringify(accepted)}`,
+    )
+    assert(
+      String(response.clientCommandId) === String(request.clientCommandId),
+      `accepted command ${i} clientCommandId ${response?.clientCommandId} != ${request.clientCommandId}: ${JSON.stringify(accepted)}`,
+    )
+    canonicalUuid(response.clientCommandId, `accepted.commands[${i}].clientCommandId`)
+    assert(
+      String(response.threadId) === String(target.threadId),
+      `accepted command ${i} threadId ${response?.threadId} != target ${target.threadId}: ${JSON.stringify(accepted)}`,
+    )
+    assert(
+      /^[1-9]\d*$/.test(String(response.sequence)),
+      `accepted command ${i} sequence must be positive decimal: ${JSON.stringify(response)}`,
+    )
+    assert(
+      /^[0-9a-f]{64}$/.test(String(response.requestHash)),
+      `accepted command ${i} requestHash must be 64 lower hex: ${JSON.stringify(response)}`,
+    )
+  }
+  return accepted
+}
+
+/**
+ * NEW_SESSION 原子物化：创建 Session + ROOT + Thread 并接受本批 commands。
+ * rootSettings 通常是 branchSettingsOf(...) 的完整分支草稿；sessionId/threadId 由调用方预分配。
+ */
+export async function materializeNewSession(
+  ctx,
+  { owner, sessionId, threadId, rootSettings, yoloEnabled = false, commands },
+) {
+  return acceptCommandBatch(ctx, {
+    owner,
+    target: newSessionTarget({ sessionId, threadId, rootSettings, yoloEnabled }),
+    commands,
+  })
+}
+
+/** ENTRY 原子物化：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
+export async function materializeEntryThread(
+  ctx,
+  { owner, sessionId, startEntryId, threadId, yoloEnabled = false, commands },
+) {
+  return acceptCommandBatch(ctx, {
+    owner,
+    target: entryTarget({ sessionId, startEntryId, threadId, yoloEnabled }),
+    commands,
+  })
+}
+
+// ---------- Session / Thread 查询 ----------
+
+/** 严格校验 Session 摘要 DTO。 */
+function assertSessionSummary(item) {
+  canonicalUuid(item?.sessionId, 'session.sessionId')
+  assert(
+    typeof item.createdAt === 'string' || typeof item.createdAt === 'number',
+    JSON.stringify(item),
+  )
+  assert(
+    typeof item.lastActivityAt === 'string' || typeof item.lastActivityAt === 'number',
+    JSON.stringify(item),
+  )
+  assert(typeof item.firstMessagePreview === 'string', JSON.stringify(item))
+  assert(Number.isSafeInteger(item.threadCount) && item.threadCount >= 0, JSON.stringify(item))
+  return item
+}
+
+/** Chat owner 的 Session 摘要数组（归属时间新到旧）。 */
+export async function listChatSessions(ctx, chatId) {
+  const { json } = await ctx.call('GET', `/api/ai/chat/${encodeURIComponent(chatId)}/sessions`)
+  const sessions = envelopeData(json)
+  assert(Array.isArray(sessions), `expected Session summary array: ${JSON.stringify(json)}`)
+  for (const item of sessions) assertSessionSummary(item)
+  return sessions
+}
+
+/** Canvas owner 的 Session 摘要数组（归属时间新到旧）。 */
+export async function listCanvasSessions(ctx, canvasId) {
+  const { json } = await ctx.call('GET', `/api/canvases/${encodeURIComponent(canvasId)}/sessions`)
+  const sessions = envelopeData(json)
+  assert(Array.isArray(sessions), `expected Session summary array: ${JSON.stringify(json)}`)
+  for (const item of sessions) assertSessionSummary(item)
+  return sessions
+}
+
+/** Session 下的 Thread 摘要数组（runtime 确定性顺序）。 */
+export async function listSessionThreads(ctx, sessionId) {
+  const { json } = await ctx.call(
+    'GET',
+    `/api/ai/runtime/sessions/${encodeURIComponent(sessionId)}/threads`,
+  )
+  const threads = envelopeData(json)
+  assert(Array.isArray(threads), `expected Thread summary array: ${JSON.stringify(json)}`)
+  for (const item of threads) {
+    canonicalUuid(item?.threadId, 'thread.threadId')
+    assert(
+      typeof item.createdAt === 'string' || typeof item.createdAt === 'number',
+      JSON.stringify(item),
+    )
+    assert(
+      typeof item.updatedAt === 'string' || typeof item.updatedAt === 'number',
+      JSON.stringify(item),
+    )
+    assert(typeof item.status === 'string', JSON.stringify(item))
+    assert(item.model?.providerName && item.model?.modelName && item.model?.variant, JSON.stringify(item))
+    assert(
+      item.headMessagePreview === null || typeof item.headMessagePreview === 'string',
+      JSON.stringify(item),
+    )
+  }
+  return threads
+}
+
+/** Session 的完整不可变 Entry Tree（parentEntryId 连接父节点；含非当前 head 历史分支）。 */
+export async function listSessionEntries(ctx, sessionId) {
+  const { json } = await ctx.call(
+    'GET',
+    `/api/ai/runtime/sessions/${encodeURIComponent(sessionId)}/entries`,
+  )
+  const entries = envelopeData(json)
+  assert(Array.isArray(entries), `expected Session Entry array: ${JSON.stringify(json)}`)
+  for (const entry of entries) {
+    canonicalUuid(entry?.entryId, 'entry.entryId')
+    canonicalUuid(entry.sessionId, 'entry.sessionId')
+    assert(
+      String(entry.sessionId) === String(sessionId),
+      `entry.sessionId ${entry.sessionId} != requested sessionId ${sessionId}: ${JSON.stringify(entry)}`,
+    )
+    if (entry.parentEntryId != null) canonicalUuid(entry.parentEntryId, 'entry.parentEntryId')
+    assert(typeof entry.entryType === 'string' && entry.entryType, JSON.stringify(entry))
+    assert(typeof entry.payloadJson === 'string', JSON.stringify(entry))
+  }
+  return entries
+}
+
 export async function getThreadSnapshot(ctx, threadId) {
   const { json } = await ctx.call(
     'GET',
@@ -188,18 +392,6 @@ export async function getThreadSnapshot(ctx, threadId) {
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
   threadIdOf(snapshot.thread)
   return snapshot
-}
-
-/** 读取 Thread 所属 Session 的完整不可变 Entry Tree，包含当前 head 之外的历史分支。 */
-export async function getThreadEntries(ctx, threadId) {
-  const { status, json } = await ctx.call(
-    'GET',
-    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/entries`,
-  )
-  assert(status === 200, `get thread entries status ${status}: ${JSON.stringify(json)}`)
-  const entries = envelopeData(json)
-  assert(Array.isArray(entries), `thread entries must be an array: ${JSON.stringify(json)}`)
-  return entries
 }
 
 /** 等待指定消息进入完整 Session Entry Tree，并同时确认 Thread 已真正 quiescent。 */
@@ -213,7 +405,7 @@ export async function waitForDurableMessages(
   let last = null
   while (Date.now() <= deadline) {
     const snapshot = await getThreadSnapshot(ctx, threadId)
-    const entries = await getThreadEntries(ctx, threadId)
+    const entries = await listSessionEntries(ctx, snapshot.thread.sessionId)
     last = { snapshot, entries }
     const payloads = entries.map((entry) => entry.payloadJson)
     const hasExpectedMessages = expectedTexts.every(
@@ -244,17 +436,6 @@ export async function snapshotEntries(ctx, threadId) {
   return (await getThreadSnapshot(ctx, threadId)).entries || []
 }
 
-/** Chat-scoped Thread 数组（关联时间新到旧）。 */
-export async function listChatThreads(ctx, chatId) {
-  const { json } = await ctx.call('GET', `/api/ai/chat/${encodeURIComponent(chatId)}/threads`)
-  const threads = envelopeData(json)
-  assert(Array.isArray(threads), `expected Chat Thread array: ${JSON.stringify(json)}`)
-  for (const thread of threads) {
-    threadIdOf(thread)
-  }
-  return threads
-}
-
 /** 只读 Environment 注册表；name 是 canonical 路由身份（唯一键），ready 是统一可用性标记。 */
 export async function listEnvironments(ctx) {
   const { json } = await ctx.call('GET', '/api/ai/environment')
@@ -282,13 +463,6 @@ export function userMessageCommand(content, clientCommandId) {
   return { type: 'USER_MESSAGE', clientCommandId, contents: [{ type: 'TEXT', text: content }] }
 }
 
-export function customMessageCommand(role, content, clientCommandId) {
-  assert(role === 'SYSTEM' || role === 'USER', `custom role must be SYSTEM|USER: ${role}`)
-  assert(typeof content === 'string' && content.trim(), 'content required')
-  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  return { type: 'CUSTOM_MESSAGE', role, clientCommandId, content }
-}
-
 export function setEnvironmentCommand(environment, clientCommandId) {
   assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
   assert(
@@ -314,50 +488,6 @@ export function setActiveToolsCommand(activeTools, clientCommandId) {
   assert(Array.isArray(activeTools), 'activeTools must be an array')
   assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
   return { type: 'SET_ACTIVE_TOOLS', clientCommandId, activeTools }
-}
-
-/**
- * 原子入队命令 batch（202 accepted）。clientCommandId 幂等：整批已存在则 replay 返回既有命令，
- * 部分存在 => 409 PARTIAL_COMMAND_REPLAY。
- */
-export async function enqueueCommands(
-  ctx,
-  threadId,
-  { expectedHeadEntryId, expectedNextCommandSequence, commands },
-) {
-  assert(Array.isArray(commands) && commands.length > 0, 'commands required')
-  const { status, json } = await ctx.call(
-    'POST',
-    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/commands`,
-    {
-      expectedHeadEntryId: canonicalUuid(expectedHeadEntryId, 'expectedHeadEntryId'),
-      expectedNextCommandSequence: positiveDecimal(
-        expectedNextCommandSequence,
-        'expectedNextCommandSequence',
-      ),
-      commands,
-    },
-  )
-  assert(status === 202, `enqueue commands status ${status}: ${JSON.stringify(json)}`)
-  const commandsDto = envelopeData(json)
-  assert(Array.isArray(commandsDto) && commandsDto.length === commands.length, JSON.stringify(json))
-  return commandsDto
-}
-
-/** 同步重定位 head（revision CAS；同 target no-op 不 bump；跨 Session target 409）。 */
-export async function updateThreadHead(ctx, threadId, { targetEntryId, expectedRevision }) {
-  const { status, json } = await ctx.call(
-    'PUT',
-    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/head`,
-    {
-      targetEntryId: canonicalUuid(targetEntryId, 'targetEntryId'),
-      expectedRevision: nonNegativeDecimal(expectedRevision, 'expectedRevision'),
-    },
-  )
-  assert(status === 200, `update head status ${status}: ${JSON.stringify(json)}`)
-  const updated = envelopeData(json)
-  threadIdOf(updated)
-  return updated
 }
 
 /**
@@ -549,6 +679,8 @@ export async function waitForModelTextDeltaAfterEventSubscribed(
     }
   }
 }
+
+// ---------- 应用事件 WebSocket 辅助 ----------
 
 function applicationEventUrl(baseUrl) {
   const url = new URL(baseUrl)

@@ -537,32 +537,31 @@ chat = json_call(
     {"title": "offline-chat-smoke", "agentName": "default-assistant", "yoloEnabled": False},
 )
 assert chat["agentName"] == "default-assistant", chat
-thread_snapshot = json_call(
-    "POST",
-    f"/api/ai/chat/{chat['id']}/threads",
-    {
-        "branchSettings": {
-            "environmentName": None,
-            "agentName": "default-assistant",
-            "model": {
-                "providerName": "stub",
-                "modelName": "acceptance-stub",
-                "variant": "default",
-            },
-            "activeTools": [],
-        },
-        "yoloEnabled": False,
-    },
-)
-thread = thread_snapshot["thread"]
-assert thread["status"] == "IDLE" and thread["processing"] is False, thread
 marker = "offline-chat-smoke-" + uuid.uuid4().hex[:8]
-enqueued = json_call(
+# 唯一产品写入口：NEW_SESSION 一次原子物化 Session + ROOT + Thread 并接受首条 USER_MESSAGE。
+session_id = str(uuid.uuid4())
+thread_id = str(uuid.uuid4())
+accepted = json_call(
     "POST",
-    f"/api/ai/runtime/threads/{thread['threadId']}/commands",
+    "/api/ai/runtime/command-batches",
     {
-        "expectedHeadEntryId": thread["headEntryId"],
-        "expectedNextCommandSequence": thread["nextCommandSequence"],
+        "owner": {"type": "CHAT", "id": chat["id"]},
+        "target": {
+            "type": "NEW_SESSION",
+            "sessionId": session_id,
+            "threadId": thread_id,
+            "rootSettings": {
+                "environment": None,
+                "agentName": "default-assistant",
+                "model": {
+                    "providerName": "stub",
+                    "modelName": "acceptance-stub",
+                    "variant": "default",
+                },
+                "activeTools": [],
+            },
+            "yoloEnabled": False,
+        },
         "commands": [
             {
                 "type": "USER_MESSAGE",
@@ -572,10 +571,15 @@ enqueued = json_call(
         ],
     },
 )
-assert enqueued[0]["type"] == "USER_MESSAGE", enqueued
+thread = accepted["thread"]
+assert accepted["replayed"] is False, accepted
+assert accepted["acceptedCommands"][0]["type"] == "USER_MESSAGE", accepted
+# 不锁定 accepted 快照的瞬时 status（processor 可能已异步消费）；只锁定 threadId 归属，
+# 随后轮询等待 quiescent 收敛。
+assert thread["threadId"] == thread_id, thread
 for _ in range(240):
     current = json_call(
-        "GET", f"/api/ai/runtime/threads/{thread['threadId']}/snapshot"
+        "GET", f"/api/ai/runtime/threads/{thread_id}/snapshot"
     )
     candidate = current["thread"]
     if (
