@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -12,6 +13,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 /**
  * package-private EntryPath turn-sequence validation state（KISS：非通用 workflow/state-machine）。
@@ -26,16 +29,18 @@ import java.util.List;
  * ASSISTANT_ERROR / ASSISTANT_ABORTED / COMPACTION）只能出现一次且之后 不得再出现 USER/CUSTOM/第二个 Assistant；TOOL
  * MESSAGE 只能跟随带 ToolCall 的 ASSISTANT MESSAGE，且必须是 ordinal 0 开始的严格前缀（ordinal 连续、toolCallId/toolName
  * 匹配、assistantEntryId 等于该 Assistant Entry id）；TURN_END 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome
- * 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE / COMPACTION 且 ToolResult 完整；HISTORY phase gap 与 complete
- * OVERFLOW compaction 必须 {@code continueModel=true}，其它 compaction 必须 false； FAILED 必须已有
- * ASSISTANT_ERROR；STOPPED 必须已有 stop barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意 open phase
- * 关闭）。路径可以在任意 prefix 截断。
+ * 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE / COMPACTION 且 ToolResult 完整；HISTORY phase gap、complete
+ * OVERFLOW recovery 与 active continuation 前的 complete THRESHOLD compaction 必须 {@code
+ * continueModel=true}，其它 compaction 必须 false；FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有 stop
+ * barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意 open phase关闭）。路径可以在任意 prefix 截断。
  */
 final class TurnPathValidator {
 
   private Entry openTurnStart;
   private TurnStartReason openReason;
   private CompactionStart openCompactionStart;
+  private UUID openOwnerThreadId;
+  private UUID pendingContinuationOwnerThreadId;
   private boolean inputSeen;
   private boolean assistantSeen;
   private Entry assistantResultEntry;
@@ -59,6 +64,11 @@ final class TurnPathValidator {
       openTurnStart = entry;
       openReason = start.reason();
       openCompactionStart = start.compaction();
+      openOwnerThreadId = start.ownerThreadId();
+      if (openReason != TurnStartReason.COMPACTION) {
+        // INPUT 覆盖旧 obligation；CONTINUATION 在打开时消费前一个 continueModel=true。
+        pendingContinuationOwnerThreadId = null;
+      }
       inputSeen = false;
       assistantSeen = false;
       assistantResultEntry = null;
@@ -105,10 +115,13 @@ final class TurnPathValidator {
             CompactionPhase phase = openCompactionStart.phase();
             boolean expectedContinueModel =
                 phase == CompactionPhase.HISTORY
-                    || openCompactionStart.trigger() == CompactionTrigger.OVERFLOW;
+                    || openCompactionStart.trigger() == CompactionTrigger.OVERFLOW
+                    || (openCompactionStart.trigger() == CompactionTrigger.THRESHOLD
+                        && Objects.equals(pendingContinuationOwnerThreadId, openOwnerThreadId));
             if (end.continueModel() != expectedContinueModel) {
               throw new IllegalArgumentException(
-                  "completed compaction continueModel must match HISTORY or OVERFLOW obligation");
+                  "completed compaction continueModel must match HISTORY, OVERFLOW, or preserved "
+                      + "continuation obligation");
             }
           } else {
             requireAssistantMessage("completed");
@@ -154,7 +167,14 @@ final class TurnPathValidator {
           // history cut 可在任意 open phase 关闭。
         }
       }
+      if (openReason != TurnStartReason.COMPACTION) {
+        pendingContinuationOwnerThreadId =
+            end.outcome() == TurnEndOutcome.COMPLETED && end.continueModel()
+                ? openOwnerThreadId
+                : null;
+      }
       openTurnStart = null;
+      openOwnerThreadId = null;
       return;
     }
     if (payload instanceof MessagePayload message) {

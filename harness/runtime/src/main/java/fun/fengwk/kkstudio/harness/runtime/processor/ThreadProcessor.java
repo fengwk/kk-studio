@@ -111,20 +111,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经 ToolTerminalPending 应用）；
  * closed turn（COMPLETE 无 calls / LENGTH 无 calls / FILTERED / terminal failure / cancel / unknown /
  * compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有 queued
- * user demand、HISTORY / OVERFLOW obligation、fallback 或 hard overflow 已确定时请求 THREAD；soft threshold
- * 绝不因普通 turn 闭合自唤醒。失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。 Tool sibling batch 追加 outcome
- * 后 追加 continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再 complete，下一 claim 才做
- * continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
+ * user demand、HISTORY / OVERFLOW obligation、fallback 或 hard overflow 已确定时请求 THREAD；完全结束的 idle run
+ * 不因 soft threshold 自唤醒。失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。 Tool sibling batch 追加
+ * outcome 后 追加 continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再 complete，下一 claim
+ * 才做 continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
  * （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 或闭合即出现 compaction action 时先请求
  * THREAD 再 complete。
  *
  * <p>durable mutation 时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、
  * complete、request 与 reschedule 始终使用未抬升的本地 lease clock，避免未来 durable 时间改变 lease 语义。
  *
- * <p>压缩触发正交：soft threshold 只在下一条真实 user demand 到达时 gate；hard overflow 立即压缩并只恢复一次； {@link
- * #compactThread} 以 expectedRevision 同步提交 MANUAL plan。所有 trigger 共用 MODEL Work、一次 fallback 与
- * deterministic no-gain；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零 queued
- * Command，另一 Thread 拥有的共享历史 turn 不压缩。
+ * <p>压缩触发正交：soft threshold 在尚未完成的 continuation 边界或下一条真实 user demand 到达时 gate；hard overflow
+ * 立即压缩并只恢复一次； {@link #compactThread} 以 expectedRevision 同步提交 MANUAL plan。所有 trigger 共用 MODEL
+ * Work、一次 fallback 与 deterministic no-gain；切分先 HISTORY 再以 continueModel obligation 机械启动
+ * TURN_PREFIX。压缩消费零 queued Command，另一 Thread 拥有的共享历史 turn 不压缩。
  */
 @Slf4j
 public final class ThreadProcessor {
@@ -297,18 +297,18 @@ public final class ThreadProcessor {
         yield null;
       }
       case ThreadContext.ContinuationDue ignored -> {
-        CompactionPreparation historyContinuation = ownedHistoryContinuation(thread, path);
-        if (historyContinuation != null) {
-          yield planStep(
-              tx, claim, thread, path, TurnStartReason.COMPACTION, historyContinuation, now);
+        // owned HISTORY 机械续作仍由 compactionPreparation 保持最高优先级；普通 continuation
+        // 在越过 soft threshold 时先压缩，成功后再由 durable continueModel obligation 恢复。
+        CompactionPreparation preparation = compactionPreparation(thread, path, true);
+        if (preparation != null) {
+          yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
         }
-        // 普通 continuation 优先：既有 obligation 必须原样执行，阈值压缩绝不插队。
         yield planStep(tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
       }
       case ThreadContext.IdleOrHistorical ignored -> {
         List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
         boolean userDemand = hasQueuedUserMessage(queued);
-        // owned HISTORY / fallback / hard overflow 优先；soft threshold 只有真实 user demand 存在时才启动。
+        // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
         CompactionPreparation preparation = compactionPreparation(thread, path, userDemand);
         if (preparation != null) {
           yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
@@ -441,9 +441,9 @@ public final class ThreadProcessor {
     tx.completeWork(claim, now);
   }
 
-  /** 按 owned HISTORY -> fallback -> hard overflow -> demand-gated threshold 的顺序计算下一次压缩。 */
+  /** 按 owned HISTORY -> fallback -> hard overflow -> eligible threshold 的顺序计算下一次压缩。 */
   private CompactionPreparation compactionPreparation(
-      ThreadState thread, EntryPath path, boolean userDemand) {
+      ThreadState thread, EntryPath path, boolean thresholdEligible) {
     CompactionConfig compaction = config.compaction();
     ClosedTurn latestTurn = latestClosedTurn(path, path.entries().size());
     if (latestTurn == null) {
@@ -486,7 +486,7 @@ public final class ThreadProcessor {
           .prepare(path, CompactionTrigger.OVERFLOW, latestStartPayload.contextWindow())
           .orElse(null);
     }
-    if (!userDemand) {
+    if (!thresholdEligible) {
       return null;
     }
     return thresholdPreparation(thread, path, latestTurn, compaction);
@@ -577,6 +577,10 @@ public final class ThreadProcessor {
             usage.providerTotalTokens() > 0
                 ? usage.providerTotalTokens()
                 : usage.categorizedTokens();
+        contextTokens =
+            Math.addExact(
+                contextTokens,
+                CompactionPlanner.estimateVisibleTokensAfter(path, resultEntry.id()));
         if (start.maxOutputTokens() == null) {
           return null;
         }
@@ -596,6 +600,32 @@ public final class ThreadProcessor {
   private static ClosedTurn previousClosedTurn(EntryPath path, ClosedTurn turn) {
     int startIndex = indexOfEntry(path.entries(), turn.start().id());
     return startIndex < 0 ? null : latestClosedTurn(path, startIndex);
+  }
+
+  /**
+   * 当前 open Compaction 之前是否仍有本 Thread 拥有的普通 continuation obligation。连续 COMPACTION turns
+   * 只承载压缩阶段/fallback；遇到 foreign owner 或首个普通 closed turn 即停止。
+   */
+  private static boolean hasPendingOwnedContinuation(
+      ThreadState thread, EntryPath path, UUID currentCompactionStartEntryId) {
+    int currentStartIndex = indexOfEntry(path.entries(), currentCompactionStartEntryId);
+    if (currentStartIndex < 0) {
+      throw new IllegalStateException(
+          "current compaction start is not on the path: " + currentCompactionStartEntryId);
+    }
+    ClosedTurn candidate = latestClosedTurn(path, currentStartIndex);
+    while (candidate != null) {
+      TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
+      if (!thread.id().equals(start.ownerThreadId())) {
+        return false;
+      }
+      if (start.reason() != TurnStartReason.COMPACTION) {
+        return candidate.end().outcome() == TurnEndOutcome.COMPLETED
+            && candidate.end().continueModel();
+      }
+      candidate = previousClosedTurn(path, candidate);
+    }
+    return false;
   }
 
   /**
@@ -705,9 +735,9 @@ public final class ThreadProcessor {
    * parent 并 attach resultEntryId。
    *
    * <p>wake 决定：active Tool phase 只为 READY 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 经
-   * ToolTerminalPending 应用并反馈模型）；closed turn 在新 Entries 插入、Thread advanced 后，只在已有 queued user
+   * ToolTerminalPending 应用并反馈模型）；完全结束的 closed turn 在新 Entries 插入、Thread advanced 后，只在已有 queued user
    * demand 或 fallback/hard-overflow obligation 已确定时请求 THREAD。soft threshold 没有新 demand 时保持
-   * idle；新命令在事务后 到达会自行 requestWork。
+   * idle；新命令在事务后到达会自行 requestWork。
    */
   private void applyModel(
       HarnessStore.Transaction tx,
@@ -861,8 +891,8 @@ public final class ThreadProcessor {
       // 关闭 turn：同事务 attach-then-delete 完成严格物化校验并删除 Model 行（closed turn 不保留 Invocation）。
       tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
       tx.deleteModelInvocation(model.id());
-      // 闭合后只重建 queued user / fallback / hard-overflow obligation；soft threshold 无新 demand 时不
-      // self-wake。
+      // 完全结束的 closed turn 只重建 queued user / fallback / hard-overflow obligation；soft threshold
+      // 无新 demand 时不 self-wake。
       boolean compactionDue =
           compactionPreparation(advancedThread, tx.loadEntryPath(head), hasQueuedMessage) != null;
       requestThread = hasQueuedMessage || compactionDue;
@@ -919,7 +949,9 @@ public final class ThreadProcessor {
         outcome = TurnEndOutcome.COMPLETED;
         continueModel =
             start.phase() == CompactionPhase.HISTORY
-                || start.trigger() == CompactionTrigger.OVERFLOW;
+                || start.trigger() == CompactionTrigger.OVERFLOW
+                || (start.trigger() == CompactionTrigger.THRESHOLD
+                    && hasPendingOwnedContinuation(thread, path, model.turnStartEntryId()));
       } else {
         outcome = TurnEndOutcome.FAILED;
       }

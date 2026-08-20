@@ -273,7 +273,7 @@ class EntryPathTest {
   }
 
   @Test
-  void completedCompactionContinueModelMatchesOverflowRecoverySemantics() {
+  void completedCompactionContinueModelMatchesRecoverySemantics() {
     Entry root = root(settings("root"));
     Entry thresholdStart =
         compactionStart(
@@ -320,6 +320,73 @@ class EntryPathTest {
             overflowStart,
             result,
             turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, true, null, null)));
+
+    // active normal continuation 可以跨 THRESHOLD checkpoint 保留；没有此前 obligation 的同形仍由上方逆证拒绝。
+    Entry inputStart = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
+    Entry assistant = assistantMessage(id(4L), id(3L));
+    Entry inputEnd = turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, true, null, null);
+    Entry thresholdAfterContinuation =
+        compactionStart(
+            id(6L),
+            id(5L),
+            settings("turn"),
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            null,
+            null);
+    Entry thresholdResult = compactionResult(id(7L), id(6L));
+    Entry thresholdEnd =
+        turnEnd(id(8L), id(7L), id(6L), TurnEndOutcome.COMPLETED, true, null, null);
+    new EntryPath(
+        List.of(
+            root,
+            inputStart,
+            user,
+            assistant,
+            inputEnd,
+            thresholdAfterContinuation,
+            thresholdResult,
+            thresholdEnd));
+  }
+
+  @Test
+  void thresholdCompactionCannotBorrowForeignContinuation() {
+    Entry root = root(settings("root"));
+    Entry inputStart = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
+    Entry assistant = assistantMessage(id(4L), id(3L));
+    Entry inputEnd = turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, true, null, null);
+    BranchSettings compactionSettings = settings("turn");
+    Entry foreignCompaction =
+        new Entry(
+            id(6L),
+            SESSION_ID,
+            id(5L),
+            new TurnStartPayload(
+                TurnStartReason.COMPACTION,
+                compactionSettings,
+                id(999L),
+                null,
+                null,
+                new CompactionStart(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    compactionSettings.model(),
+                    id(1L),
+                    null,
+                    null)),
+            time(id(6L)));
+    Entry result = compactionResult(id(7L), id(6L));
+    Entry end = turnEnd(id(8L), id(7L), id(6L), TurnEndOutcome.COMPLETED, true, null, null);
+
+    // reducer 的 owner barrier 与 Store 物化校验一致：不能借兄弟 Thread 的 continuation。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root, inputStart, user, assistant, inputEnd, foreignCompaction, result, end)));
   }
 
   @Test

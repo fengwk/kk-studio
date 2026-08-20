@@ -20,6 +20,9 @@ public final class CompactionSummaryAssembler {
   /** 切分 turn 最终 summary 中 history 与 prefix 的分隔格式。 */
   static final String TURN_PREFIX_SEPARATOR = "\n\n---\n\n**Turn Context (split turn):**\n\n";
 
+  /** direct TURN_PREFIX 没有可摘要历史时使用的固定 history 段。 */
+  static final String NO_PRIOR_HISTORY = "No prior history.";
+
   private CompactionSummaryAssembler() {}
 
   /** 组装最终 payload；{@code responseText} 必须是已通过 ModelResponseValidator 的非空摘要文本。 */
@@ -38,11 +41,12 @@ public final class CompactionSummaryAssembler {
       return new CompactionPayload(canonicalResponse);
     }
     String summary;
-    if (start.phase() == CompactionPhase.TURN_PREFIX && start.historyCompactionEntryId() != null) {
-      summary =
-          referencedHistorySummary(path, start.historyCompactionEntryId())
-              + TURN_PREFIX_SEPARATOR
-              + canonicalResponse;
+    if (start.phase() == CompactionPhase.TURN_PREFIX) {
+      String history =
+          start.historyCompactionEntryId() == null
+              ? NO_PRIOR_HISTORY
+              : referencedHistorySummary(path, start.historyCompactionEntryId());
+      summary = history + TURN_PREFIX_SEPARATOR + canonicalResponse;
     } else {
       summary = canonicalResponse;
     }
