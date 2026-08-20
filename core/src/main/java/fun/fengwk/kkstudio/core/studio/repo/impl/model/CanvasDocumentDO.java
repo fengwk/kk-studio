@@ -11,7 +11,6 @@ public class CanvasDocumentDO {
   private UUID id;
   private String title;
   private Long version;
-  private UUID threadId;
   private OffsetDateTime createdAt;
   private OffsetDateTime updatedAt;
 }

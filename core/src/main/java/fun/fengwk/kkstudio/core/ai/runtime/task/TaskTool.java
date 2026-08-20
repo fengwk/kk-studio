@@ -8,8 +8,10 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.ChangeGate;
 import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
@@ -39,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -186,10 +187,32 @@ public final class TaskTool implements Tool {
         }
         UUID resumeThreadId = arguments.sessionId();
         try (SubagentRunRegistry.Reservation reservation = reserve(parent, resumeThreadId)) {
-          ThreadSnapshot child =
-              resumeThreadId == null
-                  ? createChild(runtime, parent, selected.name(), request.context().invocationId())
-                  : resumeChild(runtime, parent, selected.name(), resumeThreadId);
+          UUID sourceHeadEntryId;
+          ThreadSnapshot child;
+          if (resumeThreadId == null) {
+            // 全新子 Session：NEW_SESSION 一次原子物化 Session/Thread/初始 prompt Command/Work。
+            child =
+                createChild(
+                    runtime,
+                    parent,
+                    selected.name(),
+                    arguments.prompt(),
+                    request.context().invocationId());
+            sourceHeadEntryId = child.thread().headEntryId();
+          } else {
+            child = resumeChild(runtime, parent, selected.name(), resumeThreadId);
+            // 恢复子 Session：目标 Agent 可切换，完整 settings diff + prompt 在一次 THREAD 接受中提交。
+            BranchSettings target =
+                settingsMaterializer.materialize(
+                    selected.name(),
+                    child.entryPath().baseSettings().environment(),
+                    depth(child),
+                    config);
+            List<NewThreadCommand> commands =
+                taskCommands(child.entryPath().baseSettings(), target, arguments.prompt());
+            sourceHeadEntryId = child.thread().headEntryId();
+            enqueue(runtime, child, commands);
+          }
           UUID threadId = child.thread().id();
           childThreadId.set(threadId);
           reservation.attach(threadId);
@@ -199,16 +222,6 @@ public final class TaskTool implements Tool {
                 call, selected.name(), threadId, RunState.CANCELLED, cancelledMessage(threadId));
             return;
           }
-          BranchSettings target =
-              settingsMaterializer.materialize(
-                  selected.name(),
-                  child.entryPath().baseSettings().environment(),
-                  depth(child),
-                  config);
-          List<NewThreadCommand> commands =
-              taskCommands(child.entryPath().baseSettings(), target, arguments.prompt());
-          UUID sourceHeadEntryId = child.thread().headEntryId();
-          enqueue(runtime, child, commands);
           RunResult result =
               awaitResult(
                   runtime,
@@ -425,7 +438,11 @@ public final class TaskTool implements Tool {
   }
 
   private ThreadSnapshot createChild(
-      HarnessRuntime runtime, ParentContext parent, String subagentType, UUID taskInvocationId) {
+      HarnessRuntime runtime,
+      ParentContext parent,
+      String subagentType,
+      String prompt,
+      UUID taskInvocationId) {
     int childDepth = parent.depth() + 1;
     BranchSettings settings =
         settingsMaterializer.materialize(
@@ -433,17 +450,27 @@ public final class TaskTool implements Tool {
             parent.snapshot().entryPath().baseSettings().environment(),
             childDepth,
             config);
-    CreatedThread created =
-        runtime.createThread(
-            new CreateThreadCommand(
-                settings,
-                parent.snapshot().thread().yoloEnabled(),
-                new SubagentContext(
-                    parent.snapshot().thread().id(),
-                    parent.rootThreadId(),
-                    taskInvocationId,
-                    childDepth)));
-    return runtime.getThreadSnapshot(created.thread().id());
+    // NEW_SESSION 一次原子物化 Session/ROOT/Thread/初始 prompt Command 与 THREAD Work。
+    try {
+      AcceptedCommands accepted =
+          runtime.acceptCommands(
+              new AcceptCommandsCommand(
+                  new AcceptCommandsTarget.NewSession(
+                      UUID.randomUUID(),
+                      UUID.randomUUID(),
+                      settings,
+                      new SubagentContext(
+                          parent.snapshot().thread().id(),
+                          parent.rootThreadId(),
+                          taskInvocationId,
+                          childDepth),
+                      parent.snapshot().thread().yoloEnabled()),
+                  List.of(command(new UserMessageCommandPayload(AgentMessage.user(prompt))))),
+              AcceptancePreflight.IDENTITY);
+      return runtime.getThreadSnapshot(accepted.thread().id());
+    } catch (HarnessRuntimeConflictException conflict) {
+      throw reject("subagent session changed before the task prompt could be queued");
+    }
   }
 
   private ThreadSnapshot resumeChild(
@@ -498,12 +525,16 @@ public final class TaskTool implements Tool {
   private static void enqueue(
       HarnessRuntime runtime, ThreadSnapshot snapshot, List<NewThreadCommand> commands) {
     try {
-      runtime.enqueueCommands(
-          new ThreadCommandBatch(
-              snapshot.thread().id(),
-              snapshot.thread().headEntryId(),
-              snapshot.thread().nextCommandSequence(),
-              commands));
+      // 继续已有子 Session：THREAD target 用精确 expected head/next-sequence 游标接受，完整 settings diff + prompt
+      // 一次入队。
+      runtime.acceptCommands(
+          new AcceptCommandsCommand(
+              new AcceptCommandsTarget.Thread(
+                  snapshot.thread().id(),
+                  snapshot.thread().headEntryId(),
+                  snapshot.thread().nextCommandSequence()),
+              commands),
+          AcceptancePreflight.IDENTITY);
     } catch (HarnessRuntimeConflictException conflict) {
       throw reject("subagent session changed before the task prompt could be queued");
     }
@@ -521,12 +552,15 @@ public final class TaskTool implements Tool {
             UUID.randomUUID(),
             ThreadCommandPayloadJsonCodec.requestHash(reminderPayload));
     try {
-      runtime.enqueueCommands(
-          new ThreadCommandBatch(
-              snapshot.thread().id(),
-              snapshot.thread().headEntryId(),
-              snapshot.thread().nextCommandSequence(),
-              List.of(reminder)));
+      // THREAD steering：恰一条 SYSTEM CUSTOM_MESSAGE 入队。
+      runtime.acceptCommands(
+          new AcceptCommandsCommand(
+              new AcceptCommandsTarget.Thread(
+                  snapshot.thread().id(),
+                  snapshot.thread().headEntryId(),
+                  snapshot.thread().nextCommandSequence()),
+              List.of(reminder)),
+          AcceptancePreflight.IDENTITY);
       return true;
     } catch (HarnessRuntimeConflictException conflict) {
       return false;

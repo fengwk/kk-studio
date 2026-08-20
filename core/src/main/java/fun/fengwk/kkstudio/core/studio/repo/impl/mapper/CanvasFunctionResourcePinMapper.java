@@ -10,36 +10,36 @@ import org.apache.ibatis.annotations.ResultMap;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 
-import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasFunctionResourceRefDO;
+import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasFunctionResourcePinDO;
 
 import java.util.List;
 import java.util.UUID;
 
-/** {@code canvas_function_resource_ref} 的原子 SQL 入口。 */
+/** {@code canvas_function_resource_pin} 的原子 SQL 入口。 */
 @Mapper
-public interface CanvasFunctionResourceRefMapper extends BaseMapper {
+public interface CanvasFunctionResourcePinMapper extends BaseMapper {
 
   @Insert(
       """
       <script>
-      insert into canvas_function_resource_ref (canvas_id, node_id, request_id, role, resource_id)
+      insert into canvas_function_resource_pin (canvas_id, node_id, request_id, role, resource_id)
       values
       <foreach item="ref" collection="refs" separator=",">
           (#{ref.canvasId}, #{ref.nodeId}, #{ref.requestId}, #{ref.role}, #{ref.resourceId})
       </foreach>
       </script>
       """)
-  int insertAll(@Param("refs") List<CanvasFunctionResourceRefDO> refs);
+  int insertAll(@Param("refs") List<CanvasFunctionResourcePinDO> refs);
 
   @Select(
       """
       select canvas_id, node_id, request_id, role, resource_id
-      from canvas_function_resource_ref
+      from canvas_function_resource_pin
       where canvas_id = #{canvasId} and node_id = #{nodeId} and request_id = #{requestId}
       order by role, resource_id
       """)
   @Results(
-      id = "canvasFunctionResourceRefMap",
+      id = "canvasFunctionResourcePinMap",
       value = {
         @Result(column = "canvas_id", property = "canvasId"),
         @Result(column = "node_id", property = "nodeId"),
@@ -47,7 +47,7 @@ public interface CanvasFunctionResourceRefMapper extends BaseMapper {
         @Result(column = "role", property = "role"),
         @Result(column = "resource_id", property = "resourceId")
       })
-  List<CanvasFunctionResourceRefDO> findByRun(
+  List<CanvasFunctionResourcePinDO> findByRun(
       @Param("canvasId") UUID canvasId,
       @Param("nodeId") UUID nodeId,
       @Param("requestId") UUID requestId);
@@ -55,18 +55,18 @@ public interface CanvasFunctionResourceRefMapper extends BaseMapper {
   @Select(
       """
       select canvas_id, node_id, request_id, role, resource_id
-      from canvas_function_resource_ref
+      from canvas_function_resource_pin
       where canvas_id = #{canvasId} and node_id = #{nodeId}
       order by request_id, role, resource_id
       """)
-  @ResultMap("canvasFunctionResourceRefMap")
-  List<CanvasFunctionResourceRefDO> findByNode(
+  @ResultMap("canvasFunctionResourcePinMap")
+  List<CanvasFunctionResourcePinDO> findByNode(
       @Param("canvasId") UUID canvasId, @Param("nodeId") UUID nodeId);
 
   @Select(
       """
       select count(1)
-      from canvas_function_resource_ref
+      from canvas_function_resource_pin
       where canvas_id = #{canvasId} and resource_id = #{resourceId}
       """)
   int countByResource(@Param("canvasId") UUID canvasId, @Param("resourceId") UUID resourceId);
@@ -74,7 +74,7 @@ public interface CanvasFunctionResourceRefMapper extends BaseMapper {
   @Select(
       """
       select ref.canvas_id, ref.node_id, ref.request_id, ref.role, ref.resource_id
-      from canvas_function_resource_ref ref
+      from canvas_function_resource_pin ref
       join canvas_function_run run
         on run.node_id = ref.node_id and run.request_id = ref.request_id
       where ref.canvas_id = #{canvasId}
@@ -82,13 +82,13 @@ public interface CanvasFunctionResourceRefMapper extends BaseMapper {
         and ref.role = 'OUTPUT'
         and run.status = 'RUNNING'
       """)
-  @ResultMap("canvasFunctionResourceRefMap")
-  List<CanvasFunctionResourceRefDO> findRunningOutputPins(
+  @ResultMap("canvasFunctionResourcePinMap")
+  List<CanvasFunctionResourcePinDO> findRunningOutputPins(
       @Param("canvasId") UUID canvasId, @Param("resourceId") UUID resourceId);
 
   @Delete(
       """
-      delete from canvas_function_resource_ref
+      delete from canvas_function_resource_pin
       where canvas_id = #{canvasId} and node_id = #{nodeId} and request_id = #{requestId}
       """)
   int deleteByRun(
@@ -98,11 +98,11 @@ public interface CanvasFunctionResourceRefMapper extends BaseMapper {
 
   @Delete(
       """
-      delete from canvas_function_resource_ref
+      delete from canvas_function_resource_pin
       where canvas_id = #{canvasId} and node_id = #{nodeId}
       """)
   int deleteByNode(@Param("canvasId") UUID canvasId, @Param("nodeId") UUID nodeId);
 
-  @Delete("delete from canvas_function_resource_ref where canvas_id = #{canvasId}")
+  @Delete("delete from canvas_function_resource_pin where canvas_id = #{canvasId}")
   int deleteByCanvas(@Param("canvasId") UUID canvasId);
 }

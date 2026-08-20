@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.core.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageMediaFacts;
 import fun.fengwk.kkstudio.core.studio.repo.impl.PostgresqlCanvasResourceRepository;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionResourceRefMapper;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionResourcePinMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasResourceMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasResourceDO;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
@@ -49,7 +49,7 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
   private final StorageBlobManager blobManager;
   private final StorageBlobMapper blobMapper;
   private final CanvasDocumentMapper documentMapper;
-  private final CanvasFunctionResourceRefMapper refMapper;
+  private final CanvasFunctionResourcePinMapper refMapper;
   private final CanvasResourceMapper resourceMapper;
   private final CanvasBlobPreviewService previewService;
   private final CanvasMediaProperties properties;
@@ -61,7 +61,7 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
       StorageBlobManager blobManager,
       StorageBlobMapper blobMapper,
       CanvasDocumentMapper documentMapper,
-      CanvasFunctionResourceRefMapper refMapper,
+      CanvasFunctionResourcePinMapper refMapper,
       CanvasResourceMapper resourceMapper,
       CanvasBlobPreviewService previewService,
       CanvasMediaProperties properties,

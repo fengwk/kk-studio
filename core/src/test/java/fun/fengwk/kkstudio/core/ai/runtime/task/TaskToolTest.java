@@ -29,8 +29,10 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.testing.TestThreadChangeSource;
-import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
@@ -71,11 +73,11 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
@@ -264,10 +266,8 @@ class TaskToolTest {
     ThreadSnapshot child = childRootSnapshot(childSettings);
     String report = "x".repeat(8_100);
     ThreadSnapshot terminal = completedChildSnapshot(child, report);
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     stubChildSnapshots(runtime, child, terminal);
     when(settingsMaterializer.materialize(eq("reviewer"), eq(null), eq(2), any()))
         .thenReturn(childSettings);
@@ -289,27 +289,20 @@ class TaskToolTest {
         CHILD_THREAD_ID.toString(),
         new ObjectMapper().readTree(result.detailsJson()).get("threadId").asText());
 
-    ArgumentCaptor<CreateThreadCommand> createCaptor =
-        ArgumentCaptor.forClass(CreateThreadCommand.class);
-    verify(runtime).createThread(createCaptor.capture());
-    CreateThreadCommand create = createCaptor.getValue();
-    assertEquals(childSettings, create.branchSettings());
-    assertTrue(create.yoloEnabled());
+    ArgumentCaptor<AcceptCommandsCommand> acceptCaptor =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime).acceptCommands(acceptCaptor.capture(), any(AcceptancePreflight.class));
+    AcceptCommandsCommand accept = acceptCaptor.getValue();
+    AcceptCommandsTarget.NewSession target = (AcceptCommandsTarget.NewSession) accept.target();
+    assertEquals(childSettings, target.rootSettings());
+    assertTrue(target.yoloEnabled());
     assertEquals(
         new SubagentContext(PARENT_THREAD_ID, PARENT_THREAD_ID, TASK_INVOCATION_ID, 2),
-        create.subagentContext());
-
-    ArgumentCaptor<ThreadCommandBatch> batchCaptor =
-        ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime).enqueueCommands(batchCaptor.capture());
-    ThreadCommandBatch batch = batchCaptor.getValue();
-    assertEquals(CHILD_THREAD_ID, batch.threadId());
-    assertEquals(CHILD_ROOT_ENTRY_ID, batch.expectedHeadEntryId());
-    assertEquals(1L, batch.expectedNextCommandSequence());
-    assertEquals(1, batch.commands().size());
-    assertNotNull(batch.commands().getFirst().clientCommandId());
+        target.subagentContext());
+    assertEquals(1, accept.commands().size());
+    assertNotNull(accept.commands().getFirst().clientCommandId());
     UserMessageCommandPayload prompt =
-        assertInstanceOf(UserMessageCommandPayload.class, batch.commands().getFirst().payload());
+        assertInstanceOf(UserMessageCommandPayload.class, accept.commands().getFirst().payload());
     assertEquals(AgentMessage.user("Review the change"), prompt.message());
 
     assertFalse(listener.partials.isEmpty());
@@ -348,7 +341,7 @@ class TaskToolTest {
         ((TextToolContent) result.contents().getFirst())
             .text()
             .contains("subagent_type \"ghost\" is not allowed; available: reviewer / researcher"));
-    verify(runtime, never()).createThread(any());
+    verify(runtime, never()).acceptCommands(any(), any());
     verifyNoInteractions(settingsMaterializer);
   }
 
@@ -400,30 +393,30 @@ class TaskToolTest {
     String text = ((TextToolContent) result.contents().getFirst()).text();
     assertTrue(text.startsWith("<task id=\"" + RESUME_THREAD_ID + "\" state=\"completed\">"), text);
     assertTrue(text.contains("resumed and finished"), text);
-    verify(runtime, never()).createThread(any());
 
-    ArgumentCaptor<ThreadCommandBatch> batchCaptor =
-        ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime).enqueueCommands(batchCaptor.capture());
-    ThreadCommandBatch batch = batchCaptor.getValue();
-    assertEquals(RESUME_THREAD_ID, batch.threadId());
-    assertEquals(id(34), batch.expectedHeadEntryId());
-    assertEquals(2L, batch.expectedNextCommandSequence());
-    assertEquals(4, batch.commands().size());
-    assertNotNull(batch.commands().get(0).clientCommandId());
+    ArgumentCaptor<AcceptCommandsCommand> acceptCaptor =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime).acceptCommands(acceptCaptor.capture(), any(AcceptancePreflight.class));
+    AcceptCommandsCommand accept = acceptCaptor.getValue();
+    AcceptCommandsTarget.Thread threadTarget = (AcceptCommandsTarget.Thread) accept.target();
+    assertEquals(RESUME_THREAD_ID, threadTarget.threadId());
+    assertEquals(id(34), threadTarget.expectedHeadEntryId());
+    assertEquals(2L, threadTarget.expectedNextCommandSequence());
+    assertEquals(4, accept.commands().size());
+    assertNotNull(accept.commands().get(0).clientCommandId());
     assertEquals(
         "beta",
-        assertInstanceOf(SetAgentCommandPayload.class, batch.commands().get(0).payload())
+        assertInstanceOf(SetAgentCommandPayload.class, accept.commands().get(0).payload())
             .agentName());
     assertEquals(
         new ModelSelection("provider", "model-b", "default"),
-        assertInstanceOf(SetModelCommandPayload.class, batch.commands().get(1).payload()).model());
+        assertInstanceOf(SetModelCommandPayload.class, accept.commands().get(1).payload()).model());
     assertEquals(
         List.of("tool-b"),
-        assertInstanceOf(SetActiveToolsCommandPayload.class, batch.commands().get(2).payload())
+        assertInstanceOf(SetActiveToolsCommandPayload.class, accept.commands().get(2).payload())
             .activeTools());
     UserMessageCommandPayload prompt =
-        assertInstanceOf(UserMessageCommandPayload.class, batch.commands().get(3).payload());
+        assertInstanceOf(UserMessageCommandPayload.class, accept.commands().get(3).payload());
     assertEquals(AgentMessage.user("Continue the work"), prompt.message());
     assertEquals(1, listener.completedCalls.get());
   }
@@ -621,10 +614,8 @@ class TaskToolTest {
             childSettings,
             new SubagentContext(PARENT_THREAD_ID, ROOT_THREAD_ID, TASK_INVOCATION_ID, 3));
     ThreadSnapshot terminal = completedChildSnapshot(child, "nested report");
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     stubChildSnapshots(runtime, child, terminal);
     when(settingsMaterializer.materialize(eq("reviewer"), isNull(), eq(3), any()))
         .thenReturn(childSettings);
@@ -640,12 +631,14 @@ class TaskToolTest {
         ((TextToolContent) result.contents().getFirst()).text().contains("nested report"),
         result.toString());
 
-    ArgumentCaptor<CreateThreadCommand> createCaptor =
-        ArgumentCaptor.forClass(CreateThreadCommand.class);
-    verify(runtime).createThread(createCaptor.capture());
+    ArgumentCaptor<AcceptCommandsCommand> acceptCaptor =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime).acceptCommands(acceptCaptor.capture(), any(AcceptancePreflight.class));
+    AcceptCommandsTarget.NewSession target =
+        (AcceptCommandsTarget.NewSession) acceptCaptor.getValue().target();
     assertEquals(
         new SubagentContext(PARENT_THREAD_ID, ROOT_THREAD_ID, TASK_INVOCATION_ID, 3),
-        createCaptor.getValue().subagentContext());
+        target.subagentContext());
 
     ToolResult status = listener.partials.getFirst();
     var statusJson = new ObjectMapper().readTree(status.detailsJson());
@@ -687,8 +680,7 @@ class TaskToolTest {
     assertEquals(
         "cancelled", new ObjectMapper().readTree(result.detailsJson()).get("state").asText());
     assertTrue(handle.isCancelled());
-    verify(runtime, never()).createThread(any());
-    verify(runtime, never()).enqueueCommands(any());
+    verify(runtime, never()).acceptCommands(any(), any());
     verify(runtime, never()).stop(any());
   }
 
@@ -706,10 +698,8 @@ class TaskToolTest {
     ThreadSnapshot running =
         runningRootSnapshot(
             CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of(queuedCommand()));
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
@@ -783,10 +773,8 @@ class TaskToolTest {
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
     ThreadSnapshot runningRev2 =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
@@ -857,10 +845,8 @@ class TaskToolTest {
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
     ThreadSnapshot runningRev2 =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
@@ -946,10 +932,8 @@ class TaskToolTest {
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot running =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     AtomicReference<Thread> observationThread = new AtomicReference<>();
@@ -997,10 +981,8 @@ class TaskToolTest {
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot running =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
@@ -1048,10 +1030,8 @@ class TaskToolTest {
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot running =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     CountDownLatch entered = new CountDownLatch(1);
@@ -1114,10 +1094,8 @@ class TaskToolTest {
             List.of());
     ThreadSnapshot idle =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
@@ -1231,10 +1209,8 @@ class TaskToolTest {
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot idle =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
@@ -1288,24 +1264,25 @@ class TaskToolTest {
     ThreadSnapshot threeTurns = turnCountSnapshot(3, model, 1L);
     ThreadSnapshot eightTurns = turnCountSnapshot(8, model, 2L);
     ThreadSnapshot terminal = completedChildSnapshot(child, "done after turns");
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     stubChildSnapshots(runtime, child, threeTurns, eightTurns, eightTurns, terminal);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
+    // NEW_SESSION 接受返回 child；THREAD reminder 接受计数，超过 2 次后抛冲突（被观察循环跳过，不中断本轮）。
     AtomicInteger enqueues = new AtomicInteger();
-    doAnswer(
+    when(runtime.acceptCommands(any(AcceptCommandsCommand.class), any(AcceptancePreflight.class)))
+        .thenAnswer(
             inv -> {
+              AcceptCommandsCommand command = inv.getArgument(0);
+              if (command.target() instanceof AcceptCommandsTarget.NewSession) {
+                return acceptedNewSession(child, command);
+              }
               if (enqueues.incrementAndGet() > 2) {
                 throw new HarnessRuntimeConflictException(
                     HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "cursor moved");
               }
               return null;
-            })
-        .when(runtime)
-        .enqueueCommands(any(ThreadCommandBatch.class));
+            });
     RecordingListener listener = new RecordingListener();
 
     tool.execute(
@@ -1323,19 +1300,22 @@ class TaskToolTest {
         3,
         new ObjectMapper().readTree(listener.partials.get(0).detailsJson()).get("turns").asInt());
 
-    ArgumentCaptor<ThreadCommandBatch> batchCaptor =
-        ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime, atLeast(2)).enqueueCommands(batchCaptor.capture());
+    ArgumentCaptor<AcceptCommandsCommand> acceptCaptor =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime, atLeast(2))
+        .acceptCommands(acceptCaptor.capture(), any(AcceptancePreflight.class));
     List<UUID> reminderIds = new ArrayList<>();
-    for (ThreadCommandBatch batch : batchCaptor.getAllValues()) {
-      if (batch.commands().getFirst().payload() instanceof CustomMessageCommandPayload reminder) {
-        reminderIds.add(batch.commands().getFirst().clientCommandId());
+    for (AcceptCommandsCommand command : acceptCaptor.getAllValues()) {
+      if (command.target() instanceof AcceptCommandsTarget.Thread
+          && command.commands().getFirst().payload()
+              instanceof CustomMessageCommandPayload reminder) {
+        reminderIds.add(command.commands().getFirst().clientCommandId());
         assertEquals(
             TaskPrompts.maxTurnsReminder(),
             ((TextMessageContent) reminder.message().contents().getFirst()).text());
       }
     }
-    // 第 3 轮首次提醒，之后每 5 轮重复（3 -> 8）；第二次提醒入队冲突只跳过本轮观察，重试后仍会成功。
+    // 第 3 轮首次提醒，之后每 5 轮重复（3 -> 8）；后续提醒入队冲突只跳过本轮观察，重试后仍会成功。
     assertTrue(reminderIds.size() >= 2, reminderIds.toString());
     assertTrue(reminderIds.stream().distinct().count() >= 2, reminderIds.toString());
   }
@@ -1353,10 +1333,8 @@ class TaskToolTest {
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot continueHead = continueModelHeadSnapshot(true, 1L);
     ThreadSnapshot terminal = continueModelHeadSnapshot(false, 1L);
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     long start = System.nanoTime();
@@ -1703,22 +1681,27 @@ class TaskToolTest {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
-    stubCreateFlow(runtime, childSettings);
+    ThreadSnapshot parent =
+        parentSnapshot(
+            settings("parent", "parent-model", List.of(TaskTool.NAME)),
+            List.of(new SubagentBinding(childSettings.agentName(), "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot terminal = completedChildSnapshot(child, "recovered report");
-    // 序列 [child, child, terminal]：第一次执行 consume 前两个 child，冲突后失败；第二次执行首次读取即见 terminal 并恢复成功。
+    when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
+    when(settingsMaterializer.materialize(eq(childSettings.agentName()), isNull(), anyInt(), any()))
+        .thenReturn(childSettings);
+    // 序列 [child, child, terminal]：第一次执行 NEW_SESSION 接受抛冲突（失败），第二次执行恢复成功。
     stubChildSnapshots(runtime, child, child, terminal);
-    AtomicInteger enqueues = new AtomicInteger();
-    doAnswer(
+    AtomicInteger accepts = new AtomicInteger();
+    when(runtime.acceptCommands(any(AcceptCommandsCommand.class), any(AcceptancePreflight.class)))
+        .thenAnswer(
             inv -> {
-              if (enqueues.incrementAndGet() == 1) {
+              if (accepts.incrementAndGet() == 1) {
                 throw new HarnessRuntimeConflictException(
                     HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "cursor moved");
               }
-              return null;
-            })
-        .when(runtime)
-        .enqueueCommands(any(ThreadCommandBatch.class));
+              return acceptedNewSession(child, inv.getArgument(0));
+            });
     RecordingListener first = new RecordingListener();
 
     tool.execute(
@@ -1767,7 +1750,7 @@ class TaskToolTest {
               .contains("subagent concurrency limit reached (1/1)"),
           result.toString());
     }
-    verify(runtime, never()).createThread(any());
+    verify(runtime, never()).acceptCommands(any(), any());
   }
 
   /** 同一 resume session 正在运行时，第二次委派被进程内 reservation 拒绝。 */
@@ -1847,7 +1830,7 @@ class TaskToolTest {
     assertTrue(text.contains(messageFragment), argumentsJson + " -> " + text);
   }
 
-  /** 建立 create-child 的公共 stub：parent snapshot、child snapshot、createThread 与 materialize。 */
+  /** 建立 create-child 的公共 stub：parent snapshot、child snapshot、NEW_SESSION 接受与 materialize。 */
   private void stubCreateFlow(HarnessRuntime runtime, BranchSettings childSettings) {
     ThreadSnapshot parent =
         parentSnapshot(
@@ -1857,9 +1840,44 @@ class TaskToolTest {
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(settingsMaterializer.materialize(eq(childSettings.agentName()), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
-    CreatedThread created =
-        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
-    when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
+    stubAcceptNewSession(runtime, child);
+  }
+
+  /** 让 NEW_SESSION 接受返回固定 child；acceptedCommands 从请求命令派生（与真实 HarnessRuntime 的分配语义一致）。 */
+  private static void stubAcceptNewSession(HarnessRuntime runtime, ThreadSnapshot child) {
+    when(runtime.acceptCommands(any(AcceptCommandsCommand.class), any(AcceptancePreflight.class)))
+        .thenAnswer(inv -> acceptedNewSession(child, inv.getArgument(0)));
+  }
+
+  private static AcceptedCommands acceptedNewSession(
+      ThreadSnapshot child, AcceptCommandsCommand command) {
+    return new AcceptedCommands(
+        new Session(child.entryPath().root().sessionId(), NOW),
+        child.entryPath().root(),
+        child.thread(),
+        toThreadCommands(child.thread().id(), command.commands()),
+        false);
+  }
+
+  /** 把 NEW_SESSION 请求命令映射为该 Thread 上 1 起始、严格递增 sequence 的 durable Commands。 */
+  private static List<ThreadCommand> toThreadCommands(
+      UUID threadId, List<NewThreadCommand> requests) {
+    List<ThreadCommand> accepted = new ArrayList<>();
+    long sequence = 1L;
+    for (NewThreadCommand request : requests) {
+      accepted.add(
+          new ThreadCommand(
+              threadId,
+              sequence++,
+              request.payload(),
+              request.clientCommandId(),
+              request.requestHash(),
+              null,
+              null,
+              null,
+              NOW));
+    }
+    return accepted;
   }
 
   @SuppressWarnings("unchecked")
@@ -1911,6 +1929,26 @@ class TaskToolTest {
     assertFalse(listener.partials.isEmpty(), "task must publish an initial status partial");
   }
 
+  /** 构造绑定给定 Session 的合法持久化 Thread 状态（materializationHash 为 64 个 0）。 */
+  private static ThreadState threadState(
+      UUID threadId,
+      UUID sessionId,
+      UUID headEntryId,
+      boolean yoloEnabled,
+      long nextCommandSequence,
+      long revision) {
+    return new ThreadState(
+        threadId,
+        sessionId,
+        headEntryId,
+        "0".repeat(64),
+        yoloEnabled,
+        nextCommandSequence,
+        revision,
+        NOW,
+        NOW);
+  }
+
   private static ThreadSnapshot parentSnapshot(
       BranchSettings settings, List<SubagentBinding> allowedSubagents) {
     return parentSnapshot(null, settings, allowedSubagents, List.of(taskInvocationSibling()));
@@ -1923,7 +1961,7 @@ class TaskToolTest {
       List<ToolInvocation> toolSiblings) {
     Entry root =
         new Entry(id(1), PARENT_SESSION_ID, null, new RootPayload(settings, rootContext), NOW);
-    ThreadState thread = new ThreadState(PARENT_THREAD_ID, root.id(), true, 1L, 0L, NOW, NOW);
+    ThreadState thread = threadState(PARENT_THREAD_ID, PARENT_SESSION_ID, root.id(), true, 1L, 0L);
     ModelRequestSpec modelRequest = mock(ModelRequestSpec.class);
     when(modelRequest.subagentBindings()).thenReturn(allowedSubagents);
     ModelInvocation model = mock(ModelInvocation.class);
@@ -1946,7 +1984,7 @@ class TaskToolTest {
       BranchSettings settings, SubagentContext context) {
     Entry root =
         new Entry(CHILD_ROOT_ENTRY_ID, SESSION_ID, null, new RootPayload(settings, context), NOW);
-    ThreadState thread = new ThreadState(CHILD_THREAD_ID, root.id(), true, 1L, 0L, NOW, NOW);
+    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, root.id(), true, 1L, 0L);
     return new ThreadSnapshot(
         thread, new EntryPath(List.of(root)), List.of(), null, List.of(), List.of());
   }
@@ -1970,8 +2008,13 @@ class TaskToolTest {
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, false, null, null),
             NOW);
     ThreadState thread =
-        new ThreadState(
-            CHILD_THREAD_ID, end.id(), initial.thread().yoloEnabled(), 2L, 2L, NOW, NOW);
+        threadState(
+            CHILD_THREAD_ID,
+            initial.thread().sessionId(),
+            end.id(),
+            initial.thread().yoloEnabled(),
+            2L,
+            2L);
     return new ThreadSnapshot(
         thread,
         new EntryPath(List.of(root, turn, assistant, end)),
@@ -2016,8 +2059,7 @@ class TaskToolTest {
             assistant.id(),
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, continueModel, null, null),
             NOW);
-    ThreadState thread =
-        new ThreadState(RESUME_THREAD_ID, headEntryId, true, 2L, revision, NOW, NOW);
+    ThreadState thread = threadState(RESUME_THREAD_ID, SESSION_ID, headEntryId, true, 2L, revision);
     return new ThreadSnapshot(
         thread,
         new EntryPath(List.of(root, turn, assistant, end)),
@@ -2061,14 +2103,13 @@ class TaskToolTest {
     entries.add(assistant);
     entries.add(end);
     ThreadState thread =
-        new ThreadState(
+        threadState(
             resumed.thread().id(),
+            resumed.thread().sessionId(),
             end.id(),
             resumed.thread().yoloEnabled(),
             resumed.thread().nextCommandSequence(),
-            resumed.thread().revision() + 1,
-            NOW,
-            NOW);
+            resumed.thread().revision() + 1);
     return new ThreadSnapshot(
         thread, new EntryPath(entries), List.of(), null, List.of(), List.of());
   }
@@ -2087,7 +2128,7 @@ class TaskToolTest {
             null,
             new RootPayload(settings, SUBAGENT_CONTEXT),
             NOW);
-    ThreadState thread = new ThreadState(threadId, headEntryId, true, 1L, revision, NOW, NOW);
+    ThreadState thread = threadState(threadId, SESSION_ID, headEntryId, true, 1L, revision);
     return new ThreadSnapshot(thread, new EntryPath(List.of(root)), queued, null, tools, List.of());
   }
 
@@ -2120,7 +2161,7 @@ class TaskToolTest {
                 null),
             NOW);
     ThreadState thread =
-        new ThreadState(CHILD_THREAD_ID, assistant.id(), true, 1L, revision, NOW, NOW);
+        threadState(CHILD_THREAD_ID, SESSION_ID, assistant.id(), true, 1L, revision);
     return new ThreadSnapshot(
         thread, new EntryPath(List.of(root, turn, assistant)), List.of(), null, tools, List.of());
   }
@@ -2188,7 +2229,7 @@ class TaskToolTest {
         parent = end.id();
       }
     }
-    ThreadState thread = new ThreadState(CHILD_THREAD_ID, parent, true, 1L, revision, NOW, NOW);
+    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, parent, true, 1L, revision);
     return new ThreadSnapshot(
         thread, new EntryPath(entries), List.of(), model, List.of(), List.of());
   }
@@ -2218,7 +2259,7 @@ class TaskToolTest {
             assistant.id(),
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, continueModel, null, null),
             NOW);
-    ThreadState thread = new ThreadState(CHILD_THREAD_ID, end.id(), true, 1L, revision, NOW, NOW);
+    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, end.id(), true, 1L, revision);
     return new ThreadSnapshot(
         thread,
         new EntryPath(List.of(root, turn, assistant, end)),
@@ -2259,7 +2300,7 @@ class TaskToolTest {
             new TurnEndPayload(
                 turn.id(), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
             NOW);
-    ThreadState thread = new ThreadState(CHILD_THREAD_ID, end.id(), true, 1L, 3L, NOW, NOW);
+    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, end.id(), true, 1L, 3L);
     return new ThreadSnapshot(
         thread,
         new EntryPath(List.of(root, turn, error, end)),
@@ -2303,7 +2344,7 @@ class TaskToolTest {
             new TurnEndPayload(
                 turn.id(), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(1)),
             NOW);
-    ThreadState thread = new ThreadState(CHILD_THREAD_ID, end.id(), true, 1L, 3L, NOW, NOW);
+    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, end.id(), true, 1L, 3L);
     return new ThreadSnapshot(
         thread,
         new EntryPath(List.of(root, turn, aborted, end)),
@@ -2337,7 +2378,7 @@ class TaskToolTest {
             new TurnEndPayload(
                 turn.id(), TurnEndOutcome.CANCELLED, false, TurnEndReason.CANCELLED, null),
             NOW);
-    ThreadState thread = new ThreadState(CHILD_THREAD_ID, end.id(), true, 1L, 3L, NOW, NOW);
+    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, end.id(), true, 1L, 3L);
     return new ThreadSnapshot(
         thread, new EntryPath(List.of(root, turn, end)), List.of(), null, List.of(), List.of());
   }
@@ -2361,6 +2402,7 @@ class TaskToolTest {
         payload,
         id(1),
         ThreadCommandPayloadJsonCodec.requestHash(payload),
+        null,
         null,
         null,
         NOW);

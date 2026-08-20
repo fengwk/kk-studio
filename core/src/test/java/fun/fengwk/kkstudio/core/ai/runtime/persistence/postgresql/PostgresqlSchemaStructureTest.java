@@ -47,9 +47,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_function_run",
           "canvas_resource",
           "canvas_command_dedup",
-          "canvas_function_resource_ref",
+          "canvas_function_resource_pin",
+          "canvas_session",
           "chat",
-          "chat_thread",
+          "chat_session",
           "harness_session",
           "harness_session_blob_ref",
           "harness_entry",
@@ -186,8 +187,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "created_at",
         "updated_at",
         "version");
-    assertColumns(
-        "canvas_document", "id", "title", "version", "thread_id", "created_at", "updated_at");
+    assertColumns("canvas_document", "id", "title", "version", "created_at", "updated_at");
     assertColumns("canvas_group", "id", "canvas_id", "title", "x", "y", "width", "height");
     assertColumns(
         "canvas_node",
@@ -220,15 +220,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "name",
         "text_content",
         "created_at");
+    assertColumns("canvas_command_dedup", "canvas_id", "command_id", "request_hash");
     assertColumns(
-        "canvas_command_dedup",
-        "canvas_id",
-        "command_id",
-        "request_hash",
-        "applied_version",
-        "created_at");
-    assertColumns(
-        "canvas_function_resource_ref",
+        "canvas_function_resource_pin",
         "canvas_id",
         "node_id",
         "request_id",
@@ -245,7 +239,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "created_at",
         "updated_at",
         "version");
-    assertColumns("chat_thread", "chat_id", "thread_id", "created_at");
+    assertColumns("chat_session", "session_id", "chat_id", "created_at");
+    assertColumns("canvas_session", "session_id", "canvas_id", "created_at");
     assertColumns(
         "storage_blob",
         "id",
@@ -286,7 +281,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumns(
         "harness_thread",
         "id",
+        "session_id",
         "head_entry_id",
+        "materialization_hash",
         "yolo_enabled",
         "next_command_sequence",
         "revision",
@@ -301,6 +298,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "client_command_id",
         "request_hash",
         "consumed_turn_start_entry_id",
+        "cancel_request_id",
         "cancelled_at",
         "created_at");
     assertColumns(
@@ -433,7 +431,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "canvas_document", "created_at");
     assertColumnType("timestamp with time zone", "canvas_document", "updated_at");
     assertColumnType("timestamp with time zone", "canvas_resource", "created_at");
-    assertColumnType("timestamp with time zone", "canvas_command_dedup", "created_at");
+    assertColumnType("timestamp with time zone", "chat_session", "created_at");
+    assertColumnType("timestamp with time zone", "canvas_session", "created_at");
     assertColumnType("timestamp with time zone", "canvas_function_run", "updated_at");
     assertColumnType("timestamp with time zone", "storage_blob", "created_at");
     assertColumnType("timestamp with time zone", "storage_blob", "updated_at");
@@ -740,16 +739,19 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " values (?, ?, 'ROOT', '{}'::jsonb, current_timestamp)");
         PreparedStatement thread =
             conn.prepareStatement(
-                "insert into harness_thread (id, head_entry_id, yolo_enabled,"
-                    + " next_command_sequence, revision, created_at, updated_at) values"
-                    + " (?, ?, false, 1, 0, current_timestamp, current_timestamp)")) {
+                "insert into harness_thread (id, session_id, head_entry_id, materialization_hash,"
+                    + " yolo_enabled, next_command_sequence, revision, created_at, updated_at)"
+                    + " values (?, ?, ?, '"
+                    + "0".repeat(64)
+                    + "', false, 1, 0, current_timestamp, current_timestamp)")) {
       session.setObject(1, sessionId);
       assertEquals(1, session.executeUpdate());
       entry.setObject(1, entryId);
       entry.setObject(2, sessionId);
       assertEquals(1, entry.executeUpdate());
       thread.setObject(1, threadId);
-      thread.setObject(2, entryId);
+      thread.setObject(2, sessionId);
+      thread.setObject(3, entryId);
       assertEquals(1, thread.executeUpdate());
     }
   }
@@ -763,7 +765,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "canvas_function_run", "request_id");
     assertColumnType("uuid", "canvas_link", "source_node_id");
     assertColumnType("uuid", "canvas_link", "target_node_id");
-    assertColumnType("uuid", "canvas_function_resource_ref", "resource_id");
+    assertColumnType("uuid", "canvas_function_resource_pin", "resource_id");
     for (String table : HARNESS_TABLES) {
       if (table.equals("harness_work")
           || table.equals("harness_thread_command")
@@ -776,7 +778,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     }
     assertColumnType("uuid", "chat", "id");
     assertColumnType("uuid", "comfyui_workflow_api", "id");
-    assertColumnType("uuid", "chat_thread", "thread_id");
+    assertColumnType("uuid", "chat_session", "session_id");
+    assertColumnType("uuid", "chat_session", "chat_id");
+    assertColumnType("uuid", "canvas_session", "session_id");
+    assertColumnType("uuid", "canvas_session", "canvas_id");
   }
 
   @Test
@@ -943,7 +948,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertEquals(
         Set.of(
             "uk_comfyui_workflow_api_api_name",
-            "uk_canvas_document_thread",
             "uk_canvas_function_run_request",
             "uk_canvas_group_canvas",
             "uk_canvas_node_canvas",
@@ -952,7 +956,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_thread_command_client",
-            "uk_chat_thread_thread",
             "uk_harness_model_invocation_turn",
             "uk_harness_model_invocation_result",
             "uk_harness_tool_invocation_ordinal",
@@ -975,9 +978,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " 'fk_canvas_link_source',"
                     + " 'fk_canvas_link_target',"
                     + " 'fk_canvas_function_run_node',"
-                    + " 'fk_canvas_function_resource_ref_node',"
-                    + " 'fk_canvas_document_thread',"
-                    + " 'fk_chat_thread_chat', 'fk_chat_thread_thread')")) {
+                    + " 'fk_canvas_function_resource_pin_node',"
+                    + " 'fk_chat_session_chat', 'fk_chat_session_session',"
+                    + " 'fk_canvas_session_canvas', 'fk_canvas_session_session')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -996,10 +999,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_canvas_link_source",
             "fk_canvas_link_target",
             "fk_canvas_function_run_node",
-            "fk_canvas_function_resource_ref_node",
-            "fk_canvas_document_thread",
-            "fk_chat_thread_chat",
-            "fk_chat_thread_thread"),
+            "fk_canvas_function_resource_pin_node",
+            "fk_chat_session_chat",
+            "fk_chat_session_session",
+            "fk_canvas_session_canvas",
+            "fk_canvas_session_session"),
         foreignKeys,
         "all non-Harness ownership relations must be enforced by PostgreSQL");
   }
