@@ -26,14 +26,12 @@ import fun.fengwk.kkstudio.harness.plugin.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
@@ -80,7 +78,7 @@ import java.util.UUID;
 
 /**
  * 生产 Core 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的 {@link
- * ModelRequestSpec} 与 contextWindow。
+ * ModelRequestSpec}、contextWindow 与 maxOutputTokens。
  *
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environment binding / agentName / {@link
  * ModelSelection}）；实现按这些精确引用读取最新 catalog / environment 事实，Agent 的 tools/skills/subagents 每个新 turn
@@ -252,20 +250,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
             toolBindings,
             skillBindings,
             subagentBindings,
-            cacheControl,
-            null),
-        contextWindow(parsedModel));
+            cacheControl),
+        contextWindow(parsedModel),
+        maxOutputTokens(parsedModel, variant));
   }
 
   /**
-   * 压缩 resolver 路径：只使用当前 branch 的 model/provider/variant 与冻结切分事实构造请求——不查 Agent system prompt、不查
-   * plugins、零 tool/skill、不做 environment 可用性查找、不做 prompt-cache finalizer / cache 写入。 永远构建一个
-   * SYSTEM（summarization system prompt）+ 一个 USER（conversation + summary prompt）请求；输出上限为 min(有效
-   * model/variant 输出上限, floor(0.8|0.5 * reserveTokens))。
+   * 压缩 resolver 路径：只按 preparation 的 executionModel 查找 provider/model/variant 构造请求——不查 Agent system
+   * prompt、不查 plugins、零 tool/skill、不做 environment 可用性查找、不做 prompt-cache finalizer / cache 写入。切分事实由
+   * candidate path 的 compaction TURN_START 持有，不复制进 spec。
    */
   private Result resolveCompaction(EntryPath path, CompactionPreparation preparation) {
-    BranchSettings settings = path.baseSettings();
-    ModelSelection selection = settings.model();
+    ModelSelection selection = preparation.executionModel();
     AgentProvider provider =
         require(
             providerRepository.getByName(selection.providerName()),
@@ -294,16 +290,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + "/"
               + selection.modelName());
     }
-    int budget =
-        preparation.phase() == CompactionPhase.TURN_PREFIX
-            ? (int) Math.floorDiv((long) compactionConfig.reserveTokens(), 2L)
-            : (int) Math.floorDiv((long) compactionConfig.reserveTokens() * 4L, 5L);
-    // 输出上限恒为 min(模型/variant 输出上限, 阶段预算)：variant 未显式设置时回退到模型全局
-    // limit.output（parser 已保证 variant <= model limit，且 limit.output <= limit.context <= int）。
-    int maxOutput =
-        variant.maxOutputTokens() == null
-            ? (int) Math.min(parsedModel.maxOutputTokens(), budget)
-            : Math.min(variant.maxOutputTokens(), budget);
+    int actualModelMaxOutput = maxOutputTokens(parsedModel, variant);
+    long budget =
+        compactionConfig.outputBudget(
+            preparation.phase(), actualModelMaxOutput, preparation.removedPrefixTokens());
+    if (budget <= 0 || budget > Integer.MAX_VALUE) {
+      throw rejection("compaction output budget must be a positive int, got " + budget);
+    }
+    int maxOutput = (int) budget;
     ModelVariant compactionVariant =
         new ModelVariant(
             variant.id(),
@@ -315,15 +309,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
             variant.presencePenalty(),
             variant.stopSequences(),
             variant.reasoningEffort());
-    CompactionRequest compactionRequest =
-        new CompactionRequest(
-            preparation.phase(),
-            preparation.trigger(),
-            preparation.tokensBefore(),
-            preparation.firstKeptEntryId(),
-            preparation.cutEntryId(),
-            preparation.turnPrefixStartEntryId());
-    // contextWindow 冻结自触发 turn 的 preparation（model config 变更不导致触发后解析漂移 / 无限 reschedule）。
     return new TurnResolver.Resolved(
         new ModelRequestSpec(
             providerType,
@@ -339,9 +324,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
             List.of(),
             List.of(),
             List.of(),
-            ProviderCacheControl.none(),
-            compactionRequest),
-        Math.toIntExact(preparation.contextWindow()));
+            ProviderCacheControl.none()),
+        contextWindow(parsedModel),
+        maxOutput);
   }
 
   /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */
@@ -351,6 +336,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
       throw rejection("model limit.context must be a positive int, got " + contextWindow);
     }
     return (int) contextWindow;
+  }
+
+  /** variant 显式上限优先，否则使用 model 全局 limit.output；结果必须是正 int。 */
+  private static int maxOutputTokens(ParsedAgentModelConfig parsedModel, ModelVariant variant) {
+    long maxOutputTokens =
+        variant.maxOutputTokens() == null
+            ? parsedModel.maxOutputTokens()
+            : variant.maxOutputTokens();
+    if (maxOutputTokens <= 0 || maxOutputTokens > Integer.MAX_VALUE) {
+      throw rejection("model limit.output must be a positive int, got " + maxOutputTokens);
+    }
+    return (int) maxOutputTokens;
   }
 
   private AgentDefinitionConfigDTO decodeAgentConfig(AgentDefinition agent) {

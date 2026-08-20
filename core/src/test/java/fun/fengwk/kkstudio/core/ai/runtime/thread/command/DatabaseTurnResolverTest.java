@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -139,8 +140,9 @@ class DatabaseTurnResolverTest {
     fixture.agent.setModelName("old-model");
     fixture.agent.setVariant("old-variant");
     when(fixture.providers.getByName("old-provider")).thenReturn(null);
-
-    ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "custom")));
+    TurnResolver.Resolved resolved =
+        fixture.resolvedResult(fixture.path(settings(null, "custom")), null);
+    ModelRequestSpec request = resolved.spec();
 
     assertEquals("provider", request.model().providerName());
     assertEquals("model", request.model().modelName());
@@ -148,6 +150,8 @@ class DatabaseTurnResolverTest {
     assertEquals("custom", request.variant().id());
     assertEquals(0.5, request.variant().temperature());
     assertEquals(2048, request.variant().maxOutputTokens());
+    assertEquals(4096, resolved.contextWindow());
+    assertEquals(2048, resolved.maxOutputTokens());
   }
 
   @Test
@@ -1027,7 +1031,8 @@ class DatabaseTurnResolverTest {
   }
 
   /** ROOT + INPUT turn + USER + ASSISTANT，供压缩 materialize 按冻结 Entry IDs 取摘要范围。 */
-  private static EntryPath compactionHistoryPath(BranchSettings settings) {
+  private static EntryPath compactionHistoryPath(
+      BranchSettings settings, CompactionPreparation preparation) {
     return new EntryPath(
         List.of(
             new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
@@ -1035,7 +1040,7 @@ class DatabaseTurnResolverTest {
                 id(2),
                 SESSION_ID,
                 id(1),
-                new TurnStartPayload(TurnStartReason.INPUT, settings, THREAD_ID, 4096),
+                new TurnStartPayload(TurnStartReason.INPUT, settings, THREAD_ID),
                 NOW.plusSeconds(1)),
             new Entry(
                 id(3),
@@ -1067,7 +1072,25 @@ class DatabaseTurnResolverTest {
                             BigDecimal.ZERO,
                             BigDecimal.ZERO)),
                     null),
-                NOW.plusSeconds(3))));
+                NOW.plusSeconds(3)),
+            new Entry(
+                id(5),
+                SESSION_ID,
+                id(4),
+                new TurnEndPayload(id(2), TurnEndOutcome.COMPLETED, false, null, null),
+                NOW.plusSeconds(4)),
+            new Entry(
+                id(6),
+                SESSION_ID,
+                id(5),
+                new TurnStartPayload(
+                    TurnStartReason.COMPACTION,
+                    settings,
+                    THREAD_ID,
+                    null,
+                    null,
+                    preparation.frozenStart()),
+                NOW.plusSeconds(5))));
   }
 
   /** 两个关闭 Turn：USER + ABORTED + STOPPED；CUSTOM + ASSISTANT_ERROR + FAILED。两个 Turn 使用同一 settings。 */
@@ -1220,7 +1243,7 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void compactionRequestIsMinimalAndFreezesPlannerFacts() {
+  void compactionSpecOnlyFreezesExecutionModelAndResolvedBudget() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings(ENV_A, "default");
     List<AgentMessage> messages =
@@ -1229,32 +1252,29 @@ class DatabaseTurnResolverTest {
         new CompactionPreparation(
             CompactionPhase.FULL,
             CompactionTrigger.THRESHOLD,
-            123L,
-            4096L,
-            id(2),
+            settings.model(),
             id(4),
             null,
             null,
-            messages);
+            null,
+            messages,
+            123L);
 
-    EntryPath historyPath = compactionHistoryPath(settings);
-    ModelRequestSpec request = fixture.resolved(historyPath, preparation);
+    EntryPath historyPath = compactionHistoryPath(settings, preparation);
+    TurnResolver.Resolved resolved = fixture.resolvedResult(historyPath, preparation);
+    ModelRequestSpec request = resolved.spec();
 
-    // 冻结的切分事实与 contextWindow 逐字段保留。
-    assertEquals(CompactionPhase.FULL, request.compaction().phase());
-    assertEquals(CompactionTrigger.THRESHOLD, request.compaction().trigger());
-    assertEquals(123L, request.compaction().tokensBefore());
-    assertEquals(id(2), request.compaction().firstKeptEntryId());
-    assertEquals(id(4), request.compaction().cutEntryId());
-    assertNull(request.compaction().turnPrefixStartEntryId());
-    assertEquals(4096, fixture.resolvedResult(historyPath, preparation).contextWindow());
-    // 解析的 inputModalities 必须随 descriptor 冻结进 compaction spec。
+    // 切分事实只在 candidate path 的 TURN_START 中冻结；spec 只保留 descriptor/variant。
     assertEquals(Set.of(ModelInputModality.TEXT), request.model().inputModalities());
-    // 零 tool / skill，无 cache。
+    assertEquals(4096, resolved.contextWindow());
+    assertEquals(123, resolved.maxOutputTokens());
+    assertEquals(123, request.variant().maxOutputTokens());
+    assertEquals(List.of(), request.preambleMessages());
     assertEquals(List.of(), request.toolBindings());
     assertEquals(List.of(), request.skillBindings());
+    assertEquals(List.of(), request.subagentBindings());
     assertEquals(ProviderCacheControl.none(), request.cacheControl());
-    // 恰好 SYSTEM + USER 两个消息：summarization system prompt + summary user prompt。
+    // materializer 从 candidate path 的 CompactionStart 重建摘要 prompt，而不是从 spec 读取切分元数据。
     List<ProviderMessage> providerMessages = materialized(historyPath, request);
     assertEquals(2, providerMessages.size());
     assertEquals(ProviderMessageRole.SYSTEM, providerMessages.get(0).role());
@@ -1263,52 +1283,140 @@ class DatabaseTurnResolverTest {
     assertEquals(ProviderMessageRole.USER, providerMessages.get(1).role());
     assertEquals(
         CompactionPrompts.summaryUserPrompt(messages, null), textOf(providerMessages.get(1)));
-    // 输出上限 = min(variant 1024, floor(0.8 * 16384) = 13107) = 1024。
-    assertEquals(1024, request.variant().maxOutputTokens());
+    // FULL 预算为 min(1024, floor(0.8 * 1024) = 819, removedPrefixTokens=123) = 123。
   }
 
   @Test
-  void compactionOutputCapFallsBackToModelGlobalLimitWhenVariantNull() {
+  void compactionOutputBudgetUsesActualModelLimitAndRemovedPrefixTokens() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.modelGlobalOutputLimit(600);
+    ModelSelection executionModel = settings(null, "default").model();
     List<AgentMessage> messages =
         List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
-    CompactionPreparation full =
+    CompactionPreparation fullSmall =
         new CompactionPreparation(
             CompactionPhase.FULL,
             CompactionTrigger.THRESHOLD,
-            123L,
-            4096L,
-            id(2),
+            executionModel,
             id(3),
             null,
             null,
-            messages);
+            null,
+            messages,
+            123L);
+    CompactionPreparation fullLarge =
+        new CompactionPreparation(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            executionModel,
+            id(3),
+            null,
+            null,
+            null,
+            messages,
+            50_000L);
     CompactionPreparation prefix =
         new CompactionPreparation(
             CompactionPhase.TURN_PREFIX,
             CompactionTrigger.THRESHOLD,
-            123L,
-            4096L,
-            id(2),
+            executionModel,
             id(3),
             id(2),
             null,
-            messages);
+            null,
+            messages,
+            50_000L);
 
-    // FULL 预算 13107、TURN_PREFIX 预算 8192：variant 未设置时都回退到模型全局 600（绝不直接使用预算）。
+    // 未显式设置 variant 上限时先取实际 model 全局 600，再由 outputBudget 阶段公式裁剪。
     assertEquals(
-        600,
+        123,
         fixture
-            .resolved(fixture.path(settings(null, "default")), full)
+            .resolvedResult(fixture.path(settings(null, "default")), fullSmall)
+            .maxOutputTokens());
+    assertEquals(
+        480,
+        fixture
+            .resolvedResult(fixture.path(settings(null, "default")), fullLarge)
+            .maxOutputTokens());
+    assertEquals(
+        300,
+        fixture.resolvedResult(fixture.path(settings(null, "default")), prefix).maxOutputTokens());
+    assertEquals(
+        480,
+        fixture
+            .resolved(fixture.path(settings(null, "default")), fullLarge)
             .variant()
             .maxOutputTokens());
     assertEquals(
-        600,
+        300,
         fixture
             .resolved(fixture.path(settings(null, "default")), prefix)
             .variant()
             .maxOutputTokens());
+  }
+
+  /** 逆证：fallback executionModel 必须改变 resolver 的 catalog 解析目标，而不是继续读取 branch settings.model。 */
+  @Test
+  void compactionResolvesProviderModelAndVariantFromFallbackExecutionModel() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    ModelSelection fallback = new ModelSelection("fallback-provider", "fallback-model", "fallback");
+    fixture.addModel(
+        fallback,
+        new ParsedAgentModelConfig(
+            8192,
+            4096,
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            List.of(
+                new ModelVariant("fallback", 1500, 0.2, null, null, null, null, List.of(), null)),
+            "fallback",
+            pricing()));
+    when(fixture.providers.getByName("provider"))
+        .thenThrow(new AssertionError("compaction must not resolve branch settings.model"));
+    when(fixture.models.getByProviderNameAndName("provider", "model"))
+        .thenThrow(new AssertionError("compaction must not resolve branch settings.model"));
+
+    List<AgentMessage> messages =
+        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
+    CompactionPreparation preparation =
+        new CompactionPreparation(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            fallback,
+            id(3),
+            null,
+            null,
+            null,
+            messages,
+            50_000L);
+
+    TurnResolver.Resolved resolved =
+        fixture.resolvedResult(fixture.path(settings(null, "default")), preparation);
+
+    assertEquals("fallback-provider", resolved.spec().model().providerName());
+    assertEquals("fallback-model", resolved.spec().model().modelName());
+    assertEquals("fallback", resolved.spec().variant().id());
+    assertEquals(8192, resolved.contextWindow());
+    // fallback variant 的实际上限 1500 经 FULL 预算公式裁剪为 1200。
+    assertEquals(1200, resolved.maxOutputTokens());
+    assertEquals(1200, resolved.spec().variant().maxOutputTokens());
+  }
+
+  /** 逆证：clean-slate 契约不再暴露旧压缩 DTO 或其复制到 spec 的 metadata。 */
+  @Test
+  void cleanSlateContractsHaveNoLegacyCompactionMetadata() {
+    assertThrows(
+        NoSuchMethodException.class,
+        () -> CompactionPreparation.class.getDeclaredMethod("tokensBefore"));
+    assertThrows(
+        NoSuchMethodException.class,
+        () -> CompactionPreparation.class.getDeclaredMethod("contextWindow"));
+    assertThrows(
+        NoSuchMethodException.class,
+        () -> CompactionPreparation.class.getDeclaredMethod("firstKeptEntryId"));
+    assertThrows(
+        NoSuchMethodException.class, () -> ModelRequestSpec.class.getDeclaredMethod("compaction"));
   }
 
   @Test
@@ -1316,7 +1424,7 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings(ENV_A, "default");
 
-    EntryPath path = projectionPath(settings, "summary text", id(2), id(4));
+    EntryPath path = projectionPath(settings, "summary text", id(4));
     ModelRequestSpec request = fixture.resolved(path);
 
     List<ProviderMessage> messages = materialized(path, request);
@@ -1353,13 +1461,9 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings(ENV_A, "default");
     // cut 不在当前路径。
-    EntryPath missingCut = projectionPath(settings, "summary", id(2), id(999));
+    EntryPath missingCut = projectionPath(settings, "summary", id(999));
     ModelRequestSpec missingSpec = fixture.resolved(missingCut);
     assertThrows(IllegalStateException.class, () -> materialized(missingCut, missingSpec));
-    // firstKept 在 cut 之后（顺序非法）。
-    EntryPath inverted = projectionPath(settings, "summary", id(4), id(3));
-    ModelRequestSpec invertedSpec = fixture.resolved(inverted);
-    assertThrows(IllegalStateException.class, () -> materialized(inverted, invertedSpec));
   }
 
   @Test
@@ -1380,9 +1484,9 @@ class DatabaseTurnResolverTest {
     assertEquals("third reply", textOf(messages.get(5)));
   }
 
-  /** 完整压缩投影路径：ROOT + 两个关闭 turn，中间夹一个完成压缩 turn（payload 携带给定 firstKept/cut）。 */
+  /** 完整压缩投影路径：ROOT + 两个关闭 turn，中间夹一个完成压缩 turn。 */
   private static EntryPath projectionPath(
-      BranchSettings settings, String summary, UUID firstKeptEntryId, UUID cutEntryId) {
+      BranchSettings settings, String summary, UUID cutEntryId) {
     return new EntryPath(
         List.of(
             new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
@@ -1390,20 +1494,13 @@ class DatabaseTurnResolverTest {
             userEntry(id(3), id(2), "first user"),
             assistantEntry(id(4), id(3), "first reply"),
             turnEnd(id(5), id(4), id(2)),
-            compactionStartEntry(id(6), id(5), settings),
+            compactionStartEntry(id(6), id(5), settings, cutEntryId),
             new Entry(
                 id(7),
                 SESSION_ID,
                 id(6),
-                new CompactionPayload(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.THRESHOLD,
-                    500L,
-                    true,
-                    summary,
-                    firstKeptEntryId,
-                    cutEntryId,
-                    null),
+                // CompactionStart carries the cut; the result payload carries only the summary.
+                new CompactionPayload(summary),
                 NOW),
             turnEnd(id(8), id(7), id(6)),
             turnEntry(id(9), id(8), settings),
@@ -1421,7 +1518,7 @@ class DatabaseTurnResolverTest {
             userEntry(id(3), id(2), "first user"),
             assistantEntry(id(4), id(3), "first reply"),
             turnEnd(id(5), id(4), id(2)),
-            compactionStartEntry(id(6), id(5), settings),
+            compactionStartEntry(id(6), id(5), settings, id(4)),
             new Entry(
                 id(7),
                 SESSION_ID,
@@ -1453,41 +1550,15 @@ class DatabaseTurnResolverTest {
             userEntry(id(3), id(2), "first user"),
             assistantEntry(id(4), id(3), "first reply"),
             turnEnd(id(5), id(4), id(2)),
-            compactionStartEntry(id(6), id(5), settings),
-            new Entry(
-                id(7),
-                SESSION_ID,
-                id(6),
-                new CompactionPayload(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.THRESHOLD,
-                    500L,
-                    true,
-                    "old summary",
-                    id(2),
-                    id(4),
-                    null),
-                NOW),
+            compactionStartEntry(id(6), id(5), settings, id(4)),
+            new Entry(id(7), SESSION_ID, id(6), new CompactionPayload("old summary"), NOW),
             turnEnd(id(8), id(7), id(6)),
             turnEntry(id(9), id(8), settings),
             userEntry(id(10), id(9), "second user"),
             assistantEntry(id(11), id(10), "second reply"),
             turnEnd(id(12), id(11), id(9)),
-            compactionStartEntry(id(13), id(12), settings),
-            new Entry(
-                id(14),
-                SESSION_ID,
-                id(13),
-                new CompactionPayload(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.THRESHOLD,
-                    500L,
-                    true,
-                    "latest summary",
-                    id(2),
-                    id(10),
-                    null),
-                NOW),
+            compactionStartEntry(id(13), id(12), settings, id(10)),
+            new Entry(id(14), SESSION_ID, id(13), new CompactionPayload("latest summary"), NOW),
             turnEnd(id(15), id(14), id(13)),
             turnEntry(id(16), id(15), settings),
             userEntry(id(17), id(16), "third user"),
@@ -1539,12 +1610,22 @@ class DatabaseTurnResolverTest {
         NOW);
   }
 
-  private static Entry compactionStartEntry(UUID id, UUID parentId, BranchSettings settings) {
+  private static Entry compactionStartEntry(
+      UUID id, UUID parentId, BranchSettings settings, UUID cutEntryId) {
+    CompactionStart compaction =
+        new CompactionStart(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            settings.model(),
+            cutEntryId,
+            null,
+            null);
     return new Entry(
         id,
         SESSION_ID,
         parentId,
-        new TurnStartPayload(TurnStartReason.COMPACTION, settings, THREAD_ID),
+        new TurnStartPayload(
+            TurnStartReason.COMPACTION, settings, THREAD_ID, null, null, compaction),
         NOW);
   }
 
@@ -1720,10 +1801,27 @@ class DatabaseTurnResolverTest {
               pluginCatalog,
               environmentRegistry,
               new SystemSettingsSnapshot(SystemSettings.DEFAULT),
-              new CompactionConfig(true, 16_384, 20_000),
+              new CompactionConfig(20_000, null),
               subagentConfig,
               new AgentPromptComposer(subagentConfig),
               clock);
+    }
+
+    private void addModel(ModelSelection selection, ParsedAgentModelConfig parsedModel) {
+      AgentProvider fallbackProvider = new AgentProvider();
+      fallbackProvider.setName(selection.providerName());
+      fallbackProvider.setProviderType(AgentProviderType.openai);
+      fallbackProvider.setVersion(0L);
+      when(providers.getByName(selection.providerName())).thenReturn(fallbackProvider);
+
+      String configJson = selection.providerName() + "-config";
+      AgentModel fallbackModel = new AgentModel();
+      fallbackModel.setProviderName(selection.providerName());
+      fallbackModel.setName(selection.modelName());
+      fallbackModel.setConfigJson(configJson);
+      when(models.getByProviderNameAndName(selection.providerName(), selection.modelName()))
+          .thenReturn(fallbackModel);
+      when(modelConfigParser.parse(configJson)).thenReturn(parsedModel);
     }
 
     private void subagent(String name, String description) {

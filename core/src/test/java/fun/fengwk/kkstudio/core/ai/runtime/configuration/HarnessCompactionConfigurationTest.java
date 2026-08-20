@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -10,8 +11,8 @@ import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 
 /**
- * Core 唯一 CompactionConfig bean 定义：由共享启动快照 SystemSettings.AiRuntime（{@code compaction*}）驱动，可被 core
- * resolver 与 web 组合根共享。
+ * Core 唯一 CompactionConfig bean 定义：由共享启动快照 SystemSettings.AiRuntime 的保留上下文配置驱动，可被 core resolver 与
+ * web 组合根共享。
  */
 class HarnessCompactionConfigurationTest {
 
@@ -24,9 +25,8 @@ class HarnessCompactionConfigurationTest {
         .run(
             context -> {
               CompactionConfig config = context.getBean(CompactionConfig.class);
-              assertEquals(true, config.enabled());
-              assertEquals(16_384, config.reserveTokens());
-              assertEquals(20_000, config.maxRecentTokens());
+              assertEquals(20_000, config.keepRecentTokens());
+              assertNull(config.fallbackModel());
             });
   }
 
@@ -40,9 +40,8 @@ class HarnessCompactionConfigurationTest {
         .run(
             context -> {
               CompactionConfig config = context.getBean(CompactionConfig.class);
-              assertEquals(false, config.enabled());
-              assertEquals(4_096, config.reserveTokens());
-              assertEquals(8_192, config.maxRecentTokens());
+              assertEquals(8_192, config.keepRecentTokens());
+              assertNull(config.fallbackModel());
             });
   }
 
