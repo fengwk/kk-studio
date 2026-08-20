@@ -19,7 +19,9 @@ revision / afterRevision / Model attempt sequence -> 0|[1-9][0-9]*
 ```java
 public record ThreadState(
     UUID id,
-    UUID headEntryId,        // 本 Thread 当前 head Entry（已提交）
+    UUID sessionId,        // 创建后不可变；head 必须属于该 Session
+    UUID headEntryId,      // 本 Thread 当前 head Entry（已提交）
+    String materializationHash, // 创建请求 canonical SHA-256，仅用于首次 materialization replay
     boolean yoloEnabled,
     long nextCommandSequence, // 必须 >= 1（创建即为 1）
     long revision,           // 必须 >= 0
@@ -30,6 +32,7 @@ public record ThreadState(
 - `headEntryId` 必须是本 Thread Session 的已提交 Entry id；Thread 的当前 Session、Environment、status 与 branch settings 由 head Entry 分支派生。
 - 已提交 Entry append-only；每个 Session 只有一个无 parent ROOT。
 - 创建 Thread 时 `nextCommandSequence=1`、`revision=0`；`validateTransition` 强制每次可见变化 revision 恰好 +1，exact replay 恒接受。
+- `materializationHash` 是服务端基于 canonical semantic request 计算的 SHA-256（覆盖 materialization target、Session/起点 Entry/客户端预分配 Thread id、初始 YOLO、ROOT settings/SubagentContext 与第一批 ordered Command 的 `clientCommandId + requestHash`），只用于第一次 materialization 的精确重放与 ID 复用冲突检测，不参与后续执行。
 
 Entry 类型固定为十种：
 
@@ -47,7 +50,7 @@ Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_STA
 }
 ```
 
-普通用户 Session 的 `subagentContext` 为 null；`depth` 以普通根 Thread 为 1，子 Session 从 2 开始。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`COMPACTION` payload 固定为 `{phase, trigger, tokensBefore, complete, summaryText, firstKeptEntryId, cutEntryId, turnPrefixStartEntryId}`：`tokensBefore` 是 JSON number，Entry ID 是 canonical UUID string。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider；插件自行定义 schema，`ContextProjector` 才能把需要的状态显式投影。Goal 使用 `goal/state@1` 完整替换快照，当前 branch 最近一条生效。
+普通用户 Session 的 `subagentContext` 为 null；`depth` 以普通根 Thread 为 1，子 Session 从 2 开始。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`COMPACTION` payload 固定为 `{"summaryText": "..."}`；`phase/trigger/executionModel/cutEntryId/turnPrefixStartEntryId/historyCompactionEntryId` 全部冻结在对应 `TURN_START` 的 `CompactionStart`（`{"phase": "FULL|HISTORY|TURN_PREFIX", "trigger": "THRESHOLD|OVERFLOW|MANUAL", "executionModel": {...}, "cutEntryId": "<uuid>", "turnPrefixStartEntryId": "<uuid>|null", "historyCompactionEntryId": "<uuid>|null"}`），Entry ID 是 canonical UUID string，不向 payload 重复保存 `complete` boolean（由 phase 派生）。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider；插件自行定义 schema，`ContextProjector` 才能把需要的状态显式投影。Goal 使用 `goal/state@1` 完整替换快照，当前 branch 最近一条生效。
 
 Model attempt 审计 payload 由同一 codec 严格编解码：
 
@@ -72,12 +75,17 @@ USER_MESSAGE, CUSTOM_MESSAGE, SET_ENVIRONMENT, SET_AGENT, SET_MODEL,
 SET_ACTIVE_TOOLS
 ```
 
-请求 wire（`HarnessThreadCommandBatchDTO`）：
+请求 wire（`HarnessCommandBatchDTO`）：
 
 ```json
 {
-  "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-  "expectedNextCommandSequence": "3",
+  "owner": { "type": "CHAT", "id": "00000000-0000-0000-0000-000000000001" },
+  "target": {
+    "type": "THREAD",
+    "threadId": "00000000-0000-0000-0000-000000000010",
+    "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
+    "expectedNextCommandSequence": "3"
+  },
   "commands": [
     { "type": "SET_AGENT", "clientCommandId": "00000000-0000-0000-0000-000000000101", "agentName": "coder" },
     {
@@ -94,12 +102,14 @@ SET_ACTIVE_TOOLS
 
 契约：
 
-- `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
+- `owner` 是 `{type: CHAT|CANVAS, id}`；服务端在返回任何 replay/Session/Thread/Entry/Command 数据前验证 owner 对目标 Session/Thread 的归属。内部 Task/one-shot 不走 owner HTTP DTO，直接调用 Runtime。
+- `target` 是严格三态 union：`NEW_SESSION{sessionId, threadId, rootSettings, yoloEnabled}` / `ENTRY{sessionId, startEntryId, threadId, yoloEnabled}` / `THREAD{threadId, expectedHeadEntryId, expectedNextCommandSequence}`；未知 target 字段拒绝。THREAD 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
 - `commands` 非空；每个 command 必须有 canonical UUID `clientCommandId`（thread 内唯一，幂等键）；同 batch 内不得重复。
-- `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费物化为 durable `resource(blobId,name,preview)`），未知字段、未知类型、空 `contents` 与非 canonical uploadId 一律拒绝。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝、`content` 对 USER_MESSAGE 禁用。
+- `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；元素允许 `TEXT(text)`、`ATTACHMENT(uploadId)` 与 `RESOURCE(blobId,name,preview?)`。ATTACHMENT 的 READY upload 在入队事务内原子消费为 durable resource；RESOURCE 只允许复用目标 Session 已有的 blob ref，不重复 retain，新/跨 Session 引用与未知字段、未知类型、空 contents、非 canonical id 一律拒绝。`text`/`content` shorthand 不属于 wire。
 - `CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
 - `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_ENVIRONMENT` 携带 `environment`（完整 `{name, workspacePath}` 对象或 null）。YOLO 不是 command：`PUT /api/ai/runtime/threads/{threadId}/yolo` 直接更新 Thread policy（见 §3「YOLO 直接控制面」）。
 - mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `contents`（`role` 仅 `CUSTOM_MESSAGE` 允许）等不相关字段，未知字段（含 `text`）一律拒绝。
+- **产品 HTTP shape**：`HarnessCommandCreateDTO` 只接受 `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/USER_MESSAGE`；`CUSTOM_MESSAGE` 在 HTTP 边界显式拒绝（"not allowed on the product HTTP surface"）。batch 必须满足：SET_* 以固定顺序（SET_ENVIRONMENT → SET_AGENT → SET_MODEL → SET_ACTIVE_TOOLS）、每种至多一次、全部出现在消息之前；**恰有一条末尾 `USER_MESSAGE`**。NEW_SESSION/ENTRY 初始 batch 允许在 user-like message 前携带 SYSTEM `CUSTOM_MESSAGE`（仅受信任内部 Java 调用）；THREAD target 要么是恰一条 SYSTEM `CUSTOM_MESSAGE` steering，要么是不含 SYSTEM CUSTOM_MESSAGE、恰有一条末尾 user-like 的用户 batch。
 
 ### Ordered command-set replay
 
@@ -112,11 +122,11 @@ SET_ACTIVE_TOOLS
 
 全新 batch 才做双 cursor CAS（任一不匹配 → `STALE_COMMAND_CURSOR` 409），成功后一次性预留全部 sequence（`nextCommandSequence += commands.length`，revision +1）、全部命令写入 QUEUED、请求 THREAD Work，整体原子提交。
 
-包含 `SET_ENVIRONMENT` 的全新 batch 额外要求**真正静止的前置状态**：无 queued `USER_MESSAGE` / `CUSTOM_MESSAGE`、共享 classifier 结果为 `IDLE_OR_HISTORICAL`、且 **THREAD Work 行完全不存在**（行存在即 fence 投机 Resolver/runnable mailbox，无论是否已 lease）。Exact replay 绕过该 admission 检查。
+queued `SET_ENVIRONMENT` 只在后续 INPUT 边界消费，因此 enqueue 不再要求当前 Thread quiescent；即使 Thread 处于 live Model/Tool 或已有 queued 消息/THREAD Work 也照常接受。Exact replay 绕过 cursor admission 检查。
 
 ### YOLO 直接控制面
 
-`PUT /{threadId}/yolo` body `{expectedRevision, yoloEnabled}`：锁 Thread 后同值请求在任何 revision CAS 之前按原样返回当前 Thread（网络重试 no-op，revision/updatedAt 零触碰）；值变化必须匹配 `expectedRevision`（否则 `STALE_REVISION` 409），随后一个原子步骤更新 `yoloEnabled` 且 revision 精确 +1。返回权威 Thread DTO（与 `PUT /head`/`POST /stop` 一致）。不创建 Command/Entry/Work，不唤醒 processors。
+`PUT /{threadId}/yolo` body `{expectedRevision, yoloEnabled}`：锁 Thread 后同值请求在任何 revision CAS 之前按原样返回当前 Thread（网络重试 no-op，revision/updatedAt 零触碰）；值变化必须匹配 `expectedRevision`（否则 `STALE_REVISION` 409），随后一个原子步骤更新 `yoloEnabled` 且 revision 精确 +1。返回权威 Thread DTO（与 `POST /{threadId}/compact`/`POST /stop` 一致）。不创建 Command/Entry/Work，不唤醒 processors。
 
 ## 4. Snapshot
 
@@ -147,9 +157,12 @@ SET_ACTIVE_TOOLS
       "failedAt": "...",
       "retryAt": "..."
     }
-  ]
+  ],
+  "manualCompaction": { "available": true, "disabledReason": null }
 }
 ```
+
+- `manualCompaction` 是瞬时 advisory sidecar（`HarnessManualCompactionDTO{available, disabledReason?}`，disabledReason ∈ `THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT`），每次 snapshot 现算；提交 `POST /{threadId}/compact` 仍以 expectedRevision CAS 守护。
 
 - `entries` 是当前 head 的 root-to-head path（recursive CTE 顺序）。
 - `modelInvocation` 是当前 open Turn 的活跃 Model（**单数**；无则 null）；`toolInvocations` 是其 Tool siblings。`modelAttemptFailures` 只在 `ModelActive` / `ModelTerminalPending` context 暴露该 invocation 尚未物化的连续 TRANSIENT 失败前缀，按 attempt 递增；compaction、Tool、IDLE/historical/continuation context 返回空列表。
@@ -162,26 +175,20 @@ SET_ACTIVE_TOOLS
 | 情形 | HTTP |
 | --- | --- |
 | DTO 字段非法、实体 id 非 canonical UUID、sequence/revision 非 strict decimal、未知命令 type、非 canonical 名称 | 400 |
-| 作为请求目标的 Thread/Entry 不存在（snapshot、commands、head、stop 路径） | 404 |
-| 命令 cursor 过期（`STALE_COMMAND_CURSOR`）、revision 过期（`STALE_REVISION`）、Thread 非 quiescent、terminal apply pending、跨 Session move、move 到 continueModel TURN_END、ordered replay 冲突 | 409 |
+| 作为请求目标的 Thread/Entry 不存在（snapshot、system-prompt、compact、stop 路径） | 404 |
+| 命令 cursor 过期（`STALE_COMMAND_CURSOR`）、revision 过期（`STALE_REVISION`）、terminal apply pending、materialization ID 复用（`MATERIALIZATION_ID_REUSED`）、ordered replay 冲突 | 409 |
 | approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`） | 409 |
 | approval 已决定且请求未精确 replay 存储决策（`APPROVAL_DECISION_MISMATCH`） | 409 |
-| 命令 batch 被接受进入 mailbox | 202 |
-| Thread 创建成功 | 201 |
+| 命令 batch 被接受进入 mailbox | 200（返回 `session/rootEntry/thread/acceptedCommands/replayed` 权威投影） |
+| 手动压缩 availability 不满足或 expectedRevision 过期 | 409 |
 
-typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAND_ID_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`THREAD_NOT_QUIESCENT`、`TERMINAL_APPLY_PENDING`、`MOVE_TARGET_CROSS_SESSION`、`MOVE_TARGET_HAS_CONTINUATION_OBLIGATION`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`。409 的统一错误信封在 `errors.reason` 暴露该稳定枚举，并在 `errors.detail` 保留诊断文本；客户端只能按稳定 reason 做恢复决策。持久化不变量破坏（错误 ownership、mixed sibling、非连续 ordinal、count mismatch）保持 `IllegalStateException`，绝不降级为业务冲突。注意 approval 路径的 Thread/target 缺失同样映射 409（`APPROVAL_NOT_APPLICABLE`），不是 404。
+typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAND_ID_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`MATERIALIZATION_ID_REUSED`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`。409 的统一错误信封在 `errors.reason` 暴露该稳定枚举，并在 `errors.detail` 保留诊断文本；客户端只能按稳定 reason 做恢复决策。持久化不变量破坏（错误 ownership、mixed sibling、非连续 ordinal、count mismatch）保持 `IllegalStateException`，绝不降级为业务冲突。注意 approval 路径的 Thread/target 缺失同样映射 409（`APPROVAL_NOT_APPLICABLE`），不是 404。
 
-## 6. MOVE_HEAD
+## 6. Head relocation 不存在
 
-```java
-public record MoveHeadCommand(UUID threadId, UUID targetEntryId, long expectedRevision) {}
-```
+**不存在 `MOVE_HEAD` / `PUT head` / standalone Thread create**。`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）；第一次 durable batch 以 ENTRY target 提交时，服务端原子 materialize 一个新 Thread（`headEntryId = startEntryId`，不复制 Entry、不修改任何已有 Thread），旧 Thread 永不 relocation。现有 Thread 的 head 只能由 Runtime 在 turn/compaction/stop 执行中推进到当前 head 的新 descendant。
 
-- 同 target → no-op（返回当前 Thread，不 bump revision）。
-- revision CAS；target 必须存在；**target 必须与当前 head 同 Session**（`MOVE_TARGET_CROSS_SESSION`）。
-- 必须无 queued commands、无 live Model/Tool context、无 terminal apply pending（`THREAD_NOT_QUIESCENT` / `TERMINAL_APPLY_PENDING`）。
-- 不能指向 `continueModel=true` 的 TURN_END（`MOVE_TARGET_HAS_CONTINUATION_OBLIGATION`）。
-- 成功后 `advanceHead`（revision +1）并删除 THREAD Work。
+冲突 reason 中不存在 `MOVE_TARGET_CROSS_SESSION` / `MOVE_TARGET_HAS_CONTINUATION_OBLIGATION` / `THREAD_NOT_QUIESCENT`：materialization 冲突统一表达为 `MATERIALIZATION_ID_REUSED`（同 threadId 不同 session/hash）与 `STALE_COMMAND_CURSOR`（THREAD 全新 batch head/sequence 不匹配）。
 
 ## 7. Stop
 
@@ -196,7 +203,8 @@ lock Thread
   -> load head path（root 推导 session）
   -> load session 全部不可变 Entry（含兄弟分支）
   -> findReplay(ownerThreadId == thread.id, stopRequestId)   // 在 revision CAS 之前
-  -> 命中 -> REPLAYED（返回被重放的 stoppedTurnEndEntryId，cancelledCommandCount=0，零 mutation）
+  -> 命中 -> REPLAYED（返回与原 Stop 相同的 stoppedTurnEndEntryId /
+                       cancelledCommandCount / cancelledUserMessages，零 mutation）
   -> revision CAS（STALE_REVISION 409）
   -> 无 live Turn（IDLE）：
        有 queued Commands -> 取消它们（cancelled_at），revision +1（touchRevision），
@@ -217,7 +225,7 @@ lock Thread
 
 Stop 成功关闭 live Turn 的同一事务内：先净化 Work mailbox（deleteWork 的 owner 校验反查 Model/Tool Invocation 行），再删除全部 Tool Invocations、删除父 ModelInvocation（删除前执行与 `ModelAttemptMaterialization` 等价的严格校验），advance Thread；closed turn 不保留任何 Invocation 行，迟到 callback 因行已删除或 claim 失效而 no-op。
 
-`StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 revision +1，**不写 durable stop 标记**；无 queued 时真正 no-op，同 `stopRequestId` 再调用仍是 IDLE 而非 REPLAYED）、`REPLAYED`（精确重放先前 STOPPED，不取消命令）。durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」，在 Thread 锁内做 Session 级不可变查找：同 raw `stopRequestId` 只在自己的 turn 上产生 replay，另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到同 Session 的兄弟分支后仍可命中。STOPPED 的不确定重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedRevision`，服务端 replay 先于 CAS；marker-free IDLE 若已取消 queued 并推进 revision，响应丢失后的旧 revision 重试可返回 `STALE_REVISION`，客户端按权威 snapshot 的 basis fence 收敛。
+`StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 revision +1，**不写 durable stop 标记**；无 queued 时真正 no-op，同 `stopRequestId` 再调用仍是 IDLE 而非 REPLAYED）、`REPLAYED`（精确重放先前 receipt，不重复取消命令）。HTTP DTO 固定为 `{status,thread,stoppedTurnEndEntryId,cancelledCommandCount,cancelledUserMessages[]}`，无独立 `replayed` 字段；取消消息按 sequence 升序，以 `{sequence,clientCommandId,messageJson}` 暴露 canonical USER AgentMessage。durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」，在 Thread 锁内做 Session 级不可变查找：同 raw `stopRequestId` 只在自己的 turn 上产生 replay，另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到同 Session 的兄弟分支后仍可命中。STOPPED 的不确定重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedRevision`，服务端 replay 先于 CAS；marker-free IDLE 若已取消 queued 并推进 revision，响应丢失后的旧 revision 重试可返回 `STALE_REVISION`，客户端按权威 snapshot 的 basis fence 收敛。
 
 ## 8. Tool approval
 
@@ -262,7 +270,7 @@ public record ModelRequestSpec(
 - tool/skill/subagent binding 名称各自不得重复；每个 environment-bound tool/skill 必须引用同一 Environment route。
 - `SubagentBinding(name, description)`：`name` 是 canonical 非空短名（≤64 字符），`description` 是可空展示描述快照（≤512 字符）；随 spec 冻结，task 执行绝不依据后续 Agent 配置扩权。
 - `contextWindow` 只在 `TurnStartPayload` 中持久化（见 §2），不在 spec 中重复保存。
-- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent bindings 必须全为空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix。`tokensBefore` 是 JSON number，三个 Entry ID 是 canonical UUID strings。
+- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent bindings 必须全为空。`CompactionPayload` 只含 `summaryText`；`phase/trigger/executionModel/cutEntryId/turnPrefixStartEntryId/historyCompactionEntryId` 冻结在 `CompactionStart`（存于 TURN_START），Entry ID 是 canonical UUID strings，complete 由 phase 与 TURN_END outcome 派生。
 - `ToolBinding(descriptor, type, environment, plugin)`：`PLATFORM` binding 的 environment 为 null，`ENVIRONMENT` binding 指向具体 binding（可为 null）；descriptor 的 type 与 binding type 一致。
 - `plugin` 为 null 或 `PluginToolBinding(pluginId, contributionLocalName, stateAccesses)`；仅 `PLATFORM` 可携带 plugin，identifier 必须 canonical，state accesses 按 customType 唯一且 mode 仅 `READ` / `WRITE`。该 provenance 随 spec 冻结，retry 不按工具名重新归属。
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
@@ -319,10 +327,11 @@ public record ProviderResponse(
 ### Durable compaction
 
 - `TurnStartReason.COMPACTION` 消费零 Command，candidate path 只追加 TURN_START；`CompactionPreparation` 作为 transient plan 事实传给 Resolver，并与 frozen `CompactionRequest` 逐字段机械比对。
-- 成功结果只能是 `CompactionPayload`；正常 invocation 不能挂 COMPACTION，compaction invocation 不能挂普通 Assistant MESSAGE。Store 要求 invocation 已 SUCCEEDED、payload metadata 与 request 精确相等，且 firstKept/cut/prefix 都在 result 前并满足 `firstKept <= cut`、`prefix < cut`。
-- phase/complete 固定：HISTORY 为 incomplete；FULL/TURN_PREFIX 为 complete。completed TURN_END 只有 complete OVERFLOW 允许 `continueModel=true`。
+- 成功结果只能是 `CompactionPayload`（`summaryText`）；正常 invocation 不能挂 COMPACTION，compaction invocation 不能挂普通 Assistant MESSAGE。Store 要求 invocation 已 SUCCEEDED、payload metadata 与 request 精确相等，且 cut/prefix anchor 在 result 前满足 `cutEntryId` 为历史 retained 边界、`turnPrefixStartEntryId` 指向 split turn 首个 user-like message。
+- phase/complete 固定：HISTORY 为 incomplete；FULL/TURN_PREFIX 为 complete。completed HISTORY 用 `continueModel=true` 机械启动 TURN_PREFIX；complete OVERFLOW 用 true 启动一次 immediate retry；成功 THRESHOLD FULL/TURN_PREFIX/fallback 仅在压缩前存在 same-owner normal continuation 时以 true 恢复该 obligation，foreign owner 不可借用。
 - HISTORY 之后只读取紧邻、已完成且 metadata 匹配的 partial；TURN_PREFIX 不扫描更早 stale partial。direct TURN_PREFIX 的 history 文本固定为 `No prior history.`。
-- Threshold freshness 只被 complete CompactionPayload 消费；普通 FAILED/CANCELLED/UNKNOWN turn 与 Resolver Rejected turn 不覆盖当前 Thread 最新成功 usage，FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止立即原地重试。shared-history ownership barrier 是 Entry-only 事实：`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行。
+- Threshold freshness 只被 complete CompactionPayload 消费；普通 FAILED/CANCELLED/UNKNOWN turn 与 Resolver Rejected turn 不覆盖当前 Thread 最新成功 usage。THRESHOLD 在 active ContinuationDue 或 queued user demand 边界执行，context tokens 为最近 compatible owned successful Provider usage 加其后可见消息估算（含 ToolResult）；完全 idle 且无 demand 不自唤醒。FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止立即原地重试。shared-history ownership barrier 是 Entry-only 事实：`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行。
+- **MANUAL**：`compactThread(CompactThreadCommand{threadId, expectedRevision})` 先锁 Thread 校验 expectedRevision，经 `manualDecision` 计算 availability（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT），再以 `CompactionTrigger.MANUAL` 构建 plan；plan 短事务 → 事务外 Resolver → 第二事务提交 COMPACTION Turn + MODEL Work（commitManual 再次校验 revision + source head + queued 快照，消费零 Command）。与自动触发共用 MODEL Work、一次 fallback 与 crash recovery。
 - `<read-files>` / `<modified-files>` 是 Runtime-owned reserved section：previous summary 入 prompt 前剥离，response 在 terminal success 前校验并剥离，最后只追加一次从完整 durable branch history 重算的 canonical 清单；modified 覆盖 read，空白或破坏 reserved 标签结构的 path 忽略。
 - immediate overflow recovery continuation 再次 OVERFLOW 时不再压缩；该失败 Entry/TURN_END 保持 durable。
 

@@ -32,12 +32,11 @@ Provider/Model/Agent 都使用带 `expectedVersion` 的硬删除。记录存续�
 | 表 | 字段与职责 |
 | --- | --- |
 | `chat` | `id uuid`、标题、`agent_name`、可空 `environment_name`、`yolo_enabled`、version 与时间 |
-| `chat_thread` | `(chat_id, thread_id)` 主键；每个 Thread 至多关联一个 Chat |
+| `chat_session` | PK `session_id`；`chat_id`；Chat↔Session 归属关系（真实 FK） |
 
-Chat 设置不复制到 Thread。Thread 的完整 BranchSettings 来自 ROOT/TURN_START Entry。
+Chat 设置不复制到 Thread。Thread 的完整 BranchSettings 来自 ROOT/TURN_START Entry。不存在 `chat_thread`；用户 Session 恰好归属于一个 Chat 或 Canvas（插入时以 `not exists(canvas_session)` 保证单 owner 原子性）。
 
-删除 Chat 时，应用先枚举关联 Thread/Session，显式释放 `harness_session_blob_ref`，再删除 Harness
-执行事实。Blob 引用不能由 FK cascade 隐式维护。
+删除 Chat 时，应用先枚举关联 Session，显式释放 `harness_session_blob_ref`，再深删除 Harness 执行事实。Blob 引用不能由 FK cascade 隐式维护。
 
 ## 4. Harness Runtime 执行表（精确 7 张）
 
@@ -45,7 +44,7 @@ Chat 设置不复制到 Thread。Thread 的完整 BranchSettings 来自 ROOT/TUR
 | --- | --- |
 | `harness_session` | `id uuid`、`created_at`；Entry Tree 边界 |
 | `harness_entry` | `id uuid`、session/parent、entry_type、payload、时间；每 Session 唯一 ROOT |
-| `harness_thread` | `id uuid`、非空 head、YOLO、next sequence、revision、时间 |
+| `harness_thread` | `id uuid`、`session_id`、非空 `head_entry_id`（同 Session FK）、`materialization_hash char(64)`、YOLO、next sequence、revision、时间 |
 | `harness_thread_command` | PK `(thread_id, sequence)`；`client_command_id uuid`、`request_hash`、payload 与消费/取消事实 |
 | `harness_model_invocation` | `id uuid`、`basis_head_entry_id` + compact `ModelRequestSpec`、status、attempt、checkpoint、append-only `failed_attempts`、terminal result/error（`result_entry_id` 只属于 open Tool phase） |
 | `harness_tool_invocation` | `id uuid`、ordinal、`call` + 可空 `binding`、approval、result/effects/error（无 `result_entry_id`） |
@@ -139,24 +138,24 @@ Provider attempt 才从 `storage_blob` 读取媒体事实并生成新鲜预签�
 
 | 表 | 职责 |
 | --- | --- |
-| `canvas_document` | `id uuid`、标题、单调 `version`、可空唯一 `thread_id`、时间 |
+| `canvas_document` | `id uuid`、标题、单调 `version`、时间；不含 thread_id，经 `canvas_session` 持有 0..N 个 Session |
 | `canvas_group` | 不嵌套的 world transform Group |
 | `canvas_node` | 唯一 Node 形态；name/transform/group；可选 `model_key + function_config_json` |
 | `canvas_link` | PK `(canvas_id, source_node_id, target_node_id)`；候选引用边，允许成环 |
 | `canvas_resource` | `id uuid`；nullable owner pair；`blob_id` 与 `text_content` 恰好互斥 |
 | `canvas_function_run` | PK `node_id`；当前/最后 Run，`request_id uuid` |
-| `canvas_function_resource_ref` | INPUT/OUTPUT pin；只保护 Resource 生命周期 |
-| `canvas_command_dedup` | PK `(canvas_id, command_id)`；request hash 与 applied version |
+| `canvas_function_resource_pin` | PK `(canvas_id, node_id, request_id, role, resource_id)`；INPUT/OUTPUT pin；只保护 Resource 生命周期 |
+| `canvas_command_dedup` | PK `(canvas_id, command_id)`；仅 request hash（无 applied version、无 created_at） |
 
 `canvas_resource(owner_node_id, resource_index)` 成对可空：可见资源必须有 owner；Function target
 物化中与 pinned orphan 可以暂时无 owner。Canvas Resource 行贡献一个 Blob 引用；删除行必须显式
 release。
 
-`canvas_document.version` 是 command、Patch、事件通道与 Function 可见状态的公共坐标：
+`canvas_document.version` 是 command、Patch、事件通道与 Function 可见状态的公共坐标，初始 0：
 
-- 成功 command batch +1；
-- Function start/cancel/success/failure +1；
-- checkpoint、Thread 绑定和 exact replay 不增加。
+- 成功 graph command batch +1；
+- Function start/cancel/checkpoint/success/failure 状态前进 +1；
+- exact replay 不增加；Harness command acceptance 不前移 graph version（Canvas 与 Agent Session 生命周期独立，无 Thread 绑定版本变化）。
 
 Redis Stream 只缓存 after-commit Patch；PostgreSQL trigger 只发 version NOTIFY 提示，不修改实体。
 
@@ -168,13 +167,12 @@ Redis Stream 只缓存 after-commit Patch；PostgreSQL trigger 只发 version NO
 - Canvas ownership FK 使用 RESTRICT；应用按
   `pins -> resources/runs -> links -> nodes -> groups -> dedup -> document` 显式删除。
 - Canvas/Chat 深删除在删除 Session 前逐行删除 `harness_session_blob_ref` 并 release Blob。
-- `canvas_document.thread_id -> harness_thread` 是 RESTRICT；删除 Canvas 时先删 document，再在同一
-  外层事务深删绑定 Thread/Session。
+- 归属关系表 `chat_session` / `canvas_session` 的 `session_id` 主键 + owner FK（RESTRICT）；删除 Chat/Canvas 时应用先列 Session 深删（`HarnessSessionDeletionService`），再删 owner relation 与 owner 行。
 
 ## 9. 时间与事务
 
 - Harness 锁序由 [harness-runtime-contracts.md](harness-runtime-contracts.md) 定义：
-  `Thread -> Commands -> Model -> Tool siblings -> Work`。
+  `Session KEY SHARE -> Thread -> Commands -> Model -> Tool siblings -> Work`（删除/归属独占用 Session FOR UPDATE）。
 - Harness Store 加入调用方事务（`PROPAGATION_REQUIRED`）；引用管理器与 `lockReady` 使用
   `MANDATORY`，防止行锁提前释放。
 - `canvas_document` 写入先锁 document，再锁 node/resource/run；Function 使用

@@ -11,7 +11,7 @@
 | 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位、全局 Locale 与浏览器偏好（`kkstudio.browser-preferences.v1`） |
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
-| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `entries` / `commands` / `yolo` / `head` / `stop` / `tool-invocations/{id}/approval`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
+| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `system-prompt` / `compact` / `yolo` / `stop` / `tool-invocations/{id}/approval`；`/api/ai/runtime/sessions/{sessionId}` 的 `threads` / `entries`；`/api/ai/runtime/command-batches`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
 | Realtime | REST snapshot first；应用事件 WebSocket（durable `revision`/`resync` + 无 cursor 的 Redis realtime overlay） |
 | 浏览器路由 | `BrowserRouter`，服务端对 SPA 路径回退 `index.html` |
 | 视觉规范 | [前端设计规范](../product-design/frontend-design-system.md) |
@@ -51,17 +51,16 @@ interface BranchDraft {
 空 Pane 首发的唯一顺序（`performBlankPaneFirstSend`）：
 
 ```text
-POST /api/ai/chat/{chatId}/threads
-  -> 原子创建 Session + ROOT（完整 BranchSettings）+ Thread，返回 snapshot
-POST /api/ai/runtime/threads/{threadId}/commands
-  -> USER_MESSAGE-only batch（expectedHeadEntryId + expectedNextCommandSequence 来自创建返回）
-把 threadId 写入 Pane
+POST /api/ai/runtime/command-batches
+  -> NEW_SESSION target 原子创建 Session + ROOT（完整 BranchSettings）+ Thread
+     + owner relation + Commands + Work，返回权威投影
+把 PaneTarget 切换为 BOUND_THREAD（写入 threadId）
 ```
 
 失败恢复（`FirstSendMessageError` 携带 snapshot/plan/cause）：
 
-- **非 409（网络/不确定）**：绑定已创建 Thread，恢复 composer 文本，并把 exact plan 交给 controller `replayRef`（byte-for-byte 重放，同 command id + 原始 cursors）。
-- **known 409**：服务端明确未接受 stale batch。仍绑定已创建 Thread、恢复 composer 文本、invalidate/refetch 新 snapshot；**不**设置 replay——下一次 submit 基于新 snapshot 构造 fresh cursors + fresh command IDs。
+- **非 409（网络/不确定）**：保留 frozen `PendingAcceptance`（请求 + composerSnapshot），恢复 composer 文本，并把 exact plan 交给 controller `replayRef`（byte-for-byte 重放，同 command id + 原始 cursors）；只收到权威成功响应才切换 `BOUND_THREAD`。
+- **known 409**：服务端明确未接受 stale batch（如 `MATERIALIZATION_ID_REUSED`/`STALE_COMMAND_CURSOR`）。不绑定 Thread、清 `PendingAcceptance`、恢复 composer 文本、invalidate/refetch 新 snapshot；**不**设置 replay——下一次 submit 基于新 snapshot 构造 fresh cursors + fresh command IDs。
 
 `ChatWorkspacePane` 的 recovery state 为 `{threadId, content, replay?}`；BoundThreadPane 接收独立 `initialDraft` 与可选 `initialReplay`，controller 以 `initialDraft` 恢复文本、仅在 `initialReplay` 存在时设置 `replayRef`；Chat 切换/Thread 切换清理 recovery。
 
@@ -79,9 +78,9 @@ SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
 YOLO 是直接控制面（`PUT /yolo`，基于 snapshot revision 的 CAS）：Bound pane 选择 YOLO 时
 乐观更新 draft 并立即 PUT，成功只对齐 base+draft 的 yolo、失败回滚并暴露错误；绝不进入命令 batch。
 
-- batch 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 来自最新 snapshot Thread DTO。
+- batch 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 来自最新 snapshot Thread DTO（THREAD target）。
 - `USER_MESSAGE` 之外的命令携带 pane 本地 draft 的对应字段（diff 相对 `effectiveBase`，避免重发 in-flight 设置）。
-- 服务端 202 只表示已接受；queued 命令由 ThreadProcessor 收割，前端以 snapshot 轮询/事件通道投影。
+- 服务端 200 返回权威 `session/rootEntry/thread/acceptedCommands/replayed`；queued 命令由 ThreadProcessor 收割，前端以 snapshot 轮询/事件通道投影。
 
 ### 共享 Attachment Pill Composer
 
@@ -89,8 +88,8 @@ Blank Chat、Bound Thread 与 Canvas Chat 共用唯一 `ThreadComposer`：
 
 - DOM 固定分为上层输入/附件行与下层控制栏：`[+] [Default|YOLO] ... [provider/model · variant] [发送]`；空草稿输入行默认单行且文字垂直居中，内容增长后在上限内滚动；Permission 与 Model/Variant 常驻可见，Footer 不承担设置入口；
 - Permission 是 anchored listbox，仅有 `Default` / `YOLO`；Model 使用 anchored 两级 listbox（provider/model → Variant），不创建 modal/backdrop；Model/Variant 选择只修改 pane-local draft，随下一条消息进入同一 SET_* batch；Permission（YOLO）选择经直接控制面立即 `PUT /yolo`（见 §4），绝不进入命令 batch；
-- 草稿是 ordered `TEXT/ATTACHMENT` parts；`contenteditable=false` pill 在 DOM 仅保存
-  `data-part-id`、`data-upload-id`、`data-filename`，展示为完整 `[name]`，不省略且不暴露内部 upload 语法；
+- 草稿是 ordered `TEXT/ATTACHMENT/RESOURCE` parts；`contenteditable=false` pill 在 DOM 保存
+  `data-part-id`、`data-part-type` 与 attachment/resource 对应引用字段，展示为完整 `[name]`。RESOURCE 是当前 Session 已拥有的 durable blob ref，可在 Stop 恢复后重新提交；ATTACHMENT 仍由当前页面上传注册表管理；
 - 左侧 `+` 直接打开命令表，不向草稿写入 `/`；slash 输入仍复用同一命令过滤与执行状态机；
   `/upload` 由 Composer 本地消费并点击 `display:none` 的原生 file input；
 - editor 收到含文件的 paste 时从 `clipboardData.files` 或 `items[].getAsFile()` 取文件并走同一上传链路；
@@ -111,15 +110,16 @@ ThreadInteractionPanel(active) + Composer(hidden but mounted)
 Composer(active, focus + caret restored)
 ```
 
-- Agent、Environment、Chat-scoped Thread 使用统一 `SelectionPanel`；面板挂在 transcript 与
+- Agent、Environment、Chat Session/Thread 使用统一 `SelectionPanel`；面板挂在 transcript 与
   只读 Footer 之间，不创建 backdrop，不使用 modal。
 - 面板打开后搜索框立即获得焦点；普通字符直接过滤，`↑/↓` 移动高亮项，`Enter` 确认，
   `Esc` 返回 Composer。Thread picker 的控制行提供“最近更新/创建时间”，`Tab` 可循环切换。
 - `/tree` 使用同一 `ThreadInteractionPanel` shell，保留记录过滤、搜索、紧凑单行树列表和确认区；
   面板按 Pane 横向铺满；行前缀对齐 pi Session Tree，使用 `›` 当前选择、`•` 当前路径以及
   `│ / ├─ / └─` 真实分叉连接符，footer 展示当前位置与键盘提示。打开时才查询
-  `threads.entries(threadId)`，读取完整 Session Entry Tree；普通 transcript 继续使用 snapshot 的当前 root-to-head，
-  历史分支不会进入 Provider 上下文。搜索框自动聚焦，方向键移动分支，Enter 重定位，Esc 返回。
+  `sessions.entries(sessionId)`，读取完整 Session Entry Tree；普通 transcript 继续使用 snapshot 的当前 root-to-head，
+  历史分支不会进入 Provider 上下文。搜索框自动聚焦，方向键移动分支，Enter 确认选择 Entry
+  并切换 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入），Esc 返回。
 - Thread 切换、创建新对话或历史重定位需要丢弃草稿时，确认框必须明确区分“输入框中未发送的消息”和“尚未随消息提交的 Agent/Environment/Model/Permission 设置”，并说明目标动作，不使用含义不明的统一提示。
 - 确认 Modal 使用紧凑布局与右上角 icon-only `X`；pending 时关闭、取消与确认控件全部禁用。
 - Composer 与 interaction panel 在视觉、焦点和键盘事件上互斥；Composer 仅设置
@@ -127,40 +127,42 @@ Composer(active, focus + caret restored)
 - interaction panel 打开时仅保留全局 Working 状态；queued 输入与 Task widgets 暂时隐藏，
   已存在的 Footer facts 继续展示。破坏性丢弃确认仍使用 alertdialog，取消后返回原 interaction panel。
 
-### Conversation/Event 互斥主视图与只读面板
+### Conversation/Debug 互斥主视图与只读面板
 
-Bound 场景提供 `/events` toggle（再执行一次切回 conversation）；全部 4 个 Composer 场景（`chat-blank` /
+Bound 场景提供 `/debug` toggle（再执行一次切回 conversation）；全部 4 个 Composer 场景（`chat-blank` /
 `chat-bound` / `canvas-blank` / `canvas-bound`）提供 `/shortcuts`；不再提供始终禁用的
-`/session`，也不再提供独立 `/conversation` 命令。命令表由单一 `threadCommandsForScene(scene)` 投影
-（`THREAD_COMMANDS` + `SCENE_AVAILABILITY: Record<ThreadCommandId, ThreadCommandScene[]>`，
-`ThreadCommandId` 为字面量联合类型），Chat Bound / Canvas Bound / Blank / Canvas Blank
+`/session`，也不再提供独立 `/conversation` 命令。命令表由单一 `threadCommandsForTarget(target, manualCompaction?)` 投影
+（`THREAD_COMMANDS` + `TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]>`，
+`ThreadCommandId` 为字面量联合类型，含 `debug` 与 `compact`），Chat Bound / Canvas Bound / Blank / Canvas Blank
 不再各自维护命令表副本；Canvas Bound 额外支持 pane-local `agent/environment/yolo`
-编辑，并投影 `stop/upload/models/events/shortcuts`；`tree/new/thread` 保持禁用。`/events` 与 `/yolo`
-一样始终保持可用，作为当前主视图 toggle。`/models` 与点击 Composer 模型按钮相同，打开后自动聚焦搜索框。
+编辑。`/debug` 与 `/yolo` 一样始终保持可用，作为当前主视图 toggle。`/compact` 仅 `BOUND_THREAD` 可用，
+且以 snapshot `manualCompaction.available` 前置门控（不可用时以 `disabledReason` 展示原因）。`/models` 与点击
+Composer 模型按钮相同，打开后自动聚焦搜索框。
 
 ```text
-ThreadPanelMainMode = 'conversation' | 'events'
-mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个主滚动区
+ThreadPanelMainMode = 'conversation' | 'debug'
+mainView?.debug ?? ThreadConversationView   # 互斥：任一时刻只有一个主滚动区
 ```
 
 - Pane/Thread 级共享状态统一由 `useThreadPanelViewState(threadId, transcriptBodyRef, events)`
-  持有：`mode` / `selectedEventId` / `eventsBodyRef` / 双 scrollTop
-  （conversation + events 各一份，内存保存，不用 localStorage），每 Pane 一个实例，
+  持有：`mode` / `selectedEventId` / `debugBodyRef` / 双 scrollTop
+  （conversation + debug 各一份，内存保存，不用 localStorage），每 Pane 一个实例，
   Chat Bound 与 Canvas Bound 复用。threadId 重绑全部重置回 conversation
   （mode/selected/scroll 清零）；切回 conversation 清空选中；`selectedEventId`
   就是当前选中行，详情只在有选中时展示；id 从列表消失即清空。
 - 切换只替换主滚动区：Composer、queue、working、widgets 保持挂载，本地 draft 不丢。
   切换前捕获当前主视图位置，目标视图**把保存位置作为 mount `initialScrollTop` 传入**
-  （conversation 经 `ThreadConversationView`、events 经 `ThreadEventView`），由视图内部
+  （conversation 经 `ThreadConversationView`、debug 经 `ThreadEventView`），由视图内部
   `useChatTranscriptAutoScroll` 挂载时应用并按 210px 阈值决定 stick——不靠父 effect
-  对新 ref 派发假 scroll；Thread 重绑清空位置并回到贴底。Conversation 与 Event 视图各自
+  对新 ref 派发假 scroll；Thread 重绑清空位置并回到贴底。Conversation 与 Debug 视图各自
   拥有独立的 stick 生命周期：视图卸载即销毁 scroll listener/ResizeObserver，重新挂载时
   重新绑定（`useAgentThreadController` 不常驻自动贴底 hook）。
-- `/events` 打开 `ThreadEventView`（listbox/option，紧凑行布局：固定时间列 + kind badge +
+- `/debug` 打开 `ThreadEventView`（listbox/option，紧凑行布局：固定时间列 + kind badge +
   单行 summary ellipsis；failed 行 danger 色、running 行 pulse dot）：初始无选中；
   点击选中并打开详情；`↑/↓` 只在已选中时切换相邻行；hover / Home / End / Page /
   Enter 不改选中；`Esc` 与详情 X 取消选中。顶部固定一块最新系统提示词预览（10 行，
-  超出独立滚动）；进入 `/events` 拉一次，turn 的 working 状态开始与结束时各拉一次，
+  超出独立滚动）：进入 `/debug` 时经 `GET /system-prompt` 现算拉取（`useSystemPromptPreview`，
+  staleTime=Infinity），turn 的 working 状态开始与结束时各 refetch 一次，
   使同批 `SET_ENVIRONMENT` 等设置在模型工作期间即可反映到预览。
 - 事件详情是**只读 widget**（`ThreadEventDetail`，位于 widget zone 第一项、TaskStatus
   之前，ThreadWidgetStack、Composer 上方），不是 InteractionPanel：不隐藏 Composer、
@@ -171,7 +173,7 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
   turnNumber, kind, status, title, summary, createdAt, details, rawJson }`：
   `buildThreadEventTimeline({entries, modelInvocation, toolInvocations,
   modelAttemptFailures, modelStream, toolStreams})` 按当前 root-to-head branch 的
-  Entry 顺序线性扫描。Events 是调试视图：durable 行标签使用真实 `entryType`
+  Entry 顺序线性扫描。Debug 是调试视图：durable 行标签使用真实 `entryType`
   枚举（`ROOT` / `TURN_START` / `MESSAGE` / `TURN_END` …），摘要是压缩后的
   Entry payload JSON（超出单行 `…`），点击详情展示 pretty JSON。kind 仍保留内部
   分类（MESSAGE 按 role 分成 USER_MESSAGE / TOOL_CALL 等），但不作为行标签。
@@ -196,7 +198,7 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
   cache 段省略；详情保留完整 usage（input/output/cacheRead/cacheWrite(含 long)/
   reasoning/providerTotal/cost/outcome）。
 - `/shortcuts` 打开只读 `ThreadShortcutsPanel`（分组快捷键目录
-  `SHORTCUT_CATALOG`：Application / Thread / Events / Canvas，只收录已实现快捷键，每个
+  `SHORTCUT_CATALOG`：Application / Thread / Debug / Canvas scope，只收录已实现快捷键，每个
   descriptionKey 在 zh-CN / en-US 均可解析 + 统一 ThreadInteractionPanel shell）：
   不创建 backdrop，`Esc` 关闭并恢复 Composer 焦点与草稿。
 - 全局键盘语义：modal / alertdialog / lightbox（`.modal-backdrop, [aria-modal],
@@ -222,21 +224,22 @@ mainView?.events ?? ThreadConversationView   # 互斥：任一时刻只有一个
 | Bound `paneDirty` | branch draft dirty 或 composer 文本非空 |
 | Bound `panePending` | queued commands 非空 / controller.pending / rebind pending / stop pending / stop replay pending / approval pending / replay pending |
 
-`/thread`、`/new`、`/tree` 切换在 `panePending` 时拒绝，在 `paneDirty` 时要求确认丢弃草稿；replay/stop-replay pending 时切换会静默丢弃 exact retry，因此同样被 `panePending` 阻止。202 清空 composer 是既定语义（accepted 消息不再留在输入框）。
+`/thread`、`/new`、`/tree` 切换在 `panePending` 时拒绝，在 `paneDirty` 时要求确认丢弃草稿；replay/stop-replay pending 时切换会静默丢弃 exact retry，因此同样被 `panePending` 阻止。200 清空 composer 是既定语义（accepted 消息不再留在输入框）。
 
-## 7. 同 Session relocation（/tree）
+## 7. 同 Session EntryDraft（/tree）
 
-`/tree` 只允许逻辑静止 Thread（IDLE/CONTINUATION_DUE 且无 panePending）：`PUT /head` 携带 `targetEntryId` + `expectedRevision`；服务端约束同 Session、无 queued、无 live/terminal context、不能指向 continueModel TURN_END。成功后重新初始化 branch draft 与 composer 文本（USER/CUSTOM 来源 Entry 恢复可编辑文本）。
+`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）：PaneTargetStore 保存 `sessionId + startEntryId` 与本地 BranchDraft（base 由该 Entry 的 root-to-entry path 派生）。发送时以 ENTRY target 原子 materialize 新 Thread（head 指向 startEntryId，不复制 Entry、不修改任何已有 Thread）；旧 Thread 永不 relocation。成功后切换到 `BOUND_THREAD` 并重新初始化 branch draft 与 composer 文本（USER/CUSTOM 来源 Entry 恢复可编辑文本）。
 
 ## 8. Approval / Stop 身份
 
 - **Approval**：同一 `(invocationId, decision)` 复用同一 `decisionId`；切换 ALLOW↔DENY mint 新 ID；输入 `ALLOW`/`DENY`，durable 值 `ALLOWED`/`DENIED`；成功后 invalidate snapshot + chats。
-- **Stop**：失败后保留完整 `PendingStopOperation {stopRequestId, expectedRevision, basisHeadEntryId, basisRevision}`。重试发送**完全相同** body（同 ID + 原始 expectedRevision，绝不从新 snapshot 重推导）；成功/已知 409 清空；网络失败保留并暴露 `stopReplayPending`；**同步 basis fence**：`stopThread` 在复用前比较当前渲染 thread 的 headEntryId/revision 与 basis，任一不同立即 retire 并 mint 新 ID + 当前 expectedRevision（不依赖被动 effect）；权威 snapshot 证明 basis 变化时 effect 同样 retire。
+- **Stop**：完整 `PendingStopOperation {stopRequestId, expectedRevision, basisHeadEntryId, basisRevision}` 以 per-Thread local sidecar 保存。重试发送**完全相同** body（同 ID + 原始 expectedRevision，绝不从新 snapshot 重推导）；成功/已知 409/basis 变化时清空，网络失败或强制 rebind 保留并暴露 `stopReplayPending`。HTTP 成功结果的 ordered `cancelledUserMessages {sequence,clientCommandId,messageJson}` 被转为 TEXT/RESOURCE parts，消息之间及恢复前缀与当前草稿之间固定插入两个换行；同一 stopRequestId 最多应用一次。RESOURCE 重新提交时只允许目标 Session 已有 blob ref，不重复 retain。
+- **Manual Compaction**：`compactThread(threadId, {expectedRevision})` 以 snapshot 的 `revision` 为 CAS 提交 `POST /{threadId}/compact`；命令入口 `/compact` 由 `manualCompaction.available` 门控（disabledReason 展示原因）；成功后 invalidate snapshot。availability 是瞬时 advisory（每次 snapshot 现算），提交成功以 expectedRevision 守护。
 
 ## 9. Snapshot-first realtime / gap / terminal / duplicate
 
 `useHarnessThreadRealtime`（`threads.snapshot(threadId)` 是唯一 realtime 驱动的 query key；
-`threads.entries(threadId)` 仅在 `/tree` 打开时按需查询）：
+`sessions.entries(sessionId)` 仅在 `/tree` 打开时按需查询）：
 
 1. 读取 snapshot；经 `useApplicationEvents().subscribe({kind:'thread', id})` 订阅：`subscribed`
    （首次订阅与每次重连重订阅后都会到达）、`revision`、`resync` 与资源级 `error` 都只

@@ -20,10 +20,12 @@
 
 ```text
 GET /api/settings
+GET /api/settings/schema
 PUT /api/settings
 ```
 
-GET 返回六个 section、`version` 与时间戳。PUT 必须发送六个完整 section 和
+`GET /api/settings` 返回六个 section、`version` 与时间戳；`GET /api/settings/schema`
+返回 ordered sections/groups/fields，是服务端设置 UI 元数据的唯一事实源。PUT 必须发送六个完整 section 和
 `expectedVersion`；服务端执行：
 
 ```text
@@ -46,7 +48,7 @@ HTTP wire 上的 Java `Long` 使用非负十进制字符串，`Integer` 使用 J
 | Section | 内容 | 生效时机 |
 | --- | --- | --- |
 | `tool` | permission、默认 YOLO、Model/Tool Gateway 重试延迟、skill 加载超时 | permission：下一次 preflight；defaultYolo：下一次未显式指定模式的 Chat 创建；其余：重启 |
-| `aiRuntime` | invocation retry、compaction、subagent 预算 | 重启 |
+| `aiRuntime` | invocation retry；`compactionKeepRecentTokens` 与可空 fallback model；subagent depth/idle/turn，以及每父 `subagentMaxConcurrency=10`、每 root tree 可空 `subagentMaxTotalConcurrency`（null 表示不限） | 重启 |
 | `environment` | daemon heartbeat、目录查询和消息/资源预算 | 重启 |
 | `integrations` | ComfyUI、OpenCLI Hub、Seedance、GPT Image 2、MiniMax H3 非敏感参数 | 重启 |
 | `storageMedia` | S3 启用、上传/预签名预算、Canvas 媒体处理预算 | 重启 |
@@ -58,22 +60,15 @@ defaultYolo 在下一次 Chat 创建读取默认值时生效。
 
 ## 4. Settings UI
 
-`/settings` 有七个 Tab：
-
-```text
-General
-AI Runtime
-Tools & Permissions
-Environment
-Integrations
-Storage & Media
-Advanced
-```
-
 General 只管理当前浏览器的 `BrowserPreferences`，保存在
-`kkstudio.browser-preferences.v1`，不写数据库。其余六个 Tab 共享同一个服务端聚合 draft，
-保存时发送完整 CAS PUT；409 时不自动刷新或覆盖 draft，而是弹窗说明并等待用户确认，
-确认后刷新页面并重新读取最新聚合，当前未保存修改随刷新丢弃。
+`kkstudio.browser-preferences.v1`，不写数据库。服务端 section/group/field 全部由
+`GET /api/settings/schema` 动态渲染，前端不维护六套 server field 列表；通用类型为
+`BOOLEAN/INTEGER/LONG/TEXT/ENUM/PERMISSION/MODEL_SELECTION`，只有 permission 与 nullable
+model selection 使用 custom renderer。schema 缺失、重复 path 或未知类型时 fail closed。
+
+服务端设置共享同一个聚合 draft，保存时发送完整 CAS PUT；409 通过全站共享 conflict presenter
+展示 `errors.reason -> ApiError.code -> CONFLICT` 的稳定原因，不自动覆盖本地 draft。用户确认后刷新并
+重新读取最新聚合，当前未保存修改随刷新丢弃。
 
 ## 5. 不进入 SystemSettings 的配置
 
