@@ -597,7 +597,7 @@ owned closed normal Turn
 
 ```text
 keepRecentTokens = 20000   // compactionKeepRecentTokens 默认值
-fallbackModel    = null    // compactionFallbackModel 默认值；仅 OVERFLOW fallback 使用
+fallbackModel    = null    // compactionFallbackModel 默认值；null 表示不做一次性 fallback
 ```
 
 派生预算（每次 planning 瞬时重算）：
@@ -614,8 +614,11 @@ Trigger 固定为三态：
 
 ```text
 THRESHOLD
-  current Thread 最近一次 owned successful Model usage
-  > softThreshold
+  active same-owner CONTINUATION_DUE 或真实 queued user demand
+  AND (
+    current Thread 最近 compatible owned successful Provider usage
+    + 该 Assistant 之后的可见消息估算（含 ToolResult）
+  ) > softThreshold
 
 OVERFLOW
   current Thread 最新 owned Turn 以 OVERFLOW 失败
@@ -634,12 +637,14 @@ MANUAL
 执行优先级：
 
 ```text
-existing CONTINUATION obligation
--> actionable Compaction
+owned HISTORY -> TURN_PREFIX obligation
+-> active continuation boundary 上 actionable Compaction
+-> normal CONTINUATION
+-> idle/historical boundary 上 actionable Compaction
 -> queued user input
 ```
 
-Compaction 消费零 Command。压缩期间新输入仍可作为 durable Command 排队；压缩完成后由同一个 Thread Work 继续处理。
+Compaction 消费零 Command。完全结束的 idle run 在没有新 user demand 时不因 soft threshold 自唤醒；长工具链则在每个 `continueModel=true` turn-end boundary 先评估压缩，避免等到最终 idle 才处理已经过大的上下文。压缩期间新输入仍可作为 durable Command 排队。
 
 #### 6.1.2 切分与阶段
 
@@ -656,10 +661,11 @@ cutEntryId
   后续 Provider Context 中首个 retained context message
 
 turnPrefixStartEntryId
-  split turn 所属同一 INPUT Turn 的首个 user-like message
+  cut 所属 logical Agent segment 的首个 user-like message；
+  segment 从最近 INPUT 开始并跨后续 CONTINUATION durable turns
 ```
 
-Entry 从不删除，BranchSettings 和控制元数据始终可从完整 root-to-head path 派生，因此不再持久化只为“重绕保留元数据”服务的 `firstKeptEntryId`。
+Entry 从不删除；retained boundary 只引用 `cutEntryId`，BranchSettings 和控制元数据始终从完整 root-to-head path 派生。最新 complete compaction 是 logical Agent segment 回扫的硬边界。
 
 阶段：
 
@@ -685,6 +691,7 @@ FULL / TURN_PREFIX       -> complete
 ```text
 summaryText =
   immediately preceding matching HISTORY.summaryText
+  // direct TURN_PREFIX 使用固定 "No prior history."
   + stable separator
   + TURN_PREFIX model output
   + canonical file sections
@@ -698,7 +705,7 @@ summaryText =
 summaryText
 ```
 
-`phase`、`trigger`、`executionModel`、`cutEntryId`、`turnPrefixStartEntryId`、`historyCompactionEntryId` 全部冻结在对应 `TURN_START` 的 `CompactionStart` 中，不重复写入 payload；`tokensBefore`、`firstKeptEntryId`、`complete` 字段在最终模型中删除。Threshold 继续使用 owned normal Turn 的权威 Provider usage，cut planning 所需估算在规划时瞬时重算。
+`phase`、`trigger`、`executionModel`、`cutEntryId`、`turnPrefixStartEntryId`、`historyCompactionEntryId` 全部冻结在对应 `TURN_START` 的 `CompactionStart` 中，不重复写入 payload；complete 由 phase 与 TURN_END outcome 派生。Threshold 使用 owned normal Turn 的权威 Provider usage，并补算该 Assistant 之后的可见消息；cut planning 估算在规划时瞬时重算。
 
 #### 6.1.3 请求与 Provider Context
 
@@ -724,8 +731,8 @@ prompt-cache writes
 输出预算：
 
 ```text
-FULL / HISTORY  min(model output limit, floor(reserveTokens * 0.8))
-TURN_PREFIX     min(model output limit, floor(reserveTokens * 0.5))
+FULL / HISTORY  min(model output limit, floor(effectiveReserve * 0.8), removedPrefixEstimate)
+TURN_PREFIX     min(model output limit, floor(effectiveReserve * 0.5), removedPrefixEstimate)
 ```
 
 普通 Model 请求的 compaction-aware history：
@@ -753,6 +760,7 @@ Entry 历史不删除。Compaction 只改变 Provider Context 投影。
 - failed/stopped Compaction Turn 保留 durable Entry，但对 transcript、token estimate 和 Provider Context不可见。
 - failed/stopped Compaction 不自唤醒；owned incomplete HISTORY 只产生一次机械 TURN_PREFIX wake，不进入 threshold retry spin。
 - complete OVERFLOW Compaction 只产生一次 immediate CONTINUATION；再次 OVERFLOW 后保留失败并停止该恢复链。
+- 成功 THRESHOLD FULL/TURN_PREFIX/fallback 若压缩前存在 same-owner normal continuation，则把该 obligation 重写到新 TURN_END 并继续；foreign owner 不可借用。失败、无增益或 fallback 耗尽后停止该恢复链。
 - Stop 终止当前 Thread 拥有的 Compaction Invocation；queued 用户输入按普通 Stop receipt 取消并恢复到 Composer。
 - owned incomplete HISTORY 与 TURN_PREFIX 之间是 durable continuation obligation；Stop 在 phase gap 获胜时追加一个 `TURN_START(COMPACTION) -> ASSISTANT_ERROR(CANCELLED) -> TURN_END(STOPPED)` barrier，确定性取消该 obligation。
 - Model retry 始终从 Invocation 的 immutable `basisHeadEntryId` 重建摘要请求，不能从已经推进的当前 Thread head 查找 previous checkpoint。
@@ -784,14 +792,14 @@ Entry 历史不删除。Compaction 只改变 Provider Context 投影。
 
 `~/proj/pi` 同时存在两套 compaction 形态：
 
-1. `packages/coding-agent` 是当前完整可运行实现：`AgentSession` 编排 summarization，最终追加单个 `CompactionEntry(summary, firstKeptEntryId, ...)`。
+1. `packages/coding-agent` 是当前完整可运行实现：`AgentSession` 编排 summarization，并以一个 retained-entry reference 保存最终 summary。
 2. `packages/agent` 是新的 Harness 形态：Compaction 是 operation record，`CompactionEntry` 内嵌 `retainedTail`；但当前 `AgentHarness.compact()` 仍未完成，不作为 kk-studio 行为事实源。
 
 kk-studio 与可运行 Pi 实现保持算法对齐：
 
 | 能力 | 一致语义 |
 | --- | --- |
-| 自动阈值 | `contextTokens > contextWindow - reserveTokens` |
+| 自动阈值 | projected context tokens 严格大于 soft threshold |
 | 默认预算 | reserve 16384、recent 20000 |
 | token 估算 | 文本约 `ceil(chars / 4)`，媒体使用固定占位预算 |
 | cut point | 可以切 USER/ASSISTANT/custom，不切 ToolResult |
@@ -811,7 +819,7 @@ kk-studio 与可运行 Pi 实现保持算法对齐：
 | Compaction lifecycle | AgentSession 内存编排 | durable internal Turn + Invocation + Work |
 | 持久化结果 | 单个 CompactionEntry | `TURN_START -> COMPACTION -> TURN_END` |
 | split turn | 一个操作中最多调用两次 LLM，最后写一条 Entry | HISTORY 与 TURN_PREFIX 分成两个可恢复 durable Turn |
-| retained suffix | `firstKeptEntryId`；新 Harness 版本尝试复制 `retainedTail` | 单一 `cutEntryId` 引用，不复制 immutable Entry |
+| retained suffix | retained-entry reference | 单一 `cutEntryId` 引用，不复制 immutable Entry |
 | 运行恢复 | 主要依赖当前进程/Session reload | lease、Work、Invocation 与 Store 支持进程重启恢复 |
 | Stop | AbortController | Thread-scoped durable Stop + late-result fence |
 | 输入并发 | 普通 prompt 在 compaction 中被拒绝；部分队列等待 | Command 可 durable 排队，Compaction 消费零 Command |
@@ -861,7 +869,7 @@ Owner barrier：
 9. Thread 从 complete Compaction 后的 Entry materialize 时直接继承 summary；从更早 Entry materialize 时形成独立路径，不受该 summary 影响。
 10. `ownerThreadId` 是不可变 UUID 事实，不要求 owner Thread 行仍存在。
 
-当前 `compactionPreparation` 对 incomplete HISTORY 的机械延续必须增加 owner 校验：
+`compactionPreparation` 对 incomplete HISTORY 的机械延续使用 owner 校验：
 
 ```text
 latest Turn is completed COMPACTION/HISTORY incomplete
@@ -900,7 +908,7 @@ otherwise
 - extension summary replacement hook；
 - Pi branch summary；
 - copied `retainedTail`；
-- `firstKeptEntryId / tokensBefore / complete` 冗余字段；
+- payload 外的重复 retained/tokens/completeness 字段；
 - Compaction 专用表、status 列或调度器。
 
 理由是这些能力都不是上下文容量 correctness 所必需；其中 branch summary 和 copied tail 还会模糊 kk-studio 的 sibling Thread 隔离与 immutable shared-history 模型。
@@ -909,7 +917,7 @@ otherwise
 
 ### 7.1 StopResult
 
-Stop 结果不使用把 replay 与业务结果混在一起的状态枚举：
+领域 `StopResult` 保留 replay fact 与完整取消内容：
 
 ```text
 StopResult {
@@ -917,7 +925,7 @@ StopResult {
   thread
   stoppedTurnEndEntryId?
   cancelledCommandCount
-  cancelledUserMessages[]   // 领域内部：仅用于 Composer 恢复，HTTP DTO 不上 wire
+  cancelledUserMessages[]
 }
 ```
 
@@ -943,6 +951,24 @@ CancelledUserMessage {
 ```
 
 返回 USER_MESSAGE 和 USER role CUSTOM_MESSAGE；不把 SET_* 或 SYSTEM steering 填回用户输入框。
+
+HTTP DTO 固定为：
+
+```text
+HarnessThreadStopResultDTO {
+  status                       // STOPPED / IDLE / REPLAYED
+  thread
+  stoppedTurnEndEntryId?
+  cancelledCommandCount
+  cancelledUserMessages[] {
+    sequence
+    clientCommandId
+    messageJson                // canonical USER AgentMessage JSON
+  }
+}
+```
+
+wire 无独立 `replayed` 字段；queued-only replay 的 `stoppedTurnEndEntryId` 仍为 null，取消计数与消息和原 receipt 一致。
 
 ### 7.2 Stop 事务
 
@@ -976,22 +1002,23 @@ Replay receipt：
 Stop identity 是 `(threadId, stopRequestId)`；`expectedRevision` 只作为首次执行 fence，不属于 receipt identity：
 
 - transport outcome unknown：逐字节重放原请求；
-- 确定收到 `STALE_REVISION`：刷新 snapshot，沿用同一 stopRequestId 和新 revision 重试；
+- 确定收到 `STALE_REVISION`：清理该 pending operation，刷新 snapshot；下一次 Stop 使用新 stopRequestId 与当前 revision；
 - 通过 revision fence 的 Stop 取消其获得 Thread lock 时存在的全部 queued Commands。
 
 ### 7.3 前端恢复
 
-Stop 发起前保存：
+Stop 发起时：
 
 ```text
-current ComposerPart[]
-logical selection anchor/focus
-focus state
-scroll state
-stopRequestId
+PendingStopOperation {
+  stopRequestId
+  expectedRevision
+  basisHeadEntryId
+  basisRevision
+}
 ```
 
-这些数据作为 per-Thread `PendingStop` sidecar 持久化，直到 Stop receipt 已成功应用；页面刷新或 transport outcome unknown 后继续沿用同一 stopRequestId 重试。
+操作 identity 作为 per-Thread local sidecar 持久化，直到 Stop receipt 已成功应用、已知 409 或权威 basis 变化；页面刷新或 transport outcome unknown 后继续沿用同一 request body 重试。当前草稿由 Composer draft storage 独立保存。
 
 成功响应后：
 
@@ -1001,16 +1028,12 @@ cancelled messages in sequence order
 -> use two newlines between message boundaries
 -> prepend before current unsent draft
 -> persist draft
--> restore selection relative to original current draft
--> scroll caret with nearest visibility
 ```
 
 规则：
 
-- 当前草稿非空时，原 selection offset 加上恢复前缀长度。
-- 当前草稿为空时，caret 放到末尾。
-- selection bookmark 失效时回退到末尾。
 - Resource 恢复成 durable Resource pill，不恢复已消费的 upload handle。
+- recovered Resource 重新提交为 `RESOURCE(blobId,name,preview?)`；只有目标 Session 已有 blob ref 才接受，不重复 retain，新/跨 Session 引用回滚整个接受事务。
 - 当前 BranchDraft 保持不变。
 - 多个 cancelled 输入合并后形成一次新的未来 submission，统一使用当前 BranchDraft；不承诺恢复每条旧输入各自的历史 settings。
 - 同一 stopRequestId 的 replay 响应最多应用一次。
@@ -1024,7 +1047,7 @@ type ComposerPart =
   | ResourcePart
 ```
 
-local storage 保存文本、READY upload handle 元数据和 durable Resource；浏览器 File 对象和仍在上传的瞬时任务不持久化。
+local storage 保存文本与 durable Resource；attachment/upload 注册表和浏览器 File 只在当前页面会话存活，含 attachment 的草稿不写入持久化 draft。
 
 ## 8. Upload 与 Blob 生命周期
 
@@ -1605,7 +1628,7 @@ create table canvas_command_dedup (
 );
 ```
 
-不保存 `applied_version` 或 `created_at`。精确 replay 保证 command identity 和副作用不重复，响应返回当前 Canvas projection。
+表字段固定为 `canvas_id / command_id / request_hash`。精确 replay 保证 command identity 和副作用不重复，响应返回当前 Canvas projection。
 
 Function Run 对 Resource 的生命周期保护统一命名为 pin：
 
@@ -1638,7 +1661,7 @@ create index idx_canvas_function_resource_pin_resource
 ```text
 canvas_document 不含 thread_id、uk_canvas_document_thread 或对应 FK/comment
 chat_thread 不存在
-canvas_command_dedup 不含 applied_version、created_at 或对应 check/comment
+canvas_command_dedup 恰含 canvas_id、command_id、request_hash
 canvas_function_resource_ref 不存在
 canvas_function_resource_pin 及 idx_canvas_function_resource_pin_resource 存在
 harness_thread 含 session_id、materialization_hash 与同 Session head FK
@@ -1646,127 +1669,15 @@ harness_thread_command 含 cancel_request_id 与 cancel receipt index
 chat_session、canvas_session、harness_session_blob_ref 使用本节最终结构
 ```
 
-### 12.7 后端代码映射
+### 12.7 后端边界映射
 
-库表 ownership 改造必须同步到领域对象、Repository、Service、Controller 和 DTO，不能只改 DDL。
-
-Harness Runtime：
-
-```text
-ThreadState / Thread DTO
-  -> sessionId 成为必填字段
-  -> materializationHash 只保存在领域/Store，不作为产品展示字段
-
-HarnessStore / PostgreSQL mapper
-  -> Thread insert/select/update 显式读写 session_id
-  -> Thread head 使用 (session_id, head_entry_id) 一致性
-  -> listThreadsBySession(sessionId)
-  -> Command cancelRequestId 读写与 replay 查询
-
-HarnessRuntime
-  -> 删除 createSession/createThread/createThreadAtEntry/moveHead
-  -> 统一为 acceptCommands(target, acceptancePreflight)
-  -> facade 不暴露 deleteThread/deleteSession；深删除由 Core HarnessSessionDeletionService
-     经 HarnessStore.Transaction（deleteWorkByThread/deleteToolInvocations/deleteModelInvocations/
-     deleteCommands/deleteThread/deleteEntries/deleteSession）编排
-
-ThreadProcessor.compactionPreparation
-  -> complete Compaction checkpoint 可沿 EntryPath 共享
-  -> incomplete HISTORY 只有 TURN_START.ownerThreadId == current Thread 才继续 TURN_PREFIX
-  -> foreign normal Turn usage 继续作为 threshold ownership barrier
-
-ThreadContextClassifier / StopControl
-  -> CONTINUATION_DUE 校验被引用 TURN_START.ownerThreadId
-  -> foreign continueModel TURN_END 分类为 historical
-  -> owned incomplete HISTORY phase gap 是 stoppable Compaction continuation obligation
-  -> Stop 通过 synthetic stopped Compaction Turn 取消 phase gap，不留下会在下次输入复活的 partial
-
-CompactionPreparation / CompactionRequest / CompactionPayload / codecs
-  -> 删除 firstKeptEntryId、tokensBefore 和 persisted complete
-  -> complete 由 phase != HISTORY 派生
-  -> repeated compaction boundary 直接使用 latest complete cutEntryId
-  -> CompactionRequest 只保留 summaryText；phase/trigger/executionModel/cutEntryId/
-     turnPrefixStartEntryId/historyCompactionEntryId 冻结在 TURN_START.CompactionStart
-  -> ThreadProcessor.compactThread(CompactThreadCommand{threadId, expectedRevision})
-     以 expectedRevision + source head + queued 快照三重 CAS 提交 MANUAL plan
-```
-
-Chat ownership：
-
-```text
-删除 ChatThreadRepository / ChatThreadService / ChatThreadServiceImpl
-新增 ChatSessionRepository（chat_session）
-
-ChatThreadCommandService / ChatThreadCommandServiceImpl
-  -> 删除 Chat 专属命名和创建逻辑
-  -> 收敛到共享 StudioCommandAcceptanceService
-
-ChatServiceImpl.deleteChat
-  -> 按 chat_session 列出 Session
-  -> 对每个 Session 调用 deleteSessionDeep
-  -> 不再按 Thread 反推并删除 Session
-```
-
-Canvas ownership：
-
-```text
-CanvasDocument / CanvasDocumentDO / CanvasDocumentDTO
-  -> 删除 threadId
-
-CanvasDocumentMapper
-  -> COLUMNS / insert / result map 删除 thread_id
-  -> 删除 bindThreadIfAbsent
-
-删除 CanvasThreadService / CanvasThreadServiceImpl
-删除 CanvasThreadFirstSendRequestDTO / CanvasThreadFirstSendResponseDTO
-新增 CanvasSessionRepository（canvas_session）
-Canvas 首发与 Chat 共用 StudioCommandAcceptanceService
-Canvas 删除按 canvas_session 深删除全部 Session
-```
-
-Web/API：
-
-```text
-StudioChatController
-  -> GET /{chatId}/sessions
-  -> 删除 GET/POST/PUT /{chatId}/threads...
-
-StudioCanvasController
-  -> GET /{canvasId}/sessions
-  -> 删除 POST /{canvasId}/thread/messages
-
-StudioHarnessThreadController
-  -> 删除 standalone create/head relocation 端点
-  -> first-send / EntryDraft / BoundThread 共用 POST /api/ai/runtime/command-batches
-
-新增
-  GET /api/ai/runtime/sessions/{sessionId}/threads
-  GET /api/ai/runtime/sessions/{sessionId}/entries
-```
-
-Share DTO：
-
-```text
-HarnessThreadDTO.sessionId 必填
-删除 HarnessThreadCreateDTO
-删除 HarnessThreadHeadUpdateDTO
-删除 CanvasDocumentDTO.threadId
-新增 SessionSummaryDTO / ThreadSummaryDTO
-Command acceptance DTO 使用 NEW_SESSION / ENTRY / THREAD target
-Stop DTO 返回 cancelledCommandCount 与 replayed；cancelledUserMessages 是领域内部语义，不上 wire
-```
-
-Canvas 辅助 Repository：
-
-```text
-CanvasCommandDedupDO / Mapper
-  -> 删除 appliedVersion、createdAt
-  -> insert/select 只处理 canvasId、commandId、requestHash
-
-CanvasFunctionResourceRef*
-  -> 全部重命名为 CanvasFunctionResourcePin*
-  -> SQL、DO、Mapper、Repository、测试和文档同步改名
-```
+- `ThreadState` / `HarnessThreadDTO` 的 `sessionId` 必填；`materializationHash` 只属于领域/Store。PostgreSQL Thread 读写显式携带 `session_id`，head 由同 Session FK 约束。
+- `HarnessRuntime.acceptCommands(target, acceptancePreflight)` 是唯一命令接受原语；facade 不提供 standalone create、head relocation 或 delete。深删除由 Core `HarnessSessionDeletionService` 经 `HarnessStore.Transaction` 按 Work/Invocation/Command/Thread/Entry/Session 顺序编排。
+- complete Compaction checkpoint 可沿 EntryPath 共享；incomplete HISTORY 与 normal continuation obligation 都要求 `TURN_START.ownerThreadId == current Thread`。`CompactionPayload` 只含 `summaryText`，其余冻结事实位于 `TURN_START.compaction`。
+- Chat 与 Canvas 都通过 `StudioCommandAcceptanceService` 绑定 Session ownership；`ChatServiceImpl.deleteChat` 按 `chat_session` 深删 Sessions，Canvas 按 `canvas_session` 深删 Sessions。Canvas document/DTO 不持有 Thread id。
+- 产品写入口为 `POST /api/ai/runtime/command-batches`；Session 查询为 owner-scoped sessions、`GET /api/ai/runtime/sessions/{sessionId}/threads` 与 `/entries`。不存在 Chat/Canvas 专属 Thread create 或 head update API。
+- Command acceptance DTO 使用 NEW_SESSION / ENTRY / THREAD target；Stop DTO 返回 `status/thread/stoppedTurnEndEntryId/cancelledCommandCount/cancelledUserMessages(sequence,clientCommandId,messageJson)`，无独立 `replayed` 字段。
+- `CanvasCommandDedupDO` / Mapper 只处理 `canvasId/commandId/requestHash`；Function Run 的 Resource 生命周期边使用 `CanvasFunctionResourcePin` 命名。
 
 其余 ModelInvocation、ToolInvocation、Work、Canvas 和 Storage 表继续保持各自职责，不向 Thread 或 Session 复制状态。
 
@@ -1863,7 +1774,6 @@ standalone createSession/createThread/createThreadAtEntry API
 MOVE_HEAD / PUT head
 chat_thread
 canvas_document.thread_id
-canvas_command_dedup.applied_version / created_at
 canvas_function_resource_ref
 Pane.threadId|null 二态模型
 selectedSessionId durable/local Pane field
@@ -1971,7 +1881,7 @@ sentinel UUID / 空串代替 NULL
 - [ ] TURN_PREFIX 最终 summary 自包含紧邻匹配 HISTORY + prefix，绝不合并 stale partial。
 - [ ] ToolResult 永不成为 cut point。
 - [ ] `effectiveKeepRecentTokens = min(keepRecentTokens, floor(contextWindow / 2))`；`effectiveReserve = min(16384, maxOutputTokens)`。
-- [ ] Compaction payload/request 不含 firstKeptEntryId 或 tokensBefore；payload 只含 summaryText，anchor 与 trigger 冻结在 TURN_START.CompactionStart。
+- [ ] Compaction payload 只含 summaryText；anchor、trigger、executionModel 与 phase 冻结在 TURN_START.CompactionStart，complete 由 phase 与 TURN_END outcome 派生。
 - [ ] repeated compaction 从 latest complete cutEntryId 开始。
 - [ ] latest complete summary + cut 后 suffix 是唯一 Provider Context 投影。
 - [ ] internal Compaction Turn、失败 attempt/error 不进入 transcript 或 Provider Context。

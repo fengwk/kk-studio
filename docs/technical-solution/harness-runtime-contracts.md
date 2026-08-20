@@ -105,7 +105,7 @@ SET_ACTIVE_TOOLS
 - `owner` 是 `{type: CHAT|CANVAS, id}`；服务端在返回任何 replay/Session/Thread/Entry/Command 数据前验证 owner 对目标 Session/Thread 的归属。内部 Task/one-shot 不走 owner HTTP DTO，直接调用 Runtime。
 - `target` 是严格三态 union：`NEW_SESSION{sessionId, threadId, rootSettings, yoloEnabled}` / `ENTRY{sessionId, startEntryId, threadId, yoloEnabled}` / `THREAD{threadId, expectedHeadEntryId, expectedNextCommandSequence}`；未知 target 字段拒绝。THREAD 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
 - `commands` 非空；每个 command 必须有 canonical UUID `clientCommandId`（thread 内唯一，幂等键）；同 batch 内不得重复。
-- `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费物化为 durable `resource(blobId,name,preview)`），未知字段、未知类型、空 `contents` 与非 canonical uploadId 一律拒绝。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝、`content` 对 USER_MESSAGE 禁用。
+- `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；元素允许 `TEXT(text)`、`ATTACHMENT(uploadId)` 与 `RESOURCE(blobId,name,preview?)`。ATTACHMENT 的 READY upload 在入队事务内原子消费为 durable resource；RESOURCE 只允许复用目标 Session 已有的 blob ref，不重复 retain，新/跨 Session 引用与未知字段、未知类型、空 contents、非 canonical id 一律拒绝。`text`/`content` shorthand 不属于 wire。
 - `CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
 - `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_ENVIRONMENT` 携带 `environment`（完整 `{name, workspacePath}` 对象或 null）。YOLO 不是 command：`PUT /api/ai/runtime/threads/{threadId}/yolo` 直接更新 Thread policy（见 §3「YOLO 直接控制面」）。
 - mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `contents`（`role` 仅 `CUSTOM_MESSAGE` 允许）等不相关字段，未知字段（含 `text`）一律拒绝。
@@ -203,7 +203,8 @@ lock Thread
   -> load head path（root 推导 session）
   -> load session 全部不可变 Entry（含兄弟分支）
   -> findReplay(ownerThreadId == thread.id, stopRequestId)   // 在 revision CAS 之前
-  -> 命中 -> REPLAYED（返回被重放的 stoppedTurnEndEntryId，cancelledCommandCount=0，零 mutation）
+  -> 命中 -> REPLAYED（返回与原 Stop 相同的 stoppedTurnEndEntryId /
+                       cancelledCommandCount / cancelledUserMessages，零 mutation）
   -> revision CAS（STALE_REVISION 409）
   -> 无 live Turn（IDLE）：
        有 queued Commands -> 取消它们（cancelled_at），revision +1（touchRevision），
@@ -224,7 +225,7 @@ lock Thread
 
 Stop 成功关闭 live Turn 的同一事务内：先净化 Work mailbox（deleteWork 的 owner 校验反查 Model/Tool Invocation 行），再删除全部 Tool Invocations、删除父 ModelInvocation（删除前执行与 `ModelAttemptMaterialization` 等价的严格校验），advance Thread；closed turn 不保留任何 Invocation 行，迟到 callback 因行已删除或 claim 失效而 no-op。
 
-`StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 revision +1，**不写 durable stop 标记**；无 queued 时真正 no-op，同 `stopRequestId` 再调用仍是 IDLE 而非 REPLAYED）、`REPLAYED`（精确重放先前 STOPPED，不取消命令）。durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」，在 Thread 锁内做 Session 级不可变查找：同 raw `stopRequestId` 只在自己的 turn 上产生 replay，另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到同 Session 的兄弟分支后仍可命中。STOPPED 的不确定重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedRevision`，服务端 replay 先于 CAS；marker-free IDLE 若已取消 queued 并推进 revision，响应丢失后的旧 revision 重试可返回 `STALE_REVISION`，客户端按权威 snapshot 的 basis fence 收敛。
+`StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 revision +1，**不写 durable stop 标记**；无 queued 时真正 no-op，同 `stopRequestId` 再调用仍是 IDLE 而非 REPLAYED）、`REPLAYED`（精确重放先前 receipt，不重复取消命令）。HTTP DTO 固定为 `{status,thread,stoppedTurnEndEntryId,cancelledCommandCount,cancelledUserMessages[]}`，无独立 `replayed` 字段；取消消息按 sequence 升序，以 `{sequence,clientCommandId,messageJson}` 暴露 canonical USER AgentMessage。durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」，在 Thread 锁内做 Session 级不可变查找：同 raw `stopRequestId` 只在自己的 turn 上产生 replay，另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到同 Session 的兄弟分支后仍可命中。STOPPED 的不确定重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedRevision`，服务端 replay 先于 CAS；marker-free IDLE 若已取消 queued 并推进 revision，响应丢失后的旧 revision 重试可返回 `STALE_REVISION`，客户端按权威 snapshot 的 basis fence 收敛。
 
 ## 8. Tool approval
 
@@ -269,7 +270,7 @@ public record ModelRequestSpec(
 - tool/skill/subagent binding 名称各自不得重复；每个 environment-bound tool/skill 必须引用同一 Environment route。
 - `SubagentBinding(name, description)`：`name` 是 canonical 非空短名（≤64 字符），`description` 是可空展示描述快照（≤512 字符）；随 spec 冻结，task 执行绝不依据后续 Agent 配置扩权。
 - `contextWindow` 只在 `TurnStartPayload` 中持久化（见 §2），不在 spec 中重复保存。
-- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent bindings 必须全为空，并冻结 phase/trigger/executionModel/cut/prefix/history anchor。`CompactionRequest` 只携带 `summaryText`（最终 payload 唯一字段）；`phase/trigger/executionModel/cutEntryId/turnPrefixStartEntryId/historyCompactionEntryId` 冻结在 `CompactionStart`（存于 TURN_START），Entry ID 是 canonical UUID strings。`tokensBefore`/`firstKeptEntryId`/`complete` 字段在最终模型中删除（complete 由 phase != HISTORY 派生）。
+- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent bindings 必须全为空。`CompactionPayload` 只含 `summaryText`；`phase/trigger/executionModel/cutEntryId/turnPrefixStartEntryId/historyCompactionEntryId` 冻结在 `CompactionStart`（存于 TURN_START），Entry ID 是 canonical UUID strings，complete 由 phase 与 TURN_END outcome 派生。
 - `ToolBinding(descriptor, type, environment, plugin)`：`PLATFORM` binding 的 environment 为 null，`ENVIRONMENT` binding 指向具体 binding（可为 null）；descriptor 的 type 与 binding type 一致。
 - `plugin` 为 null 或 `PluginToolBinding(pluginId, contributionLocalName, stateAccesses)`；仅 `PLATFORM` 可携带 plugin，identifier 必须 canonical，state accesses 按 customType 唯一且 mode 仅 `READ` / `WRITE`。该 provenance 随 spec 冻结，retry 不按工具名重新归属。
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
@@ -327,9 +328,9 @@ public record ProviderResponse(
 
 - `TurnStartReason.COMPACTION` 消费零 Command，candidate path 只追加 TURN_START；`CompactionPreparation` 作为 transient plan 事实传给 Resolver，并与 frozen `CompactionRequest` 逐字段机械比对。
 - 成功结果只能是 `CompactionPayload`（`summaryText`）；正常 invocation 不能挂 COMPACTION，compaction invocation 不能挂普通 Assistant MESSAGE。Store 要求 invocation 已 SUCCEEDED、payload metadata 与 request 精确相等，且 cut/prefix anchor 在 result 前满足 `cutEntryId` 为历史 retained 边界、`turnPrefixStartEntryId` 指向 split turn 首个 user-like message。
-- phase/complete 固定：HISTORY 为 incomplete；FULL/TURN_PREFIX 为 complete。completed TURN_END 只有 complete OVERFLOW 允许 `continueModel=true`。
+- phase/complete 固定：HISTORY 为 incomplete；FULL/TURN_PREFIX 为 complete。completed HISTORY 用 `continueModel=true` 机械启动 TURN_PREFIX；complete OVERFLOW 用 true 启动一次 immediate retry；成功 THRESHOLD FULL/TURN_PREFIX/fallback 仅在压缩前存在 same-owner normal continuation 时以 true 恢复该 obligation，foreign owner 不可借用。
 - HISTORY 之后只读取紧邻、已完成且 metadata 匹配的 partial；TURN_PREFIX 不扫描更早 stale partial。direct TURN_PREFIX 的 history 文本固定为 `No prior history.`。
-- Threshold freshness 只被 complete CompactionPayload 消费；普通 FAILED/CANCELLED/UNKNOWN turn 与 Resolver Rejected turn 不覆盖当前 Thread 最新成功 usage，FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止立即原地重试。shared-history ownership barrier 是 Entry-only 事实：`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行。
+- Threshold freshness 只被 complete CompactionPayload 消费；普通 FAILED/CANCELLED/UNKNOWN turn 与 Resolver Rejected turn 不覆盖当前 Thread 最新成功 usage。THRESHOLD 在 active ContinuationDue 或 queued user demand 边界执行，context tokens 为最近 compatible owned successful Provider usage 加其后可见消息估算（含 ToolResult）；完全 idle 且无 demand 不自唤醒。FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止立即原地重试。shared-history ownership barrier 是 Entry-only 事实：`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行。
 - **MANUAL**：`compactThread(CompactThreadCommand{threadId, expectedRevision})` 先锁 Thread 校验 expectedRevision，经 `manualDecision` 计算 availability（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT），再以 `CompactionTrigger.MANUAL` 构建 plan；plan 短事务 → 事务外 Resolver → 第二事务提交 COMPACTION Turn + MODEL Work（commitManual 再次校验 revision + source head + queued 快照，消费零 Command）。与自动触发共用 MODEL Work、一次 fallback 与 crash recovery。
 - `<read-files>` / `<modified-files>` 是 Runtime-owned reserved section：previous summary 入 prompt 前剥离，response 在 terminal success 前校验并剥离，最后只追加一次从完整 durable branch history 重算的 canonical 清单；modified 覆盖 read，空白或破坏 reserved 标签结构的 path 忽略。
 - immediate overflow recovery continuation 再次 OVERFLOW 时不再压缩；该失败 Entry/TURN_END 保持 durable。

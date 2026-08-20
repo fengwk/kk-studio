@@ -299,7 +299,7 @@ turnPrefixStartEntryId
 historyCompactionEntryId
 ```
 
-`CompactionRequest` 只携带 `summaryText`（最终 payload 唯一字段）；不保存 `messagesToSummarize`、`previousSummary` 或最终大字符串 prompt。`tokensBefore` / `firstKeptEntryId` / `complete` 在最终模型中删除（complete 由 phase != HISTORY 派生）。
+`CompactionPayload` 只携带 `summaryText`；`messagesToSummarize`、`previousSummary` 与最终 prompt 都是瞬时重建事实。phase/trigger/executionModel 与 cut/prefix/history anchors 位于 `TURN_START.compaction`，complete 由 phase 与 TURN_END outcome 派生。
 
 ## 7. ModelRequestMaterializer
 
@@ -645,9 +645,9 @@ no-tools 闭合后基于新 head EntryPath 判定下一步，actionable 则同�
 | FILTERED / LENGTH 无 calls / terminal failure/cancel | 同上（普通 turn 闭合同一判定） |
 | 有 READY tools | TOOL Work |
 | 全部 immediate FAILED | THREAD self-wake |
-| compaction 下一阶段（HISTORY → TURN_PREFIX） | THREAD self-wake |
+| compaction 下一阶段（HISTORY → TURN_PREFIX）、OVERFLOW retry、成功 THRESHOLD 后保留的原 continuation | THREAD self-wake |
 
-compaction due 判定只对普通（非 compaction）turn 闭合生效（claim 内压缩到期优先于 queued input）：threshold FULL 压缩 complete 已消费 freshness 不再 due；FAILED/STOPPED/CANCELLED/incomplete 压缩阻止立即原地重试、不得从 due self-wake 自旋；HISTORY 下一阶段与 complete OVERFLOW 的 continuation 由显式 THREAD wake 驱动。
+完全结束的普通 turn 不因 soft threshold 自唤醒；有 queued user 时仍在 INPUT 前评估 compaction。Tool batch 关闭后固定产生 `CONTINUATION_DUE`，下一 claim 先计算最近 Provider usage + Assistant 后可见消息（含 ToolResult），越阈则 COMPACTION 优先于普通 CONTINUATION。threshold FULL complete 消费 freshness；FAILED/STOPPED/CANCELLED/incomplete 压缩不原地重试；HISTORY 下一阶段、complete OVERFLOW retry 与成功 THRESHOLD 后保留的 same-owner normal continuation 由显式 THREAD wake 驱动。
 
 ### 13.2 ToolTerminalPending
 
@@ -677,6 +677,20 @@ complete current THREAD Work
 每个 Tool terminal 都可以 request THREAD Work，Work mailbox 负责合并；Thread 提前 claim 时分类为 ToolActive 并完成，不产生业务 mutation。
 
 ### 13.4 ContinuationDue / Input / Compaction
+
+单 action 优先级固定：
+
+```text
+ContinuationDue:
+  owned HISTORY -> TURN_PREFIX
+  -> over-threshold COMPACTION
+  -> normal CONTINUATION
+
+IdleOrHistorical:
+  fallback / hard overflow / queued-demand threshold COMPACTION
+  -> INPUT
+  -> complete claim
+```
 
 保留 Resolver 两阶段协议：
 
@@ -756,7 +770,7 @@ Model request materialization发生在有效 MODEL claim 内，但不持有长�
 ### 16.1 Stop
 
 Stop 的 durable replay key 是「被关闭 turn 的 TURN_START.ownerThreadId + closeRequestId」：Thread 锁内 Session 级
-不可变查找使 owning Thread 在 head move 到同 Session 的兄弟分支后仍能精确 replay，另一 Thread 的相同 raw id 被忽略
+不可变查找使 owning Thread 的当前 head 已推进到后续 descendant 时仍能精确 replay，另一 Thread 的相同 raw id 被忽略
 而非冲突；revision 只用于未 replay 的首发 CAS。
 
 Stop 成功关闭 live turn 的同一事务必须：
