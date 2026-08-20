@@ -162,7 +162,8 @@ class SystemPromptPreviewServiceTest {
     EntryPath path =
         new EntryPath(
             List.of(new Entry(SESSION_ID, SESSION_ID, null, new RootPayload(settings), NOW)));
-    ThreadState thread = new ThreadState(THREAD_ID, SESSION_ID, false, 1, 0, NOW, NOW);
+    ThreadState thread =
+        new ThreadState(THREAD_ID, SESSION_ID, SESSION_ID, "0".repeat(64), false, 1, 0, NOW, NOW);
     return new ThreadSnapshot(thread, path, List.of(), null, List.of(), List.of());
   }
 }

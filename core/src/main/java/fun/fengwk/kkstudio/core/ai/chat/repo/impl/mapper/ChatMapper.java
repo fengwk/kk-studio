@@ -47,6 +47,11 @@ public interface ChatMapper extends BaseMapper {
   @ResultMap("chatResultMap")
   ChatDO lockById(@Param("id") UUID id);
 
+  /** KEY SHARE：阻止 Chat 删除但不串行化同 Chat 的并发命令接受（归属授权路径）。 */
+  @Select("select " + COLUMNS + " from chat where id = #{id} for key share")
+  @ResultMap("chatResultMap")
+  ChatDO lockForKeyShare(@Param("id") UUID id);
+
   @Insert(
       """
       insert into chat (

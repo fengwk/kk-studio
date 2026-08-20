@@ -4,9 +4,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionResourceRefMapper;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionResourcePinMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasResourceMapper;
-import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasFunctionResourceRefDO;
+import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasFunctionResourcePinDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasResourceDO;
 
 import java.util.LinkedHashSet;
@@ -25,12 +25,12 @@ import java.util.UUID;
 public class CanvasResourceLifecycle {
 
   private final CanvasResourceMapper resourceMapper;
-  private final CanvasFunctionResourceRefMapper refMapper;
+  private final CanvasFunctionResourcePinMapper refMapper;
   private final ObjectProvider<StorageBlobManager> blobManagers;
 
   public CanvasResourceLifecycle(
       CanvasResourceMapper resourceMapper,
-      CanvasFunctionResourceRefMapper refMapper,
+      CanvasFunctionResourcePinMapper refMapper,
       ObjectProvider<StorageBlobManager> blobManagers) {
     this.resourceMapper = Objects.requireNonNull(resourceMapper, "resourceMapper");
     this.refMapper = Objects.requireNonNull(refMapper, "refMapper");
@@ -39,14 +39,14 @@ public class CanvasResourceLifecycle {
 
   /** 释放指定 Run 的全部 pin，并回收因此失去最后一个 pin 的无 owner Resource。 */
   public void releaseRunPins(UUID canvasId, UUID nodeId, UUID requestId) {
-    List<CanvasFunctionResourceRefDO> refs = refMapper.findByRun(canvasId, nodeId, requestId);
+    List<CanvasFunctionResourcePinDO> refs = refMapper.findByRun(canvasId, nodeId, requestId);
     refMapper.deleteByRun(canvasId, nodeId, requestId);
     collectUnowned(canvasId, refs);
   }
 
   /** 释放节点当前 Run 的全部 pin，并回收因此失去最后一个 pin 的无 owner Resource。 */
   public void releaseNodePins(UUID canvasId, UUID nodeId) {
-    List<CanvasFunctionResourceRefDO> refs = refMapper.findByNode(canvasId, nodeId);
+    List<CanvasFunctionResourcePinDO> refs = refMapper.findByNode(canvasId, nodeId);
     refMapper.deleteByNode(canvasId, nodeId);
     collectUnowned(canvasId, refs);
   }
@@ -115,9 +115,9 @@ public class CanvasResourceLifecycle {
     }
   }
 
-  private void collectUnowned(UUID canvasId, List<CanvasFunctionResourceRefDO> refs) {
+  private void collectUnowned(UUID canvasId, List<CanvasFunctionResourcePinDO> refs) {
     Set<UUID> resourceIds = new LinkedHashSet<>();
-    for (CanvasFunctionResourceRefDO ref : refs) {
+    for (CanvasFunctionResourcePinDO ref : refs) {
       resourceIds.add(ref.getResourceId());
     }
     for (UUID resourceId : resourceIds) {

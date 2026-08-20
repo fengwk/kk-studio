@@ -12,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import fun.fengwk.kkstudio.core.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
@@ -33,8 +32,6 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasNodeDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasResourceDO;
 import fun.fengwk.kkstudio.core.studio.resource.CanvasBlobPreviewService;
 import fun.fengwk.kkstudio.core.studio.resource.CanvasResourceLifecycle;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasConflictException;
@@ -98,8 +95,7 @@ public class DurableCanvasService implements CanvasCommandService {
   private final CanvasFunctionModelRegistry functionModelRegistry;
   private final ObjectMapper objectMapper;
   private final CanvasRealtimeService realtimeService;
-  private final ObjectProvider<HarnessStore> harnessStores;
-  private final ObjectProvider<SessionBlobRefManager> sessionBlobRefManagers;
+  private final HarnessSessionDeletionService sessionDeletionService;
 
   public DurableCanvasService(
       CanvasDocumentMapper documentMapper,
@@ -117,8 +113,7 @@ public class DurableCanvasService implements CanvasCommandService {
       CanvasFunctionModelRegistry functionModelRegistry,
       ObjectMapper objectMapper,
       CanvasRealtimeService realtimeService,
-      ObjectProvider<HarnessStore> harnessStores,
-      ObjectProvider<SessionBlobRefManager> sessionBlobRefManagers) {
+      HarnessSessionDeletionService sessionDeletionService) {
     this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
     this.groupMapper = Objects.requireNonNull(groupMapper, "groupMapper");
     this.nodeMapper = Objects.requireNonNull(nodeMapper, "nodeMapper");
@@ -135,9 +130,8 @@ public class DurableCanvasService implements CanvasCommandService {
         Objects.requireNonNull(functionModelRegistry, "functionModelRegistry");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     this.realtimeService = Objects.requireNonNull(realtimeService, "realtimeService");
-    this.harnessStores = Objects.requireNonNull(harnessStores, "harnessStores");
-    this.sessionBlobRefManagers =
-        Objects.requireNonNull(sessionBlobRefManagers, "sessionBlobRefManagers");
+    this.sessionDeletionService =
+        Objects.requireNonNull(sessionDeletionService, "sessionDeletionService");
   }
 
   @Override
@@ -209,7 +203,6 @@ public class DurableCanvasService implements CanvasCommandService {
     dedup.setCanvasId(canvasId);
     dedup.setCommandId(commandId);
     dedup.setRequestHash(requestHash);
-    dedup.setAppliedVersion(newVersion);
     try {
       commandDedupMapper.insert(dedup);
     } catch (DuplicateKeyException error) {
@@ -228,6 +221,8 @@ public class DurableCanvasService implements CanvasCommandService {
     if (document == null) {
       throw new IllegalArgumentException("Canvas not found: " + canvasId);
     }
+    // canvas_document 行锁（Owner FOR UPDATE）保护：先删 graph 内容，再经共享会话深删除移除全部归属 Session
+    // （relation 行先于 document 行删除，FK RESTRICT 顺序由应用显式驱动），最后 CAS 删除 document 行。
     resourceLifecycle.releaseCanvasPins(canvasId);
     resourceLifecycle.deleteCanvasResources(canvasId);
     runRepository.deleteByCanvasId(canvasId);
@@ -239,11 +234,9 @@ public class DurableCanvasService implements CanvasCommandService {
       groupMapper.deleteById(canvasId, group.getId());
     }
     commandDedupMapper.deleteByCanvas(canvasId);
+    sessionDeletionService.deleteSessionsByOwner(new StudioOwner(StudioOwnerType.CANVAS, canvasId));
     if (documentMapper.deleteById(canvasId) != 1) {
       throw new IllegalStateException("canvas document delete failed under row lock");
-    }
-    if (document.getThreadId() != null) {
-      deepDeleteThread(document.getThreadId());
     }
   }
 
@@ -632,36 +625,6 @@ public class DurableCanvasService implements CanvasCommandService {
     return blobManager;
   }
 
-  private void deepDeleteThread(UUID threadId) {
-    HarnessStore harnessStore = harnessStores.getIfAvailable();
-    if (harnessStore == null) {
-      throw new IllegalStateException(
-          "harness store is not available; cannot deep delete bound thread " + threadId);
-    }
-    harnessStore.transaction(
-        tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElse(null);
-          if (thread == null) {
-            throw new IllegalStateException("canvas bound thread " + threadId + " does not exist");
-          }
-          UUID sessionId = tx.loadEntryPath(thread.headEntryId()).root().sessionId();
-          tx.deleteWorkByThread(threadId);
-          tx.deleteToolInvocations(threadId);
-          tx.deleteModelInvocations(threadId);
-          tx.deleteCommands(threadId);
-          tx.deleteThread(threadId);
-          tx.deleteEntries(sessionId);
-          SessionBlobRefManager refManager = sessionBlobRefManagers.getIfAvailable();
-          if (refManager != null) {
-            for (UUID blobId : refManager.listBlobIds(sessionId)) {
-              refManager.releaseRef(sessionId, blobId);
-            }
-          }
-          tx.deleteSession(sessionId);
-          return null;
-        });
-  }
-
   private CanvasResourceNode projectNode(
       CanvasNodeDO node,
       List<CanvasResourceDO> resources,
@@ -787,7 +750,6 @@ public class DurableCanvasService implements CanvasCommandService {
         document.getId(),
         document.getTitle(),
         document.getVersion(),
-        document.getThreadId(),
         document.getCreatedAt().toInstant(),
         document.getUpdatedAt().toInstant());
   }

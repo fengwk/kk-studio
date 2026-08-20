@@ -135,7 +135,6 @@ public class PostgresqlCanvasQueryService implements CanvasQueryService {
         document.getId(),
         document.getTitle(),
         document.getVersion(),
-        document.getThreadId(),
         document.getCreatedAt().toInstant(),
         document.getUpdatedAt().toInstant());
   }

@@ -9,10 +9,10 @@ import java.util.UUID;
  * <p>Run 启动时 pin 其 manifest 与目标资源，Run 被覆盖或节点删除时按 {@code (canvasId, nodeId, requestId)}
  * 释放，不引入通用引用计数。身份为 {@code (canvasId, nodeId, requestId, role, resourceId)}，便于持久化层按 canvas 组合外键约束。
  */
-public record CanvasFunctionResourceRef(
+public record CanvasFunctionResourcePin(
     UUID canvasId, UUID nodeId, UUID requestId, UUID resourceId, Role role) {
 
-  public CanvasFunctionResourceRef {
+  public CanvasFunctionResourcePin {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
     Objects.requireNonNull(requestId, "requestId");

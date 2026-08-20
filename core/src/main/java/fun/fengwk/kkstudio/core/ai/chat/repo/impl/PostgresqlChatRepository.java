@@ -37,6 +37,11 @@ public class PostgresqlChatRepository implements ChatRepository {
   }
 
   @Override
+  public Chat lockForKeyShare(UUID id) {
+    return toModel(chatMapper.lockForKeyShare(id));
+  }
+
+  @Override
   public boolean create(Chat chat) {
     return chatMapper.insert(toDO(chat)) == 1;
   }

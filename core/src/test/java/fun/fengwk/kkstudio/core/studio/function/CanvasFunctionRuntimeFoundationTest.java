@@ -31,8 +31,8 @@ import fun.fengwk.kkstudio.core.studio.realtime.CanvasPatchStore;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourceRef;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourceRefRepository;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePin;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
@@ -97,7 +97,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresSpringTestSupport {
   @Autowired private CanvasQueryService queryService;
   @Autowired private CanvasResourceRepository resourceRepository;
   @Autowired private CanvasFunctionRunRepository runRepository;
-  @Autowired private CanvasFunctionResourceRefRepository refRepository;
+  @Autowired private CanvasFunctionResourcePinRepository refRepository;
   @Autowired private StorageBlobRepository blobRepository;
   @Autowired private CanvasFunctionRunTransactions transactions;
   @Autowired private CanvasFunctionModelRegistry registry;
@@ -123,7 +123,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresSpringTestSupport {
     assertEquals(
         1,
         refRepository.findByRun(canvas.id(), nodeId, first.requestId()).stream()
-            .filter(ref -> ref.role() == CanvasFunctionResourceRef.Role.OUTPUT)
+            .filter(ref -> ref.role() == CanvasFunctionResourcePin.Role.OUTPUT)
             .count());
 
     CanvasFunctionRun replay = transactions.start(canvas.id(), nodeId, REQUEST_1).run();
@@ -247,7 +247,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresSpringTestSupport {
     assertEquals(
         1,
         refRepository.findByRun(canvas.id(), targetNodeId, run.requestId()).stream()
-            .filter(ref -> ref.role() == CanvasFunctionResourceRef.Role.INPUT)
+            .filter(ref -> ref.role() == CanvasFunctionResourcePin.Role.INPUT)
             .count());
 
     apply(canvas, new CanvasCommand.DeleteNode(targetNodeId));

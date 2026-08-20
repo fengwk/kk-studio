@@ -14,7 +14,7 @@ import fun.fengwk.kkstudio.core.storage.persistence.postgresql.mapper.StorageBlo
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionResourceRefMapper;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionResourcePinMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasResourceMapper;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceMaterializer;
@@ -69,7 +69,7 @@ public class CanvasMediaConfiguration {
       ObjectProvider<StorageBlobManager> blobManager,
       StorageBlobMapper blobMapper,
       CanvasDocumentMapper documentMapper,
-      CanvasFunctionResourceRefMapper refMapper,
+      CanvasFunctionResourcePinMapper refMapper,
       CanvasResourceMapper resourceMapper,
       ObjectProvider<CanvasBlobPreviewService> previewService,
       TransactionTemplate transactionTemplate) {

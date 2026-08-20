@@ -4,9 +4,9 @@ import lombok.Data;
 
 import java.util.UUID;
 
-/** {@code canvas_function_resource_ref} 行映射。 */
+/** {@code canvas_function_resource_pin} 行映射。 */
 @Data
-public class CanvasFunctionResourceRefDO {
+public class CanvasFunctionResourcePinDO {
   private UUID canvasId;
   private UUID nodeId;
   private UUID requestId;

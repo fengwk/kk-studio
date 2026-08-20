@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasResourceMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasDocumentDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasNodeDO;
 import fun.fengwk.kkstudio.core.studio.resource.CanvasResourceLifecycle;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourceRefRepository;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
@@ -85,8 +85,8 @@ class CanvasFunctionRunTransactionsTest {
     linkMapper = mock(CanvasLinkMapper.class);
     documentMapper = mock(CanvasDocumentMapper.class);
     runRepository = mock(CanvasFunctionRunRepository.class);
-    CanvasFunctionResourceRefRepository refRepository =
-        mock(CanvasFunctionResourceRefRepository.class);
+    CanvasFunctionResourcePinRepository refRepository =
+        mock(CanvasFunctionResourcePinRepository.class);
     CanvasFunctionModelRegistry registry = mock(CanvasFunctionModelRegistry.class);
     when(registry.require(MODEL.key()))
         .thenReturn(

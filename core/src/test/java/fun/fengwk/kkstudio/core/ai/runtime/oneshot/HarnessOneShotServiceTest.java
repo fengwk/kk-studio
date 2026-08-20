@@ -21,10 +21,11 @@ import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.core.ai.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
-import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime.NewCommandPreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
@@ -53,11 +54,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -111,11 +113,7 @@ class HarnessOneShotServiceTest {
 
   @Test
   void submitsSystemAndStructuredUserInOneBatchWithNoTools() {
-    Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
-    ThreadState thread = new ThreadState(id(3), root.id(), false, 1L, 0L, NOW, NOW);
-    when(runtime.createThread(any(CreateThreadCommand.class)))
-        .thenReturn(new CreatedThread(new Session(id(1), NOW), root, thread));
-
+    stubAcceptAsNewSession(id(3));
     UUID threadId =
         service.submit(
             "h3-agent",
@@ -126,32 +124,25 @@ class HarnessOneShotServiceTest {
                 List.of(new TextMessageContent("user"), new TextMessageContent(" media"))));
 
     assertEquals(id(3), threadId);
-    ArgumentCaptor<CreateThreadCommand> create = ArgumentCaptor.forClass(CreateThreadCommand.class);
-    verify(runtime).createThread(create.capture());
-    assertEquals(List.of(), create.getValue().branchSettings().activeTools());
-    ArgumentCaptor<ThreadCommandBatch> batch = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime).enqueueCommands(batch.capture(), any(NewCommandPreflight.class));
-    assertEquals(2, batch.getValue().commands().size());
+    ArgumentCaptor<AcceptCommandsCommand> accept =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime).acceptCommands(accept.capture(), any(AcceptancePreflight.class));
+    AcceptCommandsCommand command = accept.getValue();
+    AcceptCommandsTarget.NewSession target = (AcceptCommandsTarget.NewSession) command.target();
+    assertEquals(List.of(), target.rootSettings().activeTools());
+    assertEquals(2, command.commands().size());
     assertEquals(
         AgentMessageRole.SYSTEM,
-        ((CustomMessageCommandPayload) batch.getValue().commands().get(0).payload())
-            .message()
-            .role());
+        ((CustomMessageCommandPayload) command.commands().get(0).payload()).message().role());
     assertEquals(
         AgentMessageRole.USER,
-        ((CustomMessageCommandPayload) batch.getValue().commands().get(1).payload())
-            .message()
-            .role());
+        ((CustomMessageCommandPayload) command.commands().get(1).payload()).message().role());
   }
 
   @Test
   void passesPreflightThroughAndKeepsClientIdsAndHashes() {
-    Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
-    ThreadState thread = new ThreadState(id(3), root.id(), false, 1L, 0L, NOW, NOW);
-    when(runtime.createThread(any(CreateThreadCommand.class)))
-        .thenReturn(new CreatedThread(new Session(id(1), NOW), root, thread));
-
-    NewCommandPreflight preflight = (tx, sessionId, commands) -> List.copyOf(commands);
+    stubAcceptAsNewSession(id(3));
+    AcceptancePreflight preflight = (tx, session, commands) -> List.copyOf(commands);
     UUID threadId =
         service.submit(
             "h3-agent",
@@ -161,10 +152,49 @@ class HarnessOneShotServiceTest {
             preflight);
 
     assertEquals(id(3), threadId);
-    ArgumentCaptor<ThreadCommandBatch> batch = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime).enqueueCommands(batch.capture(), eq(preflight));
-    List<NewThreadCommand> prepared = preflight.prepare(null, id(1), batch.getValue().commands());
-    assertEquals(batch.getValue().commands(), prepared);
+    ArgumentCaptor<AcceptCommandsCommand> accept =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime).acceptCommands(accept.capture(), eq(preflight));
+    List<NewThreadCommand> prepared =
+        preflight.prepare(null, new Session(id(1), NOW), accept.getValue().commands());
+    assertEquals(accept.getValue().commands(), prepared);
+  }
+
+  /** 模拟一次成功的全新接受：以固定 threadId 返回 AcceptedCommands，acceptedCommands 从请求的命令派生。 */
+  private void stubAcceptAsNewSession(UUID threadId) {
+    Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
+    when(runtime.acceptCommands(any(AcceptCommandsCommand.class), any(AcceptancePreflight.class)))
+        .thenAnswer(
+            inv -> {
+              AcceptCommandsCommand command = inv.getArgument(0);
+              List<ThreadCommand> accepted = new ArrayList<>();
+              long sequence = 1L;
+              for (NewThreadCommand request : command.commands()) {
+                accepted.add(
+                    new ThreadCommand(
+                        threadId,
+                        sequence++,
+                        request.payload(),
+                        request.clientCommandId(),
+                        request.requestHash(),
+                        null,
+                        null,
+                        null,
+                        NOW));
+              }
+              ThreadState thread =
+                  new ThreadState(
+                      threadId,
+                      id(1),
+                      root.id(),
+                      "0".repeat(64),
+                      false,
+                      accepted.size() + 1L,
+                      0L,
+                      NOW,
+                      NOW);
+              return new AcceptedCommands(new Session(id(1), NOW), root, thread, accepted, false);
+            });
   }
 
   @Test
@@ -365,12 +395,19 @@ class HarnessOneShotServiceTest {
   private static ThreadSnapshot idle() {
     Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
     return new ThreadSnapshot(
-        new ThreadState(id(3), root.id(), false, 1L, 0L, NOW, NOW),
+        thread(id(3), id(1), root.id(), 1L, 0L),
         new EntryPath(List.of(root)),
         List.of(),
         null,
         List.of(),
         List.of());
+  }
+
+  /** 构造与 Session id(1)、materializationHash 为 64 个 0 的合法持久化 Thread 状态。 */
+  private static ThreadState thread(
+      UUID threadId, UUID sessionId, UUID head, long nextCommandSequence, long revision) {
+    return new ThreadState(
+        threadId, sessionId, head, "0".repeat(64), false, nextCommandSequence, revision, NOW, NOW);
   }
 
   private static ThreadSnapshot completed(String text) {
@@ -412,7 +449,7 @@ class HarnessOneShotServiceTest {
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, false, null, null),
             NOW);
     return new ThreadSnapshot(
-        new ThreadState(id(3), end.id(), false, 2L, 2L, NOW, NOW),
+        thread(id(3), id(1), end.id(), 2L, 2L),
         new EntryPath(List.of(root, turn, user, assistant, end)),
         List.of(),
         null,
@@ -455,7 +492,7 @@ class HarnessOneShotServiceTest {
                 outcome == TurnEndOutcome.STOPPED ? id(3) : null),
             NOW);
     return new ThreadSnapshot(
-        new ThreadState(id(3), end.id(), false, 2L, 2L, NOW, NOW),
+        thread(id(3), id(1), end.id(), 2L, 2L),
         new EntryPath(List.of(root, turn, user, failureEntry, end)),
         List.of(),
         null,
