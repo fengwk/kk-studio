@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   AgentSelectionPanel,
   SelectionPanel,
-  ThreadSelectionPanel,
 } from '@/features/ai/chat/SelectionPanel'
 
 describe('SelectionPanel', () => {
@@ -112,29 +111,6 @@ describe('SelectionPanel', () => {
     expect(screen.getByText('空列表')).toBeInTheDocument()
     await user.type(screen.getByRole('searchbox'), 'missing')
     expect(screen.getByText('没有匹配“missing”的选项')).toBeInTheDocument()
-  })
-
-  it('supports Thread sort buttons and the keyboard Tab cycle', async () => {
-    const user = userEvent.setup()
-    const onSortChange = vi.fn()
-    render(
-      <ThreadSelectionPanel
-        items={[
-          { id: 't1', title: 'Thread 1' },
-          { id: 't2', title: 'Thread 2' },
-        ]}
-        sort="recent"
-        onSortChange={onSortChange}
-        onSelect={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    )
-    await user.click(screen.getByRole('button', { name: '创建时间' }))
-    expect(onSortChange).toHaveBeenCalledWith('created')
-    onSortChange.mockClear()
-    await user.click(screen.getByRole('searchbox'))
-    await user.keyboard('{Tab}')
-    expect(onSortChange).toHaveBeenCalledWith('created')
   })
 
   it('lists agents', async () => {

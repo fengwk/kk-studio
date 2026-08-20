@@ -7,7 +7,6 @@ import {
 } from 'react'
 import { Search } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/ai/runtime/thread-panel/ThreadInteractionPanel'
-import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { useI18n } from '@/shared/i18n'
 
 export interface SelectionPanelItem {
@@ -242,40 +241,6 @@ export function SelectionPanel({
   )
 }
 
-export function SelectionPanelToggleGroup({
-  label,
-  value,
-  options,
-  disabled = false,
-  onChange,
-}: {
-  label: string
-  value: string
-  options: Array<{ value: string; label: string }>
-  disabled?: boolean
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="thread-selection-toggle" role="group" aria-label={label}>
-      <span>{label}</span>
-      <div>
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={option.value === value}
-            disabled={disabled}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 export function AgentSelectionPanel({
   agents,
   selectedAgentName,
@@ -306,51 +271,6 @@ export function AgentSelectionPanel({
       emptyText={t('ai.chat.noAgents')}
       onSelect={onSelect}
       onClose={onClose}
-    />
-  )
-}
-
-export function ThreadSelectionPanel({
-  items,
-  selectedThreadId,
-  sort,
-  loading = false,
-  onSortChange,
-  onSelect,
-  onClose,
-}: {
-  items: SelectionPanelItem[]
-  selectedThreadId?: string | null
-  sort: PaneSortPreference
-  loading?: boolean
-  onSortChange: (sort: PaneSortPreference) => void
-  onSelect: (threadId: string) => void | Promise<void>
-  onClose: () => void
-}) {
-  const { t } = useI18n()
-  const cycleSort = () => onSortChange(sort === 'recent' ? 'created' : 'recent')
-  return (
-    <SelectionPanel
-      title={t('ai.chat.selectThread')}
-      items={items}
-      selectedId={selectedThreadId}
-      loading={loading}
-      emptyText={t('ai.chat.noThreads')}
-      onCycleControl={cycleSort}
-      cycleControlHint={t('ai.chat.selection.tabSort')}
-      onSelect={onSelect}
-      onClose={onClose}
-      controls={(
-        <SelectionPanelToggleGroup
-          label={t('ai.chat.sort')}
-          value={sort}
-          options={[
-            { value: 'recent', label: t('ai.chat.recentlyUpdated') },
-            { value: 'created', label: t('ai.chat.createdAt') },
-          ]}
-          onChange={(value) => onSortChange(value as PaneSortPreference)}
-        />
-      )}
     />
   )
 }

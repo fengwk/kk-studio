@@ -10,7 +10,6 @@ import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn
 import type { ThreadCommand } from '@/features/ai/runtime'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
-import { useThreadCommandBatchMutation } from '@/features/ai/runtime/useThreadCommandBatchMutation'
 import {
   createDecisionId,
   createStopRequestId,
@@ -36,9 +35,14 @@ import {
 } from '@/features/ai/composer/composer-draft'
 import { isConflictError, isConflictReason } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
+import { agentPaneService } from '@/shared/api/agent-pane-service'
 import type { HarnessThreadSnapshotDTO } from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
+import {
+  presentConflict,
+  type ConflictPresentation,
+} from '@/features/ai/runtime/conflict-presenter'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -84,15 +88,17 @@ export function canRetryStaleMessageBatch(
   plan: CommandBatchPlan,
   snapshot: HarnessThreadSnapshotDTO,
 ): boolean {
+  const target = plan.request.target
   if (
-    plan.batch.commands.length === 0
-    || plan.batch.commands.some((command) => command.type !== 'USER_MESSAGE')
+    target.type !== 'THREAD'
+    || plan.request.commands.length === 0
+    || plan.request.commands.some((command) => command.type !== 'USER_MESSAGE')
   ) {
     return false
   }
   if (
-    snapshot.thread.headEntryId === plan.batch.expectedHeadEntryId
-    && snapshot.thread.nextCommandSequence === plan.batch.expectedNextCommandSequence
+    snapshot.thread.headEntryId === target.expectedHeadEntryId
+    && snapshot.thread.nextCommandSequence === target.expectedNextCommandSequence
   ) {
     return false
   }
@@ -103,8 +109,8 @@ export function canRetryStaleMessageBatch(
   if (!branchDraftsEqual(latestTarget, plan.targetDraft)) {
     return false
   }
-  return snapshot.thread.headEntryId === plan.batch.expectedHeadEntryId
-    || snapshot.entries.some((entry) => entry.entryId === plan.batch.expectedHeadEntryId)
+  return snapshot.thread.headEntryId === target.expectedHeadEntryId
+    || snapshot.entries.some((entry) => entry.entryId === target.expectedHeadEntryId)
 }
 
 /**
@@ -143,6 +149,7 @@ export function useAgentThreadController(
   )
   const draftRef = useRef<ComposerPart[]>(draft)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   // 维护局部的 in-flight 计数，保证重叠 mutateAsync 调用下 pending 状态依旧准确。
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
   // 未决的精确 batch（处于 in-flight 或在不确定的网络错误后被保留）会阻塞面板
@@ -168,10 +175,10 @@ export function useAgentThreadController(
     modelInvocation,
     toolInvocations,
     modelAttemptFailures,
+    manualCompaction,
     snapshotQuery,
   } = useAgentThreadQueries(threadId)
   const bound = Boolean(thread)
-  const batchMutation = useThreadCommandBatchMutation(threadId)
   const realtime = useHarnessThreadRealtime(
     threadId,
     Boolean(threadId) && snapshotQuery.isSuccess,
@@ -241,6 +248,7 @@ export function useAgentThreadController(
         reason: null,
       }),
     onSuccess: async (_result, variables) => {
+      setConflict(null)
       decisionIdByInvocation.current.delete(
         `${variables.targetThreadId}:${variables.invocationId}:${variables.decision}`,
       )
@@ -268,6 +276,8 @@ export function useAgentThreadController(
     decision: 'ALLOW' | 'DENY',
     targetThreadId: string = threadId,
   ): Promise<void> {
+    setActionError(null)
+    setConflict(null)
     // 回放键必须包含 targetThreadId：不同子 Thread 可能复用相同的 invocationId，
     // 绝不能把 A 子 Thread 的幂等键复用给 B 子 Thread。
     const key = `${targetThreadId}:${invocationId}:${decision}`
@@ -286,23 +296,40 @@ export function useAgentThreadController(
       harnessService.stopThread(threadId, body),
   })
 
+  const compactMutation = useMutation({
+    mutationFn: (expectedRevision: string) =>
+      agentPaneService.compactThread(threadId, { expectedRevision }),
+    onSuccess: async () => {
+      setConflict(null)
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.threads.snapshot(threadId),
+      })
+    },
+  })
+
   /**
    * 409 意味着本地 revision 已过期或 Thread 未处于静默状态。给出明确提示并重新拉取
    * 目标 Thread，使下一次尝试携带当前的 revision。
    */
   function reportMutationError(error: unknown, fallbackKey: string, targetThreadId = threadId) {
     if (isConflictError(error)) {
-      setActionError(
-        t('ai.runtime.action.threadStateChanged', {
-          action: t(fallbackKey),
-          error: errorMessage(error),
-        }),
-      )
+      const presented = presentConflict(error)
+      if (presented != null) {
+        setConflict(presented)
+      } else {
+        setActionError(
+          t('ai.runtime.action.threadStateChanged', {
+            action: t(fallbackKey),
+            error: errorMessage(error),
+          }),
+        )
+      }
       void queryClient.invalidateQueries({
         queryKey: queryKeys.threads.snapshot(targetThreadId),
       })
       return
     }
+    setConflict(null)
     setActionError(errorMessage(error))
   }
 
@@ -345,6 +372,7 @@ export function useAgentThreadController(
       return Promise.resolve()
     }
     setActionError(null)
+    setConflict(null)
     const plan = buildBatch(trimmed)
     if (plan == null) {
       return Promise.resolve()
@@ -363,7 +391,7 @@ export function useAgentThreadController(
     draftRef.current = []
     setDraftState([])
     setInFlightSubmissions((count) => count + 1)
-    return enqueueMessagePlanWithCursorRecovery(submittedPlan)
+    return acceptMessagePlanWithCursorRecovery(submittedPlan)
       .then(() => {
         // 仅当身份仍属于这个正在完成的请求时才清除它。
         if (replayRef.current?.plan === submittedPlan) {
@@ -396,13 +424,14 @@ export function useAgentThreadController(
         setInFlightSubmissions((count) => Math.max(0, count - 1))
       })
 
-    async function enqueueMessagePlanWithCursorRecovery(
+    async function acceptMessagePlanWithCursorRecovery(
       initialPlan: CommandBatchPlan,
     ): Promise<void> {
       submittedPlan = initialPlan
       for (let retryCount = 0; ; retryCount += 1) {
         try {
-          await batchMutation.mutateAsync(submittedPlan.batch)
+          await agentPaneService.acceptCommandBatch(submittedPlan.request)
+          setConflict(null)
           return
         } catch (error) {
           if (
@@ -414,7 +443,7 @@ export function useAgentThreadController(
           let latest: HarnessThreadSnapshotDTO
           try {
             // 直接读取权威 snapshot，不能复用可能早于失败请求启动的 query refetch。
-            latest = await harnessService.getThreadSnapshot(threadId)
+            latest = await agentPaneService.getThreadSnapshot(threadId)
           } catch {
             throw error
           }
@@ -427,10 +456,14 @@ export function useAgentThreadController(
           queryClient.setQueryData(queryKeys.threads.snapshot(threadId), latest)
           submittedPlan = {
             ...submittedPlan,
-            batch: {
-              ...submittedPlan.batch,
-              expectedHeadEntryId: latest.thread.headEntryId,
-              expectedNextCommandSequence: latest.thread.nextCommandSequence,
+            request: {
+              ...submittedPlan.request,
+              target: {
+                type: 'THREAD',
+                threadId,
+                expectedHeadEntryId: latest.thread.headEntryId,
+                expectedNextCommandSequence: latest.thread.nextCommandSequence,
+              },
             },
           }
           // stale batch 明确未被接受：保留 command IDs/payload，只替换权威 cursor。
@@ -445,6 +478,9 @@ export function useAgentThreadController(
     switch (command.id) {
       case 'stop':
         void stopThread()
+        return
+      case 'compact':
+        void compactThread()
         return
       default:
         setActionError(t('ai.runtime.action.unknownCommand', { command: command.id }))
@@ -465,6 +501,7 @@ export function useAgentThreadController(
       return Promise.resolve()
     }
     setActionError(null)
+    setConflict(null)
     // 同步 basis 栅栏：绝不复用 basis 已不再匹配「当前」渲染 snapshot 的待决操作
     //（head/revision 已移动 => 旧 Turn 已结束或 Thread 已前进）。在这里——而不仅仅在
     // 被动清理 effect 中——退役，可以关闭「snapshot 已前进但 effect 尚未 flush」时
@@ -517,6 +554,27 @@ export function useAgentThreadController(
       })
   }
 
+  function compactThread(): Promise<void> {
+    if (!thread || !requireBoundThread('ai.runtime.action.compactFailed')) {
+      return Promise.resolve()
+    }
+    if (!manualCompaction.available) {
+      setActionError(
+        manualCompaction.disabledReason
+        || t('ai.runtime.action.compactUnavailable'),
+      )
+      return Promise.resolve()
+    }
+    setActionError(null)
+    setConflict(null)
+    return compactMutation
+      .mutateAsync(thread.revision)
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        reportMutationError(error, 'ai.runtime.action.compactFailed')
+      })
+  }
+
   // 权威 snapshot 的 basis 协调：当存在含混的 Stop 操作时，一旦 snapshot 证明其 basis
   // 已变化（head 或 revision 已移动 => 旧 Turn 已结束或 Thread 已前进），就退役该操作，
   // 使在新 Turn 上发起的 Stop 始终使用全新 id。该 effect 只在确有操作待决时起作用——
@@ -555,9 +613,14 @@ export function useAgentThreadController(
     disabled: !bound,
     actionError,
     dismissActionError: () => setActionError(null),
+    conflict,
+    dismissConflict: () => setConflict(null),
     setDraft,
     submitMessage,
     stopThread,
+    compactThread,
+    compactPending: compactMutation.isPending,
+    manualCompaction,
     runCommand,
     decideApproval,
     approvalPending: approvalMutation.isPending,

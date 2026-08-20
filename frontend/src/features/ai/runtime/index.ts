@@ -1,4 +1,5 @@
 export {
+  ThreadPanel,
   ThreadComposer,
   ThreadStatusFooter,
   ThreadEventView,
@@ -13,7 +14,8 @@ export {
   type ThreadComposerSettingsInput,
 } from '@/features/ai/runtime/thread-panel'
 export {
-  threadCommandsForScene,
+  threadCommandsForTarget,
+  THREAD_COMMANDS,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
 export {
   ChatPanel,
@@ -34,3 +36,8 @@ export {
   useBoundThreadPanelLabels,
   buildBoundThreadTranscript,
 } from '@/features/ai/runtime/useBoundThreadPanelViews'
+export {
+  useAgentPaneController,
+  type AgentPaneDefaults,
+  type PaneInteraction,
+} from '@/features/ai/runtime/useAgentPaneController'

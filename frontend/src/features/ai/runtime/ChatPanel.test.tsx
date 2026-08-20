@@ -280,7 +280,7 @@ describe('ChatPanel', () => {
     expect(screen.queryByText('资源不可用')).not.toBeInTheDocument()
   })
 
-  it('renders the events main view exclusively: transcript is unmounted, composer/queue stay', () => {
+  it('renders the debug main view exclusively: transcript is unmounted, composer/queue stay', () => {
     const { container } = render(
       <ChatPanel
         labels={{}}
@@ -302,7 +302,7 @@ describe('ChatPanel', () => {
           error: null,
         }}
         mainView={{
-          events: (
+          debug: (
             <div role="listbox" aria-label="事件">
               <div role="option">entry event</div>
             </div>

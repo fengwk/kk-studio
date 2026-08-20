@@ -1,6 +1,4 @@
 import type { CanvasVersion } from '@/shared/api/contracts/base'
-import type { HarnessUserMessageContentDTO } from '@/shared/api/contracts/ai-runtime'
-import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 
 /**
  * Canonical UUID ids cross the HTTP boundary as lowercase dashed strings.
@@ -17,15 +15,13 @@ export type CanvasFunctionRunStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANC
  * Canvas 聚合的持久化头。version 是单调递增的 graph 版本，也是
  * command expected 游标与 patch base/version 的公共坐标系；wire 上是
  * canonical 非负十进制字符串（Java long，数据库仍为 bigint），
- * 客户端绝不转换为 JS number；
- * threadId 绑定本画布的 Harness Thread（harness 迁移后同样使用 canonical UUID），
- * null 表示尚未创建（走 blank 首次发送流程）。
+ * 客户端绝不转换为 JS number。Agent Session/Thread 是独立的 owner 事实，
+ * 不属于 Canvas graph document。
  */
 export interface CanvasDocumentDTO {
   id: UUIDString
   title: string
   version: CanvasVersion
-  threadId: UUIDString | null
   createdAt: string
   updatedAt: string
 }
@@ -310,38 +306,3 @@ export type CanvasCommandDTO =
       groupId: UUIDString
       title: string
     }
-
-/**
- * Canvas Thread 的 branch settings 快照。与 harness runtime 的
- * HarnessBranchSettingsDTO 同构，后端 slice 负责映射；model 选择
- * 是冻结的 provider/model/variant 三元组。
- */
-export interface CanvasThreadBranchSettingsDTO {
-  environment: EnvironmentBindingDTO | null
-  agentName: string
-  model: {
-    providerName: string
-    modelName: string
-    variant: string
-  }
-  activeTools: string[]
-}
-
-/**
- * Canvas 空 Thread 的原子首次发送（POST /canvases/{id}/thread/messages）：
- * 创建绑定到本画布的 Thread 并一次性发送有序 USER_MESSAGE contents。
- * commandId 是幂等键：同一请求重复提交返回同一 Thread 与 document。
- * 本请求是 canvas-scoped 的（画布 id 在 URL 中），不携带任何隐式画布上下文。
- */
-export interface CanvasThreadFirstSendRequestDTO {
-  commandId: UUIDString
-  branchSettings: CanvasThreadBranchSettingsDTO
-  yoloEnabled: boolean
-  contents: HarnessUserMessageContentDTO[]
-}
-
-/** 首次发送响应：绑定后的 Thread id 与携带 threadId 的最新 document。 */
-export interface CanvasThreadFirstSendResponseDTO {
-  threadId: UUIDString
-  document: CanvasDocumentDTO
-}

@@ -41,7 +41,6 @@ function snapshot(version: number | string): CanvasSnapshotDTO {
       id: CANVAS_ID,
       title: 'Board',
       version: String(version),
-      threadId: null,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
@@ -69,7 +68,6 @@ describe('Canvas entity patch reducer', () => {
 
     expect(next).not.toBeNull()
     expect(next?.document.version).toBe('4')
-    expect(next?.document.threadId).toBeNull()
     expect(next?.nodes.map((node) => node.id).sort()).toEqual([NODE_A, NODE_B])
     expect(next?.nodes.find((node) => node.id === NODE_A)?.name).toBe('renamed')
     expect(next?.groups).toEqual([])

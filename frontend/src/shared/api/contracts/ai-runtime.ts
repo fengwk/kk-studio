@@ -104,7 +104,7 @@ export interface HarnessThreadCommandDTO {
  * 类型化的 Thread mailbox command 请求。
  *
  * USER_MESSAGE 只接受一个非空、有序的 contents 列表（TEXT/ATTACHMENT），不提供
- * 任何文本 shorthand。CUSTOM_MESSAGE 携带 content 与大写 role（SYSTEM/USER）。
+ * 任何文本 shorthand。持久 Entry/投影仍可包含 CUSTOM_MESSAGE，但它不是创建命令。
  * clientCommandId 是稳定的幂等键。
  */
 export type HarnessUserMessageContentDTO =
@@ -121,33 +121,12 @@ type HarnessUserMessageCommandDTO = {
   contents: [HarnessUserMessageContentDTO, ...HarnessUserMessageContentDTO[]]
 }
 
-export type HarnessThreadCommandCreateDTO =
+export type HarnessCommandCreateDTO =
   | HarnessUserMessageCommandDTO
-  | { type: 'CUSTOM_MESSAGE'; clientCommandId: string; content: string; role: 'SYSTEM' | 'USER' }
   | { type: 'SET_AGENT'; clientCommandId: string; agentName: string }
   | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
   | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
   | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environment: EnvironmentBindingDTO | null }
-
-/** 原子化的 Thread mailbox 入队请求；期望游标来自最新的 thread DTO。 */
-export interface HarnessThreadCommandBatchDTO {
-  expectedHeadEntryId: string
-  expectedNextCommandSequence: string
-  commands: HarnessThreadCommandCreateDTO[]
-}
-
-/** 以完整的 branch settings 快照原子化创建 Thread；title 可为 null。 */
-export interface HarnessThreadCreateDTO {
-  title: string | null
-  branchSettings: HarnessBranchSettingsDTO
-  yoloEnabled: boolean
-}
-
-/** Thread head 重定位请求；expectedRevision 是精确的 revision CAS 游标。 */
-export interface HarnessThreadHeadUpdateDTO {
-  targetEntryId: string
-  expectedRevision: string
-}
 
 /**
  * Thread YOLO policy 直接更新请求；expectedRevision 是精确的 revision CAS 游标
@@ -248,10 +227,12 @@ export interface ModelAttemptFailureDTO {
 }
 
 /**
- * 一致的 Thread 快照投影；所有字段都来自同一个数据库快照。
+ * 一致的 Thread 快照投影；durable 字段都来自同一个数据库快照。
  * modelInvocation 是当前 Turn 的活动 model invocation（无则为 null）；
  * toolInvocations 是它的 tool 兄弟调用；modelAttemptFailures 只包含当前 Model context
  * 尚未物化的失败 attempt。
+ * manualCompaction 是 advisory sidecar：它只表示当前快照时刻的手动压缩可用性，
+ * 不是 durable Thread 状态，提交 compact 时仍必须以最新 revision 重新校验。
  */
 export interface HarnessThreadSnapshotDTO {
   revision: string
@@ -261,4 +242,87 @@ export interface HarnessThreadSnapshotDTO {
   modelInvocation: ModelInvocationDTO | null
   toolInvocations: ToolInvocationDTO[]
   modelAttemptFailures: ModelAttemptFailureDTO[]
+  manualCompaction: ManualCompactionDTO
+}
+
+export interface ManualCompactionDTO {
+  available: boolean
+  disabledReason: string | null
+}
+
+export interface AgentRuntimeOwnerDTO {
+  type: 'CHAT' | 'CANVAS'
+  id: string
+}
+
+export interface NewSessionCommandTargetDTO {
+  type: 'NEW_SESSION'
+  sessionId: string
+  threadId: string
+  rootSettings: HarnessBranchSettingsDTO
+  yoloEnabled: boolean
+}
+
+export interface EntryCommandTargetDTO {
+  type: 'ENTRY'
+  sessionId: string
+  startEntryId: string
+  threadId: string
+  yoloEnabled: boolean
+}
+
+export interface ThreadCommandTargetDTO {
+  type: 'THREAD'
+  threadId: string
+  expectedHeadEntryId: string
+  expectedNextCommandSequence: string
+}
+
+export type AgentCommandTargetDTO =
+  | NewSessionCommandTargetDTO
+  | EntryCommandTargetDTO
+  | ThreadCommandTargetDTO
+
+export interface AgentCommandBatchRequestDTO {
+  owner: AgentRuntimeOwnerDTO
+  target: AgentCommandTargetDTO
+  commands: HarnessCommandCreateDTO[]
+}
+
+export interface RuntimeSessionSummaryDTO {
+  sessionId: string
+  createdAt: BackendDateTime
+  lastActivityAt: BackendDateTime
+  firstMessagePreview: string
+  threadCount: number
+}
+
+export interface RuntimeThreadSummaryDTO {
+  threadId: string
+  createdAt: BackendDateTime
+  updatedAt: BackendDateTime
+  status: string
+  model: HarnessModelSelectionDTO
+  headMessagePreview: string | null
+}
+
+export interface AgentCommandBatchResponseDTO {
+  session: {
+    sessionId: string
+    createdAt: BackendDateTime
+  }
+  rootEntry: HarnessSessionEntryDTO
+  thread: HarnessThreadDTO
+  acceptedCommands: HarnessThreadCommandDTO[]
+  replayed: boolean
+}
+
+export interface ManualCompactionRequestDTO {
+  expectedRevision: string
+}
+
+export interface ManualCompactionResponseDTO {
+  thread: HarnessThreadDTO
+  turnStartEntryId: string
+  modelInvocationId: string | null
 }

@@ -9,19 +9,16 @@ function source(relativePath: string) {
 describe('Thread snapshot architecture', () => {
   it('keeps current Thread state snapshot-only and loads the full Entry Tree on demand', () => {
     const queries = source('features/ai/runtime/useAgentThreadQueries.ts')
-    const boundPane = source('features/ai/chat/chat-workspace-pane/BoundThreadPane.tsx')
-    const service = source('shared/api/harness-service.ts')
+    const paneController = source('features/ai/runtime/useAgentPaneController.ts')
+    const service = source('shared/api/agent-pane-service.ts')
     const keys = source('shared/lib/query-keys.ts')
 
     expect(queries).toContain('queryKeys.threads.snapshot(threadId)')
     expect(queries).not.toContain('refetchInterval')
-    expect(service).not.toMatch(
-      /getThread:|listThreadInputs:|listThreadToolInvocations:|getThreadUsage:/,
-    )
-    expect(service).toContain('listThreadEntries:')
-    expect(queries).not.toContain('queryKeys.threads.entries(threadId)')
-    expect(boundPane).toContain('queryKeys.threads.entries(threadId)')
-    expect(boundPane).toContain("enabled: interaction === 'history'")
+    expect(service).toContain('listSessionEntries:')
+    expect(paneController).toContain("interaction === 'tree' || isEntryTarget(target)")
+    expect(paneController).toContain("['agent-pane', 'entries'")
+    expect(paneController).toContain('treeEntriesQuery.data')
     const threadKeys = keys.slice(keys.indexOf('threads:'), keys.indexOf('comfyui:'))
     expect(threadKeys).toContain('entries:')
     expect(threadKeys).not.toMatch(/detail:|inputs:|events:|toolInvocations:/)

@@ -11,7 +11,7 @@ import {
 } from '@/features/ai/composer/composer-parts'
 import {
   filterThreadCommands,
-  threadCommandsForScene,
+  threadCommandsForTarget,
   THREAD_COMMANDS,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
 import { firstEnabledCommandIndex } from '@/features/ai/runtime/thread-panel/thread-command-navigation'
@@ -42,14 +42,15 @@ describe('ThreadComposer and commands', () => {
       'stop',
       'new',
       'upload',
-      'events',
+      'debug',
       'shortcuts',
+      'compact',
     ])
     // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
     expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
-    const blank = threadCommandsForScene('chat-blank')
+    const blank = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/events`
+    // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/debug`/`/compact`
     // 不可用，而 `/thread`（仅切换面板）与 `/shortcuts` 保持可用。
     expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
       'thread',
@@ -62,45 +63,27 @@ describe('ThreadComposer and commands', () => {
     ])
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'tree')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'events')?.disabled).toBe(true)
-    expect(threadCommandsForScene('chat-bound').every((c) => !c.disabled)).toBe(true)
+    expect(blank.find((c) => c.id === 'debug')?.disabled).toBe(true)
+    expect(blank.find((c) => c.id === 'compact')?.disabled).toBe(true)
+    expect(threadCommandsForTarget({ kind: 'BOUND_THREAD' }).every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
     expect(filterThreadCommands('tree')[0]?.id).toBe('tree')
-    expect(filterThreadCommands('events')[0]?.id).toBe('events')
+    expect(filterThreadCommands('debug')[0]?.id).toBe('debug')
     expect(filterThreadCommands('shortcuts')[0]?.id).toBe('shortcuts')
-    expect(['history', 'branch', 'rebind', 'head'].every((keyword) => filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
+    expect(['history', 'branch'].every((keyword) =>
+      filterThreadCommands(keyword).some((command) => command.id === 'tree'))).toBe(true)
     expect(filterThreadCommands('', blank).map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     expect(firstEnabledCommandIndex(blank)).toBe(0)
     expect(filterThreadCommands('missing')).toEqual([])
   })
 
-  it('projects canvas-bound branch settings while keeping Chat-only navigation disabled', () => {
-    // Canvas Bound 与 Chat Bound 共享 pane-local branch settings；tree/new/thread 仍是 Chat 专属。
-    const canvasBound = threadCommandsForScene('canvas-bound')
-    expect(canvasBound.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
-      'agent',
-      'environment',
-      'yolo',
-      'models',
-      'stop',
-      'upload',
-      'events',
-      'shortcuts',
-    ])
-    for (const id of ['thread', 'tree', 'new']) {
-      expect(canvasBound.find((c) => c.id === id)?.disabled).toBe(true)
-    }
-    // canvas-blank 仍支持 agent/environment/yolo/models/upload/shortcuts，但没有 /thread。
-    const canvasBlank = threadCommandsForScene('canvas-blank')
-    expect(canvasBlank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
-      'agent',
-      'environment',
-      'yolo',
-      'models',
-      'upload',
-      'shortcuts',
-    ])
+  it('projects the same command matrix for Chat and Canvas bound targets', () => {
+    const chatBound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' })
+    const canvasBound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' })
+    expect(canvasBound.map((command) => command.id)).toEqual(chatBound.map((command) => command.id))
+    expect(canvasBound.filter((command) => !command.disabled).map((command) => command.id))
+      .toEqual(THREAD_COMMANDS.map((command) => command.id))
   })
 
   it('uses slash as a text-only shortcut without consuming attachments', () => {

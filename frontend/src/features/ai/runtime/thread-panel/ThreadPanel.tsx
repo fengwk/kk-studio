@@ -35,11 +35,11 @@ export interface ThreadPanelTranscriptInput {
 }
 
 /**
- * 主视图槽位：Conversation 与 Event 互斥，只渲染一个主滚动区（不并排、无 tabs）。
- * 传入 events 时替换 transcript 滚动区；Composer/queue/working 保持挂载，切换不丢状态。
+ * 主视图槽位：Conversation 与 Debug 互斥，只渲染一个主滚动区（不并排、无 tabs）。
+ * 传入 debug 时替换 transcript 滚动区；Composer/queue/working 保持挂载，切换不丢状态。
  */
 export interface ThreadPanelMainView {
-  events?: ReactNode
+  debug?: ReactNode
 }
 
 /**
@@ -86,7 +86,7 @@ interface ThreadPanelSlots {
 
 interface ThreadPanelProps {
   transcript: ThreadPanelTranscriptInput
-  /** 互斥主视图：传入 events 时替换 transcript（Event view）。 */
+  /** 互斥主视图：传入 debug 时替换 transcript（Debug view）。 */
   mainView?: ThreadPanelMainView
   composer: ThreadPanelComposerInput
   activity: ThreadPanelActivityInput
@@ -95,7 +95,7 @@ interface ThreadPanelProps {
 
 /**
  * 全宽 thread 面板：
- * Conversation/Event 互斥主滚动区 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
+ * Conversation/Debug 互斥主滚动区 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
  */
 export function ThreadPanel({ transcript, mainView, composer, activity, slots }: ThreadPanelProps) {
   const interactionOpen = composer.interactionPanel != null
@@ -115,7 +115,7 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots }:
     <section className="chat-shell thread-panel">
       {slots?.sidebar}
       <main className="chat-main thread-panel-main">
-        {mainView?.events ?? (
+        {mainView?.debug ?? (
           <ThreadConversationView
             messages={transcript.messages}
             loading={transcript.loading}
