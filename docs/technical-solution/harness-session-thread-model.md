@@ -593,28 +593,42 @@ owned closed normal Turn
 
 #### 6.1.1 触发
 
-部署配置：
+部署配置只有两个字段（来自 `SystemSettings.AiRuntime`，经 `HarnessCompactionConfiguration` 装配）：
 
 ```text
-enabled = true
-reserveTokens = 16384
-maxRecentTokens = 20000
-effectiveKeepRecentTokens =
-  min(floor(contextWindow * 0.5), maxRecentTokens)
+keepRecentTokens = 20000   // compactionKeepRecentTokens 默认值
+fallbackModel    = null    // compactionFallbackModel 默认值；仅 OVERFLOW fallback 使用
 ```
 
-只保留自动触发：
+派生预算（每次 planning 瞬时重算）：
+
+```text
+effectiveKeepRecentTokens = min(keepRecentTokens, floor(contextWindow / 2))
+effectiveReserve          = min(16384, maxOutputTokens)
+softThreshold             = max(effectiveKeepRecentTokens, contextWindow - effectiveReserve)
+manualMinimum             = min(keepRecentTokens * 2, floor(contextWindow / 2))
+outputBudget              = min(maxOutput, floor(0.8 * effectiveReserve), removedPrefixEstimate)
+```
+
+Trigger 固定为三态：
 
 ```text
 THRESHOLD
   current Thread 最近一次 owned successful Model usage
-  > contextWindow - reserveTokens
+  > softThreshold
 
 OVERFLOW
   current Thread 最新 owned Turn 以 OVERFLOW 失败
   -> compact
   -> immediate CONTINUATION
   -> 最多一次
+
+MANUAL
+  用户在 Bound Thread 发起 /compact
+  -> availability 门控（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT /
+     MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT）
+  -> expectedRevision CAS 提交 MANUAL plan
+  -> 与自动触发共用 MODEL Work、一次 fallback 与 crash recovery
 ```
 
 执行优先级：
@@ -681,14 +695,10 @@ summaryText =
 最终 `CompactionPayload`：
 
 ```text
-phase
-trigger
 summaryText
-cutEntryId
-turnPrefixStartEntryId?
 ```
 
-`tokensBefore` 不参与触发、切分、Provider Context、恢复或产品展示，最终模型删除该字段；threshold 继续使用 owned normal Turn 的权威 Provider usage，cut planning 所需估算在规划时瞬时重算。
+`phase`、`trigger`、`executionModel`、`cutEntryId`、`turnPrefixStartEntryId`、`historyCompactionEntryId` 全部冻结在对应 `TURN_START` 的 `CompactionStart` 中，不重复写入 payload；`tokensBefore`、`firstKeptEntryId`、`complete` 字段在最终模型中删除。Threshold 继续使用 owned normal Turn 的权威 Provider usage，cut planning 所需估算在规划时瞬时重算。
 
 #### 6.1.3 请求与 Provider Context
 
@@ -806,7 +816,7 @@ kk-studio 与可运行 Pi 实现保持算法对齐：
 | Stop | AbortController | Thread-scoped durable Stop + late-result fence |
 | 输入并发 | 普通 prompt 在 compaction 中被拒绝；部分队列等待 | Command 可 durable 排队，Compaction 消费零 Command |
 | usage ownership | 当前 active branch 的最近 assistant usage | 只借用当前 Thread owned usage，shared history 有 barrier |
-| manual | `/compact [instructions]` | 无 manual Compaction 控制面 |
+| manual | `/compact [instructions]` | `/compact` 手动压缩：availability 门控 + expectedRevision CAS，固定 deterministic prompt，不支持 per-Agent instructions |
 | hook | extension 可取消或替换 summary | 固定 deterministic prompt，无 summary hook |
 | `/tree` | 可把离开分支摘要注入目标分支 | 选择 EntryDraft/Thread，不隐式合并 sibling 分支 |
 | recent budget | 直接使用 `keepRecentTokens` | 额外限制为 context window 的一半 |
@@ -880,12 +890,12 @@ otherwise
 - 最小 `cutEntryId / turnPrefixStartEntryId` anchor；
 - fixed prompts、file sections、one-shot cache policy；
 - threshold/overflow 自动触发；
+- MANUAL 手动压缩（`/compact` 命令 + `POST /{threadId}/compact`，availability 门控 + expectedRevision CAS）；
 - current Thread ownership barrier；
 - complete summary 的 Session Entry 共享。
 
 不增加：
 
-- `/compact` 命令或 manual HTTP API；
 - per-Agent/custom compaction instructions；
 - extension summary replacement hook；
 - Pi branch summary；
@@ -907,7 +917,7 @@ StopResult {
   thread
   stoppedTurnEndEntryId?
   cancelledCommandCount
-  cancelledUserMessages[]
+  cancelledUserMessages[]   // 领域内部：仅用于 Composer 恢复，HTTP DTO 不上 wire
 }
 ```
 
@@ -1131,7 +1141,7 @@ threadCount
 派生规则：
 
 - `lastActivityAt` 取 Session、Entry、Thread 活动时间最大值；
-- 用户消息按 `createdAt, id` 确定性排序；标题顺序为首条用户文本、首个附件文件名、`Session {shortId}`；
+- 用户消息按 `createdAt, id` 确定性排序；标题顺序为首条用户文本、首个附件文件名、`Session {shortId}`（shortId = session UUID 前 8 位）；
 - 不增加 Session title 列。
 
 ### 9.3 Thread summary 与 Tree
@@ -1234,6 +1244,7 @@ SessionTreePanel
 | `/models` | 修改本地 BranchDraft；随下一条输入提交 `SET_MODEL` |
 | `/tree` | 选择当前 Session 的 Entry，并切换到 `ENTRY_DRAFT` |
 | `/stop` | 停止当前 Thread 并恢复被取消的用户消息 |
+| `/compact` | 在 Bound Thread 发起手动压缩：先经 availability 门控（THREAD_BUSY / OWNERSHIP_BARRIER / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT 等），再以 expectedRevision CAS 提交 MANUAL Compaction Turn |
 | `/new` | 切换到 `NEW_SESSION_DRAFT` |
 | `/upload` | 插入 ordered upload part |
 | `/debug` | Conversation 与当前 Thread Debug View 间切换 |
@@ -1247,7 +1258,7 @@ SessionTreePanel
 | --- | --- |
 | `NEW_SESSION_DRAFT` | `thread`、`agent`、`environment`、`yolo`、`models`、`upload`、`shortcuts` |
 | `ENTRY_DRAFT` | `thread`、`agent`、`environment`、`yolo`、`models`、`tree`、`new`、`upload`、`shortcuts` |
-| `BOUND_THREAD` | 全部 |
+| `BOUND_THREAD` | 全部（`/compact` 以 snapshot `manualCompaction.available` 为前置门控） |
 
 Chat 和 Canvas 对同一个 PaneTarget 使用同一矩阵。
 
@@ -1305,8 +1316,7 @@ getThreadSnapshot
 stop
 decideToolApproval
 setThreadYolo
-deleteThread
-deleteSession
+findThreadCommand
 ```
 
 不提供：
@@ -1320,6 +1330,8 @@ putHead
 ```
 
 Session/Thread 只允许在第一批 Command 被接受时创建。
+
+手动压缩与 system-prompt 预览不在 `HarnessRuntime` facade：`compactThread` / `manualCompactionAvailability` 由 `ThreadProcessor` 提供，`getSystemPromptPreview` 由 Core 的 `SystemPromptPreviewService` 提供；Thread 删除走 `HarnessStore.Transaction`（由 Core `HarnessSessionDeletionService` 编排），Runtime facade 不暴露 delete。
 
 ### 11.3 用户写 API
 
@@ -1379,10 +1391,14 @@ replayed
 
 ```text
 GET  /api/ai/runtime/threads/{threadId}/snapshot
+GET  /api/ai/runtime/threads/{threadId}/system-prompt
+POST /api/ai/runtime/threads/{threadId}/compact
 PUT  /api/ai/runtime/threads/{threadId}/yolo
 POST /api/ai/runtime/threads/{threadId}/stop
 POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval
 ```
+
+`system-prompt` 返回按当前 root-to-head branch 最新 Agent / Environment / skills / subagents 现算的只读预览（不冻结 ModelInvocation、不校验 Tool catalog）；`compact` 请求体携带 `expectedRevision`（exact 十进制 revision cursor），提交成功后返回权威 Thread 投影、`turnStartEntryId` 与可选 `modelInvocationId`。snapshot 同时携带 `manualCompaction.available / disabledReason` 瞬时 availability sidecar；提交仍以 expectedRevision CAS 守护。
 
 ## 12. 持久化模型
 
@@ -1539,8 +1555,8 @@ create table chat_session (
     foreign key (session_id) references harness_session(id) on delete restrict
 );
 
-create index idx_chat_session_created
-    on chat_session(chat_id, created_at desc, session_id);
+create index idx_chat_session_chat
+    on chat_session(chat_id, session_id);
 
 create table canvas_session (
     session_id uuid primary key,
@@ -1550,8 +1566,8 @@ create table canvas_session (
     foreign key (session_id) references harness_session(id) on delete restrict
 );
 
-create index idx_canvas_session_created
-    on canvas_session(canvas_id, created_at desc, session_id);
+create index idx_canvas_session_canvas
+    on canvas_session(canvas_id, session_id);
 ```
 
 删除 `chat_thread` 和 `canvas_document.thread_id`。
@@ -1650,8 +1666,9 @@ HarnessStore / PostgreSQL mapper
 HarnessRuntime
   -> 删除 createSession/createThread/createThreadAtEntry/moveHead
   -> 统一为 acceptCommands(target, acceptancePreflight)
-  -> deleteThread 只删除 Thread-scoped facts
-  -> deleteSession 深删除整个 Session
+  -> facade 不暴露 deleteThread/deleteSession；深删除由 Core HarnessSessionDeletionService
+     经 HarnessStore.Transaction（deleteWorkByThread/deleteToolInvocations/deleteModelInvocations/
+     deleteCommands/deleteThread/deleteEntries/deleteSession）编排
 
 ThreadProcessor.compactionPreparation
   -> complete Compaction checkpoint 可沿 EntryPath 共享
@@ -1668,6 +1685,10 @@ CompactionPreparation / CompactionRequest / CompactionPayload / codecs
   -> 删除 firstKeptEntryId、tokensBefore 和 persisted complete
   -> complete 由 phase != HISTORY 派生
   -> repeated compaction boundary 直接使用 latest complete cutEntryId
+  -> CompactionRequest 只保留 summaryText；phase/trigger/executionModel/cutEntryId/
+     turnPrefixStartEntryId/historyCompactionEntryId 冻结在 TURN_START.CompactionStart
+  -> ThreadProcessor.compactThread(CompactThreadCommand{threadId, expectedRevision})
+     以 expectedRevision + source head + queued 快照三重 CAS 提交 MANUAL plan
 ```
 
 Chat ownership：
@@ -1732,7 +1753,7 @@ HarnessThreadDTO.sessionId 必填
 删除 CanvasDocumentDTO.threadId
 新增 SessionSummaryDTO / ThreadSummaryDTO
 Command acceptance DTO 使用 NEW_SESSION / ENTRY / THREAD target
-Stop DTO 返回 cancelledUserMessages 与 replayed
+Stop DTO 返回 cancelledCommandCount 与 replayed；cancelledUserMessages 是领域内部语义，不上 wire
 ```
 
 Canvas 辅助 Repository：
@@ -1949,8 +1970,8 @@ sentinel UUID / 空串代替 NULL
 - [ ] HISTORY → TURN_PREFIX 复用冻结 cut/prefix anchors，不重新选 cut。
 - [ ] TURN_PREFIX 最终 summary 自包含紧邻匹配 HISTORY + prefix，绝不合并 stale partial。
 - [ ] ToolResult 永不成为 cut point。
-- [ ] `effectiveKeepRecentTokens = min(contextWindow / 2, maxRecentTokens)`。
-- [ ] Compaction payload/request 不含 firstKeptEntryId 或 tokensBefore。
+- [ ] `effectiveKeepRecentTokens = min(keepRecentTokens, floor(contextWindow / 2))`；`effectiveReserve = min(16384, maxOutputTokens)`。
+- [ ] Compaction payload/request 不含 firstKeptEntryId 或 tokensBefore；payload 只含 summaryText，anchor 与 trigger 冻结在 TURN_START.CompactionStart。
 - [ ] repeated compaction 从 latest complete cutEntryId 开始。
 - [ ] latest complete summary + cut 后 suffix 是唯一 Provider Context 投影。
 - [ ] internal Compaction Turn、失败 attempt/error 不进入 transcript 或 Provider Context。
@@ -1960,7 +1981,8 @@ sentinel UUID / 空串代替 NULL
 - [ ] Stop Compaction 后迟到 Model 结果不能 append。
 - [ ] file sections 由 Runtime 重算，malformed reserved tags fail closed。
 - [ ] complete file sections 每次从 ROOT 到 cut 累计重算。
-- [ ] 不存在 manual `/compact`、summary replacement hook、branch summary 或 copied retainedTail。
+- [ ] MANUAL `/compact`：availability 门控与 expectedRevision CAS 缺一不可，THREAD_BUSY / OWNERSHIP_BARRIER / BELOW_MINIMUM / NOTHING_TO_COMPACT 等 disabledReason 确定性返回。
+- [ ] 不存在 summary replacement hook、branch summary 或 copied retainedTail。
 
 ### 18.5 Stop
 

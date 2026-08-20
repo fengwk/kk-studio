@@ -140,10 +140,12 @@ YOLO 是 Thread 级控制流策略：
 ```java
 public record ThreadState(
     UUID id,
+    UUID sessionId,        // 创建后不可变；head 必须属于该 Session
     UUID headEntryId,
     boolean yoloEnabled,
     long nextCommandSequence,
     long revision,
+    String materializationHash, // 创建请求 canonical SHA-256，仅用于首次 materialization replay
     Instant createdAt,
     Instant updatedAt) {}
 ```
@@ -286,18 +288,18 @@ Provider tool definitions每次由 bindings 派生，不保存第二份。
 
 #### compaction
 
-普通请求为 null。Compaction 请求冻结：
+普通请求为 null。Compaction 请求冻结（`CompactionStart`，存于 TURN_START）：
 
 ```text
 phase
 trigger
-tokensBefore
-firstKeptEntryId
+executionModel
 cutEntryId
 turnPrefixStartEntryId
+historyCompactionEntryId
 ```
 
-不保存 `messagesToSummarize`、`previousSummary` 或最终大字符串 prompt。
+`CompactionRequest` 只携带 `summaryText`（最终 payload 唯一字段）；不保存 `messagesToSummarize`、`previousSummary` 或最终大字符串 prompt。`tokensBefore` / `firstKeptEntryId` / `complete` 在最终模型中删除（complete 由 phase != HISTORY 派生）。
 
 ## 7. ModelRequestMaterializer
 
@@ -786,18 +788,9 @@ Approval decisionId replay 与 ALLOW/DENY 语义保持不变。
 
 YOLO 不重写已创建的 WAITING_APPROVAL；审批事实只能由 approval API 决定。
 
-### 16.3 MOVE_HEAD
+### 16.3 Head relocation 不存在
 
-MOVE_HEAD 继续要求：
-
-- revision CAS
-- 同 Session
-- 无 queued command
-- quiescent
-- 无 terminal apply pending
-- target 无 continuation obligation
-
-Active Invocation 不允许 relocation。
+**不存在 MOVE_HEAD / PUT head / standalone Thread create**：`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）；第一次 durable batch 以 ENTRY target 提交时原子 materialize 新 Thread（`headEntryId = startEntryId`，不复制 Entry、不修改任何已有 Thread），旧 Thread 永不 relocation。现有 Thread 的 head 只能由 Runtime 在 turn/compaction/stop 执行中推进到当前 head 的新 descendant；Active Invocation 不允许任何形式的 head 变更。
 
 ## 17. Command 与长程输入
 
@@ -834,7 +827,7 @@ Closed-turn compaction 不得读取历史 Invocation。
 - complete CompactionPayload 是 freshness barrier。
 - 只使用 `ownerThreadId == currentThreadId` 且 `contextWindow != null` 的成功 Assistant usage。
 - 遇到 `ownerThreadId != currentThreadId` 的 shared turn 时停止向前借用 usage（Entry-only 事实，不查询其它 Thread 的 Invocation 行）。
-- threshold 为 `max(0, contextWindow - reserveTokens)`。
+- threshold 为 `softThreshold = max(effectiveKeepRecentTokens, contextWindow - effectiveReserve)`，其中 `effectiveKeepRecentTokens = min(keepRecentTokens, floor(contextWindow / 2))`、`effectiveReserve = min(16384, maxOutputTokens)`（配置只有 `keepRecentTokens` 默认 20000 与可空 `fallbackModel`）。
 
 ### 18.2 Overflow
 
@@ -842,9 +835,13 @@ Closed-turn compaction 不得读取历史 Invocation。
 
 ### 18.3 Split turn
 
-HISTORY/TURN_PREFIX 继续使用 CompactionRequest 冻结的 Entry IDs。HISTORY 成功后下一阶段由显式 THREAD self-wake 驱动。
+HISTORY/TURN_PREFIX 继续使用 CompactionStart 冻结的 Entry IDs（`cutEntryId` / `turnPrefixStartEntryId` / `historyCompactionEntryId`）。HISTORY 成功后下一阶段由显式 THREAD self-wake 驱动。
 
-### 18.4 Context projection
+### 18.4 Manual compaction
+
+`compactThread(CompactThreadCommand{threadId, expectedRevision})`：锁 Thread 校验 expectedRevision → `manualDecision` 计算 availability（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT）→ 以 `CompactionTrigger.MANUAL` 构建 plan → 事务外 Resolver → 第二事务提交 COMPACTION Turn + MODEL Work（commitManual 再次校验 revision + source head + queued 快照，消费零 Command）。与自动触发共用 MODEL Work、一次 fallback 与 crash recovery。snapshot 的 `manualCompaction` availability 是瞬时 advisory sidecar，提交成功以 expectedRevision CAS 守护。
+
+### 18.5 Context projection
 
 下一次正常 ModelRequestMaterializer：
 
@@ -884,6 +881,7 @@ Provider fatal error / retry exhausted
 
 ### harness_thread
 
+- 含 `session_id`、`materialization_hash char(64)` 与 `head_entry_id`（同 Session FK `(session_id, head_entry_id)`）。
 - 保留 `yolo_enabled`。
 - 直接控制 API 更新。
 
@@ -948,7 +946,7 @@ attempt state
 - credential/base URL/timeout 更新在下一 attempt 生效。
 - Tool catalog 更新不改变 frozen ToolBinding。
 - Resource URL 每 attempt 刷新，但 durable Resource block 不变。
-- CompactionRequest 可从 Entry IDs 重建相同 summary input。
+- CompactionStart 冻结的 Entry IDs（cut/prefix/history anchor）可从 TURN_START 重建相同 summary input；`CompactionPayload` 只含 `summaryText`。
 
 ### 23.2 Provider / Planner
 
@@ -984,7 +982,7 @@ attempt state
 - 最后一轮没有下一 TurnStart 仍完成清理。
 - Stop 与 terminal callback 并发。
 - approval replay。
-- moveHead 拒绝 active/pending。
+- ENTRY target materialization 从 startEntry 创建新 Thread，不复制 Entry、不修改 sibling；不存在 head relocation（moveHead 无此能力）。
 - lease expired MODEL/TOOL certainty 语义。
 
 ### 23.5 YOLO
