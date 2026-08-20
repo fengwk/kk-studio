@@ -36,13 +36,13 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
 
     SystemSettingsUpdateDTO update = updateFrom(current, "0");
     update.getTool().setDefaultYolo(true);
-    update.getAiRuntime().setCompactionEnabled(false);
+    update.getAiRuntime().setCompactionKeepRecentTokens(8_192);
     update.getStorageMedia().setUploadExpiresSeconds(7200L);
 
     SystemSettingsDTO updated = systemSettingsService.update(update);
     assertEquals("1", updated.getVersion());
     assertEquals(true, updated.getTool().getDefaultYolo());
-    assertEquals(false, updated.getAiRuntime().getCompactionEnabled());
+    assertEquals(8_192, updated.getAiRuntime().getCompactionKeepRecentTokens());
     assertEquals(7200L, updated.getStorageMedia().getUploadExpiresSeconds());
     // 未修改的 section 保持完整。
     assertEquals(

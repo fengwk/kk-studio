@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.share.systemsettings;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+
 /**
  * aiRuntime section：共享调用重试、自动压缩与 subagent 预算。
  *
@@ -20,11 +22,9 @@ public class SystemSettingsAiRuntimeDTO {
 
   private Long retryMaxDelayMillis;
 
-  private Boolean compactionEnabled;
+  private Integer compactionKeepRecentTokens;
 
-  private Integer compactionReserveTokens;
-
-  private Integer compactionMaxRecentTokens;
+  private HarnessModelSelectionDTO compactionFallbackModel;
 
   private Integer subagentMaxDepth;
 

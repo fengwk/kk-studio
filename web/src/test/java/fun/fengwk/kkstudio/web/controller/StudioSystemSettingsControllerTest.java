@@ -55,6 +55,52 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
   }
 
   @Test
+  public void schemaReturnsOrderedSectionsGroupsAndFields() throws Exception {
+    mockMvc
+        .perform(get("/api/settings/schema"))
+        .andExpect(status().isOk())
+        // section 顺序沿用原 tabs/cards：tool -> aiRuntime -> environment -> integrations
+        // -> storageMedia -> advanced。
+        .andExpect(jsonPath("$.data.sections[0].key").value("tool"))
+        .andExpect(jsonPath("$.data.sections[1].key").value("aiRuntime"))
+        .andExpect(jsonPath("$.data.sections[2].key").value("environment"))
+        .andExpect(jsonPath("$.data.sections[3].key").value("integrations"))
+        .andExpect(jsonPath("$.data.sections[4].key").value("storageMedia"))
+        .andExpect(jsonPath("$.data.sections[5].key").value("advanced"))
+        // 两个 custom atomic leaf 各为单个 field。
+        .andExpect(jsonPath("$.data.sections[0].groups[0].fields[0].path").value("tool.permission"))
+        .andExpect(
+            jsonPath("$.data.sections[1].groups[1].fields[1].path")
+                .value("aiRuntime.compactionFallbackModel"))
+        // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
+        .andExpect(jsonPath("$.data.sections[1].groups[1].fields[0].type").value("INTEGER"))
+        .andExpect(jsonPath("$.data.sections[1].groups[1].fields[0].min").value(1))
+        .andExpect(jsonPath("$.data.sections[3].groups[1].fields[3].max").value(1800000))
+        // ENUM options 由 server 表达。
+        .andExpect(jsonPath("$.data.sections[1].groups[0].fields[1].type").value("ENUM"))
+        .andExpect(
+            jsonPath("$.data.sections[1].groups[0].fields[1].options[0].value").value("FIXED"))
+        .andExpect(
+            jsonPath("$.data.sections[1].groups[0].fields[1].options[1].value")
+                .value("EXPONENTIAL"))
+        // PERMISSION options 由 server 表达。
+        .andExpect(
+            jsonPath("$.data.sections[0].groups[0].fields[0].options[0].value").value("allow"))
+        .andExpect(jsonPath("$.data.sections[0].groups[0].fields[0].options[1].value").value("ask"))
+        .andExpect(
+            jsonPath("$.data.sections[0].groups[0].fields[0].options[2].value").value("deny"))
+        // nullable fallback model 输出为 true。
+        .andExpect(jsonPath("$.data.sections[1].groups[1].fields[1].nullable").value(true))
+        // group 最小结构：key/labelKey/restartRequired。
+        .andExpect(jsonPath("$.data.sections[0].groups[0].key").value("tool.permission"))
+        .andExpect(jsonPath("$.data.sections[0].groups[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[1].groups[1].restartRequired").value(true))
+        // restartRequired section 标记。
+        .andExpect(jsonPath("$.data.sections[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[1].restartRequired").value(true));
+  }
+
+  @Test
   public void putReplacesTheCompleteAggregateWithCas() throws Exception {
     String first =
         bodyFromGet(

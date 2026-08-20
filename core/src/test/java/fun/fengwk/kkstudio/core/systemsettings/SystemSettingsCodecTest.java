@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
@@ -59,6 +60,47 @@ class SystemSettingsCodecTest {
     assertTrue(!canonical.contains("subagentMaxTotalConcurrency"), canonical);
     assertTrue(!canonical.contains("workspaceId"), canonical);
     assertTrue(!canonical.contains("comfyui\":{\"baseUrl"), canonical);
+    // null compactionFallbackModel 也在 canonical JSON 中省略。
+    assertTrue(!canonical.contains("compactionFallbackModel"), canonical);
+  }
+
+  @Test
+  void compactionFallbackModelRoundTripsThroughCanonicalJsonAndDto() {
+    SystemSettings settings =
+        new SystemSettings(
+            SystemSettings.DEFAULT.tool(),
+            new SystemSettings.AiRuntime(
+                SystemSettings.AiRuntime.DEFAULT.retryMaxRetries(),
+                SystemSettings.AiRuntime.DEFAULT.retryBackoffStrategy(),
+                SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
+                SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
+                SystemSettings.AiRuntime.DEFAULT.compactionKeepRecentTokens(),
+                new ModelSelection("openai", "gpt-4o", "default"),
+                SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
+                SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
+                SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
+                SystemSettings.AiRuntime.DEFAULT.subagentIdleTimeoutMillis(),
+                SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns()),
+            SystemSettings.DEFAULT.environment(),
+            SystemSettings.DEFAULT.integrations(),
+            SystemSettings.DEFAULT.storageMedia(),
+            SystemSettings.DEFAULT.advanced());
+
+    // canonical JSON 往返保留 fallback。
+    SystemSettings decoded = codec.decode(codec.encode(settings));
+    assertEquals(settings, decoded);
+
+    // DTO 双向映射保留 fallback（share 层 HarnessModelSelectionDTO）。
+    SystemSettingsSectionsDTO dto = codec.toSections(settings);
+    assertEquals("openai", dto.getAiRuntime().getCompactionFallbackModel().getProviderName());
+    assertEquals("gpt-4o", dto.getAiRuntime().getCompactionFallbackModel().getModelName());
+    assertEquals("default", dto.getAiRuntime().getCompactionFallbackModel().getVariant());
+    assertEquals(settings, codec.fromDto(dto));
+
+    // null fallback 在 canonical JSON 中省略；DTO 方向为 null。
+    SystemSettingsSectionsDTO nullDto = codec.toSections(SystemSettings.DEFAULT);
+    assertEquals(null, nullDto.getAiRuntime().getCompactionFallbackModel());
+    assertEquals(null, codec.fromDto(nullDto).aiRuntime().compactionFallbackModel());
   }
 
   @Test
@@ -130,8 +172,8 @@ class SystemSettingsCodecTest {
     String canonical = codec.encode(SystemSettings.DEFAULT);
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode(withoutAiRuntimeField(canonical, "compactionEnabled")),
-        "missing compactionEnabled");
+        () -> codec.decode(withoutAiRuntimeField(canonical, "compactionKeepRecentTokens")),
+        "missing compactionKeepRecentTokens");
     assertThrows(
         IllegalStateException.class,
         () -> codec.decode(withoutAiRuntimeField(canonical, "retryMaxRetries")),
@@ -144,8 +186,10 @@ class SystemSettingsCodecTest {
     String canonical = codec.encode(SystemSettings.DEFAULT);
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode(withAiRuntimeField(canonical, "compactionEnabled", mapper.nullNode())),
-        "null compactionEnabled");
+        () ->
+            codec.decode(
+                withAiRuntimeField(canonical, "compactionKeepRecentTokens", mapper.nullNode())),
+        "null compactionKeepRecentTokens");
     assertThrows(
         IllegalStateException.class,
         () -> codec.decode(withAiRuntimeField(canonical, "retryMaxRetries", mapper.nullNode())),
@@ -160,22 +204,19 @@ class SystemSettingsCodecTest {
         IllegalStateException.class,
         () ->
             codec.decode(
-                withAiRuntimeField(
-                    canonical, "compactionEnabled", mapper.getNodeFactory().textNode("true"))),
+                withToolField(canonical, "defaultYolo", mapper.getNodeFactory().textNode("true"))),
         "string boolean");
     assertThrows(
         IllegalStateException.class,
         () ->
             codec.decode(
-                withAiRuntimeField(
-                    canonical, "compactionEnabled", mapper.getNodeFactory().numberNode(1))),
+                withToolField(canonical, "defaultYolo", mapper.getNodeFactory().numberNode(1))),
         "integer boolean");
     assertThrows(
         IllegalStateException.class,
         () ->
             codec.decode(
-                withAiRuntimeField(
-                    canonical, "compactionEnabled", mapper.getNodeFactory().numberNode(1.5))),
+                withToolField(canonical, "defaultYolo", mapper.getNodeFactory().numberNode(1.5))),
         "float boolean");
   }
 
@@ -319,6 +360,12 @@ class SystemSettingsCodecTest {
       throws Exception {
     ObjectNode root = (ObjectNode) mapper.readTree(canonical);
     ((ObjectNode) root.get("aiRuntime")).set(field, value);
+    return mapper.writeValueAsString(root);
+  }
+
+  private String withToolField(String canonical, String field, JsonNode value) throws Exception {
+    ObjectNode root = (ObjectNode) mapper.readTree(canonical);
+    ((ObjectNode) root.get("tool")).set(field, value);
     return mapper.writeValueAsString(root);
   }
 }

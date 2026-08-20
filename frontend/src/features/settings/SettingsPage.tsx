@@ -1,38 +1,21 @@
-import { useState, type KeyboardEvent } from 'react'
-import { useI18n } from '@/shared/i18n'
+import { useMemo, useState, type KeyboardEvent } from 'react'
 import { SettingsToolbar } from '@/features/settings/SettingsToolbar'
-import {
-  SETTINGS_TABS,
-  type SettingsTabId,
-} from '@/features/settings/settings-tabs'
 import { GeneralTab } from '@/features/settings/tabs/GeneralTab'
-import { AiRuntimeTab } from '@/features/settings/tabs/AiRuntimeTab'
-import { ToolsPermissionsTab } from '@/features/settings/tabs/ToolsPermissionsTab'
-import { EnvironmentTab } from '@/features/settings/tabs/EnvironmentTab'
-import { IntegrationsTab } from '@/features/settings/tabs/IntegrationsTab'
-import { StorageMediaTab } from '@/features/settings/tabs/StorageMediaTab'
-import { AdvancedTab } from '@/features/settings/tabs/AdvancedTab'
+import {
+  GENERAL_SETTINGS_TAB,
+  type SettingsTabMeta,
+} from '@/features/settings/settings-tabs'
+import { SystemSettingsSchemaRenderer } from '@/features/settings/SystemSettingsSchemaRenderer'
 import {
   useSystemSettingsEditor,
   type SystemSettingsEditor,
 } from '@/features/settings/useSystemSettingsEditor'
-import type { SystemSettingsSectionsDraft } from '@/features/settings/system-settings-draft'
-import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
-
-type ServerSectionKey = keyof SystemSettingsSectionsDraft
-
-const SERVER_SECTION_BY_TAB: Partial<Record<SettingsTabId, ServerSectionKey>> = {
-  'ai-runtime': 'aiRuntime',
-  'tools-permissions': 'tool',
-  environment: 'environment',
-  integrations: 'integrations',
-  'storage-media': 'storageMedia',
-  advanced: 'advanced',
-}
+import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
+import { useI18n } from '@/shared/i18n'
 
 /**
- * 全局设置页：General 本地偏好 + 六个 server settings tab。
- * server tab 共享同一个权威聚合 draft（加载/保存一体），每个 section 独立组件编辑。
+ * 全局设置页：General 保留本地偏好；所有 server tabs、section/group 顺序和字段控件来自
+ * GET /api/settings/schema。
  */
 export function SettingsPage({
   reloadPage = reloadCurrentPage,
@@ -40,30 +23,44 @@ export function SettingsPage({
   reloadPage?: () => void
 } = {}) {
   const { t } = useI18n()
-  const [activeTab, setActiveTab] = useState<SettingsTabId>('general')
   const editor = useSystemSettingsEditor()
+  const serverTabs = useMemo<SettingsTabMeta[]>(
+    () =>
+      (editor.schema?.sections ?? []).map((section) => ({
+        id: section.key,
+        labelKey: section.labelKey,
+      })),
+    [editor.schema],
+  )
+  const tabs = useMemo(() => [GENERAL_SETTINGS_TAB, ...serverTabs], [serverTabs])
+  const [activeTab, setActiveTab] = useState(GENERAL_SETTINGS_TAB.id)
+  const effectiveActiveTab = tabs.some((tab) => tab.id === activeTab)
+    ? activeTab
+    : GENERAL_SETTINGS_TAB.id
 
-  // Tab 键盘导航：ArrowLeft/Right 相邻、Home 首个、End 末个；移动方向键时焦点跟随新选中项（roving tabindex：
-  // 选中项 tabIndex=0，其余为 -1，进入 tablist 时把焦点放到选中项）。
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    const currentIndex = SETTINGS_TABS.findIndex((tab) => tab.id === activeTab)
+    const currentIndex = tabs.findIndex((tab) => tab.id === effectiveActiveTab)
     let nextIndex: number | null = null
     if (event.key === 'ArrowRight') {
-      nextIndex = (currentIndex + 1) % SETTINGS_TABS.length
+      nextIndex = (currentIndex + 1) % tabs.length
     } else if (event.key === 'ArrowLeft') {
-      nextIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
     } else if (event.key === 'Home') {
       nextIndex = 0
     } else if (event.key === 'End') {
-      nextIndex = SETTINGS_TABS.length - 1
+      nextIndex = tabs.length - 1
     }
     if (nextIndex !== null) {
       event.preventDefault()
-      const nextTab = SETTINGS_TABS[nextIndex]!
+      const nextTab = tabs[nextIndex]!
       setActiveTab(nextTab.id)
       document.getElementById(`settings-tab-${nextTab.id}`)?.focus()
     }
   }
+
+  const activeSection = editor.schema?.sections.find(
+    (section) => section.key === effectiveActiveTab,
+  )
 
   return (
     <section className="screen active">
@@ -71,8 +68,8 @@ export function SettingsPage({
         <h1 className="settings-title">{t('settings.title')}</h1>
 
         <div className="settings-tabs" role="tablist" aria-label={t('settings.tabs.ariaLabel')}>
-          {SETTINGS_TABS.map((tab) => {
-            const selected = activeTab === tab.id
+          {tabs.map((tab) => {
+            const selected = effectiveActiveTab === tab.id
             return (
               <button
                 key={tab.id}
@@ -92,35 +89,29 @@ export function SettingsPage({
           })}
         </div>
 
+        {editor.schemaError && effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
+          <SchemaError error={editor.schemaError} onRetry={editor.retryLoad} />
+        ) : null}
+
         <div
-          id={`settings-tabpanel-${activeTab}`}
+          id={`settings-tabpanel-${effectiveActiveTab}`}
           role="tabpanel"
-          aria-labelledby={`settings-tab-${activeTab}`}
+          aria-labelledby={`settings-tab-${effectiveActiveTab}`}
         >
-          {activeTab === 'general' ? (
+          {effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
             <GeneralTab />
           ) : (
             <ServerTabPane
               editor={editor}
-              sectionKey={SERVER_SECTION_BY_TAB[activeTab] ?? 'tool'}
+              section={activeSection}
             />
           )}
         </div>
       </div>
-      <ConfirmActionModal
-        modal={
-          editor.staleConflict
-            ? {
-                title: t('settings.conflict.title'),
-                description: t('settings.conflict.description'),
-                confirmLabel: t('settings.conflict.reload'),
-                icon: 'refresh',
-                onConfirm: reloadPage,
-              }
-            : null
-        }
-        pending={false}
-        onClose={editor.dismissStaleConflict}
+      <ConflictPresenter
+        conflict={editor.conflict}
+        onRefresh={reloadPage}
+        onClose={editor.dismissConflict}
       />
     </section>
   )
@@ -130,13 +121,12 @@ function reloadCurrentPage() {
   window.location.reload()
 }
 
-/** server tab 的展示层：loading / 初始加载错误 / 工具条 + 对应 section 编辑器。 */
 function ServerTabPane({
   editor,
-  sectionKey,
+  section,
 }: {
   editor: SystemSettingsEditor
-  sectionKey: ServerSectionKey
+  section: NonNullable<SystemSettingsEditor['schema']>['sections'][number] | undefined
 }) {
   const { t } = useI18n()
 
@@ -148,16 +138,12 @@ function ServerTabPane({
     )
   }
   if (editor.loadError) {
-    return (
-      <div className="state-block" role="alert">
-        <p>{editor.loadError}</p>
-        <button type="button" className="settings-button" onClick={editor.retryLoad}>
-          {t('settings.retry')}
-        </button>
-      </div>
-    )
+    return <SchemaError error={editor.loadError} onRetry={editor.retryLoad} />
   }
-  if (!editor.draft) {
+  if (editor.schemaError) {
+    return <SchemaError error={editor.schemaError} onRetry={editor.retryLoad} />
+  }
+  if (!editor.draft || section == null) {
     return (
       <div className="state-block" role="status">
         {t('settings.loading')}
@@ -168,69 +154,23 @@ function ServerTabPane({
   return (
     <>
       <SettingsToolbar editor={editor} />
-      <ServerSectionTab
-        sectionKey={sectionKey}
+      <SystemSettingsSchemaRenderer
+        schema={{ sections: [section] }}
         draft={editor.draft}
-        onChange={editor.updateSection}
+        onChange={editor.updateDraft}
       />
     </>
   )
 }
 
-function ServerSectionTab({
-  sectionKey,
-  draft,
-  onChange,
-}: {
-  sectionKey: ServerSectionKey
-  draft: SystemSettingsSectionsDraft
-  onChange: <K extends keyof SystemSettingsSectionsDraft>(
-    key: K,
-    value: SystemSettingsSectionsDraft[K],
-  ) => void
-}) {
-  switch (sectionKey) {
-    case 'tool':
-      return (
-        <ToolsPermissionsTab
-          value={draft.tool}
-          onChange={(next) => onChange('tool', next)}
-        />
-      )
-    case 'aiRuntime':
-      return (
-        <AiRuntimeTab
-          value={draft.aiRuntime}
-          onChange={(next) => onChange('aiRuntime', next)}
-        />
-      )
-    case 'environment':
-      return (
-        <EnvironmentTab
-          value={draft.environment}
-          onChange={(next) => onChange('environment', next)}
-        />
-      )
-    case 'integrations':
-      return (
-        <IntegrationsTab
-          value={draft.integrations}
-          onChange={(next) => onChange('integrations', next)}
-        />
-      )
-    case 'storageMedia':
-      return (
-        <StorageMediaTab
-          value={draft.storageMedia}
-          onChange={(next) => onChange('storageMedia', next)}
-        />
-      )
-    case 'advanced':
-      return (
-        <AdvancedTab
-          value={draft.advanced}
-          onChange={(next) => onChange('advanced', next)}
-        />
-      )
-  }
+function SchemaError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const { t } = useI18n()
+  return (
+    <div className="state-block" role="alert">
+      <p>{error}</p>
+      <button type="button" className="settings-button" onClick={onRetry}>
+        {t('settings.retry')}
+      </button>
+    </div>
+  )
 }

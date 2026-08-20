@@ -17,9 +17,11 @@ import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO;
@@ -222,9 +224,8 @@ public class SystemSettingsCodec {
         strategy,
         requiredMillis(dto.getRetryBaseDelayMillis(), "aiRuntime.retryBaseDelayMillis"),
         requiredMillis(dto.getRetryMaxDelayMillis(), "aiRuntime.retryMaxDelayMillis"),
-        requiredBoolean(dto.getCompactionEnabled(), "aiRuntime.compactionEnabled"),
-        requiredInt(dto.getCompactionReserveTokens(), "aiRuntime.compactionReserveTokens"),
-        requiredInt(dto.getCompactionMaxRecentTokens(), "aiRuntime.compactionMaxRecentTokens"),
+        requiredInt(dto.getCompactionKeepRecentTokens(), "aiRuntime.compactionKeepRecentTokens"),
+        toModelSelection(dto.getCompactionFallbackModel()),
         requiredInt(dto.getSubagentMaxDepth(), "aiRuntime.subagentMaxDepth"),
         requiredInt(dto.getSubagentMaxConcurrency(), "aiRuntime.subagentMaxConcurrency"),
         dto.getSubagentMaxTotalConcurrency(),
@@ -475,9 +476,8 @@ public class SystemSettingsCodec {
     dto.setRetryBackoffStrategy(aiRuntime.retryBackoffStrategy().name());
     dto.setRetryBaseDelayMillis(aiRuntime.retryBaseDelayMillis());
     dto.setRetryMaxDelayMillis(aiRuntime.retryMaxDelayMillis());
-    dto.setCompactionEnabled(aiRuntime.compactionEnabled());
-    dto.setCompactionReserveTokens(aiRuntime.compactionReserveTokens());
-    dto.setCompactionMaxRecentTokens(aiRuntime.compactionMaxRecentTokens());
+    dto.setCompactionKeepRecentTokens(aiRuntime.compactionKeepRecentTokens());
+    dto.setCompactionFallbackModel(fromModelSelection(aiRuntime.compactionFallbackModel()));
     dto.setSubagentMaxDepth(aiRuntime.subagentMaxDepth());
     dto.setSubagentMaxConcurrency(aiRuntime.subagentMaxConcurrency());
     dto.setSubagentMaxTotalConcurrency(aiRuntime.subagentMaxTotalConcurrency());
@@ -493,6 +493,24 @@ public class SystemSettingsCodec {
     dto.setMaxMessageBytes(environment.maxMessageBytes());
     dto.setHeartbeatTimeoutMillis(environment.heartbeatTimeoutMillis());
     dto.setDirectoryListTimeoutMillis(environment.directoryListTimeoutMillis());
+    return dto;
+  }
+
+  private static ModelSelection toModelSelection(HarnessModelSelectionDTO dto) {
+    if (dto == null) {
+      return null;
+    }
+    return new ModelSelection(dto.getProviderName(), dto.getModelName(), dto.getVariant());
+  }
+
+  private static HarnessModelSelectionDTO fromModelSelection(ModelSelection selection) {
+    if (selection == null) {
+      return null;
+    }
+    HarnessModelSelectionDTO dto = new HarnessModelSelectionDTO();
+    dto.setProviderName(selection.providerName());
+    dto.setModelName(selection.modelName());
+    dto.setVariant(selection.variant());
     return dto;
   }
 

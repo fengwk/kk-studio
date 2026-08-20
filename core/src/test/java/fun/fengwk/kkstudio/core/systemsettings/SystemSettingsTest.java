@@ -46,9 +46,8 @@ class SystemSettingsTest {
         InvocationRetryBackoffStrategy.EXPONENTIAL, defaults.aiRuntime().retryBackoffStrategy());
     assertEquals(2_000L, defaults.aiRuntime().retryBaseDelayMillis());
     assertEquals(60_000L, defaults.aiRuntime().retryMaxDelayMillis());
-    assertEquals(true, defaults.aiRuntime().compactionEnabled());
-    assertEquals(16_384, defaults.aiRuntime().compactionReserveTokens());
-    assertEquals(20_000, defaults.aiRuntime().compactionMaxRecentTokens());
+    assertEquals(20_000, defaults.aiRuntime().compactionKeepRecentTokens());
+    assertEquals(null, defaults.aiRuntime().compactionFallbackModel());
     assertEquals(2, defaults.aiRuntime().subagentMaxDepth());
     assertEquals(10, defaults.aiRuntime().subagentMaxConcurrency());
     assertEquals(null, defaults.aiRuntime().subagentMaxTotalConcurrency());
@@ -173,9 +172,8 @@ class SystemSettingsTest {
                 base.retryBackoffStrategy(),
                 60_000L,
                 2_000L,
-                base.compactionEnabled(),
-                base.compactionReserveTokens(),
-                base.compactionMaxRecentTokens(),
+                base.compactionKeepRecentTokens(),
+                base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -194,9 +192,8 @@ class SystemSettingsTest {
                 base.retryBackoffStrategy(),
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
-                base.compactionEnabled(),
-                base.compactionReserveTokens(),
-                base.compactionMaxRecentTokens(),
+                base.compactionKeepRecentTokens(),
+                base.compactionFallbackModel(),
                 0,
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -210,9 +207,8 @@ class SystemSettingsTest {
                 base.retryBackoffStrategy(),
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
-                base.compactionEnabled(),
-                base.compactionReserveTokens(),
-                base.compactionMaxRecentTokens(),
+                base.compactionKeepRecentTokens(),
+                base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 0,
@@ -226,9 +222,8 @@ class SystemSettingsTest {
                 base.retryBackoffStrategy(),
                 base.retryBaseDelayMillis(),
                 base.retryMaxDelayMillis(),
-                base.compactionEnabled(),
-                base.compactionReserveTokens(),
-                base.compactionMaxRecentTokens(),
+                base.compactionKeepRecentTokens(),
+                base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
@@ -449,7 +444,7 @@ class SystemSettingsTest {
     boolean pluralTokenBudget = path.toLowerCase().endsWith("tokens");
     for (String forbiddenPart : forbidden) {
       if ("token".equals(forbiddenPart) && pluralTokenBudget) {
-        // compactionReserveTokens / compactionMaxRecentTokens 是 token 预算计数，不是秘密 token。
+        // compactionKeepRecentTokens 是 token 预算计数，不是秘密 token。
         continue;
       }
       if (path.toLowerCase().contains(forbiddenPart)) {

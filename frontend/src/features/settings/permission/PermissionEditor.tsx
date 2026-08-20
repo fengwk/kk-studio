@@ -10,8 +10,7 @@ import {
 } from '@/features/settings/permission-utils'
 import type { PermissionGroupDraft } from '@/features/settings/system-settings-draft'
 import { SettingsCard } from '@/features/settings/settings-primitives'
-
-const PERMISSION_ACTIONS = ['allow', 'ask', 'deny'] as const
+import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
 
 /**
  * 保序 permission 规则编辑器（tool 名 + 该 tool 下有序规则数组）。
@@ -24,9 +23,11 @@ const PERMISSION_ACTIONS = ['allow', 'ask', 'deny'] as const
 export function PermissionEditor({
   groups,
   onChange,
+  options,
 }: {
   groups: PermissionGroupDraft[]
   onChange: (next: PermissionGroupDraft[]) => void
+  options: SystemSettingsSchemaOption[]
 }) {
   const { t } = useI18n()
 
@@ -118,9 +119,9 @@ export function PermissionEditor({
                         )
                       }
                     >
-                      {PERMISSION_ACTIONS.map((action) => (
-                        <option key={action} value={action}>
-                          {t(`settings.permission.action.${action}`)}
+                      {options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {t(option.labelKey)}
                         </option>
                       ))}
                     </select>
@@ -178,9 +179,11 @@ export function PermissionEditor({
 export function PermissionEditorCard({
   groups,
   onChange,
+  options,
 }: {
   groups: PermissionGroupDraft[]
   onChange: (next: PermissionGroupDraft[]) => void
+  options: SystemSettingsSchemaOption[]
 }) {
   const { t } = useI18n()
   return (
@@ -189,7 +192,7 @@ export function PermissionEditorCard({
       description="settings.section.tool.permission.description"
       timing="nextInvocation"
     >
-      <PermissionEditor groups={groups} onChange={onChange} />
+      <PermissionEditor groups={groups} onChange={onChange} options={options} />
     </SettingsCard>
   )
 }

@@ -5,15 +5,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BrowserPreferencesProvider,
 } from '@/features/settings/browser-preferences'
-import { makeSettingsDto } from '@/features/settings/settings-test-fixtures'
+import { makeSettingsDto, makeSettingsSchema } from '@/features/settings/settings-test-fixtures'
 import { setLocale } from '@/shared/i18n'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }))
 
 vi.mock('@/shared/api/system-settings-service', () => ({
-  systemSettingsService: { get: mocks.get, update: mocks.update },
-  createSystemSettingsService: () => ({ get: vi.fn(), update: vi.fn() }),
+  systemSettingsService: { get: mocks.get, getSchema: mocks.getSchema, update: mocks.update },
+  createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))
 
 const STORAGE_KEY = 'kkstudio.browser-preferences.v1'
@@ -30,6 +30,7 @@ beforeEach(() => {
   // 清空存储会连带清掉测试基座写入的 locale；恢复默认测试语言。
   setLocale('zh-CN')
   mocks.get.mockResolvedValue(makeSettingsDto())
+  mocks.getSchema.mockResolvedValue(makeSettingsSchema())
   notificationState = {
     permission: 'default',
     requestPermission: vi.fn(async () => {
@@ -64,12 +65,12 @@ function switchControl() {
   return screen.getByRole('switch', { name: '浏览器通知' })
 }
 
-function tabByName(name: string) {
-  return screen.getByRole('tab', { name })
+async function tabByName(name: string) {
+  return await screen.findByRole('tab', { name })
 }
 
 describe('SettingsPage general tab + notifications', () => {
-  it('renders every top-level settings tab', () => {
+  it('renders every top-level settings tab', async () => {
     renderSettings()
     for (const name of [
       '常规',
@@ -80,7 +81,7 @@ describe('SettingsPage general tab + notifications', () => {
       '存储与媒体',
       '高级',
     ]) {
-      expect(tabByName(name)).toBeInTheDocument()
+      expect(await tabByName(name)).toBeInTheDocument()
     }
   })
 
@@ -224,11 +225,11 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
     return screen.getByRole('tab', { selected: true })
   }
 
-  it('keeps only the selected tab in the sequential tab order (tabIndex 0) and the rest at -1', () => {
+  it('keeps only the selected tab in the sequential tab order (tabIndex 0) and the rest at -1', async () => {
     renderSettings()
-    expect(tabByName('常规')).toHaveAttribute('tabindex', '0')
+    expect(await tabByName('常规')).toHaveAttribute('tabindex', '0')
     for (const name of ['AI 运行时', '工具与权限', '环境', '集成', '存储与媒体', '高级']) {
-      expect(tabByName(name)).toHaveAttribute('tabindex', '-1')
+      expect(await tabByName(name)).toHaveAttribute('tabindex', '-1')
     }
   })
 
@@ -236,30 +237,30 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
     const user = userEvent.setup()
     renderSettings()
 
-    tabByName('常规').focus()
+    ;(await tabByName('常规')).focus()
     await user.keyboard('{ArrowRight}')
-    expect(selectedTab()).toBe(tabByName('AI 运行时'))
-    expect(document.activeElement?.id).toBe('settings-tab-ai-runtime')
+    expect(selectedTab()).toBe(await tabByName('工具与权限'))
+    expect(document.activeElement?.id).toBe('settings-tab-tool')
 
     await user.keyboard('{End}')
-    expect(selectedTab()).toBe(tabByName('高级'))
+    expect(selectedTab()).toBe(await tabByName('高级'))
     expect(document.activeElement?.id).toBe('settings-tab-advanced')
 
     await user.keyboard('{Home}')
-    expect(selectedTab()).toBe(tabByName('常规'))
+    expect(selectedTab()).toBe(await tabByName('常规'))
     expect(document.activeElement?.id).toBe('settings-tab-general')
 
     // Arrow 环绕：从首项向左回到末项。
     await user.keyboard('{ArrowLeft}')
-    expect(selectedTab()).toBe(tabByName('高级'))
+    expect(selectedTab()).toBe(await tabByName('高级'))
     expect(document.activeElement?.id).toBe('settings-tab-advanced')
   })
 
   it('keeps click selection working with focus on the clicked tab', async () => {
     const user = userEvent.setup()
     renderSettings()
-    await user.click(tabByName('高级'))
-    expect(selectedTab()).toBe(tabByName('高级'))
+    await user.click(await tabByName('高级'))
+    expect(selectedTab()).toBe(await tabByName('高级'))
     expect(document.activeElement?.id).toBe('settings-tab-advanced')
   })
 })

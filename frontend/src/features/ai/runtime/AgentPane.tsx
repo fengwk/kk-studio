@@ -8,7 +8,7 @@ import {
 import { AgentSelectionPanel, SelectionPanel } from '@/features/ai/chat/SelectionPanel'
 import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
-import { ConflictPresenter } from '@/features/ai/runtime/ConflictPresenter'
+import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import {
   useAgentPaneController,
   type AgentPaneDefaults,
@@ -120,7 +120,7 @@ export function AgentPane({
         <div className="thread-acceptance-retry">
           {pane.pendingAcceptance.unknownOutcome ? (
             <button type="button" className="btn-primary" onClick={pane.retryAcceptance}>
-              {t('ai.runtime.conflict.retry')}
+              {t('shared.conflict.retry')}
             </button>
           ) : null}
           <button type="button" className="ghost-btn" onClick={pane.abandonPendingAcceptance}>

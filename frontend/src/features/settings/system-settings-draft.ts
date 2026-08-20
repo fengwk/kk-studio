@@ -3,6 +3,7 @@ import type {
   SystemSettingsSectionsDTO,
   SystemSettingsUpdateDTO,
 } from '@/shared/api/contracts/system-settings'
+import type { HarnessModelSelectionDTO } from '@/shared/api/contracts/ai-runtime'
 
 /** 前端 draft 的共享数字/文本基元。 */
 export type DraftNumericField = string
@@ -32,9 +33,8 @@ export interface SystemSettingsAiRuntimeDraft {
   retryBackoffStrategy: 'FIXED' | 'EXPONENTIAL'
   retryBaseDelayMillis: DraftNumericField
   retryMaxDelayMillis: DraftNumericField
-  compactionEnabled: boolean
-  compactionReserveTokens: DraftNumericField
-  compactionMaxRecentTokens: DraftNumericField
+  compactionKeepRecentTokens: DraftNumericField
+  compactionFallbackModel: ModelSelectionDraft | null
   subagentMaxDepth: DraftNumericField
   subagentMaxConcurrency: DraftNumericField
   /** '' 表示不额外限制（无 cap）。 */
@@ -42,6 +42,12 @@ export interface SystemSettingsAiRuntimeDraft {
   /** 0 表示关闭。 */
   subagentIdleTimeoutMillis: DraftNumericField
   subagentMaxTurns: DraftNumericField
+}
+
+export interface ModelSelectionDraft {
+  providerName: string
+  modelName: string
+  variant: string
 }
 
 export interface SystemSettingsEnvironmentDraft {
@@ -160,6 +166,7 @@ export type DraftValidationReason =
   | 'duplicateToolName'
   | 'blankPattern'
   | 'emptyNumericField'
+  | 'partialModelSelection'
 
 export class DraftValidationError extends Error {
   readonly reason: DraftValidationReason
@@ -242,9 +249,15 @@ function aiRuntimeToDraft(
     retryBackoffStrategy: dto.retryBackoffStrategy,
     retryBaseDelayMillis: dto.retryBaseDelayMillis,
     retryMaxDelayMillis: dto.retryMaxDelayMillis,
-    compactionEnabled: dto.compactionEnabled,
-    compactionReserveTokens: String(dto.compactionReserveTokens),
-    compactionMaxRecentTokens: String(dto.compactionMaxRecentTokens),
+    compactionKeepRecentTokens: String(dto.compactionKeepRecentTokens),
+    compactionFallbackModel:
+      dto.compactionFallbackModel == null
+        ? null
+        : {
+            providerName: dto.compactionFallbackModel.providerName,
+            modelName: dto.compactionFallbackModel.modelName,
+            variant: dto.compactionFallbackModel.variant,
+          },
     subagentMaxDepth: String(dto.subagentMaxDepth),
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
     subagentMaxTotalConcurrency:
@@ -356,9 +369,10 @@ export function assembleSettingsUpdate(
       retryBackoffStrategy: draft.aiRuntime.retryBackoffStrategy,
       retryBaseDelayMillis: requiredLong(draft.aiRuntime.retryBaseDelayMillis),
       retryMaxDelayMillis: requiredLong(draft.aiRuntime.retryMaxDelayMillis),
-      compactionEnabled: draft.aiRuntime.compactionEnabled,
-      compactionReserveTokens: requiredInt(draft.aiRuntime.compactionReserveTokens),
-      compactionMaxRecentTokens: requiredInt(draft.aiRuntime.compactionMaxRecentTokens),
+      compactionKeepRecentTokens: requiredInt(draft.aiRuntime.compactionKeepRecentTokens),
+      compactionFallbackModel: assembleModelSelection(
+        draft.aiRuntime.compactionFallbackModel,
+      ),
       subagentMaxDepth: requiredInt(draft.aiRuntime.subagentMaxDepth),
       subagentMaxConcurrency: requiredInt(draft.aiRuntime.subagentMaxConcurrency),
       subagentMaxTotalConcurrency: nullableInt(
@@ -556,4 +570,105 @@ function nullableInt(value: string): number | null {
 function nullableText(value: string): string | null {
   const trimmed = value.trim()
   return trimmed === '' ? null : trimmed
+}
+
+function assembleModelSelection(
+  value: ModelSelectionDraft | null,
+): HarnessModelSelectionDTO | null {
+  if (value == null) {
+    return null
+  }
+  const providerName = value.providerName.trim()
+  const modelName = value.modelName.trim()
+  const variant = value.variant.trim()
+  if (providerName === '' && modelName === '' && variant === '') {
+    return null
+  }
+  if (providerName === '' || modelName === '' || variant === '') {
+    throw new DraftValidationError('partialModelSelection')
+  }
+  return { providerName, modelName, variant }
+}
+
+const CUSTOM_ATOMIC_FIELD_PATHS = new Set([
+  'tool.permission',
+  'aiRuntime.compactionFallbackModel',
+])
+
+/** 严格读取 draft 路径；schema renderer 不维护第二份 server field registry。 */
+export function getDraftValue(draft: SystemSettingsSectionsDraft, path: string): unknown {
+  const segments = splitPath(path)
+  let current: unknown = draft
+  for (const segment of segments) {
+    if (!isObjectRecord(current) || !Object.prototype.hasOwnProperty.call(current, segment)) {
+      throw new Error(`unknown system settings draft path: ${path}`)
+    }
+    current = current[segment]
+  }
+  return current
+}
+
+/** 严格按路径进行不可变写入；不存在的中间节点或字段会 fail closed。 */
+export function setDraftValue(
+  draft: SystemSettingsSectionsDraft,
+  path: string,
+  value: unknown,
+): SystemSettingsSectionsDraft {
+  const segments = splitPath(path)
+  return setDraftValueAt(draft, segments, value, path) as SystemSettingsSectionsDraft
+}
+
+/** 递归枚举 draft leaf，两个 custom atomic leaf 与 schema 语义保持一致。 */
+export function draftLeafPaths(draft: SystemSettingsSectionsDraft): string[] {
+  const paths: string[] = []
+  collectDraftLeaves(draft, '', paths)
+  return paths
+}
+
+function setDraftValueAt(
+  current: unknown,
+  segments: string[],
+  value: unknown,
+  path: string,
+): unknown {
+  if (!isObjectRecord(current)) {
+    throw new Error(`unknown system settings draft path: ${path}`)
+  }
+  const [segment, ...rest] = segments
+  if (segment == null || !Object.prototype.hasOwnProperty.call(current, segment)) {
+    throw new Error(`unknown system settings draft path: ${path}`)
+  }
+  if (rest.length === 0) {
+    return { ...current, [segment]: value }
+  }
+  return {
+    ...current,
+    [segment]: setDraftValueAt(current[segment], rest, value, path),
+  }
+}
+
+function collectDraftLeaves(value: unknown, prefix: string, paths: string[]): void {
+  if (prefix !== '' && CUSTOM_ATOMIC_FIELD_PATHS.has(prefix)) {
+    paths.push(prefix)
+    return
+  }
+  if (!isObjectRecord(value)) {
+    paths.push(prefix)
+    return
+  }
+  for (const [key, child] of Object.entries(value)) {
+    collectDraftLeaves(child, prefix === '' ? key : `${prefix}.${key}`, paths)
+  }
+}
+
+function splitPath(path: string): string[] {
+  const segments = path.split('.')
+  if (path.trim() === '' || segments.some((segment) => segment === '')) {
+    throw new Error(`invalid system settings draft path: ${path}`)
+  }
+  return segments
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
