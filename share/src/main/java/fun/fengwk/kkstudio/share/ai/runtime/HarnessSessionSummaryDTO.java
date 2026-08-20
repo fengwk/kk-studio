@@ -1,0 +1,31 @@
+package fun.fengwk.kkstudio.share.ai.runtime;
+
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import lombok.Data;
+
+import java.time.Instant;
+
+/** Chat/Canvas owner 持有的 Harness Session 摘要。 */
+@Data
+public class HarnessSessionSummaryDTO {
+
+  /** Session 主键：canonical UUID string。 */
+  private String sessionId;
+
+  /** Session ROOT 创建时间（UTC Instant）。 */
+  private Instant createdAt;
+
+  /** Session 内 Entry 与 Thread 的最后活动时间（UTC Instant）。 */
+  private Instant lastActivityAt;
+
+  /** 按时间确定性选择的首条用户可读预览。 */
+  private String firstMessagePreview;
+
+  /** 当前 Session 的 Thread 数量。 */
+  private int threadCount;
+
+  @JsonAnySetter
+  public void rejectUnknownField(String field, Object value) {
+    throw new IllegalArgumentException("unknown harness session summary field: " + field);
+  }
+}

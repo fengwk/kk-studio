@@ -90,7 +90,6 @@ public class StudioWebMapper {
     dto.setId(document.id().toString());
     dto.setTitle(document.title());
     dto.setVersion(Long.toString(document.version()));
-    dto.setThreadId(document.threadId() == null ? null : document.threadId().toString());
     dto.setCreatedAt(document.createdAt().toString());
     dto.setUpdatedAt(document.updatedAt().toString());
     return dto;
