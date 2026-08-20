@@ -38,6 +38,9 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -2187,7 +2190,19 @@ class TaskToolTest {
             id(nextId++),
             SESSION_ID,
             parent,
-            new TurnStartPayload(TurnStartReason.COMPACTION, settings, OWNER_THREAD_ID),
+            new TurnStartPayload(
+                TurnStartReason.COMPACTION,
+                settings,
+                OWNER_THREAD_ID,
+                null,
+                null,
+                new CompactionStart(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    settings.model(),
+                    root.id(),
+                    null,
+                    null)),
             NOW);
     Entry compactionEnd =
         new Entry(
