@@ -614,10 +614,10 @@ registerCase({
 })
 
 registerCase({
-  id: 'crud.chat.thread_association_list',
+  id: 'crud.chat.session_ownership_list',
   level: 'L1',
   title: 'Chat Session 摘要与 Session Thread 列表',
-  docs: 'NEW_SESSION 原子物化即建立 Chat owner 归属；GET /api/ai/chat/{chatId}/sessions 返回 Session 摘要（新到旧）；GET /api/ai/runtime/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
+  docs: 'NEW_SESSION 原子物化即建立 Chat owner 归属；GET /api/ai/chat/{chatId}/sessions 返回 Session 摘要（新到旧，firstMessagePreview 精确等于首条 USER 文本、threadCount=1）；同批 NEW_SESSION 幂等重放 replayed=true 且不新增 Session/Thread relation；GET /api/ai/runtime/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -630,52 +630,88 @@ registerCase({
     const materializedThreadIds = []
     const makeSession = async (title) => {
       const threadId = cid()
+      const commands = [userMessageCommand(`${title} ${suffix}`, cid())]
       const accepted = await materializeNewSession(ctx, {
         owner: chatOwner(chat.id),
         sessionId: cid(),
         threadId,
         rootSettings: branchSettingsOf({ name: agent.name }, modelSelection, { environment: null }),
         yoloEnabled: true,
-        commands: [userMessageCommand(`${title} ${suffix}`, cid())],
+        commands,
       })
       materializedThreadIds.push(threadId)
-      return accepted
+      return { accepted, commands }
     }
     const first = await makeSession('first')
     const second = await makeSession('second')
+    const third = await makeSession('third')
     try {
-      assert(first.thread.status === 'IDLE', JSON.stringify(first.thread))
-      // materialize 快照可能已含 processor 消费（revision >= 0）；只断言结构。
-      assert(/^\d+$/.test(String(first.thread.revision)), JSON.stringify(first.thread))
-      assert(first.thread.sessionId && first.thread.headEntryId, JSON.stringify(first.thread))
+      // materialize 快照可能已含 processor 消费；只断言结构，不锁定瞬时 status。
+      const firstThread = first.accepted.thread
+      assert(/^\d+$/.test(String(firstThread.revision)), JSON.stringify(firstThread))
+      assert(firstThread.sessionId && firstThread.headEntryId, JSON.stringify(firstThread))
+
+      // 精确 preview 断言依赖 USER entry 已 durable 物化：先等三个 Thread 的 turn 收敛。
+      for (const threadId of materializedThreadIds) {
+        await waitForQuiescentThread(ctx, threadId, {
+          timeoutMs: 60_000,
+          intervalMs: 100,
+        })
+      }
 
       // NEW_SESSION materialization 是 Chat owner 归属的唯一入口：连续三次物化产生三个 Session。
-      const third = await makeSession('third')
       const sessions = await listChatSessions(ctx, chat.id)
       const sessionIds = sessions.map((item) => String(item.sessionId))
-      assert(sessionIds.includes(String(first.thread.sessionId)), 'first Session missing')
-      assert(sessionIds.includes(String(second.thread.sessionId)), 'second Session missing')
-      assert(sessionIds.includes(String(third.thread.sessionId)), 'third Session missing')
+      assert(sessionIds.includes(String(first.accepted.thread.sessionId)), 'first Session missing')
+      assert(sessionIds.includes(String(second.accepted.thread.sessionId)), 'second Session missing')
+      assert(sessionIds.includes(String(third.accepted.thread.sessionId)), 'third Session missing')
       // 新到旧：最近物化（third）排在最前。
       assert(
-        sessionIds[0] === String(third.thread.sessionId),
+        sessionIds[0] === String(third.accepted.thread.sessionId),
         `expected newest-first: ${JSON.stringify(sessions)}`,
       )
+      // 精确摘要：firstMessagePreview 等于该 Session 首条 USER 文本；每个 Session 恰一个 Thread。
+      const byId = new Map(sessions.map((item) => [String(item.sessionId), item]))
+      for (const { accepted, commands } of [first, second, third]) {
+        const summary = byId.get(String(accepted.thread.sessionId))
+        assert(summary, `Session summary missing: ${accepted.thread.sessionId}`)
+        const expectedPreview = commands[0].contents.find((c) => c.type === 'TEXT').text
+        assert(
+          summary.firstMessagePreview === expectedPreview,
+          `firstMessagePreview ${JSON.stringify(summary.firstMessagePreview)} != ${JSON.stringify(expectedPreview)}: ${JSON.stringify(summary)}`,
+        )
+        assert(summary.threadCount === 1, `threadCount must be 1: ${JSON.stringify(summary)}`)
+      }
+
+      // 同批 NEW_SESSION 幂等重放：replayed=true 且不新增 Session/Thread relation。
+      const { accepted: thirdAccepted, commands: thirdCommands } = third
+      const replayed = await materializeNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: String(thirdAccepted.session.sessionId),
+        threadId: String(thirdAccepted.thread.threadId),
+        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection, { environment: null }),
+        yoloEnabled: true,
+        commands: thirdCommands,
+      })
+      assert(replayed.replayed === true, `expected replayed=true: ${JSON.stringify(replayed)}`)
+      const sessionsAfterReplay = await listChatSessions(ctx, chat.id)
       assert(
-        sessions.every(
-          (item) =>
-            typeof item.firstMessagePreview === 'string'
-            && Number.isSafeInteger(item.threadCount)
-            && item.threadCount >= 1,
-        ),
-        `Session summary shape: ${JSON.stringify(sessions)}`,
+        sessionsAfterReplay.length === sessions.length,
+        `replay must not add Session relation: ${JSON.stringify(sessionsAfterReplay)}`,
+      )
+      const replayedSummary = sessionsAfterReplay.find(
+        (item) => String(item.sessionId) === String(thirdAccepted.session.sessionId),
+      )
+      assert(
+        replayedSummary && replayedSummary.threadCount === 1,
+        `replay must not add Thread relation: ${JSON.stringify(sessionsAfterReplay)}`,
       )
 
       // Session Thread 摘要包含物化 Thread。
-      const sessionThreads = await listSessionThreads(ctx, third.thread.sessionId)
+      const sessionThreads = await listSessionThreads(ctx, thirdAccepted.thread.sessionId)
       const threadIds = sessionThreads.map((item) => String(item.threadId))
       assert(
-        threadIds.includes(String(third.thread.threadId)),
+        threadIds.includes(String(thirdAccepted.thread.threadId)),
         `created Thread missing from Session Thread list: ${JSON.stringify(threadIds)}`,
       )
 
@@ -688,12 +724,12 @@ registerCase({
     } finally {
       // 先等全部 Thread 的 turn 真正 quiescent（processor 不再写该 Session 的
       // model_invocation/entry 行），再删除 Chat，避免 cascade 删除与 processor
-      // 写入的锁序交叉死锁。
+      // 写入的锁序交叉死锁。quiescence 失败必须显式抛出（不吞错误）。
       for (const threadId of materializedThreadIds) {
         await waitForQuiescentThread(ctx, threadId, {
           timeoutMs: 60_000,
           intervalMs: 100,
-        }).catch(() => {})
+        })
       }
       await deleteChat(ctx, chat)
     }

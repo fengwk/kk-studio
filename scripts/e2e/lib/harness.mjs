@@ -177,8 +177,8 @@ export function threadTarget({ threadId, expectedHeadEntryId, expectedNextComman
 
 // ---------- 唯一产品写入口 ----------
 
-/** 校验一个 202 accepted 的 HarnessAcceptedCommandsDTO（严格形状）。 */
-export function assertAcceptedCommands(accepted, { expectedCommandCount, expectedTypes } = {}) {
+/** 校验一个 202 accepted 的 HarnessAcceptedCommandsDTO 的核心形状（具体一致性由 acceptCommandBatch 完成）。 */
+function assertAcceptedCommands(accepted) {
   assert(accepted && typeof accepted === 'object', `expected accepted object: ${JSON.stringify(accepted)}`)
   canonicalUuid(accepted.session?.sessionId, 'accepted.session.sessionId')
   canonicalUuid(accepted.rootEntry?.entryId, 'accepted.rootEntry.entryId')
@@ -189,26 +189,19 @@ export function assertAcceptedCommands(accepted, { expectedCommandCount, expecte
   threadIdOf(accepted.thread)
   assert(Array.isArray(accepted.acceptedCommands), JSON.stringify(accepted))
   assert(typeof accepted.replayed === 'boolean', JSON.stringify(accepted))
-  if (expectedCommandCount != null) {
-    assert(
-      accepted.acceptedCommands.length === expectedCommandCount,
-      `expected ${expectedCommandCount} accepted commands, got ${accepted.acceptedCommands.length}: ${JSON.stringify(accepted)}`,
-    )
-  }
-  if (expectedTypes != null) {
-    assert(
-      accepted.acceptedCommands.map((command) => command.type).join(',') === expectedTypes.join(','),
-      `accepted command types ${accepted.acceptedCommands.map((command) => command.type).join(',')} != ${expectedTypes.join(',')}: ${JSON.stringify(accepted)}`,
-    )
-  }
-  return accepted
 }
 
 /**
  * 唯一产品用户命令写入口：owner-aware command batch（202 accepted）。
- * 严格校验响应形状并返回 {session, rootEntry, thread, acceptedCommands, replayed}。
+ *
+ * 自动基于请求 target/commands 严格校验响应形状（无需调用方传 options）：
+ * - 返回 threadId 必须等于 target.threadId；
+ * - NEW_SESSION/ENTRY 的 sessionId 必须等于 target.sessionId；
+ * - rootEntry.sessionId/thread.sessionId 必须等于 response session.sessionId；
+ * - acceptedCommands 的 count/type/clientCommandId/order 必须与请求 commands 一致，
+ *   且每项 threadId、positive sequence、canonical clientCommandId、64 位小写 hex requestHash 均校验。
  */
-export async function acceptCommandBatch(ctx, { owner, target, commands }, options = {}) {
+export async function acceptCommandBatch(ctx, { owner, target, commands }) {
   assert(owner?.type && owner?.id, `owner required: ${JSON.stringify(owner)}`)
   assert(owner.type === 'CHAT' || owner.type === 'CANVAS', `owner.type must be CHAT|CANVAS: ${JSON.stringify(owner)}`)
   canonicalUuid(owner.id, 'owner.id')
@@ -227,7 +220,53 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }, optio
   })
   assert(status === 202, `accept command batch status ${status}: ${JSON.stringify(json)}`)
   const accepted = envelopeData(json)
-  assertAcceptedCommands(accepted, options)
+  assertAcceptedCommands(accepted)
+  // target 一致性：threadId 恒等于 target.threadId。
+  assert(
+    String(accepted.thread?.threadId) === String(target.threadId),
+    `accepted threadId ${accepted.thread?.threadId} != target ${target.threadId}: ${JSON.stringify(accepted)}`,
+  )
+  if (target.type === 'NEW_SESSION' || target.type === 'ENTRY') {
+    assert(
+      String(accepted.session?.sessionId) === String(target.sessionId),
+      `accepted sessionId ${accepted.session?.sessionId} != target ${target.sessionId}: ${JSON.stringify(accepted)}`,
+    )
+  }
+  assert(
+    String(accepted.rootEntry?.sessionId) === String(accepted.session?.sessionId)
+      && String(accepted.thread?.sessionId) === String(accepted.session?.sessionId),
+    `rootEntry/thread session must equal accepted session: ${JSON.stringify(accepted)}`,
+  )
+  // acceptedCommands 与请求 commands 逐项一致。
+  assert(
+    accepted.acceptedCommands.length === commands.length,
+    `accepted command count ${accepted.acceptedCommands.length} != ${commands.length}: ${JSON.stringify(accepted)}`,
+  )
+  for (let i = 0; i < commands.length; i++) {
+    const request = commands[i]
+    const response = accepted.acceptedCommands[i]
+    assert(
+      String(response.type) === String(request.type),
+      `accepted command ${i} type ${response?.type} != ${request.type}: ${JSON.stringify(accepted)}`,
+    )
+    assert(
+      String(response.clientCommandId) === String(request.clientCommandId),
+      `accepted command ${i} clientCommandId ${response?.clientCommandId} != ${request.clientCommandId}: ${JSON.stringify(accepted)}`,
+    )
+    canonicalUuid(response.clientCommandId, `accepted.commands[${i}].clientCommandId`)
+    assert(
+      String(response.threadId) === String(target.threadId),
+      `accepted command ${i} threadId ${response?.threadId} != target ${target.threadId}: ${JSON.stringify(accepted)}`,
+    )
+    assert(
+      /^[1-9]\d*$/.test(String(response.sequence)),
+      `accepted command ${i} sequence must be positive decimal: ${JSON.stringify(response)}`,
+    )
+    assert(
+      /^[0-9a-f]{64}$/.test(String(response.requestHash)),
+      `accepted command ${i} requestHash must be 64 lower hex: ${JSON.stringify(response)}`,
+    )
+  }
   return accepted
 }
 
@@ -237,68 +276,25 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }, optio
  */
 export async function materializeNewSession(
   ctx,
-  { owner, sessionId, threadId, rootSettings, yoloEnabled = false, commands, options = {} },
+  { owner, sessionId, threadId, rootSettings, yoloEnabled = false, commands },
 ) {
   return acceptCommandBatch(ctx, {
     owner,
     target: newSessionTarget({ sessionId, threadId, rootSettings, yoloEnabled }),
     commands,
-    ...options,
   })
 }
 
 /** ENTRY 原子物化：在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）。 */
 export async function materializeEntryThread(
   ctx,
-  { owner, sessionId, startEntryId, threadId, yoloEnabled = false, commands, options = {} },
+  { owner, sessionId, startEntryId, threadId, yoloEnabled = false, commands },
 ) {
   return acceptCommandBatch(ctx, {
     owner,
     target: entryTarget({ sessionId, startEntryId, threadId, yoloEnabled }),
     commands,
-    ...options,
   })
-}
-
-/**
- * 免费确定性空闲 Thread 物化：NEW_SESSION + 不存在的 Agent 名，使 bootstrap turn 在调用
- * Provider 前确定性 PLANNING_FAILED；等 quiescent 后返回权威 Thread。
- */
-export async function materializeIdleThread(
-  ctx,
-  {
-    owner,
-    agent,
-    model,
-    titlePrefix = 'e2e-idle',
-    yoloEnabled = false,
-    environment = null,
-    activeTools = [],
-    commands,
-  },
-) {
-  const suffix = Math.random().toString(36).slice(2, 10)
-  const sessionId = crypto.randomUUID()
-  const threadId = crypto.randomUUID()
-  const rootSettings = branchSettingsOf(
-    { name: `e2e-${titlePrefix}-missing-${suffix}` },
-    model,
-    { environment, activeTools },
-  )
-  const accepted = await materializeNewSession(ctx, {
-    owner,
-    sessionId,
-    threadId,
-    rootSettings,
-    yoloEnabled,
-    commands: commands || [userMessageCommand(`materialize idle ${suffix}`, crypto.randomUUID())],
-  })
-  const finalThread = await waitForQuiescentThread(ctx, threadId, {
-    timeoutMs: 60_000,
-    intervalMs: 250,
-  })
-  assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
-  return { accepted, thread: finalThread, sessionId: accepted.session.sessionId, threadId }
 }
 
 // ---------- Session / Thread 查询 ----------
@@ -376,6 +372,10 @@ export async function listSessionEntries(ctx, sessionId) {
   for (const entry of entries) {
     canonicalUuid(entry?.entryId, 'entry.entryId')
     canonicalUuid(entry.sessionId, 'entry.sessionId')
+    assert(
+      String(entry.sessionId) === String(sessionId),
+      `entry.sessionId ${entry.sessionId} != requested sessionId ${sessionId}: ${JSON.stringify(entry)}`,
+    )
     if (entry.parentEntryId != null) canonicalUuid(entry.parentEntryId, 'entry.parentEntryId')
     assert(typeof entry.entryType === 'string' && entry.entryType, JSON.stringify(entry))
     assert(typeof entry.payloadJson === 'string', JSON.stringify(entry))
@@ -680,7 +680,7 @@ export async function waitForModelTextDeltaAfterEventSubscribed(
   }
 }
 
-// ---------- 兼容薄层（供 scripts/reliability 等越界文件保留旧导出面） ----------
+// ---------- 应用事件 WebSocket 辅助 ----------
 
 function applicationEventUrl(baseUrl) {
   const url = new URL(baseUrl)

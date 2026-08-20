@@ -573,8 +573,10 @@ accepted = json_call(
 )
 thread = accepted["thread"]
 assert accepted["replayed"] is False, accepted
-assert thread["status"] == "IDLE" and thread["processing"] is False, thread
 assert accepted["acceptedCommands"][0]["type"] == "USER_MESSAGE", accepted
+# 不锁定 accepted 快照的瞬时 status（processor 可能已异步消费）；只锁定 threadId 归属，
+# 随后轮询等待 quiescent 收敛。
+assert thread["threadId"] == thread_id, thread
 for _ in range(240):
     current = json_call(
         "GET", f"/api/ai/runtime/threads/{thread_id}/snapshot"

@@ -747,7 +747,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     })
     const owner = chatOwner(state.chat.id)
     const threadId = cid()
-    const accepted = await materializeNewSession(apiCtx, {
+    await materializeNewSession(apiCtx, {
       owner,
       sessionId: cid(),
       threadId,

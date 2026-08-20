@@ -1,5 +1,4 @@
 import { assert, expectHttpError, httpJson } from '../lib/http.mjs'
-import { createChat } from '../lib/harness.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 function errorEnvelope(error) {
@@ -20,21 +19,6 @@ async function localizedGet(ctx, requestPath, language, status = 400) {
         { 'Accept-Language': language },
       ),
     { status },
-  )
-}
-
-async function localizedPut(ctx, requestPath, language) {
-  return expectHttpError(
-    () =>
-      httpJson(
-        ctx.baseUrl,
-        'PUT',
-        requestPath,
-        undefined,
-        60_000,
-        { 'Accept-Language': language },
-      ),
-    { status: 400 },
   )
 }
 
@@ -83,11 +67,6 @@ registerCase({
     )
 
     // Controller-originated ResponseStatusException 保持 HTTP code/context，仅本地化 message/title。
-    const chat = await createChat(ctx, {
-      title: `e2e-i18n-${Math.random().toString(36).slice(2, 10)}`,
-      agentName: ctx.vars.agent.name,
-      yoloEnabled: false,
-    })
     const responseStatusPath = '/api/ai/runtime/threads/not-a-number/snapshot'
     const englishHttp = errorEnvelope(await localizedGet(ctx, responseStatusPath, 'en-US'))
     const chineseHttp = errorEnvelope(await localizedGet(ctx, responseStatusPath, 'zh-CN'))
