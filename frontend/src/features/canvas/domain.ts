@@ -14,8 +14,6 @@ export interface CanvasDocument {
   title: string
   /** canonical 非负十进制字符串（Java long wire），显示与比较都保持字符串。 */
   version: CanvasVersion
-  /** 绑定到本画布的 Harness Thread（canonical UUID）；null 表示尚未创建。 */
-  threadId: UUIDString | null
   createdAt: string
   updatedAt: string
 }

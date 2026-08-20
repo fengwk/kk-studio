@@ -1,23 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 
-export type ThreadPanelMainMode = 'conversation' | 'events'
+export type ThreadPanelMainMode = 'conversation' | 'debug'
 
 interface MainViewScrollPositions {
   conversation: number | null
-  events: number | null
+  debug: number | null
 }
 
-/**
- * Pane/Thread 级 Conversation/Event 互斥主视图状态（每 Pane 一个实例，Bound Chat
- * 与 Canvas Bound 复用）：
- *
- * - `mode`：当前主视图；切换前捕获当前视图 scrollTop，目标视图把保存位置作为
- *   mount `initialScrollTop` 传入；
- * - `selectedEventId`：当前选中行；null 表示未选中，详情只在有选中时展示；
- *   切回 conversation / threadId 重绑清空；id 从列表消失即清空；
- * - threadId 重绑：mode/selected/两个 scrollTop 全部重置回 conversation。
- */
+/** 每个 Pane 独立维护 Conversation/Debug 的模式、选中行和两套滚动位置。 */
 export function useThreadPanelViewState(
   threadId: string,
   transcriptBodyRef: RefObject<HTMLDivElement | null>,
@@ -27,21 +18,21 @@ export function useThreadPanelViewState(
   const modeRef = useRef<ThreadPanelMainMode>('conversation')
   const positionsRef = useRef<MainViewScrollPositions>({
     conversation: null,
-    events: null,
+    debug: null,
   })
   const [initialConversationScrollTop, setInitialConversationScrollTop] = useState<number | null>(
     null,
   )
-  const [initialEventsScrollTop, setInitialEventsScrollTop] = useState<number | null>(null)
+  const [initialDebugScrollTop, setInitialDebugScrollTop] = useState<number | null>(null)
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
-  const eventsBodyRef = useRef<HTMLDivElement>(null)
+  const debugBodyRef = useRef<HTMLDivElement>(null)
 
   const switchMode = useCallback(function switchMode(next: ThreadPanelMainMode) {
     const current = modeRef.current
     if (current === next) {
       return
     }
-    const container = current === 'events' ? eventsBodyRef.current : transcriptBodyRef.current
+    const container = current === 'debug' ? debugBodyRef.current : transcriptBodyRef.current
     const positions = { ...positionsRef.current }
     if (container) {
       positions[current] = container.scrollTop
@@ -49,7 +40,7 @@ export function useThreadPanelViewState(
     positionsRef.current = positions
     modeRef.current = next
     setInitialConversationScrollTop(next === 'conversation' ? positions.conversation : null)
-    setInitialEventsScrollTop(next === 'events' ? positions.events : null)
+    setInitialDebugScrollTop(next === 'debug' ? positions.debug : null)
     if (next === 'conversation') {
       setSelectedEventId(null)
     }
@@ -62,9 +53,9 @@ export function useThreadPanelViewState(
       return
     }
     lastThreadIdRef.current = threadId
-    positionsRef.current = { conversation: null, events: null }
+    positionsRef.current = { conversation: null, debug: null }
     setInitialConversationScrollTop(null)
-    setInitialEventsScrollTop(null)
+    setInitialDebugScrollTop(null)
     setSelectedEventId(null)
     modeRef.current = 'conversation'
     setModeState('conversation')
@@ -81,8 +72,8 @@ export function useThreadPanelViewState(
     switchMode,
     selectedEventId,
     selectEvent: setSelectedEventId,
-    eventsBodyRef,
+    eventsBodyRef: debugBodyRef,
     initialConversationScrollTop,
-    initialEventsScrollTop,
+    initialEventsScrollTop: initialDebugScrollTop,
   }
 }

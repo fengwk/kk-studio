@@ -12,7 +12,10 @@ import {
 } from '@/features/ai/chat/command-batch-plan'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  AgentRuntimeOwnerDTO,
+  HarnessThreadDTO,
+} from '@/shared/api/contracts/ai-runtime'
 import {
   useAgentThreadController,
   type CommandBatchReplay,
@@ -84,10 +87,12 @@ function compareDecimalRevisions(a: string, b: string): number {
  * 在调用组件中。
  */
 export function useBoundBranchPanel({
+  owner,
   threadId,
   initialParts = [],
   initialReplay,
 }: {
+  owner: AgentRuntimeOwnerDTO
   threadId: string
   initialParts?: ComposerPart[]
   initialReplay?: CommandBatchReplay
@@ -174,13 +179,14 @@ export function useBoundBranchPanel({
         return null
       }
       return buildMessageBatchPlan({
+        owner,
         thread: boundThread,
         effectiveBase,
         draft: boundBranchState.draft,
         parts,
       })
     },
-    [boundBranchState, boundThread, effectiveBase],
+    [boundBranchState, boundThread, effectiveBase, owner],
   )
   useEffect(() => {
     // Ref 由 controller 的 submit handler 使用（事件驱动，总在 effect 之后）。
