@@ -153,7 +153,7 @@ Compaction resolver 不读取 Agent prompt、plugin projector、Environment live
 - plugin binding 仅允许 `PLATFORM`，冻结 canonical `pluginId`、`contributionLocalName` 与有序唯一 state accesses；retry/重启后仍按该 provenance 恢复，不按工具名猜 owner；
 - tool/skill/subagent binding 名称各自不重复；每个 environment-bound tool/skill 引用同一 route；
 - `SubagentBinding(name, description)`：canonical 短名 + 可空描述（≤512 字符）的 allowlist 快照；`task` 的 ToolBinding 冻结在 `toolBindings`，allowlist 冻结在 `subagentBindings`，二者在同一个 spec 中配对；
-- `compaction` 非 null 时 tool bindings、skill bindings、subagent bindings 必须全空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix；
+- `compaction` 非 null 时 tool bindings、skill bindings、subagent bindings 必须全空；phase/trigger/executionModel 与 cut/prefix/history anchors 冻结在 `TURN_START.compaction`；
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 类型与 cache capability 由 attempt 时当前 `ProviderFactory` 解析；
 - retry 重放同一 spec：每次 attempt 由 `ModelRequestMaterializer` 从相同 `basisHeadEntryId + spec` 重建内存 ProviderRequest；当前失败 attempt 的 partial/thinking/error 不修改 spec，后续 turn 的白名单历史投影同样排除 `MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR`；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择；
 - attempt 时 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造短生命周期 Provider，并把持久 cache control 按当前 factory capability 规范化：不兼容能力降级为 `none()`，兼容时按当前 capability 重求形态与断点。

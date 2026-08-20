@@ -8,7 +8,7 @@ Canvas 是资源组织与创作界面，不是工作流编排器。当前模型�
 - GPT Image 2、Seedance 2.0 系列、MiniMax-H3 Ref2VA 与免费 fake Function；
 - Group、Link、结构化 `@` 引用；
 - PostgreSQL durable graph、Redis bounded Patch Cache、PostgreSQL `NOTIFY` + 应用事件通道；
-- 与独立 Chat 共用 Attachment Pill Composer，并在 Canvas 首次发送时绑定真实 Harness 根 Thread。
+- 与独立 Chat 共用 Attachment Pill Composer；Canvas 经 `canvas_session` 持有 0..N 个 Harness Session，首条 Agent 消息与 Chat 共用 `POST /api/ai/runtime/command-batches`（NEW_SESSION target）。
 
 Link 只声明 source Resource 是 target Function 的候选引用，不表示执行依赖。Link 可以成环；v1 不实现 DAG、自动下游执行、条件、循环、CRDT、Presence 或 WebSocket 协作协议。
 
@@ -34,16 +34,16 @@ CanvasDocument
 `CanvasDocument` 持久字段为：
 
 ```text
-id, title, version, threadId?, createdAt, updatedAt
+id, title, version, createdAt, updatedAt
 ```
 
-- `version` 是 Graph、Patch、事件通道和 `expectedVersion` CAS 共用的单调游标。DTO/事件帧中的
+- `version` 是 Graph、Patch、事件通道和 `expectedVersion` CAS 共用的单调游标，初始 0。DTO/事件帧中的
   version 一律是 canonical 非负十进制字符串（如 `"0"`、`"42"`），与数据库 `bigint` 一一对应；
   客户端禁止转换为 JS number，比较必须使用十进制字符串长度/字典序（bigint-safe）。
-- 每个成功的 typed command batch 恰好前进一次。
+- 每个成功的 typed graph command batch 恰好前进一次。
 - Function Run 的新 start、checkpoint、cancel、success 或 failure 各前进一次。
 - 同 commandId + 同 request hash 的精确重放返回当前版本的空 Patch，不前进。
-- `threadId` 可空且唯一；首次 Canvas Chat 发送原子创建并绑定一个 Harness 根 Thread，绑定本身不前进 graph version。
+- 不含 `threadId`：Canvas 经 `canvas_session(session_id, canvas_id)` 持有 0..N 个 Harness Session；Harness command acceptance 不前移 graph version（Canvas Graph 与 Agent Session 生命周期独立）。
 - PostgreSQL UPDATE 使用 `greatest(updated_at, clock_timestamp())`，不依赖事务开始时间，保证 `updatedAt` 不回拨。
 
 ### 2.2 ResourceNode
@@ -134,11 +134,13 @@ nodeId, requestId, status, stateJson, error?, updatedAt
 
 ### 2.5 INPUT/OUTPUT pin 与成功交换
 
-`canvas_function_resource_ref` 保存 Run 生命周期 pin：
+`canvas_function_resource_pin` 保存 Run 生命周期 pin：
 
 ```text
 canvasId, nodeId, requestId, role(INPUT|OUTPUT), resourceId
 ```
+
+PK `(canvas_id, node_id, request_id, role, resource_id)`。
 
 - start 为冻结 manifest 写 INPUT pin，为预分配 target ID 写 OUTPUT pin。
 - pin 只保护 Resource 行生命周期，不参与 Blob ref_count。
@@ -176,7 +178,7 @@ canvas_node
 canvas_link
 canvas_resource
 canvas_function_run
-canvas_function_resource_ref
+canvas_function_resource_pin
 canvas_command_dedup
 ```
 
@@ -193,7 +195,7 @@ harness_session / harness_entry / harness_thread / ...
 
 ```text
 canvas_document
-  id uuid, title, version bigint, thread_id uuid?
+  id uuid, title, version bigint
 
 canvas_node
   id uuid, canvas_id, name, x, y, width, height, group_id?,
@@ -206,11 +208,14 @@ canvas_resource
 canvas_function_run
   node_id uuid PK, request_id uuid, status, state_json, error?, updated_at
 
-canvas_function_resource_ref
+canvas_function_resource_pin
   canvas_id, node_id, request_id, role, resource_id
 
 canvas_command_dedup
-  canvas_id, command_id, request_hash, applied_version, created_at
+  canvas_id, command_id, request_hash
+
+canvas_session
+  session_id uuid PK, canvas_id, created_at
 ```
 
 Canvas ownership FK 都是 `ON DELETE RESTRICT`。深删除由应用显式按生命周期顺序执行，不能用 cascade 绕过 Blob release。
@@ -237,7 +242,7 @@ DELETE_GROUP
 RENAME_GROUP
 ```
 
-聚合 Snapshot 在装配前后同时核对 `canvas_document` 与有序 FunctionRun 列表；任一 version、Thread 绑定或 Run
+聚合 Snapshot 在装配前后同时核对 `canvas_document` 与有序 FunctionRun 列表；任一 version 或 Run
 事实在多查询装配期间变化就重读，避免返回某一代 Run 与另一代 Graph/Resource 的混合结果。
 
 请求：
@@ -270,8 +275,8 @@ GET    /api/canvases/{canvasId}
 DELETE /api/canvases/{canvasId}
 POST   /api/canvases/{canvasId}/commands
 GET    /api/canvases/{canvasId}/changes?afterVersion=N
+GET    /api/canvases/{canvasId}/sessions
 WebSocket /api/events/v1        -> kind=canvas 版本事件订阅（version/resync）
-POST   /api/canvases/{canvasId}/thread/messages
 
 GET    /api/canvas-function-models
 POST   /api/canvases/{canvasId}/nodes/{nodeId}/runs
@@ -287,6 +292,8 @@ DELETE /api/storage/uploads/{uploadId}
 GET    /api/storage/blobs/{blobId}/presigned-original
 GET    /api/storage/blobs/{blobId}/presigned-preview
 ```
+
+不存在 `POST /api/canvases/{canvasId}/thread/messages`：Canvas 首条 Agent 消息与 Chat 共用 `POST /api/ai/runtime/command-batches`（NEW_SESSION target 原子创建 Session + ROOT + Thread + `canvas_session` relation + Commands + Work）。
 
 ## 5. 全局 Blob 上传与消费
 
@@ -326,7 +333,7 @@ TEXT(text)
 ATTACHMENT(uploadId)
 ```
 
-`ATTACHMENT` 只存在于请求与提交事务内；共享 `ChatThreadCommandService` 在入队前消费 READY Upload，写成 durable：
+`ATTACHMENT` 只存在于请求与提交事务内；`StudioCommandAcceptanceService` 在 `acceptCommands` 事务内消费 READY Upload，写成 durable：
 
 ```text
 RESOURCE(blobId, name, preview?)
@@ -337,13 +344,13 @@ RESOURCE(blobId, name, preview?)
 Canvas 首次发送：
 
 ```text
-lock canvas_document
--> create Harness Session + ROOT + Thread
--> 复用 Chat command use-case 物化附件并入队
--> bind canvas_document.thread_id
+POST /api/ai/runtime/command-batches（NEW_SESSION target）
+  -> 原子创建 Harness Session + ROOT + Thread
+  -> 写 canvas_session relation（insertIfNotOwnedByOther 保证单 owner）
+  -> 消费附件并入队 Commands + Work
 ```
 
-Canvas 已绑定 Thread 时，只按 `clientCommandId + raw requestHash` 重放；缺失或不同内容返回 `COMMAND_ID_REUSED`。
+Canvas 已绑定 Thread（同一 Session 的 THREAD target）时，只按 `clientCommandId + raw requestHash` 重放；缺失或不同内容返回 `COMMAND_ID_REUSED`。Canvas 经 `canvas_session` 持有多个 Session（多 Thread 共享 Canvas 历史是核心能力）。
 
 ## 7. Realtime 与恢复
 
@@ -378,13 +385,13 @@ lock document
 -> delete groups
 -> delete command dedup
 -> delete canvas_document
--> deep delete bound Harness Thread/Session
-   -> delete work/invocations/commands/thread/entries
+-> deep delete owned Harness Sessions（HarnessSessionDeletionService）
+   -> per Session：delete work/invocations/commands/thread/entries
    -> release all harness_session_blob_ref
    -> delete session
 ```
 
-先删 `canvas_document` 再删绑定 Thread，是因为 `canvas_document.thread_id -> harness_thread` 使用 RESTRICT FK；整个顺序仍在同一外层事务中，任一步失败整体回滚。
+先删 `canvas_document` 再删 Session，是因为 `canvas_session.canvas_id -> canvas_document` 使用 RESTRICT FK；整个顺序仍在同一外层事务中，任一步失败整体回滚。
 
 Blob `release` 减到 0 时在事务内转为 `DELETING`，提交后当前线程按 `preview -> original -> row` 删除。应用启动恢复与机会式小批量清扫处理崩溃窗口；不运行独立 GC worker。
 
@@ -421,7 +428,7 @@ MiniMax-H3 的 Prompt Agent 也使用 durable Blob Resource：Canvas manifest �
 - Blob retain/release、ACTIVE/DELETING 与两阶段删除；
 - Resource nullable owner pair、INPUT/OUTPUT pin、成功交换和失败清理；
 - command version CAS/dedup、Link 成环、Patch gap/Snapshot、事件通道重连；
-- Canvas 首发附件物化、raw request hash 重放与 Canvas/Thread/Session/Blob 深删除。
+- Canvas 首发附件物化、raw request hash 重放与 Canvas/Session/Blob 深删除。
 
 前端覆盖：
 
