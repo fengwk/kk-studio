@@ -104,7 +104,7 @@ export interface HarnessThreadCommandDTO {
  * 类型化的 Thread mailbox command 请求。
  *
  * USER_MESSAGE 只接受一个非空、有序的 contents 列表（TEXT/ATTACHMENT），不提供
- * 任何文本 shorthand。CUSTOM_MESSAGE 携带 content 与大写 role（SYSTEM/USER）。
+ * 任何文本 shorthand。持久 Entry/投影仍可包含 CUSTOM_MESSAGE，但它不是创建命令。
  * clientCommandId 是稳定的幂等键。
  */
 export type HarnessUserMessageContentDTO =
@@ -121,9 +121,8 @@ type HarnessUserMessageCommandDTO = {
   contents: [HarnessUserMessageContentDTO, ...HarnessUserMessageContentDTO[]]
 }
 
-export type HarnessThreadCommandCreateDTO =
+export type HarnessCommandCreateDTO =
   | HarnessUserMessageCommandDTO
-  | { type: 'CUSTOM_MESSAGE'; clientCommandId: string; content: string; role: 'SYSTEM' | 'USER' }
   | { type: 'SET_AGENT'; clientCommandId: string; agentName: string }
   | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
   | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
@@ -228,10 +227,12 @@ export interface ModelAttemptFailureDTO {
 }
 
 /**
- * 一致的 Thread 快照投影；所有字段都来自同一个数据库快照。
+ * 一致的 Thread 快照投影；durable 字段都来自同一个数据库快照。
  * modelInvocation 是当前 Turn 的活动 model invocation（无则为 null）；
  * toolInvocations 是它的 tool 兄弟调用；modelAttemptFailures 只包含当前 Model context
  * 尚未物化的失败 attempt。
+ * manualCompaction 是 advisory sidecar：它只表示当前快照时刻的手动压缩可用性，
+ * 不是 durable Thread 状态，提交 compact 时仍必须以最新 revision 重新校验。
  */
 export interface HarnessThreadSnapshotDTO {
   revision: string
@@ -255,7 +256,7 @@ export interface AgentRuntimeOwnerDTO {
 }
 
 export interface NewSessionCommandTargetDTO {
-  kind: 'NEW_SESSION'
+  type: 'NEW_SESSION'
   sessionId: string
   threadId: string
   rootSettings: HarnessBranchSettingsDTO
@@ -263,7 +264,7 @@ export interface NewSessionCommandTargetDTO {
 }
 
 export interface EntryCommandTargetDTO {
-  kind: 'ENTRY'
+  type: 'ENTRY'
   sessionId: string
   startEntryId: string
   threadId: string
@@ -271,7 +272,7 @@ export interface EntryCommandTargetDTO {
 }
 
 export interface ThreadCommandTargetDTO {
-  kind: 'THREAD'
+  type: 'THREAD'
   threadId: string
   expectedHeadEntryId: string
   expectedNextCommandSequence: string
@@ -285,7 +286,7 @@ export type AgentCommandTargetDTO =
 export interface AgentCommandBatchRequestDTO {
   owner: AgentRuntimeOwnerDTO
   target: AgentCommandTargetDTO
-  commands: HarnessThreadCommandCreateDTO[]
+  commands: HarnessCommandCreateDTO[]
 }
 
 export interface RuntimeSessionSummaryDTO {
@@ -301,16 +302,16 @@ export interface RuntimeThreadSummaryDTO {
   createdAt: BackendDateTime
   updatedAt: BackendDateTime
   status: string
-  model: HarnessModelSelectionDTO | null
-  headMessagePreview: string
+  model: HarnessModelSelectionDTO
+  headMessagePreview: string | null
 }
 
 export interface AgentCommandBatchResponseDTO {
   session: {
     sessionId: string
     createdAt: BackendDateTime
-  } | null
-  rootEntry: HarnessSessionEntryDTO | null
+  }
+  rootEntry: HarnessSessionEntryDTO
   thread: HarnessThreadDTO
   acceptedCommands: HarnessThreadCommandDTO[]
   replayed: boolean

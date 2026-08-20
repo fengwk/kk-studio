@@ -22,6 +22,7 @@ export function CanvasAgentThread() {
   }
   return (
     <AgentPane
+      key={snapshot.document.id}
       owner={{ type: 'CANVAS', id: snapshot.document.id }}
       paneId="canvas-agent"
       agents={agentsQuery.data?.results ?? []}

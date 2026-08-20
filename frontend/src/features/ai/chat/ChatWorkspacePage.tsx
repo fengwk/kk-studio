@@ -8,14 +8,12 @@ import {
   focusPane,
   loadChatPaneState,
   saveChatPaneState,
-  updatePaneTarget,
   visibleChatPanes,
   type ChatLayout,
   type ChatPaneState,
 } from '@/features/ai/chat/chat-pane-state'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
-import type { PaneTarget } from '@/features/ai/runtime/agent-pane'
 import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
@@ -114,9 +112,6 @@ export function ChatWorkspacePage() {
             pane={pane}
             focused={paneState.focusedPaneId === pane.id}
             onFocus={() => setPaneState((current) => focusPane(current, pane.id))}
-            onTargetChange={(target: PaneTarget) => {
-              setPaneState((current) => updatePaneTarget(current, pane.id, target))
-            }}
           />
         ))}
       </div>
