@@ -53,9 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * ThreadProcessor history normalization 与 MOVE_HEAD relocation：历史分支绝不恢复 / 复用，只补 synthetic 后新开 Turn。
- */
+/** ThreadProcessor history normalization：历史分支绝不恢复 / 复用，只补 synthetic 后新开 Turn。 */
 class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
 
   @Test
@@ -67,7 +65,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         rootBaseline.threadId(),
         new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(rootFixture.store, rootBaseline.threadId());
-    rootFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    rootFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork rootClaim = claimThreadWork(rootFixture.store, rootBaseline.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, rootFixture.processor.process(rootClaim));
     // ROOT -> TURN_START + USER：无 normalization suffix。
@@ -80,7 +78,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         closedBaseline.threadId(),
         new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(closedFixture.store, closedBaseline.threadId());
-    closedFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    closedFixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork closedClaim = claimThreadWork(closedFixture.store, closedBaseline.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, closedFixture.processor.process(closedClaim));
     // TURN_END(continueModel=false) + USER -> 直接新 INPUT Turn，无 HISTORY_CUT suffix。
@@ -100,7 +98,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
@@ -124,7 +122,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
@@ -160,7 +158,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
@@ -190,7 +188,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, second.threadId(), new UserMessageCommandPayload(userMessage("from-b")));
     requestThreadWork(fixture.store, second.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork bClaim = claimThreadWork(fixture.store, second.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(bClaim));
 
@@ -198,7 +196,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, shared.threadId(), new UserMessageCommandPayload(userMessage("from-a")));
     requestThreadWork(fixture.store, shared.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork aClaim = claimThreadWork(fixture.store, shared.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(aClaim));
 
@@ -282,10 +280,10 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-    // MOVE_HEAD 回 attached assistant（无调用）：不锁 Model/Tool，normalization 补 CANCELLED TURN_END 后新开
+    // head 位于 attached assistant（无调用）：不锁 Model/Tool，normalization 补 CANCELLED TURN_END 后新开
     // INPUT Turn。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
 
@@ -346,7 +344,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         });
     seedCommand(fixture.store, threadId, new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, threadId);
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork claim = claimThreadWork(fixture.store, threadId);
 
     // head != assistant、不在 basis 与 resultEntryId 上：IDLE_OR_HISTORICAL → INPUT normalization 只补缺失

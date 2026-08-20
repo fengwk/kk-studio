@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -31,7 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
@@ -499,8 +499,8 @@ class ModelProcessorTest {
   }
 
   @Test
-  void compactionCheckpointIsCanonicalAndRealtimeDeltasAreSuppressed() {
-    Fixture fixture = fixture(NO_RETRY, compactionInvocationRequest());
+  void compactionExecutionSuppressesRealtimeAndKeepsProviderTerminalForReducer() {
+    Fixture fixture = compactionFixture(NO_RETRY);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -519,8 +519,9 @@ class ModelProcessorTest {
 
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
-    assertEquals("structured summary", terminal.result().text());
-    assertEquals("structured summary", terminal.streamCheckpoint().text());
+    assertEquals(
+        "structured summary\n\n<read-files>\nstale.txt\n</read-files>", terminal.result().text());
+    assertEquals(terminal.result().text(), terminal.streamCheckpoint().text());
     assertTrue(deltas(fixture.sink).isEmpty());
   }
 
@@ -904,7 +905,7 @@ class ModelProcessorTest {
             store,
             (threadId, path, preparation) -> null,
             new ThreadProcessorConfig(
-                LEASE_CONFIG, FALLBACK_DELAY, new CompactionConfig(false, 16_384, 20_000)),
+                LEASE_CONFIG, FALLBACK_DELAY, new CompactionConfig(20_000, null)),
             clock,
             newScheduler());
     assertEquals(
@@ -2827,6 +2828,10 @@ class ModelProcessorTest {
     return fixture(retryPolicy, request());
   }
 
+  private Fixture compactionFixture(InvocationRetryPolicy retryPolicy) {
+    return new Fixture(retryPolicy, request(), newScheduler(), TurnStartReason.COMPACTION);
+  }
+
   private Fixture fixture(InvocationRetryPolicy retryPolicy, ModelRequestSpec request) {
     return new Fixture(retryPolicy, request, newScheduler());
   }
@@ -2857,13 +2862,17 @@ class ModelProcessorTest {
         InvocationRetryPolicy retryPolicy,
         ModelRequestSpec request,
         ScheduledExecutorService scheduler) {
+      this(retryPolicy, request, scheduler, TurnStartReason.INPUT);
+    }
+
+    Fixture(
+        InvocationRetryPolicy retryPolicy,
+        ModelRequestSpec request,
+        ScheduledExecutorService scheduler,
+        TurnStartReason reason) {
       this.scheduler = scheduler;
       this.request = request;
-      this.baseline =
-          seedBaseline(
-              store,
-              NOW,
-              request.compaction() == null ? TurnStartReason.INPUT : TurnStartReason.COMPACTION);
+      this.baseline = seedBaseline(store, NOW, reason);
       this.invocationId = seedInvocation(store, baseline, request, NOW);
       this.processor =
           new ModelProcessor(
@@ -2899,7 +2908,8 @@ class ModelProcessorTest {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), threadId, 100_000),
+                  new TurnStartPayload(
+                      TurnStartReason.INPUT, branchSettings(), threadId, 100_000, 16_384, null),
                   NOW.plusMillis(1)));
           tx.insertEntry(
               new Entry(
@@ -2959,6 +2969,7 @@ class ModelProcessorTest {
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
           UUID parentId = rootEntryId;
           Instant turnStartAt = now.plusMillis(1);
+          CompactionStart compaction = null;
           if (reason == TurnStartReason.COMPACTION) {
             // 压缩 invocation 的 basis 是 COMPACTION TURN_START；摘要范围必须落在此前可见历史里。
             UUID inputStart = tx.nextId();
@@ -2971,7 +2982,7 @@ class ModelProcessorTest {
                     sessionId,
                     rootEntryId,
                     new TurnStartPayload(
-                        TurnStartReason.INPUT, branchSettings(), threadId, 100_000),
+                        TurnStartReason.INPUT, branchSettings(), threadId, 100_000, 16_384, null),
                     now.plusMillis(1)));
             tx.insertEntry(
                 new Entry(userId, sessionId, inputStart, userMessagePayload(), now.plusMillis(2)));
@@ -2986,6 +2997,14 @@ class ModelProcessorTest {
                     now.plusMillis(4)));
             parentId = inputEnd;
             turnStartAt = now.plusMillis(5);
+            compaction =
+                new CompactionStart(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    branchSettings().model(),
+                    inputEnd,
+                    null,
+                    null);
           }
           UUID turnStartEntryId = tx.nextId();
           tx.insertEntry(
@@ -2993,7 +3012,8 @@ class ModelProcessorTest {
                   turnStartEntryId,
                   sessionId,
                   parentId,
-                  new TurnStartPayload(reason, branchSettings(), threadId, 100_000),
+                  new TurnStartPayload(
+                      reason, branchSettings(), threadId, 100_000, 16_384, compaction),
                   turnStartAt));
           tx.insertThread(
               ThreadProcessorTestSupport.threadState(threadId, sessionId, turnStartEntryId, now));
@@ -3092,14 +3112,7 @@ class ModelProcessorTest {
   }
 
   private static ModelRequestSpec request() {
-    return spec(List.of(), null);
-  }
-
-  private static ModelRequestSpec compactionInvocationRequest() {
-    return spec(
-        List.of(),
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100L, id(4L), id(6L), null));
+    return spec(List.of());
   }
 
   private static ModelRequestSpec requestWithTool() {
@@ -3114,10 +3127,10 @@ class ModelProcessorTest {
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30));
     ToolBinding binding = new ToolBinding(descriptor, ToolType.PLATFORM, null);
-    return spec(List.of(binding), null);
+    return spec(List.of(binding));
   }
 
-  private static ModelRequestSpec spec(List<ToolBinding> bindings, CompactionRequest compaction) {
+  private static ModelRequestSpec spec(List<ToolBinding> bindings) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         modelDescriptor(),
@@ -3126,8 +3139,7 @@ class ModelProcessorTest {
         bindings,
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        compaction);
+        ProviderCacheControl.none());
   }
 
   private static ProviderRequest providerRequest(List<ProviderToolDefinition> tools) {

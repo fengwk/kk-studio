@@ -92,7 +92,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             ModelInvocationStatus.SUCCEEDED,
             List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.SUCCEEDED));
     requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
     // claim1：Tool batch apply（TOOL0/TOOL1/TURN_END(COMPLETED, continueModel=true)），删除
     // children+parent，
@@ -169,7 +169,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     touchModelTimestamp(fixture.store, chain.modelInvocationId(), modelFloor);
     touchToolTimestamp(fixture.store, chain.toolInvocationIds().getFirst(), toolFloor);
     requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
     // claim1：Tool batch 原子 apply（results + TURN_END）以全部 durable floors 抬升。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
@@ -222,7 +222,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
         chain.toolInvocationIds().get(1),
         new ToolResult("call-2", List.of(new TextToolContent("second")), false, "{}"));
     requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
     // claim1：Tool batch apply：effects 先于 ToolResult，TURN_END 收尾，rows 删除。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
@@ -283,7 +283,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
                 ToolInvocationStatus.CANCELLED,
                 ToolInvocationStatus.UNKNOWN));
     requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
     // claim1：Tool batch 精确映射 FAILED/CANCELLED/UNKNOWN outcome payload 并收尾 TURN_END。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));

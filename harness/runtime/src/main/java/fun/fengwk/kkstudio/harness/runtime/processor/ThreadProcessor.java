@@ -2,12 +2,19 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
@@ -23,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
@@ -33,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ContextPressureDetector;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
@@ -45,7 +52,9 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -74,10 +83,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Assistant head 时加载），再按上下文恰执行一个动作：(a) MODEL_TERMINAL_PENDING —— head 恰为 basis 且未挂结果的 terminal
  * ModelInvocation 原子 apply；(b) TOOL_TERMINAL_PENDING —— 当前 head 恰为本 Thread ModelInvocation 产出 的
  * Assistant Entry、且其 Tool siblings 全部 terminal 时按 ordinal 原子 apply；(c) MODEL_ACTIVE / TOOL_ACTIVE
- * —— 当前 applicable invocation 非 terminal 时完成 claim；(d) CONTINUATION_DUE —— 无 open Turn 且 head 为
- * continueModel=true 的 TURN_END 时启动 continuation；(e) queued USER_MESSAGE/CUSTOM_MESSAGE 存在时启动 INPUT
- * Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn 只在启动 新 INPUT Turn 时被 normalization，绝不恢复
- * / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
+ * —— 当前 applicable invocation 非 terminal 时完成 claim；(d) CONTINUATION_DUE —— HISTORY phase gap 启动
+ * TURN_PREFIX，其它 continueModel obligation 启动 CONTINUATION；(e) queued USER_MESSAGE/CUSTOM_MESSAGE
+ * 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn 只在启动 新 INPUT Turn 时被
+ * normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
  *
  * <p>Turn 启动采用 speculative plan：短事务锁 Thread、读取 queued Command 快照与 cutoff、校验 claim（并对近过期 lease 做
  * {@link ProcessorLeaseSupport#ensureLeaseMargin} 保证首次 Resolver heartbeat 前不会过期）、分配 candidate Entry
@@ -102,22 +111,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经 ToolTerminalPending 应用）；
  * closed turn（COMPLETE 无 calls / LENGTH 无 calls / FILTERED / terminal failure / cancel / unknown /
  * compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有 queued
- * message、成功 HISTORY / OVERFLOW compaction 需要延续、或闭合后用新 head path 判定立即出现 compaction action （如普通成功
- * turn 刚越过 threshold 自动自压）时请求 THREAD；失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。 Tool sibling
- * batch 追加 outcome 后 追加 continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再
- * complete，下一 claim 才做 continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages
- * 制造无意义 THREAD claim （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 或闭合即出现
- * compaction action 时先请求 THREAD 再 complete。
+ * user demand、HISTORY / OVERFLOW obligation、fallback 或 hard overflow 已确定时请求 THREAD；soft threshold
+ * 绝不因普通 turn 闭合自唤醒。失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。 Tool sibling batch 追加 outcome
+ * 后 追加 continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再 complete，下一 claim 才做
+ * continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
+ * （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 或闭合即出现 compaction action 时先请求
+ * THREAD 再 complete。
  *
  * <p>durable mutation 时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、
  * complete、request 与 reschedule 始终使用未抬升的本地 lease clock，避免未来 durable 时间改变 lease 语义。
  *
- * <p>自动压缩：无 open turn / continuation 待续且无 queued 输入时，按最新已关闭非压缩 turn 的 usage（providerTotalTokens
- * 优先，否则 categorizedTokens）与冻结 contextWindow 做阈值触发（{@code > max(0, contextWindow -
- * reserveTokens)}），或按 terminal OVERFLOW 错误触发 overflow 压缩；压缩 turn 复用同一 MODEL invocation + Work
- * 状态机，成功把 COMPACTION 结果 Entry 挂到 resultEntryId 后关闭（OVERFLOW 用 continueModel=true 让既有 CONTINUATION
- * 重试失败 turn，THRESHOLD 用 false）。切分 turn 先 HISTORY（incomplete payload）再机械启动独立 TURN_PREFIX 调用； 失败 / 停止
- * / 完成的压缩 turn 绝不立即再次压缩，压缩消费零 queued Command，另一 Thread 拥有的共享历史 turn 不压缩。
+ * <p>压缩触发正交：soft threshold 只在下一条真实 user demand 到达时 gate；hard overflow 立即压缩并只恢复一次； {@link
+ * #compactThread} 以 expectedRevision 同步提交 MANUAL plan。所有 trigger 共用 MODEL Work、一次 fallback 与
+ * deterministic no-gain；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零 queued
+ * Command，另一 Thread 拥有的共享历史 turn 不压缩。
  */
 @Slf4j
 public final class ThreadProcessor {
@@ -194,6 +201,43 @@ public final class ThreadProcessor {
     }
   }
 
+  /** 返回 Thread 当前的手动压缩可用性；结果是瞬时 projection，提交仍由 expectedRevision 做最终 CAS。 */
+  public ManualCompactionAvailability manualCompactionAvailability(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return store.transaction(
+        tx -> {
+          ThreadState thread =
+              tx.lockThread(threadId)
+                  .orElseThrow(
+                      () ->
+                          new HarnessRuntimeNotFoundException(
+                              "thread " + threadId + " does not exist"));
+          EntryPath path = tx.loadEntryPath(thread.headEntryId());
+          return manualDecision(tx, thread, path).availability();
+        });
+  }
+
+  /**
+   * 手动压缩控制：短事务 plan，事务外 resolve，再以 expected revision/source head/command snapshot 原子提交 COMPACTION
+   * Turn 与 MODEL Work。resolve 前崩溃零持久化；提交成功后不依赖进程内 intent。
+   */
+  public CompactThreadResult compactThread(CompactThreadCommand command) {
+    Objects.requireNonNull(command, "command");
+    ManualPlan manualPlan = store.transaction(tx -> planManual(tx, command));
+    TurnResolver.Result result =
+        resolver.resolve(
+            manualPlan.plan().threadId(),
+            manualPlan.plan().candidatePath(),
+            manualPlan.plan().preparation());
+    if (result == null) {
+      throw new IllegalStateException("turn resolver returned null for manual compaction");
+    }
+    if (result instanceof TurnResolver.Resolved resolved) {
+      ResolvedRequestValidator.validate(manualPlan.plan(), resolved);
+    }
+    return store.transaction(tx -> commitManual(tx, command, manualPlan.plan(), result));
+  }
+
   /**
    * 单 action 短事务：锁 Thread -&gt;（Commands -&gt; Model -&gt; Tool）-&gt; Work，按固定优先级分类并恰执行一个 durable
    * action。返回 null 表示 action 已在该事务完成 claim；非 null 表示构造了 speculative plan，由调用方在事务外 resolve 后第二事务
@@ -210,27 +254,12 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
-    ModelInvocation model = null;
-    List<ToolInvocation> siblings = List.of();
-    var openTurn = path.openTurnStart();
-    if (openTurn.isPresent()) {
-      // unlocked 读：决策阶段不产生任何 Model/Tool 锁。model 只按 (threadId, open TURN_START) 精确查找；Tool
-      // siblings 只在 model 结果恰为当前 head 且 head 为 ASSISTANT Message 时加载，否则保持空。
-      model = tx.findModelInvocationByTurn(thread.id(), openTurn.get().id()).orElse(null);
-      if (model != null
-          && model.resultEntryId() != null
-          && model.resultEntryId().equals(thread.headEntryId())
-          && path.head().payload() instanceof MessagePayload message
-          && message.message().role() == AgentMessageRole.ASSISTANT) {
-        siblings = tx.loadToolInvocationsByAssistantEntryId(path.head().id());
-      }
-    }
     // 唯一的 live/historical 适用性来源：不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
-    ThreadContext context = contextClassifier.classify(thread, path, model, siblings);
+    ThreadContext context = loadContext(tx, thread, path);
     return switch (context) {
       case ThreadContext.ModelTerminalPending pending -> {
         // 锁序 Thread -> Commands -> Model：判断 pre-existing queued message 必须在 lock Model 前加载。
-        boolean hasQueuedMessage = hasQueuedMessage(tx.loadQueuedCommands(thread.id()));
+        boolean hasQueuedMessage = hasQueuedUserMessage(tx.loadQueuedCommands(thread.id()));
         ModelInvocation locked = tx.lockModelInvocation(pending.model().id()).orElse(null);
         if (locked == null) {
           throw new ClaimLostSignal();
@@ -268,18 +297,23 @@ public final class ThreadProcessor {
         yield null;
       }
       case ThreadContext.ContinuationDue ignored -> {
-        // continuation 优先：现有 continueModel 义务必须原样执行，阈值压缩绝不插队（否则会吞掉既有 continuation）。
-        // OVERFLOW 失败的 turn 已关闭为 FAILED/idle，仍会通过 IdleOrHistorical 的 overflow 路径压缩。
+        CompactionPreparation historyContinuation = ownedHistoryContinuation(thread, path);
+        if (historyContinuation != null) {
+          yield planStep(
+              tx, claim, thread, path, TurnStartReason.COMPACTION, historyContinuation, now);
+        }
+        // 普通 continuation 优先：既有 obligation 必须原样执行，阈值压缩绝不插队。
         yield planStep(tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
       }
       case ThreadContext.IdleOrHistorical ignored -> {
-        // 压缩优先于输入：到期压缩先执行（消费零 Command），不能被已 queued 的用户消息绕过。
-        CompactionPreparation preparation = compactionPreparation(thread, path);
+        List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+        boolean userDemand = hasQueuedUserMessage(queued);
+        // owned HISTORY / fallback / hard overflow 优先；soft threshold 只有真实 user demand 存在时才启动。
+        CompactionPreparation preparation = compactionPreparation(thread, path, userDemand);
         if (preparation != null) {
           yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
         }
-        List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-        if (hasQueuedMessage(queued)) {
+        if (userDemand) {
           yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
         }
         completeClaim(tx, claim, now);
@@ -288,10 +322,111 @@ public final class ThreadProcessor {
     };
   }
 
-  /** queued 快照中是否存在待处理 message 命令（USER/CUSTOM）。 */
-  private static boolean hasQueuedMessage(List<ThreadCommand> queued) {
+  /** 无锁 Invocation 读取 + 纯 classifier；调用方必须已锁 Thread。 */
+  private ThreadContext loadContext(
+      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+    ModelInvocation model = null;
+    List<ToolInvocation> siblings = List.of();
+    var openTurn = path.openTurnStart();
+    if (openTurn.isPresent()) {
+      model = tx.findModelInvocationByTurn(thread.id(), openTurn.get().id()).orElse(null);
+      if (model != null
+          && model.resultEntryId() != null
+          && model.resultEntryId().equals(thread.headEntryId())
+          && path.head().payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.ASSISTANT) {
+        siblings = tx.loadToolInvocationsByAssistantEntryId(path.head().id());
+      }
+    }
+    return contextClassifier.classify(thread, path, model, siblings);
+  }
+
+  private ManualPlan planManual(HarnessStore.Transaction tx, CompactThreadCommand command) {
+    ThreadState thread =
+        tx.lockThread(command.threadId())
+            .orElseThrow(
+                () ->
+                    new HarnessRuntimeNotFoundException(
+                        "thread " + command.threadId() + " does not exist"));
+    if (thread.revision() != command.expectedRevision()) {
+      throw staleManualRevision(command, thread);
+    }
+    EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    ManualDecision decision = manualDecision(tx, thread, path);
+    if (!decision.availability().available()) {
+      throw manualUnavailable(thread, decision.availability().disabledReason());
+    }
+    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+    Instant now = durableMutationTime(clock.instant(), thread.updatedAt(), path.head().createdAt());
+    TurnPlan plan =
+        planBuilder.build(
+            thread.id(),
+            path,
+            TurnStartReason.COMPACTION,
+            queued,
+            tx::nextId,
+            now,
+            decision.preparation());
+    return new ManualPlan(plan);
+  }
+
+  private ManualDecision manualDecision(
+      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+    ThreadContext context = loadContext(tx, thread, path);
+    if (!(context instanceof ThreadContext.IdleOrHistorical)
+        || path.openTurnStart().isPresent()
+        || compactionPreparation(thread, path, false) != null) {
+      return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_BUSY);
+    }
+    ClosedTurn candidate = latestClosedTurn(path, path.entries().size());
+    boolean mismatchedModelSeen = false;
+    while (candidate != null) {
+      TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
+      if (!thread.id().equals(start.ownerThreadId())) {
+        return ManualDecision.disabled(
+            ManualCompactionAvailability.DisabledReason.OWNERSHIP_BARRIER);
+      }
+      if (start.contextWindow() != null && start.maxOutputTokens() != null) {
+        var executionModel =
+            start.compaction() == null
+                ? start.settings().model()
+                : start.compaction().executionModel();
+        if (executionModel.equals(path.baseSettings().model())) {
+          long projectedTokens = CompactionPlanner.estimateProjectionTokens(path);
+          long minimum = config.compaction().manualMinimum(start.contextWindow());
+          if (projectedTokens < minimum) {
+            return ManualDecision.disabled(
+                ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM);
+          }
+          CompactionPreparation preparation =
+              compactionPlanner
+                  .prepare(path, CompactionTrigger.MANUAL, start.contextWindow())
+                  .orElse(null);
+          return preparation == null
+              ? ManualDecision.disabled(
+                  ManualCompactionAvailability.DisabledReason.NOTHING_TO_COMPACT)
+              : ManualDecision.enabled(preparation);
+        }
+        if (start.compaction() == null) {
+          mismatchedModelSeen = true;
+        }
+      }
+      candidate = previousClosedTurn(path, candidate);
+    }
+    return ManualDecision.disabled(
+        mismatchedModelSeen
+            ? ManualCompactionAvailability.DisabledReason.MODEL_CHANGED
+            : ManualCompactionAvailability.DisabledReason.NO_RESOLVED_CONTEXT);
+  }
+
+  /** queued 快照中是否存在真实 user-like 输入；SYSTEM steering 只等待下一 INPUT/CONTINUATION，不独立启动 Turn。 */
+  private static boolean hasQueuedUserMessage(List<ThreadCommand> queued) {
     for (ThreadCommand command : queued) {
-      if (command.type().isMessage()) {
+      if (command.payload() instanceof UserMessageCommandPayload) {
+        return true;
+      }
+      if (command.payload() instanceof CustomMessageCommandPayload custom
+          && custom.message().role() == AgentMessageRole.USER) {
         return true;
       }
     }
@@ -306,21 +441,10 @@ public final class ThreadProcessor {
     tx.completeWork(claim, now);
   }
 
-  /**
-   * 计算当前 Thread 是否应当启动一次压缩 turn（纯读、无锁写）。
-   *
-   * <p>只基于路径上最新已关闭 turn 的 Entry 事实：该 turn 是 COMPACTION 时，只有其结果为 incomplete HISTORY payload 才机械启动
-   * TURN_PREFIX（失败 / 停止 / 完成的压缩 turn 绝不立即再次压缩，避免 spin）。非压缩 turn 必须 {@code ownerThreadId} 等于当前
-   * Thread（共享历史是 ownership barrier）；{@code contextWindow == null} 的 Resolver rejected turn 可跨越。最新
-   * terminal OVERFLOW 错误优先触发 overflow 压缩；否则在最近一次 complete COMPACTION barrier 之后向前寻找本 Thread 最新成功
-   * Assistant usage，超过 {@code max(0, contextWindow - reserveTokens)} 时阈值触发（providerTotalTokens 为 0
-   * 时回退 categorizedTokens，全零不触发）。planner 无内容可摘要时返回 null。活跃 open turn 查找仍可使用当前 Invocation。
-   */
-  private CompactionPreparation compactionPreparation(ThreadState thread, EntryPath path) {
+  /** 按 owned HISTORY -> fallback -> hard overflow -> demand-gated threshold 的顺序计算下一次压缩。 */
+  private CompactionPreparation compactionPreparation(
+      ThreadState thread, EntryPath path, boolean userDemand) {
     CompactionConfig compaction = config.compaction();
-    if (!compaction.enabled()) {
-      return null;
-    }
     ClosedTurn latestTurn = latestClosedTurn(path, path.entries().size());
     if (latestTurn == null) {
       return null;
@@ -328,41 +452,91 @@ public final class ThreadProcessor {
     Entry latestStart = latestTurn.start();
     TurnStartPayload latestStartPayload = (TurnStartPayload) latestStart.payload();
     if (latestStartPayload.reason() == TurnStartReason.COMPACTION) {
-      // 机械延续：最新关闭的 COMPACTION turn 结果为 incomplete HISTORY payload 时启动第二次 TURN_PREFIX 调用。
-      if (latestTurn.end().outcome() != TurnEndOutcome.COMPLETED) {
+      if (!thread.id().equals(latestStartPayload.ownerThreadId())) {
         return null;
       }
-      CompactionPayload incomplete = compactionResultOfTurn(path, latestStart);
-      if (incomplete == null || incomplete.phase() != CompactionPhase.HISTORY) {
-        return null;
+      CompactionPreparation historyContinuation = ownedHistoryContinuation(thread, path);
+      if (historyContinuation != null) {
+        return historyContinuation;
       }
-      Integer contextWindow = latestStartPayload.contextWindow();
-      if (contextWindow == null) {
-        return null;
+      CompactionTurns.CompactionTurn compactionTurn = compactionTurnAtStart(path, latestStart.id());
+      if (latestTurn.end().outcome() == TurnEndOutcome.FAILED
+          && compaction.fallbackModel() != null
+          && latestStartPayload
+              .compaction()
+              .executionModel()
+              .equals(latestStartPayload.settings().model())
+          && !compaction.fallbackModel().equals(latestStartPayload.compaction().executionModel())) {
+        return compactionPlanner.prepareFallback(path, compactionTurn);
       }
-      return compactionPlanner.prepareTurnPrefix(path, incomplete, contextWindow);
+      return null;
     }
     if (!thread.id().equals(latestStartPayload.ownerThreadId())) {
-      // 最新已关闭 turn 属于另一 Thread 的共享历史：不压缩。
       return null;
     }
     Entry latestResultEntry = turnResultEntry(path, latestStart);
-    if (latestResultEntry != null
-        && latestResultEntry.payload() instanceof AssistantErrorPayload error
-        && ProviderErrorKind.OVERFLOW.name().equals(error.error().code())) {
+    if (isContextWall(latestStartPayload, latestResultEntry)) {
       if (latestStartPayload.contextWindow() == null) {
         return null;
       }
       if (isOverflowRecoveryRetry(path, latestTurn)) {
-        // 一次 OVERFLOW 只允许 compact + immediate CONTINUATION 重试一次；重试仍 overflow 时保留失败结果，
-        // 绝不进入无界 compaction/retry 循环。后续新的 INPUT 或 tool continuation 仍可独立触发压缩。
         return null;
       }
       return compactionPlanner
           .prepare(path, CompactionTrigger.OVERFLOW, latestStartPayload.contextWindow())
           .orElse(null);
     }
+    if (!userDemand) {
+      return null;
+    }
     return thresholdPreparation(thread, path, latestTurn, compaction);
+  }
+
+  /** owned completed HISTORY turn 的机械 TURN_PREFIX obligation；其它 head 返回 null。 */
+  private CompactionPreparation ownedHistoryContinuation(ThreadState thread, EntryPath path) {
+    ClosedTurn latestTurn = latestClosedTurn(path, path.entries().size());
+    if (latestTurn == null
+        || latestTurn.end().outcome() != TurnEndOutcome.COMPLETED
+        || !(latestTurn.start().payload() instanceof TurnStartPayload start)
+        || start.reason() != TurnStartReason.COMPACTION
+        || !thread.id().equals(start.ownerThreadId())) {
+      return null;
+    }
+    CompactionTurns.CompactionTurn compactionTurn =
+        compactionTurnAtStart(path, latestTurn.start().id());
+    if (compactionTurn.phase() != CompactionPhase.HISTORY || compactionTurn.result() == null) {
+      return null;
+    }
+    return compactionPlanner.prepareTurnPrefix(path, compactionTurn);
+  }
+
+  private static CompactionTurns.CompactionTurn compactionTurnAtStart(
+      EntryPath path, UUID startEntryId) {
+    for (CompactionTurns.CompactionTurn turn : CompactionTurns.scan(path)) {
+      if (path.entries().get(turn.startIndex()).id().equals(startEntryId)) {
+        return turn;
+      }
+    }
+    throw new IllegalStateException("closed COMPACTION turn is missing from derived turn facts");
+  }
+
+  private static boolean isContextWall(TurnStartPayload start, Entry resultEntry) {
+    if (resultEntry == null) {
+      return false;
+    }
+    if (resultEntry.payload() instanceof AssistantErrorPayload error) {
+      return ProviderErrorKind.OVERFLOW.name().equals(error.error().code());
+    }
+    if (resultEntry.payload() instanceof MessagePayload message
+        && message.message().role() == AgentMessageRole.ASSISTANT
+        && message.assistantMetadata() != null
+        && start.contextWindow() != null) {
+      return ContextPressureDetector.detectResponse(
+          message.assistantMetadata().stopReason(),
+          message.assistantMetadata().usage(),
+          start.contextWindow());
+    }
+    return false;
   }
 
   /**
@@ -376,8 +550,8 @@ public final class ThreadProcessor {
     while (candidate != null) {
       TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
       if (start.reason() == TurnStartReason.COMPACTION) {
-        CompactionPayload result = compactionResultOfTurn(path, candidate.start());
-        if (result != null && result.complete()) {
+        CompactionTurns.CompactionTurn turn = compactionTurnAtStart(path, candidate.start().id());
+        if (turn.complete()) {
           return null;
         }
         candidate = previousClosedTurn(path, candidate);
@@ -390,6 +564,9 @@ public final class ThreadProcessor {
         candidate = previousClosedTurn(path, candidate);
         continue;
       }
+      if (!start.settings().model().equals(path.baseSettings().model())) {
+        return null;
+      }
       Entry resultEntry = turnResultEntry(path, candidate.start());
       if (resultEntry != null
           && resultEntry.payload() instanceof MessagePayload message
@@ -400,7 +577,10 @@ public final class ThreadProcessor {
             usage.providerTotalTokens() > 0
                 ? usage.providerTotalTokens()
                 : usage.categorizedTokens();
-        long threshold = Math.max(0L, (long) start.contextWindow() - compaction.reserveTokens());
+        if (start.maxOutputTokens() == null) {
+          return null;
+        }
+        long threshold = compaction.softThreshold(start.contextWindow(), start.maxOutputTokens());
         if (contextTokens <= threshold) {
           return null;
         }
@@ -469,31 +649,6 @@ public final class ThreadProcessor {
     return null;
   }
 
-  /** 返回指定 turn 内唯一的 COMPACTION result payload；turn 以其它 assistant result 结束 / 无结果时返回 null。 */
-  private static CompactionPayload compactionResultOfTurn(EntryPath path, Entry turn) {
-    boolean inTurn = false;
-    for (Entry entry : path.entries()) {
-      if (entry.id().equals(turn.id())) {
-        inTurn = true;
-        continue;
-      }
-      if (!inTurn) {
-        continue;
-      }
-      EntryPayload payload = entry.payload();
-      if (payload instanceof TurnEndPayload
-          || payload instanceof AssistantErrorPayload
-          || payload instanceof AssistantAbortedPayload
-          || payload instanceof MessagePayload) {
-        return null;
-      }
-      if (payload instanceof CompactionPayload compaction) {
-        return compaction;
-      }
-    }
-    return null;
-  }
-
   /** 当前失败 turn 是否正是 complete OVERFLOW compaction 创建的 immediate CONTINUATION 重试。 */
   private static boolean isOverflowRecoveryRetry(EntryPath path, ClosedTurn latestTurn) {
     if (((TurnStartPayload) latestTurn.start().payload()).reason()
@@ -512,9 +667,9 @@ public final class ThreadProcessor {
             != TurnStartReason.COMPACTION) {
       return false;
     }
-    CompactionPayload previousCompaction = compactionResultOfTurn(path, previousTurn.start());
-    return previousCompaction != null
-        && previousCompaction.complete()
+    CompactionTurns.CompactionTurn previousCompaction =
+        compactionTurnAtStart(path, previousTurn.start().id());
+    return previousCompaction.complete()
         && previousCompaction.trigger() == CompactionTrigger.OVERFLOW;
   }
 
@@ -550,10 +705,9 @@ public final class ThreadProcessor {
    * parent 并 attach resultEntryId。
    *
    * <p>wake 决定：active Tool phase 只为 READY 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 经
-   * ToolTerminalPending 应用并反馈模型）；closed turn 在新 Entries 插入、Thread advanced 后用新 head path 判定闭合是否立即
-   * 出现 compaction action（如普通成功 turn 刚越过 threshold 自动自压），只要已有 queued message、成功 HISTORY / OVERFLOW
-   * compaction 需要延续、或 compaction 立即到期就先请求 THREAD 再 complete，由 wakeVersion 保留新 wake；失败 / 停止 /
-   * complete COMPACTION 由 planner 判定不 spin，绝不 always wake。新命令在事务后到达会自行 requestWork。
+   * ToolTerminalPending 应用并反馈模型）；closed turn 在新 Entries 插入、Thread advanced 后，只在已有 queued user
+   * demand 或 fallback/hard-overflow obligation 已确定时请求 THREAD。soft threshold 没有新 demand 时保持
+   * idle；新命令在事务后 到达会自行 requestWork。
    */
   private void applyModel(
       HarnessStore.Transaction tx,
@@ -573,11 +727,32 @@ public final class ThreadProcessor {
     }
     Instant mutationNow =
         durableMutationTime(now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
+    TurnStartPayload turnStart =
+        (TurnStartPayload)
+            path.openTurnStart()
+                .orElseThrow(
+                    () ->
+                        new IllegalStateException(
+                            "terminal model must belong to an open TURN_START"))
+                .payload();
+    if (turnStart.compaction() != null) {
+      applyCompactionModel(
+          tx,
+          claim,
+          thread,
+          path,
+          model,
+          turnStart.compaction(),
+          mutationNow,
+          now,
+          hasQueuedMessage);
+      return;
+    }
     UUID sessionId = path.root().sessionId();
-    UUID parentId = ModelAttemptFailureAppender.append(tx, sessionId, path.head().id(), model);
+    UUID parentId =
+        ModelAttemptFailureAppender.append(tx, sessionId, path.head().id(), model, false);
     boolean succeeded = model.status() == ModelInvocationStatus.SUCCEEDED;
     ProviderResponse response = model.result();
-    CompactionRequest compactionRequest = model.request().compaction();
     UUID resultEntryId = tx.nextId();
     tx.insertEntry(
         new Entry(
@@ -585,35 +760,13 @@ public final class ThreadProcessor {
             sessionId,
             parentId,
             succeeded
-                ? compactionRequest != null
-                    ? CompactionSummaryAssembler.resultPayload(
-                        compactionRequest, response.text(), path)
-                    : payloadMapper.assistantPayload(response, model.request().toolBindings())
+                ? payloadMapper.assistantPayload(response, model.request().toolBindings())
                 : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
             mutationNow));
     UUID head = resultEntryId;
     boolean toolPhase = false;
     List<ToolInvocation> invocations = List.of();
-    // 关闭的压缩 turn 是否需要 THREAD 延续：HISTORY 部分成功（TURN_PREFIX 义务）或 OVERFLOW 最终压缩 continueModel=true。
-    boolean compactionWake = false;
-    if (succeeded && compactionRequest != null) {
-      // 压缩 turn：成功结果固定无 tool call；HISTORY 部分成功固定 continueModel=false，只有 complete 最终压缩且
-      // OVERFLOW 触发时才 continueModel=true（让既有 CONTINUATION 重试失败 turn）。
-      boolean continueModel =
-          compactionRequest.phase() != CompactionPhase.HISTORY
-              && compactionRequest.trigger() == CompactionTrigger.OVERFLOW;
-      compactionWake = continueModel || compactionRequest.phase() == CompactionPhase.HISTORY;
-      UUID turnEndId = tx.nextId();
-      tx.insertEntry(
-          new Entry(
-              turnEndId,
-              sessionId,
-              resultEntryId,
-              new TurnEndPayload(
-                  model.turnStartEntryId(), TurnEndOutcome.COMPLETED, continueModel, null, null),
-              mutationNow));
-      head = turnEndId;
-    } else if (succeeded) {
+    if (succeeded) {
       // canonical response 已在 SUCCEEDED 前通过 validator；这里只按 planner 的纯决策落地。
       ModelResponsePlan plan = responsePlanner.plan(response, model.request().toolBindings());
       switch (plan) {
@@ -708,11 +861,11 @@ public final class ThreadProcessor {
       // 关闭 turn：同事务 attach-then-delete 完成严格物化校验并删除 Model 行（closed turn 不保留 Invocation）。
       tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
       tx.deleteModelInvocation(model.id());
-      // 闭合后用新 head path 判断是否立即出现 compaction action（如普通成功 turn 刚越过 threshold 自动自压）；失败 /
-      // 停止 / complete 的 COMPACTION 由 planner 返回 null 保持不 spin，HISTORY / OVERFLOW 既有规则不变。绝不 always
-      // wake。
-      boolean compactionDue = compactionPreparation(advancedThread, tx.loadEntryPath(head)) != null;
-      requestThread = hasQueuedMessage || compactionWake || compactionDue;
+      // 闭合后只重建 queued user / fallback / hard-overflow obligation；soft threshold 无新 demand 时不
+      // self-wake。
+      boolean compactionDue =
+          compactionPreparation(advancedThread, tx.loadEntryPath(head), hasQueuedMessage) != null;
+      requestThread = hasQueuedMessage || compactionDue;
     }
     tx.updateThread(advancedThread);
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
@@ -739,6 +892,68 @@ public final class ThreadProcessor {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     }
     tx.completeWork(claim, now);
+  }
+
+  /** 应用一个 terminal Compaction Model；摘要语义失败也关闭本 turn，让 reducer决定一次 fallback或停止。 */
+  private void applyCompactionModel(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      EntryPath path,
+      ModelInvocation model,
+      CompactionStart start,
+      Instant mutationNow,
+      Instant workNow,
+      boolean hasQueuedUserMessage) {
+    UUID sessionId = path.root().sessionId();
+    EntryPayload resultPayload;
+    TurnEndOutcome outcome;
+    boolean continueModel = false;
+    if (model.status() != ModelInvocationStatus.SUCCEEDED) {
+      resultPayload =
+          payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model));
+      outcome = TurnEndOutcome.FAILED;
+    } else {
+      resultPayload = CompactionResultEvaluator.evaluate(path, start, model.result());
+      if (resultPayload instanceof CompactionPayload) {
+        outcome = TurnEndOutcome.COMPLETED;
+        continueModel =
+            start.phase() == CompactionPhase.HISTORY
+                || start.trigger() == CompactionTrigger.OVERFLOW;
+      } else {
+        outcome = TurnEndOutcome.FAILED;
+      }
+    }
+    UUID resultEntryId = tx.nextId();
+    tx.insertEntry(
+        new Entry(resultEntryId, sessionId, path.head().id(), resultPayload, mutationNow));
+    UUID turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId,
+            sessionId,
+            resultEntryId,
+            new TurnEndPayload(
+                model.turnStartEntryId(),
+                outcome,
+                continueModel,
+                outcome == TurnEndOutcome.FAILED ? TurnEndReason.TURN_FAILED : null,
+                null),
+            mutationNow));
+    tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
+    tx.deleteModelInvocation(model.id());
+    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
+    tx.updateThread(advanced);
+    boolean compactionDue =
+        compactionPreparation(advanced, tx.loadEntryPath(turnEndId), hasQueuedUserMessage) != null;
+    boolean mechanicalWake = outcome == TurnEndOutcome.COMPLETED && continueModel;
+    if (tx.lockClaimedWork(claim, workNow).isEmpty()) {
+      throw new ClaimLostSignal();
+    }
+    if (hasQueuedUserMessage || compactionDue || mechanicalWake) {
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);
+    }
+    tx.completeWork(claim, workNow);
   }
 
   /**
@@ -898,8 +1113,7 @@ public final class ThreadProcessor {
    *
    * <p>resolved：同层 Work 按 (type, id) 升序（先 THREAD wake 再 MODEL Work）只请求 MODEL Work——绝不因 deferred
    * messages 制造无意义 THREAD claim（terminal apply 会按 queued 快照重建 wake）——然后 complete。rejected：追加
-   * error+TURN_END 后，若 plan 保留了 deferred messages 或闭合后用新 head path 判定立即出现 compaction action （更早
-   * usage 超阈值）则先请求 THREAD 再 complete，否则直接 complete。
+   * error+TURN_END 后，只在 deferred user demand 或 fallback/hard-overflow obligation 存在时请求 THREAD。
    */
   private void commit(ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
     store.transaction(
@@ -907,6 +1121,95 @@ public final class ThreadProcessor {
           commitTx(tx, claim, plan, result);
           return null;
         });
+  }
+
+  private CompactThreadResult commitManual(
+      HarnessStore.Transaction tx,
+      CompactThreadCommand command,
+      TurnPlan plan,
+      TurnResolver.Result result) {
+    Instant now = clock.instant();
+    ThreadState thread =
+        tx.lockThread(command.threadId())
+            .orElseThrow(
+                () ->
+                    new HarnessRuntimeNotFoundException(
+                        "thread " + command.threadId() + " does not exist"));
+    if (thread.revision() != command.expectedRevision()
+        || !thread.headEntryId().equals(plan.sourceHeadEntryId())) {
+      throw staleManualRevision(command, thread);
+    }
+    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+    if (!snapshotMatches(plan, queued)) {
+      throw staleManualRevision(command, thread);
+    }
+    if (!plan.consumedCommands().isEmpty()) {
+      throw new IllegalStateException("manual compaction must not consume commands");
+    }
+    Instant mutationNow = durableMutationTime(now, thread.updatedAt());
+    for (Entry entry : plan.candidateEntries()) {
+      mutationNow = durableMutationTime(mutationNow, entry.createdAt());
+    }
+    Integer contextWindow =
+        result instanceof TurnResolver.Resolved resolved ? resolved.contextWindow() : null;
+    Integer maxOutputTokens =
+        result instanceof TurnResolver.Resolved resolved ? resolved.maxOutputTokens() : null;
+    for (Entry entry : plan.candidateEntries()) {
+      tx.insertEntry(
+          withCreatedAt(
+              withResolvedTurnStart(entry, plan, contextWindow, maxOutputTokens), mutationNow));
+    }
+    if (result instanceof TurnResolver.Resolved resolved) {
+      ThreadState advanced = thread.advanceHead(plan.candidateHeadEntryId(), mutationNow);
+      tx.updateThread(advanced);
+      UUID invocationId = tx.nextId();
+      tx.insertModelInvocation(
+          new ModelInvocation(
+              invocationId,
+              thread.id(),
+              plan.turnStartEntryId(),
+              plan.candidateHeadEntryId(),
+              resolved.spec(),
+              ModelInvocationStatus.READY,
+              0,
+              null,
+              null,
+              null,
+              null,
+              List.of(),
+              mutationNow,
+              mutationNow));
+      tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), now);
+      return new CompactThreadResult(advanced, plan.turnStartEntryId(), invocationId);
+    }
+    TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
+    UUID errorEntryId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            errorEntryId,
+            plan.sessionId(),
+            plan.candidateHeadEntryId(),
+            new AssistantErrorPayload(rejected.error(), null),
+            mutationNow));
+    UUID turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId,
+            plan.sessionId(),
+            errorEntryId,
+            new TurnEndPayload(
+                plan.turnStartEntryId(),
+                TurnEndOutcome.FAILED,
+                false,
+                TurnEndReason.TURN_FAILED,
+                null),
+            mutationNow));
+    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
+    tx.updateThread(advanced);
+    if (plan.hasDeferredUserMessages()) {
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+    }
+    return new CompactThreadResult(advanced, plan.turnStartEntryId(), null);
   }
 
   private void commitTx(
@@ -929,9 +1232,13 @@ public final class ThreadProcessor {
     }
     Integer contextWindow =
         result instanceof TurnResolver.Resolved resolved ? resolved.contextWindow() : null;
+    Integer maxOutputTokens =
+        result instanceof TurnResolver.Resolved resolved ? resolved.maxOutputTokens() : null;
     // 低序 mutation（Entries / Commands / Thread / ModelInvocation）先完成。
     for (Entry entry : plan.candidateEntries()) {
-      tx.insertEntry(withCreatedAt(withResolvedTurnStart(entry, plan, contextWindow), mutationNow));
+      tx.insertEntry(
+          withCreatedAt(
+              withResolvedTurnStart(entry, plan, contextWindow, maxOutputTokens), mutationNow));
     }
     List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
     for (ThreadCommand command : plan.consumedCommands()) {
@@ -984,14 +1291,16 @@ public final class ThreadProcessor {
               mutationNow));
       ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
       tx.updateThread(advanced);
-      // 低序 mutation 完成后，final fence 前基于新 head path 判断闭合后是否立即出现 compaction action（如更早
-      // usage 已超阈值）；Rejected turn 本身（contextWindow==null）不作为触发事实。
-      boolean compactionDue = compactionPreparation(advanced, tx.loadEntryPath(turnEndId)) != null;
+      // Rejected turn 本身没有 resolved budgets；仅 deferred demand 或更早的 fallback/hard-overflow 事实可重建
+      // wake。
+      boolean deferredUserDemand = plan.hasDeferredUserMessages();
+      boolean compactionDue =
+          compactionPreparation(advanced, tx.loadEntryPath(turnEndId), deferredUserDemand) != null;
       if (tx.lockClaimedWork(claim, now).isEmpty()) {
         throw new ClaimLostSignal();
       }
-      // rejected：保留 deferred messages 或闭合即触发 compaction 时先请求 THREAD 再 complete。
-      if (plan.hasDeferredMessages() || compactionDue) {
+      // rejected：保留 deferred user 或已确定 compaction obligation 时先请求 THREAD 再 complete。
+      if (deferredUserDemand || compactionDue) {
         tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
       }
       tx.completeWork(claim, now);
@@ -1047,8 +1356,9 @@ public final class ThreadProcessor {
         entry.id(), entry.sessionId(), entry.parentEntryId(), entry.payload(), createdAt);
   }
 
-  /** 第二阶段 commit 在插入前补齐 Resolver 成功时的 contextWindow；rejected 保持 null。 */
-  private static Entry withResolvedTurnStart(Entry entry, TurnPlan plan, Integer contextWindow) {
+  /** 第二阶段 commit 在插入前补齐 Resolver 成功时的 contextWindow/maxOutputTokens；rejected 保持 null。 */
+  private static Entry withResolvedTurnStart(
+      Entry entry, TurnPlan plan, Integer contextWindow, Integer maxOutputTokens) {
     if (!entry.id().equals(plan.turnStartEntryId())
         || !(entry.payload() instanceof TurnStartPayload start)) {
       return entry;
@@ -1058,7 +1368,12 @@ public final class ThreadProcessor {
         entry.sessionId(),
         entry.parentEntryId(),
         new TurnStartPayload(
-            start.reason(), start.settings(), start.ownerThreadId(), contextWindow),
+            start.reason(),
+            start.settings(),
+            start.ownerThreadId(),
+            contextWindow,
+            maxOutputTokens,
+            start.compaction()),
         entry.createdAt());
   }
 
@@ -1096,6 +1411,52 @@ public final class ThreadProcessor {
     @Override
     public String toString() {
       return pluginId + ":" + customType;
+    }
+  }
+
+  private static HarnessRuntimeConflictException staleManualRevision(
+      CompactThreadCommand command, ThreadState thread) {
+    return new HarnessRuntimeConflictException(
+        HarnessRuntimeConflictException.Reason.STALE_REVISION,
+        "thread "
+            + thread.id()
+            + " revision "
+            + thread.revision()
+            + " does not match expected "
+            + command.expectedRevision());
+  }
+
+  private static HarnessRuntimeConflictException manualUnavailable(
+      ThreadState thread, ManualCompactionAvailability.DisabledReason reason) {
+    return new HarnessRuntimeConflictException(
+        HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE,
+        "thread " + thread.id() + " cannot be compacted manually: " + reason);
+  }
+
+  private record ManualPlan(TurnPlan plan) {
+    private ManualPlan {
+      plan = Objects.requireNonNull(plan, "plan");
+    }
+  }
+
+  private record ManualDecision(
+      ManualCompactionAvailability availability, CompactionPreparation preparation) {
+    private ManualDecision {
+      availability = Objects.requireNonNull(availability, "availability");
+      if (availability.available() != (preparation != null)) {
+        throw new IllegalArgumentException(
+            "manual compaction preparation must be present iff availability is enabled");
+      }
+    }
+
+    private static ManualDecision enabled(CompactionPreparation preparation) {
+      return new ManualDecision(
+          ManualCompactionAvailability.enabled(),
+          Objects.requireNonNull(preparation, "preparation"));
+    }
+
+    private static ManualDecision disabled(ManualCompactionAvailability.DisabledReason reason) {
+      return new ManualDecision(ManualCompactionAvailability.disabled(reason), null);
     }
   }
 

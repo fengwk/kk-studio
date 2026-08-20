@@ -8,12 +8,12 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -183,7 +183,7 @@ class ModelAttemptMaterializationTest {
   void acceptsOnlyTheExactDirectStopBarrier() {
     StreamCheckpoint checkpoint = new StreamCheckpoint(1, 4, "partial", "thinking");
     ModelInvocation running =
-        invocation(request(null), ModelInvocationStatus.RUNNING, 1, checkpoint, null, List.of());
+        invocation(request(), ModelInvocationStatus.RUNNING, 1, checkpoint, null, List.of());
     ModelInvocationError cancellation =
         new ModelInvocationError(ProviderErrorKind.CANCELLED, "cancelled");
     Entry aborted =
@@ -208,7 +208,7 @@ class ModelAttemptMaterializationTest {
         () -> ModelAttemptMaterialization.validate(running, attached, inputPath(droppedPartial)));
 
     ModelInvocation ready =
-        invocation(request(null), ModelInvocationStatus.READY, 0, null, null, List.of());
+        invocation(request(), ModelInvocationStatus.READY, 0, null, null, List.of());
     Entry cancellationBarrier = assistantError(id(4L), id(3L), cancellation, null, T6);
     ModelInvocation stopped =
         ready.cancel(cancellation, T6).attachResultEntry(cancellationBarrier.id(), T6);
@@ -221,28 +221,30 @@ class ModelAttemptMaterializationTest {
     ModelAttemptFailure failure = failure();
     ModelInvocationError terminalError =
         new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "summarization failed");
+    CompactionStart compaction = fullCompactionStart();
     ModelInvocation stored =
-        invocation(
-            request(
-                new CompactionRequest(
-                    CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100, id(1L), id(1L), null)),
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(2L),
+            request(),
             ModelInvocationStatus.FAILED,
             2,
             null,
+            null,
             terminalError,
-            List.of(failure));
+            null,
+            List.of(failure),
+            T2,
+            T6);
     Entry result =
         assistantError(id(3L), id(2L), terminalError, new ModelAttemptSnapshot(2, 0, "", ""), T6);
     EntryPath path =
         new EntryPath(
             List.of(
                 root(),
-                new Entry(
-                    id(2L),
-                    id(100L),
-                    id(1L),
-                    new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
-                    T1),
+                new Entry(id(2L), id(100L), id(1L), resolvedCompactionTurnStart(compaction), T1),
                 result));
 
     assertDoesNotThrow(
@@ -368,7 +370,7 @@ class ModelAttemptMaterializationTest {
             id(20L),
             id(2L),
             id(4L),
-            request(null),
+            request(),
             ModelInvocationStatus.FAILED,
             1,
             null,
@@ -390,7 +392,7 @@ class ModelAttemptMaterializationTest {
             id(20L),
             id(2L),
             id(2L),
-            request(null),
+            request(),
             ModelInvocationStatus.SUCCEEDED,
             1,
             null,
@@ -613,15 +615,16 @@ class ModelAttemptMaterializationTest {
   /** attach 转换的 compaction 成功结果：必须完整等于装配 result payload（preResultPath 去 head 重放 apply 上下文）。 */
   @Test
   void acceptsExactCompactionSuccessResultAndRejectsSummaryDrift() {
-    CompactionRequest compaction = compactionRequest();
+    CompactionStart compaction = historyCompactionStart();
     // compaction 结果必须位于 COMPACTION turn 内（TurnPathValidator），basis = TURN_START id(2)。
-    ModelInvocation stored = compactionSucceededInvocation(compaction);
-    EntryPath preResult = new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1)));
+    ModelInvocation stored = compactionSucceededInvocation();
+    EntryPath preResult =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
     CompactionPayload exact =
-        CompactionSummaryAssembler.resultPayload(compaction, "final summary", preResult);
+        CompactionSummaryAssembler.resultPayload(preResult, compaction, "final summary");
     Entry result = new Entry(id(4L), id(100L), id(2L), exact, T6);
     EntryPath path =
-        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1), result));
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
     assertDoesNotThrow(
         () ->
             ModelAttemptMaterialization.validate(
@@ -629,22 +632,10 @@ class ModelAttemptMaterializationTest {
 
     // summaryText 漂移（同一 phase/trigger/tokens，仅文本不同）必须被拒。
     Entry drifted =
-        new Entry(
-            id(4L),
-            id(100L),
-            id(2L),
-            new CompactionPayload(
-                CompactionPhase.FULL,
-                CompactionTrigger.THRESHOLD,
-                100,
-                true,
-                "drifted summary",
-                compaction.firstKeptEntryId(),
-                compaction.cutEntryId(),
-                compaction.turnPrefixStartEntryId()),
-            T6);
+        new Entry(id(4L), id(100L), id(2L), new CompactionPayload("drifted summary"), T6);
     EntryPath driftedPath =
-        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1), drifted));
+        new EntryPath(
+            List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), drifted));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -656,36 +647,32 @@ class ModelAttemptMaterializationTest {
   /** preResultPath 下界：compaction 成功结果前的 preResult 前缀必须至少保留 ROOT + basis（即 resultPath 至少 3 项）。 */
   @Test
   void compactionSuccessResultRequiresNonTrivialPreResultPath() {
-    CompactionRequest compaction = compactionRequest();
-    ModelInvocation stored = compactionSucceededInvocation(compaction);
+    CompactionStart compaction = historyCompactionStart();
+    ModelInvocation stored = compactionSucceededInvocation();
     // 最短合法形状恰为 [ROOT, TURN_START, result]：preResult = [ROOT, TURN_START]（ROOT+basis 两项）是 <3
     // 下界守卫允许的边界；更短（只剩 ROOT）的前缀无法由 EntryPath 构造（ROOT-first + COMPACTION 必须在 open TURN_START
     // 内），该守卫仅作不可达防御。
-    EntryPath preResult = new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1)));
+    EntryPath preResult =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
     CompactionPayload exact =
-        CompactionSummaryAssembler.resultPayload(compaction, "final summary", preResult);
+        CompactionSummaryAssembler.resultPayload(preResult, compaction, "final summary");
     Entry result = new Entry(id(4L), id(100L), id(2L), exact, T6);
     EntryPath minimum =
-        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1), result));
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
     assertDoesNotThrow(
         () ->
             ModelAttemptMaterialization.validate(
                 stored, stored.attachResultEntry(result.id(), T6), minimum));
   }
 
-  private static CompactionRequest compactionRequest() {
-    return new CompactionRequest(
-        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100, id(1L), id(1L), null);
-  }
-
   /** SUCCEEDED compaction invocation：basis = TURN_START id(2)，result = 固定摘要文本快照。 */
-  private static ModelInvocation compactionSucceededInvocation(CompactionRequest compaction) {
+  private static ModelInvocation compactionSucceededInvocation() {
     return new ModelInvocation(
         id(10L),
         id(20L),
         id(2L),
         id(2L),
-        request(compaction),
+        request(),
         ModelInvocationStatus.SUCCEEDED,
         1,
         null,
@@ -699,7 +686,7 @@ class ModelAttemptMaterializationTest {
 
   private static ModelInvocation failedInvocation(List<ModelAttemptFailure> failures) {
     return invocation(
-        request(null),
+        request(),
         ModelInvocationStatus.FAILED,
         2,
         new StreamCheckpoint(2, 7, "terminal partial", "terminal thinking"),
@@ -718,7 +705,7 @@ class ModelAttemptMaterializationTest {
         id(10L),
         id(20L),
         id(2L),
-        status == ModelInvocationStatus.FAILED && request.compaction() != null ? id(2L) : id(3L),
+        id(3L),
         request,
         status,
         attempt,
@@ -805,7 +792,7 @@ class ModelAttemptMaterializationTest {
     return new Entry(id(1L), id(100L), null, new RootPayload(SETTINGS), T0);
   }
 
-  private static ModelRequestSpec request(CompactionRequest compaction) {
+  private static ModelRequestSpec request() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         modelDescriptor(),
@@ -814,8 +801,7 @@ class ModelAttemptMaterializationTest {
         List.of(),
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        compaction);
+        ProviderCacheControl.none());
   }
 
   private static ModelDescriptor modelDescriptor() {
@@ -889,8 +875,7 @@ class ModelAttemptMaterializationTest {
         List.of(binding),
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        null);
+        ProviderCacheControl.none());
   }
 
   /** [root, TURN_START, USER, assistant] 且 basis == assistant == head 的 tool phase path。 */
@@ -984,13 +969,30 @@ class ModelAttemptMaterializationTest {
   }
 
   /** COMPACTION turn 的 TURN_START（compaction 结果 Entry 必须位于 compaction turn 内）。 */
-  private static Entry compactionTurnStart(UUID entryId, UUID parentId, Instant createdAt) {
+  private static Entry compactionTurnStart(
+      UUID entryId, UUID parentId, Instant createdAt, CompactionStart compaction) {
     return new Entry(
-        entryId,
-        id(100L),
-        parentId,
-        new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
-        createdAt);
+        entryId, id(100L), parentId, resolvedCompactionTurnStart(compaction), createdAt);
+  }
+
+  private static TurnStartPayload resolvedCompactionTurnStart(CompactionStart compaction) {
+    return new TurnStartPayload(
+        TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, compaction);
+  }
+
+  private static CompactionStart fullCompactionStart() {
+    return new CompactionStart(
+        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, SETTINGS.model(), id(1L), null, null);
+  }
+
+  private static CompactionStart historyCompactionStart() {
+    return new CompactionStart(
+        CompactionPhase.HISTORY,
+        CompactionTrigger.THRESHOLD,
+        SETTINGS.model(),
+        id(1L),
+        id(1L),
+        null);
   }
 
   private static Entry assistantToolMessage(UUID entryId, UUID parentId) {

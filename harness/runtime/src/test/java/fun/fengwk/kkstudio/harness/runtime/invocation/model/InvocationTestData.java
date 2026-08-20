@@ -134,8 +134,7 @@ final class InvocationTestData {
         bindings,
         List.of(),
         List.of(),
-        provider.cacheControl(),
-        null);
+        provider.cacheControl());
   }
 
   static ModelRequestSpec request() {

@@ -4,7 +4,10 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
 import java.util.List;
 import java.util.Objects;
@@ -54,10 +57,14 @@ record TurnPlan(
     }
   }
 
-  /** continuation 保留的 message 命令（USER/CUSTOM 未被消费）仍 queued 时需要一次显式 THREAD wake。 */
-  boolean hasDeferredMessages() {
+  /** continuation/compaction 保留的真实 user-like 命令仍 queued 时需要一次显式 THREAD wake。 */
+  boolean hasDeferredUserMessages() {
     for (ThreadCommand command : plannedCommands) {
-      if (command.type().isMessage() && !consumedCommands.contains(command)) {
+      boolean userLike =
+          command.payload() instanceof UserMessageCommandPayload
+              || (command.payload() instanceof CustomMessageCommandPayload custom
+                  && custom.message().role() == AgentMessageRole.USER);
+      if (userLike && !consumedCommands.contains(command)) {
         return true;
       }
     }

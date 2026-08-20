@@ -71,6 +71,36 @@ import java.util.concurrent.TimeUnit;
 class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
+  @Test
+  void inputConsumesExactlyOnePreexistingUserMessage() {
+    // 旧实现会把整个 queued snapshot 写进同一 INPUT；现在只消费到首条 user-like，后续消息保持 QUEUED。
+    Fixture fixture = fixture();
+    var baseline = seedBaseline(fixture.store);
+    UUID first =
+        seedCommand(
+            fixture.store,
+            baseline.threadId(),
+            new UserMessageCommandPayload(userMessage("first")));
+    UUID second =
+        seedCommand(
+            fixture.store,
+            baseline.threadId(),
+            new UserMessageCommandPayload(userMessage("second")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(3, path.entries().size());
+    MessagePayload user = (MessagePayload) path.head().payload();
+    assertEquals("first", ((TextMessageContent) user.message().contents().getFirst()).text());
+    assertEquals(
+        ThreadCommandState.APPLIED, command(fixture.store, baseline.threadId(), first).state());
+    assertEquals(
+        ThreadCommandState.QUEUED, command(fixture.store, baseline.threadId(), second).state());
+  }
+
   /**
    * continuation 优先于 queued USER：claim1 只创建 continuation（不消费 USER、不 wake THREAD）；模拟 ModelProcessor
    * 完成后 claim2 关闭 turn 时按 queued 快照 wake THREAD；claim3 才用保留 message 启动 INPUT。
@@ -83,8 +113,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
     // claim1：continuation plan -> resolve -> commit resolved：只请求 MODEL Work，不因 deferred USER 制造
     // THREAD claim。
@@ -449,7 +479,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             baseline.threadId(),
             new UserMessageCommandPayload(userMessage("first")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     // resolve 期间入队第二条 USER（sequence > cutoff）并请求 THREAD Work（enqueue 侧行为）。
     fixture.resolver.onResolve =
         () -> {
@@ -498,7 +528,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     fixture.resolver.onResolve =
         () ->
             inTx(
@@ -529,7 +559,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     // resolve 期间另一 actor 在 ROOT 下打开新 Turn 并移动 head。
     fixture.resolver.onResolve =
         () ->
@@ -569,7 +599,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     fixture.resolver.onResolve =
         () ->
             inTx(
@@ -637,7 +667,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
     // scheduler 已关闭：resolve 期间无法启动 heartbeat -> reschedule，零 durable mutation。
     fixture.scheduler.shutdownNow();
@@ -656,7 +686,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
     // claim 的 lease 仅剩 4s（< heartbeat interval 5s）：plan 事务必须 renew 到 now + leaseDuration，否则
     // Resolver 首次 heartbeat 前 lease 即过期。
     fixture.resolver.onResolve =

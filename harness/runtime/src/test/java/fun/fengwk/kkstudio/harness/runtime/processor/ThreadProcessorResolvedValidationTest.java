@@ -86,7 +86,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(mismatchedSpec, 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(mismatchedSpec, 100_000, 16_384));
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
@@ -155,7 +155,6 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
         List.of(environmentTool),
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        null);
+        ProviderCacheControl.none());
   }
 }

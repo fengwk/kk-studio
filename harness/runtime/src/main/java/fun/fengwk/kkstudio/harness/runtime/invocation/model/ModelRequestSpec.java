@@ -17,8 +17,9 @@ import java.util.Objects;
  *
  * <p>{@link ProviderType}、{@link ModelDescriptor}、{@link ModelVariant} 与 preamble / bindings /
  * cacheControl 是本次调用的唯一 durable 契约。完整对话历史、可由 {@code toolBindings} 派生的 Provider tools、顶层
- * Environment、YOLO 与 contextWindow 都不进入本对象；每次 attempt 由 {@link ModelRequestMaterializer} 从
- * EntryPath 重建内存 {@code ProviderRequest}。
+ * Environment、YOLO、contextWindow 与压缩元数据（压缩调用由 basis EntryPath 末尾 owned TURN_START.compaction
+ * 识别）都不进入本对象；每次 attempt 由 {@link ModelRequestMaterializer} 从 EntryPath 重建内存 {@code
+ * ProviderRequest}。
  */
 public record ModelRequestSpec(
     ProviderType providerType,
@@ -28,8 +29,7 @@ public record ModelRequestSpec(
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
     List<SubagentBinding> subagentBindings,
-    ProviderCacheControl cacheControl,
-    CompactionRequest compaction) {
+    ProviderCacheControl cacheControl) {
 
   /** 构造不具备子 Agent 委派能力的请求。 */
   public ModelRequestSpec(
@@ -39,8 +39,7 @@ public record ModelRequestSpec(
       List<AgentMessage> preambleMessages,
       List<ToolBinding> toolBindings,
       List<SkillBinding> skillBindings,
-      ProviderCacheControl cacheControl,
-      CompactionRequest compaction) {
+      ProviderCacheControl cacheControl) {
     this(
         providerType,
         model,
@@ -49,8 +48,7 @@ public record ModelRequestSpec(
         toolBindings,
         skillBindings,
         List.of(),
-        cacheControl,
-        compaction);
+        cacheControl);
   }
 
   public ModelRequestSpec {
@@ -66,26 +64,6 @@ public record ModelRequestSpec(
     requireUniqueSkillNames(skillBindings);
     requireUniqueSubagentNames(subagentBindings);
     requireConsistentRoutes(toolBindings, skillBindings);
-    requireCompactionRequestShape(toolBindings, skillBindings, subagentBindings, compaction);
-  }
-
-  private static void requireCompactionRequestShape(
-      List<ToolBinding> toolBindings,
-      List<SkillBinding> skillBindings,
-      List<SubagentBinding> subagentBindings,
-      CompactionRequest compaction) {
-    if (compaction == null) {
-      return;
-    }
-    if (!toolBindings.isEmpty()) {
-      throw new IllegalArgumentException("compaction requests must not carry tool bindings");
-    }
-    if (!skillBindings.isEmpty()) {
-      throw new IllegalArgumentException("compaction requests must not carry skill bindings");
-    }
-    if (!subagentBindings.isEmpty()) {
-      throw new IllegalArgumentException("compaction requests must not carry subagent bindings");
-    }
   }
 
   private static void requireUniqueToolNames(List<ToolBinding> toolBindings) {

@@ -263,14 +263,21 @@ class HistoryEntryPayloadTest {
         new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID).reason());
     assertEquals(
         4096,
-        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 4096)
+        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 4096, 1024, null)
             .contextWindow());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 0));
+        () ->
+            new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 0, 1024, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, -1));
+        () ->
+            new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 4096, 0, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new TurnStartPayload(
+                TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID, 4096, null, null));
   }
 
   @Test

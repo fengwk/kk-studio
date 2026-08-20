@@ -26,7 +26,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** TurnPlan 不可变快照校验：positive id、非负 cutoff、非空引用、防御性列表拷贝与 deferred-message 推导。 */
+/** TurnPlan 不可变快照校验：positive id、非负 cutoff、非空引用与 deferred user demand 推导。 */
 class TurnPlanTest {
 
   @Test
@@ -55,11 +55,11 @@ class TurnPlanTest {
     assertEquals(entries, plan.candidateEntries());
     assertEquals(List.of(), plan.plannedCommands());
     assertEquals(List.of(), plan.consumedCommands());
-    assertFalse(plan.hasDeferredMessages());
+    assertFalse(plan.hasDeferredUserMessages());
   }
 
   @Test
-  void hasDeferredMessagesDerivesFromPlannedMinusConsumed() {
+  void hasDeferredUserMessagesDerivesFromPlannedMinusConsumed() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     UUID messageCommandId =
@@ -84,7 +84,7 @@ class TurnPlanTest {
             TestIds.id(100),
             TurnStartReason.CONTINUATION,
             null);
-    assertTrue(withDeferred.hasDeferredMessages());
+    assertTrue(withDeferred.hasDeferredUserMessages());
     // 同一命令已被消费 -> 不再需要 wake。
     TurnPlan consumed =
         new TurnPlan(
@@ -100,7 +100,7 @@ class TurnPlanTest {
             TestIds.id(100),
             TurnStartReason.CONTINUATION,
             null);
-    assertFalse(consumed.hasDeferredMessages());
+    assertFalse(consumed.hasDeferredUserMessages());
   }
 
   @Test

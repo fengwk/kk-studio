@@ -3,10 +3,11 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryInput;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -32,7 +33,9 @@ import java.util.UUID;
 /**
  * 唯一请求重建边界：从不可变 {@link EntryPath} 与冻结 {@link ModelRequestSpec} 纯投影内存 {@link ProviderRequest}。
  *
- * <p>不访问 catalog、Environment registry 或 Plugin ContextProjector；也不持有事务。
+ * <p>不访问 catalog、Environment registry 或 Plugin ContextProjector；也不持有事务。压缩摘要调用通过 basis EntryPath 末尾
+ * owned {@code TURN_START.compaction}（{@link #compactionStartAtHead}）识别——closed Invocation 后仍可从
+ * Entry 恢复 fallback / split 元数据，不再在请求内复制 compaction facts。
  */
 public final class ModelRequestMaterializer {
 
@@ -52,10 +55,21 @@ public final class ModelRequestMaterializer {
   public ProviderRequest materialize(EntryPath path, ModelRequestSpec spec) {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(spec, "spec");
-    if (spec.compaction() != null) {
-      return materializeCompaction(path, spec);
+    CompactionStart compaction = compactionStartAtHead(path);
+    if (compaction != null) {
+      return materializeCompaction(path, spec, compaction);
     }
     return materializeLive(path, spec);
+  }
+
+  /** basis path 末尾条目是 owned COMPACTION TURN_START 时返回其冻结元数据，否则 null。 */
+  public static CompactionStart compactionStartAtHead(EntryPath path) {
+    Entry head = path.head();
+    if (head.payload() instanceof TurnStartPayload start
+        && start.reason() == TurnStartReason.COMPACTION) {
+      return start.compaction();
+    }
+    return null;
   }
 
   private ProviderRequest materializeLive(EntryPath path, ModelRequestSpec spec) {
@@ -69,8 +83,9 @@ public final class ModelRequestMaterializer {
         spec.cacheControl());
   }
 
-  private ProviderRequest materializeCompaction(EntryPath path, ModelRequestSpec spec) {
-    CompactionRequest compaction = spec.compaction();
+  /** 摘要调用：永远构建一个 SYSTEM（summarization system）+ 一个 USER（conversation + summary prompt）请求。 */
+  private ProviderRequest materializeCompaction(
+      EntryPath path, ModelRequestSpec spec, CompactionStart compaction) {
     CompactionSummaryInput input = CompactionPlanner.reconstructSummaryInput(path, compaction);
     List<AgentMessage> semanticMessages = new ArrayList<>(2);
     semanticMessages.add(AgentMessage.system(CompactionPrompts.summarizationSystemPrompt()));
@@ -96,24 +111,18 @@ public final class ModelRequestMaterializer {
   private static void appendHistory(EntryPath path, List<AgentMessage> semanticMessages) {
     List<Entry> entries = path.entries();
     int walkStart = 0;
-    CompactionPayload latestComplete = latestCompleteCompaction(entries);
-    if (latestComplete != null) {
-      int compactionIndex = indexOfPayload(entries, latestComplete);
-      int cutIndex = indexOfId(entries, latestComplete.cutEntryId());
-      int firstKeptIndex = indexOfId(entries, latestComplete.firstKeptEntryId());
-      if (cutIndex < 0
-          || firstKeptIndex < 0
-          || compactionIndex < 0
-          || firstKeptIndex > cutIndex
-          || cutIndex >= compactionIndex) {
+    var latest = CompactionTurns.latestComplete(path);
+    if (latest.isPresent()) {
+      var complete = latest.get();
+      int cutIndex = indexOfId(entries, complete.freezing().cutEntryId());
+      if (cutIndex < 0 || complete.resultIndex() < 0 || cutIndex > complete.resultIndex()) {
         throw new IllegalStateException(
-            "complete compaction references are corrupt on the current path: firstKeptEntryId="
-                + latestComplete.firstKeptEntryId()
-                + " cutEntryId="
-                + latestComplete.cutEntryId());
+            "complete compaction references are corrupt on the current path: cutEntryId="
+                + complete.freezing().cutEntryId());
       }
+      Entry completeResult = entries.get(complete.resultIndex());
       semanticMessages.add(
-          AgentMessage.user(CompactionPrompts.compactedContext(latestComplete.summaryText())));
+          AgentMessage.user(CompactionPrompts.compactedContext(complete.result().summaryText())));
       walkStart = cutIndex;
     }
     boolean inCompactionTurn = false;
@@ -155,28 +164,9 @@ public final class ModelRequestMaterializer {
     return List.copyOf(tools);
   }
 
-  private static CompactionPayload latestCompleteCompaction(List<Entry> entries) {
-    CompactionPayload latest = null;
-    for (Entry entry : entries) {
-      if (entry.payload() instanceof CompactionPayload payload && payload.complete()) {
-        latest = payload;
-      }
-    }
-    return latest;
-  }
-
   private static int indexOfId(List<Entry> entries, UUID entryId) {
     for (int i = 0; i < entries.size(); i++) {
       if (entries.get(i).id().equals(entryId)) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  private static int indexOfPayload(List<Entry> entries, CompactionPayload payload) {
-    for (int i = 0; i < entries.size(); i++) {
-      if (entries.get(i).payload() == payload) {
         return i;
       }
     }

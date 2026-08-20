@@ -43,6 +43,8 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     /** Approval target 缺失、不属于请求 thread 或当前不适用。 */
     APPROVAL_NOT_APPLICABLE,
     /** Approval 已被决策，且请求未重放已存储的决策。 */
-    APPROVAL_DECISION_MISMATCH
+    APPROVAL_DECISION_MISMATCH,
+    /** Thread 当前不满足手动压缩的可用性条件。 */
+    MANUAL_COMPACTION_UNAVAILABLE
   }
 }
