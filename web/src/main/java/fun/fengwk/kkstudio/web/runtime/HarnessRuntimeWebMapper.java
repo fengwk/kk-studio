@@ -1,9 +1,14 @@
 package fun.fengwk.kkstudio.web.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
+import fun.fengwk.kkstudio.core.studio.StudioOwner;
+import fun.fengwk.kkstudio.core.studio.StudioOwnerType;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
+import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
-import fun.fengwk.kkstudio.harness.runtime.MoveHeadCommand;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
@@ -12,7 +17,6 @@ import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.StreamCheckpointJsonCodec;
@@ -31,14 +35,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -48,15 +50,20 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCreateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
@@ -279,8 +286,10 @@ public final class HarnessRuntimeWebMapper {
     return dto;
   }
 
-  public static HarnessThreadSnapshotDTO toSnapshotDto(ThreadSnapshot snapshot) {
+  public static HarnessThreadSnapshotDTO toSnapshotDto(
+      ThreadSnapshot snapshot, ManualCompactionAvailability manualCompaction) {
     Objects.requireNonNull(snapshot, "snapshot");
+    Objects.requireNonNull(manualCompaction, "manualCompaction");
     HarnessThreadSnapshotDTO dto = new HarnessThreadSnapshotDTO();
     dto.setRevision(Long.toString(snapshot.thread().revision()));
     dto.setThread(toThreadDto(snapshot));
@@ -318,20 +327,53 @@ public final class HarnessRuntimeWebMapper {
       failures.add(failureDto);
     }
     dto.setModelAttemptFailures(List.copyOf(failures));
+    HarnessManualCompactionDTO manualCompactionDto = new HarnessManualCompactionDTO();
+    manualCompactionDto.setAvailable(manualCompaction.available());
+    manualCompactionDto.setDisabledReason(
+        manualCompaction.available() ? null : manualCompaction.disabledReason().name());
+    dto.setManualCompaction(manualCompactionDto);
     return dto;
   }
 
-  /** 映射 create-thread 返回的初始仅 ROOT 快照。 */
-  public static HarnessThreadDTO toCreatedThreadDto(CreatedThread created) {
-    Objects.requireNonNull(created, "created");
-    return toThreadDto(
-        new ThreadSnapshot(
-            created.thread(),
-            new EntryPath(List.of(created.rootEntry())),
-            List.of(),
-            null,
-            List.of(),
-            List.of()));
+  /** 映射命令接受结果，并使用接受后重新读取的当前 Thread snapshot 投影 Thread。 */
+  public static HarnessAcceptedCommandsDTO toAcceptedCommandsDto(
+      AcceptedCommands accepted, ThreadSnapshot currentSnapshot) {
+    Objects.requireNonNull(accepted, "accepted");
+    Objects.requireNonNull(currentSnapshot, "currentSnapshot");
+    if (!accepted.thread().id().equals(currentSnapshot.thread().id())) {
+      throw new IllegalArgumentException(
+          "accepted result and current snapshot thread do not match");
+    }
+    HarnessAcceptedCommandsDTO dto = new HarnessAcceptedCommandsDTO();
+    HarnessSessionDTO sessionDto = new HarnessSessionDTO();
+    sessionDto.setSessionId(accepted.session().id().toString());
+    sessionDto.setCreatedAt(accepted.session().createdAt());
+    dto.setSession(sessionDto);
+    dto.setRootEntry(toEntryDto(accepted.rootEntry()));
+    dto.setThread(toThreadDto(currentSnapshot));
+    List<HarnessThreadCommandDTO> commands = new ArrayList<>(accepted.acceptedCommands().size());
+    for (ThreadCommand command : accepted.acceptedCommands()) {
+      commands.add(toCommandDto(command));
+    }
+    dto.setAcceptedCommands(List.copyOf(commands));
+    dto.setReplayed(accepted.replayed());
+    return dto;
+  }
+
+  /** 映射手动压缩的提交结果，并使用提交后重新读取的当前 Thread snapshot 投影 Thread。 */
+  public static HarnessThreadCompactResultDTO toCompactResultDto(
+      CompactThreadResult result, ThreadSnapshot currentSnapshot) {
+    Objects.requireNonNull(result, "result");
+    Objects.requireNonNull(currentSnapshot, "currentSnapshot");
+    if (!result.thread().id().equals(currentSnapshot.thread().id())) {
+      throw new IllegalArgumentException("compact result and current snapshot thread do not match");
+    }
+    HarnessThreadCompactResultDTO dto = new HarnessThreadCompactResultDTO();
+    dto.setThread(toThreadDto(currentSnapshot));
+    dto.setTurnStartEntryId(result.turnStartEntryId().toString());
+    dto.setModelInvocationId(
+        result.modelInvocationId() == null ? null : result.modelInvocationId().toString());
+    return dto;
   }
 
   /** 映射一次 Stop 结果及权威的 stop 后快照。 */
@@ -344,7 +386,10 @@ public final class HarnessRuntimeWebMapper {
       throw new IllegalArgumentException("post-stop snapshot does not match Stop result");
     }
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
-    dto.setStatus(result.status().name());
+    dto.setStatus(
+        result.replayed()
+            ? "REPLAYED"
+            : result.stoppedTurnEndEntryId() == null ? "IDLE" : "STOPPED");
     dto.setThread(toThreadDto(postStopSnapshot));
     dto.setStoppedTurnEndEntryId(
         result.stoppedTurnEndEntryId() == null ? null : result.stoppedTurnEndEntryId().toString());
@@ -353,13 +398,6 @@ public final class HarnessRuntimeWebMapper {
   }
 
   // ---------- DTO -> domain ----------
-
-  public static CreateThreadCommand toCreateThreadCommand(HarnessThreadCreateDTO dto) {
-    requireNonNull(dto, "createDTO");
-    return new CreateThreadCommand(
-        toBranchSettings(dto.getBranchSettings()),
-        requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
-  }
 
   public static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
@@ -378,40 +416,39 @@ public final class HarnessRuntimeWebMapper {
         requireText(dto.getVariant(), "model.variant"));
   }
 
-  public static ThreadCommandBatch toCommandBatch(
-      String threadId, HarnessThreadCommandBatchDTO dto) {
-    requireNonNull(dto, "batchDTO");
-    List<HarnessThreadCommandCreateDTO> commands = requireList(dto.getCommands(), "commands");
-    if (commands.isEmpty()) {
-      throw new IllegalArgumentException("command batch must contain at least one command");
+  /** 映射 owner，并只允许产品公开的 CHAT/CANVAS discriminator。 */
+  public static StudioOwner toOwner(HarnessCommandOwnerDTO dto) {
+    requireNonNull(dto, "owner");
+    String type = requireText(dto.getType(), "owner.type");
+    StudioOwnerType ownerType;
+    try {
+      ownerType = StudioOwnerType.valueOf(type);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("owner.type must be CHAT or CANVAS: " + type, error);
     }
-    List<NewThreadCommand> domain = new ArrayList<>(commands.size());
-    for (HarnessThreadCommandCreateDTO command : commands) {
-      domain.add(toNewThreadCommand(command));
-    }
-    return new ThreadCommandBatch(
-        parseUuid(threadId, "threadId"),
-        parseUuid(dto.getExpectedHeadEntryId(), "expectedHeadEntryId"),
-        parsePositiveDecimal(dto.getExpectedNextCommandSequence(), "expectedNextCommandSequence"),
-        domain);
+    return new StudioOwner(ownerType, parseUuid(dto.getId(), "owner.id"));
   }
 
-  /** 在严格字段规则下把一个 typed command DTO 映射为 domain payload，并按 raw 请求形态计算 requestHash。 */
-  public static NewThreadCommand toNewThreadCommand(HarnessThreadCommandCreateDTO dto) {
-    requireNonNull(dto, "commandDTO");
-    ThreadCommandType type = requireType(dto.getType());
-    ThreadCommandPayload payload = toPayload(type, dto);
-    return new NewThreadCommand(
-        payload,
-        parseUuid(dto.getClientCommandId(), "clientCommandId"),
-        ThreadCommandPayloadJsonCodec.requestHash(payload));
+  /** 将唯一产品 HTTP 写请求映射为 owner + sealed target + ordered commands。 */
+  public static AcceptCommandsCommand toAcceptCommandsCommand(HarnessCommandBatchDTO dto) {
+    requireNonNull(dto, "commandBatchDTO");
+    List<HarnessCommandCreateDTO> requestCommands = requireList(dto.getCommands(), "commands");
+    if (requestCommands.isEmpty()) {
+      throw new IllegalArgumentException("commands must not be empty");
+    }
+    List<NewThreadCommand> commands = new ArrayList<>(requestCommands.size());
+    for (HarnessCommandCreateDTO command : requestCommands) {
+      commands.add(toNewHttpCommand(command));
+    }
+    validateHttpCommandShape(commands);
+    return new AcceptCommandsCommand(toTarget(dto.getTarget()), commands);
   }
 
-  public static MoveHeadCommand toMoveHeadCommand(String threadId, HarnessThreadHeadUpdateDTO dto) {
-    requireNonNull(dto, "headUpdateDTO");
-    return new MoveHeadCommand(
+  public static CompactThreadCommand toCompactThreadCommand(
+      String threadId, HarnessThreadCompactDTO dto) {
+    requireNonNull(dto, "compactDTO");
+    return new CompactThreadCommand(
         parseUuid(threadId, "threadId"),
-        parseUuid(dto.getTargetEntryId(), "targetEntryId"),
         parseNonNegativeDecimal(dto.getExpectedRevision(), "expectedRevision"));
   }
 
@@ -454,78 +491,156 @@ public final class HarnessRuntimeWebMapper {
 
   // ---------- 内部辅助方法 ----------
 
+  private static AcceptCommandsTarget toTarget(HarnessCommandTargetDTO dto) {
+    requireNonNull(dto, "target");
+    String type = requireText(dto.getType(), "target.type");
+    return switch (type) {
+      case "NEW_SESSION" -> {
+        requireForbiddenTarget(
+            dto, "startEntryId", "expectedHeadEntryId", "expectedNextCommandSequence");
+        yield new AcceptCommandsTarget.NewSession(
+            parseUuid(dto.getSessionId(), "target.sessionId"),
+            parseUuid(dto.getThreadId(), "target.threadId"),
+            toBranchSettings(requireNonNull(dto.getRootSettings(), "target.rootSettings")),
+            null,
+            requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
+      }
+      case "ENTRY" -> {
+        requireForbiddenTarget(
+            dto, "rootSettings", "expectedHeadEntryId", "expectedNextCommandSequence");
+        yield new AcceptCommandsTarget.Entry(
+            parseUuid(dto.getSessionId(), "target.sessionId"),
+            parseUuid(dto.getStartEntryId(), "target.startEntryId"),
+            parseUuid(dto.getThreadId(), "target.threadId"),
+            requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
+      }
+      case "THREAD" -> {
+        requireForbiddenTarget(dto, "sessionId", "startEntryId", "rootSettings", "yoloEnabled");
+        yield new AcceptCommandsTarget.Thread(
+            parseUuid(dto.getThreadId(), "target.threadId"),
+            parseUuid(dto.getExpectedHeadEntryId(), "target.expectedHeadEntryId"),
+            parsePositiveDecimal(
+                dto.getExpectedNextCommandSequence(), "target.expectedNextCommandSequence"));
+      }
+      default -> throw new IllegalArgumentException("unknown target type: " + type);
+    };
+  }
+
+  private static NewThreadCommand toNewHttpCommand(HarnessCommandCreateDTO dto) {
+    requireNonNull(dto, "command");
+    ThreadCommandType type = requireHttpCommandType(dto.getType());
+    ThreadCommandPayload payload = toPayload(type, dto);
+    return new NewThreadCommand(
+        payload,
+        parseUuid(dto.getClientCommandId(), "command.clientCommandId"),
+        ThreadCommandPayloadJsonCodec.requestHash(payload));
+  }
+
   private static ThreadCommandPayload toPayload(
-      ThreadCommandType type, HarnessThreadCommandCreateDTO dto) {
+      ThreadCommandType type, HarnessCommandCreateDTO dto) {
     return switch (type) {
       case USER_MESSAGE -> {
-        requireForbidden(
-            dto, "content", "role", "agentName", "model", "activeTools", "environment");
+        requireForbidden(dto, "agentName", "model", "activeTools", "environment");
         yield new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
       }
-      case CUSTOM_MESSAGE -> {
-        requireForbidden(dto, "contents", "agentName", "model", "activeTools", "environment");
-        AgentMessageRole role = requireRole(dto.getRole());
-        yield new CustomMessageCommandPayload(
-            new AgentMessage(
-                role, List.of(new TextMessageContent(requireText(dto.getContent(), "content")))));
-      }
       case SET_AGENT -> {
-        requireForbidden(dto, "content", "contents", "role", "model", "activeTools", "environment");
+        requireForbidden(dto, "contents", "model", "activeTools", "environment");
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
       case SET_MODEL -> {
-        requireForbidden(
-            dto, "content", "contents", "role", "agentName", "activeTools", "environment");
+        requireForbidden(dto, "contents", "agentName", "activeTools", "environment");
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
       }
       case SET_ACTIVE_TOOLS -> {
-        requireForbidden(dto, "content", "contents", "role", "agentName", "model", "environment");
+        requireForbidden(dto, "contents", "agentName", "model", "environment");
         yield new SetActiveToolsCommandPayload(requireList(dto.getActiveTools(), "activeTools"));
       }
       case SET_ENVIRONMENT -> {
-        requireForbidden(dto, "content", "contents", "role", "agentName", "model", "activeTools");
+        requireForbidden(dto, "contents", "agentName", "model", "activeTools");
         if (!dto.hasEnvironmentField()) {
           throw new IllegalArgumentException(
               "SET_ENVIRONMENT must contain environment (a binding object selects, null unbinds)");
         }
         yield new SetEnvironmentCommandPayload(toEnvironmentBinding(dto.getEnvironment()));
       }
+      default -> throw new IllegalArgumentException(
+          "command type is not allowed on the product HTTP surface: " + type);
     };
   }
 
-  private static ThreadCommandType requireType(String type) {
-    if (type == null) {
-      throw new IllegalArgumentException("type must not be null");
+  private static ThreadCommandType requireHttpCommandType(String type) {
+    String required = requireText(type, "command.type");
+    return switch (required) {
+      case "USER_MESSAGE" -> ThreadCommandType.USER_MESSAGE;
+      case "SET_ENVIRONMENT" -> ThreadCommandType.SET_ENVIRONMENT;
+      case "SET_AGENT" -> ThreadCommandType.SET_AGENT;
+      case "SET_MODEL" -> ThreadCommandType.SET_MODEL;
+      case "SET_ACTIVE_TOOLS" -> ThreadCommandType.SET_ACTIVE_TOOLS;
+      case "CUSTOM_MESSAGE" -> throw new IllegalArgumentException(
+          "CUSTOM_MESSAGE is not allowed on the product HTTP surface");
+      default -> throw new IllegalArgumentException("unknown command type: " + required);
+    };
+  }
+
+  private static void validateHttpCommandShape(List<NewThreadCommand> commands) {
+    List<ThreadCommandType> prefixOrder =
+        List.of(
+            ThreadCommandType.SET_ENVIRONMENT,
+            ThreadCommandType.SET_AGENT,
+            ThreadCommandType.SET_MODEL,
+            ThreadCommandType.SET_ACTIVE_TOOLS);
+    int lastSetOrder = -1;
+    int userMessageCount = 0;
+    boolean sawUserMessage = false;
+    for (int i = 0; i < commands.size(); i++) {
+      ThreadCommandType type = commands.get(i).payload().type();
+      if (type == ThreadCommandType.USER_MESSAGE) {
+        userMessageCount++;
+        sawUserMessage = true;
+        if (i != commands.size() - 1) {
+          throw new IllegalArgumentException("USER_MESSAGE must be the final HTTP command");
+        }
+        continue;
+      }
+      int order = prefixOrder.indexOf(type);
+      if (order < 0) {
+        throw new IllegalArgumentException(
+            "command type is not allowed on the product HTTP surface: " + type);
+      }
+      if (sawUserMessage || order <= lastSetOrder) {
+        throw new IllegalArgumentException(
+            "HTTP commands must use SET_ENVIRONMENT, SET_AGENT, SET_MODEL, SET_ACTIVE_TOOLS order");
+      }
+      lastSetOrder = order;
     }
-    try {
-      return ThreadCommandType.valueOf(type);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("unknown command type: " + type, error);
+    if (userMessageCount != 1) {
+      throw new IllegalArgumentException(
+          "HTTP command batch must contain exactly one USER_MESSAGE");
     }
   }
 
-  private static AgentMessageRole requireRole(String role) {
-    if (role == null) {
-      throw new IllegalArgumentException("role must not be null");
+  private static void requireForbiddenTarget(HarnessCommandTargetDTO dto, String... fields) {
+    for (String field : fields) {
+      boolean present =
+          switch (field) {
+            case "sessionId" -> dto.hasSessionIdField();
+            case "startEntryId" -> dto.hasStartEntryIdField();
+            case "threadId" -> dto.hasThreadIdField();
+            case "rootSettings" -> dto.hasRootSettingsField();
+            case "yoloEnabled" -> dto.hasYoloEnabledField();
+            case "expectedHeadEntryId" -> dto.hasExpectedHeadEntryIdField();
+            case "expectedNextCommandSequence" -> dto.hasExpectedNextCommandSequenceField();
+            default -> throw new IllegalArgumentException("unknown target field: " + field);
+          };
+      if (present) {
+        throw new IllegalArgumentException(
+            "field " + field + " is forbidden for target type " + dto.getType());
+      }
     }
-    AgentMessageRole parsed;
-    try {
-      parsed = AgentMessageRole.valueOf(role);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("unknown message role: " + role, error);
-    }
-    if (parsed != AgentMessageRole.SYSTEM && parsed != AgentMessageRole.USER) {
-      throw new IllegalArgumentException("custom message role must be SYSTEM or USER: " + role);
-    }
-    return parsed;
   }
 
-  /**
-   * 映射有序 USER_MESSAGE contents 列表（Canvas 首次发送等非 thread-command 路径复用）。
-   *
-   * <p>与 {@link #toUserMessageContents(HarnessThreadCommandCreateDTO)} 的 contents 分支共享严格字段校验。
-   */
+  /** 映射有序 USER_MESSAGE contents 列表（Canvas 首次发送等非 thread-command 路径复用）。 */
   public static List<AgentMessageContent> toUserMessageContents(
       List<HarnessUserMessageContentDTO> contents) {
     List<HarnessUserMessageContentDTO> required = requireList(contents, "contents");
@@ -539,8 +654,7 @@ public final class HarnessRuntimeWebMapper {
     return List.copyOf(mapped);
   }
 
-  private static List<AgentMessageContent> toUserMessageContents(
-      HarnessThreadCommandCreateDTO dto) {
+  private static List<AgentMessageContent> toUserMessageContents(HarnessCommandCreateDTO dto) {
     if (!dto.hasContentsField()) {
       throw new IllegalArgumentException(
           "USER_MESSAGE must contain exactly one non-empty contents list of TEXT/ATTACHMENT");
@@ -583,16 +697,14 @@ public final class HarnessRuntimeWebMapper {
     }
   }
 
-  private static void requireForbidden(HarnessThreadCommandCreateDTO dto, String... fields) {
+  private static void requireForbidden(HarnessCommandCreateDTO dto, String... fields) {
     for (String field : fields) {
       Object value =
           switch (field) {
-            case "content" -> dto.hasContentField() ? Boolean.TRUE : null;
             case "contents" -> dto.hasContentsField() ? Boolean.TRUE : null;
-            case "role" -> dto.getRole();
-            case "agentName" -> dto.getAgentName();
-            case "model" -> dto.getModel();
-            case "activeTools" -> dto.getActiveTools();
+            case "agentName" -> dto.hasAgentNameField() ? Boolean.TRUE : null;
+            case "model" -> dto.hasModelField() ? Boolean.TRUE : null;
+            case "activeTools" -> dto.hasActiveToolsField() ? Boolean.TRUE : null;
             case "environment" -> dto.hasEnvironmentField() ? Boolean.TRUE : null;
             default -> throw new IllegalArgumentException("unknown field: " + field);
           };

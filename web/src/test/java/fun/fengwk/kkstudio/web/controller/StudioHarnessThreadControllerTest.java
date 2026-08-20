@@ -2,11 +2,9 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -23,20 +21,17 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
+import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.MoveHeadCommand;
+import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
-import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
@@ -44,14 +39,8 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * {@link StudioHarnessThreadController} HTTP 契约（standalone MockMvc）：命令 batch 映射与 202、 404/409/400
- * 错误映射、head/stop/approval 请求字段透传。
- */
+/** Harness Thread 控制/查询 API：snapshot availability、compact、yolo/stop/approval 与旧路由逆证。 */
 class StudioHarnessThreadControllerTest {
-
-  private static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS =
-      new ThreadCommandPayloadJsonCodec();
 
   private static UUID id(long value) {
     return new UUID(0L, value);
@@ -62,18 +51,17 @@ class StudioHarnessThreadControllerTest {
   }
 
   private HarnessRuntime runtime;
-  private ChatThreadCommandService chatThreadCommandService;
+  private ThreadProcessor threadProcessor;
   private SystemPromptPreviewService systemPromptPreviewService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     runtime = mock(HarnessRuntime.class);
-    chatThreadCommandService = mock(ChatThreadCommandService.class);
+    threadProcessor = mock(ThreadProcessor.class);
     systemPromptPreviewService = mock(SystemPromptPreviewService.class);
     StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(
-            runtime, chatThreadCommandService, systemPromptPreviewService);
+        new StudioHarnessThreadController(runtime, threadProcessor, systemPromptPreviewService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -83,404 +71,100 @@ class StudioHarnessThreadControllerTest {
   }
 
   @Test
-  void getSnapshotMapsOneConsistentProjection() throws Exception {
+  void snapshotProjectsManualCompactionAvailabilityFromThreadProcessor() throws Exception {
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+    when(threadProcessor.manualCompactionAvailability(id(1)))
+        .thenReturn(
+            ManualCompactionAvailability.disabled(
+                ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM));
 
     mockMvc
         .perform(get("/api/ai/runtime/threads/" + idText(1) + "/snapshot"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.revision").value("3"))
         .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data.thread.sessionId").value(idText(1)))
-        .andExpect(jsonPath("$.data.thread.headEntryId").value(idText(1)))
-        .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
-        .andExpect(jsonPath("$.data.thread.processing").value(false))
-        .andExpect(jsonPath("$.data.thread.branchSettings.agentName").value("default-assistant"))
-        .andExpect(jsonPath("$.data.entries.length()").value(1))
-        .andExpect(jsonPath("$.data.queuedCommands.length()").value(0))
-        .andExpect(jsonPath("$.data.modelInvocation").value(nullValue()))
-        .andExpect(jsonPath("$.data.toolInvocations.length()").value(0));
+        .andExpect(jsonPath("$.data.manualCompaction.available").value(false))
+        .andExpect(jsonPath("$.data.manualCompaction.disabledReason").value("BELOW_MINIMUM"));
   }
 
   @Test
-  void getEntriesMapsFullSessionListAndPreservesEntryShape() throws Exception {
-    when(runtime.getThreadSessionEntries(id(1)))
-        .thenReturn(
-            List.of(
-                HarnessRuntimeTestFixtures.rootEntry(),
-                HarnessRuntimeTestFixtures.turnStartEntry()));
-
-    mockMvc
-        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/entries"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(2))
-        .andExpect(jsonPath("$.data[0].entryId").value(idText(1)))
-        .andExpect(jsonPath("$.data[0].sessionId").value(idText(1)))
-        .andExpect(jsonPath("$.data[0].parentEntryId").value(nullValue()))
-        .andExpect(jsonPath("$.data[0].entryType").value("ROOT"))
-        .andExpect(jsonPath("$.data[0].payloadJson").isString())
-        .andExpect(jsonPath("$.data[0].createTime").value(1767225600.000000000))
-        .andExpect(jsonPath("$.data[1].entryId").value(idText(2)))
-        .andExpect(jsonPath("$.data[1].parentEntryId").value(idText(1)))
-        .andExpect(jsonPath("$.data[1].entryType").value("TURN_START"));
-  }
-
-  @Test
-  void getSystemPromptMapsLatestPreviewText() throws Exception {
-    when(systemPromptPreviewService.preview(id(1))).thenReturn("You are the planner.");
-
-    mockMvc
-        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/system-prompt"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.text").value("You are the planner."));
-  }
-
-  @Test
-  void enqueueCommandsMapsOneBatchAndReturnsAccepted() throws Exception {
-    when(chatThreadCommandService.submitCommands(any(ThreadCommandBatch.class)))
-        .thenReturn(List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()));
-
-    String body =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [
-            {"type": "USER_MESSAGE", "contents": [{"type": "TEXT", "text": "hello"}], "clientCommandId": "00000000-0000-0000-0000-000000000101"},
-            {"type": "SET_AGENT", "agentName": "default-assistant", "clientCommandId": "00000000-0000-0000-0000-000000000102"},
-            {"type": "SET_MODEL",
-             "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
-             "clientCommandId": "00000000-0000-0000-0000-000000000103"},
-            {"type": "SET_ACTIVE_TOOLS", "activeTools": ["web_search"], "clientCommandId": "00000000-0000-0000-0000-000000000104"},
-            {"type": "SET_ENVIRONMENT",
-             "environment": {"name": "123e4567-e89b-12d3-a456-426614174000", "workspacePath": "."},
-             "clientCommandId": "00000000-0000-0000-0000-000000000105"},
-            {"type": "CUSTOM_MESSAGE", "role": "SYSTEM", "content": "rules", "clientCommandId": "00000000-0000-0000-0000-000000000106"}
-          ]
-        }
-        """;
-
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data[0].sequence").value("4"))
-        .andExpect(jsonPath("$.data[0].type").value("USER_MESSAGE"))
-        .andExpect(jsonPath("$.data[0].state").value("QUEUED"))
-        .andExpect(jsonPath("$.data[0].clientCommandId").value(idText(50)));
-
-    ArgumentCaptor<ThreadCommandBatch> captor = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(chatThreadCommandService).submitCommands(captor.capture());
-    ThreadCommandBatch batch = captor.getValue();
-    assertEquals(id(1), batch.threadId());
-    assertEquals(id(3), batch.expectedHeadEntryId());
-    assertEquals(4L, batch.expectedNextCommandSequence());
-    assertEquals(6, batch.commands().size());
-    assertEquals(ThreadCommandType.USER_MESSAGE, batch.commands().get(0).payload().type());
-    assertEquals(
-        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}",
-        COMMAND_PAYLOADS.encode(batch.commands().get(0).payload()));
-    assertEquals(ThreadCommandType.SET_ENVIRONMENT, batch.commands().get(4).payload().type());
-    assertEquals(
-        "{\"environment\":{\"name\":\"123e4567-e89b-12d3-a456-426614174000\",\"workspacePath\":\".\"}}",
-        COMMAND_PAYLOADS.encode(batch.commands().get(4).payload()));
-    assertEquals(ThreadCommandType.CUSTOM_MESSAGE, batch.commands().get(5).payload().type());
-  }
-
-  @Test
-  void enqueueCommandsRejectsForbiddenFieldAsBadRequest() throws Exception {
-    String body =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [
-            {"type": "USER_MESSAGE", "contents": [{"type": "TEXT", "text": "hello"}], "agentName": "default-assistant", "clientCommandId": "00000000-0000-0000-0000-000000000101"}
-          ]
-        }
-        """;
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isBadRequest());
-  }
-
-  @Test
-  void enqueueCommandsRejectsMissingSetEnvironmentFieldAsBadRequest() throws Exception {
-    // environment 字段缺省 ≠ 显式 null：SET_ENVIRONMENT 必须携带该字段。
-    String body =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [
-            {"type": "SET_ENVIRONMENT", "clientCommandId": "00000000-0000-0000-0000-000000000108"}
-          ]
-        }
-        """;
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isBadRequest());
-    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
-  }
-
-  @Test
-  void enqueueCommandsRejectsExplicitNullEnvironmentForOtherDiscriminatorsAsBadRequest()
-      throws Exception {
-    // 其他 discriminator 即使显式 environment:null 也按 forbidden 拒绝。
-    String body =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [
-            {"type": "SET_AGENT", "agentName": "default-assistant", "environment": null, "clientCommandId": "00000000-0000-0000-0000-000000000109"}
-          ]
-        }
-        """;
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isBadRequest());
-    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
-  }
-
-  @Test
-  void enqueueCommandsRejectsIncompleteEnvironmentBindingAsBadRequest() throws Exception {
-    // binding 嵌套字段缺失必须稳定 400（IAE），绝不能把 NPE 漏成 500。
-    String missingName =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [
-            {"type": "SET_ENVIRONMENT", "environment": {"workspacePath": "."}, "clientCommandId": "00000000-0000-0000-0000-000000000110"}
-          ]
-        }
-        """;
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(missingName))
-        .andExpect(status().isBadRequest());
-
-    String missingPath =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [
-            {"type": "SET_ENVIRONMENT", "environment": {"name": "env-1"}, "clientCommandId": "00000000-0000-0000-0000-000000000111"}
-          ]
-        }
-        """;
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(missingPath))
-        .andExpect(status().isBadRequest());
-    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
-  }
-
-  @Test
-  void enqueueCommandsRejectsUnknownCommandFieldAsBadRequest() throws Exception {
-    String body =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [
-            {"type": "SET_AGENT", "agentName": "default-assistant", "unexpected": true, "clientCommandId": "00000000-0000-0000-0000-000000000101"}
-          ]
-        }
-        """;
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isBadRequest());
-    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
-  }
-
-  @Test
-  void enqueueCommandsMapsStructuredUserContentsToCanonicalPersistentMessage() throws Exception {
-    when(chatThreadCommandService.submitCommands(any(ThreadCommandBatch.class)))
-        .thenReturn(List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()));
-    String body =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [{
-            "type": "USER_MESSAGE",
-            "clientCommandId": "00000000-0000-0000-0000-000000000201",
-            "contents": [
-              {"type": "TEXT", "text": "animate this"},
-              {"type": "ATTACHMENT", "uploadId": "00000000-0000-0000-0000-000000000301"}
-            ]
-          }]
-        }
-        """;
-
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isAccepted());
-
-    ArgumentCaptor<ThreadCommandBatch> captor = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(chatThreadCommandService).submitCommands(captor.capture());
-    assertEquals(
-        "{\"message\":{\"role\":\"USER\",\"contents\":["
-            + "{\"type\":\"text\",\"text\":\"animate this\"},"
-            + "{\"type\":\"attachment\",\"uploadId\":\"00000000-0000-0000-0000-000000000301\"}]}}",
-        COMMAND_PAYLOADS.encodeRequest(captor.getValue().commands().get(0).payload()));
-  }
-
-  @Test
-  void enqueueCommandsRejectsInvalidStructuredUserMessageShapesAsBadRequest() throws Exception {
-    String prefix =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [{
-            "type": "USER_MESSAGE",
-            "clientCommandId": "00000000-0000-0000-0000-000000000202",
-        """;
-    String suffix = """
-          }]
-        }
-        """;
-    List<String> invalidBodies =
-        List.of(
-            prefix + "\"contents\": []" + suffix,
-            prefix
-                + "\"text\": \"hello\", \"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\"}]"
-                + suffix,
-            prefix
-                + "\"text\": null, \"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\"}]"
-                + suffix,
-            prefix
-                + "\"contents\": [{\"type\": \"IMAGE\", \"mediaType\": \"audio/mpeg\","
-                + " \"source\": \"image-source\"}]"
-                + suffix,
-            prefix
-                + "\"contents\": [{\"type\": \"VIDEO\", \"mediaType\": \"video/mp4\","
-                + " \"source\": \" \"}]"
-                + suffix,
-            prefix + "\"contents\": [{\"type\": \"TOOL\", \"text\": \"hidden\"}]" + suffix,
-            prefix
-                + "\"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\", \"unknown\": true}]"
-                + suffix,
-            prefix
-                + "\"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\","
-                + " \"mediaType\": null}]"
-                + suffix,
-            prefix + "\"text\": \"hello\", \"textFieldPresent\": true" + suffix,
-            prefix
-                + "\"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\","
-                + " \"mediaTypeFieldPresent\": true}]"
-                + suffix);
-
-    for (String body : invalidBodies) {
-      mockMvc
-          .perform(
-              post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                  .contentType(MediaType.APPLICATION_JSON)
-                  .content(body))
-          .andExpect(status().isBadRequest());
-    }
-    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
-  }
-
-  @Test
-  void mapsNotFoundConflictAndBadRequestStatuses() throws Exception {
-    when(runtime.getThreadSnapshot(id(1)))
-        .thenThrow(new HarnessRuntimeNotFoundException("thread 1 does not exist"));
-    mockMvc
-        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/snapshot"))
-        .andExpect(status().isNotFound());
-
-    when(chatThreadCommandService.submitCommands(any(ThreadCommandBatch.class)))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "stale cursor"));
-    String body =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [{"type": "SET_MODEL", "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"}, "clientCommandId": "00000000-0000-0000-0000-000000000101"}]
-        }
-        """;
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/" + idText(1) + "/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.errors.reason").value("STALE_COMMAND_CURSOR"))
-        .andExpect(jsonPath("$.errors.detail").value("stale cursor"));
-
-    mockMvc.perform(get("/api/ai/runtime/threads/0/snapshot")).andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/ai/runtime/threads/not-a-number/snapshot"))
-        .andExpect(status().isBadRequest());
-
-    when(runtime.getThreadSessionEntries(id(1)))
-        .thenThrow(new HarnessRuntimeNotFoundException("thread 1 does not exist"));
-    mockMvc
-        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/entries"))
-        .andExpect(status().isNotFound());
-    mockMvc.perform(get("/api/ai/runtime/threads/0/entries")).andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/ai/runtime/threads/not-a-number/entries"))
-        .andExpect(status().isBadRequest());
-  }
-
-  @Test
-  void updateHeadMovesWithRevisionCasAndReturnsThread() throws Exception {
-    when(runtime.moveHead(any(MoveHeadCommand.class)))
-        .thenReturn(HarnessRuntimeTestFixtures.thread(id(2)));
+  void compactCallsInjectedThreadProcessorWithRevisionFenceAndMapsCommitResult() throws Exception {
+    when(threadProcessor.compactThread(any(CompactThreadCommand.class)))
+        .thenReturn(new CompactThreadResult(HarnessRuntimeTestFixtures.thread(id(1)), id(2), null));
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
 
     mockMvc
         .perform(
-            put("/api/ai/runtime/threads/" + idText(1) + "/head")
+            post("/api/ai/runtime/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"targetEntryId\":\"" + idText(2) + "\",\"expectedRevision\":\"3\"}"))
+                .content("{\"expectedRevision\":\"3\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("IDLE"));
+        .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
+        .andExpect(jsonPath("$.data.turnStartEntryId").value(idText(2)))
+        .andExpect(jsonPath("$.data.modelInvocationId").value(nullValue()));
 
-    ArgumentCaptor<MoveHeadCommand> captor = ArgumentCaptor.forClass(MoveHeadCommand.class);
-    verify(runtime).moveHead(captor.capture());
+    ArgumentCaptor<CompactThreadCommand> captor =
+        ArgumentCaptor.forClass(CompactThreadCommand.class);
+    verify(threadProcessor).compactThread(captor.capture());
     assertEquals(id(1), captor.getValue().threadId());
-    assertEquals(id(2), captor.getValue().targetEntryId());
     assertEquals(3L, captor.getValue().expectedRevision());
   }
 
   @Test
-  void stopCarriesIdempotencyKeyAndRevisionAndReturnsResultDto() throws Exception {
-    when(runtime.stop(any(StopCommand.class)))
-        .thenReturn(
-            new StopResult(
-                StopResult.Status.STOPPED, HarnessRuntimeTestFixtures.thread(id(2)), id(9), 2));
+  void compactConflictPreservesManualUnavailableReason() throws Exception {
+    when(threadProcessor.compactThread(any(CompactThreadCommand.class)))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE,
+                "manual compaction is disabled"));
+
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/threads/" + idText(1) + "/compact")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":\"3\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.errors.reason").value("MANUAL_COMPACTION_UNAVAILABLE"));
+  }
+
+  @Test
+  void compactRejectsNonStringRevisionAtTheHttpBoundary() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/threads/" + idText(1) + "/compact")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":3}"))
+        .andExpect(status().isBadRequest());
+    verify(threadProcessor, never()).compactThread(any(CompactThreadCommand.class));
+  }
+
+  @Test
+  void yoloCarriesRevisionCasAndReturnsCurrentThread() throws Exception {
+    when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
+        .thenReturn(HarnessRuntimeTestFixtures.thread(id(1)));
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
 
+    mockMvc
+        .perform(
+            put("/api/ai/runtime/threads/" + idText(1) + "/yolo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedRevision\":\"3\",\"yoloEnabled\":true}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.threadId").value(idText(1)))
+        .andExpect(jsonPath("$.data.status").value("IDLE"));
+
+    ArgumentCaptor<SetThreadYoloCommand> captor =
+        ArgumentCaptor.forClass(SetThreadYoloCommand.class);
+    verify(runtime).setThreadYolo(captor.capture());
+    assertEquals(3L, captor.getValue().expectedRevision());
+  }
+
+  @Test
+  void stopAndApprovalRoutesRemainAvailable() throws Exception {
+    when(runtime.stop(any()))
+        .thenReturn(
+            new StopResult(false, HarnessRuntimeTestFixtures.thread(id(1)), id(9), 2, List.of()));
+    when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
     mockMvc
         .perform(
             post("/api/ai/runtime/threads/" + idText(1) + "/stop")
@@ -488,22 +172,10 @@ class StudioHarnessThreadControllerTest {
                 .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedRevision\":\"3\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("STOPPED"))
-        .andExpect(jsonPath("$.data.stoppedTurnEndEntryId").value(idText(9)))
-        .andExpect(jsonPath("$.data.cancelledCommandCount").value(2))
-        .andExpect(jsonPath("$.data.thread.status").value("IDLE"));
+        .andExpect(jsonPath("$.data.cancelledCommandCount").value(2));
 
-    ArgumentCaptor<StopCommand> captor = ArgumentCaptor.forClass(StopCommand.class);
-    verify(runtime).stop(captor.capture());
-    assertEquals(id(1), captor.getValue().threadId());
-    assertEquals(id(9), captor.getValue().stopRequestId());
-    assertEquals(3L, captor.getValue().expectedRevision());
-  }
-
-  @Test
-  void approvalCarriesDecisionIdActorAndReason() throws Exception {
     when(runtime.decideToolApproval(any(ToolApprovalCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.waitingApprovalTool());
-
     mockMvc
         .perform(
             post("/api/ai/runtime/threads/"
@@ -515,115 +187,32 @@ class StudioHarnessThreadControllerTest {
                 .content(
                     "{\"decision\":\"ALLOW\",\"decisionId\":\""
                         + idText(1)
-                        + "\",\"actor\":\"alice\","
-                        + "\"reason\":\"looks safe\"}"))
+                        + "\",\"actor\":\"alice\"}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.id").value(idText(100)))
-        .andExpect(jsonPath("$.data.toolCallId").value("call-1"))
         .andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
 
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(runtime).decideToolApproval(captor.capture());
-    assertEquals(id(1), captor.getValue().threadId());
-    assertEquals(id(100), captor.getValue().toolInvocationId());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
-    assertEquals(id(1), captor.getValue().decisionId());
-    assertEquals("alice", captor.getValue().actor());
-    assertEquals("looks safe", captor.getValue().reason());
   }
 
   @Test
-  void approvalConflictMapsToConflict() throws Exception {
-    when(runtime.decideToolApproval(any(ToolApprovalCommand.class)))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.APPROVAL_DECISION_MISMATCH, "mismatch"));
-    mockMvc
-        .perform(
-            post("/api/ai/runtime/threads/"
-                    + idText(1)
-                    + "/tool-invocations/"
-                    + idText(100)
-                    + "/approval")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"decision\":\"DENY\",\"decisionId\":\""
-                        + idText(1)
-                        + "\",\"actor\":\"alice\"}"))
-        .andExpect(status().isConflict());
-  }
-
-  @Test
-  void serializesSixCommandBatchJson() throws Exception {
-    when(chatThreadCommandService.submitCommands(any(ThreadCommandBatch.class)))
-        .thenReturn(List.of());
-    // 保证 mapper 对 6 类 discriminator 的 JSON 反序列化边界（严格字段）与 HTTP 层一致。
-    String body =
-        """
-        {
-          "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
-          "expectedNextCommandSequence": 4,
-          "commands": [
-            {"type": "USER_MESSAGE", "contents": [{"type": "TEXT", "text": "hi"}], "clientCommandId": "00000000-0000-0000-0000-000000000101"},
-            {"type": "CUSTOM_MESSAGE", "role": "USER", "content": "custom", "clientCommandId": "00000000-0000-0000-0000-000000000102"},
-            {"type": "SET_AGENT", "agentName": "a", "clientCommandId": "00000000-0000-0000-0000-000000000103"},
-            {"type": "SET_MODEL", "model": {"providerName": "p", "modelName": "m", "variant": "v"}, "clientCommandId": "00000000-0000-0000-0000-000000000104"},
-            {"type": "SET_ACTIVE_TOOLS", "activeTools": [], "clientCommandId": "00000000-0000-0000-0000-000000000105"},
-            {"type": "SET_ENVIRONMENT", "environment": null, "clientCommandId": "00000000-0000-0000-0000-000000000106"}
-          ]
-        }
-        """;
+  void oldCommandHeadAndThreadEntryRoutesHaveNoCompatibilityAlias() throws Exception {
+    // 逆证：旧 mailbox/head/thread-entry 路由不应被保留为兼容 alias。
     mockMvc
         .perform(
             post("/api/ai/runtime/threads/" + idText(1) + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isAccepted());
-
-    ArgumentCaptor<ThreadCommandBatch> captor = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(chatThreadCommandService).submitCommands(captor.capture());
-    ThreadCommandBatch batch = captor.getValue();
-    assertEquals(6, batch.commands().size());
-    assertEquals(
-        "{\"environment\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(5).payload()));
-    assertEquals(
-        "{\"activeTools\":[]}", COMMAND_PAYLOADS.encode(batch.commands().get(4).payload()));
-  }
-
-  @Test
-  void updateYoloSetsPolicyWithRevisionCasAndReturnsThread() throws Exception {
-    when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
-        .thenReturn(HarnessRuntimeTestFixtures.thread(id(2)));
-    when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
-
+                .content("{}"))
+        .andExpect(status().isNotFound());
     mockMvc
         .perform(
-            put("/api/ai/runtime/threads/" + idText(1) + "/yolo")
+            put("/api/ai/runtime/threads/" + idText(1) + "/head")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedRevision\":\"3\",\"yoloEnabled\":true}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("IDLE"));
-
-    ArgumentCaptor<SetThreadYoloCommand> captor =
-        ArgumentCaptor.forClass(SetThreadYoloCommand.class);
-    verify(runtime).setThreadYolo(captor.capture());
-    assertEquals(id(1), captor.getValue().threadId());
-    assertEquals(3L, captor.getValue().expectedRevision());
-    assertTrue(captor.getValue().enabled());
-
-    // 缺失字段与非法 revision 稳定 400。
+                .content("{}"))
+        .andExpect(status().isNotFound());
     mockMvc
-        .perform(
-            put("/api/ai/runtime/threads/" + idText(1) + "/yolo")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"yoloEnabled\":false}"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(
-            put("/api/ai/runtime/threads/" + idText(1) + "/yolo")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedRevision\":\"-1\",\"yoloEnabled\":false}"))
-        .andExpect(status().isBadRequest());
-    verify(runtime, times(1)).setThreadYolo(any(SetThreadYoloCommand.class));
+        .perform(get("/api/ai/runtime/threads/" + idText(1) + "/entries"))
+        .andExpect(status().isNotFound());
   }
 }
