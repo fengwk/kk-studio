@@ -1,6 +1,7 @@
 export {
   createAttachmentPart,
   createPartId,
+  createResourcePart,
   createTextPart,
   hasMessageContent,
   mergeTextParts,

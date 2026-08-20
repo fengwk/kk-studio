@@ -8,8 +8,8 @@ import {
  * contenteditable editor 的最小 DOM parts 契约。
  *
  * Editor 的 DOM 只包含两类节点：纯文本节点（text part）与
- * `contenteditable=false` 的 pill span（attachment part）。Pill 携带
- * `data-part-id` 与 `data-upload-id`（以及展示用的 `data-filename`）。
+ * `contenteditable=false` 的 pill span（attachment/resource part）。Pill 携带
+ * `data-part-id`、`data-part-type` 与对应引用字段。
  *
  * 这些是纯函数 DOM 辅助；组件负责事件驱动下的调用时机与状态回传。
  */
@@ -30,16 +30,20 @@ const BLOCK_TAGS = new Set([
 ])
 
 export function isPillElement(node: Node | null): node is HTMLSpanElement {
+  const partType =
+    node?.nodeType === Node.ELEMENT_NODE
+      ? (node as HTMLElement).getAttribute('data-part-type')
+      : null
   return (
     node != null
     && node.nodeType === Node.ELEMENT_NODE
     && (node as HTMLElement).tagName.toLowerCase() === 'span'
     && (node as HTMLElement).hasAttribute('data-part-id')
-    && (node as HTMLElement).hasAttribute('data-upload-id')
+    && (partType === 'attachment' || partType === 'resource')
   )
 }
 
-/** 从 DOM 提取 ordered parts：text 节点 -> text part，pill span -> attachment part。 */
+/** 从 DOM 提取 ordered parts：text 节点 -> text part，pill span -> attachment/resource part。 */
 export function extractPartsFromEditor(root: HTMLElement): ComposerPart[] {
   const parts: ComposerPart[] = []
   for (const node of Array.from(root.childNodes)) {
@@ -54,14 +58,32 @@ export function extractPartsFromEditor(root: HTMLElement): ComposerPart[] {
       continue
     }
     if (isPillElement(node)) {
-      const uploadId = node.getAttribute('data-upload-id') ?? ''
-      const filename = node.getAttribute('data-filename') ?? ''
-      if (uploadId) {
+      const partId = node.getAttribute('data-part-id') ?? createPartId()
+      if (node.getAttribute('data-part-type') === 'attachment') {
+        const uploadId = node.getAttribute('data-upload-id') ?? ''
+        const filename = node.getAttribute('data-filename') ?? ''
+        if (!uploadId) {
+          continue
+        }
         parts.push({
           type: 'attachment',
-          partId: node.getAttribute('data-part-id') ?? createPartId(),
+          partId,
           uploadId,
           filename,
+        })
+        continue
+      }
+      const blobId = node.getAttribute('data-blob-id') ?? ''
+      const name = node.getAttribute('data-name') ?? ''
+      if (blobId && name) {
+        parts.push({
+          type: 'resource',
+          partId,
+          blobId,
+          name,
+          ...(node.hasAttribute('data-preview')
+            ? { preview: node.getAttribute('data-preview') ?? '' }
+            : {}),
         })
       }
     }
@@ -73,15 +95,27 @@ export function extractPartsKeyFromEditor(root: HTMLElement): string {
   return partsKey(extractPartsFromEditor(root))
 }
 
-/** 创建 pill span（contenteditable=false；携带 partId/uploadId/filename 属性）。 */
-function createPillElement(root: HTMLElement, part: ComposerPart & { type: 'attachment' }): HTMLSpanElement {
+type PillPart = Exclude<ComposerPart, { type: 'text' }>
+
+/** 创建 pill span（contenteditable=false；携带 part identity 与引用属性）。 */
+function createPillElement(root: HTMLElement, part: PillPart): HTMLSpanElement {
   const pill = root.ownerDocument.createElement('span')
   pill.className = 'composer-pill'
   pill.contentEditable = 'false'
   pill.dataset.partId = part.partId
-  pill.dataset.uploadId = part.uploadId
-  pill.dataset.filename = part.filename
-  pill.textContent = `[${part.filename}]`
+  pill.dataset.partType = part.type
+  if (part.type === 'attachment') {
+    pill.dataset.uploadId = part.uploadId
+    pill.dataset.filename = part.filename
+    pill.textContent = `[${part.filename}]`
+  } else {
+    pill.dataset.blobId = part.blobId
+    pill.dataset.name = part.name
+    if (part.preview !== undefined) {
+      pill.dataset.preview = part.preview
+    }
+    pill.textContent = `[${part.name}]`
+  }
   return pill
 }
 
@@ -239,13 +273,13 @@ export function insertTextAtCaret(root: HTMLElement, text: string): void {
 }
 
 /**
- * 在光标处插入 attachment pills（文件粘贴/拖放/选择后调用），光标移到最后一颗
+ * 在光标处插入非文本 pills，光标移到最后一颗
  * pill 之后；光标不在 editor 内时追加到末尾。插入后由调用方重新提取并回传 parts。
  */
 export function insertPillsAtCaret(root: HTMLElement, parts: ComposerPart[]): void {
   const selection = root.ownerDocument.getSelection()
   const pills = parts
-    .filter((part): part is ComposerPart & { type: 'attachment' } => part.type === 'attachment')
+    .filter((part): part is PillPart => part.type !== 'text')
     .map((part) => createPillElement(root, part))
   if (pills.length === 0) {
     return

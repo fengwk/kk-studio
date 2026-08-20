@@ -383,7 +383,7 @@ export function removePartsForUpload(
 
 /** 该消息是否可发送：有内容，且所有 attachment parts 对应的上传均已 ready。 */
 export function canSubmitParts(parts: ComposerPart[], uploads: AttachmentUpload[]): boolean {
-  const hasContent = parts.some((part) => part.type === 'attachment' || part.text.trim() !== '')
+  const hasContent = parts.some((part) => part.type !== 'text' || part.text.trim() !== '')
   if (!hasContent) {
     return false
   }

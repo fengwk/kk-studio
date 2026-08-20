@@ -10,6 +10,13 @@ import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn
 import type { ThreadCommand } from '@/features/ai/runtime'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
+import { prependCancelledMessages } from '@/features/ai/runtime/cancelled-message-parts'
+import {
+  clearPendingStop,
+  loadPendingStop,
+  storePendingStop,
+  type PendingStopOperation,
+} from '@/features/ai/runtime/pending-stop-sidecar'
 import {
   createDecisionId,
   createStopRequestId,
@@ -61,21 +68,6 @@ function errorMessage(error: unknown): string {
 export interface CommandBatchReplay {
   plan: CommandBatchPlan
   parts: ComposerPart[]
-}
-
-/**
- * 一次含混的 Stop 操作。重试必须发送完全相同的原始 body（相同的
- * stopRequestId + 原始 expectedRevision）；basis 标识了派生该操作的 snapshot，
- * 因此一旦权威 snapshot 证明 basis 已变化（旧 Turn 结束 / head 或 revision
- * 已前进），该操作会被自动失效——在新 Turn 上的下一次 Stop 派生全新的 id。
- * Java 的 StopControl 在 revision CAS 之前按持久键回放，因此原始
- * expectedRevision 在精确重试中仍然有效。
- */
-export interface PendingStopOperation {
-  stopRequestId: string
-  expectedRevision: string
-  basisHeadEntryId: string
-  basisRevision: string
 }
 
 const MAX_STALE_MESSAGE_CURSOR_RETRIES = 2
@@ -143,6 +135,8 @@ export function useAgentThreadController(
   buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
 ) {
   const { t } = useI18n()
+  const boundThreadIdRef = useRef(threadId)
+  boundThreadIdRef.current = threadId
   const draftStorageScope = `thread:${threadId}`
   const [draft, setDraftState] = useState<ComposerPart[]>(
     () => restoreComposerDraft(draftStorageScope, initialParts),
@@ -158,6 +152,7 @@ export function useAgentThreadController(
   const replayRef = useRef<CommandBatchReplay | null>(null)
   const initializedReplayThreadRef = useRef<string | null>(null)
   const pendingStopRef = useRef<PendingStopOperation | null>(null)
+  const appliedStopRequestIdsRef = useRef(new Set<string>())
   // 当含混的 Stop 操作尚待重试或失效时为 true：切换 Thread 时面板
   // 绝不能悄悄丢弃这次精确重试。
   const [stopReplayPending, setStopReplayPending] = useState(false)
@@ -223,9 +218,11 @@ export function useAgentThreadController(
     replayRef.current = initialReplay ?? null
     setReplayPending(initialReplay != null)
     initializedReplayThreadRef.current = threadId
-    // 重新绑定到另一个 Thread 时，绝不能泄漏 stop/decision 的回放身份。
-    pendingStopRef.current = null
-    setStopReplayPending(false)
+    // Pending Stop 按 Thread 持久化；重新绑定时只加载当前 Thread 的精确 identity。
+    const restoredStop = loadPendingStop(threadId)
+    pendingStopRef.current = restoredStop
+    setStopReplayPending(restoredStop != null)
+    appliedStopRequestIdsRef.current.clear()
     decisionIdByInvocation.current.clear()
   }, [draftStorageScope, initialParts, initialReplay, threadId])
 
@@ -502,6 +499,7 @@ export function useAgentThreadController(
     }
     setActionError(null)
     setConflict(null)
+    const operationThreadId = threadId
     // 同步 basis 栅栏：绝不复用 basis 已不再匹配「当前」渲染 snapshot 的待决操作
     //（head/revision 已移动 => 旧 Turn 已结束或 Thread 已前进）。在这里——而不仅仅在
     // 被动清理 effect 中——退役，可以关闭「snapshot 已前进但 effect 尚未 flush」时
@@ -510,6 +508,7 @@ export function useAgentThreadController(
     if (pending !== pendingStopRef.current) {
       pendingStopRef.current = pending
       setStopReplayPending(false)
+      clearPendingStop(threadId)
     }
     // 含混重试：复用「精确」的先前操作（相同的 stopRequestId + 原始
     // expectedRevision + basis）。全新的 Stop 会针对当前 snapshot 铸造新操作；
@@ -523,34 +522,65 @@ export function useAgentThreadController(
     if (pending == null) {
       pendingStopRef.current = operation
       setStopReplayPending(true)
+      storePendingStop(operationThreadId, operation)
     }
     return stopMutation
       .mutateAsync({
         stopRequestId: operation.stopRequestId,
         expectedRevision: operation.expectedRevision,
       })
-      .then(async () => {
+      .then(async (result) => {
+        if (boundThreadIdRef.current !== operationThreadId) {
+          // 导航门控正常情况下不会发生；若宿主强制重绑，保留旧 Thread sidecar，
+          // 让用户返回后用同一 id replay 并把 cancelled messages 恢复到正确 Composer。
+          await Promise.all([
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.threads.snapshot(operationThreadId),
+            }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
+          ])
+          return
+        }
         // Stop 成功（或服务器重放了完全相同的先前 Stop）：操作已了结，
         // 下一次 stop 会铸造全新 id。
+        if (!appliedStopRequestIdsRef.current.has(operation.stopRequestId)) {
+          const restored = prependCancelledMessages(
+            result.cancelledUserMessages,
+            draftRef.current,
+          )
+          if (partsKey(restored) !== partsKey(draftRef.current)) {
+            setDraft(restored)
+          }
+          appliedStopRequestIdsRef.current.add(operation.stopRequestId)
+        }
         pendingStopRef.current = null
         setStopReplayPending(false)
+        clearPendingStop(operationThreadId)
         replayRef.current = null
         setReplayPending(false)
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.threads.snapshot(operationThreadId),
+          }),
           queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
         ])
       })
       .catch((error: unknown) => {
+        const stillBound = boundThreadIdRef.current === operationThreadId
         if (isConflictError(error)) {
           // 已知 409：操作未被接受（revision 过期 / 未静默 /
           // 终态 apply 待处理 / id 被复用）。清除它；下一次 stop 会针对
           // 刷新的 snapshot 铸造新操作。
-          pendingStopRef.current = null
-          setStopReplayPending(false)
+          clearPendingStop(operationThreadId)
+          if (stillBound) {
+            pendingStopRef.current = null
+            setStopReplayPending(false)
+          }
         }
         // 网络/不确定的失败会保留精确操作，用于逐字节重试。
-        reportMutationError(error, 'ai.runtime.action.stopFailed')
+        if (stillBound) {
+          reportMutationError(error, 'ai.runtime.action.stopFailed', operationThreadId)
+        }
       })
   }
 
@@ -584,6 +614,7 @@ export function useAgentThreadController(
     if (pending !== pendingStopRef.current) {
       pendingStopRef.current = pending
       setStopReplayPending(false)
+      clearPendingStop(threadId)
     }
     // thread 每次 refetch 都是新的 snapshot 对象；只有其身份字段参与栅栏判定。
     // eslint-disable-next-line react-hooks/exhaustive-deps
