@@ -55,10 +55,10 @@ flowchart LR
 用户消息与设置通过：
 
 ```text
-POST /api/ai/runtime/threads/{threadId}/commands
+POST /api/ai/runtime/command-batches
 ```
 
-请求携带 `expectedHeadEntryId`、`expectedNextCommandSequence` 与命令数组（每项含 `clientCommandId`）。服务端**幂等查找先于任何 head/sequence/live 检查**：全部 `clientCommandId` 已存在、raw `requestHash` 相同且 sequence 在请求顺序上连续时是 ordered command-set replay——忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行；部分存在/hash 不同/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`。全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`）并一次性预留 sequence（202 表示已接受，不代表模型已完成）。
+请求携带 `owner`、`target`（NEW_SESSION / ENTRY / THREAD 三态）与命令数组（每项含 `clientCommandId`）。THREAD target 携带 `expectedHeadEntryId`、`expectedNextCommandSequence`；服务端**幂等查找先于任何 head/sequence/live 检查**：全部 `clientCommandId` 已存在、raw `requestHash` 相同且 sequence 在请求顺序上连续时是 ordered command-set replay——忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行；部分存在/hash 不同/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`。全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`）并一次性预留 sequence（200 返回权威 `session/rootEntry/thread/acceptedCommands/replayed`，不代表模型已完成）。
 
 `ThreadProcessor` 收割 queued Commands：
 
@@ -95,7 +95,7 @@ cacheControl      # Resolver 生成的 compact ProviderCacheControl
 compaction        # null 或冻结的 CompactionRequest
 ```
 
-system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合，固定顺序为：Agent 正文（非空时）→ `<current_environment>`（至少有一个有值字段时）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。Events 顶部只读预览通过 `GET /api/ai/runtime/threads/{threadId}/system-prompt` 按当前 branch 最新状态现算同一组合；进入 `/events` 拉一次，turn 开始与结束时各拉一次，使同批设置变更在模型工作期间即可可见。current_environment 只输出有值字段：
+system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合，固定顺序为：Agent 正文（非空时）→ `<current_environment>`（至少有一个有值字段时）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。Debug 视图顶部只读预览通过 `GET /api/ai/runtime/threads/{threadId}/system-prompt` 按当前 branch 最新状态现算同一组合；进入 `/debug` 拉一次，turn 开始与结束时各 refetch 一次，使同批设置变更在模型工作期间即可可见。current_environment 只输出有值字段：
 
 ```text
 <current_environment>

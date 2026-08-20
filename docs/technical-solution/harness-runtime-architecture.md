@@ -61,7 +61,7 @@ TURN_END
 - `CUSTOM_MESSAGE` 是业务扩展注入的对话消息：冻结 `AgentMessage`（SYSTEM/USER）保持 model-visible，`details` 绝不投影；非插件命令消息使用稳定 core 元数据（`pluginId=core`、`customType=message`、`rendererKey=message`、`details={}`）。
 - `ASSISTANT_ERROR` 是 Provider/Assistant-side 失败审计：payload 把 stable `error{code,message}` 与可空 `attempt{attempt,sequence,text,thinking}` 分离；planning/Stop/尚未确认 Provider start 的 barrier 使用 null，已确认 attempt 的 terminal Model 错误即使没有 partial 也保留该 attempt snapshot（text/thinking 可同时为空）。它不投影到 Provider Context。
 - `ASSISTANT_ABORTED` 是用户主动 Stop 的 assistant turn：只保存安全 text/thinking，绝不包含 tool call。
-- `COMPACTION` 是内部压缩 Model 的 durable summary：冻结 phase/trigger、`tokensBefore`、complete 标记与 `firstKeptEntryId`/`cutEntryId`/`turnPrefixStartEntryId`。它只能作为 `TURN_START(COMPACTION)` 的唯一成功结果；HISTORY 为 incomplete，FULL/TURN_PREFIX 为 complete。
+- `COMPACTION` 是内部压缩 Model 的 durable summary：payload 只含 `summaryText`；phase/trigger/executionModel/`cutEntryId`/`turnPrefixStartEntryId`/`historyCompactionEntryId` 冻结在对应 `TURN_START` 的 `CompactionStart`。它只能作为 `TURN_START(COMPACTION)` 的唯一成功结果；HISTORY 为 incomplete，FULL/TURN_PREFIX 为 complete（complete 由 phase 派生，不持久化 boolean）。
 - `TURN_END` 关闭一次 turn，payload 携带 `TurnEndOutcome`（`COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`）与 `TurnEndReason`（`USER_STOP` / `HISTORY_CUT` / `CANCELLED` / `TURN_FAILED`），以及 continuation obligation。
 
 `BranchSettings` 是完整不可变设置快照：
@@ -78,14 +78,16 @@ YOLO 不在分支历史中：它是 Thread 运行时策略。
 
 ### Thread
 
-`ThreadState` 的 durable 字段只有：
+`ThreadState` 的 durable 字段：
 
 ```text
 id
-headEntryId            # 始终非空
-yoloEnabled            # Thread 当前运行时策略（直接控制面 PUT /yolo 修改，不进入请求/spec）
-nextCommandSequence    # 从 1 开始；每次命令 batch 预留后 +N
-revision               # 非负；每次可见状态变化恰好 +1
+sessionId                # 创建后不可变；head 必须属于该 Session
+headEntryId              # 始终非空
+materializationHash      # 创建请求 canonical SHA-256，仅用于首次 materialization replay
+yoloEnabled              # Thread 当前运行时策略（直接控制面 PUT /yolo 修改，不进入请求/spec）
+nextCommandSequence      # 从 1 开始；每次命令 batch 预留后 +N
+revision                 # 非负；每次可见状态变化恰好 +1
 createdAt / updatedAt
 ```
 
@@ -221,14 +223,14 @@ TURN_START(COMPACTION)
   -> TURN_END
 ```
 
-- 默认 `reserveTokens=16384`、`maxRecentTokens=20000`；最近一次 complete compaction 之后，本 Thread 最新成功 Model usage 严格大于 `contextWindow-reserveTokens` 时 threshold 触发。后续普通 FAILED/CANCELLED/UNKNOWN turn 与 Resolver Rejected turn 不抹掉该 usage；shared-history ownership barrier 是 Entry-only 事实（`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行）。terminal `OVERFLOW` 失败可触发一次恢复。
-- 有效 recent retention 为 `min(floor(contextWindow*0.5), maxRecentTokens)`；cut point 只允许 USER/ASSISTANT/CUSTOM_MESSAGE/AssistantAborted，绝不切在 ToolResult。`firstKeptEntryId` 向前包含相邻控制元数据，但不跨任何 CompactionPayload。
-- split turn 先生成 incomplete HISTORY，再以完全冻结的 ids/trigger/tokens/contextWindow 机械生成 TURN_PREFIX；没有先前 history 的 direct TURN_PREFIX 使用固定文本 `No prior history.`。
+- 配置只有 `keepRecentTokens=20000` 与可空 `fallbackModel`（`SystemSettings.AiRuntime` 经 `HarnessCompactionConfiguration` 装配）；派生 `effectiveKeepRecentTokens = min(keepRecentTokens, floor(contextWindow / 2))`、`effectiveReserve = min(16384, maxOutputTokens)`、`softThreshold = max(effectiveKeepRecentTokens, contextWindow - effectiveReserve)`。最近一次 complete compaction 之后，本 Thread 最新成功 Model usage 严格大于 `softThreshold` 时 threshold 触发。后续普通 FAILED/CANCELLED/UNKNOWN turn 与 Resolver Rejected turn 不抹掉该 usage；shared-history ownership barrier 是 Entry-only 事实（`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行）。terminal `OVERFLOW` 失败可触发一次恢复。
+- 有效 recent retention 为 `effectiveKeepRecentTokens`；cut point 只允许 USER/ASSISTANT/CUSTOM_MESSAGE/AssistantAborted，绝不切在 ToolResult。`firstKeptEntryId` 不再存在：cut 边界直接由 `cutEntryId` 表达，相邻控制元数据从完整 root-to-head path 派生。
+- split turn 先生成 incomplete HISTORY，再以完全冻结的 `CompactionStart`（phase/trigger/executionModel/cutEntryId/turnPrefixStartEntryId/historyCompactionEntryId）机械生成 TURN_PREFIX；没有先前 history 的 direct TURN_PREFIX 使用固定文本 `No prior history.`。
 - `TURN_START(COMPACTION)...TURN_END` 内全部对话事实对后续 planner、token estimate、Provider Context 与前端 transcript 不可见；停止压缩的 AssistantAborted 不成为未来 cut 或摘要内容。FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止原地立即重试，出现新的普通 turn 后不再充当长期 freshness barrier。
 - 闭合后的 wake 判定只在普通（非 compaction）turn 闭合时评估 compaction due（见 §5 action 列表）：threshold FULL 压缩 complete 已消费 freshness 不再 due；FAILED/STOPPED/CANCELLED/incomplete 压缩阻止立即原地重试、不从 due self-wake 自旋；HISTORY 下一阶段与 complete OVERFLOW 的 continuation 由显式 THREAD wake 驱动。
-- complete summary 在下一次正常请求中投影为一个 wrapped USER message，并从 `cutEntryId` 本身继续保留上下文。`tokensBefore` 估算 wrapper + retained suffix；文件 read/write/edit 清单从当前 branch 的完整 durable history 累计重算。`<read-files>` / `<modified-files>` 是 Runtime 保留 section：旧 summary 和模型响应中的同名 section 先剥离，最终只机械追加一份 canonical 清单，modified 覆盖 read。
+- complete summary 在下一次正常请求中投影为一个 wrapped USER message，并从 `cutEntryId` 本身继续保留上下文。removed-prefix 估算在 planning 时瞬时重算（不持久化 `tokensBefore`）；文件 read/write/edit 清单从当前 branch 的完整 durable history 累计重算。`<read-files>` / `<modified-files>` 是 Runtime 保留 section：旧 summary 和模型响应中的同名 section 先剥离，最终只机械追加一份 canonical 清单，modified 覆盖 read。
 - HISTORY 与 threshold 压缩固定 `continueModel=false`；只有 complete OVERFLOW 压缩为 true。它创建一次 immediate CONTINUATION 恢复；该 retry 再次 overflow 时保留失败并停止，不进入无界压缩循环。后续新的 input/tool continuation 可独立触发压缩。
-- phase output budget 为 FULL/HISTORY `floor(0.8*reserveTokens)`、TURN_PREFIX `floor(0.5*reserveTokens)`，最终上限取该预算与有效 model/variant max output 的较小值。
+- phase output budget 为 `min(model output limit, floor(effectiveReserve * 0.8))`（FULL/HISTORY）与 `min(model output limit, floor(effectiveReserve * 0.5))`（TURN_PREFIX），最终上限再取与 removed-prefix estimate 的较小值。
 - 所有 prompt 是 strict classpath resource；复制自 Pi 的资源在同目录保留 MIT `NOTICE`。
 
 ## 6. ModelProcessor
@@ -260,16 +262,15 @@ Binary/Resource 且零存储 I/O。durable 物化发生在 `ToolOutcomeAppender`
 
 ## 8. Command 控制面（HarnessRuntime）
 
-`HarnessRuntime` 是同步 command/control/query 门面，每个方法恰好一个事务，锁序固定：
+`HarnessRuntime` 是同步 command/control/query 门面，每个方法恰好一个事务，锁序固定（Session → Thread → Commands → ModelInvocation → ToolInvocation siblings → Work；Session 用 KEY SHARE，正常写入不串行化 sibling Thread）：
 
 ```text
-Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
+Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 ```
 
-实现 `createThread`、`enqueueCommands`、`moveHead`、`stop`、`decideToolApproval`、`setThreadYolo` 与 `getThreadSnapshot`。
+实现 `acceptCommands`（NEW_SESSION / ENTRY / THREAD 单原语）、`findThreadCommand`、`stop`、`decideToolApproval`、`setThreadYolo`、`getThreadSnapshot`、`getSessionEntries`、`listThreadsBySession`；不提供 create/delete（Session/Thread 只允许在第一批 Command 被接受时创建，深删除由 Core `HarnessSessionDeletionService` 经 `HarnessStore.Transaction` 编排）。
 
-- `enqueueCommands`：幂等查找先于任何 head/sequence/live 检查——全部 `clientCommandId` 已存在、对应 `requestHash` 相同且 sequence 连续时是 **ordered command-set replay**（忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行）；部分存在/hash 不同/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`；全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`），一次性预留全部 sequence（`revision` +1），含 `SET_ENVIRONMENT` 的 batch 额外要求真正静止前置状态（无 queued USER_MESSAGE/CUSTOM_MESSAGE、classifier 为 IDLE_OR_HISTORICAL、无 THREAD Work 行）。
-- `moveHead`：revision CAS；同 target no-op；**只允许同 Session**；无 queued command；无 live/terminal-pending context；不能指向 `continueModel=true` 的 TURN_END。
+- `acceptCommands(target, preflight)`：单个写入原语。NEW_SESSION 原子创建 Session + ROOT（rootSettings + 可选 SubagentContext）+ Thread（head=ROOT，revision 0 / nextCommandSequence 1）+ owner relation（preflight）+ Commands（sequence 从 1 起）+ THREAD Work；ENTRY 校验 startEntry 属于 Session 后创建 Thread（head=startEntryId，不复制 Entry）+ Commands + Work；THREAD 先读 immutable `thread.sessionId` 并 KEY SHARE Session、再锁 Thread 复核，exact ordered replay 查找必须先于任何 cursor/preflight admission，全新 batch 要求精确 expected head + next sequence（否则 `STALE_COMMAND_CURSOR`）。materialization replay：同 hash + 同 Session 的 client threadId 精确重放原始初始命令（验证 requestHash 相等且 sequence 从 1 连续）；同 threadId 不同 session/hash 返回 `MATERIALIZATION_ID_REUSED`。
 - `stop`：先在 Thread 锁内做 Session 级不可变查找，`findReplay` 按「被引用 TURN_START 的 `ownerThreadId` == thread + `closeRequestId` == stopRequestId」精确命中（在 revision CAS **之前**）→ `REPLAYED`；否则 revision CAS。另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到兄弟分支后仍可命中。`IDLE_OR_HISTORICAL` 取消 queued（有取消则 revision +1、不写 stop marker；无 queued 则真正 no-op）；`CONTINUATION_DUE` 先物化 `TURN_START(CONTINUATION)` + `ASSISTANT_ERROR(CANCELLED)`，再追加 `TURN_END(STOPPED)`；Model/Tool active 则写安全 `ASSISTANT_ABORTED` 或取消/不确定 Tool Result，再追加 `TURN_END(STOPPED)`。Tool terminal winner 在 Stop 路径也共用 `ToolOutcomeAppender`，成功 sibling 的 effects 不会丢失；所有 STOPPED 路径同时取消 queued、先净化 Work mailbox 再删除当前 Tool/Model Invocations、fence 后续 callback，closed turn 不保留 Invocation 行。
 - `setThreadYolo`：锁 Thread → 同值在任何 revision CAS 前 no-op（支持网络重试）→ 变化时 revision CAS（`STALE_REVISION` 409）→ 更新 `yoloEnabled` 且 revision +1；不创建 Command/Entry/Work，也不唤醒 processors。
 - `decideToolApproval`：`decisionId` 幂等；已决定请求精确 replay（保留原 `decidedAt`，无 revision bump，不请求 Work）；未决定请求必须位于锁定的 TOOL_ACTIVE 上下文，mutation/`decidedAt` 抬升到 Thread/head/Model/siblings/approval 的最新 durable 时间，`ALLOWED` → `READY` + TOOL Work，`DENIED` → `FAILED` + THREAD Work，revision 恰好 touch 一次；Work request 仍使用原始本地调度时钟。
@@ -298,9 +299,9 @@ durable mutation
 
 `task` 是内部 `PLATFORM` Tool，由 Core `TaskTool` 实现，**不增加表、状态机或调度器**：父 Thread 的 ToolInvocation 照常走 approval/Work/ToolProcessor，子 Agent 则是另一个普通 durable Harness Thread（其执行仍由既有 ThreadProcessor 驱动）。
 
-- 子 Thread 创建复用 `HarnessRuntime.createThread`：ROOT 携带 `SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}`（普通根 depth=1，子 Session 从 2 开始；rootThreadId 在整棵委派树不变）；Thread YOLO 继承父 Thread；branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（activeTools = config.tools + skills 非空时内部 `load_skill` + subagents 非空且 depth < maxDepth 时内部 `task`）。
-- 委派权限冻结在父 `ModelRequestSpec.subagentBindings`（Agent 名称 + 描述）；TaskTool 执行只消费该冻结 allowlist，绝不重读父 Agent 配置扩权。运行中由 `TaskTool` 轮询子 Thread snapshot：以 durable 指纹（revision/head/model/tool siblings）判定活动，idle 超时排除 active tool 时间；约 1s 一次发布非 durable `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整 JSON 快照）。活动 task 的进程内 registry 只 relay 扁平 descendant 状态给祖先心跳，使根 Thread 可审批任意深度调用；durable 子 Thread 仍是唯一执行事实。`maxTurns` 软预算达界后每 5 turn 入队 SYSTEM `CUSTOM_MESSAGE` 提醒。
-- 恢复（`session_id` = 子 ThreadId，canonical UUID）要求同 parent/root 归属且子 Thread quiescent；Stop/取消子 Thread 保留可恢复 Session（`cancelChild` 复用 `HarnessRuntime.stop` 的 `task-{invocationId}-cancel` stopRequestId）。进程内 `SubagentRunRegistry` 只做并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
+- 子 Thread 创建复用 `runtime.acceptCommands(NEW_SESSION, SubagentContext)`：原子创建 Session + ROOT（`SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}`；普通根 depth=1，子 Session 从 2 开始；rootThreadId 在整棵委派树不变）+ Thread（yolo 继承父 Thread）+ Commands（SYSTEM CUSTOM_MESSAGE + USER_MESSAGE prompt）；branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（activeTools = config.tools + skills 非空时内部 `load_skill` + subagents 非空且 depth < maxDepth 时内部 `task`）。
+- 委派权限冻结在父 `ModelRequestSpec.subagentBindings`（Agent 名称 + 描述）；TaskTool 执行只消费该冻结 allowlist，绝不重读父 Agent 配置扩权。运行中由 `TaskTool` 经内部 `HarnessThreadChangeSource` 事件化观察子 Thread（`ChangeGate.awaitChange` 等 revision wake 到达才读 snapshot，无固定轮询）：以 durable 指纹（revision/head/model/tool siblings）判定活动，idle 超时排除 active tool 时间；约 1s 一次基于缓存 snapshot 发布非 durable `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整 JSON 快照）。活动 task 的进程内 registry 只 relay 扁平 descendant 状态给祖先心跳，使根 Thread 可审批任意深度调用；durable 子 Thread 仍是唯一执行事实。`maxTurns` 软预算达界后每 5 turn 入队 SYSTEM `CUSTOM_MESSAGE` 提醒。
+- 恢复（`session_id` = 子 ThreadId，canonical UUID）要求同 parent/root 归属且子 Thread quiescent，resume 用 THREAD target + settings diff + prompt 的用户输入 batch；Stop/取消子 Thread 保留可恢复 Session（`cancelChild` 复用 `HarnessRuntime.stop` 的 `task-{invocationId}-cancel` stopRequestId）。进程内 `SubagentRunRegistry` 只做并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
 - 子 Agent 的工具审批仍复用既有 `decideToolApproval`（以子 ThreadId 定位），approval 事实/`WAITING_APPROVAL` 语义与父 Thread 完全一致；子工具执行经同一 ToolGateway 管线，权限判定同 YOLO/Allow/Ask/Deny 规则。
 
 相关文档：

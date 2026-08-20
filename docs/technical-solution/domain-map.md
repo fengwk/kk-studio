@@ -46,7 +46,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Session | append-only Entry Tree 的边界 |
 | Entry | 语义持久事实：`ROOT`、`TURN_START`、`MESSAGE`、`CUSTOM`、`MODEL_ATTEMPT_FAILURE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`、`COMPACTION`、`TURN_END` |
 | BranchSettings | Entry 分支的完整不可变设置快照（environment binding/agentName/model；历史 activeTools 只作投影，不是新 turn 的能力事实） |
-| HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
+| HarnessThread | durable 字段为 `sessionId`、`headEntryId`、`materializationHash`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，六类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS`；YOLO 是 Thread 直接控制面 |
 | ModelInvocation | 一次持久化 `basisHeadEntryId + compact ModelRequestSpec`（providerType/model/variant/preamble/tool/skill/subagent bindings/cacheControl）的 Provider 执行；完整 ProviderRequest 每次 attempt 由 Materializer 从 EntryPath + spec 内存重建；`failedAttempts` 保存尚未物化的连续瞬态失败审计 |
 | ToolInvocation | 按 `call` + 可空 `binding` 执行的一次 ToolCall durable 事实（approval/status/result/effects）；插件 binding 冻结 owner、contribution 与 state accesses，unknown tool 槽位 binding 为 null，非空 effects 只允许属于 terminal `SUCCEEDED` |
@@ -67,12 +67,12 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | --- | --- |
 | Chat 卡片 | `ChatDTO`：标题、Agent/YOLO 可见设置、版本 |
 | Chat 工作区 | `localStorage` 中的八个 Pane 槽位 |
-| Pane | 本地 `threadId` 绑定；服务端通过 Chat↔Thread 历史关系聚合 |
+| Pane | 本地 `PaneTarget`（NEW_SESSION_DRAFT / ENTRY_DRAFT / BOUND_THREAD 三态）；pendingAcceptance/pendingStop 等 sidecar 只存浏览器本地 |
 | Blank pane | 本地 `BranchDraft`（frozenDraft）物化自 Chat defaults + Catalog |
 | Bound pane | `branchState` 从 snapshot `branchSettings` 初始化；queued SET_* 投影 `effectiveBase` |
 | Composer | 双层输入与控制栏；Permission 仅 Default/YOLO，Model/Variant 使用 anchored 两级菜单；每次发送构造 SET_* diff batch + `USER_MESSAGE`（不携带 role） |
 | Thread transcript | `HarnessThreadSnapshotDTO` 的 entries（root-to-head）、queuedCommands、活跃 Invocation 与尚未物化的 `modelAttemptFailures` |
-| `/tree` | 按需读取 `GET /api/ai/runtime/threads/{threadId}/entries` 的完整 Session Tree，选择历史 Entry 后调用 `PUT /api/ai/runtime/threads/{threadId}/head`（同 Session） |
+| `/tree` | 按需读取 `GET /api/ai/runtime/sessions/{sessionId}/entries` 的完整 Session Tree，选择历史 Entry 后把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零写入，不创建 Thread） |
 | Footer | 纯只读展示真实 Environment/Workspace、Git branch、Branch usage、context 与 cache hit；未绑定 Environment 时展示 `none env`，Git 缺失整段省略，usage/cache 缺失按 0 展示，不承载设置或通知入口 |
 | Approval | `POST /tool-invocations/{id}/approval`，输入 `ALLOW`/`DENY` |
 | Stop | `POST /stop`，`stopRequestId` + `expectedRevision`，三态结果 |
@@ -81,7 +81,7 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 
 | 概念 | 含义 |
 | --- | --- |
-| CanvasDocument | 画布身份、标题、单调 `version`、可空唯一 `threadId` 与创建/更新时间 |
+| CanvasDocument | 画布身份、标题、单调 `version` 与创建/更新时间；不含 threadId，经 `canvas_session` 持有 0..N 个 Session |
 | ResourceNode | 唯一业务节点；包含 name/world transform/groupId、当前有序 `Resource[]` 与可选 Function |
 | Resource | Canvas 内内容事实；可见资源直接 owner 到 Node，Function target/pinned orphan 可暂时无 owner；媒体只引用全局 Blob，TEXT 内联 |
 | Function | ResourceNode 上可选的 `modelKey + configJson` 资源生产能力 |
@@ -100,13 +100,15 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | `GET/POST /api/ai/catalog/models` | Model 分页查询与创建 |
 | `GET/POST /api/ai/catalog/agents` | Agent 分页查询与创建 |
 | `GET/POST /api/ai/chat` | Chat 列表与创建 |
-| `GET /api/ai/chat/{chatId}/threads` | Chat-scoped Thread 全量列表（按关联时间从新到旧） |
-| `POST /api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT、Thread 并关联 Chat |
-| `GET /api/ai/runtime/threads/{threadId}/snapshot` | 单一 Thread 一致投影 |
-| `GET /api/ai/runtime/threads/{threadId}/entries` | Thread 所属 Session 的完整 immutable Entry Tree |
-| `POST /api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（六类），202 |
+| `GET /api/ai/chat/{chatId}/sessions` | Chat-scoped Session 列表（sessionId/createdAt/lastActivityAt/firstMessagePreview/threadCount） |
+| `GET /api/ai/canvases/{canvasId}/sessions` | Canvas-scoped Session 列表 |
+| `POST /api/ai/runtime/command-batches` | 唯一产品写入口：owner + NEW_SESSION/ENTRY/THREAD target + commands，原子接受并 materialize |
+| `GET /api/ai/runtime/sessions/{sessionId}/threads` | Session 内 Thread summary 列表 |
+| `GET /api/ai/runtime/sessions/{sessionId}/entries` | Session 的完整 immutable Entry Tree |
+| `GET /api/ai/runtime/threads/{threadId}/snapshot` | 单一 Thread 一致投影（含 manualCompaction availability sidecar） |
+| `GET /api/ai/runtime/threads/{threadId}/system-prompt` | 按当前 branch 现算的只读 system prompt 预览 |
+| `POST /api/ai/runtime/threads/{threadId}/compact` | 手动压缩：expectedRevision CAS 提交 MANUAL Compaction Turn |
 | `PUT /api/ai/runtime/threads/{threadId}/yolo` | Thread YOLO policy 直接更新（revision CAS；同值 no-op 先于 CAS） |
-| `PUT /api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
 | `POST /api/ai/runtime/threads/{threadId}/stop` | stopRequestId + revision CAS |
 | `POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval` | Tool approval 决定（父/子 Thread 同一端点） |
 | WebSocket `/api/events/v1` | 事件通道：`subscribe/unsubscribe`（thread/canvas），`subscribed/event/resync/error` 帧 |
@@ -118,17 +120,16 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | `GET /api/canvases/{canvasId}` | Canvas document、ResourceNode/Resource/Function/Run、Group、Link 完整快照 |
 | `POST /api/canvases/{canvasId}/commands` | typed Canvas command batch；version CAS、commandId/hash 幂等与实体 Patch |
 | `GET /api/canvases/{canvasId}/changes` | 连续 Patch 或 gap Snapshot 恢复 |
-| `POST /api/canvases/{canvasId}/thread/messages` | 首次创建并绑定真实 Harness Thread；ordered TEXT/ATTACHMENT |
 | `POST /api/storage/uploads` | 全局 Upload reserve；PENDING 返回带 checksum 的 create-only PUT |
 | `POST /api/storage/uploads/{uploadId}/complete` | 校验并绑定 READY Blob |
 | `GET /api/storage/blobs/{blobId}/presigned-original` | durable Blob Resource 的渲染期原件 URL，并返回权威 `mediaType/sizeBytes` |
 | `GET /api/storage/blobs/{blobId}/presigned-preview` | durable Blob Resource 的渲染期预览 URL |
 
-**不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 端点、无 `/messages` 或 `/messages/custom`（消息由 `/commands` 命令表达）、无 `expectedExecutionEpoch`。
+**不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 端点、无 `/messages` 或 `/messages/custom`（消息由 `command-batches` 命令表达）、无 `expectedExecutionEpoch`、无 `POST /{chatId}/threads`、无 `PUT /{threadId}/head`、无 `POST /{threadId}/commands`、无 `POST /{canvasId}/thread/messages`、无 standalone Thread create。
 
 ## 7. 一句话实现
 
 Harness 以 Session Entry Tree 记录语义事实（含插件 `CUSTOM` branch state），以 head 非空的 Thread
 记录执行控制面（revision CAS + 命令 mailbox），以 `BranchSettings` 驱动逐轮
 Catalog/Environment/插件上下文解析并冻结 compact spec，以 Model/Tool Invocation + Work 支持恢复；全局 Blob
-Storage 为 Chat、Harness history 与 Canvas 提供统一内容身份，Canvas 可绑定一个 Harness 根 Thread。
+Storage 为 Chat、Harness history 与 Canvas 提供统一内容身份，Chat/Canvas 经 `chat_session` / `canvas_session` 持有 0..N 个 Harness Session。
