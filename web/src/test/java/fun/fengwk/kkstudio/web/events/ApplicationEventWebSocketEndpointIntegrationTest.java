@@ -16,6 +16,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.time.Duration;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -89,7 +90,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
 
   @Test
   void subscribeExistingThreadReturnsSubscribedAckWithCursor() throws Exception {
-    // 经真实 API 创建 Chat + Thread（workers disabled 下同步完成），再经 WS 订阅验证 ack。
+    // 经真实 API 创建 Chat，并以唯一 command-batch 用户提交物化 Session/Thread；再经 WS 订阅验证 ack。
     HttpClient http = HttpClient.newHttpClient();
     HttpResponse<String> chatResponse =
         http.send(
@@ -104,22 +105,49 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     assertEquals(201, chatResponse.statusCode(), chatResponse.body());
     String chatId = MAPPER.readTree(chatResponse.body()).path("data").path("id").asText();
 
+    String sessionId = UUID.randomUUID().toString();
+    String threadId = UUID.randomUUID().toString();
+    String clientCommandId = UUID.randomUUID().toString();
     String createBody =
-        "{\"branchSettings\":{\"environment\":null,\"agentName\":\"default-assistant\","
-            + "\"model\":{\"providerName\":\"stub\",\"modelName\":\"acceptance-stub\",\"variant\":\"default\"},"
-            + "\"activeTools\":[]},\"yoloEnabled\":false}";
+        """
+        {
+          "owner":{"type":"CHAT","id":"%s"},
+          "target":{
+            "type":"NEW_SESSION",
+            "sessionId":"%s",
+            "threadId":"%s",
+            "rootSettings":{
+              "environment":null,
+              "agentName":"default-assistant",
+              "model":{
+                "providerName":"stub",
+                "modelName":"acceptance-stub",
+                "variant":"default"
+              },
+              "activeTools":[]
+            },
+            "yoloEnabled":false
+          },
+          "commands":[{
+            "type":"USER_MESSAGE",
+            "clientCommandId":"%s",
+            "contents":[{"type":"TEXT","text":"hello"}]
+          }]
+        }
+        """
+            .formatted(chatId, sessionId, threadId, clientCommandId);
     HttpResponse<String> threadResponse =
         http.send(
-            HttpRequest.newBuilder(uri("/api/ai/chat/" + chatId + "/threads"))
+            HttpRequest.newBuilder(uri("/api/ai/runtime/command-batches"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(createBody))
                 .build(),
             HttpResponse.BodyHandlers.ofString());
-    assertEquals(201, threadResponse.statusCode(), threadResponse.body());
+    assertEquals(202, threadResponse.statusCode(), threadResponse.body());
     JsonNode created = MAPPER.readTree(threadResponse.body()).path("data");
-    String threadId = created.path("thread").path("threadId").asText();
-    assertNotNull(threadId);
+    assertEquals(threadId, created.path("thread").path("threadId").asText());
+    String revision = created.path("thread").path("revision").asText();
 
     FrameCollector collector = new FrameCollector();
     WebSocket socket = connect(collector);
@@ -134,7 +162,9 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     assertEquals(
         "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + threadId
-            + "\"},\"cursor\":\"0\"}",
+            + "\"},\"cursor\":\""
+            + revision
+            + "\"}",
         collector.nextText());
     socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);
   }
