@@ -83,8 +83,7 @@ class DatabaseThreadSelectedSkillLookupTest {
             List.of(),
             List.of(new SkillBinding("review", "Review code", sourceEnvironment)),
             List.of(),
-            ProviderCacheControl.none(),
-            null);
+            ProviderCacheControl.none());
     return REQUEST_CODEC.encode(request);
   }
 
