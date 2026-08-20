@@ -17,7 +17,7 @@ import { useI18n } from '@/shared/i18n'
 
 /**
  * Canvas Chat 右侧面板。
- * 仅做组合 —— 面板主体（真实 Thread / blank 首次发送）在 CanvasAgentThread；
+ * 仅做组合 —— 共享三态 AgentPane 主体在 CanvasAgentThread；
  * 本组件保留 resize/header/collapse 外壳与桌面/窄屏行为。
  */
 export function CanvasAgentDock() {

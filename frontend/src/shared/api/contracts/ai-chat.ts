@@ -21,12 +21,3 @@ export interface ChatCreateDTO {
   environment?: EnvironmentBindingDTO | null
   yoloEnabled?: boolean
 }
-
-/** 部分更新：省略的字段保持不变；environment 显式传 null 表示清空默认环境。 */
-export interface ChatUpdateDTO {
-  title?: string | null
-  agentName?: string
-  environment?: EnvironmentBindingDTO | null
-  yoloEnabled?: boolean
-  expectedVersion: CatalogVersion
-}

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   activeAncestry,
-  branchTarget,
   buildSessionEntryTree,
   isOnActivePath,
   parseHistorySearchTokens,
@@ -122,11 +121,16 @@ describe('Session Entry Tree', () => {
     expect(rows.map((row) => row.hasBranchConnector)).toEqual([true, true, true])
   })
 
-  it('rewinds the head to the parent for editable USER/CUSTOM entries and to itself otherwise', () => {
-    expect(branchTarget(entries[1])).toEqual({ headEntryId: 'root', draft: 'original prompt' })
-    expect(branchTarget(entries[4])).toEqual({ headEntryId: 'assistant', draft: 'custom text' })
-    expect(branchTarget(entries[2])).toEqual({ headEntryId: 'assistant', draft: '' })
-    expect(branchTarget(entries[0])).toEqual({ headEntryId: 'root', draft: '' })
+  it('keeps every tree Entry selectable without relocating a durable head', () => {
+    const rows = buildSessionEntryTree(entries, 'all')
+    expect(rows.map((row) => row.entry.entryId)).toEqual([
+      'root',
+      'user',
+      'assistant',
+      'tool',
+      'custom',
+      'error',
+    ])
   })
 
   it('classifies unknown and malformed Entries while keeping the conversation view free of system records', () => {
@@ -151,7 +155,6 @@ describe('Session Entry Tree', () => {
 
     expect(buildSessionEntryTree([assistant], 'all')[0]?.preview).toBe('面向用户的正文')
     expect(buildSessionEntryTree([assistant], 'all', parseHistorySearchTokens('内部计划'))).toEqual([])
-    expect(branchTarget(custom).draft).toBe(fullDraft)
     expect(buildSessionEntryTree([custom], 'all')[0]?.preview).toHaveLength(220)
   })
 

@@ -29,12 +29,6 @@ interface SessionTreeConnector {
   continues: boolean
 }
 
-export interface BranchTarget {
-  /** `PUT /threads/{id}/head` 的目标 head Entry；当 Entry 不可选中时为 null。 */
-  headEntryId: string | null
-  draft: string
-}
-
 /** 投影预览文本在每个 tree row 渲染时的最大长度。 */
 const PROJECTED_PREVIEW_LIMIT = 220
 
@@ -213,27 +207,6 @@ function matchesSessionTreeFilter(kind: SessionEntryKind, filter: SessionTreeFil
     case 'all':
       return true
   }
-}
-
-/**
- * USER/CUSTOM entry 会将 head 回退到其父节点，并恢复可编辑的原文；其他 Entry 自身就是 head。
- */
-export function branchTarget(entry: HarnessSessionEntryDTO): BranchTarget {
-  if (entry.entryType === 'TURN_START' || entry.entryType === 'TURN_END') {
-    // 控制边界不是 branch 目标；branching 会落到其父节点。
-    return { headEntryId: entry.parentEntryId ?? null, draft: '' }
-  }
-  const kind = sessionEntryKind(entry)
-  if (kind === 'user' || kind === 'custom') {
-    return { headEntryId: entry.parentEntryId ?? null, draft: sessionEntryText(entry) }
-  }
-  return { headEntryId: entry.entryId, draft: '' }
-}
-
-/** branching draft 的完整文本主体。这里有意保留 thinking block：USER/CUSTOM
- * draft 必须保留所有可编辑文本 block，而 preview 使用 sessionEntryVisibleText()。 */
-function sessionEntryText(entry: HarnessSessionEntryDTO): string {
-  return collectMessageText(messageContents(entry), true).join('\n')
 }
 
 /** tree row 使用的单行 preview。显式的 `thinking` block 会被排除。 */

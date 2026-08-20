@@ -3,7 +3,7 @@ import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environmen
 import type {
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
-  HarnessThreadCommandCreateDTO,
+  HarnessCommandCreateDTO,
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
 } from '@/shared/api/contracts/ai-runtime'
@@ -188,8 +188,8 @@ export function buildBranchDiffCommands(
   base: BranchDraft,
   draft: BranchDraft,
   createCommandId: () => string,
-): HarnessThreadCommandCreateDTO[] {
-  const commands: HarnessThreadCommandCreateDTO[] = []
+): HarnessCommandCreateDTO[] {
+  const commands: HarnessCommandCreateDTO[] = []
   if (!sameBinding(base.environment, draft.environment)) {
     commands.push({
       type: 'SET_ENVIRONMENT',

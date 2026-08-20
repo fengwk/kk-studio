@@ -16,8 +16,6 @@ import type {
   CanvasPresignedUrlDTO,
   CanvasResourceNodeDTO,
   CanvasSnapshotDTO,
-  CanvasThreadFirstSendRequestDTO,
-  CanvasThreadFirstSendResponseDTO,
   CreateCanvasRequestDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
@@ -82,22 +80,6 @@ export function getCanvasChanges(
   }, decodeCanvasChanges)
 }
 
-/**
- * POST /canvases/{id}/thread/messages：Canvas 空 Thread 的原子首次发送。
- * 创建绑定到本画布的 Thread 并发送有序 USER_MESSAGE contents；
- * 返回绑定后的 threadId 与携带 threadId 的最新 document。
- */
-export function sendCanvasThreadFirstSend(
-  canvasId: UUIDString,
-  request: CanvasThreadFirstSendRequestDTO,
-  options?: CanvasRequestOptions,
-): Promise<CanvasThreadFirstSendResponseDTO> {
-  return canvasRequest(`/canvases/${canvasId}/thread/messages`, {
-    method: 'POST',
-    body: request,
-    signal: options?.signal,
-  }, decodeCanvasThreadFirstSendResponse)
-}
 
 export function listCanvasFunctionModels(
   options?: CanvasRequestOptions,
@@ -335,15 +317,10 @@ function decodeLong(value: unknown, path: string): number | null {
 
 function decodeCanvasDocument(value: unknown): CanvasDocumentDTO {
   const candidate = requireRecord(value, 'document')
-  const threadId = candidate.threadId
-  if (threadId !== null && threadId !== undefined && !UUID_SHAPE.test(String(threadId))) {
-    throw invalidPayload('document.threadId must be a canonical UUID string or null')
-  }
   return {
     id: requireUuid(candidate.id, 'document.id'),
     title: requireString(candidate.title, 'document.title'),
     version: requireCanvasVersion(candidate.version, 'document.version'),
-    threadId: (threadId ?? null) as UUIDString | null,
     createdAt: requireString(candidate.createdAt, 'document.createdAt'),
     updatedAt: requireString(candidate.updatedAt, 'document.updatedAt'),
   }
@@ -508,13 +485,5 @@ function decodeCanvasChanges(value: unknown): CanvasChangesDTO {
     snapshot: candidate.snapshot === null || candidate.snapshot === undefined
       ? null
       : decodeCanvasSnapshot(candidate.snapshot),
-  }
-}
-
-function decodeCanvasThreadFirstSendResponse(value: unknown): CanvasThreadFirstSendResponseDTO {
-  const candidate = requireRecord(value, 'first send response')
-  return {
-    threadId: requireUuid(candidate.threadId, 'first send response.threadId'),
-    document: decodeCanvasDocument(candidate.document),
   }
 }

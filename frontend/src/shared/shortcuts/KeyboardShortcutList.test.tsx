@@ -9,7 +9,7 @@ describe('KeyboardShortcutList', () => {
     render(<KeyboardShortcutList />)
     const groups = screen.getAllByRole('listitem').filter((item) => item.matches('.shortcut-group'))
     expect(groups.map((group) => group.querySelector('.shortcut-group-title')?.textContent)).toEqual(
-      ['应用', '对话', '事件', '画布'],
+      ['应用', '对话', '调试', '画布'],
     )
     expect(groups.map((group) => group.querySelector('.shortcut-group-list')?.children.length)).toEqual(
       SHORTCUT_SCOPE_ORDER.map((scope) =>

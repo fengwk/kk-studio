@@ -18,7 +18,6 @@ function snapshot(run: CanvasFunctionRunDTO | null): CanvasSnapshotDTO {
       id: CANVAS_ID,
       title: 'Board',
       version: '4',
-      threadId: null,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },

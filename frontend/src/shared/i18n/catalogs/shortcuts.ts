@@ -41,21 +41,21 @@ export const shortcutsCatalog = {
     'en-US': 'Thread',
     'zh-CN': '对话',
   },
-  'ai.runtime.shortcuts.group.events': {
-    'en-US': 'Events',
-    'zh-CN': '事件',
+  'ai.runtime.shortcuts.group.debug': {
+    'en-US': 'Debug',
+    'zh-CN': '调试',
   },
   'ai.runtime.shortcuts.group.canvas': {
     'en-US': 'Canvas',
     'zh-CN': '画布',
   },
-  'ai.runtime.shortcuts.eventsNav': {
-    'en-US': 'Move the selected event',
-    'zh-CN': '切换选中事件',
+  'ai.runtime.shortcuts.debugNav': {
+    'en-US': 'Move the selected debug record',
+    'zh-CN': '切换选中调试记录',
   },
-  'ai.runtime.shortcuts.eventsEscape': {
-    'en-US': 'Clear the event selection',
-    'zh-CN': '取消选中事件',
+  'ai.runtime.shortcuts.debugEscape': {
+    'en-US': 'Clear the debug selection',
+    'zh-CN': '取消选中调试记录',
   },
   'ai.runtime.shortcuts.canvasEscape': {
     'en-US': 'Clear the selection and focus the stage',
@@ -113,11 +113,11 @@ export const shortcutsCatalog = {
     'en-US': 'Command edges',
     'zh-CN': '命令边界',
   },
-  'ai.runtime.shortcuts.label.eventsNav': {
-    'en-US': 'Event navigation',
-    'zh-CN': '事件导航',
+  'ai.runtime.shortcuts.label.debugNav': {
+    'en-US': 'Debug navigation',
+    'zh-CN': '调试导航',
   },
-  'ai.runtime.shortcuts.label.eventsEscape': {
+  'ai.runtime.shortcuts.label.debugEscape': {
     'en-US': 'Clear selection',
     'zh-CN': '取消选中',
   },

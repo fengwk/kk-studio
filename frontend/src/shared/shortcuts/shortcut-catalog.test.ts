@@ -15,7 +15,7 @@ import { setLocale, translate } from '@/shared/i18n'
  */
 describe('SHORTCUT_CATALOG', () => {
   it('declares the four fact scopes in order and a title key per scope', () => {
-    expect(SHORTCUT_SCOPE_ORDER).toEqual(['application', 'thread', 'events', 'canvas'])
+    expect(SHORTCUT_SCOPE_ORDER).toEqual(['application', 'thread', 'debug', 'canvas'])
     for (const scope of SHORTCUT_SCOPE_ORDER) {
       expect(SHORTCUT_SCOPE_TITLE_KEYS[scope]).toMatch(/^ai\.runtime\.shortcuts\.group\./)
     }
@@ -69,8 +69,8 @@ describe('SHORTCUT_CATALOG', () => {
         .map((definition) => definition.keys)
     // Application：ThreadComposer 全局 Escape。
     expect(keysByScope('application')).toEqual(['Esc'])
-    // Events：ThreadEventView 键盘语义。
-    expect(keysByScope('events')).toEqual([
+    // Debug：ThreadEventView 键盘语义。
+    expect(keysByScope('debug')).toEqual([
       '↑ / ↓',
       'Esc',
     ])
