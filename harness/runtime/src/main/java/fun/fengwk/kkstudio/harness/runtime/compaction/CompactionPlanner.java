@@ -40,10 +40,10 @@ import java.util.UUID;
  * point（USER/ASSISTANT 上下文消息、CUSTOM_MESSAGE 或 AssistantAborted，绝不切在 ToolResult 或 COMPACTION turn
  * 内部条目）；从未越过则取范围内最早的合法 cut point。
  *
- * <p>切分检测：cut 非 USER 时只在 cut 所属同一 INPUT turn 内查找第一个 USER/CUSTOM 上下文消息；切分且 HISTORY 段为空时 直接执行
- * TURN_PREFIX，HISTORY 段非空时为 HISTORY→TURN_PREFIX 两段。{@link #prepareTurnPrefix} 精确引用紧邻已关闭 HISTORY 结果
- * Entry（{@code historyCompactionEntryId}），绝不扫描 stale partial；{@link #prepareFallback} 复用失败 primary
- * 的 phase/anchors，仅替换 executionModel 为 fallback。
+ * <p>切分检测：cut 非 USER 时从最近 INPUT 的首个 USER/CUSTOM 开始，并把后续 CONTINUATION durable turns 视为同一逻辑 Agent
+ * segment；切分且 HISTORY 段为空时直接执行 TURN_PREFIX，HISTORY 段非空时为 HISTORY→TURN_PREFIX 两段。{@link
+ * #prepareTurnPrefix} 精确引用紧邻已关闭 HISTORY 结果 Entry（{@code historyCompactionEntryId}），绝不扫描 stale
+ * partial；{@link #prepareFallback} 复用失败 primary 的 phase/anchors，仅替换 executionModel 为 fallback。
  *
  * <p>本类只计算切分事实与 {@link CompactionPreparation#removedPrefixTokens()}。Resolver 按实际 execution model 解析
  * context window / max output 后调用 {@link CompactionConfig#outputBudget} 计算请求预算；fallback 不复用 primary
@@ -112,7 +112,8 @@ public final class CompactionPlanner {
     }
     UUID cutEntryId = entries.get(cutIndex).id();
 
-    // 切分检测：cut 非 USER 时，只在 cut 所属同一 turn 内取第一个 USER/CUSTOM；CONTINUATION 不跨 turn 借用旧 USER。
+    // 切分检测：cut 非 USER 时，从 cut 所属逻辑 Agent segment 的最近 INPUT 起点取第一个
+    // USER/CUSTOM；后续 CONTINUATION durable turns 仍属于同一 segment。
     boolean cutIsUser = isUserLike(entries.get(cutIndex));
     int turnPrefixStartIndex =
         cutIsUser ? -1 : turnPrefixStartIndex(entries, visible, boundaryStart, cutIndex);
@@ -365,6 +366,23 @@ public final class CompactionPlanner {
     return tokens;
   }
 
+  /** 估算指定 Entry 之后仍会进入 Provider Context 的可见消息 token；Entry 缺失即分支损坏，fail closed。 */
+  public static long estimateVisibleTokensAfter(EntryPath path, UUID entryId) {
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(entryId, "entryId");
+    List<Entry> entries = path.entries();
+    int entryIndex = indexOfId(entries, entryId);
+    if (entryIndex < 0) {
+      throw new IllegalStateException("entryId is not on the current path: " + entryId);
+    }
+    boolean[] visible = visibilityMask(entries);
+    long tokens = 0L;
+    for (int i = entryIndex + 1; i < entries.size(); i++) {
+      tokens = Math.addExact(tokens, visible[i] ? estimateTokens(entries.get(i)) : 0L);
+    }
+    return tokens;
+  }
+
   private static int boundaryStartIndex(List<Entry> entries) {
     var path = new EntryPath(entries);
     Optional<CompactionTurns.CompactionTurn> latest = CompactionTurns.latestComplete(path);
@@ -397,19 +415,18 @@ public final class CompactionPlanner {
   }
 
   /**
-   * cut 所属同一 turn 的首个可见 USER/CUSTOM 索引；该 turn 不在当前 compaction boundary 内、不是 INPUT turn，或 cut 前没有
-   * user-like 消息时返回 -1。
+   * cut 所属逻辑 Agent segment 的首个可见 USER/CUSTOM 索引。segment 从最近 INPUT 开始并跨越其后的 CONTINUATION durable
+   * turns；当前 compaction boundary 内没有 INPUT，或 cut 前没有 user-like 消息时返回 -1。
    */
   private static int turnPrefixStartIndex(
       List<Entry> entries, boolean[] visible, int boundaryStart, int cutIndex) {
     int turnStartIndex = -1;
     for (int i = cutIndex - 1; i >= boundaryStart; i--) {
       if (entries.get(i).payload() instanceof TurnStartPayload start) {
-        if (start.reason() != TurnStartReason.INPUT) {
-          return -1;
+        if (start.reason() == TurnStartReason.INPUT) {
+          turnStartIndex = i;
+          break;
         }
-        turnStartIndex = i;
-        break;
       }
     }
     if (turnStartIndex < 0) {

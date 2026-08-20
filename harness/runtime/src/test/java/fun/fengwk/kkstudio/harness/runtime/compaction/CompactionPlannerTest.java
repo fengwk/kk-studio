@@ -97,6 +97,21 @@ class CompactionPlannerTest {
   }
 
   @Test
+  void estimatesOnlyVisibleMessagesAfterTheUsageEntry() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("user");
+    path.assistant("call", "call-1");
+    path.toolResult(id(4L), "call-1");
+    path.closeTurn(true);
+
+    assertEquals(1L, CompactionPlanner.estimateVisibleTokensAfter(path.path(), id(4L)));
+    assertThrows(
+        IllegalStateException.class,
+        () -> CompactionPlanner.estimateVisibleTokensAfter(path.path(), id(999L)));
+  }
+
+  @Test
   void neverExceedingBudgetYieldsNoPreparation() {
     // 预算远大于全部消息（窗口巨大）-> 无合法 cut 位置可产生非空摘要范围。
     PathBuilder path = new PathBuilder();
@@ -231,21 +246,71 @@ class CompactionPlannerTest {
   }
 
   @Test
-  void continuationAssistantNeverBorrowsUserFromPreviousTurnAsSplitPrefix() {
+  void continuationAssistantUsesLatestInputAcrossDurableTurns() {
     PathBuilder path = new PathBuilder();
     path.root();
     path.turn("original user");
     path.assistant("tool-free answer");
     path.closeTurn(true);
     path.continuation();
+    path.assistant("first continuation answer");
+    path.closeTurn(true);
+    path.continuation();
+    path.assistant("second continuation answer");
+
+    CompactionPreparation preparation = plan(path, 40L).orElseThrow();
+
+    assertEquals(CompactionPhase.TURN_PREFIX, preparation.phase());
+    assertEquals(id(10L), preparation.cutEntryId());
+    assertEquals(id(3L), preparation.turnPrefixStartEntryId());
+    assertEquals(3, preparation.messagesToSummarize().size());
+    assertTrue(contentText(preparation.messagesToSummarize().get(0)).contains("original user"));
+    assertTrue(
+        contentText(preparation.messagesToSummarize().get(2)).contains("first continuation"));
+  }
+
+  @Test
+  void continuationSplitUsesNewestInputSegment() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("older user");
+    path.assistant("older answer");
+    path.closeTurn();
+    path.turn("latest user");
+    path.assistant("latest answer");
+    path.closeTurn(true);
+    path.continuation();
+    path.assistant("continuation answer");
+
+    CompactionPreparation preparation = plan(path, 40L).orElseThrow();
+
+    assertEquals(CompactionPhase.HISTORY, preparation.phase());
+    assertEquals(id(11L), preparation.cutEntryId());
+    assertEquals(id(7L), preparation.turnPrefixStartEntryId());
+    assertEquals(2, preparation.messagesToSummarize().size());
+    assertTrue(contentText(preparation.messagesToSummarize().get(0)).contains("older user"));
+    assertFalse(
+        preparation.messagesToSummarize().stream()
+            .anyMatch(message -> contentText(message).contains("latest user")));
+  }
+
+  @Test
+  void continuationSplitDoesNotCrossLatestCompleteBoundary() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("original user");
+    path.assistant("original answer");
+    path.closeTurn();
+    path.completedCompaction(fullStart(id(4L)), "previous summary");
+    path.continuation();
     path.assistant("continuation answer");
 
     CompactionPreparation preparation = plan(path, 40L).orElseThrow();
 
     assertEquals(CompactionPhase.FULL, preparation.phase());
-    assertEquals(id(7L), preparation.cutEntryId());
+    assertEquals(id(10L), preparation.cutEntryId());
     assertNull(preparation.turnPrefixStartEntryId());
-    assertEquals(2, preparation.messagesToSummarize().size());
+    assertEquals("previous summary", preparation.previousSummary());
   }
 
   @Test
