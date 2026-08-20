@@ -154,9 +154,11 @@ Agent 使用相同 System Prompt 和精确相同的
 `tools=[read,write,edit,bash,grep,find], skills=[], subagents=[]`，只改变 Model 引用。
 该 Agent System Prompt 不包含日期、时间、状态、ready、workdir 或 case path；日粒度日期只由
 Core 的稳定 `<current_environment>` 块提供。
-每个 case 创建独立 Chat/Thread，Thread 固定 `yoloEnabled=true`、目标 Environment、
-上述 active tools 和该 case 的 `high` Model；每个 Thread 只入队一条 USER message，工具
-continuation 仍属于同一个真实 turn。
+每个 case 创建独立 Chat/Thread，Thread 固定 `yoloEnabled=true`、目标 Environment
+（Chat 与 rootSettings 均为完整 `EnvironmentBinding{name, workspacePath: '.'}`）、
+上述 active tools 和该 case 的 `high` Model；每个 case 通过一次原子
+NEW_SESSION command batch 物化 Session + ROOT + Thread 并提交首条 USER message，
+工具 continuation 仍属于同一个真实 turn。
 
 执行流程为：
 

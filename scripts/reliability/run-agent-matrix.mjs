@@ -36,11 +36,11 @@ import {
 import { assert, envelopeData, httpJson, pageResults, cid } from '../e2e/lib/http.mjs'
 import {
   branchSettingsOf,
+  chatOwner,
   createChat,
-  createChatThread,
-  enqueueCommands,
   getThreadSnapshot,
   listEnvironments,
+  materializeNewSession,
   stopThread,
   userMessageCommand,
   waitForQuiescentThread,
@@ -262,28 +262,18 @@ async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv }) 
       title: `reliability-${testCase.id}`,
       agentName: agent.name,
       yoloEnabled: true,
-      environmentName: daemonEnv,
+      environment: { name: daemonEnv, workspacePath: '.' },
     })
-    const snapshot = await createChatThread(ctx, chat.id, {
-      title: null,
-      yoloEnabled: true,
-      branchSettings: branchSettingsOf(
-        agent,
-        {
-          providerName: testCase.model.providerName,
-          modelName: testCase.model.modelName,
-          variant: VARIANT,
-        },
-        { environmentName: daemonEnv, activeTools: [...ACTIVE_TOOLS] },
-      ),
+    const request = buildNewSessionRequest({
+      chat,
+      agent,
+      testCase,
+      daemonEnv,
+      prompt: buildUserPrompt(testCase),
     })
-    threadId = snapshot.thread.threadId
-    assertThreadSettings(snapshot, testCase, daemonEnv, agent.name)
-    await enqueueCommands(ctx, threadId, {
-      expectedHeadEntryId: snapshot.thread.headEntryId,
-      expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
-      commands: [userMessageCommand(buildUserPrompt(testCase), cid())],
-    })
+    const accepted = await materializeNewSession(ctx, request)
+    threadId = accepted.thread.threadId
+    assertThreadSettings(accepted, testCase, daemonEnv, agent.name)
     result.turnStarted = true
 
     try {
@@ -557,10 +547,48 @@ async function postcheckCase(docker, testCase, precheck) {
   }
 }
 
-function assertThreadSettings(snapshot, testCase, daemonEnv, agentName) {
-  const thread = snapshot.thread
+/** 构造原子 NEW_SESSION 提交：预分配 sessionId/threadId，rootSettings 绑定环境与 activeTools，yolo true，首条 USER command。 */
+export function buildNewSessionRequest({ chat, agent, testCase, daemonEnv, prompt }) {
+  return {
+    owner: chatOwner(chat.id),
+    sessionId: cid(),
+    threadId: cid(),
+    rootSettings: branchSettingsOf(
+      agent,
+      {
+        providerName: testCase.model.providerName,
+        modelName: testCase.model.modelName,
+        variant: VARIANT,
+      },
+      { environment: { name: daemonEnv, workspacePath: '.' }, activeTools: [...ACTIVE_TOOLS] },
+    ),
+    yoloEnabled: true,
+    commands: [userMessageCommand(prompt, cid())],
+  }
+}
+
+export function assertThreadSettings(accepted, testCase, daemonEnv, agentName) {
+  const thread = accepted.thread
+  const firstAccepted = accepted.acceptedCommands?.[0]
+  assert(
+    firstAccepted && String(thread.threadId) === String(firstAccepted.threadId),
+    'Thread identity mismatch',
+  )
+  // 首条 USER command 已接受：nextCommandSequence 精确为 2，revision 至少 1。
+  // 不锁定瞬时 status/head（processor 可能已异步消费）。
+  assert(
+    String(thread.nextCommandSequence) === '2',
+    `Thread nextCommandSequence must be 2: ${JSON.stringify(thread)}`,
+  )
+  assert(
+    Number(thread.revision) >= 1,
+    `Thread revision must be at least 1: ${JSON.stringify(thread)}`,
+  )
   assert(thread.yoloEnabled === true, 'Thread yoloEnabled must be true')
-  assert(thread.branchSettings?.environmentName === daemonEnv, 'Thread Environment mismatch')
+  assert(
+    thread.branchSettings?.environment?.name === daemonEnv,
+    'Thread Environment mismatch',
+  )
   assert(thread.branchSettings?.agentName === agentName, 'Thread Agent mismatch')
   assert(
     JSON.stringify(thread.branchSettings?.model)
