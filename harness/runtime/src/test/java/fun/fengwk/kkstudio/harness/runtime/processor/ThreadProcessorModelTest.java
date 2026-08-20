@@ -424,7 +424,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
     // 一个 claim：stale model 不 apply；queued USER 触发历史 open Turn 的 INPUT normalization。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
@@ -483,7 +483,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
             successResponse(List.of("call-1"), "unknown-tool"),
             null);
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
     // claim1：Model apply 物化 immediate FAILED(UNKNOWN_TOOL) 槽位，仅请求 THREAD、完成 claim（不写 TURN_END）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
@@ -549,7 +549,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
         successResponse(List.of(new ProviderToolCall("call-1", "bash", "{\"unexpected\":1}"))),
         null);
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
     // claim1：Model apply（schema-invalid immediate FAILED 槽位）-> 请求 THREAD。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
@@ -693,7 +693,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
             GenerationStopReason.LENGTH),
         null);
     requestThreadWork(fixture.store, baseline.threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000));
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
     // claim1：Model apply materialize 两个 immediate FAILED(MODEL_OUTPUT_TRUNCATED) 槽位 -> 请求 THREAD。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));

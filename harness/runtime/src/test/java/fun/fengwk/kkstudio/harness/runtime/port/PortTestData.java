@@ -40,8 +40,7 @@ final class PortTestData {
         List.of(),
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        null);
+        ProviderCacheControl.none());
   }
 
   static ProviderRequest providerRequest() {

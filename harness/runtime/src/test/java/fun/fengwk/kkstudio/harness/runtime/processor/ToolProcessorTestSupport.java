@@ -210,7 +210,8 @@ final class ToolProcessorTestSupport {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), threadId, 100_000),
+                  new TurnStartPayload(
+                      TurnStartReason.INPUT, branchSettings(), threadId, 100_000, 16_384, null),
                   now.plusMillis(1)));
           tx.insertEntry(
               new Entry(
@@ -455,8 +456,7 @@ final class ToolProcessorTestSupport {
         List.of(platformBinding(ToolSideEffect.READ_ONLY)),
         List.of(),
         List.of(),
-        provider.cacheControl(),
-        null);
+        provider.cacheControl());
   }
 
   private static ProviderRequest providerRequest() {

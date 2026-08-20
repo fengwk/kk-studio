@@ -33,6 +33,26 @@ import java.util.List;
 class HarnessRuntimeApiRecordsTest {
 
   @Test
+  void manualCompactionRecordsValidateTheirShapes() {
+    assertThrows(NullPointerException.class, () -> new CompactThreadCommand(null, 0));
+    assertThrows(IllegalArgumentException.class, () -> new CompactThreadCommand(TestIds.id(1), -1));
+    assertTrue(ManualCompactionAvailability.enabled().available());
+    ManualCompactionAvailability disabled =
+        ManualCompactionAvailability.disabled(
+            ManualCompactionAvailability.DisabledReason.THREAD_BUSY);
+    assertEquals(
+        ManualCompactionAvailability.DisabledReason.THREAD_BUSY, disabled.disabledReason());
+    assertThrows(NullPointerException.class, () -> ManualCompactionAvailability.disabled(null));
+
+    ThreadState thread =
+        HarnessRuntimeTestSupport.thread(TestIds.id(1), TestIds.id(2), TestIds.id(3));
+    CompactThreadResult result = new CompactThreadResult(thread, TestIds.id(4), null);
+    assertEquals(thread, result.thread());
+    assertThrows(
+        NullPointerException.class, () -> new CompactThreadResult(null, TestIds.id(4), null));
+  }
+
+  @Test
   void acceptCommandsTargetsValidateTheirShapes() {
     // NEW_SESSION 必需字段。
     assertThrows(

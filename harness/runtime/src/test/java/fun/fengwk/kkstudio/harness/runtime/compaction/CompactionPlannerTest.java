@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -53,7 +52,9 @@ import java.util.UUID;
 class CompactionPlannerTest {
   private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
-  private static final CompactionConfig CONFIG = new CompactionConfig(true, 16_384, 20_000);
+  private static final ModelSelection SETTINGS_MODEL =
+      new ModelSelection("provider", "model", "v1");
+  private static final CompactionConfig CONFIG = new CompactionConfig(20_000, null);
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 
   @Test
@@ -124,11 +125,10 @@ class CompactionPlannerTest {
 
     assertEquals(CompactionPhase.FULL, preparation.phase());
     assertEquals(id(7L), preparation.cutEntryId()); // second turn 的 USER
-    assertEquals(id(5L), preparation.firstKeptEntryId()); // 重绕包含 TURN_END(5)，止于 ASSISTANT(4)
     assertNull(preparation.turnPrefixStartEntryId());
     assertEquals(2, preparation.messagesToSummarize().size());
-    assertTrue(preparation.tokensBefore() > 0);
-    assertEquals(80L, preparation.contextWindow());
+    assertTrue(preparation.removedPrefixTokens() > 0);
+    assertEquals(SETTINGS_MODEL, preparation.executionModel());
   }
 
   @Test
@@ -172,41 +172,27 @@ class CompactionPlannerTest {
         history.messagesToSummarize().stream()
             .anyMatch(m -> contentText(m).contains("split turn")));
 
-    // TURN_PREFIX 延续冻结复用同一 payload 事实，绝不重新选 cut。
-    CompactionPayload partial =
-        new CompactionPayload(
-            CompactionPhase.HISTORY,
-            CompactionTrigger.THRESHOLD,
-            history.tokensBefore(),
-            false,
-            "history summary",
-            history.firstKeptEntryId(),
-            history.cutEntryId(),
-            history.turnPrefixStartEntryId());
-    CompactionPreparation prefix = planner().prepareTurnPrefix(path.path(), partial, 100_000L);
+    // TURN_PREFIX 延续冻结复用同一 enclosing TURN_START 事实，绝不重新选 cut。
+    path.closeTurn();
+    CompactionTurns.CompactionTurn historyTurn =
+        path.completedCompaction(history.frozenStart(), "history summary");
+    CompactionPreparation prefix = planner().prepareTurnPrefix(path.path(), historyTurn);
     assertEquals(CompactionPhase.TURN_PREFIX, prefix.phase());
-    assertEquals(history.firstKeptEntryId(), prefix.firstKeptEntryId());
     assertEquals(history.cutEntryId(), prefix.cutEntryId());
     assertEquals(history.turnPrefixStartEntryId(), prefix.turnPrefixStartEntryId());
-    assertEquals(history.tokensBefore(), prefix.tokensBefore());
+    assertEquals(
+        CompactionTurns.entryAt(path.path(), historyTurn.resultIndex()).id(),
+        prefix.historyCompactionEntryId());
     assertEquals(CompactionTrigger.THRESHOLD, prefix.trigger());
     assertEquals(1, prefix.messagesToSummarize().size());
     assertTrue(contentText(prefix.messagesToSummarize().get(0)).contains("split turn"));
 
     CompactionSummaryInput reconstructedHistory =
-        CompactionPlanner.reconstructSummaryInput(path.path(), requestOf(history));
+        CompactionPlanner.reconstructSummaryInput(path.path(), history.frozenStart());
     assertEquals(history.messagesToSummarize(), reconstructedHistory.messages());
     assertNull(reconstructedHistory.previousSummary());
     CompactionSummaryInput reconstructedPrefix =
-        CompactionPlanner.reconstructSummaryInput(
-            path.path(),
-            new CompactionRequest(
-                CompactionPhase.TURN_PREFIX,
-                prefix.trigger(),
-                prefix.tokensBefore(),
-                prefix.firstKeptEntryId(),
-                prefix.cutEntryId(),
-                prefix.turnPrefixStartEntryId()));
+        CompactionPlanner.reconstructSummaryInput(path.path(), prefix.frozenStart());
     assertEquals(prefix.messagesToSummarize(), reconstructedPrefix.messages());
     assertNull(reconstructedPrefix.previousSummary());
   }
@@ -266,15 +252,7 @@ class CompactionPlannerTest {
   void emptyMessagesReturnsNoPreparationEvenWithPreviousSummary() {
     PathBuilder path = new PathBuilder();
     path.root();
-    path.compaction(
-        CompactionPhase.FULL,
-        CompactionTrigger.THRESHOLD,
-        500L,
-        true,
-        "previous summary",
-        id(1L),
-        id(1L),
-        null);
+    path.completedCompaction(fullStart(id(1L)), "previous summary");
     path.custom("com.example", "state");
 
     // 之后没有任何新对话消息：即使存在 previous summary 也不单独重压缩（避免空转）。
@@ -312,97 +290,74 @@ class CompactionPlannerTest {
 
     assertEquals(CompactionPhase.FULL, preparation.phase());
     assertEquals(id(8L), preparation.cutEntryId());
-    assertEquals(id(5L), preparation.firstKeptEntryId());
     assertEquals(2, preparation.messagesToSummarize().size());
   }
 
   @Test
-  void missingPreviousFirstKeptFailsClosed() {
+  void missingPreviousCutFailsClosed() {
     PathBuilder path = new PathBuilder();
     path.root();
     path.turn("hi");
     path.assistant("reply");
     path.closeTurn();
-    // complete 压缩引用了不存在的 firstKeptEntryId -> 分支损坏。
-    path.compaction(
-        CompactionPhase.FULL,
-        CompactionTrigger.THRESHOLD,
-        500L,
-        true,
-        "summary",
-        id(999L),
-        id(4L),
-        null);
+    // complete 压缩引用了不存在的 cutEntryId -> 分支损坏。
+    path.completedCompaction(fullStart(id(999L)), "summary");
     path.turn("later");
 
     IllegalStateException error =
         assertThrows(IllegalStateException.class, () -> plan(path, 100_000L));
-    assertTrue(error.getMessage().contains("firstKeptEntryId"), error.getMessage());
+    assertTrue(error.getMessage().contains("cutEntryId"), error.getMessage());
   }
 
   @Test
   void frozenContinuationFailsClosedOnMissingOrCorruptReferences() {
-    PathBuilder path = new PathBuilder();
-    path.root();
-    path.turn("hi");
-    path.assistant("reply");
-    path.closeTurn();
-
-    CompactionPayload partial =
-        new CompactionPayload(
-            CompactionPhase.HISTORY,
-            CompactionTrigger.THRESHOLD,
-            100L,
-            false,
-            "history",
-            id(2L),
-            id(999L), // cut 不在当前路径
-            id(3L));
+    PathBuilder missingCut = closedTurnPath();
+    CompactionTurns.CompactionTurn missingCutTurn =
+        missingCut.completedCompaction(historyStart(id(999L), id(3L)), "history");
     assertThrows(
         IllegalStateException.class,
-        () -> planner().prepareTurnPrefix(path.path(), partial, 100_000L));
+        () -> planner().prepareTurnPrefix(missingCut.path(), missingCutTurn));
 
-    CompactionPayload emptyPrefix =
-        new CompactionPayload(
-            CompactionPhase.HISTORY,
-            CompactionTrigger.THRESHOLD,
-            100L,
-            false,
-            "history",
-            id(2L),
-            id(4L),
-            id(4L)); // turnPrefixStart == cut -> 空前缀
+    PathBuilder emptyPrefix = closedTurnPath();
+    CompactionTurns.CompactionTurn emptyPrefixTurn =
+        emptyPrefix.completedCompaction(
+            historyStart(id(4L), id(4L)), "history"); // turnPrefixStart == cut
     assertThrows(
         IllegalStateException.class,
-        () -> planner().prepareTurnPrefix(path.path(), emptyPrefix, 100_000L));
+        () -> planner().prepareTurnPrefix(emptyPrefix.path(), emptyPrefixTurn));
 
-    CompactionPayload inverted =
-        new CompactionPayload(
-            CompactionPhase.HISTORY,
-            CompactionTrigger.THRESHOLD,
-            100L,
-            false,
-            "history",
-            id(5L),
-            id(4L),
-            id(3L)); // firstKept 在 cut 之后
+    PathBuilder complete = closedTurnPath();
+    CompactionTurns.CompactionTurn completeTurn =
+        complete.completedCompaction(fullStart(id(4L)), "complete");
     assertThrows(
         IllegalStateException.class,
-        () -> planner().prepareTurnPrefix(path.path(), inverted, 100_000L));
+        () -> planner().prepareTurnPrefix(complete.path(), completeTurn));
+  }
 
-    CompactionPayload complete =
-        new CompactionPayload(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            100L,
-            true,
-            "complete",
-            id(2L),
-            id(4L),
-            null);
+  @Test
+  void continuationAndFallbackRequireTheirExactTerminalOutcomes() {
+    PathBuilder historyPath = closedTurnPath();
+    CompactionTurns.CompactionTurn completedHistory =
+        historyPath.completedCompaction(historyStart(id(4L), id(3L)), "history");
+    CompactionTurns.CompactionTurn stoppedHistory =
+        new CompactionTurns.CompactionTurn(
+            completedHistory.start(),
+            completedHistory.result(),
+            new TurnEndPayload(
+                id(99L), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(100L)),
+            completedHistory.startIndex(),
+            completedHistory.resultIndex(),
+            completedHistory.endIndex());
     assertThrows(
         IllegalStateException.class,
-        () -> planner().prepareTurnPrefix(path.path(), complete, 100_000L));
+        () -> planner().prepareTurnPrefix(historyPath.path(), stoppedHistory));
+
+    CompactionPlanner fallbackPlanner =
+        new CompactionPlanner(
+            new CompactionConfig(20_000, new ModelSelection("fallback", "summary", "v2")));
+    assertThrows(
+        IllegalStateException.class,
+        () -> fallbackPlanner.prepareFallback(historyPath.path(), completedHistory));
   }
 
   @Test
@@ -412,15 +367,8 @@ class CompactionPlannerTest {
     path.turn("first");
     path.assistant("first reply");
     path.closeTurn();
-    path.compaction(
-        CompactionPhase.FULL,
-        CompactionTrigger.THRESHOLD,
-        100L,
-        true,
-        "carried summary\n\n<read-files>\nold.txt\n</read-files>",
-        id(1L),
-        id(4L),
-        null);
+    path.completedCompaction(
+        fullStart(id(4L)), "carried summary\n\n<read-files>\nold.txt\n</read-files>");
     path.turn("new messages");
     path.assistant("new reply");
 
@@ -429,16 +377,9 @@ class CompactionPlannerTest {
     // cut 落在新 ASSISTANT 上且前缀非空 -> HISTORY 阶段；previousSummary 沿用于 update 提示。
     assertEquals(CompactionPhase.HISTORY, preparation.phase());
     assertEquals("carried summary", preparation.previousSummary());
-    // tokensBefore 是压缩感知估计：完整 wrapper summary + 上次 cut 后的 3 条可见消息。
-    long wrapperTokens =
-        (CompactionPrompts.compactedContext(
-                        "carried summary\n\n<read-files>\nold.txt\n</read-files>")
-                    .length()
-                + 3L)
-            / 4L;
-    assertEquals(wrapperTokens + 75L, preparation.tokensBefore());
+    assertTrue(preparation.removedPrefixTokens() > 0);
     CompactionSummaryInput reconstructed =
-        CompactionPlanner.reconstructSummaryInput(path.path(), requestOf(preparation));
+        CompactionPlanner.reconstructSummaryInput(path.path(), preparation.frozenStart());
     assertEquals(preparation.messagesToSummarize(), reconstructed.messages());
     assertEquals("carried summary", reconstructed.previousSummary());
   }
@@ -453,16 +394,16 @@ class CompactionPlannerTest {
     path.turn("second");
     path.assistant("second reply");
     CompactionPreparation preparation = plan(path, 80L).orElseThrow();
-    CompactionRequest request = requestOf(preparation);
+    CompactionStart start = preparation.frozenStart();
 
     path.closeTurn();
     path.turn("later user");
     path.assistant("later reply");
 
     CompactionSummaryInput reconstructed =
-        CompactionPlanner.reconstructSummaryInput(path.path(), request);
+        CompactionPlanner.reconstructSummaryInput(path.path(), start);
     assertEquals(preparation.messagesToSummarize(), reconstructed.messages());
-    assertEquals(preparation.cutEntryId(), request.cutEntryId());
+    assertEquals(preparation.cutEntryId(), start.cutEntryId());
   }
 
   @Test
@@ -484,14 +425,12 @@ class CompactionPlannerTest {
 
     assertEquals(CompactionPhase.FULL, preparation.phase());
     assertEquals(id(10L), preparation.cutEntryId()); // 绝不落在被停止压缩 turn 内部
-    assertEquals(id(5L), preparation.firstKeptEntryId()); // 重绕穿过 6..8，止于 ASST1(4)
     assertNull(preparation.turnPrefixStartEntryId());
     assertEquals(2, preparation.messagesToSummarize().size()); // 只有 USER1+ASST1
     assertFalse(
         preparation.messagesToSummarize().stream()
             .anyMatch(m -> contentText(m).contains("aborted")));
-    // 4 条可见消息 x 25 token；内部 ABORTED 不计入（否则 125）。
-    assertEquals(100L, preparation.tokensBefore());
+    assertEquals(50L, preparation.removedPrefixTokens());
   }
 
   @Test
@@ -517,46 +456,28 @@ class CompactionPlannerTest {
             .anyMatch(m -> contentText(m).contains("aborted")));
   }
 
-  @Test
-  void prepareTurnPrefixExcludesStoppedCompactionMessagesAndFailsClosedWhenEmpty() {
+  private static PathBuilder closedTurnPath() {
     PathBuilder path = new PathBuilder();
     path.root();
-    path.turn("first user");
-    path.assistant("first reply");
+    path.turn("hi");
+    path.assistant("reply");
     path.closeTurn();
-    path.stoppedCompaction("internal aborted");
-    path.turn("second user");
-    path.assistant("second reply");
+    return path;
+  }
 
-    // 前缀范围 [6,11) 内被停止压缩 turn 的 ABORTED 不可见，USER2(10) 保留。
-    CompactionPayload partial =
-        new CompactionPayload(
-            CompactionPhase.HISTORY,
-            CompactionTrigger.THRESHOLD,
-            500L,
-            false,
-            "history",
-            id(5L),
-            id(11L),
-            id(6L));
-    CompactionPreparation prefix = planner().prepareTurnPrefix(path.path(), partial, 100_000L);
-    assertEquals(1, prefix.messagesToSummarize().size());
-    assertTrue(contentText(prefix.messagesToSummarize().get(0)).contains("second user"));
+  private static CompactionStart fullStart(UUID cutEntryId) {
+    return new CompactionStart(
+        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, SETTINGS_MODEL, cutEntryId, null, null);
+  }
 
-    // 前缀范围 [6,8) 全部被掩码 -> 分支损坏 fail closed。
-    CompactionPayload empty =
-        new CompactionPayload(
-            CompactionPhase.HISTORY,
-            CompactionTrigger.THRESHOLD,
-            500L,
-            false,
-            "history",
-            id(5L),
-            id(8L),
-            id(6L));
-    assertThrows(
-        IllegalStateException.class,
-        () -> planner().prepareTurnPrefix(path.path(), empty, 100_000L));
+  private static CompactionStart historyStart(UUID cutEntryId, UUID turnPrefixStartEntryId) {
+    return new CompactionStart(
+        CompactionPhase.HISTORY,
+        CompactionTrigger.THRESHOLD,
+        SETTINGS_MODEL,
+        cutEntryId,
+        turnPrefixStartEntryId,
+        null);
   }
 
   private static CompactionPlanner planner() {
@@ -565,16 +486,6 @@ class CompactionPlannerTest {
 
   private static Optional<CompactionPreparation> plan(PathBuilder path, long contextWindow) {
     return planner().prepare(path.path(), CompactionTrigger.THRESHOLD, contextWindow);
-  }
-
-  private static CompactionRequest requestOf(CompactionPreparation preparation) {
-    return new CompactionRequest(
-        preparation.phase(),
-        preparation.trigger(),
-        preparation.tokensBefore(),
-        preparation.firstKeptEntryId(),
-        preparation.cutEntryId(),
-        preparation.turnPrefixStartEntryId());
   }
 
   private static String contentText(AgentMessage message) {
@@ -592,10 +503,7 @@ class CompactionPlannerTest {
     private final List<Entry> entries = new ArrayList<>();
     private final BranchSettings SETTINGS =
         new BranchSettings(
-            EnvironmentBindings.binding("env-1"),
-            "agent",
-            new ModelSelection("provider", "model", "v1"),
-            List.of());
+            EnvironmentBindings.binding("env-1"), "agent", SETTINGS_MODEL, List.of());
     private long nextId = 1L;
 
     PathBuilder root() {
@@ -806,94 +714,42 @@ class CompactionPlannerTest {
       return this;
     }
 
-    /** 完成压缩 turn：[TURN_START(COMPACTION), COMPACTION payload, TURN_END]。 */
-    long compactionComplete(UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
+    /** 完成压缩 turn，并返回从当前 immutable path 派生的 enclosing facts。 */
+    CompactionTurns.CompactionTurn completedCompaction(CompactionStart start, String summary) {
       long startId = nextId++;
       entries.add(
           new Entry(
               id(startId),
               id(100L),
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
+              new TurnStartPayload(
+                  TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, start),
               BASE));
       entries.add(
-          new Entry(
-              id(nextId++),
-              id(100L),
-              parentId(),
-              new CompactionPayload(
-                  CompactionPhase.FULL,
-                  CompactionTrigger.THRESHOLD,
-                  500L,
-                  true,
-                  "summary",
-                  firstKeptEntryId,
-                  cutEntryId,
-                  turnPrefixStartEntryId),
-              BASE));
+          new Entry(id(nextId++), id(100L), parentId(), new CompactionPayload(summary), BASE));
       long endId = nextId++;
+      boolean continueModel =
+          start.phase() == CompactionPhase.HISTORY || start.trigger() == CompactionTrigger.OVERFLOW;
       entries.add(
           new Entry(
               id(endId),
               id(100L),
               parentId(),
-              new TurnEndPayload(id(startId), TurnEndOutcome.COMPLETED, false, null, null),
+              new TurnEndPayload(id(startId), TurnEndOutcome.COMPLETED, continueModel, null, null),
               BASE));
-      return endId;
-    }
-
-    /** HISTORY incomplete compaction turn。 */
-    PathBuilder compaction(
-        CompactionPhase phase,
-        CompactionTrigger trigger,
-        long tokens,
-        boolean complete,
-        String summary,
-        UUID firstKeptEntryId,
-        UUID cutEntryId,
-        UUID turnPrefixStartEntryId) {
-      long startId = nextId++;
-      entries.add(
-          new Entry(
-              id(startId),
-              id(100L),
-              parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
-              BASE));
-      entries.add(
-          new Entry(
-              id(nextId++),
-              id(100L),
-              parentId(),
-              new CompactionPayload(
-                  phase,
-                  trigger,
-                  tokens,
-                  complete,
-                  summary,
-                  firstKeptEntryId,
-                  cutEntryId,
-                  turnPrefixStartEntryId),
-              BASE));
-      long endId = nextId++;
-      entries.add(
-          new Entry(
-              id(endId),
-              id(100L),
-              parentId(),
-              new TurnEndPayload(id(startId), TurnEndOutcome.COMPLETED, false, null, null),
-              BASE));
-      return this;
+      return CompactionTurns.scan(path()).getLast();
     }
 
     PathBuilder stoppedCompaction(String abortedText) {
       long startId = nextId++;
+      CompactionStart start = fullStart(parentId());
       entries.add(
           new Entry(
               id(startId),
               id(100L),
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
+              new TurnStartPayload(
+                  TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, null, null, start),
               BASE));
       aborted(abortedText);
       long endId = nextId++;

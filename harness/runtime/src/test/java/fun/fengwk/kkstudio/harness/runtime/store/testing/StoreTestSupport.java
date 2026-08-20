@@ -78,6 +78,7 @@ final class StoreTestSupport {
   static final EnvironmentBinding ENV_ID = EnvironmentBindings.binding("env-1");
   static final UUID OWNER_THREAD_ID = TestIds.id(10L);
   static final int CONTEXT_WINDOW = 100_000;
+  static final int MAX_OUTPUT_TOKENS = 16_384;
   static final Instant T0 = Instant.ofEpochMilli(1000);
   static final Instant T1 = Instant.ofEpochMilli(2000);
   static final Instant T2 = Instant.ofEpochMilli(3000);
@@ -202,7 +203,12 @@ final class StoreTestSupport {
 
   static EntryPayload resolvedTurnStartPayload(UUID ownerThreadId) {
     return new TurnStartPayload(
-        TurnStartReason.INPUT, branchSettings(), ownerThreadId, CONTEXT_WINDOW);
+        TurnStartReason.INPUT,
+        branchSettings(),
+        ownerThreadId,
+        CONTEXT_WINDOW,
+        MAX_OUTPUT_TOKENS,
+        null);
   }
 
   /** ASSISTANT MESSAGE payload；{@code toolCallIds} 会按顺序变成 ToolCall 内容。 */
@@ -516,8 +522,7 @@ final class StoreTestSupport {
         List.of(),
         List.of(),
         List.of(),
-        provider.cacheControl(),
-        null);
+        provider.cacheControl());
   }
 
   /** SUCCEEDED live-attach 的机械请求：单一 bash binding（renderer 由 binding 派生，与 assistant ToolCall 全等）。 */
@@ -531,8 +536,7 @@ final class StoreTestSupport {
         List.of(platformBinding()),
         List.of(),
         List.of(),
-        base.cacheControl(),
-        null);
+        base.cacheControl());
   }
 
   /** SUCCEEDED assistant payload：由同一 request/response 经 mapper 机械派生（strict attach 校验要求全等）。 */

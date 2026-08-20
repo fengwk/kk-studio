@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -140,9 +141,10 @@ class HistoryEntryPayloadJsonCodecTest {
             + "\"activeTools\":[\"read\",\"grep\"]},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
-            + "\",\"contextWindow\":4096}",
+            + "\",\"contextWindow\":4096,\"maxOutputTokens\":1024,\"compaction\":null}",
         CODEC.encode(
-            new TurnStartPayload(TurnStartReason.INPUT, settings(null), OWNER_THREAD_ID, 4096)));
+            new TurnStartPayload(
+                TurnStartReason.INPUT, settings(null), OWNER_THREAD_ID, 4096, 1024, null)));
     assertEquals(
         "{\"pluginId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
             + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"sys\"}]},"
@@ -188,186 +190,52 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   @Test
-  void roundTripsAllCompactionPhaseShapes() {
-    CompactionPayload full =
-        new CompactionPayload(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            500L,
-            true,
-            "full summary",
-            id(2L),
-            id(4L),
-            null);
-    CompactionPayload history =
-        new CompactionPayload(
-            CompactionPhase.HISTORY,
-            CompactionTrigger.OVERFLOW,
-            0L,
-            false,
-            "partial",
-            id(2L),
-            id(4L),
-            id(3L));
-    CompactionPayload prefix =
-        new CompactionPayload(
+  void roundTripsMinimalCompactionPayload() {
+    // Durable result 只保存 summaryText；phase/trigger/cut 位于 enclosing TURN_START。
+    CompactionPayload payload = new CompactionPayload("structured summary");
+
+    assertEquals("{\"summaryText\":\"structured summary\"}", CODEC.encode(payload));
+    assertEquals(payload, CODEC.decode(EntryType.COMPACTION, CODEC.encode(payload)));
+    assertEquals(payload, CODEC.decodeNode(EntryType.COMPACTION, CODEC.encodeNode(payload)));
+  }
+
+  @Test
+  void roundTripsCompactionStartMetadataInsideTurnStart() {
+    // Compaction 的全部执行事实只在 TURN_START 冻结一次。
+    CompactionStart start =
+        new CompactionStart(
             CompactionPhase.TURN_PREFIX,
-            CompactionTrigger.THRESHOLD,
-            500L,
-            true,
-            "prefix",
-            id(2L),
+            CompactionTrigger.MANUAL,
+            settings(null).model(),
             id(4L),
-            id(3L));
+            id(3L),
+            id(2L));
+    TurnStartPayload payload =
+        new TurnStartPayload(
+            TurnStartReason.COMPACTION, settings(null), OWNER_THREAD_ID, 4096, 1024, start);
 
-    for (CompactionPayload payload : List.of(full, history, prefix)) {
-      assertEquals(payload, CODEC.decode(EntryType.COMPACTION, CODEC.encode(payload)));
-      assertEquals(payload, CODEC.decodeNode(EntryType.COMPACTION, CODEC.encodeNode(payload)));
-    }
+    assertEquals(payload, CODEC.decode(EntryType.TURN_START, CODEC.encode(payload)));
+    assertEquals(payload, CODEC.decodeNode(EntryType.TURN_START, CODEC.encodeNode(payload)));
   }
 
   @Test
-  void encodesCompactionCanonicalFieldOrder() {
-    assertEquals(
-        "{\"phase\":\"FULL\",\"trigger\":\"THRESHOLD\",\"tokensBefore\":500,"
-            + "\"complete\":true,\"summaryText\":\"summary\",\"firstKeptEntryId\":\""
-            + UUID_2
-            + "\","
-            + "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\","
-            + "\"turnPrefixStartEntryId\":null}",
-        CODEC.encode(
-            new CompactionPayload(
-                CompactionPhase.FULL,
-                CompactionTrigger.THRESHOLD,
-                500L,
-                true,
-                "summary",
-                id(2L),
-                id(4L),
-                null)));
-    assertEquals(
-        "{\"phase\":\"HISTORY\",\"trigger\":\"OVERFLOW\",\"tokensBefore\":0,"
-            + "\"complete\":false,\"summaryText\":\"partial\",\"firstKeptEntryId\":\""
-            + UUID_2
-            + "\","
-            + "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\","
-            + "\"turnPrefixStartEntryId\":\"00000000-0000-0000-0000-000000000003\"}",
-        CODEC.encode(
-            new CompactionPayload(
-                CompactionPhase.HISTORY,
-                CompactionTrigger.OVERFLOW,
-                0L,
-                false,
-                "partial",
-                id(2L),
-                id(4L),
-                id(3L))));
-  }
-
-  @Test
-  void compactionCodecRejectsInvalidPhaseCompleteAndScalars() {
-    String base =
-        "{\"phase\":\"FULL\",\"trigger\":\"THRESHOLD\",\"tokensBefore\":500,"
-            + "\"complete\":true,\"summaryText\":\"summary\",\"firstKeptEntryId\":\""
-            + UUID_2
-            + "\","
-            + "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\","
-            + "\"turnPrefixStartEntryId\":null}";
-    assertEquals(
-        new CompactionPayload(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            500L,
-            true,
-            "summary",
-            id(2L),
-            id(4L),
-            null),
-        CODEC.decode(EntryType.COMPACTION, base));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> CODEC.decode(EntryType.COMPACTION, base.replace("\"FULL\"", "\"FOO\"")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> CODEC.decode(EntryType.COMPACTION, base.replace("\"THRESHOLD\"", "\"FOO\"")));
+  void compactionCodecRejectsLegacyAndWrongTypedFields() {
+    String canonical = "{\"summaryText\":\"summary\"}";
+    assertEquals(new CompactionPayload("summary"), CODEC.decode(EntryType.COMPACTION, canonical));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                EntryType.COMPACTION, base.replace("\"tokensBefore\":500", "\"tokensBefore\":-1")));
+                EntryType.COMPACTION, "{\"summaryText\":\"summary\",\"tokensBefore\":500}"));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION,
-                base.replace("\"tokensBefore\":500", "\"tokensBefore\":\"500\"")));
+        () -> CODEC.decode(EntryType.COMPACTION, "{\"summaryText\":5}"));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION,
-                base.replace("\"tokensBefore\":500", "\"tokensBefore\":1.5")));
+        () -> CODEC.decode(EntryType.COMPACTION, "{\"summaryText\":\" \"}"));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION,
-                base.replace(
-                    "\"" + UUID_2 + "\",\"cutEntryId\"", "\"not-a-uuid\",\"cutEntryId\"")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION,
-                base.replace(
-                    "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\"",
-                    "\"cutEntryId\":\"-4\"")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION,
-                base.replace(
-                    "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\"",
-                    "\"cutEntryId\":5")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION, base.replace("\"complete\":true", "\"complete\":\"yes\"")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION,
-                base.replace("\"summaryText\":\"summary\"", "\"summaryText\":5")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION,
-                base.replace(
-                    "\"turnPrefixStartEntryId\":null", "\"turnPrefixStartEntryId\":\"-1\"")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION,
-                base.replace("\"turnPrefixStartEntryId\":null", "\"turnPrefixStartEntryId\":5")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION, base.replace("\"cutEntryId\"", "\"extra\",\"cutEntryId\"")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.COMPACTION,
-                base.replace(
-                    "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\"",
-                    "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\",\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\"")));
+        () -> CODEC.decode(EntryType.COMPACTION, "{\"summaryText\":\"a\",\"summaryText\":\"b\"}"));
   }
 
   @Test

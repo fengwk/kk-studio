@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -66,11 +65,7 @@ class CompactionFileSectionsTest {
     long te1 = path.turnEnd(ts1);
     path.turnStart(); // 当前压缩 turn
 
-    CompactionRequest request =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te1), null);
-
-    String sections = CompactionFileSections.sections(path.path(), request);
+    String sections = CompactionFileSections.sections(path.path(), id(te1));
 
     assertEquals(
         "<read-files>\nz.txt\n</read-files>\n\n<modified-files>\na.txt\nb.txt\n</modified-files>",
@@ -89,18 +84,14 @@ class CompactionFileSectionsTest {
     long te1 = path.turnEnd(ts1);
     path.turnStart();
 
-    CompactionRequest request =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te1), null);
-
     assertEquals(
         "<read-files>\nkept.txt\n</read-files>",
-        CompactionFileSections.sections(path.path(), request));
+        CompactionFileSections.sections(path.path(), id(te1)));
   }
 
   @Test
-  void historyPhaseScansOnlyUpToTurnPrefixStart() {
-    // 第一个 turn 的 read 属于 history；第二个 turn 的 read 属于 prefix（cut 之前），不进入 history 清单。
+  void finalSectionsScanCumulativelyThroughCut() {
+    // HISTORY partial 不生成清单；最终 complete 结果从 ROOT 累计到 cut，包含 history 与 prefix。
     PathBuilder path = new PathBuilder();
     path.root();
     long ts1 = path.turnStart();
@@ -115,13 +106,9 @@ class CompactionFileSectionsTest {
     long te2 = path.turnEnd(ts2);
     path.turnStart(); // 当前压缩 turn
 
-    CompactionRequest request =
-        new CompactionRequest(
-            CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te2), id(ts2));
-
     assertEquals(
-        "<read-files>\nhistory.txt\n</read-files>",
-        CompactionFileSections.sections(path.path(), request));
+        "<read-files>\nhistory.txt\nprefix.txt\n</read-files>",
+        CompactionFileSections.sections(path.path(), id(te2)));
   }
 
   @Test
@@ -136,13 +123,10 @@ class CompactionFileSectionsTest {
     long te1 = path.turnEnd(ts1);
     path.turnStart();
 
-    CompactionRequest missingCut =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(999L), null);
     IllegalStateException cutError =
         assertThrows(
             IllegalStateException.class,
-            () -> CompactionFileSections.sections(path.path(), missingCut));
+            () -> CompactionFileSections.sections(path.path(), id(999L)));
     assertTrue(cutError.getMessage().contains(id(999L).toString()), cutError.getMessage());
   }
 
@@ -156,7 +140,7 @@ class CompactionFileSectionsTest {
     path.assistant("read", "legacy.txt");
     path.toolResults();
     long te1 = path.turnEnd(ts1);
-    path.compactionComplete(id(2L), id(te1), null); // 第一次 FULL 压缩
+    path.compactionComplete(id(te1)); // 第一次 FULL 压缩
     long ts2 = path.turnStart();
     path.user("u2");
     long asst2 = path.assistant("read", "new.txt");
@@ -164,13 +148,9 @@ class CompactionFileSectionsTest {
     long te2 = path.turnEnd(ts2);
     path.turnStart(); // 当前压缩 turn
 
-    CompactionRequest request =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te2), null);
-
     assertEquals(
         "<read-files>\nlegacy.txt\nnew.txt\n</read-files>",
-        CompactionFileSections.sections(path.path(), request));
+        CompactionFileSections.sections(path.path(), id(te2)));
   }
 
   @Test
@@ -182,7 +162,7 @@ class CompactionFileSectionsTest {
     path.assistant("read", "a.txt");
     path.toolResults();
     long te1 = path.turnEnd(ts1);
-    path.compactionComplete(id(2L), id(te1), null);
+    path.compactionComplete(id(te1));
     long ts2 = path.turnStart();
     path.user("u2");
     path.assistant("write", "a.txt");
@@ -190,13 +170,9 @@ class CompactionFileSectionsTest {
     long te2 = path.turnEnd(ts2);
     path.turnStart();
 
-    CompactionRequest request =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te2), null);
-
     assertEquals(
         "<modified-files>\na.txt\n</modified-files>",
-        CompactionFileSections.sections(path.path(), request));
+        CompactionFileSections.sections(path.path(), id(te2)));
   }
 
   @Test
@@ -210,13 +186,9 @@ class CompactionFileSectionsTest {
     long te1 = path.turnEnd(ts1);
     path.turnStart();
 
-    CompactionRequest request =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te1), null);
-
     assertEquals(
         "<read-files>\nkept.txt\n</read-files>",
-        CompactionFileSections.sections(path.path(), request));
+        CompactionFileSections.sections(path.path(), id(te1)));
   }
 
   @Test
@@ -242,12 +214,9 @@ class CompactionFileSectionsTest {
     long te1 = path.turnEnd(ts1);
     path.turnStart();
 
-    CompactionRequest withFiles =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te1), null);
     assertEquals(
         "summary\n\n<read-files>\na.txt\n</read-files>",
-        CompactionFileSections.append(path.path(), withFiles, "summary"));
+        CompactionFileSections.append(path.path(), id(te1), "summary"));
 
     // 范围内没有任何文件工具调用 -> 原样返回，不产生 section。
     PathBuilder clean = new PathBuilder();
@@ -258,10 +227,7 @@ class CompactionFileSectionsTest {
     clean.toolResults();
     long cleanTe = clean.turnEnd(cleanTs);
     clean.turnStart();
-    CompactionRequest cleanRequest =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(cleanTe), null);
-    assertEquals("summary", CompactionFileSections.append(clean.path(), cleanRequest, "summary"));
+    assertEquals("summary", CompactionFileSections.append(clean.path(), id(cleanTe), "summary"));
   }
 
   /** 自包含合法路径构造器：id 顺序、parent 链、TURN 语法。 */
@@ -389,30 +355,29 @@ class CompactionFileSectionsTest {
     }
 
     /** 完成压缩 turn：[TURN_START(COMPACTION), COMPACTION payload, TURN_END]。 */
-    long compactionComplete(UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
+    long compactionComplete(UUID cutEntryId) {
       long startId = nextId++;
       entries.add(
           new Entry(
               id(startId),
               SESSION_ID,
               parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID),
+              new TurnStartPayload(
+                  TurnStartReason.COMPACTION,
+                  SETTINGS,
+                  OWNER_THREAD_ID,
+                  100_000,
+                  16_384,
+                  new CompactionStart(
+                      CompactionPhase.FULL,
+                      CompactionTrigger.THRESHOLD,
+                      SETTINGS.model(),
+                      cutEntryId,
+                      null,
+                      null)),
               BASE));
       entries.add(
-          new Entry(
-              id(nextId++),
-              SESSION_ID,
-              parentId(),
-              new CompactionPayload(
-                  CompactionPhase.FULL,
-                  CompactionTrigger.THRESHOLD,
-                  500L,
-                  true,
-                  "summary",
-                  firstKeptEntryId,
-                  cutEntryId,
-                  turnPrefixStartEntryId),
-              BASE));
+          new Entry(id(nextId++), SESSION_ID, parentId(), new CompactionPayload("summary"), BASE));
       long endId = nextId++;
       entries.add(
           new Entry(

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 
 import java.util.HashSet;
 import java.util.List;
@@ -73,11 +74,12 @@ public record EntryPath(List<Entry> entries) {
     return entries.get(entries.size() - 1);
   }
 
-  /** 返回沿路径最近的 ROOT/TURN_START 完整 settings snapshot；ROOT settings 由构造不变量保证非空。 */
+  /** 返回沿路径最近的非 COMPACTION settings snapshot；压缩执行模型绝不污染真实 branch settings。 */
   public BranchSettings baseSettings() {
     BranchSettings settings = ((RootPayload) root().payload()).settings();
     for (Entry entry : entries) {
-      if (entry.payload() instanceof TurnStartPayload start) {
+      if (entry.payload() instanceof TurnStartPayload start
+          && start.reason() != TurnStartReason.COMPACTION) {
         settings = start.settings();
       }
     }

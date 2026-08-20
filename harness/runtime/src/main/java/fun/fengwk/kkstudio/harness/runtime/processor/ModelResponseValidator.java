@@ -6,8 +6,6 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionFileSections;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -24,9 +22,8 @@ import java.util.Set;
  * ModelCost} 构造器保证，此处不再重复校验。Tool 是否在冻结 binding 中可见、参数是否符合 Tool schema 属于 {@link
  * ModelResponsePlanner} 的决策，不在此处校验；stop reason 与 tool call 存在性正交，无等价约束。
  *
- * <p>压缩调用（{@code request.compaction()} 非空）成功必须是 {@code COMPLETE}、零 tool call、非空摘要文本，并在 durable
- * SUCCEEDED 前剥离 Runtime-owned file sections。失败抛 {@link IllegalArgumentException}，由 {@link
- * ModelExecution} 映射为 {@code INVALID_RESPONSE} 自动重试。
+ * <p>Compaction 的 stop reason、tool intent、摘要内容与 no-gain 是 reducer 语义，不在 Provider transport
+ * 边界改写为重试；这里只拒绝所有调用都不可能接受的 malformed response。
  */
 final class ModelResponseValidator {
 
@@ -41,8 +38,7 @@ final class ModelResponseValidator {
     return mapper;
   }
 
-  static ProviderResponse validate(ModelRequestSpec request, ProviderResponse response) {
-    Objects.requireNonNull(request, "request");
+  static ProviderResponse validate(ProviderResponse response) {
     Objects.requireNonNull(response, "response");
     if (response.stopReason() == null) {
       throw new IllegalArgumentException("provider response requires a stop reason");
@@ -62,32 +58,6 @@ final class ModelResponseValidator {
     }
     if (response.stopReason() == GenerationStopReason.FILTERED && !response.toolCalls().isEmpty()) {
       throw new IllegalArgumentException("FILTERED responses must not contain tool calls");
-    }
-    if (request.compaction() != null) {
-      if (response.stopReason() != GenerationStopReason.COMPLETE) {
-        throw new IllegalArgumentException(
-            "compaction responses must be COMPLETE, got " + response.stopReason());
-      }
-      if (!response.toolCalls().isEmpty()) {
-        throw new IllegalArgumentException("compaction responses must not contain tool calls");
-      }
-      String canonicalText = CompactionFileSections.stripReservedSections(response.text());
-      if (canonicalText.isBlank()) {
-        throw new IllegalArgumentException(
-            "compaction responses must contain nonblank text outside reserved file sections");
-      }
-      if (!canonicalText.equals(response.text())) {
-        return new ProviderResponse(
-            canonicalText,
-            response.thinking(),
-            response.toolCalls(),
-            response.stopReason(),
-            response.usage(),
-            response.cost(),
-            response.requestId(),
-            response.serviceTier(),
-            response.rawUsageJson());
-      }
     }
     return response;
   }

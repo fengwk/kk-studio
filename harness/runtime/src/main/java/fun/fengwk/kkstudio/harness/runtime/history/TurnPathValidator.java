@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -24,14 +26,16 @@ import java.util.List;
  * ASSISTANT_ERROR / ASSISTANT_ABORTED / COMPACTION）只能出现一次且之后 不得再出现 USER/CUSTOM/第二个 Assistant；TOOL
  * MESSAGE 只能跟随带 ToolCall 的 ASSISTANT MESSAGE，且必须是 ordinal 0 开始的严格前缀（ordinal 连续、toolCallId/toolName
  * 匹配、assistantEntryId 等于该 Assistant Entry id）；TURN_END 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome
- * 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE / COMPACTION 且 ToolResult 完整；complete OVERFLOW compaction
- * 必须 {@code continueModel=true}，其它 compaction 必须 false； FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有
- * stop barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意 open phase 关闭）。路径可以在任意 prefix 截断。
+ * 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE / COMPACTION 且 ToolResult 完整；HISTORY phase gap 与 complete
+ * OVERFLOW compaction 必须 {@code continueModel=true}，其它 compaction 必须 false； FAILED 必须已有
+ * ASSISTANT_ERROR；STOPPED 必须已有 stop barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意 open phase
+ * 关闭）。路径可以在任意 prefix 截断。
  */
 final class TurnPathValidator {
 
   private Entry openTurnStart;
   private TurnStartReason openReason;
+  private CompactionStart openCompactionStart;
   private boolean inputSeen;
   private boolean assistantSeen;
   private Entry assistantResultEntry;
@@ -54,6 +58,7 @@ final class TurnPathValidator {
       }
       openTurnStart = entry;
       openReason = start.reason();
+      openCompactionStart = start.compaction();
       inputSeen = false;
       assistantSeen = false;
       assistantResultEntry = null;
@@ -97,12 +102,13 @@ final class TurnPathValidator {
               throw new IllegalArgumentException(
                   "completed compaction turns require a COMPACTION result");
             }
-            CompactionPayload compaction = (CompactionPayload) assistantResultEntry.payload();
+            CompactionPhase phase = openCompactionStart.phase();
             boolean expectedContinueModel =
-                compaction.complete() && compaction.trigger() == CompactionTrigger.OVERFLOW;
+                phase == CompactionPhase.HISTORY
+                    || openCompactionStart.trigger() == CompactionTrigger.OVERFLOW;
             if (end.continueModel() != expectedContinueModel) {
               throw new IllegalArgumentException(
-                  "completed compaction continueModel must be true only for complete OVERFLOW");
+                  "completed compaction continueModel must match HISTORY or OVERFLOW obligation");
             }
           } else {
             requireAssistantMessage("completed");

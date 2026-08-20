@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -19,7 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
@@ -116,8 +116,11 @@ final class ThreadProcessorTestSupport {
   /** 测试请求统一的冻结上下文窗口。 */
   static final int CONTEXT_WINDOW = 100_000;
 
-  /** 测试用默认压缩配置（开启、16_384 预留、20_000 保留）。 */
-  static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(true, 16_384, 20_000);
+  /** 测试请求统一的冻结最大输出。 */
+  static final int MAX_OUTPUT_TOKENS = 16_384;
+
+  /** 测试用默认压缩配置（20_000 保留，无 fallback）。 */
+  static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(20_000, null);
 
   /** 测试种子线程的合法 64 位小写 SHA-256 materialization hash（非 accept 路径的固定身份键）。 */
   static final String MATERIALIZATION_HASH =
@@ -728,13 +731,24 @@ final class ThreadProcessorTestSupport {
   /** Resolver 成功后的 INPUT TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
   static TurnStartPayload resolvedInputTurnStart(UUID ownerThreadId) {
     return new TurnStartPayload(
-        TurnStartReason.INPUT, branchSettings(), ownerThreadId, CONTEXT_WINDOW);
+        TurnStartReason.INPUT,
+        branchSettings(),
+        ownerThreadId,
+        CONTEXT_WINDOW,
+        MAX_OUTPUT_TOKENS,
+        null);
   }
 
   /** Resolver 成功后的 COMPACTION TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
-  static TurnStartPayload resolvedCompactionTurnStart(UUID ownerThreadId) {
+  static TurnStartPayload resolvedCompactionTurnStart(
+      UUID ownerThreadId, CompactionStart compaction) {
     return new TurnStartPayload(
-        TurnStartReason.COMPACTION, branchSettings(), ownerThreadId, CONTEXT_WINDOW);
+        TurnStartReason.COMPACTION,
+        branchSettings(),
+        ownerThreadId,
+        CONTEXT_WINDOW,
+        MAX_OUTPUT_TOKENS,
+        compaction);
   }
 
   static EntryPayload userMessagePayload(String text) {
@@ -790,8 +804,7 @@ final class ThreadProcessorTestSupport {
         bindings,
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        null);
+        ProviderCacheControl.none());
   }
 
   /** 按 candidate BranchSettings 构造机械一致的 Resolved spec（model / variant / tools）。 */
@@ -809,35 +822,34 @@ final class ThreadProcessorTestSupport {
         bindings,
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        null);
+        ProviderCacheControl.none());
   }
 
   static ToolInvocationRequest toolRequest(String callId) {
     return new ToolInvocationRequest(new ToolCall(callId, "bash", "{}"), platformBinding("bash"));
   }
 
-  /**
-   * 按冻结 preparation 构造机械一致的压缩 Resolved 请求（零 tool/skill、零 provider tools、缓存 none、
-   * contextWindow/tokensBefore/ids 与 preparation 逐字段一致）。
-   */
+  /** 按冻结 preparation 构造机械一致的压缩 Resolved 请求（使用 executionModel，零 bindings、缓存 none）。 */
   static ModelRequestSpec compactionRequest(CompactionPreparation preparation) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        modelDescriptor("provider", "model"),
-        new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+        modelDescriptor(
+            preparation.executionModel().providerName(), preparation.executionModel().modelName()),
+        new ModelVariant(
+            preparation.executionModel().variant(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            List.of(),
+            null),
         List.of(),
         List.of(),
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        new CompactionRequest(
-            preparation.phase(),
-            preparation.trigger(),
-            preparation.tokensBefore(),
-            preparation.firstKeptEntryId(),
-            preparation.cutEntryId(),
-            preparation.turnPrefixStartEntryId()));
+        ProviderCacheControl.none());
   }
 
   /**
@@ -852,7 +864,7 @@ final class ThreadProcessorTestSupport {
 
   static ClosedTurnBaseline seedCompactionReadyClosedTurn(
       InMemoryHarnessStore store, ModelUsage usage, boolean continueModel) {
-    // 形状：turn1（短消息，作为可摘要历史）+ turn2（长 USER 消息 + 带 usage 的短 ASSISTANT）。
+    // 形状：turn1（有足够可移除历史，确保成功摘要有真实 gain）+ turn2（长 USER + 短 ASSISTANT）。
     // planner 从尾部累计：turn2 的 ASSISTANT 远小于 keepRecentTokens，长 USER 处越过 -> cut 落在 turn2 USER（非切分
     // FULL）。
     ProviderResponse response = successResponse(usage, cost(), "assistant reply");
@@ -872,13 +884,17 @@ final class ThreadProcessorTestSupport {
           tx.insertSession(new Session(sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          // turn1：短消息。
+          // turn1：可摘要历史显著大于测试摘要 wrapper，避免成功路径被 no-gain 保护拦截。
           tx.insertEntry(
               new Entry(
                   turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
           tx.insertEntry(
               new Entry(
-                  userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
+                  userEntryId,
+                  sessionId,
+                  turnStartEntryId,
+                  userMessagePayload("historical user " + "h".repeat(50_000)),
+                  NOW));
           tx.insertEntry(
               new Entry(
                   assistantEntryId,
@@ -887,7 +903,9 @@ final class ThreadProcessorTestSupport {
                   new MessagePayload(
                       new AgentMessage(
                           AgentMessageRole.ASSISTANT,
-                          List.of(new TextMessageContent("assistant reply"))),
+                          List.of(
+                              new TextMessageContent(
+                                  "historical assistant " + "a".repeat(50_000)))),
                       new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
                       null),
                   NOW));
@@ -1106,7 +1124,8 @@ final class ThreadProcessorTestSupport {
         // 按 candidate path 的最终 branch 事实自动构造一致 spec；压缩 turn 按冻结 preparation 构造。
         return new TurnResolver.Resolved(
             preparation == null ? requestFor(path.baseSettings()) : compactionRequest(preparation),
-            CONTEXT_WINDOW);
+            CONTEXT_WINDOW,
+            MAX_OUTPUT_TOKENS);
       }
       if (results.isEmpty()) {
         return null;
@@ -1161,17 +1180,25 @@ final class ThreadProcessorTestSupport {
     ClaimedWork claim;
 
     Fixture() {
-      this(null);
+      this((HarnessStore) null);
     }
 
     /** {@code processorStore} 非空时 processor 使用包装 store（seed/断言仍用 {@link #store}）。 */
     Fixture(HarnessStore processorStore) {
+      this(processorStore, COMPACTION_CONFIG);
+    }
+
+    Fixture(CompactionConfig compactionConfig) {
+      this(null, compactionConfig);
+    }
+
+    private Fixture(HarnessStore processorStore, CompactionConfig compactionConfig) {
       this.scheduler = newScheduler();
       this.processor =
           new ThreadProcessor(
               processorStore == null ? store : processorStore,
               resolver,
-              new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, COMPACTION_CONFIG),
+              new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, compactionConfig),
               clock,
               scheduler);
     }
