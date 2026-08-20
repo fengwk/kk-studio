@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.web;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -77,7 +76,7 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
       throws Exception {
     mockMvc
         .perform(
-            put("/api/ai/chat/{chatId}/threads/{threadId}", chatId, "not-a-number")
+            get("/api/ai/runtime/sessions/{sessionId}/threads", "not-a-number")
                 .header(HttpHeaders.ACCEPT_LANGUAGE, language))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
@@ -86,6 +85,6 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.type").value("about:blank"))
         .andExpect(jsonPath("$.errors.title").value(expectedTitle))
         .andExpect(
-            jsonPath("$.errors.detail").value("threadId must be a canonical UUID: not-a-number"));
+            jsonPath("$.errors.detail").value("sessionId must be a canonical UUID: not-a-number"));
   }
 }

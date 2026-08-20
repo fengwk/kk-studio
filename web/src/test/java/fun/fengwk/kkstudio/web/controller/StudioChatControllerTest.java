@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -27,24 +26,17 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
-import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
-import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadService;
-import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.core.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * {@link StudioChatController} Chat-scoped Thread 编排契约：列表按关联顺序映射快照、创建先 createThread
- * 再关联并返回创建快照、关联前校验快照存在。
- */
+/** {@link StudioChatController} Chat CRUD 与 owner Session listing 的 HTTP 契约。 */
 class StudioChatControllerTest {
 
   private static UUID id(long value) {
@@ -56,19 +48,14 @@ class StudioChatControllerTest {
   }
 
   private ChatService chatService;
-  private ChatThreadService chatThreadService;
-  private ChatThreadCommandService chatThreadCommandService;
-  private HarnessRuntime runtime;
+  private StudioHarnessQueryService harnessQueryService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     chatService = mock(ChatService.class);
-    chatThreadService = mock(ChatThreadService.class);
-    chatThreadCommandService = mock(ChatThreadCommandService.class);
-    runtime = mock(HarnessRuntime.class);
-    StudioChatController controller =
-        new StudioChatController(chatService, chatThreadService, chatThreadCommandService, runtime);
+    harnessQueryService = mock(StudioHarnessQueryService.class);
+    StudioChatController controller = new StudioChatController(chatService, harnessQueryService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new ResultResponseBodyAdvice())
@@ -76,60 +63,22 @@ class StudioChatControllerTest {
   }
 
   @Test
-  void listChatThreadsReturnsMappedThreadsInAssociationOrder() throws Exception {
-    when(chatThreadService.listThreadIds("7")).thenReturn(List.of(id(2), id(1)));
-    when(runtime.getThreadSnapshot(id(2)))
-        .thenReturn(HarnessRuntimeTestFixtures.continuationDueSnapshot(id(2)));
-    when(runtime.getThreadSnapshot(id(1)))
-        .thenReturn(HarnessRuntimeTestFixtures.idleSnapshot(id(1)));
+  void listChatSessionsReturnsOwnerSummaries() throws Exception {
+    HarnessSessionSummaryDTO summary = new HarnessSessionSummaryDTO();
+    summary.setSessionId(idText(2));
+    summary.setCreatedAt(Instant.parse("2026-08-10T00:00:00Z"));
+    summary.setLastActivityAt(Instant.parse("2026-08-10T00:01:00Z"));
+    summary.setFirstMessagePreview("hello");
+    summary.setThreadCount(2);
+    when(harnessQueryService.listChatSessions(id(7))).thenReturn(List.of(summary));
 
     mockMvc
-        .perform(get("/api/ai/chat/7/threads"))
+        .perform(get("/api/ai/chat/" + idText(7) + "/sessions"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(2))
-        .andExpect(jsonPath("$.data[0].threadId").value(idText(2)))
-        .andExpect(jsonPath("$.data[0].status").value("CONTINUATION_DUE"))
-        .andExpect(jsonPath("$.data[1].threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data[1].status").value("IDLE"));
-  }
-
-  @Test
-  void createChatThreadCreatesAssociatesAndReturnsCreatedSnapshot() throws Exception {
-    when(chatThreadCommandService.createChatThread(any(), any(CreateThreadCommand.class)))
-        .thenReturn(
-            new CreatedThread(
-                HarnessRuntimeTestFixtures.session(),
-                HarnessRuntimeTestFixtures.rootEntry(),
-                HarnessRuntimeTestFixtures.thread(id(1))));
-    when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
-
-    String body =
-        """
-        {
-          "branchSettings": {
-            "environment": {"name": "123e4567-e89b-12d3-a456-426614174000", "workspacePath": "."},
-            "agentName": "default-assistant",
-            "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
-            "activeTools": ["web_search"]
-          },
-          "yoloEnabled": true
-        }
-        """;
-
-    mockMvc
-        .perform(
-            post("/api/ai/chat/7/threads").contentType(MediaType.APPLICATION_JSON).content(body))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
-        .andExpect(jsonPath("$.data.thread.branchSettings.agentName").value("default-assistant"));
-
-    ArgumentCaptor<CreateThreadCommand> captor = ArgumentCaptor.forClass(CreateThreadCommand.class);
-    verify(chatThreadCommandService).createChatThread(eq("7"), captor.capture());
-    assertEquals("default-assistant", captor.getValue().branchSettings().agentName());
-    assertEquals("gpt-5", captor.getValue().branchSettings().model().modelName());
-    assertEquals(List.of("web_search"), captor.getValue().branchSettings().activeTools());
-    assertEquals(true, captor.getValue().yoloEnabled());
+        .andExpect(jsonPath("$.data[0].sessionId").value(idText(2)))
+        .andExpect(jsonPath("$.data[0].firstMessagePreview").value("hello"))
+        .andExpect(jsonPath("$.data[0].threadCount").value(2));
+    verify(harnessQueryService).listChatSessions(id(7));
   }
 
   @Test
@@ -226,59 +175,5 @@ class StudioChatControllerTest {
     ArgumentCaptor<ChatUpdateDTO> omitCaptor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
     verify(chatService, times(2)).updateChat(eq("7"), omitCaptor.capture());
     assertFalse(omitCaptor.getValue().isEnvironmentProvided());
-  }
-
-  @Test
-  void associateValidatesRuntimeSnapshotThenAssociates() throws Exception {
-    when(runtime.getThreadSnapshot(id(5))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
-
-    mockMvc.perform(put("/api/ai/chat/7/threads/" + idText(5))).andExpect(status().isNoContent());
-
-    verify(runtime).getThreadSnapshot(id(5));
-    verify(chatThreadService).associateThread("7", id(5));
-  }
-
-  @Test
-  void associateMissingThreadIsNotFoundAndDoesNotAssociate() throws Exception {
-    when(runtime.getThreadSnapshot(any()))
-        .thenThrow(new HarnessRuntimeNotFoundException("thread 9 does not exist"));
-
-    mockMvc.perform(put("/api/ai/chat/7/threads/" + idText(9))).andExpect(status().isNotFound());
-
-    verify(chatThreadService, never()).associateThread(eq("7"), any());
-  }
-
-  @Test
-  void createChatThreadRejectsIncompleteBranchSettingsAsBadRequest() throws Exception {
-    mockMvc
-        .perform(
-            post("/api/ai/chat/7/threads")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"yoloEnabled\":true}"))
-        .andExpect(status().isBadRequest());
-    verify(runtime, never()).createThread(any(CreateThreadCommand.class));
-  }
-
-  @Test
-  void createChatThreadRejectsUnknownBranchSettingsField() throws Exception {
-    String body =
-        """
-        {
-          "branchSettings": {
-            "environment": null,
-            "agentName": "default-assistant",
-            "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
-            "activeTools": [],
-            "unexpected": true
-          },
-          "yoloEnabled": false
-        }
-        """;
-
-    mockMvc
-        .perform(
-            post("/api/ai/chat/7/threads").contentType(MediaType.APPLICATION_JSON).content(body))
-        .andExpect(status().isBadRequest());
-    verify(runtime, never()).createThread(any(CreateThreadCommand.class));
   }
 }
