@@ -239,8 +239,8 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
 
     ;(await tabByName('常规')).focus()
     await user.keyboard('{ArrowRight}')
-    expect(selectedTab()).toBe(await tabByName('工具与权限'))
-    expect(document.activeElement?.id).toBe('settings-tab-tool')
+    expect(selectedTab()).toBe(await tabByName('AI 运行时'))
+    expect(document.activeElement?.id).toBe('settings-tab-aiRuntime')
 
     await user.keyboard('{End}')
     expect(selectedTab()).toBe(await tabByName('高级'))

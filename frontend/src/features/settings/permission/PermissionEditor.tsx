@@ -9,7 +9,6 @@ import {
   updateRule,
 } from '@/features/settings/permission-utils'
 import type { PermissionGroupDraft } from '@/features/settings/system-settings-draft'
-import { SettingsCard } from '@/features/settings/settings-primitives'
 import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
 
 /**
@@ -173,26 +172,5 @@ export function PermissionEditor({
         {t('settings.permission.addTool')}
       </button>
     </div>
-  )
-}
-
-export function PermissionEditorCard({
-  groups,
-  onChange,
-  options,
-}: {
-  groups: PermissionGroupDraft[]
-  onChange: (next: PermissionGroupDraft[]) => void
-  options: SystemSettingsSchemaOption[]
-}) {
-  const { t } = useI18n()
-  return (
-    <SettingsCard
-      title={t('settings.section.tool.permission.title')}
-      description="settings.section.tool.permission.description"
-      timing="nextInvocation"
-    >
-      <PermissionEditor groups={groups} onChange={onChange} options={options} />
-    </SettingsCard>
   )
 }

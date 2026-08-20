@@ -122,6 +122,18 @@ describe('system settings server editor', () => {
     expect(await screen.findByLabelText('最大重试次数')).toHaveValue(3)
   })
 
+  it('does not build any server tab when the schema fails validation', async () => {
+    // 让 schema 无效（sections 为空）：SettingsPage 不得渲染任何 server tab，且只显示 General。
+    mocks.get.mockResolvedValue(makeSettingsDto())
+    mocks.getSchema.mockResolvedValue({ sections: [] })
+    renderSettings()
+
+    expect(await screen.findByRole('tab', { name: '常规' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'AI 运行时' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '工具与权限' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('键盘快捷键')
+  })
+
   it('saves the complete aggregate with expectedVersion and clears the dirty state on success', async () => {
     const backend = createBackend()
     mocks.get.mockImplementation(backend.get)
