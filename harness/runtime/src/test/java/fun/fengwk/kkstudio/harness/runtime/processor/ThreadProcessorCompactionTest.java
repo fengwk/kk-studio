@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.CONTEXT_WINDOW;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.ClosedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.Fixture;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.MAX_OUTPUT_TOKENS;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.branchSettings;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.compactionRequest;
@@ -46,6 +47,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -64,6 +67,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -79,6 +84,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
 
   private static final ModelUsage OVER_THRESHOLD_USAGE =
       new ModelUsage(90_000L, 2L, 0L, 0L, 0L, 0L, 90_002L);
+  private static final ModelUsage BELOW_THRESHOLD_USAGE =
+      new ModelUsage(80_000L, 2L, 0L, 0L, 0L, 0L, 80_002L);
 
   @Test
   void thresholdCompactionRunsBeforeQueuedInputAndConsumesZeroCommands() {
@@ -249,6 +256,41 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
+  @Test
+  void thresholdFullCompactionResumesPendingContinuation() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE, true);
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    // claim1：active continuation 越阈，先启动 FULL 压缩。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    Entry start = path(fixture.store, baseline.threadId()).head();
+    ModelInvocation compaction =
+        fixture
+            .store
+            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), start.id()))
+            .orElseThrow();
+    transitionModel(fixture.store, compaction.id(), m -> m.beginDispatch(NOW));
+    transitionModel(fixture.store, compaction.id(), m -> m.markRunning(NOW));
+    transitionModel(
+        fixture.store, compaction.id(), m -> m.succeed(successResponse(List.of(), "bash"), NOW));
+    requestThreadWork(fixture.store, baseline.threadId());
+
+    // claim2：成功 checkpoint 必须把原 continuation obligation 重写到自己的 TURN_END。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath applied = path(fixture.store, baseline.threadId());
+    TurnEndPayload end = (TurnEndPayload) applied.head().payload();
+    assertTrue(end.continueModel());
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+
+    // claim3：无需 queued user，仍恢复原 CONTINUATION。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    TurnStartPayload continuation =
+        (TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload();
+    assertEquals(TurnStartReason.CONTINUATION, continuation.reason());
+  }
+
   /** 完整压缩后失败普通 turn：压缩保持 freshness barrier；失败 turn 后的下一次 INPUT 仍正常。 */
   @Test
   void completeCompactionIsFreshnessBarrierAfterLaterFailedTurn() {
@@ -336,11 +378,11 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(CompactionTrigger.THRESHOLD, start.compaction().trigger());
   }
 
-  /** TURN_PREFIX 延续成功：claim2 组装 complete payload 并关闭 turn（continueModel=false）。 */
+  /** TURN_PREFIX 延续成功：组装 complete payload，并在 split 两阶段之后恢复原普通 continuation。 */
   @Test
-  void historyContinuationAppliesCompleteTurnPrefixPayloadAndClosesFalse() {
+  void historyContinuationAppliesCompletePayloadAndResumesOriginalContinuation() {
     Fixture fixture = fixture();
-    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE, true);
     seedClosedHistoryPartial(fixture, baseline);
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
@@ -361,7 +403,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         fixture.store, continuation.id(), m -> m.succeed(successResponse(List.of(), "bash"), NOW));
     requestThreadWork(fixture.store, baseline.threadId());
 
-    // 一个 claim：TURN_PREFIX 完整 payload 应用并关闭（不继续）。
+    // 一个 claim：TURN_PREFIX 完整 payload 应用并关闭。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath applied = path(fixture.store, baseline.threadId());
@@ -375,7 +417,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         payload.summaryText());
     TurnEndPayload end = (TurnEndPayload) applied.entries().get(14).payload();
     assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
-    assertFalse(end.continueModel()); // HISTORY 派生的 TURN_PREFIX 完成不继续。
+    assertTrue(end.continueModel()); // split 两阶段完成后恢复压缩前的普通 continuation。
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+
+    // 下一 claim 偿还的是原普通 continuation，不是第三个压缩阶段。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    TurnStartPayload resumed =
+        (TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload();
+    assertEquals(TurnStartReason.CONTINUATION, resumed.reason());
   }
 
   /**
@@ -661,14 +710,30 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   @Test
-  void continuationDueRunsExistingContinuationWithoutCompactionInsertion() {
+  void overThresholdContinuationCompactsBeforeResumingModel() {
     Fixture fixture = fixture();
-    // continueModel=true 的关闭 turn + 超阈值 usage：continuation 义务必须原样执行，阈值压缩绝不插队。
+    // continueModel=true 的关闭 turn + 超阈值 usage：旧实现直接 CONTINUATION；新边界必须先压缩。
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE, true);
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
 
-    // 一个 claim：CONTINUATION 优先于阈值压缩。
+    // 一个 claim：压缩消费零 Command，并冻结原 continuation 之前的路径。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    TurnStartPayload start = (TurnStartPayload) path.entries().get(9).payload();
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    assertEquals(CompactionTrigger.THRESHOLD, start.compaction().trigger());
+  }
+
+  @Test
+  void belowThresholdContinuationRunsWithoutCompaction() {
+    Fixture fixture = fixture();
+    // 尚未越过阈值时不增加中间动作，既有 continuation 仍直接执行。
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, usage(), true);
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
@@ -676,11 +741,29 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(TurnStartReason.CONTINUATION, start.reason());
   }
 
-  /** 失败 continuation 不抹掉更早 usage，但 soft threshold 仍等待下一条真实 user demand。 */
   @Test
-  void failedContinuationKeepsThresholdFactUntilNextUserDemand() {
+  void trailingToolResultCanCrossThresholdAtTurnEnd() {
     Fixture fixture = fixture();
-    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE, true);
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, usage(), true);
+    appendClosedContinuationWithToolResult(
+        fixture, baseline, BELOW_THRESHOLD_USAGE, "tool output ".repeat(2_000));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    // Provider usage 本身低于 83_616；turn end 新增的 ToolResult 把 projected context 推过阈值。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    TurnStartPayload start =
+        (TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload();
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    assertEquals(CompactionTrigger.THRESHOLD, start.compaction().trigger());
+  }
+
+  /** below-threshold continuation 失败后完全结束；没有新 demand 时不自唤醒。 */
+  @Test
+  void failedBelowThresholdContinuationWaitsForNextUserDemand() {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, usage(), true);
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
@@ -709,7 +792,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
 
-    // 下一条 user demand 到达后，claim2 先启动 threshold 压缩。
+    // 下一条 user demand 到达后直接启动 INPUT；旧 usage 未越阈，不制造无意义压缩。
     seedCommand(
         fixture.store,
         baseline.threadId(),
@@ -717,27 +800,21 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, baseline.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
-    EntryPath compactionPlanned = path(fixture.store, baseline.threadId());
-    assertEquals(13, compactionPlanned.entries().size());
-    Entry compactionStart = compactionPlanned.head();
-    assertEquals(
-        TurnStartReason.COMPACTION, ((TurnStartPayload) compactionStart.payload()).reason());
+    EntryPath inputPlanned = path(fixture.store, baseline.threadId());
+    Entry inputStart = inputPlanned.openTurnStart().orElseThrow();
+    assertEquals(TurnStartReason.INPUT, ((TurnStartPayload) inputStart.payload()).reason());
     assertTrue(
         fixture
             .store
-            .transaction(
-                tx -> tx.findModelInvocationByTurn(baseline.threadId(), compactionStart.id()))
+            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
             .isPresent());
-    assertEquals(
-        CompactionTrigger.THRESHOLD,
-        ((TurnStartPayload) compactionStart.payload()).compaction().trigger());
   }
 
-  /** 被 reject 的 continuation 不抹掉更早 usage；soft threshold 仍由下一条 user demand 激活。 */
+  /** below-threshold continuation 被 reject 后完全结束；没有新 demand 时不自唤醒。 */
   @Test
-  void rejectedContinuationKeepsThresholdFactUntilNextUserDemand() {
+  void rejectedBelowThresholdContinuationWaitsForNextUserDemand() {
     Fixture fixture = fixture();
-    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE, true);
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, usage(), true);
     fixture.resolver.results.add(
         new TurnResolver.Rejected(new AssistantError("CONFIG_ERROR", "bad config")));
     fixture.resolver.onResolve = () -> fixture.resolver.autoConsistent = fixture.resolver.calls > 1;
@@ -747,7 +824,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
 
-    // 下一条 user demand 到达，claim2 在消费消息前启动 threshold 压缩。
+    // 下一条 user demand 到达后直接启动 INPUT。
     seedCommand(
         fixture.store,
         baseline.threadId(),
@@ -756,19 +833,13 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(13, path.entries().size());
-    Entry compactionStart = path.head();
-    assertEquals(
-        TurnStartReason.COMPACTION, ((TurnStartPayload) compactionStart.payload()).reason());
+    Entry inputStart = path.openTurnStart().orElseThrow();
+    assertEquals(TurnStartReason.INPUT, ((TurnStartPayload) inputStart.payload()).reason());
     assertTrue(
         fixture
             .store
-            .transaction(
-                tx -> tx.findModelInvocationByTurn(baseline.threadId(), compactionStart.id()))
+            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
             .isPresent());
-    assertEquals(
-        CompactionTrigger.THRESHOLD,
-        ((TurnStartPayload) compactionStart.payload()).compaction().trigger());
   }
 
   /** 失败压缩不 spin、不阻塞 queued input；后续 user demand 可再次触发 threshold。 */
@@ -931,6 +1002,59 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   @Test
+  void successfulFallbackResumesPendingContinuation() {
+    ModelSelection fallback = new ModelSelection("fallback", "summary-model", "v2");
+    Fixture fixture = fixture(new CompactionConfig(20_000, fallback));
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE, true);
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    // claim1/2：primary 压缩启动后失败，durable fallback obligation 保留。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    Entry primaryEntry = path(fixture.store, baseline.threadId()).head();
+    ModelInvocation primary =
+        fixture
+            .store
+            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), primaryEntry.id()))
+            .orElseThrow();
+    transitionModel(fixture.store, primary.id(), m -> m.beginDispatch(NOW));
+    transitionModel(fixture.store, primary.id(), m -> m.markRunning(NOW));
+    transitionModel(
+        fixture.store,
+        primary.id(),
+        m -> m.fail(new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "bad"), NOW));
+    requestThreadWork(fixture.store, baseline.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    // claim3/4：fallback 复用冻结 anchors；成功后仍能越过失败 primary 找回原 continuation。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    Entry fallbackEntry = path(fixture.store, baseline.threadId()).head();
+    ModelInvocation fallbackInvocation =
+        fixture
+            .store
+            .transaction(
+                tx -> tx.findModelInvocationByTurn(baseline.threadId(), fallbackEntry.id()))
+            .orElseThrow();
+    transitionModel(fixture.store, fallbackInvocation.id(), m -> m.beginDispatch(NOW));
+    transitionModel(fixture.store, fallbackInvocation.id(), m -> m.markRunning(NOW));
+    transitionModel(
+        fixture.store,
+        fallbackInvocation.id(),
+        m -> m.succeed(successResponse(List.of(), "bash"), NOW));
+    requestThreadWork(fixture.store, baseline.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    assertTrue(
+        ((TurnEndPayload) path(fixture.store, baseline.threadId()).head().payload())
+            .continueModel());
+
+    // claim5：无 queued input，恢复原模型 continuation。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    assertEquals(
+        TurnStartReason.CONTINUATION,
+        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload()).reason());
+  }
+
+  @Test
   void noGainWritesStableErrorAndKeepsQueuedInput() {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
@@ -967,6 +1091,80 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(
         TurnStartReason.INPUT,
         ((TurnStartPayload) inputPath.openTurnStart().orElseThrow().payload()).reason());
+  }
+
+  /**
+   * 在既有 logical Agent segment 后追加一个已关闭 CONTINUATION turn；Provider usage 不含其后的 ToolResult， 用于验证
+   * turn-end projected token 补算。
+   */
+  private static void appendClosedContinuationWithToolResult(
+      Fixture fixture, ClosedTurnBaseline baseline, ModelUsage usage, String toolResultText) {
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          UUID turnStartId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnStartId,
+                  baseline.sessionId(),
+                  baseline.turnEndEntryId(),
+                  new TurnStartPayload(
+                      TurnStartReason.CONTINUATION,
+                      branchSettings(),
+                      baseline.threadId(),
+                      CONTEXT_WINDOW,
+                      MAX_OUTPUT_TOKENS,
+                      null),
+                  NOW));
+          UUID assistantEntryId = tx.nextId();
+          String callId = "large-result";
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId,
+                  baseline.sessionId(),
+                  turnStartId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.ASSISTANT,
+                          List.of(
+                              new ToolCallMessageContent(callId, "bash", "bash", "{}"),
+                              new TextMessageContent("working"))),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, cost()),
+                      null),
+                  NOW));
+          UUID toolResultEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  toolResultEntryId,
+                  baseline.sessionId(),
+                  assistantEntryId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.TOOL,
+                          List.of(
+                              new ToolResultMessageContent(
+                                  callId,
+                                  "bash",
+                                  "bash",
+                                  List.of(new TextMessageContent(toolResultText)),
+                                  false,
+                                  "{}"))),
+                      null,
+                      new ToolResultMetadata(
+                          assistantEntryId, callId, 0, ToolResultStatus.SUCCEEDED, false, null)),
+                  NOW));
+          UUID turnEndEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndEntryId,
+                  baseline.sessionId(),
+                  toolResultEntryId,
+                  new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, true, null, null),
+                  NOW));
+          tx.updateThread(
+              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(turnEndEntryId, NOW));
+          return null;
+        });
   }
 
   /**
