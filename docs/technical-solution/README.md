@@ -10,6 +10,7 @@ flowchart TD
     A --> B[architecture.md<br/>架构与模块边界]
     A --> O[domain-map.md<br/>领域词汇与映射]
     A --> Q[harness-runtime-architecture.md<br/>Harness Runtime 架构]
+    A --> T[harness-session-thread-model.md<br/>Session / Thread / Pane lazy materialization]
     A --> Y[harness-runtime-agent-loop-refactor.md<br/>Agent Loop durable reducer]
     A --> X[harness-runtime-contracts.md<br/>Runtime 公共契约]
     A --> S[harness-storage-runtime.md<br/>PostgreSQL durable facts 与 Work/Redis]
@@ -51,6 +52,7 @@ flowchart TD
 | 17 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
 | 18 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
 | 19 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
+| 20 | [harness-session-thread-model.md](harness-session-thread-model.md) | Session Tree、三态 PaneTarget、lazy Thread materialization、Stop 恢复、上传回收与 clean-slate schema |
 
 ## 贯穿约束
 
@@ -59,15 +61,15 @@ flowchart TD
 - PostgreSQL 是唯一 durable truth；`harness_work` 是唯一调度 mailbox（`wake_version` + lease）；Redis/NOTIFY 永非 correctness truth。
 - 所有 Runtime 实体 id（Thread/Session/Entry/Invocation/Command）在 HTTP wire 上是 canonical UUID strings；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal strings，前端以 `DecimalLong=string` 接收并按字段领域约束严格校验。
 - Thread `nextCommandSequence` 从 1 开始；每次可见状态变化 `revision` 恰好 +1。
-- Agent Loop 固定 6 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS`；YOLO 由 Thread 直接控制 API 修改，不进入 command batch。
-- MOVE_HEAD 只允许**同 Session** 历史 Entry，revision CAS、要求 quiescent 且无 queued command；不能指向 `continueModel=true` 的 TURN_END。
-- Stop 先按「被关闭 turn 的 TURN_START `ownerThreadId` + `closeRequestId`」durable key 精确 replay（Thread 锁内 Session 级查找），再做 revision CAS；`STOPPED` / `IDLE`（无 marker，可取消 queued）/ `REPLAYED` 三态。
+- Agent Loop 固定 6 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS`；产品输入 batch 恰有一个末尾 user-like message，设置只在下一次 INPUT 边界生效；YOLO 由 Thread 控制 API 修改。
+- Thread 不提供 MOVE_HEAD：`/tree` 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`；第一批 Command 被原子接受时才 materialize Thread，现有 Thread 永不 relocation。
+- Stop 先按 owning Thread 的 `TURN_END.closeRequestId` 或 Command `cancelRequestId` 精确 replay，再做 revision CAS；结果正交返回 stopped TURN_END、cancelled Commands/messages 和当前 Thread projection，no-op 不写 marker。
 - Tool approval 输入 `ALLOW` / `DENY`，durable 值为 `ALLOWED` / `DENIED`；`ALLOWED` 恢复执行，`DENIED` 终结失败；ToolProcessor 在 permission preflight 前读取当前 Thread YOLO，true 时直接 Allow。
 - AgentDefinitionConfigDTO 的 `tools`/`skills`/`subagents` 三个列表必填：`tools`/`skills` 是短名集合，`subagents` 是 Agent 名称 allowlist（引用锁定，被引用 Agent 不可删除）；branch `activeTools` 由 config.tools + skills 非空时的内部 `load_skill` + subagents 非空时的内部 `task` 派生（子 Agent 在最大深度处省略 `task`）。
-- `load_skill` 与 `task` 是两个内部 `PLATFORM` Tool，绝不出现在 `GET /api/ai/catalog/tools`；`task` 以普通 durable Harness Thread 运行子 Agent（ROOT 冻结 `subagentContext`），复用 ToolInvocation/approval/stop/Work 与既有 Thread，无新表/新状态机/新调度器。
+- `load_skill` 与 `task` 是两个内部 `PLATFORM` Tool，绝不出现在 `GET /api/ai/catalog/tools`；`task` 在一个事务内创建 Session + ROOT + Thread + initial prompt Commands + Work（ROOT 冻结 `subagentContext`），复用 ToolInvocation/approval/stop/Work，无新表/新状态机/新调度器。
 - Tool terminal success 的 `effects` 与 `SUCCEEDED` 同行原子持久化且 terminal immutable；唯一 `ToolOutcomeAppender` 按 `CUSTOM effects -> Tool Result` 顺序推进 Entry/head。
 - 普通 Model 的 `TRANSIENT` retry 把已展示的 text/thinking、错误与 retry 时间追加到 Invocation `failedAttempts`；active snapshot 通过 `modelAttemptFailures` 暴露，终态/Stop 时按 attempt 顺序物化为 `MODEL_ATTEMPT_FAILURE` 后再写 Assistant 结果。失败 attempt 与 `ASSISTANT_ERROR` 的 partial/error 只用于 UI/audit，绝不进入立即 retry 或后续 turn 的 Provider Context。
-- Durable compaction 复用 MODEL Work 与现有 processor：阈值或一次 overflow recovery 启动 `TURN_START(COMPACTION) -> COMPACTION -> TURN_END`；split turn 使用 HISTORY/TURN_PREFIX，内部 turn 不进入后续 Provider Context 或前端 transcript。
+- Durable compaction 复用 MODEL Work 与现有 processor：阈值或一次 overflow recovery 启动 `TURN_START(COMPACTION) -> COMPACTION -> TURN_END`；split turn 使用 HISTORY/TURN_PREFIX；complete summary 是可沿 Session EntryPath 共享的 checkpoint，但 incomplete HISTORY、`continueModel` 与 overflow retry obligation 仅由原 owner Thread 继续；内部 turn 不进入后续 Provider Context 或前端 transcript。
 - Environment 以 canonical bounded 小写 `environmentName` 作为唯一动态路由身份，不持久化独立环境资源；分支快照冻结完整 `EnvironmentBinding{name, workspacePath}`（workspace path 为 Environment Root 下 canonical 相对 wire 路径，`'.'` 表示 root）；daemon wire 是 v3。
 - Resource 安全边界：Tool 边界的 URI 只属于瞬时 `ResourceRef`；写入 Entry 前统一摄入全局 Blob，durable message 只保存 `resource(blobId,name,preview)`。前端通过 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 在渲染期获取短期 URL，并以原件响应的权威 `mediaType/sizeBytes` 分类；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation `file:`、`s3:` 引用兼容。
 
@@ -75,7 +77,7 @@ flowchart TD
 
 | 规则 | 说明 |
 | --- | --- |
-| 状态准确 | Agent Loop 以 [harness-runtime-agent-loop-refactor.md](harness-runtime-agent-loop-refactor.md)、[harness-runtime-architecture.md](harness-runtime-architecture.md) 与 [harness-runtime-contracts.md](harness-runtime-contracts.md) 为事实源，存储与 Work/Redis 以 [harness-storage-runtime.md](harness-storage-runtime.md) 为事实源 |
+| 状态准确 | Session/Thread/Pane 重构目标以 [harness-session-thread-model.md](harness-session-thread-model.md) 为准；Agent Loop 以 [harness-runtime-agent-loop-refactor.md](harness-runtime-agent-loop-refactor.md)、[harness-runtime-architecture.md](harness-runtime-architecture.md) 与 [harness-runtime-contracts.md](harness-runtime-contracts.md) 为事实源，存储与 Work/Redis 以 [harness-storage-runtime.md](harness-storage-runtime.md) 为事实源 |
 | 上下文无关 | 文档可独立阅读，不依赖讨论过程；不写否决项、迁移历史或旧方案 |
 | 分层清晰 | 架构、Runtime、存储、前后端实现分别维护 |
 | 当前态 | 所有技术方案只描述当前仓库已生效的职责、结构、协议与约束 |
