@@ -8,7 +8,7 @@ function errorEnvelope(error) {
   return body
 }
 
-async function localizedGet(ctx, requestPath, language) {
+async function localizedGet(ctx, requestPath, language, status = 400) {
   return expectHttpError(
     () =>
       httpJson(
@@ -19,7 +19,7 @@ async function localizedGet(ctx, requestPath, language) {
         60_000,
         { 'Accept-Language': language },
       ),
-    { status: requestPath.startsWith('/api/ai/chat/') ? 404 : 400 },
+    { status },
   )
 }
 
@@ -45,8 +45,8 @@ registerCase({
   docs: 'Domain error 与 ResponseStatusException 保持 status/code/context/detail，仅本地化 message/title；不支持语言回退英文',
   async run(ctx) {
     const unknownChatPath = '/api/ai/chat/00000000-0000-0000-0000-000000000999'
-    const englishDomain = errorEnvelope(await localizedGet(ctx, unknownChatPath, 'en-US'))
-    const chineseDomain = errorEnvelope(await localizedGet(ctx, unknownChatPath, 'zh-CN'))
+    const englishDomain = errorEnvelope(await localizedGet(ctx, unknownChatPath, 'en-US', 404))
+    const chineseDomain = errorEnvelope(await localizedGet(ctx, unknownChatPath, 'zh-CN', 404))
     assert(englishDomain.code === 'resource_not_found', JSON.stringify(englishDomain))
     assert(englishDomain.message === 'The chat was not found.', JSON.stringify(englishDomain))
     assert(chineseDomain.code === 'resource_not_found', JSON.stringify(chineseDomain))
@@ -88,10 +88,10 @@ registerCase({
       agentName: ctx.vars.agent.name,
       yoloEnabled: false,
     })
-    const responseStatusPath = `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/not-a-number`
-    const englishHttp = errorEnvelope(await localizedPut(ctx, responseStatusPath, 'en-US'))
-    const chineseHttp = errorEnvelope(await localizedPut(ctx, responseStatusPath, 'zh-CN'))
-    const fallbackHttp = errorEnvelope(await localizedPut(ctx, responseStatusPath, 'fr-FR'))
+    const responseStatusPath = '/api/ai/runtime/threads/not-a-number/snapshot'
+    const englishHttp = errorEnvelope(await localizedGet(ctx, responseStatusPath, 'en-US'))
+    const chineseHttp = errorEnvelope(await localizedGet(ctx, responseStatusPath, 'zh-CN'))
+    const fallbackHttp = errorEnvelope(await localizedGet(ctx, responseStatusPath, 'fr-FR'))
     assert(englishHttp.code === 'BAD_REQUEST', JSON.stringify(englishHttp))
     assert(englishHttp.message === 'The request is invalid.', JSON.stringify(englishHttp))
     assert(englishHttp.errors?.title === 'Bad Request', JSON.stringify(englishHttp))

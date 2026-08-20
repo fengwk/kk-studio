@@ -2,10 +2,14 @@ import { assert, envelopeData, expectHttpError, pageResults, cid } from '../lib/
 import { baseModelConfig, providerCreateBody } from '../lib/fixtures.mjs'
 import {
   branchSettingsOf,
+  chatOwner,
   createChat,
-  createChatThread,
   getThreadSnapshot,
-  listChatThreads,
+  listChatSessions,
+  listSessionThreads,
+  materializeNewSession,
+  userMessageCommand,
+  waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
@@ -476,7 +480,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 EnvironmentBinding；Thread 创建携带完整 branchSettings；更新 Chat 默认值不改变既有 Thread',
+  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 EnvironmentBinding；NEW_SESSION rootSettings 携带完整 branch draft；更新 Chat 默认值不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -493,20 +497,24 @@ registerCase({
           && chat.environment === null,
         JSON.stringify(chat),
       )
-      // 先创建 Thread，再更新 Chat 默认值，最后 reread 同一 Thread：更新 Chat 不影响既有 Thread
-      // 的 branchSettings（immutable Environment route；Thread 快照是运行时事实）。
+      // 先创建 Thread（NEW_SESSION materialization），再更新 Chat 默认值，最后 reread 同一 Thread：
+      // 更新 Chat 不影响既有 Thread 的 branchSettings（immutable Environment route；Thread 快照是运行时事实）。
       const requested = {
         environment: null,
         agentName: agent.name,
         model: modelSelectionFor(agent),
         activeTools: [],
       }
-      const threadSnapshot = await createChatThread(ctx, chat.id, {
-        title: null,
+      const threadId = cid()
+      const accepted = await materializeNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: cid(),
+        threadId,
+        rootSettings: requested,
         yoloEnabled: false,
-        branchSettings: requested,
+        commands: [userMessageCommand(`settings independent ${suffix}`, cid())],
       })
-      const thread = threadSnapshot.thread
+      const thread = accepted.thread
       assert(thread.yoloEnabled === false, JSON.stringify(thread))
       assert(
         JSON.stringify(thread.branchSettings) === JSON.stringify(requested),
@@ -528,16 +536,21 @@ registerCase({
         JSON.stringify(updated),
       )
       // 同一 Thread reread：branchSettings 逐字段不变。
-      const reread = await getThreadSnapshot(ctx, thread.threadId)
+      const reread = await getThreadSnapshot(ctx, threadId)
       assert(
         JSON.stringify(reread.thread.branchSettings) === JSON.stringify(requested),
         JSON.stringify({ expected: requested, actual: reread.thread.branchSettings }),
       )
       assert(reread.thread.yoloEnabled === false, JSON.stringify(reread.thread))
-      // 缺 branchSettings 的创建 => 400（mapper requireNonNull）。
+      // 缺 rootSettings 的 NEW_SESSION => 400（mapper requireNonNull）。
       await expectHttpError(
-        () => ctx.call('POST', `/api/ai/chat/${encodeURIComponent(chat.id)}/threads`, { title: null }),
-        { status: 400, messageIncludes: /branchSettings/i },
+        () =>
+          ctx.call('POST', '/api/ai/runtime/command-batches', {
+            owner: chatOwner(chat.id),
+            target: { type: 'NEW_SESSION', sessionId: cid(), threadId: cid(), yoloEnabled: false },
+            commands: [userMessageCommand('missing root settings', cid())],
+          }),
+        { status: 400, messageIncludes: /rootSettings/i },
       )
     } finally {
       await deleteChat(ctx, cleanupChat)
@@ -603,8 +616,8 @@ registerCase({
 registerCase({
   id: 'crud.chat.thread_association_list',
   level: 'L1',
-  title: 'Chat Thread 数组列表与幂等 association',
-  docs: 'Chat-scoped POST 返回创建快照；PUT /threads/{threadId} association 幂等；GET 返回数组且新到旧；未知 Thread 关联 => 404',
+  title: 'Chat Session 摘要与 Session Thread 列表',
+  docs: 'NEW_SESSION 原子物化即建立 Chat owner 归属；GET /api/ai/chat/{chatId}/sessions 返回 Session 摘要（新到旧）；GET /api/ai/runtime/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -613,66 +626,75 @@ registerCase({
       agentName: agent.name,
       yoloEnabled: true,
     })
-    const first = await createChatThread(ctx, chat.id, {
-      title: null,
-      yoloEnabled: true,
-      branchSettings: branchSettingsOf(
-        { name: agent.name },
-        modelSelectionFor(agent),
-        { environment: null },
-      ),
-    })
-    const second = await createChatThread(ctx, chat.id, {
-      title: null,
-      yoloEnabled: true,
-      branchSettings: branchSettingsOf(
-        { name: agent.name },
-        modelSelectionFor(agent),
-        { environment: null },
-      ),
-    })
+    const modelSelection = modelSelectionFor(agent)
+    const materializedThreadIds = []
+    const makeSession = async (title) => {
+      const threadId = cid()
+      const accepted = await materializeNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: cid(),
+        threadId,
+        rootSettings: branchSettingsOf({ name: agent.name }, modelSelection, { environment: null }),
+        yoloEnabled: true,
+        commands: [userMessageCommand(`${title} ${suffix}`, cid())],
+      })
+      materializedThreadIds.push(threadId)
+      return accepted
+    }
+    const first = await makeSession('first')
+    const second = await makeSession('second')
     try {
       assert(first.thread.status === 'IDLE', JSON.stringify(first.thread))
-      assert(String(first.thread.revision) === '0', JSON.stringify(first.thread))
+      // materialize 快照可能已含 processor 消费（revision >= 0）；只断言结构。
+      assert(/^\d+$/.test(String(first.thread.revision)), JSON.stringify(first.thread))
       assert(first.thread.sessionId && first.thread.headEntryId, JSON.stringify(first.thread))
 
-      // 幂等 association（同一 Thread 两次 PUT 均 204）。
-      const third = await createChatThread(ctx, chat.id, {
-        title: null,
-        yoloEnabled: true,
-        branchSettings: branchSettingsOf(
-          { name: agent.name },
-          modelSelectionFor(agent),
-          { environment: null },
+      // NEW_SESSION materialization 是 Chat owner 归属的唯一入口：连续三次物化产生三个 Session。
+      const third = await makeSession('third')
+      const sessions = await listChatSessions(ctx, chat.id)
+      const sessionIds = sessions.map((item) => String(item.sessionId))
+      assert(sessionIds.includes(String(first.thread.sessionId)), 'first Session missing')
+      assert(sessionIds.includes(String(second.thread.sessionId)), 'second Session missing')
+      assert(sessionIds.includes(String(third.thread.sessionId)), 'third Session missing')
+      // 新到旧：最近物化（third）排在最前。
+      assert(
+        sessionIds[0] === String(third.thread.sessionId),
+        `expected newest-first: ${JSON.stringify(sessions)}`,
+      )
+      assert(
+        sessions.every(
+          (item) =>
+            typeof item.firstMessagePreview === 'string'
+            && Number.isSafeInteger(item.threadCount)
+            && item.threadCount >= 1,
         ),
-      })
-      await ctx.call(
-        'PUT',
-        `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/${encodeURIComponent(first.thread.threadId)}`,
+        `Session summary shape: ${JSON.stringify(sessions)}`,
       )
-      await ctx.call(
-        'PUT',
-        `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/${encodeURIComponent(first.thread.threadId)}`,
-      )
-      const scoped = await listChatThreads(ctx, chat.id)
-      const scopedIds = scoped.map((thread) => String(thread.threadId))
-      assert(scopedIds.includes(String(first.thread.threadId)), 'first Thread missing')
-      assert(scopedIds.includes(String(second.thread.threadId)), 'second Thread missing')
-      assert(scopedIds.includes(String(third.thread.threadId)), 'third Thread missing')
-      // 新到旧：最近创建（third）排在最前。
-      assert(scopedIds[0] === String(third.thread.threadId), `expected newest-first: ${JSON.stringify(scoped)}`)
 
-      // canonical 但未知的 Thread 关联 => 404。
-      const unknownThreadId = '00000000-0000-0000-0000-000000000999'
+      // Session Thread 摘要包含物化 Thread。
+      const sessionThreads = await listSessionThreads(ctx, third.thread.sessionId)
+      const threadIds = sessionThreads.map((item) => String(item.threadId))
+      assert(
+        threadIds.includes(String(third.thread.threadId)),
+        `created Thread missing from Session Thread list: ${JSON.stringify(threadIds)}`,
+      )
+
+      // canonical 但未知的 Chat sessions => 404。
+      const unknownChatId = '00000000-0000-0000-0000-000000000999'
       await expectHttpError(
-        () =>
-          ctx.call(
-            'PUT',
-            `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/${unknownThreadId}`,
-          ),
+        () => ctx.call('GET', `/api/ai/chat/${unknownChatId}/sessions`),
         { status: 404, messageIncludes: /unknown|not found/i },
       )
     } finally {
+      // 先等全部 Thread 的 turn 真正 quiescent（processor 不再写该 Session 的
+      // model_invocation/entry 行），再删除 Chat，避免 cascade 删除与 processor
+      // 写入的锁序交叉死锁。
+      for (const threadId of materializedThreadIds) {
+        await waitForQuiescentThread(ctx, threadId, {
+          timeoutMs: 60_000,
+          intervalMs: 100,
+        }).catch(() => {})
+      }
       await deleteChat(ctx, chat)
     }
   },

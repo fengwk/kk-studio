@@ -2,12 +2,16 @@ import { createServer } from 'node:http'
 
 import { assert, cid, envelopeData, sleep } from '../lib/http.mjs'
 import {
+  acceptCommandBatch,
   branchSettingsOf,
+  chatOwner,
   createChat,
-  createChatThread,
-  enqueueCommands,
   getThreadSnapshot,
+  materializeNewSession,
+  setAgentCommand,
+  setModelCommand,
   stopThread,
+  threadTarget,
   userMessageCommand,
   waitForModelTextDeltaAfterEventSubscribed,
   waitForQuiescentThread,
@@ -95,33 +99,54 @@ registerCase({
         agentName: agent.name,
         yoloEnabled: false,
       })
-      const created = await createChatThread(ctx, chat.id, {
-        title: null,
+      // 先用不存在的 Agent 确定性物化空闲 Thread（不触发 Provider），随后在已订阅事件通道后
+      // 通过 THREAD batch 一次性 SET_AGENT/SET_MODEL + USER_MESSAGE 启动 mock turn。
+      const sessionId = cid()
+      const createdThreadId = cid()
+      await materializeNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId,
+        threadId: createdThreadId,
+        rootSettings: branchSettingsOf(
+          { name: `e2e-attempt-missing-${suffix}` },
+          { providerName: model.providerName, modelName: model.name, variant: 'default' },
+        ),
         yoloEnabled: false,
-        branchSettings: branchSettingsOf(agent, {
-          providerName: model.providerName,
-          modelName: model.name,
-          variant: 'default',
-        }),
+        commands: [userMessageCommand(`materialize ${suffix}`, cid())],
       })
-      threadId = String(created.thread.threadId)
+      threadId = String(createdThreadId)
+      const idleThread = await waitForQuiescentThread(ctx, threadId, {
+        timeoutMs: 60_000,
+        intervalMs: 100,
+      })
 
       const { signal: firstDelta, startResult } =
         await waitForModelTextDeltaAfterEventSubscribed(
           ctx,
           threadId,
           () =>
-            enqueueCommands(ctx, threadId, {
-              expectedHeadEntryId: created.thread.headEntryId,
-              expectedNextCommandSequence: created.thread.nextCommandSequence,
-              commands: [userMessageCommand(initialMarker, cid())],
+            acceptCommandBatch(ctx, {
+              owner: chatOwner(chat.id),
+              target: threadTarget({
+                threadId,
+                expectedHeadEntryId: idleThread.headEntryId,
+                expectedNextCommandSequence: idleThread.nextCommandSequence,
+              }),
+              commands: [
+                setAgentCommand(agent.name, cid()),
+                setModelCommand(
+                  { providerName: model.providerName, modelName: model.name, variant: 'default' },
+                  cid(),
+                ),
+                userMessageCommand(initialMarker, cid()),
+              ],
             }),
           { timeoutMs: 30_000 },
         )
       assert(
-        Array.isArray(startResult)
-          && startResult.length === 1
-          && startResult[0].type === 'USER_MESSAGE',
+        Array.isArray(startResult?.acceptedCommands)
+          && startResult.acceptedCommands.length === 3
+          && startResult.acceptedCommands.at(-1).type === 'USER_MESSAGE',
         `initial message batch: ${JSON.stringify(startResult)}`,
       )
       assert(
@@ -149,13 +174,18 @@ registerCase({
         recoveredText: RECOVERED_TEXT,
       })
 
-      const secondStart = await enqueueCommands(ctx, threadId, {
-        expectedHeadEntryId: firstFinalSnapshot.thread.headEntryId,
-        expectedNextCommandSequence: firstFinalSnapshot.thread.nextCommandSequence,
+      const secondStart = await acceptCommandBatch(ctx, {
+        owner: chatOwner(chat.id),
+        target: threadTarget({
+          threadId,
+          expectedHeadEntryId: firstFinalSnapshot.thread.headEntryId,
+          expectedNextCommandSequence: firstFinalSnapshot.thread.nextCommandSequence,
+        }),
         commands: [userMessageCommand(secondMarker, cid())],
       })
       assert(
-        secondStart.length === 1 && secondStart[0].type === 'USER_MESSAGE',
+        secondStart.acceptedCommands.length === 1
+          && secondStart.acceptedCommands[0].type === 'USER_MESSAGE',
         `second message batch: ${JSON.stringify(secondStart)}`,
       )
       secondFinalSnapshot = await waitForQuiescentSnapshot(ctx, threadId)
@@ -416,10 +446,19 @@ function assertFirstTurnDurable(
   assert(snapshot.queuedCommands.length === 0, JSON.stringify(snapshot.queuedCommands))
 
   const entries = snapshot.entries
-  const failureEntries = entries.filter((entry) => entryType(entry) === 'MODEL_ATTEMPT_FAILURE')
-  assert(failureEntries.length === 1, `expected one MODEL_ATTEMPT_FAILURE: ${JSON.stringify(entries)}`)
+  // bootstrap turn（missing Agent PLANNING_FAILED）产生持久 ASSISTANT_ERROR + TURN_END(FAILED)，
+  // 属预期；本断言只覆盖 initialMarker 之后的 mock retry turn。
+  const userIndex = findUserEntryIndex(entries, initialMarker)
+  assert(userIndex >= 0, JSON.stringify(entries))
+  const turnEntries = entries.slice(userIndex)
+  const failureEntries = turnEntries.filter((entry) => entryType(entry) === 'MODEL_ATTEMPT_FAILURE')
+  assert(
+    failureEntries.length === 1,
+    `expected one MODEL_ATTEMPT_FAILURE after initialMarker: ${JSON.stringify(entries)}`,
+  )
   const failureEntry = failureEntries[0]
-  const failureIndex = entries.indexOf(failureEntry)
+  const failureIndex = turnEntries.indexOf(failureEntry)
+  assert(failureIndex > 0, JSON.stringify(turnEntries))
   const failurePayload = parsePayload(failureEntry)
   assert(
     failurePayload.attempt?.attempt === 1
@@ -442,14 +481,12 @@ function assertFirstTurnDurable(
     })}`,
   )
 
-  const userIndex = findUserEntryIndex(entries, initialMarker)
-  assert(userIndex >= 0 && userIndex < failureIndex, JSON.stringify(entries))
-  const assistants = entries.filter(
+  const assistants = turnEntries.filter(
     (entry) => entryType(entry) === 'MESSAGE' && parsePayload(entry).message?.role === 'ASSISTANT',
   )
   assert(assistants.length === 1, `expected one recovered assistant: ${JSON.stringify(entries)}`)
   const assistant = assistants[0]
-  const assistantIndex = entries.indexOf(assistant)
+  const assistantIndex = turnEntries.indexOf(assistant)
   assert(failureIndex < assistantIndex, JSON.stringify(entries))
   assert(messageText(assistant) === recoveredText, JSON.stringify(parsePayload(assistant)))
   assert(
@@ -457,13 +494,13 @@ function assertFirstTurnDurable(
     `recovered assistant must not concatenate failed partial: ${JSON.stringify(parsePayload(assistant))}`,
   )
   assert(
-    !entries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
-    `retry success must not materialize ASSISTANT_ERROR: ${JSON.stringify(entries)}`,
+    !turnEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
+    `retry success must not materialize ASSISTANT_ERROR after initialMarker: ${JSON.stringify(turnEntries)}`,
   )
-  const turnEnds = entries.filter((entry) => entryType(entry) === 'TURN_END')
+  const turnEnds = turnEntries.filter((entry) => entryType(entry) === 'TURN_END')
   assert(
     turnEnds.length === 1 && parsePayload(turnEnds[0]).outcome === 'COMPLETED',
-    `first turn must complete: ${JSON.stringify(turnEnds)}`,
+    `mock turn must complete exactly once: ${JSON.stringify(turnEnds)}`,
   )
 }
 
@@ -473,6 +510,7 @@ function assertSecondTurnDurable(snapshot, { secondMarker, secondTurnText }) {
   assert(snapshot.queuedCommands.length === 0, JSON.stringify(snapshot.queuedCommands))
   const secondUserIndex = findUserEntryIndex(snapshot.entries, secondMarker)
   assert(secondUserIndex >= 0, JSON.stringify(snapshot.entries))
+  const turnEntries = snapshot.entries.slice(secondUserIndex)
   const assistants = snapshot.entries.filter(
     (entry) => entryType(entry) === 'MESSAGE' && parsePayload(entry).message?.role === 'ASSISTANT',
   )
@@ -483,10 +521,10 @@ function assertSecondTurnDurable(snapshot, { secondMarker, secondTurnText }) {
     `second assistant must follow second user: ${JSON.stringify(snapshot.entries)}`,
   )
   assert(messageText(secondAssistant) === secondTurnText, JSON.stringify(parsePayload(secondAssistant)))
-  const turnEnds = snapshot.entries.filter((entry) => entryType(entry) === 'TURN_END')
+  const turnEnds = turnEntries.filter((entry) => entryType(entry) === 'TURN_END')
   assert(
-    turnEnds.length === 2 && parsePayload(turnEnds.at(-1)).outcome === 'COMPLETED',
-    `second turn must complete: ${JSON.stringify(turnEnds)}`,
+    turnEnds.length === 1 && parsePayload(turnEnds[0]).outcome === 'COMPLETED',
+    `second turn must complete exactly once: ${JSON.stringify(turnEnds)}`,
   )
 }
 

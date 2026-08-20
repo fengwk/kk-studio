@@ -8,12 +8,15 @@ import {
   expectHttpError,
 } from '../lib/http.mjs'
 import {
+  acceptCommandBatch,
   branchSettingsOf,
+  chatOwner,
   createChat,
-  createChatThread,
-  enqueueCommands,
   getThreadSnapshot,
+  materializeNewSession,
   stopThread,
+  threadTarget,
+  userMessageCommand,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig } from '../lib/fixtures.mjs'
@@ -32,7 +35,7 @@ registerCase({
   level: 'L1',
   requires: ['canvas-storage'],
   title: 'USER_MESSAGE ATTACHMENT 消费与 requestHash 契约',
-  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 原子消费；响应 requestHash 为 64 位小写 hex，durable payload 为 resource(blobId,name,preview)；整批重放幂等不二次消费；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
+  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 作为 NEW_SESSION 首条消息原子物化；响应 requestHash 为 64 位小写 hex，durable payload 为 resource(blobId,name,preview)；同批精确重放 replayed=true 不二次消费；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -41,21 +44,16 @@ registerCase({
       agentName: ctx.vars.agent.name,
       yoloEnabled: false,
     })
-    const snapshot = await createChatThread(ctx, chat.id, {
-      title: null,
-      yoloEnabled: false,
-      // 使用不存在的 Agent，让附件命令确定性物化后在 Provider 调用前 PLANNING_FAILED。
-      branchSettings: branchSettingsOf(
-        { name: `e2e-attachment-missing-${cid().slice(0, 8)}` },
-        {
-          providerName: 'minimax',
-          modelName: 'MiniMax-M2.7',
-          variant: 'default',
-        },
-        { activeTools: [] },
-      ),
-    })
-    const thread = snapshot.thread
+    // 使用不存在的 Agent，让附件消息确定性物化后在 Provider 调用前 PLANNING_FAILED。
+    const rootSettings = branchSettingsOf(
+      { name: `e2e-attachment-missing-${cid().slice(0, 8)}` },
+      {
+        providerName: 'minimax',
+        modelName: 'MiniMax-M2.7',
+        variant: 'default',
+      },
+      { activeTools: [] },
+    )
 
     // 1. reserve：PENDING + PUT + 不暴露 bucket/key。
     const content = Buffer.from(`e2e chat attachment payload ${cid()}`, 'utf8')
@@ -100,17 +98,24 @@ registerCase({
     const blobId = String(ready.blobId)
     assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(blobId), JSON.stringify(ready))
 
-    // 4. ATTACHMENT 命令原子消费：durable resource + requestHash。
+    // 4. ATTACHMENT 作为 NEW_SESSION 首条消息原子物化：durable resource + requestHash。
+    const sessionId = cid()
+    const threadId = cid()
     const clientCommandId = cid()
-    const batch = {
-      expectedHeadEntryId: String(thread.headEntryId),
-      expectedNextCommandSequence: String(thread.nextCommandSequence),
-      commands: [
-        { type: 'USER_MESSAGE', clientCommandId, contents: [{ type: 'ATTACHMENT', uploadId }] },
-      ],
+    const attachmentCommand = {
+      type: 'USER_MESSAGE',
+      clientCommandId,
+      contents: [{ type: 'ATTACHMENT', uploadId }],
     }
-    const enqueued = await enqueueCommands(ctx, String(thread.threadId), batch)
-    const command = enqueued[0]
+    const accepted = await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings,
+      yoloEnabled: false,
+      commands: [attachmentCommand],
+    })
+    const command = accepted.acceptedCommands[0]
     assert(command.type === 'USER_MESSAGE', JSON.stringify(command))
     assert(/^[0-9a-f]{64}$/.test(String(command.requestHash)), JSON.stringify(command))
     assert(String(command.clientCommandId) === clientCommandId, JSON.stringify(command))
@@ -119,22 +124,34 @@ registerCase({
     assert(String(payload.message.contents[0].blobId) === blobId, JSON.stringify(payload))
     assert(payload.message.contents[0].name === 'e2e-attachment.txt', JSON.stringify(payload))
 
-    // 5. 整批重放：返回既有命令（requestHash 一致），不二次消费。
-    const replayed = await enqueueCommands(ctx, String(thread.threadId), batch)
-    assert(String(replayed[0].requestHash) === String(command.requestHash), JSON.stringify(replayed))
-    await waitForQuiescentThread(ctx, String(thread.threadId), {
+    // 5. 整批精确重放：replayed=true，返回既有命令（requestHash 一致），不二次消费。
+    const replayed = await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings,
+      yoloEnabled: false,
+      commands: [attachmentCommand],
+    })
+    assert(replayed.replayed === true, JSON.stringify(replayed))
+    assert(String(replayed.acceptedCommands[0].requestHash) === String(command.requestHash), JSON.stringify(replayed))
+    await waitForQuiescentThread(ctx, String(threadId), {
       timeoutMs: 60_000,
       intervalMs: 100,
     })
-    const snapshotAfterReplay = await getThreadSnapshot(ctx, String(thread.threadId))
+    const snapshotAfterReplay = await getThreadSnapshot(ctx, String(threadId))
     assert(snapshotAfterReplay.queuedCommands.length === 0, JSON.stringify(snapshotAfterReplay.queuedCommands))
 
     // 6. upload 行已消费：同一 uploadId 的 NEW 命令确定性 400。
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, String(thread.threadId), {
-          expectedHeadEntryId: String(snapshotAfterReplay.thread.headEntryId),
-          expectedNextCommandSequence: String(snapshotAfterReplay.thread.nextCommandSequence),
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: snapshotAfterReplay.thread.headEntryId,
+            expectedNextCommandSequence: snapshotAfterReplay.thread.nextCommandSequence,
+          }),
           commands: [
             { type: 'USER_MESSAGE', clientCommandId: cid(), contents: [{ type: 'ATTACHMENT', uploadId }] },
           ],
@@ -146,9 +163,13 @@ registerCase({
     for (const media of ['IMAGE', 'AUDIO', 'VIDEO']) {
       await expectHttpError(
         () =>
-          enqueueCommands(ctx, String(thread.threadId), {
-            expectedHeadEntryId: String(snapshotAfterReplay.thread.headEntryId),
-            expectedNextCommandSequence: String(snapshotAfterReplay.thread.nextCommandSequence),
+          acceptCommandBatch(ctx, {
+            owner: chatOwner(chat.id),
+            target: threadTarget({
+              threadId,
+              expectedHeadEntryId: snapshotAfterReplay.thread.headEntryId,
+              expectedNextCommandSequence: snapshotAfterReplay.thread.nextCommandSequence,
+            }),
             commands: [
               {
                 type: 'USER_MESSAGE',
@@ -171,9 +192,13 @@ registerCase({
     const pendingUploadId = String(envelopeData(pendingReserveJson).id)
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, String(thread.threadId), {
-          expectedHeadEntryId: String(snapshotAfterReplay.thread.headEntryId),
-          expectedNextCommandSequence: String(snapshotAfterReplay.thread.nextCommandSequence),
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: snapshotAfterReplay.thread.headEntryId,
+            expectedNextCommandSequence: snapshotAfterReplay.thread.nextCommandSequence,
+          }),
           commands: [
             {
               type: 'USER_MESSAGE',
@@ -252,10 +277,23 @@ registerCase({
         agentName: agent.name,
         yoloEnabled: false,
       })
-      const created = await createChatThread(ctx, chat.id, {
-        title: null,
-        yoloEnabled: false,
-        branchSettings: branchSettingsOf(
+      const image = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      )
+      const uploadId = await uploadReadyFile(ctx, {
+        filename: 'pixel.png',
+        mediaType: 'image/png',
+        content: image,
+      })
+      // NEW_SESSION 首条消息即携带 TEXT+ATTACHMENT 原子物化。
+      const sessionId = cid()
+      const createdThreadId = cid()
+      const accepted = await materializeNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId,
+        threadId: createdThreadId,
+        rootSettings: branchSettingsOf(
           agent,
           {
             providerName: model.providerName,
@@ -264,8 +302,19 @@ registerCase({
           },
           { activeTools: ['read'] },
         ),
+        yoloEnabled: false,
+        commands: [
+          {
+            type: 'USER_MESSAGE',
+            clientCommandId: cid(),
+            contents: [
+              { type: 'TEXT', text: `inspect inline image ${suffix}` },
+              { type: 'ATTACHMENT', uploadId },
+            ],
+          },
+        ],
       })
-      threadId = String(created.thread.threadId)
+      threadId = String(createdThreadId)
 
       // Thread 已冻结旧 activeTools 后再更新 Agent；下一 turn 必须读取最新 Agent 配置。
       agent = envelopeData(
@@ -279,30 +328,7 @@ registerCase({
           })
         ).json,
       )
-
-      const image = Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-        'base64',
-      )
-      const uploadId = await uploadReadyFile(ctx, {
-        filename: 'pixel.png',
-        mediaType: 'image/png',
-        content: image,
-      })
-      await enqueueCommands(ctx, threadId, {
-        expectedHeadEntryId: created.thread.headEntryId,
-        expectedNextCommandSequence: created.thread.nextCommandSequence,
-        commands: [
-          {
-            type: 'USER_MESSAGE',
-            clientCommandId: cid(),
-            contents: [
-              { type: 'TEXT', text: `inspect inline image ${suffix}` },
-              { type: 'ATTACHMENT', uploadId },
-            ],
-          },
-        ],
-      })
+      assert(accepted.acceptedCommands.length === 1, JSON.stringify(accepted.acceptedCommands))
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 45_000, intervalMs: 100 })
 
       assert(mock.requests.length === 1, JSON.stringify(mock.requests))
