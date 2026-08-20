@@ -13,7 +13,8 @@ import java.util.Objects;
  * <ul>
  *   <li>{@code effectiveKeep = min(keepRecentTokens, C / 2)}——C 为触发 turn 的冻结 contextWindow。
  *   <li>{@code effectiveReserve = min(16_384, maxOutputTokens)}——summary prompt + output 的预留预算。
- *   <li>{@code softThreshold = max(effectiveKeep, C - effectiveReserve)}——next-demand 门控阈值。
+ *   <li>{@code softThreshold = max(effectiveKeep, C - effectiveReserve)}——活跃 continuation /
+ *       next-demand 门控阈值。
  *   <li>{@code manualMinimum = min(keepRecentTokens * 2, C / 2)}——手动控制的最低上下文量。
  *   <li>输出预算：FULL/HISTORY 为 {@code min(maxOutput, floor(0.8 * reserve), removedPrefixEstimate)}；
  *       TURN_PREFIX 为 {@code min(maxOutput, floor(0.5 * reserve), removedPrefixEstimate)}。

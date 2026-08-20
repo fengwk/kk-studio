@@ -106,6 +106,29 @@ class CompactionSummaryAssemblerTest {
   }
 
   @Test
+  void directTurnPrefixUsesFixedNoPriorHistorySegment() {
+    // 旧实现只保存 prefix 文本，丢失 Pi 两段式形状；direct split 也必须有固定 history 段。
+    CompactionStart prefix =
+        new CompactionStart(
+            CompactionPhase.TURN_PREFIX,
+            CompactionTrigger.THRESHOLD,
+            SETTINGS.model(),
+            id(4L),
+            id(3L),
+            null);
+    EntryPath path = simpleTurnWithOpenCompaction(prefix);
+
+    CompactionPayload payload =
+        CompactionSummaryAssembler.resultPayload(path, prefix, "prefix summary");
+
+    assertEquals(
+        CompactionSummaryAssembler.NO_PRIOR_HISTORY
+            + CompactionSummaryAssembler.TURN_PREFIX_SEPARATOR
+            + "prefix summary",
+        payload.summaryText());
+  }
+
+  @Test
   void turnPrefixMissingReferencedHistoryFailsClosed() {
     // 丢失精确 HISTORY result 引用是 durable branch 损坏，不能回退扫描更早摘要。
     SplitPath split = splitPath("history summary");
