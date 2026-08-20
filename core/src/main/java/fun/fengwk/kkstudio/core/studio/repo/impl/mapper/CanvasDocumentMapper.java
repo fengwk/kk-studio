@@ -20,12 +20,12 @@ import java.util.UUID;
 @Mapper
 public interface CanvasDocumentMapper extends BaseMapper {
 
-  String COLUMNS = "id, title, version, thread_id, created_at, updated_at";
+  String COLUMNS = "id, title, version, created_at, updated_at";
 
   @Insert(
       """
-      insert into canvas_document (id, title, version, thread_id, created_at, updated_at)
-      values (#{id}, #{title}, #{version}, #{threadId}, current_timestamp, current_timestamp)
+      insert into canvas_document (id, title, version, created_at, updated_at)
+      values (#{id}, #{title}, #{version}, current_timestamp, current_timestamp)
       """)
   int insert(CanvasDocumentDO document);
 
@@ -35,7 +35,6 @@ public interface CanvasDocumentMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
         @Result(column = "version", property = "version"),
-        @Result(column = "thread_id", property = "threadId"),
         @Result(column = "created_at", property = "createdAt"),
         @Result(column = "updated_at", property = "updatedAt")
       })
@@ -45,6 +44,11 @@ public interface CanvasDocumentMapper extends BaseMapper {
   @Select("select " + COLUMNS + " from canvas_document where id = #{id} for update")
   @ResultMap("canvasDocumentMap")
   CanvasDocumentDO getByIdForUpdate(@Param("id") UUID id);
+
+  /** 归属/授权路径的轻量锁：KEY SHARE 阻止 owner 删除，但不串行化同 Canvas 的并发命令与接受。 */
+  @Select("select " + COLUMNS + " from canvas_document where id = #{id} for key share")
+  @ResultMap("canvasDocumentMap")
+  CanvasDocumentDO getByIdForKeyShare(@Param("id") UUID id);
 
   @Select("select " + COLUMNS + " from canvas_document order by updated_at desc, id desc")
   @ResultMap("canvasDocumentMap")
@@ -70,15 +74,6 @@ public interface CanvasDocumentMapper extends BaseMapper {
       where id = #{id}
       """)
   int incrementVersion(@Param("id") UUID id);
-
-  /** 绑定根 Thread：只更新 thread_id，不触碰 graph 版本（Chat 消息/revision 不递增 Canvas 版本）。 */
-  @Update(
-      """
-      update canvas_document
-      set thread_id = #{threadId}, updated_at = greatest(updated_at, clock_timestamp())
-      where id = #{id} and thread_id is null
-      """)
-  int bindThreadIfAbsent(@Param("id") UUID id, @Param("threadId") UUID threadId);
 
   @Delete("delete from canvas_document where id = #{id}")
   int deleteById(@Param("id") UUID id);

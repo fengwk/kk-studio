@@ -16,8 +16,8 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasNodeDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasResourceDO;
 import fun.fengwk.kkstudio.core.studio.resource.CanvasResourceLifecycle;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunction;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourceRef;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourceRefRepository;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePin;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
@@ -54,7 +54,7 @@ public class CanvasFunctionRunTransactions {
   private final CanvasLinkMapper linkMapper;
   private final CanvasDocumentMapper documentMapper;
   private final CanvasFunctionRunRepository runRepository;
-  private final CanvasFunctionResourceRefRepository refRepository;
+  private final CanvasFunctionResourcePinRepository refRepository;
   private final CanvasFunctionModelRegistry registry;
   private final CanvasFunctionConfigCodec configCodec;
   private final CanvasFunctionRunStateCodec stateCodec;
@@ -69,7 +69,7 @@ public class CanvasFunctionRunTransactions {
       CanvasLinkMapper linkMapper,
       CanvasDocumentMapper documentMapper,
       CanvasFunctionRunRepository runRepository,
-      CanvasFunctionResourceRefRepository refRepository,
+      CanvasFunctionResourcePinRepository refRepository,
       CanvasFunctionModelRegistry registry,
       CanvasFunctionConfigCodec configCodec,
       CanvasFunctionRunStateCodec stateCodec,
@@ -391,25 +391,25 @@ public class CanvasFunctionRunTransactions {
     }
   }
 
-  private List<CanvasFunctionResourceRef> pins(
+  private List<CanvasFunctionResourcePin> pins(
       UUID canvasId,
       UUID nodeId,
       UUID requestId,
       List<CanvasFunctionFrozenReference> manifest,
       UUID targetResourceId) {
-    List<CanvasFunctionResourceRef> refs = new ArrayList<>(manifest.size() + 1);
+    List<CanvasFunctionResourcePin> refs = new ArrayList<>(manifest.size() + 1);
     for (CanvasFunctionFrozenReference reference : manifest) {
       refs.add(
-          new CanvasFunctionResourceRef(
+          new CanvasFunctionResourcePin(
               canvasId,
               nodeId,
               requestId,
               reference.resourceId(),
-              CanvasFunctionResourceRef.Role.INPUT));
+              CanvasFunctionResourcePin.Role.INPUT));
     }
     refs.add(
-        new CanvasFunctionResourceRef(
-            canvasId, nodeId, requestId, targetResourceId, CanvasFunctionResourceRef.Role.OUTPUT));
+        new CanvasFunctionResourcePin(
+            canvasId, nodeId, requestId, targetResourceId, CanvasFunctionResourcePin.Role.OUTPUT));
     return List.copyOf(refs);
   }
 

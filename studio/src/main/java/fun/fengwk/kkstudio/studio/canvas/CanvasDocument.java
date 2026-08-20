@@ -7,10 +7,11 @@ import java.util.UUID;
 /**
  * Canvas aggregate 的持久化头。
  *
- * <p>{@code threadId} 可空：Canvas 至多绑定一个根 Harness Thread，作为该画布的根级对话上下文。
+ * <p>Harness 会话归属不落在此头上：Canvas 可以持有任意数量 {@link CanvasSession}（owner listing），线程本身由 Session
+ * 关系枚举，本头不冗余存储 thread/session 引用。
  */
 public record CanvasDocument(
-    UUID id, String title, long version, UUID threadId, Instant createdAt, Instant updatedAt) {
+    UUID id, String title, long version, Instant createdAt, Instant updatedAt) {
 
   public CanvasDocument {
     Objects.requireNonNull(id, "id");

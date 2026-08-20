@@ -195,14 +195,6 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           () -> insertDedup(conn, canvasId, "0".repeat(63)));
     }
 
-    // Dedup：applied_version 必须非负。
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_canvas_command_dedup_applied_version_nonneg",
-          () -> insertDedup(conn, canvasId, "f".repeat(64), -1L));
-    }
-
     // 健全性检查：完全合规的 dedup 行可被插入。
     try (Connection conn = newConnection()) {
       insertDedup(conn, canvasId, "f".repeat(64));
@@ -328,16 +320,19 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
                     + " values (?, ?, 'ROOT', '{}'::jsonb, current_timestamp)");
         PreparedStatement thread =
             conn.prepareStatement(
-                "insert into harness_thread (id, head_entry_id, yolo_enabled,"
-                    + " next_command_sequence, revision, created_at, updated_at) values"
-                    + " (?, ?, false, 1, 0, current_timestamp, current_timestamp)")) {
+                "insert into harness_thread (id, session_id, head_entry_id, materialization_hash,"
+                    + " yolo_enabled, next_command_sequence, revision, created_at, updated_at)"
+                    + " values (?, ?, ?, '"
+                    + "0".repeat(64)
+                    + "', false, 1, 0, current_timestamp, current_timestamp)")) {
       session.setObject(1, sessionId);
       assertEquals(1, session.executeUpdate());
       entry.setObject(1, entryId);
       entry.setObject(2, sessionId);
       assertEquals(1, entry.executeUpdate());
       thread.setObject(1, threadId);
-      thread.setObject(2, entryId);
+      thread.setObject(2, sessionId);
+      thread.setObject(3, entryId);
       assertEquals(1, thread.executeUpdate());
     }
   }
@@ -397,20 +392,13 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   }
 
   private void insertDedup(Connection conn, UUID canvasId, String requestHash) throws SQLException {
-    insertDedup(conn, canvasId, requestHash, 1L);
-  }
-
-  private void insertDedup(Connection conn, UUID canvasId, String requestHash, long appliedVersion)
-      throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into canvas_command_dedup"
-                + " (canvas_id, command_id, request_hash, applied_version)"
-                + " values (?, ?, ?, ?)")) {
+            "insert into canvas_command_dedup (canvas_id, command_id, request_hash)"
+                + " values (?, ?, ?)")) {
       ps.setObject(1, canvasId);
       ps.setObject(2, uuid());
       ps.setString(3, requestHash);
-      ps.setLong(4, appliedVersion);
       assertEquals(1, ps.executeUpdate());
     }
   }

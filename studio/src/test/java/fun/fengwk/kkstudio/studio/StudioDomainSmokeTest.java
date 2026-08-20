@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunction;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourceRef;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.studio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.studio.canvas.CanvasLink;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
@@ -25,6 +25,7 @@ import java.util.UUID;
 class StudioDomainSmokeTest {
 
   private static final Instant NOW = Instant.parse("2026-08-10T00:00:00Z");
+  private static final Instant LATER = Instant.parse("2026-08-10T00:00:01Z");
   private static final CanvasTransform TRANSFORM = new CanvasTransform(1, 2, 100, 80);
 
   private static UUID id(long n) {
@@ -41,21 +42,15 @@ class StudioDomainSmokeTest {
   }
 
   @Test
-  void documentAndTransformRejectInvalidState() {
+  void documentRejectsInvalidStateAndOutOfOrderTimestamps() {
+    assertThrows(NullPointerException.class, () -> new CanvasDocument(null, "x", 0, NOW, NOW));
+    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(id(1), " ", 0, NOW, NOW));
     assertThrows(
-        NullPointerException.class, () -> new CanvasDocument(null, "x", 0, null, NOW, NOW));
+        IllegalArgumentException.class, () -> new CanvasDocument(id(1), "x", -1, NOW, NOW));
     assertThrows(
-        IllegalArgumentException.class, () -> new CanvasDocument(id(1), " ", 0, null, NOW, NOW));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CanvasDocument(id(1), "x", -1, null, NOW, NOW));
+        IllegalArgumentException.class, () -> new CanvasDocument(id(1), "x", 0, LATER, NOW));
     assertThrows(IllegalArgumentException.class, () -> new CanvasTransform(Double.NaN, 0, 1, 1));
     assertThrows(IllegalArgumentException.class, () -> new CanvasTransform(0, 0, 0, 1));
-  }
-
-  @Test
-  void documentMayBindOptionalRootThread() {
-    assertEquals(id(7), new CanvasDocument(id(1), "c", 0, id(7), NOW, NOW).threadId());
-    assertEquals(null, new CanvasDocument(id(1), "c", 0, null, NOW, NOW).threadId());
   }
 
   @Test
@@ -142,7 +137,7 @@ class StudioDomainSmokeTest {
     uploadIds.add(id(2));
     assertEquals(List.of(id(1)), command.uploadIds());
 
-    CanvasDocument document = new CanvasDocument(id(1), "c", 0, null, NOW, NOW);
+    CanvasDocument document = new CanvasDocument(id(1), "c", 0, NOW, NOW);
     CanvasSnapshot snapshot = new CanvasSnapshot(document, List.of(), List.of(), List.of());
     assertThrows(UnsupportedOperationException.class, () -> snapshot.groups().add(null));
   }
@@ -166,18 +161,18 @@ class StudioDomainSmokeTest {
 
   @Test
   void functionResourceRefRequiresCanvasRunIdentityResourceAndRole() {
-    CanvasFunctionResourceRef input =
-        new CanvasFunctionResourceRef(
-            id(10), id(20), id(30), id(1), CanvasFunctionResourceRef.Role.INPUT);
+    CanvasFunctionResourcePin input =
+        new CanvasFunctionResourcePin(
+            id(10), id(20), id(30), id(1), CanvasFunctionResourcePin.Role.INPUT);
     assertEquals(id(10), input.canvasId());
-    assertEquals(CanvasFunctionResourceRef.Role.INPUT, input.role());
+    assertEquals(CanvasFunctionResourcePin.Role.INPUT, input.role());
     assertThrows(
         NullPointerException.class,
         () ->
-            new CanvasFunctionResourceRef(
-                null, id(20), id(30), id(1), CanvasFunctionResourceRef.Role.INPUT));
+            new CanvasFunctionResourcePin(
+                null, id(20), id(30), id(1), CanvasFunctionResourcePin.Role.INPUT));
     assertThrows(
         NullPointerException.class,
-        () -> new CanvasFunctionResourceRef(id(10), id(20), id(30), id(1), null));
+        () -> new CanvasFunctionResourcePin(id(10), id(20), id(30), id(1), null));
   }
 }

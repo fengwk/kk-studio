@@ -6,7 +6,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 在 web / DTO 边界暴露的 Chat / ChatThread UUID id 的严格解析器。
+ * 在 web / DTO 边界暴露的 Chat / Chat Session UUID id 的严格解析器。
  *
  * <p>只接受 canonical UUID 文本（{@link UUID#fromString} 与 {@code toString} 往返一致）。拒绝时抛 {@link
  * AiValidationException}，由全局 handler 映射为 HTTP 400。

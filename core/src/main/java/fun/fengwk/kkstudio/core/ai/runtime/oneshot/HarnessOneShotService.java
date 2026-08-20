@@ -8,10 +8,11 @@ import fun.fengwk.kkstudio.core.ai.runtime.ChangeGate;
 import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
-import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime.NewCommandPreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
@@ -28,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
@@ -69,20 +69,21 @@ public final class HarnessOneShotService {
       EnvironmentBinding environment,
       String systemMessage,
       AgentMessage userMessage) {
-    return submit(agentName, environment, systemMessage, userMessage, NewCommandPreflight.IDENTITY);
+    return submit(agentName, environment, systemMessage, userMessage, AcceptancePreflight.IDENTITY);
   }
 
   /**
-   * 带 media preflight 的一次性提交：在入队事务内（幂等重放检查之后）把 USER 消息中按 manifest 顺序的占位内容物化为 durable 内容（如 H3 的全局存储
-   * RESOURCE）；preflight 必须保持 clientCommandId/requestHash 不变。CUSTOM_MESSAGE 请求 hash 只基于 durable
-   * 形态计算，因此 USER 消息在提交时不得携带瞬时 media/attachment 内容。
+   * 带 media preflight 的一次性提交：NEW_SESSION 一次原子物化 Session/Thread/Command/Work（preflight 在全新接受时把 USER
+   * 消息中按 manifest 顺序的占位内容物化为 durable 内容，如 H3 的全局存储 RESOURCE）；preflight 必须保持
+   * clientCommandId/requestHash 不变。CUSTOM_MESSAGE 请求 hash 只基于 durable 形态计算，因此 USER 消息在提交时不得携带 瞬时
+   * media/attachment 内容。
    */
   public UUID submit(
       String agentName,
       EnvironmentBinding environment,
       String systemMessage,
       AgentMessage userMessage,
-      NewCommandPreflight preflight) {
+      AcceptancePreflight preflight) {
     Objects.requireNonNull(userMessage, "userMessage");
     Objects.requireNonNull(preflight, "preflight");
     if (userMessage.role() != AgentMessageRole.USER) {
@@ -93,25 +94,25 @@ public final class HarnessOneShotService {
         settingsMaterializer
             .materialize(agentName, environment, 1, subagentConfig)
             .withActiveTools(List.of());
-    CreatedThread created = runtime.createThread(new CreateThreadCommand(settings, false));
-    runtime.enqueueCommands(
-        new ThreadCommandBatch(
-            created.thread().id(),
-            created.thread().headEntryId(),
-            created.thread().nextCommandSequence(),
-            List.of(
-                new NewThreadCommand(
-                    new CustomMessageCommandPayload(AgentMessage.system(systemMessage)),
-                    UUID.randomUUID(),
-                    ThreadCommandPayloadJsonCodec.requestHash(
-                        new CustomMessageCommandPayload(AgentMessage.system(systemMessage)))),
-                new NewThreadCommand(
-                    new CustomMessageCommandPayload(userMessage),
-                    UUID.randomUUID(),
-                    ThreadCommandPayloadJsonCodec.requestHash(
-                        new CustomMessageCommandPayload(userMessage))))),
-        preflight);
-    return created.thread().id();
+    CustomMessageCommandPayload systemPayload =
+        new CustomMessageCommandPayload(AgentMessage.system(systemMessage));
+    CustomMessageCommandPayload userPayload = new CustomMessageCommandPayload(userMessage);
+    NewThreadCommand systemCommand =
+        new NewThreadCommand(
+            systemPayload,
+            UUID.randomUUID(),
+            ThreadCommandPayloadJsonCodec.requestHash(systemPayload));
+    NewThreadCommand userCommand =
+        new NewThreadCommand(
+            userPayload, UUID.randomUUID(), ThreadCommandPayloadJsonCodec.requestHash(userPayload));
+    AcceptedCommands accepted =
+        runtime.acceptCommands(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.NewSession(
+                    UUID.randomUUID(), UUID.randomUUID(), settings, null, false),
+                List.of(systemCommand, userCommand)),
+            preflight);
+    return accepted.thread().id();
   }
 
   public String await(UUID threadId, Duration timeout, BooleanSupplier continueWaiting) {
