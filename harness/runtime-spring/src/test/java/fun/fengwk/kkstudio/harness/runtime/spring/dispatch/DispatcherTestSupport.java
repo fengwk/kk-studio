@@ -577,7 +577,8 @@ final class DispatcherTestSupport {
         id,
         sessionId,
         parentId,
-        new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), ownerThreadId, 100_000),
+        new TurnStartPayload(
+            TurnStartReason.INPUT, branchSettings(), ownerThreadId, 100_000, 16_384, null),
         NOW);
   }
 
@@ -621,8 +622,7 @@ final class DispatcherTestSupport {
         List.of(),
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        null);
+        ProviderCacheControl.none());
   }
 
   /** 带 bash binding 的机械请求（与 {@link #toolRequest()} 的 binding renderer 全等）。 */
@@ -636,8 +636,7 @@ final class DispatcherTestSupport {
         List.of(toolRequest().binding()),
         List.of(),
         List.of(),
-        base.cacheControl(),
-        null);
+        base.cacheControl());
   }
 
   private static ProviderResponse toolResponse() {
