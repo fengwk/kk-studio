@@ -61,6 +61,7 @@ export function SettingsPage({
   const activeSection = editor.schema?.sections.find(
     (section) => section.key === effectiveActiveTab,
   )
+  const generalError = editor.loadError ?? editor.schemaError
 
   return (
     <section className="screen active">
@@ -89,8 +90,8 @@ export function SettingsPage({
           })}
         </div>
 
-        {editor.schemaError && effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
-          <SchemaError error={editor.schemaError} onRetry={editor.retryLoad} />
+        {generalError && effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
+          <SchemaError error={generalError} onRetry={editor.retryLoad} />
         ) : null}
 
         <div

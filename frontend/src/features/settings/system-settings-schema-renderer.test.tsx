@@ -188,6 +188,15 @@ describe('system settings schema renderer', () => {
     expect(validateSystemSettingsSchema(schema, draft)).toMatch(/invalid settings schema field/)
   })
 
+  it('fail-closes when a null model selection is declared non-nullable', () => {
+    const schema = makeSettingsSchema()
+    const draft = settingsSectionsToDraft(makeSettingsDto())
+    schema.sections[0]!.groups[1]!.fields[1]!.nullable = false
+    expect(validateSystemSettingsSchema(schema, draft)).toMatch(
+      /settings schema type does not match draft/,
+    )
+  })
+
   it('fail-closes when a schema path is missing from the draft', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
