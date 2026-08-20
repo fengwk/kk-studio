@@ -1,8 +1,13 @@
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
+import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
 import type {
+  AgentCommandTargetDTO,
   AgentCommandBatchRequestDTO,
   AgentRuntimeOwnerDTO,
+  HarnessBranchSettingsDTO,
+  HarnessCommandCreateDTO,
+  HarnessModelSelectionDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
 export type PaneTarget =
@@ -39,6 +44,143 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function nonBlank(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+function isOwner(value: unknown): value is AgentRuntimeOwnerDTO {
+  return isRecord(value)
+    && (value.type === 'CHAT' || value.type === 'CANVAS')
+    && nonBlank(value.id)
+}
+
+function isModelSelection(value: unknown): value is HarnessModelSelectionDTO {
+  return isRecord(value)
+    && nonBlank(value.providerName)
+    && nonBlank(value.modelName)
+    && nonBlank(value.variant)
+}
+
+function isEnvironmentBinding(value: unknown): value is EnvironmentBindingDTO | null {
+  return value === null
+    || (
+      isRecord(value)
+      && nonBlank(value.name)
+      && nonBlank(value.workspacePath)
+    )
+}
+
+function isBranchSettings(value: unknown): value is HarnessBranchSettingsDTO {
+  return isRecord(value)
+    && isEnvironmentBinding(value.environment)
+    && nonBlank(value.agentName)
+    && isModelSelection(value.model)
+    && Array.isArray(value.activeTools)
+    && value.activeTools.every((item) => typeof item === 'string')
+}
+
+function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
+  if (!isRecord(value) || typeof value.type !== 'string') {
+    return false
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'kind')) {
+    return false
+  }
+  if (value.type === 'NEW_SESSION') {
+    return nonBlank(value.sessionId)
+      && nonBlank(value.threadId)
+      && isBranchSettings(value.rootSettings)
+      && typeof value.yoloEnabled === 'boolean'
+  }
+  if (value.type === 'ENTRY') {
+    return nonBlank(value.sessionId)
+      && nonBlank(value.startEntryId)
+      && nonBlank(value.threadId)
+      && typeof value.yoloEnabled === 'boolean'
+  }
+  if (value.type === 'THREAD') {
+    return nonBlank(value.threadId)
+      && nonBlank(value.expectedHeadEntryId)
+      && nonBlank(value.expectedNextCommandSequence)
+  }
+  return false
+}
+
+function isCommandContent(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.type !== 'string') {
+    return false
+  }
+  if (value.type === 'TEXT') {
+    return typeof value.text === 'string'
+  }
+  return value.type === 'ATTACHMENT' && nonBlank(value.uploadId)
+}
+
+function isCommand(value: unknown): value is HarnessCommandCreateDTO {
+  if (!isRecord(value) || !nonBlank(value.type) || !nonBlank(value.clientCommandId)) {
+    return false
+  }
+  switch (value.type) {
+    case 'USER_MESSAGE':
+      return Array.isArray(value.contents)
+        && value.contents.length > 0
+        && value.contents.every(isCommandContent)
+    case 'SET_AGENT':
+      return nonBlank(value.agentName)
+    case 'SET_MODEL':
+      return isModelSelection(value.model)
+    case 'SET_ACTIVE_TOOLS':
+      return Array.isArray(value.activeTools)
+        && value.activeTools.every((item) => typeof item === 'string')
+    case 'SET_ENVIRONMENT':
+      return Object.prototype.hasOwnProperty.call(value, 'environment')
+        && isEnvironmentBinding(value.environment)
+    default:
+      return false
+  }
+}
+
+function isCommandBatchRequest(value: unknown): value is AgentCommandBatchRequestDTO {
+  return isRecord(value)
+    && isOwner(value.owner)
+    && isCommandTarget(value.target)
+    && Array.isArray(value.commands)
+    && value.commands.length > 0
+    && value.commands.every(isCommand)
+}
+
+function isBranchDraft(value: unknown): value is BranchDraft {
+  return isRecord(value)
+    && isEnvironmentBinding(value.environment)
+    && nonBlank(value.agentName)
+    && isModelSelection(value.model)
+    && Array.isArray(value.activeTools)
+    && value.activeTools.every((item) => typeof item === 'string')
+    && typeof value.yoloEnabled === 'boolean'
+}
+
+function isComposerPart(value: unknown): value is ComposerPart {
+  if (!isRecord(value) || !nonBlank(value.partId)) {
+    return false
+  }
+  if (value.type === 'text') {
+    return typeof value.text === 'string'
+  }
+  return value.type === 'attachment'
+    && nonBlank(value.uploadId)
+    && typeof value.filename === 'string'
+}
+
+function isPendingAcceptanceValue(value: unknown): value is PendingAcceptance {
+  return isRecord(value)
+    && isOwner(value.owner)
+    && isPaneTarget(value.target)
+    && isCommandBatchRequest(value.request)
+    && isBranchDraft(value.branchDraft)
+    && Array.isArray(value.composerParts)
+    && value.composerParts.every(isComposerPart)
+    && typeof value.generation === 'number'
+    && Number.isInteger(value.generation)
+    && value.generation >= 0
+    && typeof value.unknownOutcome === 'boolean'
 }
 
 export function isPaneTarget(value: unknown): value is PaneTarget {
@@ -123,13 +265,18 @@ export function loadPendingAcceptance(
       return null
     }
     const value: unknown = JSON.parse(raw)
-    if (!isRecord(value) || !isPaneTarget(value.target) || !isRecord(value.request)) {
+    if (!isPendingAcceptanceValue(value)) {
       return null
     }
-    if (!Array.isArray(value.composerParts) || !isRecord(value.branchDraft)) {
+    if (
+      value.owner.type !== owner.type
+      || value.owner.id !== owner.id
+      || value.request.owner.type !== owner.type
+      || value.request.owner.id !== owner.id
+    ) {
       return null
     }
-    return value as unknown as PendingAcceptance
+    return value
   } catch {
     return null
   }

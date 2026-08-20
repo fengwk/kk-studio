@@ -136,7 +136,6 @@ function snapshot(version: number | string = 0): CanvasSnapshotDTO {
       id: CANVAS_ID,
       title: 'Board',
       version: String(version),
-      threadId: null,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },

@@ -1,12 +1,7 @@
-import type { PaneTarget } from '@/features/ai/runtime/agent-pane/pane-target'
-
 export type ChatLayout = 'single' | 'split-2' | 'split-3' | 'grid-4' | 'grid-6' | 'grid-8'
-export type PaneSortPreference = 'recent' | 'created'
 
 export interface ChatPane {
   id: string
-  /** Pane durable-local state is exactly one of the three PaneTarget values. */
-  target: PaneTarget
 }
 
 export interface ChatPaneState {
@@ -36,7 +31,7 @@ function createPaneId(index: number): string {
 }
 
 function createEmptyPane(index: number): ChatPane {
-  return { id: createPaneId(index), target: { kind: 'NEW_SESSION_DRAFT' } }
+  return { id: createPaneId(index) }
 }
 
 function createDefaultChatPaneState(layout: ChatLayout = 'single'): ChatPaneState {
@@ -66,37 +61,11 @@ function parseLayout(value: unknown): ChatLayout {
   return 'single'
 }
 
-function parseTarget(value: unknown): PaneTarget {
-  if (!isRecord(value) || typeof value.kind !== 'string') {
-    return { kind: 'NEW_SESSION_DRAFT' }
-  }
-  if (value.kind === 'NEW_SESSION_DRAFT') {
-    return { kind: value.kind }
-  }
-  if (
-    value.kind === 'ENTRY_DRAFT'
-    && typeof value.sessionId === 'string'
-    && value.sessionId.trim()
-    && typeof value.startEntryId === 'string'
-    && value.startEntryId.trim()
-  ) {
-    return {
-      kind: value.kind,
-      sessionId: value.sessionId.trim(),
-      startEntryId: value.startEntryId.trim(),
-    }
-  }
-  if (value.kind === 'BOUND_THREAD' && typeof value.threadId === 'string' && value.threadId.trim()) {
-    return { kind: value.kind, threadId: value.threadId.trim() }
-  }
-  return { kind: 'NEW_SESSION_DRAFT' }
-}
-
 function parsePane(value: unknown, index: number): ChatPane {
   if (!isRecord(value)) {
     return createEmptyPane(index)
   }
-  return { id: createPaneId(index), target: parseTarget(value.target) }
+  return { id: createPaneId(index) }
 }
 
 function normalizeChatPaneState(raw: unknown): ChatPaneState {
@@ -136,17 +105,6 @@ export function applyChatLayout(state: ChatPaneState, layout: ChatLayout): ChatP
     ? state.focusedPaneId
     : panes[0]?.id ?? 'pane-1'
   return { ...state, layout, panes, focusedPaneId }
-}
-
-export function updatePaneTarget(
-  state: ChatPaneState,
-  paneId: string,
-  target: PaneTarget,
-): ChatPaneState {
-  return {
-    ...state,
-    panes: state.panes.map((pane) => pane.id === paneId ? { ...pane, target } : pane),
-  }
 }
 
 export function focusPane(state: ChatPaneState, paneId: string): ChatPaneState {

@@ -3,7 +3,7 @@ import type {
   AgentRuntimeOwnerDTO,
   HarnessBranchSettingsDTO,
   HarnessThreadDTO,
-  HarnessThreadCommandCreateDTO,
+  HarnessCommandCreateDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import {
   buildBranchDiffCommands,
@@ -29,7 +29,10 @@ export interface AcceptanceBuildInput {
   target: PaneTarget
   draft: BranchDraft
   base: BranchDraft
+  /** Resolved payload parts used to build the durable USER_MESSAGE request. */
   parts: ComposerPart[]
+  /** Browser-local draft identity restored after a definite failure or explicit abandon. */
+  localParts?: ComposerPart[]
   thread?: HarnessThreadDTO | null
   createId?: () => string
 }
@@ -70,15 +73,16 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
  */
 export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenCommandBatchRequest {
   const createId = input.createId ?? createClientCommandId
-  const composerParts = trimMessageParts(input.parts)
-  if (!hasMessageContent(composerParts)) {
+  const payloadParts = trimMessageParts(input.parts)
+  const composerParts = trimMessageParts(input.localParts ?? input.parts)
+  if (!hasMessageContent(payloadParts)) {
     throw new Error('A command batch requires message content')
   }
-  const contents = partsToMessageContents(composerParts)
+  const contents = partsToMessageContents(payloadParts)
   if (contents.length === 0) {
     throw new Error('A command batch requires non-empty contents')
   }
-  const message: HarnessThreadCommandCreateDTO = {
+  const message: HarnessCommandCreateDTO = {
     type: 'USER_MESSAGE',
     clientCommandId: createId(),
     contents: contents as [
@@ -112,7 +116,7 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
         ? { ...command, clientCommandId: undefined }
         : { ...command, clientCommandId: undefined }),
       branchDraft: input.draft,
-      parts: partsKey(composerParts),
+      parts: partsKey(payloadParts),
     }),
   }
 }
@@ -124,7 +128,7 @@ function materializeTarget(
 ) {
   if (target.kind === 'NEW_SESSION_DRAFT') {
     return {
-      kind: 'NEW_SESSION' as const,
+      type: 'NEW_SESSION' as const,
       sessionId: createMaterializedSessionId(),
       threadId: createMaterializedThreadId(),
       rootSettings: createBranchSettings(draft),
@@ -133,7 +137,7 @@ function materializeTarget(
   }
   if (target.kind === 'ENTRY_DRAFT') {
     return {
-      kind: 'ENTRY' as const,
+      type: 'ENTRY' as const,
       sessionId: target.sessionId,
       startEntryId: target.startEntryId,
       threadId: createMaterializedThreadId(),
@@ -144,7 +148,7 @@ function materializeTarget(
     throw new Error('Bound Thread snapshot is not available')
   }
   return {
-    kind: 'THREAD' as const,
+    type: 'THREAD' as const,
     threadId: thread.threadId,
     expectedHeadEntryId: thread.headEntryId,
     expectedNextCommandSequence: thread.nextCommandSequence,

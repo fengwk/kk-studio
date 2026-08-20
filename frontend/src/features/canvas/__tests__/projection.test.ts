@@ -17,7 +17,6 @@ const snapshotDTO: CanvasSnapshotDTO = {
     id: CANVAS_ID,
     title: 'Board',
     version: '3',
-    threadId: null,
     createdAt: '2026-08-10T00:00:00Z',
     updatedAt: '2026-08-10T00:00:00Z',
   },
@@ -113,7 +112,6 @@ describe('Canvas snapshot projection', () => {
     const snapshot = projectCanvasSnapshot(snapshotDTO)
 
     expect(snapshot.document.version).toBe('3')
-    expect(snapshot.document.threadId).toBeNull()
     expect(snapshot.resourceNodes[0]).toMatchObject({
       id: NODE_IMAGE,
       function: { modelKey: 'fake-image' },

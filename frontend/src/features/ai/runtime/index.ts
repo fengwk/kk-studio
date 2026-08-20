@@ -36,3 +36,8 @@ export {
   useBoundThreadPanelLabels,
   buildBoundThreadTranscript,
 } from '@/features/ai/runtime/useBoundThreadPanelViews'
+export {
+  useAgentPaneController,
+  type AgentPaneDefaults,
+  type PaneInteraction,
+} from '@/features/ai/runtime/useAgentPaneController'

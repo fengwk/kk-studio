@@ -71,7 +71,7 @@ describe('PaneTarget durable-local FSM', () => {
       request: {
         owner,
         target: {
-          kind: 'NEW_SESSION',
+          type: 'NEW_SESSION',
           sessionId: 's1',
           threadId: 't1',
           rootSettings: {
@@ -139,5 +139,219 @@ describe('PaneTarget durable-local FSM', () => {
     expect(() => savePaneTarget(owner, 'pane-1', { kind: 'BOUND_THREAD', threadId: 't1' }, failingStorage)).not.toThrow()
     expect(() => clearPaneTarget(owner, 'pane-1', failingStorage)).not.toThrow()
     expect(() => clearPendingAcceptance(owner, 'pane-1', failingStorage)).not.toThrow()
+  })
+
+  it('rejects pending storage unless owner, commands, generation, and outcome are valid', () => {
+    const owner = { type: 'CHAT' as const, id: 'chat-1' }
+    const storage = memoryStorage()
+    const key = 'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'
+    const valid = {
+      owner,
+      target: { kind: 'NEW_SESSION_DRAFT' },
+      request: {
+        owner,
+        target: {
+          type: 'NEW_SESSION',
+          sessionId: 's1',
+          threadId: 't1',
+          rootSettings: {
+            environment: null,
+            agentName: 'assistant',
+            model: { providerName: 'p', modelName: 'm', variant: 'v' },
+            activeTools: [],
+          },
+          yoloEnabled: false,
+        },
+        commands: [{
+          type: 'USER_MESSAGE',
+          clientCommandId: 'c1',
+          contents: [{ type: 'TEXT', text: 'hello' }],
+        }],
+      },
+      branchDraft: {
+        environment: null,
+        agentName: 'assistant',
+        model: { providerName: 'p', modelName: 'm', variant: 'v' },
+        activeTools: [],
+        yoloEnabled: false,
+      },
+      composerParts: [createTextPart('hello')],
+      generation: 1,
+      unknownOutcome: true,
+    }
+    storage.setItem(key, JSON.stringify(valid))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+
+    for (const [field, value] of [
+      ['owner', { type: 'CHAT' }],
+      ['request', { ...valid.request, commands: [] }],
+      ['generation', -1],
+      ['unknownOutcome', 'true'],
+    ] as const) {
+      storage.setItem(key, JSON.stringify({ ...valid, [field]: value }))
+      expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    }
+    storage.setItem(key, JSON.stringify({
+      ...valid,
+      request: {
+        ...valid.request,
+        target: { ...valid.request.target, ...{ ['kind']: 'NEW_SESSION' } },
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    const setRequest = (request: object) => {
+      storage.setItem(key, JSON.stringify({ ...valid, request }))
+    }
+    const setPending = (changes: object) => {
+      storage.setItem(key, JSON.stringify({ ...valid, ...changes }))
+    }
+    const validRequest = valid.request
+    for (const target of [
+      {
+        type: 'ENTRY',
+        sessionId: 's1',
+        startEntryId: 'e1',
+        threadId: 't1',
+        yoloEnabled: false,
+      },
+      {
+        type: 'THREAD',
+        threadId: 't1',
+        expectedHeadEntryId: 'e1',
+        expectedNextCommandSequence: '1',
+      },
+    ]) {
+      setRequest({ ...validRequest, target })
+      expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    }
+    for (const command of [
+      { type: 'SET_AGENT', clientCommandId: 'c1', agentName: 'assistant' },
+      {
+        type: 'SET_MODEL',
+        clientCommandId: 'c1',
+        model: { providerName: 'p', modelName: 'm', variant: 'v' },
+      },
+      { type: 'SET_ACTIVE_TOOLS', clientCommandId: 'c1', activeTools: ['search'] },
+      { type: 'SET_ENVIRONMENT', clientCommandId: 'c1', environment: null },
+      {
+        type: 'USER_MESSAGE',
+        clientCommandId: 'c1',
+        contents: [{ type: 'ATTACHMENT', uploadId: 'u1', filename: 'file.txt' }],
+      },
+    ]) {
+      setRequest({ ...validRequest, commands: [command] })
+      expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    }
+    setRequest({
+      ...validRequest,
+      commands: [{
+        type: 'USER_MESSAGE',
+        clientCommandId: 'c1',
+        contents: [{ type: 'TEXT', text: 1 }],
+      }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({
+      ...validRequest,
+      commands: [{
+        type: 'USER_MESSAGE',
+        clientCommandId: 'c1',
+        contents: [{ type: 'ATTACHMENT', uploadId: '', filename: 'file.txt' }],
+      }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({
+      ...validRequest,
+      commands: [{ type: 'UNKNOWN', clientCommandId: 'c1' }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({
+      ...validRequest,
+      commands: [{ type: 'SET_AGENT', clientCommandId: 'c1', agentName: ' ' }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({
+      ...validRequest,
+      target: {
+        type: 'NEW_SESSION',
+        sessionId: 's1',
+        threadId: 't1',
+        rootSettings: { ...validRequest.target.rootSettings, model: null },
+        yoloEnabled: false,
+      },
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({
+      ...validRequest,
+      target: { type: 'ENTRY', sessionId: 's1', startEntryId: '', threadId: 't1', yoloEnabled: false },
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({
+      ...validRequest,
+      target: {
+        type: 'THREAD',
+        threadId: 't1',
+        expectedHeadEntryId: '',
+        expectedNextCommandSequence: '1',
+      },
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setPending({ branchDraft: { ...valid.branchDraft, model: null } })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setPending({
+      composerParts: [{ partId: 'p1', type: 'attachment', uploadId: 'u1', filename: 'file.txt' }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    setPending({
+      composerParts: [{ partId: 'p1', type: 'attachment', uploadId: '', filename: 'file.txt' }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setPending({ owner: { type: 'OTHER', id: 'chat-1' } })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setPending({
+      branchDraft: {
+        ...valid.branchDraft,
+        environment: { name: 'local', workspacePath: '.' },
+      },
+      request: {
+        ...validRequest,
+        target: {
+          ...validRequest.target,
+          rootSettings: {
+            ...validRequest.target.rootSettings,
+            environment: { name: 'local', workspacePath: '.' },
+          },
+        },
+      },
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    setRequest({ ...validRequest, target: null })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({ ...validRequest, target: { type: 1 } })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({ ...validRequest, target: { type: 'UNKNOWN' } })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({
+      ...validRequest,
+      commands: [{ type: 'USER_MESSAGE', clientCommandId: 'c1', contents: [null] }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({
+      ...validRequest,
+      commands: [{ type: 'SET_AGENT', clientCommandId: '', agentName: 'assistant' }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setRequest({
+      ...validRequest,
+      commands: [{ type: 'SET_AGENT', agentName: 'assistant' }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setPending({ composerParts: [{}] })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setPending({
+      owner: { type: 'CHAT', id: 'different-owner' },
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
   })
 })

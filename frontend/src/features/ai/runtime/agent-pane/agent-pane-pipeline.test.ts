@@ -13,7 +13,10 @@ import {
 } from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
 import { threadCommandsForTarget, THREAD_COMMANDS } from '@/features/ai/runtime/thread-panel/thread-commands'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
-import { createTextPart } from '@/features/ai/composer/composer-parts'
+import {
+  createAttachmentPart,
+  createTextPart,
+} from '@/features/ai/composer/composer-parts'
 import { ApiError } from '@/shared/api/client'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
@@ -63,7 +66,7 @@ describe('AgentPane acceptance pipeline', () => {
       contents: [{ type: 'TEXT', text: 'hello' }],
     })
     expect(plan.request.target).toMatchObject({
-      kind: 'NEW_SESSION',
+      type: 'NEW_SESSION',
       rootSettings: {
         agentName: 'assistant',
         model: baseDraft.model,
@@ -108,12 +111,12 @@ describe('AgentPane acceptance pipeline', () => {
       'USER_MESSAGE',
     ])
     expect(entry.request.target).toMatchObject({
-      kind: 'ENTRY',
+      type: 'ENTRY',
       sessionId: 's1',
       startEntryId: 'e1',
     })
     expect(bound.request.target).toEqual({
-      kind: 'THREAD',
+      type: 'THREAD',
       threadId: thread.threadId,
       expectedHeadEntryId: thread.headEntryId,
       expectedNextCommandSequence: thread.nextCommandSequence,
@@ -157,6 +160,27 @@ describe('AgentPane acceptance pipeline', () => {
       'frozen',
       'new input',
     ])
+  })
+
+  it('freezes browser-local attachment identity separately from the resolved request payload', () => {
+    const local = createAttachmentPart('local-upload-id', 'image.png')
+    const resolved = { ...local, uploadId: 'server-upload-id' }
+
+    const plan = buildAcceptanceRequest({
+      owner: { type: 'CHAT', id: 'chat-1' },
+      target: { kind: 'NEW_SESSION_DRAFT' },
+      draft: baseDraft,
+      base: baseDraft,
+      parts: [resolved],
+      localParts: [local],
+      createId: () => 'attachment-command',
+    })
+
+    expect(plan.request.commands[0]).toMatchObject({
+      type: 'USER_MESSAGE',
+      contents: [{ type: 'ATTACHMENT', uploadId: 'server-upload-id' }],
+    })
+    expect(plan.composerParts).toEqual([local])
   })
 
   it('keeps frozen request identity and handles definite conflict branches explicitly', () => {

@@ -22,6 +22,10 @@ import {
 } from '@/features/ai/runtime/useAgentThreadController'
 import { harnessService } from '@/shared/api/harness-service'
 import { translate } from '@/shared/i18n'
+import {
+  presentConflict,
+  type ConflictPresentation,
+} from '@/features/ai/runtime/conflict-presenter'
 
 /**
  * 面板本地 branch draft：从持久化的 Thread snapshot 初始化，面板本地编辑，
@@ -108,6 +112,7 @@ export function useBoundBranchPanel({
   )
   const [branchState, setBranchState] = useState<BoundBranchState | null>(null)
   const [yoloError, setYoloError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   const boundThreadIdRef = useRef<string | null>(null)
   // YOLO 直接控制面的权威 Thread 状态（revision + yolo policy）：来自 /yolo 成功
   // 响应，或非回退的 snapshot。后续每次 CAS 都基于它，而不是可能滞后的
@@ -136,6 +141,7 @@ export function useBoundBranchPanel({
     yoloPendingRef.current = null
     setBranchState(null)
     setYoloError(null)
+    setConflict(null)
   }, [threadId])
 
   // 从持久化 Thread snapshot 初始化或跟随 base；用户 draft 绝不会被静默覆盖。
@@ -255,6 +261,7 @@ export function useBoundBranchPanel({
       return
     }
     setYoloError(null)
+    setConflict(null)
     editDraft({ yoloEnabled: enabled })
     yoloPendingRef.current = enabled
     void drainYolo()
@@ -303,6 +310,7 @@ export function useBoundBranchPanel({
       }
       adoptAuthoritative(updated)
       setYoloError(null)
+      setConflict(null)
       // 捕获成功时刻的排队意图：React 会延迟执行 setBranchState 回调，届时
       // pending 可能已被 drain 消费为 null，导致误判“无更新意图”而压掉乐观 draft。
       const hasNewerIntent = yoloPendingRef.current != null
@@ -326,6 +334,11 @@ export function useBoundBranchPanel({
       ) {
         return
       }
+      const presented = presentConflict(error)
+      if (presented != null) {
+        setConflict(presented)
+        return
+      }
       if (yoloPendingRef.current != null) {
         // 过期中间请求失败且已有更新意图在排队：不动 draft、不产生瞬时错误，
         // 交给后续请求出结果（latest wins）。
@@ -347,8 +360,8 @@ export function useBoundBranchPanel({
   }
 
   /**
-   * 用权威 Thread DTO 完整重载 base + draft（base === draft，干净）。用于 head
-   * 重定位成功后从返回的 Thread 重新初始化（yolo 保留服务器值；settings 取自 DTO）。
+   * 用权威 Thread DTO 完整重载 base + draft（base === draft，干净）。用于
+   * 接受外部刷新后的当前 Thread 快照（yolo 保留服务器值；settings 取自 DTO）。
    * 非当前 Thread 的 DTO 会被拒绝，绝不写入。
    */
   function resetDraftFromThread(thread: HarnessThreadDTO) {
@@ -368,6 +381,8 @@ export function useBoundBranchPanel({
     dirty,
     yoloError,
     dismissYoloError: () => setYoloError(null),
+    conflict,
+    dismissConflict: () => setConflict(null),
     selectAgent,
     selectEnvironment,
     setYoloEnabled,

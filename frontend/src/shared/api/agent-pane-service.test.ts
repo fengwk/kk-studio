@@ -21,7 +21,7 @@ describe('agent-pane wire service', () => {
     const request = {
       owner: { type: 'CANVAS' as const, id: 'canvas-1' },
       target: {
-        kind: 'NEW_SESSION' as const,
+        type: 'NEW_SESSION' as const,
         sessionId: 's1',
         threadId: 't1',
         rootSettings: {

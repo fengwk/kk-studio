@@ -4,7 +4,6 @@ import {
   focusPane,
   loadChatPaneState,
   saveChatPaneState,
-  updatePaneTarget,
   visibleChatPanes,
 } from '@/features/ai/chat/chat-pane-state'
 
@@ -22,26 +21,22 @@ function storage(): Storage {
   }
 }
 
-describe('Chat PaneTarget slots', () => {
-  it('persists and changes only the three-state target', () => {
+describe('Chat pane layout state', () => {
+  it('persists layout and focus without duplicating PaneTarget storage', () => {
     const store = storage()
     let state = loadChatPaneState('chat-1', store)
-    state = updatePaneTarget(state, 'pane-1', {
-      kind: 'ENTRY_DRAFT',
-      sessionId: 's1',
-      startEntryId: 'e1',
-    })
+    state = applyChatLayout(state, 'split-2')
+    state = focusPane(state, 'pane-2')
     saveChatPaneState('chat-1', state, store)
-    expect(loadChatPaneState('chat-1', store).panes[0]?.target).toEqual({
-      kind: 'ENTRY_DRAFT',
-      sessionId: 's1',
-      startEntryId: 'e1',
+    expect(loadChatPaneState('chat-1', store)).toMatchObject({
+      layout: 'split-2',
+      focusedPaneId: 'pane-2',
     })
+    expect(loadChatPaneState('chat-1', store).panes[0]).toEqual({ id: 'pane-1' })
   })
 
-  it('keeps target slots through layout changes and focuses only visible panes', () => {
+  it('keeps pane slots through layout changes and focuses only visible panes', () => {
     let state = loadChatPaneState('chat-1', storage())
-    state = updatePaneTarget(state, 'pane-2', { kind: 'BOUND_THREAD', threadId: 't2' })
     state = applyChatLayout(state, 'split-2')
     state = focusPane(state, 'pane-2')
     expect(visibleChatPanes(state).map((pane) => pane.id)).toEqual(['pane-1', 'pane-2'])

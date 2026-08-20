@@ -39,6 +39,10 @@ import { agentPaneService } from '@/shared/api/agent-pane-service'
 import type { HarnessThreadSnapshotDTO } from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
+import {
+  presentConflict,
+  type ConflictPresentation,
+} from '@/features/ai/runtime/conflict-presenter'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -86,7 +90,7 @@ export function canRetryStaleMessageBatch(
 ): boolean {
   const target = plan.request.target
   if (
-    target.kind !== 'THREAD'
+    target.type !== 'THREAD'
     || plan.request.commands.length === 0
     || plan.request.commands.some((command) => command.type !== 'USER_MESSAGE')
   ) {
@@ -145,6 +149,7 @@ export function useAgentThreadController(
   )
   const draftRef = useRef<ComposerPart[]>(draft)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   // 维护局部的 in-flight 计数，保证重叠 mutateAsync 调用下 pending 状态依旧准确。
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
   // 未决的精确 batch（处于 in-flight 或在不确定的网络错误后被保留）会阻塞面板
@@ -243,6 +248,7 @@ export function useAgentThreadController(
         reason: null,
       }),
     onSuccess: async (_result, variables) => {
+      setConflict(null)
       decisionIdByInvocation.current.delete(
         `${variables.targetThreadId}:${variables.invocationId}:${variables.decision}`,
       )
@@ -270,6 +276,8 @@ export function useAgentThreadController(
     decision: 'ALLOW' | 'DENY',
     targetThreadId: string = threadId,
   ): Promise<void> {
+    setActionError(null)
+    setConflict(null)
     // 回放键必须包含 targetThreadId：不同子 Thread 可能复用相同的 invocationId，
     // 绝不能把 A 子 Thread 的幂等键复用给 B 子 Thread。
     const key = `${targetThreadId}:${invocationId}:${decision}`
@@ -292,6 +300,7 @@ export function useAgentThreadController(
     mutationFn: (expectedRevision: string) =>
       agentPaneService.compactThread(threadId, { expectedRevision }),
     onSuccess: async () => {
+      setConflict(null)
       await queryClient.invalidateQueries({
         queryKey: queryKeys.threads.snapshot(threadId),
       })
@@ -304,17 +313,23 @@ export function useAgentThreadController(
    */
   function reportMutationError(error: unknown, fallbackKey: string, targetThreadId = threadId) {
     if (isConflictError(error)) {
-      setActionError(
-        t('ai.runtime.action.threadStateChanged', {
-          action: t(fallbackKey),
-          error: errorMessage(error),
-        }),
-      )
+      const presented = presentConflict(error)
+      if (presented != null) {
+        setConflict(presented)
+      } else {
+        setActionError(
+          t('ai.runtime.action.threadStateChanged', {
+            action: t(fallbackKey),
+            error: errorMessage(error),
+          }),
+        )
+      }
       void queryClient.invalidateQueries({
         queryKey: queryKeys.threads.snapshot(targetThreadId),
       })
       return
     }
+    setConflict(null)
     setActionError(errorMessage(error))
   }
 
@@ -357,6 +372,7 @@ export function useAgentThreadController(
       return Promise.resolve()
     }
     setActionError(null)
+    setConflict(null)
     const plan = buildBatch(trimmed)
     if (plan == null) {
       return Promise.resolve()
@@ -415,6 +431,7 @@ export function useAgentThreadController(
       for (let retryCount = 0; ; retryCount += 1) {
         try {
           await agentPaneService.acceptCommandBatch(submittedPlan.request)
+          setConflict(null)
           return
         } catch (error) {
           if (
@@ -442,7 +459,7 @@ export function useAgentThreadController(
             request: {
               ...submittedPlan.request,
               target: {
-                kind: 'THREAD',
+                type: 'THREAD',
                 threadId,
                 expectedHeadEntryId: latest.thread.headEntryId,
                 expectedNextCommandSequence: latest.thread.nextCommandSequence,
@@ -484,6 +501,7 @@ export function useAgentThreadController(
       return Promise.resolve()
     }
     setActionError(null)
+    setConflict(null)
     // 同步 basis 栅栏：绝不复用 basis 已不再匹配「当前」渲染 snapshot 的待决操作
     //（head/revision 已移动 => 旧 Turn 已结束或 Thread 已前进）。在这里——而不仅仅在
     // 被动清理 effect 中——退役，可以关闭「snapshot 已前进但 effect 尚未 flush」时
@@ -548,6 +566,7 @@ export function useAgentThreadController(
       return Promise.resolve()
     }
     setActionError(null)
+    setConflict(null)
     return compactMutation
       .mutateAsync(thread.revision)
       .then(() => undefined)
@@ -594,6 +613,8 @@ export function useAgentThreadController(
     disabled: !bound,
     actionError,
     dismissActionError: () => setActionError(null),
+    conflict,
+    dismissConflict: () => setConflict(null),
     setDraft,
     submitMessage,
     stopThread,
