@@ -291,7 +291,7 @@ class ThreadContextClassifierTest {
 
   @Test
   void attachedTerminalModelRelocatedBackToBasisIsIdleOrHistorical() {
-    // MOVE_HEAD 回 basis（结果挂在另一 descendant）：head == basis 但 resultEntryId 非空，不重放、不 apply。
+    // head 回到 basis（结果挂在另一 descendant）：head == basis 但 resultEntryId 非空，不重放、不 apply。
     assertEquals(
         ThreadContext.IdleOrHistorical.class,
         classifier
@@ -839,8 +839,7 @@ class ThreadContextClassifierTest {
         List.of(),
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        null);
+        ProviderCacheControl.none());
   }
 
   private static ToolBinding toolBinding() {

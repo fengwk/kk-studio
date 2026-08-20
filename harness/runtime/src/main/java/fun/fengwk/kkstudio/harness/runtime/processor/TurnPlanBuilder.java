@@ -35,9 +35,9 @@ import java.util.function.Supplier;
  * EntryPath，不接触 Store、不写任何 durable 状态。Thread YOLO 不进入 plan。
  *
  * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL / SET_ACTIVE_TOOLS）与 SYSTEM CUSTOM_MESSAGE（用于 task
- * soft steering），保留 USER_MESSAGE、USER CUSTOM_MESSAGE 与 SET_ENVIRONMENT；INPUT 消费 cutoff 内完整 queued
- * 快照并先做可选 history normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END），再追加
- * TURN_START(INPUT) 与按 sequence 顺序的 USER/CUSTOM Message；COMPACTION 只追加
+ * soft steering），保留 USER_MESSAGE、USER CUSTOM_MESSAGE 与 SET_ENVIRONMENT；INPUT 只消费到首条 user-like
+ * message 为止的命令前缀，并先做可选 history normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED
+ * TURN_END），再追加 TURN_START(INPUT) 与按 sequence 顺序的 USER/CUSTOM Message；COMPACTION 只追加
  * TURN_START(COMPACTION)（settings 快照为当前 branch），消费零 Command，切分事实由调用方传入的 {@link
  * CompactionPreparation} 承载。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
  */
@@ -67,9 +67,20 @@ final class TurnPlanBuilder {
 
     List<ThreadCommand> consumedCommands = new ArrayList<>();
     for (ThreadCommand command : plannedCommands) {
+      if (reason == TurnStartReason.INPUT) {
+        consumedCommands.add(command);
+        if (isUserLike(command)) {
+          break;
+        }
+        continue;
+      }
       if (isConsumed(reason, command)) {
         consumedCommands.add(command);
       }
+    }
+    if (reason == TurnStartReason.INPUT
+        && (consumedCommands.isEmpty() || !isUserLike(consumedCommands.getLast()))) {
+      throw new IllegalArgumentException("INPUT plan requires one queued user-like message");
     }
     CommandHarvestResult harvest =
         harvestReducer.reduce(threadId, sourcePath.baseSettings(), consumedCommands);
@@ -93,12 +104,20 @@ final class TurnPlanBuilder {
             turnStartEntryId,
             sessionId,
             parentId,
-            new TurnStartPayload(reason, harvest.branchSettings(), threadId, null),
+            new TurnStartPayload(
+                reason,
+                harvest.branchSettings(),
+                threadId,
+                null,
+                null,
+                preparation == null ? null : preparation.frozenStart()),
             now));
     parentId = turnStartEntryId;
     if (reason == TurnStartReason.INPUT || reason == TurnStartReason.CONTINUATION) {
       for (ThreadCommand command : plannedCommands) {
-        if (reason == TurnStartReason.INPUT && command.type() == ThreadCommandType.USER_MESSAGE) {
+        if (reason == TurnStartReason.INPUT
+            && command.type() == ThreadCommandType.USER_MESSAGE
+            && consumedCommands.contains(command)) {
           UUID entryId = idAllocator.get();
           candidateEntries.add(
               new Entry(
@@ -110,7 +129,7 @@ final class TurnPlanBuilder {
                   now));
           parentId = entryId;
         } else if (command.type() == ThreadCommandType.CUSTOM_MESSAGE
-            && isConsumed(reason, command)) {
+            && consumedCommands.contains(command)) {
           UUID entryId = idAllocator.get();
           candidateEntries.add(
               new Entry(
@@ -162,6 +181,14 @@ final class TurnPlanBuilder {
           == AgentMessageRole.SYSTEM;
       case USER_MESSAGE, SET_ENVIRONMENT -> false;
     };
+  }
+
+  private static boolean isUserLike(ThreadCommand command) {
+    if (command.type() == ThreadCommandType.USER_MESSAGE) {
+      return true;
+    }
+    return command.payload() instanceof CustomMessageCommandPayload custom
+        && custom.message().role() == AgentMessageRole.USER;
   }
 
   /**

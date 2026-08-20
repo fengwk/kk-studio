@@ -10,7 +10,7 @@ import java.util.UUID;
 
 /**
  * 同步、无副作用、事务外的 turn 解析端口：把调用方传入的 candidate {@link EntryPath} 解析为冻结的 {@link ModelRequestSpec} 与本次
- * turn 的 {@code contextWindow}。
+ * turn 的 {@code contextWindow} / {@code maxOutputTokens}。
  *
  * <p>调用方在短事务内锁 Thread、捕获 queued Command 快照、分配稳定 Entry ID 并构造 candidate path 后，在事务外调用本端口（Resolver
  * 执行期间 Processor 只做 lease heartbeat，本端口绝不要求也不持有任何行锁）。candidate path 是 Thread 当前 head 的已持久化前缀与尚未
@@ -19,8 +19,8 @@ import java.util.UUID;
  * Store（suffix 尚未持久化）；其结果只有在 Processor 第二事务 CAS 成功后才成为 durable execution fact。抛出的异常表示临时基础设施失败（DB /
  * 网络不可用），由 Processor reschedule，绝不改写 durable invocation。
  *
- * <p>{@code compactionPreparation} 非空当且仅当本次是 COMPACTION turn：实现必须按切分事实冻结 {@code CompactionRequest}
- * 元数据与模型/variant，不得把 messagesToSummarize / previousSummary 写入 spec。YOLO 不进入本端口。
+ * <p>{@code compactionPreparation} 非空当且仅当本次是 COMPACTION turn：实现必须按切分事实冻结输出预算作为 {@code
+ * maxOutputTokens}，不得把 messagesToSummarize / previousSummary 写入 spec。YOLO 不进入本端口。
  */
 public interface TurnResolver {
 
@@ -30,12 +30,15 @@ public interface TurnResolver {
   /** 解析结果：冻结请求或确定性拒绝。 */
   sealed interface Result permits TurnResolver.Resolved, TurnResolver.Rejected {}
 
-  /** 解析成功：紧凑 spec 已冻结，contextWindow 为本次 turn 冻结的正整数。 */
-  record Resolved(ModelRequestSpec spec, int contextWindow) implements Result {
+  /** 解析成功：紧凑 spec 已冻结，contextWindow 与 maxOutputTokens 为本次 turn 冻结的正整数。 */
+  record Resolved(ModelRequestSpec spec, int contextWindow, int maxOutputTokens) implements Result {
     public Resolved {
       spec = Objects.requireNonNull(spec, "spec");
       if (contextWindow <= 0) {
         throw new IllegalArgumentException("contextWindow must be positive");
+      }
+      if (maxOutputTokens <= 0) {
+        throw new IllegalArgumentException("maxOutputTokens must be positive");
       }
     }
   }

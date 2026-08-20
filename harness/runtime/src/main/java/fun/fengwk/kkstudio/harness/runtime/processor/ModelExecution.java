@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -55,7 +54,7 @@ final class ModelExecution implements ModelGateway.Listener {
   private final UUID invocationId;
   private final UUID threadId;
   private final int attempt;
-  private final ModelRequestSpec request;
+  private final boolean compaction;
   private final ModelProcessorConfig config;
   private final Clock clock;
   private final WorkHeartbeat heartbeat;
@@ -79,7 +78,7 @@ final class ModelExecution implements ModelGateway.Listener {
       ClaimedWork claim,
       UUID threadId,
       int attempt,
-      ModelRequestSpec request,
+      boolean compaction,
       ModelProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
@@ -90,7 +89,7 @@ final class ModelExecution implements ModelGateway.Listener {
     this.invocationId = claim.target().id();
     this.threadId = threadId;
     this.attempt = attempt;
-    this.request = Objects.requireNonNull(request, "request");
+    this.compaction = compaction;
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.heartbeat =
@@ -423,7 +422,7 @@ final class ModelExecution implements ModelGateway.Listener {
     ProviderResponse validatedResponse;
     try {
       completion = accumulator.complete(response);
-      validatedResponse = ModelResponseValidator.validate(request, completion.response());
+      validatedResponse = ModelResponseValidator.validate(completion.response());
     } catch (RuntimeException failure) {
       log.warn(
           "invalid provider response for invocation {}: {}",
@@ -592,9 +591,8 @@ final class ModelExecution implements ModelGateway.Listener {
                 if (tx.lockClaimedWork(claim, now).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
-                String text = request.compaction() == null ? accumulator.text() : response.text();
-                String thinking =
-                    request.compaction() == null ? accumulator.thinking() : response.thinking();
+                String text = compaction ? response.text() : accumulator.text();
+                String thinking = compaction ? response.thinking() : accumulator.thinking();
                 if (!text.isEmpty() || !thinking.isEmpty()) {
                   ModelInvocation checkpointed =
                       model.checkpoint(
@@ -692,7 +690,7 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private void publishAll(List<Publish> publishes) {
-    if (request.compaction() != null) {
+    if (compaction) {
       return;
     }
     for (Publish publish : publishes) {

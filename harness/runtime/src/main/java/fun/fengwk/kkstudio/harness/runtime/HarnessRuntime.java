@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -773,14 +774,14 @@ public final class HarnessRuntime {
                 queued,
                 active.model(),
                 List.of(),
-                projectModelAttemptFailures(active.model()));
+                projectModelAttemptFailures(active.model(), locked.path()));
             case ThreadContext.ModelTerminalPending pending -> new ThreadSnapshot(
                 thread,
                 locked.path(),
                 queued,
                 pending.model(),
                 List.of(),
-                projectModelAttemptFailures(pending.model()));
+                projectModelAttemptFailures(pending.model(), locked.path()));
             case ThreadContext.ToolActive active -> new ThreadSnapshot(
                 thread, locked.path(), queued, active.model(), active.siblings(), List.of());
             case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
@@ -814,8 +815,9 @@ public final class HarnessRuntime {
   }
 
   private static List<ModelAttemptFailureProjection> projectModelAttemptFailures(
-      ModelInvocation invocation) {
-    if (invocation.request().compaction() != null || invocation.failedAttempts().isEmpty()) {
+      ModelInvocation invocation, EntryPath path) {
+    if (ModelAttemptMaterialization.isCompactionInvocation(invocation, path)
+        || invocation.failedAttempts().isEmpty()) {
       return List.of();
     }
     List<ModelAttemptFailureProjection> projections = new ArrayList<>();

@@ -34,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -42,7 +43,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -325,7 +325,9 @@ public abstract class HarnessStoreInvocationContract {
                           TurnStartReason.INPUT,
                           StoreTestSupport.branchSettings(),
                           foreignOwner,
-                          StoreTestSupport.CONTEXT_WINDOW),
+                          StoreTestSupport.CONTEXT_WINDOW,
+                          StoreTestSupport.MAX_OUTPUT_TOKENS,
+                          null),
                       T1));
               ThreadState locked = tx.lockThread(root.threadId()).orElseThrow();
               tx.updateThread(locked.advanceHead(id, T1));
@@ -2059,6 +2061,14 @@ public abstract class HarnessStoreInvocationContract {
                       baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
                   T1));
           UUID start = tx.nextId();
+          CompactionStart compaction =
+              new CompactionStart(
+                  CompactionPhase.HISTORY,
+                  CompactionTrigger.THRESHOLD,
+                  StoreTestSupport.branchSettings().model(),
+                  endEntryId,
+                  userEntryId,
+                  null);
           tx.insertEntry(
               new Entry(
                   start,
@@ -2068,7 +2078,9 @@ public abstract class HarnessStoreInvocationContract {
                       TurnStartReason.COMPACTION,
                       StoreTestSupport.branchSettings(),
                       baseline.threadId(),
-                      StoreTestSupport.CONTEXT_WINDOW),
+                      StoreTestSupport.CONTEXT_WINDOW,
+                      16_384,
+                      compaction),
                   T1));
           tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, T2));
           return start;
@@ -2168,41 +2180,14 @@ public abstract class HarnessStoreInvocationContract {
         "{}");
   }
 
-  private static ModelRequestSpec compactionRequest(
-      CompactionPhase phase, UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
-    ModelRequestSpec base = modelRequest();
-    return new ModelRequestSpec(
-        base.providerType(),
-        base.model(),
-        base.variant(),
-        base.preambleMessages(),
-        List.of(),
-        List.of(),
-        List.of(),
-        base.cacheControl(),
-        new CompactionRequest(
-            phase,
-            CompactionTrigger.THRESHOLD,
-            500L,
-            firstKeptEntryId,
-            cutEntryId,
-            turnPrefixStartEntryId));
+  private static ModelRequestSpec compactionRequest() {
+    return modelRequest();
   }
 
   @Test
-  void compactionInvocationAcceptsSucceededResultWithExactFrozenMetadata() {
-    ModelRequestSpec request =
-        compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null);
-    CompactionPayload result =
-        new CompactionPayload(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            500L,
-            true,
-            "summary",
-            TestIds.id(2),
-            TestIds.id(5),
-            null);
+  void compactionInvocationAcceptsExactSucceededSummary() {
+    ModelRequestSpec request = compactionRequest();
+    CompactionPayload result = new CompactionPayload("summary");
 
     UUID modelId = seedCompletedCompactionTurn(request, result);
 
@@ -2212,19 +2197,9 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   @Test
-  void compactionResultRejectsNonSucceededStatusAndMetadataDrift() {
-    ModelRequestSpec request =
-        compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null);
-    CompactionPayload result =
-        new CompactionPayload(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            500L,
-            true,
-            "summary",
-            TestIds.id(2),
-            TestIds.id(5),
-            null);
+  void compactionResultRejectsNonSucceededStatusAndSummaryDrift() {
+    ModelRequestSpec request = compactionRequest();
+    CompactionPayload result = new CompactionPayload("summary");
 
     // FAILED invocation 携带 COMPACTION result -> 拒绝。
     UUID turnStart = openCompactionTurn();
@@ -2247,231 +2222,20 @@ public abstract class HarnessStoreInvocationContract {
                   return null;
                 }));
 
-    // SUCCEEDED 但 payload 元数据与冻结请求不一致（phase 漂移）-> 拒绝。
-    CompactionPayload drifted =
-        new CompactionPayload(
-            CompactionPhase.TURN_PREFIX,
-            CompactionTrigger.THRESHOLD,
-            500L,
-            true,
-            "summary",
-            TestIds.id(2),
-            TestIds.id(5),
-            TestIds.id(3));
+    // SUCCEEDED 但 summaryText 与 Provider terminal 不一致 -> 拒绝。
+    CompactionPayload drifted = new CompactionPayload("drifted summary");
     assertThrows(
         IllegalArgumentException.class, () -> seedCompletedCompactionTurn(request, drifted));
   }
 
   @Test
-  void compactionResultReferencesMustPrecedeResultAndRespectOrder() {
-    // cut 不在 result 路径上。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            seedCompletedCompactionTurn(
-                compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(999), null),
-                new CompactionPayload(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.THRESHOLD,
-                    500L,
-                    true,
-                    "summary",
-                    TestIds.id(2),
-                    TestIds.id(999),
-                    null)));
-    // firstKept 与 cut 都存在且位于 result 前，但 firstKept > cut 仍拒绝。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            seedCompletedCompactionTurn(
-                compactionRequest(CompactionPhase.FULL, TestIds.id(5), TestIds.id(2), null),
-                new CompactionPayload(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.THRESHOLD,
-                    500L,
-                    true,
-                    "summary",
-                    TestIds.id(5),
-                    TestIds.id(2),
-                    null)));
-    // firstKept 是 result Entry 自身（不位于 result 之前）-> 拒绝。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx -> {
-                  ModelRequestSpec request =
-                      compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null);
-                  UUID turnStart = seedCompactionTurnWithReadyInvocation(tx, request);
-                  UUID modelId = lastModelId(tx, turnStart);
-                  UUID resultEntryId = tx.nextId();
-                  tx.insertEntry(
-                      new Entry(
-                          resultEntryId,
-                          baseline.sessionId(),
-                          turnStart,
-                          new CompactionPayload(
-                              CompactionPhase.FULL,
-                              CompactionTrigger.THRESHOLD,
-                              500L,
-                              true,
-                              "summary",
-                              resultEntryId,
-                              TestIds.id(5),
-                              null),
-                          T2));
-                  ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
-                  tx.updateModelInvocation(current.beginDispatch(T2));
-                  current = tx.lockModelInvocation(modelId).orElseThrow();
-                  tx.updateModelInvocation(current.markRunning(T2));
-                  current = tx.lockModelInvocation(modelId).orElseThrow();
-                  tx.updateModelInvocation(current.succeed(successResponse(), T3));
-                  current = tx.lockModelInvocation(modelId).orElseThrow();
-                  tx.updateModelInvocation(current.attachResultEntry(resultEntryId, T3));
-                  return null;
-                }));
-    // prefix 必须 < cut（相等拒绝）。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            seedCompletedCompactionTurn(
-                compactionRequest(
-                    CompactionPhase.TURN_PREFIX, TestIds.id(2), TestIds.id(5), TestIds.id(5)),
-                new CompactionPayload(
-                    CompactionPhase.TURN_PREFIX,
-                    CompactionTrigger.THRESHOLD,
-                    500L,
-                    true,
-                    "summary",
-                    TestIds.id(2),
-                    TestIds.id(5),
-                    TestIds.id(5))));
-    // prefix 不在 result 路径上。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            seedCompletedCompactionTurn(
-                compactionRequest(
-                    CompactionPhase.TURN_PREFIX, TestIds.id(2), TestIds.id(5), TestIds.id(999)),
-                new CompactionPayload(
-                    CompactionPhase.TURN_PREFIX,
-                    CompactionTrigger.THRESHOLD,
-                    500L,
-                    true,
-                    "summary",
-                    TestIds.id(2),
-                    TestIds.id(5),
-                    TestIds.id(999))));
-  }
+  void compactionPurposeComesOnlyFromTurnStart() {
+    // ModelRequestSpec 不复制 compaction metadata；同一紧凑请求由 immutable TURN_START 决定执行用途。
+    UUID turnStart = openCompactionTurn();
+    UUID modelId = insertCompactionInvocation(turnStart, modelRequest());
 
-  @Test
-  void turnStartReasonMustMatchCompactionPurpose() {
-    // 普通（非压缩）invocation 不能挂在 COMPACTION TURN_START 下。
-    UUID compactionTurnStart = openCompactionTurn();
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.lockThread(baseline.threadId());
-                  tx.insertModelInvocation(
-                      modelInvocation(
-                          TestIds.id(42),
-                          baseline.threadId(),
-                          compactionTurnStart,
-                          compactionTurnStart,
-                          ModelInvocationStatus.READY,
-                          null,
-                          T2));
-                }));
-
-    // 压缩 invocation 必须挂在 COMPACTION TURN_START 下（INPUT TURN_START 拒绝）。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.lockThread(baseline.threadId());
-                  tx.insertModelInvocation(
-                      new ModelInvocation(
-                          TestIds.id(43),
-                          baseline.threadId(),
-                          baseline.turnStartEntryId(),
-                          baseline.turnStartEntryId(),
-                          compactionRequest(
-                              CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null),
-                          ModelInvocationStatus.READY,
-                          0,
-                          null,
-                          null,
-                          null,
-                          null,
-                          List.of(),
-                          T2,
-                          T2));
-                }));
-  }
-
-  /** 在给定事务内：开 COMPACTION turn 链 + READY compaction invocation，返回 turnStart id。 */
-  private UUID seedCompactionTurnWithReadyInvocation(
-      HarnessStore.Transaction tx, ModelRequestSpec request) {
-    tx.lockThread(baseline.threadId());
-    UUID userEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            userEntryId,
-            baseline.sessionId(),
-            baseline.turnStartEntryId(),
-            userMessagePayload(),
-            T1));
-    UUID assistantEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(assistantEntryId, baseline.sessionId(), userEntryId, assistantPayload(), T1));
-    UUID endEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            endEntryId,
-            baseline.sessionId(),
-            assistantEntryId,
-            new TurnEndPayload(
-                baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
-            T1));
-    UUID start = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            start,
-            baseline.sessionId(),
-            endEntryId,
-            new TurnStartPayload(
-                TurnStartReason.COMPACTION,
-                StoreTestSupport.branchSettings(),
-                baseline.threadId(),
-                StoreTestSupport.CONTEXT_WINDOW),
-            T1));
-    tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, T2));
-    UUID modelId = tx.nextId();
-    tx.insertModelInvocation(
-        new ModelInvocation(
-            modelId,
-            baseline.threadId(),
-            start,
-            start,
-            request,
-            ModelInvocationStatus.READY,
-            0,
-            null,
-            null,
-            null,
-            null,
-            List.of(),
-            T2,
-            T2));
-    return start;
-  }
-
-  private UUID lastModelId(HarnessStore.Transaction tx, UUID turnStart) {
-    return tx.findModelInvocationByTurn(baseline.threadId(), turnStart).orElseThrow().id();
+    ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
+    assertEquals(turnStart, stored.turnStartEntryId());
+    assertEquals(modelRequest(), stored.request());
   }
 }

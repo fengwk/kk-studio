@@ -250,9 +250,8 @@ public interface HarnessStore {
     Optional<Work> lockClaimedWork(ClaimedWork claim, Instant now);
 
     /**
-     * 控制面强制锁定并删除 Work 行：行存在时删除并返回 true，不存在返回 false；无需 claim token（Stop / MOVE_HEAD 用它 fence 旧
-     * callback）。Work 行存在时要求 owning Thread 已在本事务锁定；删除后旧 claim 的 renew / complete / reschedule 视为
-     * lost ownership。
+     * 控制面强制锁定并删除 Work 行：行存在时删除并返回 true，不存在返回 false；无需 claim token（Stop 用它 fence 旧 callback）。Work
+     * 行存在时要求 owning Thread 已在本事务锁定；删除后旧 claim 的 renew / complete / reschedule 视为 lost ownership。
      */
     boolean deleteWork(WorkTarget target);
 

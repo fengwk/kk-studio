@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
@@ -385,12 +388,7 @@ final class StopControl {
     UUID turnStartId = tx.nextId();
     tx.insertEntry(
         new Entry(
-            turnStartId,
-            sessionId,
-            path.head().id(),
-            new TurnStartPayload(
-                TurnStartReason.CONTINUATION, path.baseSettings(), thread.id(), null),
-            now));
+            turnStartId, sessionId, path.head().id(), continuationBarrierStart(path, thread), now));
     UUID barrierId = tx.nextId();
     tx.insertEntry(
         new Entry(
@@ -408,6 +406,52 @@ final class StopControl {
     return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
   }
 
+  /**
+   * 普通 continueModel obligation 写 CONTINUATION barrier；completed HISTORY phase gap 写精确配对的
+   * TURN_PREFIX COMPACTION barrier，使 Stop receipt 与被取消的 durable obligation 同域。
+   */
+  private static TurnStartPayload continuationBarrierStart(EntryPath path, ThreadState thread) {
+    TurnEndPayload due = (TurnEndPayload) path.head().payload();
+    Entry referencedStart = null;
+    for (Entry entry : path.entries()) {
+      if (entry.id().equals(due.turnStartEntryId())
+          && entry.payload() instanceof TurnStartPayload) {
+        referencedStart = entry;
+        break;
+      }
+    }
+    if (referencedStart == null) {
+      throw new IllegalStateException(
+          "continuation TURN_END references missing TURN_START " + due.turnStartEntryId());
+    }
+    TurnStartPayload source = (TurnStartPayload) referencedStart.payload();
+    if (source.compaction() == null || source.compaction().phase() != CompactionPhase.HISTORY) {
+      return new TurnStartPayload(TurnStartReason.CONTINUATION, path.baseSettings(), thread.id());
+    }
+    CompactionTurns.CompactionTurn history = null;
+    for (CompactionTurns.CompactionTurn turn : CompactionTurns.scan(path)) {
+      if (CompactionTurns.entryAt(path, turn.startIndex()).id().equals(referencedStart.id())) {
+        history = turn;
+        break;
+      }
+    }
+    if (history == null || history.result() == null || history.resultIndex() < 0) {
+      throw new IllegalStateException(
+          "completed HISTORY continuation requires its exact compaction result");
+    }
+    CompactionStart frozen = source.compaction();
+    CompactionStart stoppedPrefix =
+        new CompactionStart(
+            CompactionPhase.TURN_PREFIX,
+            frozen.trigger(),
+            frozen.executionModel(),
+            frozen.cutEntryId(),
+            frozen.turnPrefixStartEntryId(),
+            CompactionTurns.entryAt(path, history.resultIndex()).id());
+    return new TurnStartPayload(
+        TurnStartReason.COMPACTION, path.baseSettings(), thread.id(), null, null, stoppedPrefix);
+  }
+
   private StopResult stopModel(
       HarnessStore.Transaction tx,
       ThreadState thread,
@@ -422,7 +466,12 @@ final class StopControl {
     ModelInvocationError error =
         new ModelInvocationError(ProviderErrorKind.CANCELLED, CANCELLED_MESSAGE);
     UUID parentId =
-        ModelAttemptFailureAppender.append(tx, path.root().sessionId(), path.head().id(), model);
+        ModelAttemptFailureAppender.append(
+            tx,
+            path.root().sessionId(),
+            path.head().id(),
+            model,
+            ((TurnStartPayload) path.openTurnStart().orElseThrow().payload()).compaction() != null);
     UUID barrierId = tx.nextId();
     tx.insertEntry(new Entry(barrierId, path.root().sessionId(), parentId, barrier, now));
     // attach 转换触发与 ModelAttemptMaterialization 等价的严格校验（failed attempts 与 terminal 结果逐条比对）。

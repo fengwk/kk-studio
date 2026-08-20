@@ -1,51 +1,17 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
-
-import java.util.Objects;
-import java.util.UUID;
-
 /**
  * 自动压缩 turn 的 durable 摘要结果 payload（仅作为 COMPACTION turn 的 assistant result）。
  *
- * <p>{@code complete=false} 只属于 HISTORY 阶段（切分 turn 的第一次调用）；FULL / TURN_PREFIX 成功写出 {@code
- * complete=true} 的最终 summary。{@code firstKeptEntryId} 是保留区起点（可包含 cut 前相邻的非上下文元数据）， {@code
- * cutEntryId} 是实际第一个保留的上下文消息；切分 turn 额外携带 {@code turnPrefixStartEntryId}（FULL 必须为 null）。 {@code
- * summaryText} 始终非空（ModelResponseValidator 保证压缩成功响应的文本非空）。
+ * <p>只保存非空 {@code summaryText}：phase / trigger / cut / complete / execution model 全部从 enclosing
+ * TURN_START（{@link TurnStartPayload#compaction()}）与紧邻完成的 TURN_END 派生——{@code complete = phase !=
+ * HISTORY && TurnEnd COMPLETED}。不再持久化 tokensBefore / firstKeptEntryId / complete。
  */
-public record CompactionPayload(
-    CompactionPhase phase,
-    CompactionTrigger trigger,
-    long tokensBefore,
-    boolean complete,
-    String summaryText,
-    UUID firstKeptEntryId,
-    UUID cutEntryId,
-    UUID turnPrefixStartEntryId)
-    implements EntryPayload {
+public record CompactionPayload(String summaryText) implements EntryPayload {
 
   public CompactionPayload {
-    phase = Objects.requireNonNull(phase, "phase");
-    trigger = Objects.requireNonNull(trigger, "trigger");
-    if (tokensBefore < 0) {
-      throw new IllegalArgumentException("tokensBefore must not be negative");
-    }
     if (summaryText == null || summaryText.isBlank()) {
       throw new IllegalArgumentException("summaryText must not be blank");
-    }
-    Objects.requireNonNull(firstKeptEntryId, "firstKeptEntryId");
-    Objects.requireNonNull(cutEntryId, "cutEntryId");
-    if (phase == CompactionPhase.FULL) {
-      if (turnPrefixStartEntryId != null) {
-        throw new IllegalArgumentException("FULL compaction must not carry turnPrefixStartEntryId");
-      }
-    } else if (turnPrefixStartEntryId == null) {
-      throw new IllegalArgumentException("split compaction phases require turnPrefixStartEntryId");
-    }
-    if ((phase == CompactionPhase.HISTORY) != !complete) {
-      throw new IllegalArgumentException(
-          "HISTORY compaction must be incomplete and other phases complete");
     }
   }
 

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryInput;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -122,29 +123,24 @@ class ModelRequestMaterializerTest {
   void liveProjectionSkipsBoundariesErrorsAndUsesLatestCompleteCompaction() {
     List<Entry> entries = new ArrayList<>();
     entries.add(entry(1, 0, new RootPayload(SETTINGS)));
-    entries.add(entry(2, 1, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER, 4096)));
+    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(3, 2, user("old-user")));
     entries.add(entry(4, 3, assistant("old-reply")));
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
-    entries.add(
-        entry(6, 5, new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS, OWNER, 4096)));
-    entries.add(
-        entry(
-            7,
-            6,
-            new CompactionPayload(
-                CompactionPhase.FULL,
-                CompactionTrigger.THRESHOLD,
-                10L,
-                true,
-                "kept summary",
-                id(4L),
-                id(4L),
-                null)));
+    CompactionStart completed =
+        new CompactionStart(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            SETTINGS.model(),
+            id(4L),
+            null,
+            null);
+    entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
+    entries.add(entry(7, 6, new CompactionPayload("kept summary")));
     entries.add(
         entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
-    entries.add(entry(9, 8, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER, 4096)));
+    entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(10, 9, user("kept-user")));
     entries.add(
         entry(
@@ -157,7 +153,7 @@ class ModelRequestMaterializerTest {
             11,
             new TurnEndPayload(
                 id(9L), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null)));
-    entries.add(entry(13, 12, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER, 4096)));
+    entries.add(entry(13, 12, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(14, 13, user("latest-user")));
 
     ProviderRequest request =
@@ -175,12 +171,21 @@ class ModelRequestMaterializerTest {
 
   @Test
   void compactionRequestRebuildsTheSameSummaryPromptFromEntryIds() {
-    EntryPath path = conversationPath(2);
-    CompactionRequest compaction =
-        new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 80L, id(2L), id(4L), null);
+    EntryPath history = conversationPath(2);
+    CompactionStart compaction =
+        new CompactionStart(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            SETTINGS.model(),
+            id(4L),
+            null,
+            null);
+    List<Entry> entries = new ArrayList<>(history.entries());
+    entries.add(
+        entry(id(10L), history.head().id(), resolvedStart(TurnStartReason.COMPACTION, compaction)));
+    EntryPath path = new EntryPath(entries);
     CompactionSummaryInput input = CompactionPlanner.reconstructSummaryInput(path, compaction);
-    ModelRequestSpec spec = compactionSpec(compaction);
+    ModelRequestSpec spec = compactionSpec();
 
     ProviderRequest request = MATERIALIZER.materialize(path, spec);
 
@@ -199,8 +204,7 @@ class ModelRequestMaterializerTest {
     UUID parent = id(1L);
     for (int i = 1; i <= closedTurns; i++) {
       UUID start = id(nextId++);
-      entries.add(
-          entry(start, parent, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER, 4096)));
+      entries.add(entry(start, parent, resolvedStart(TurnStartReason.INPUT, null)));
       UUID user = id(nextId++);
       entries.add(entry(user, start, user("user-" + i)));
       UUID assistant = id(nextId++);
@@ -232,11 +236,10 @@ class ModelRequestMaterializerTest {
         List.of(binding),
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        null);
+        ProviderCacheControl.none());
   }
 
-  private static ModelRequestSpec compactionSpec(CompactionRequest compaction) {
+  private static ModelRequestSpec compactionSpec() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         descriptor(),
@@ -245,8 +248,12 @@ class ModelRequestMaterializerTest {
         List.of(),
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        compaction);
+        ProviderCacheControl.none());
+  }
+
+  private static TurnStartPayload resolvedStart(
+      TurnStartReason reason, CompactionStart compaction) {
+    return new TurnStartPayload(reason, SETTINGS, OWNER, 4096, 1024, compaction);
   }
 
   private static ToolBinding bashBinding() {

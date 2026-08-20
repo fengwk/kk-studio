@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
@@ -23,9 +22,10 @@ import java.util.regex.Pattern;
 /**
  * 从被摘要分支重算的 Pi 风格 {@code <read-files>} / {@code <modified-files>} 文件清单。
  *
- * <p>从分支 durable 历史起点（ROOT 之后）累计扫描到被摘要范围终点（cut，HISTORY 阶段为 turnPrefixStart）内 ASSISTANT 消息的
- * read/write/edit tool call {@code path} 参数——完整 Entry 历史保持 durable，因此旧文件操作（包括早于之前压缩的） 不会丢失。modified
- * 集合为 write ∪ edit，read-only 为 read − modified；最终按字典序输出 Pi 格式，空清单不产生 section。
+ * <p>从分支 durable 历史起点（ROOT 之后索引 0）累计扫描到被摘要范围终点（最终 complete 结果一律为 {@code cutEntryId}—— FULL /
+ * TURN_PREFIX 只在最终 complete 结果由 Runtime 从 ROOT..cut 累计重算，HISTORY 不产出文件清单）内 ASSISTANT 消息的
+ * read/write/edit tool call {@code path} 参数。modified 集合为 write ∪ edit，read-only 为 read − modified；
+ * 最终按字典序输出 Pi 格式，空清单不产生 section。模型输出残留不完整 reserved tag 时 fail closed。
  */
 public final class CompactionFileSections {
 
@@ -40,13 +40,14 @@ public final class CompactionFileSections {
   private CompactionFileSections() {}
 
   /** 把文件清单 section 追加到 summary 文本（无清单时原样返回）。 */
-  public static String append(EntryPath path, CompactionRequest request, String summary) {
+  public static String append(EntryPath path, UUID cutEntryId, String summary) {
+    Objects.requireNonNull(cutEntryId, "cutEntryId");
     String canonicalSummary = stripReservedSections(summary);
     if (canonicalSummary.isBlank()) {
       throw new IllegalArgumentException(
           "compaction summary must contain text outside reserved file sections");
     }
-    String sections = sections(path, request);
+    String sections = sections(path, cutEntryId);
     return sections.isEmpty() ? canonicalSummary : canonicalSummary + "\n\n" + sections;
   }
 
@@ -61,21 +62,15 @@ public final class CompactionFileSections {
     return stripped.strip();
   }
 
-  static String sections(EntryPath path, CompactionRequest request) {
+  static String sections(EntryPath path, UUID cutEntryId) {
     Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(cutEntryId, "cutEntryId");
     List<Entry> entries = path.entries();
-    // 从分支起点（索引 0）累计；HISTORY phase 只扫到 turnPrefixStartEntryId，完整阶段（FULL/TURN_PREFIX）扫到
-    // cutEntryId。
-    UUID rangeEndId =
-        request.phase() == CompactionPhase.HISTORY && request.turnPrefixStartEntryId() != null
-            ? request.turnPrefixStartEntryId()
-            : request.cutEntryId();
-    int rangeEnd = indexOfId(entries, rangeEndId);
+    int rangeEnd = indexOfId(entries, cutEntryId);
     if (rangeEnd < 0) {
-      // 切分事实缺失视为分支损坏，fail closed（绝不静默输出空清单）。
+      // cut 缺失视为分支损坏，fail closed（绝不静默输出空清单）。
       throw new IllegalStateException(
-          "compaction file-section range end entry " + rangeEndId + " is not on the current path");
+          "compaction file-section range end entry " + cutEntryId + " is not on the current path");
     }
     Set<String> read = new TreeSet<>();
     Set<String> modified = new TreeSet<>();
