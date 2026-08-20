@@ -9,14 +9,14 @@ import type {
 } from '@/shared/api/contracts/system-settings'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
-import { makeSettingsDto } from '@/features/settings/settings-test-fixtures'
+import { makeSettingsDto, makeSettingsSchema } from '@/features/settings/settings-test-fixtures'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }))
 
 vi.mock('@/shared/api/system-settings-service', () => ({
-  systemSettingsService: { get: mocks.get, update: mocks.update },
-  createSystemSettingsService: () => ({ get: vi.fn(), update: vi.fn() }),
+  systemSettingsService: { get: mocks.get, getSchema: mocks.getSchema, update: mocks.update },
+  createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))
 
 /** 测试级「真实后端」：GET 返回当前状态，PUT 按 expectedVersion CAS 推进版本。 */
@@ -27,8 +27,10 @@ function createBackend(initial: SystemSettingsDTO = makeSettingsDto()) {
     if (update.expectedVersion !== state.version) {
       throw new ApiError('conflict', 409, 'version_conflict', {
         resource: 'system_settings',
+        reason: 'VERSION_CONFLICT',
         expectedVersion: update.expectedVersion,
         actualVersion: state.version,
+        detail: `system settings version conflict: expected=${update.expectedVersion} actual=${state.version}`,
       })
     }
     state = {
@@ -60,13 +62,15 @@ function renderSettings(reloadPage?: () => void) {
   return { queryClient, ...result }
 }
 
-function serverTab(name: string) {
-  return screen.getByRole('tab', { name })
+async function serverTab(name: string) {
+  return await screen.findByRole('tab', { name })
 }
 
 describe('system settings server editor', () => {
   beforeEach(() => {
     mocks.get.mockReset()
+    mocks.getSchema.mockReset()
+    mocks.getSchema.mockResolvedValue(makeSettingsSchema())
     mocks.update.mockReset()
   })
 
@@ -74,7 +78,7 @@ describe('system settings server editor', () => {
     mocks.get.mockResolvedValue(makeSettingsDto())
     renderSettings()
 
-    await userEvent.click(serverTab('AI 运行时'))
+    await userEvent.click(await serverTab('AI 运行时'))
     expect(await screen.findByLabelText('最大重试次数')).toHaveValue(3)
     expect(screen.getByLabelText('基础延迟（毫秒）')).toHaveValue(2000)
     expect(screen.getByLabelText('保留最近 token')).toHaveValue(20000)
@@ -84,13 +88,13 @@ describe('system settings server editor', () => {
     mocks.get.mockResolvedValue(makeSettingsDto())
     renderSettings()
 
-    await userEvent.click(serverTab('工具与权限'))
+    await userEvent.click(await serverTab('工具与权限'))
     expect(await screen.findByText('下次调用生效')).toBeInTheDocument()
     expect(screen.getByText('新建对话生效')).toBeInTheDocument()
     expect(screen.getByText('重启后生效')).toBeInTheDocument()
   })
 
-  it('shows a loading state while the aggregate is pending and renders content after it resolves', async () => {
+  it('does not expose unvalidated server tabs while the aggregate is pending', async () => {
     let resolveGet: (dto: SystemSettingsDTO) => void
     mocks.get.mockImplementation(
       () => new Promise<SystemSettingsDTO>((resolve) => {
@@ -99,10 +103,11 @@ describe('system settings server editor', () => {
     )
     renderSettings()
 
-    await userEvent.click(serverTab('AI 运行时'))
-    expect(screen.getByRole('status')).toHaveTextContent('正在加载设置…')
+    expect(await screen.findByRole('tab', { name: '常规' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'AI 运行时' })).not.toBeInTheDocument()
 
     resolveGet!(makeSettingsDto())
+    await userEvent.click(await serverTab('AI 运行时'))
     expect(await screen.findByLabelText('最大重试次数')).toHaveValue(3)
   })
 
@@ -111,11 +116,26 @@ describe('system settings server editor', () => {
     mocks.get.mockRejectedValueOnce(new Error('network down')).mockImplementation(backend.get)
     renderSettings()
 
-    await userEvent.click(serverTab('AI 运行时'))
     expect(await screen.findByText('设置加载失败。')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: '重试' }))
+    await userEvent.click(await serverTab('AI 运行时'))
     expect(await screen.findByLabelText('最大重试次数')).toHaveValue(3)
+  })
+
+  it('does not build any server tab when the schema fails validation', async () => {
+    // 让 schema 无效（sections 为空）：SettingsPage 不得渲染任何 server tab，且只显示 General。
+    mocks.get.mockResolvedValue(makeSettingsDto())
+    mocks.getSchema.mockResolvedValue({ sections: [] })
+    renderSettings()
+
+    expect(await screen.findByRole('tab', { name: '常规' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'AI 运行时' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '工具与权限' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '设置表单元数据无效，无法渲染编辑器。',
+    )
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('键盘快捷键')
   })
 
   it('saves the complete aggregate with expectedVersion and clears the dirty state on success', async () => {
@@ -124,7 +144,7 @@ describe('system settings server editor', () => {
     mocks.update.mockImplementation(backend.update)
     renderSettings()
 
-    await userEvent.click(serverTab('AI 运行时'))
+    await userEvent.click(await serverTab('AI 运行时'))
     const field = await screen.findByLabelText('基础延迟（毫秒）')
     await userEvent.clear(field)
     await userEvent.type(field, '3000')
@@ -154,7 +174,7 @@ describe('system settings server editor', () => {
     mocks.update.mockImplementation(backend.update)
     renderSettings()
 
-    await userEvent.click(serverTab('高级'))
+    await userEvent.click(await serverTab('高级'))
     const lease = await screen.findByLabelText('处理器租约时长（毫秒）')
     await userEvent.clear(lease)
     await userEvent.type(lease, '45000')
@@ -176,7 +196,7 @@ describe('system settings server editor', () => {
     const reloadPage = vi.fn()
     renderSettings(reloadPage)
 
-    await userEvent.click(serverTab('工具与权限'))
+    await userEvent.click(await serverTab('工具与权限'))
     const yolo = screen.getByRole('switch', { name: '默认 YOLO' })
     expect(yolo).toHaveAttribute('aria-checked', 'false')
     await userEvent.click(yolo)
@@ -186,9 +206,10 @@ describe('system settings server editor', () => {
     backend.setState(makeSettingsDto({ version: '1' }))
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    const dialog = await screen.findByRole('alertdialog', { name: '设置已在其他位置修改' })
-    expect(dialog).toHaveTextContent('当前未保存的修改将会丢失')
-    expect(dialog.querySelector('.lucide-refresh-cw')).toBeInTheDocument()
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('持久状态已变化')
+    expect(dialog).toHaveTextContent('原因：VERSION_CONFLICT')
+    expect(dialog).toHaveTextContent('expected=0 actual=1')
     // 用户确认前不 refetch、不刷新、不覆盖 draft。
     expect(mocks.get).toHaveBeenCalledTimes(1)
     expect(reloadPage).not.toHaveBeenCalled()
@@ -200,9 +221,10 @@ describe('system settings server editor', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(yolo).toHaveAttribute('aria-checked', 'true')
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    const reopened = await screen.findByRole('alertdialog', { name: '设置已在其他位置修改' })
+    const reopened = await screen.findByRole('alertdialog')
+    expect(reopened).toHaveTextContent('原因：VERSION_CONFLICT')
 
-    await userEvent.click(within(reopened).getByRole('button', { name: '重新加载' }))
+    await userEvent.click(within(reopened).getByRole('button', { name: '刷新' }))
     expect(reloadPage).toHaveBeenCalledOnce()
   })
 
@@ -213,7 +235,7 @@ describe('system settings server editor', () => {
     const { queryClient } = renderSettings()
 
     // 以 v0 权威 hydration，然后编辑一个字段。
-    await userEvent.click(serverTab('AI 运行时'))
+    await userEvent.click(await serverTab('AI 运行时'))
     const delay = await screen.findByLabelText('基础延迟（毫秒）')
     await userEvent.clear(delay)
     await userEvent.type(delay, '3000')
@@ -233,8 +255,9 @@ describe('system settings server editor', () => {
     // 保存必须携带 draft 快照的 baseVersion=0，而不是权威的 v1，否则会静默覆盖并发修改。
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    const dialog = await screen.findByRole('alertdialog', { name: '设置已在其他位置修改' })
-    expect(dialog).toHaveTextContent('当前未保存的修改将会丢失')
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('持久状态已变化')
+    expect(dialog).toHaveTextContent('原因：VERSION_CONFLICT')
     expect(mocks.update).toHaveBeenCalledTimes(1)
     const sent = mocks.update.mock.calls[0]![0] as SystemSettingsUpdateDTO
     expect(sent.expectedVersion).toBe('0')
@@ -249,7 +272,7 @@ describe('system settings server editor', () => {
     mocks.get.mockImplementation(backend.get)
     renderSettings()
 
-    await userEvent.click(serverTab('环境'))
+    await userEvent.click(await serverTab('环境'))
     const field = await screen.findByLabelText('最大资源字节数')
     await userEvent.clear(field)
     await userEvent.type(field, '99999999')
@@ -266,7 +289,7 @@ describe('system settings server editor', () => {
     mocks.get.mockImplementation(backend.get)
     renderSettings()
 
-    await userEvent.click(serverTab('环境'))
+    await userEvent.click(await serverTab('环境'))
     const field = await screen.findByLabelText('最大资源字节数')
     await userEvent.clear(field)
 
@@ -282,7 +305,7 @@ describe('system settings server editor', () => {
     mocks.update.mockImplementation(backend.update)
     renderSettings()
 
-    await userEvent.click(serverTab('工具与权限'))
+    await userEvent.click(await serverTab('工具与权限'))
     await userEvent.click(screen.getByRole('button', { name: '添加工具' }))
     const toolInputs = screen.getAllByLabelText('工具')
     // 新分组输入一个与既有 write 在 trim 后相同的名称：保存必须拒绝而非静默覆盖前一个分组的规则。

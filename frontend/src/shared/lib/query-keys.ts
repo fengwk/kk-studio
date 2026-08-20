@@ -37,6 +37,7 @@ export const queryKeys = {
   },
   systemSettings: {
     all: ['system-settings', 'aggregate'] as const,
+    schema: ['system-settings', 'schema'] as const,
   },
   studio: {
     canvases: ['studio', 'canvases'] as const,

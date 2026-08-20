@@ -72,6 +72,8 @@ class StudioSystemSettingsErrorAdviceTest {
         Map.of(
             "resource",
             "system_settings",
+            "reason",
+            "VERSION_CONFLICT",
             "expectedVersion",
             "3",
             "actualVersion",

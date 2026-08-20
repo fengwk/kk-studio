@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.systemsettings;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
@@ -111,15 +112,14 @@ public record SystemSettings(
     }
   }
 
-  /** aiRuntime section：共享调用重试、自动压缩、subagent 预算。 */
+  /** aiRuntime section：共享调用重试、自动压缩 fallback、subagent 预算。 */
   public record AiRuntime(
       int retryMaxRetries,
       InvocationRetryBackoffStrategy retryBackoffStrategy,
       long retryBaseDelayMillis,
       long retryMaxDelayMillis,
-      boolean compactionEnabled,
-      int compactionReserveTokens,
-      int compactionMaxRecentTokens,
+      int compactionKeepRecentTokens,
+      ModelSelection compactionFallbackModel,
       int subagentMaxDepth,
       int subagentMaxConcurrency,
       Integer subagentMaxTotalConcurrency,
@@ -132,9 +132,8 @@ public record SystemSettings(
             InvocationRetryBackoffStrategy.EXPONENTIAL,
             2_000L,
             60_000L,
-            true,
-            16_384,
             20_000,
+            null,
             2,
             10,
             null,
@@ -154,9 +153,7 @@ public record SystemSettings(
             "aiRuntime.retryMaxDelayMillis must not be less than retryBaseDelayMillis");
       }
       SystemSettingsValidation.requirePositive(
-          compactionReserveTokens, "aiRuntime.compactionReserveTokens");
-      SystemSettingsValidation.requirePositive(
-          compactionMaxRecentTokens, "aiRuntime.compactionMaxRecentTokens");
+          compactionKeepRecentTokens, "aiRuntime.compactionKeepRecentTokens");
       SystemSettingsValidation.requireAtLeast(subagentMaxDepth, 1, "aiRuntime.subagentMaxDepth");
       SystemSettingsValidation.requireAtLeast(
           subagentMaxConcurrency, 1, "aiRuntime.subagentMaxConcurrency");

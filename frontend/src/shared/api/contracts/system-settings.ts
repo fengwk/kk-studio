@@ -1,4 +1,5 @@
 import type { DecimalLong, InstantTimestamp } from '@/shared/api/contracts/base'
+import type { HarnessModelSelectionDTO } from '@/shared/api/contracts/ai-runtime'
 
 /**
  * GET/PUT {@code /api/settings} 的严格 wire 契约（对齐 share/systemsettings 各 DTO）。
@@ -34,9 +35,8 @@ export interface SystemSettingsAiRuntimeDTO {
   retryBackoffStrategy: RetryBackoffStrategy
   retryBaseDelayMillis: DecimalLong
   retryMaxDelayMillis: DecimalLong
-  compactionEnabled: boolean
-  compactionReserveTokens: number
-  compactionMaxRecentTokens: number
+  compactionKeepRecentTokens: number
+  compactionFallbackModel: HarnessModelSelectionDTO | null
   subagentMaxDepth: number
   subagentMaxConcurrency: number
   /** null 表示不额外限制（无 cap）。 */
@@ -167,4 +167,52 @@ export interface SystemSettingsDTO extends SystemSettingsSectionsDTO {
 /** PUT {@code /api/settings} 请求体：完整 section 聚合 + 必填 expectedVersion CAS 令牌。 */
 export interface SystemSettingsUpdateDTO extends SystemSettingsSectionsDTO {
   expectedVersion: string
+}
+
+export type SystemSettingsSchemaFieldType =
+  | 'BOOLEAN'
+  | 'INTEGER'
+  | 'LONG'
+  | 'TEXT'
+  | 'ENUM'
+  | 'PERMISSION'
+  | 'MODEL_SELECTION'
+
+export type SystemSettingsSchemaApplyTiming = 'NEXT_INVOCATION' | 'NEXT_CHAT' | 'RESTART'
+
+export interface SystemSettingsSchemaOption {
+  value: string
+  labelKey: string
+}
+
+export interface SystemSettingsSchemaField {
+  path: string
+  labelKey: string
+  hintKey: string | null
+  type: SystemSettingsSchemaFieldType
+  nullable: boolean
+  min: number | null
+  max: number | null
+  options: SystemSettingsSchemaOption[] | null
+}
+
+export interface SystemSettingsSchemaGroup {
+  key: string
+  labelKey: string
+  descriptionKey: string
+  restartRequired: boolean
+  applyTiming: SystemSettingsSchemaApplyTiming | null
+  fields: SystemSettingsSchemaField[]
+}
+
+export interface SystemSettingsSchemaSection {
+  key: string
+  labelKey: string
+  descriptionKey: string
+  restartRequired: boolean
+  groups: SystemSettingsSchemaGroup[]
+}
+
+export interface SystemSettingsSchemaDTO {
+  sections: SystemSettingsSchemaSection[]
 }

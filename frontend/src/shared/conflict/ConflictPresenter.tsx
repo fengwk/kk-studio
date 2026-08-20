@@ -1,9 +1,9 @@
 import { translate } from '@/shared/i18n'
-import type { ConflictPresentation } from '@/features/ai/runtime/conflict-presenter'
+import type { ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 
 /**
- * Durable acceptance/control conflicts share this presenter. Callers may keep
- * their operation-specific retry callback, but the reason is never discarded.
+ * Durable acceptance/control/settings conflicts share this presenter. Callers retain their own
+ * refresh and optional exact-retry callbacks, while reason and detail are never discarded.
  */
 export function ConflictPresenter({
   conflict,
@@ -21,19 +21,19 @@ export function ConflictPresenter({
   }
   return (
     <div className="thread-conflict-modal" role="alertdialog" aria-modal="true">
-      <strong>{translate('ai.runtime.conflict.title')}</strong>
-      <p>{translate('ai.runtime.conflict.reason', { reason: conflict.reason })}</p>
+      <strong>{translate('shared.conflict.title')}</strong>
+      <p>{translate('shared.conflict.reason', { reason: conflict.reason })}</p>
       <p>{conflict.detail}</p>
       <div className="thread-conflict-actions">
         <button type="button" className="ghost-btn" onClick={onClose}>
           {translate('shared.cancel')}
         </button>
         <button type="button" className="ghost-btn" onClick={onRefresh}>
-          {translate('ai.runtime.conflict.refresh')}
+          {translate('shared.conflict.refresh')}
         </button>
         {onRetry ? (
           <button type="button" className="btn-primary" onClick={onRetry}>
-            {translate('ai.runtime.conflict.retry')}
+            {translate('shared.conflict.retry')}
           </button>
         ) : null}
       </div>

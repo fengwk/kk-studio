@@ -25,7 +25,7 @@ import { translate } from '@/shared/i18n'
 import {
   presentConflict,
   type ConflictPresentation,
-} from '@/features/ai/runtime/conflict-presenter'
+} from '@/shared/conflict/conflict-presenter'
 
 /**
  * 面板本地 branch draft：从持久化的 Thread snapshot 初始化，面板本地编辑，
