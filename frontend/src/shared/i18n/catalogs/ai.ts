@@ -1250,9 +1250,13 @@ export const aiCatalog = {
     'en-US': 'Return to a blank pane; sending creates a new Session / Thread',
     'zh-CN': '回到空面板；发送后创建新的 Session / Thread',
   },
-  'ai.runtime.command.events': {
-    'en-US': 'Toggle the durable Entry log and live model / tool invocations',
-    'zh-CN': '切换持久 Entry 日志与活跃 model / tool 调用',
+  'ai.runtime.command.debug': {
+    'en-US': 'Toggle the durable Entry debug view and live model / tool invocations',
+    'zh-CN': '切换持久 Entry 调试视图与活跃 model / tool 调用',
+  },
+  'ai.runtime.command.compact': {
+    'en-US': 'Request manual context compaction for this Thread',
+    'zh-CN': '请求压缩当前 Thread 的上下文',
   },
   'ai.runtime.command.shortcuts': {
     'en-US': 'Show the keyboard shortcut catalog',
@@ -1298,9 +1302,13 @@ export const aiCatalog = {
     'en-US': 'new',
     'zh-CN': 'new',
   },
-  'ai.runtime.command.eventsLabel': {
-    'en-US': 'events',
-    'zh-CN': 'events',
+  'ai.runtime.command.debugLabel': {
+    'en-US': 'debug',
+    'zh-CN': 'debug',
+  },
+  'ai.runtime.command.compactLabel': {
+    'en-US': 'compact',
+    'zh-CN': 'compact',
   },
   'ai.runtime.command.shortcutsLabel': {
     'en-US': 'shortcuts',
@@ -1869,6 +1877,34 @@ export const aiCatalog = {
   'ai.runtime.action.stopFailed': {
     'en-US': 'Stop failed',
     'zh-CN': '停止失败',
+  },
+  'ai.runtime.action.compactFailed': {
+    'en-US': 'Compaction failed',
+    'zh-CN': '压缩失败',
+  },
+  'ai.runtime.action.compactUnavailable': {
+    'en-US': 'Manual compaction is currently unavailable',
+    'zh-CN': '当前无法手动压缩',
+  },
+  'ai.runtime.action.acceptancePending': {
+    'en-US': 'A previous acceptance is still awaiting a definite result',
+    'zh-CN': '上一条接受请求仍在等待确定结果',
+  },
+  'ai.runtime.conflict.title': {
+    'en-US': 'The durable state changed',
+    'zh-CN': '持久状态已变化',
+  },
+  'ai.runtime.conflict.reason': {
+    'en-US': 'Reason: {{reason}}',
+    'zh-CN': '原因：{{reason}}',
+  },
+  'ai.runtime.conflict.refresh': {
+    'en-US': 'Refresh',
+    'zh-CN': '刷新',
+  },
+  'ai.runtime.conflict.retry': {
+    'en-US': 'Retry',
+    'zh-CN': '重试',
   },
   'ai.environment.loading': {
     'en-US': 'Loading Environments',

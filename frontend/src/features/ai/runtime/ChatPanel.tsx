@@ -88,7 +88,7 @@ export function ChatPanel({
 }: {
   labels: ChatPanelLabels
   transcript: ChatPanelTranscriptInput
-  /** 互斥主视图：传入 events 时替换 transcript（Event view）。 */
+  /** 互斥主视图：传入 debug 时替换 transcript（Debug view）。 */
   mainView?: ThreadPanelMainView
   composer: ChatPanelComposerInput
   activity: ChatPanelActivityInput

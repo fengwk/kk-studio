@@ -1,0 +1,18 @@
+export {
+  clearPaneTarget,
+  clearPendingAcceptance,
+  isBoundTarget,
+  isEntryTarget,
+  isNewSessionTarget,
+  isPaneTarget,
+  loadPaneTarget,
+  loadPendingAcceptance,
+  normalizePaneTarget,
+  samePaneTarget,
+  savePaneTarget,
+  savePendingAcceptance,
+  targetIdentity,
+  type PaneTarget,
+  type PaneTargetKind,
+  type PendingAcceptance,
+} from '@/features/ai/runtime/agent-pane/pane-target'

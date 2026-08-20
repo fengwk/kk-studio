@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
-import { harnessService } from '@/shared/api/harness-service'
+import { agentPaneService } from '@/shared/api/agent-pane-service'
 import { toAgentModelViews } from '@/features/ai/catalog'
 import { queryKeys } from '@/shared/lib/query-keys'
 
@@ -16,7 +16,7 @@ export function useAgentThreadQueries(threadId: string) {
   })
   const snapshotQuery = useQuery({
     queryKey: queryKeys.threads.snapshot(threadId),
-    queryFn: () => harnessService.getThreadSnapshot(threadId),
+    queryFn: () => agentPaneService.getThreadSnapshot(threadId),
     enabled: Boolean(threadId),
   })
   const snapshot = snapshotQuery.data
@@ -51,5 +51,9 @@ export function useAgentThreadQueries(threadId: string) {
     modelInvocation,
     toolInvocations,
     modelAttemptFailures,
+    manualCompaction: snapshot?.manualCompaction ?? {
+      available: false,
+      disabledReason: 'Thread snapshot is not loaded',
+    },
   }
 }

@@ -212,7 +212,7 @@ describe('SettingsPage general tab + notifications', () => {
     expect(screen.getByRole('heading', { name: '键盘快捷键' })).toBeInTheDocument()
     expect(screen.getByText('本版本支持的键盘快捷键只读目录。')).toBeInTheDocument()
     // scope 分组与条目来自唯一事实源。
-    for (const title of ['应用', '对话', '事件', '画布']) {
+    for (const title of ['应用', '对话', '调试', '画布']) {
       expect(screen.getByText(title)).toBeInTheDocument()
     }
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()

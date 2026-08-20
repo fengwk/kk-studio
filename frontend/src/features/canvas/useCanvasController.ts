@@ -32,8 +32,6 @@ import {
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
 import type {
   CanvasCommandDTO,
-  CanvasDocumentDTO,
-  CanvasSnapshotDTO,
   CanvasTransformDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
@@ -136,18 +134,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     onVersion: syncCanvasChanges,
     onResync: resyncCanvas,
   })
-
-  /** 原子首次发送成功后，把携带 threadId 的 document 写入快照。 */
-  const bindThreadDocument = useCallback((document: CanvasDocumentDTO) => {
-    const canvasId = state.canvasId
-    if (!canvasId) {
-      return
-    }
-    queryClient.setQueryData<CanvasSnapshotDTO>(
-      queryKeys.studio.canvas(canvasId),
-      (current) => (current ? { ...current, document } : current),
-    )
-  }, [queryClient, state.canvasId])
 
   useEffect(() => {
     if (!state.toast) {
@@ -670,7 +656,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     deleteNode,
     uploadFiles,
     handleAddAction,
-    bindThreadDocument,
     toggleAddMenu,
     closeAddMenu,
     setAddMenuIndex,

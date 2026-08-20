@@ -1,0 +1,908 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  ChatPanel,
+  ThreadPanel,
+  ThreadShortcutsPanel,
+  ThreadStatusFooter,
+  ThreadEventDetail,
+  useBoundBranchPanel,
+  useBoundThreadPanelLabels,
+  useBoundThreadPanelViews,
+  buildBoundThreadTranscript,
+  type ChatPanelActivityInput,
+  type ChatPanelComposerInput,
+  type ThreadCommand,
+} from '@/features/ai/runtime'
+import { SelectionPanel, AgentSelectionPanel } from '@/features/ai/chat/SelectionPanel'
+import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
+import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
+import {
+  materializeAgentBranchDraft,
+  materializeBlankBranchDraft,
+  type BranchDraft,
+} from '@/features/ai/chat/branch-draft'
+import {
+  hasMessageContent,
+  slashQueryOf,
+  trimMessageParts,
+  type ComposerPart,
+} from '@/features/ai/composer/composer-parts'
+import {
+  clearStoredComposerDraft,
+  restoreComposerDraft,
+  storeComposerDraft,
+} from '@/features/ai/composer/composer-draft'
+import {
+  agentPaneService,
+} from '@/shared/api/agent-pane-service'
+import { ConflictPresenter } from '@/features/ai/runtime/ConflictPresenter'
+import {
+  presentConflict,
+  type ConflictPresentation,
+} from '@/features/ai/runtime/conflict-presenter'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type {
+  AgentRuntimeOwnerDTO,
+  HarnessSessionEntryDTO,
+  RuntimeSessionSummaryDTO,
+  RuntimeThreadSummaryDTO,
+} from '@/shared/api/contracts/ai-runtime'
+import type { EnvironmentBindingDTO, LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import { useEnvironmentWorkspaceMetadata } from '@/features/ai/environment/useEnvironmentWorkspaceMetadata'
+import {
+  buildAcceptanceRequest,
+  isDefiniteAcceptanceFailure,
+  prependFrozenComposerParts,
+  preserveCurrentBranchDraft,
+  type FrozenCommandBatchRequest,
+} from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
+import {
+  clearPendingAcceptance,
+  isBoundTarget,
+  isEntryTarget,
+  loadPaneTarget,
+  loadPendingAcceptance,
+  samePaneTarget,
+  savePaneTarget,
+  savePendingAcceptance,
+  type PaneTarget,
+  type PendingAcceptance,
+} from '@/features/ai/runtime/agent-pane'
+import { threadCommandsForTarget } from '@/features/ai/runtime/thread-panel/thread-commands'
+import { useApplicationEvents } from '@/shared/app-events'
+import { queryKeys } from '@/shared/lib/query-keys'
+import { useI18n } from '@/shared/i18n'
+import { formatBackendDate } from '@/features/ai/chat/chat-utils'
+import { parsePayload } from '@/features/ai/runtime/payload-json'
+
+type PaneInteraction =
+  | 'agent'
+  | 'environment'
+  | 'shortcuts'
+  | 'tree'
+  | 'thread-sessions'
+  | 'thread-threads'
+  | null
+
+export interface AgentPaneDefaults {
+  agentName?: string
+  environment?: EnvironmentBindingDTO | null
+  yoloEnabled?: boolean
+}
+
+export function AgentPane({
+  owner,
+  paneId,
+  agents,
+  environments = [],
+  defaults = {},
+  initialTarget,
+  focused = false,
+  onFocus,
+  onTargetChange,
+}: {
+  owner: AgentRuntimeOwnerDTO
+  paneId: string
+  agents: AgentDefinitionDTO[]
+  environments?: LiveEnvironmentDTO[]
+  defaults?: AgentPaneDefaults
+  initialTarget?: PaneTarget
+  focused?: boolean
+  onFocus?: () => void
+  onTargetChange?: (target: PaneTarget) => void
+}) {
+  const { t } = useI18n()
+  const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
+  const composerScope = `agent-pane:${owner.type}:${owner.id}:${paneId}`
+  const [target, setTargetState] = useState<PaneTarget>(
+    () => initialTarget ?? loadPaneTarget(owner, paneId),
+  )
+  const [localDraft, setLocalDraft] = useState<BranchDraft | null>(null)
+  const [parts, setPartsState] = useState<ComposerPart[]>(
+    () => restoreComposerDraft(composerScope, []),
+  )
+  const [pendingAcceptance, setPendingAcceptance] = useState<PendingAcceptance | null>(
+    () => {
+      const pending = loadPendingAcceptance(owner, paneId)
+      return pending == null ? null : { ...pending, unknownOutcome: true }
+    },
+  )
+  const [interaction, setInteraction] = useState<PaneInteraction>(null)
+  const [threadNavigationSessionId, setThreadNavigationSessionId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
+  const targetRef = useRef(target)
+  const lastNotifiedTargetRef = useRef<PaneTarget | null>(null)
+  const partsRef = useRef(parts)
+  const localDraftRef = useRef<BranchDraft | null>(localDraft)
+  const initializedEntryDraftRef = useRef<string | null>(null)
+  const pendingAcceptanceRef = useRef<PendingAcceptance | null>(pendingAcceptance)
+  const generationRef = useRef(0)
+  const backgroundSubscriptionsRef = useRef(new Map<string, () => void>())
+  const previousBoundThreadRef = useRef<string | null>(null)
+
+  const boundThreadId = isBoundTarget(target) ? target.threadId : ''
+  const branchPanel = useBoundBranchPanel({
+    owner,
+    threadId: boundThreadId,
+  })
+  const controller = branchPanel.controller
+  const activeDraft = isBoundTarget(target) ? branchPanel.draft ?? null : localDraft
+  const models = controller.models
+
+  useEffect(() => {
+    targetRef.current = target
+    savePaneTarget(owner, paneId, target)
+    if (
+      onTargetChange != null
+      && (lastNotifiedTargetRef.current == null
+        || !samePaneTarget(lastNotifiedTargetRef.current, target))
+    ) {
+      lastNotifiedTargetRef.current = target
+      onTargetChange(target)
+    }
+  }, [onTargetChange, owner, paneId, target])
+
+  useEffect(() => {
+    partsRef.current = parts
+  }, [parts])
+
+  useEffect(() => {
+    localDraftRef.current = localDraft
+  }, [localDraft])
+
+  useEffect(() => {
+    pendingAcceptanceRef.current = pendingAcceptance
+  }, [pendingAcceptance])
+
+  useEffect(() => {
+    if (isBoundTarget(target)) {
+      return
+    }
+    if (localDraft != null || models.length === 0) {
+      return
+    }
+    const preferred = defaults.agentName
+      ? agents.find((agent) => agent.name === defaults.agentName)
+      : agents.find((agent) =>
+        materializeBlankBranchDraft(agent, defaults.yoloEnabled ?? false, models, defaults.environment)
+        != null,
+      )
+    const materialized = preferred == null
+      ? null
+      : materializeBlankBranchDraft(
+        preferred,
+        defaults.yoloEnabled ?? false,
+        models,
+        defaults.environment,
+      )
+    if (materialized != null) {
+      setLocalDraft(materialized)
+    }
+  }, [agents, defaults.agentName, defaults.environment, defaults.yoloEnabled, localDraft, models, target])
+
+  /**
+   * Keep a light projection subscription for previously active Threads. It only
+   * updates their query cache; it never changes the active PaneTarget.
+   */
+  useEffect(() => {
+    const previous = previousBoundThreadRef.current
+    if (previous == null || previous === boundThreadId) {
+      previousBoundThreadRef.current = boundThreadId || null
+      return
+    }
+    if (!backgroundSubscriptionsRef.current.has(previous)) {
+      const unsubscribe = applicationEvents.subscribe(
+        { kind: 'thread', id: previous },
+        {
+          onSubscribed: () => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(previous) })
+          },
+          onEvent: (name) => {
+            if (name === 'revision') {
+              void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(previous) })
+            }
+          },
+          onResync: () => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(previous) })
+          },
+          onError: () => {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(previous) })
+          },
+        },
+      )
+      backgroundSubscriptionsRef.current.set(previous, unsubscribe)
+    }
+    previousBoundThreadRef.current = boundThreadId || null
+  }, [applicationEvents, boundThreadId, queryClient])
+
+  useEffect(() => () => {
+    for (const unsubscribe of backgroundSubscriptionsRef.current.values()) {
+      unsubscribe()
+    }
+  }, [])
+
+  const currentSessionId = isBoundTarget(target)
+    ? controller.sessionId
+    : isEntryTarget(target)
+      ? target.sessionId
+      : null
+  const sessionsQuery = useQuery({
+    queryKey: ['agent-pane', 'sessions', owner.type, owner.id],
+    queryFn: () => owner.type === 'CHAT'
+      ? agentPaneService.listChatSessions(owner.id)
+      : agentPaneService.listCanvasSessions(owner.id),
+    enabled: interaction === 'thread-sessions',
+  })
+  const threadsQuery = useQuery({
+    queryKey: ['agent-pane', 'threads', threadNavigationSessionId],
+    queryFn: () => agentPaneService.listSessionThreads(threadNavigationSessionId!),
+    enabled: interaction === 'thread-threads' && threadNavigationSessionId != null,
+  })
+  const treeEntriesQuery = useQuery({
+    queryKey: ['agent-pane', 'entries', threadNavigationSessionId ?? currentSessionId],
+    queryFn: () => agentPaneService.listSessionEntries(threadNavigationSessionId ?? currentSessionId!),
+    enabled:
+      (interaction === 'tree' || isEntryTarget(target))
+      && (threadNavigationSessionId ?? currentSessionId) != null,
+  })
+
+  const entryBaseDraft = useMemo(() => {
+    if (!isEntryTarget(target)) {
+      return activeDraft
+    }
+    if (treeEntriesQuery.data == null) {
+      return activeDraft
+    }
+    return branchDraftFromEntryPath(
+      treeEntriesQuery.data,
+      target.startEntryId,
+      activeDraft,
+    )
+  }, [activeDraft, target, treeEntriesQuery.data])
+
+  useEffect(() => {
+    if (!isEntryTarget(target) || treeEntriesQuery.data == null || entryBaseDraft == null) {
+      return
+    }
+    const identity = `${target.sessionId}:${target.startEntryId}`
+    if (initializedEntryDraftRef.current === identity) {
+      return
+    }
+    initializedEntryDraftRef.current = identity
+    setLocalDraft(cloneDraft(entryBaseDraft))
+  }, [entryBaseDraft, target, treeEntriesQuery.data])
+
+  function setParts(next: ComposerPart[]) {
+    partsRef.current = next
+    storeComposerDraft(composerScope, next)
+    setPartsState(next)
+  }
+
+  function changeTarget(next: PaneTarget, draft: BranchDraft | null = activeDraft): boolean {
+    if (pendingAcceptance != null) {
+      setActionError(t('ai.runtime.action.acceptancePending'))
+      return false
+    }
+    generationRef.current += 1
+    targetRef.current = next
+    setTargetState(next)
+    setLocalDraft(draft == null ? null : cloneDraft(draft))
+    setInteraction(null)
+    setActionError(null)
+    return true
+  }
+
+  function abandonPendingAcceptance(): void {
+    generationRef.current += 1
+    pendingAcceptanceRef.current = null
+    setPendingAcceptance(null)
+    clearPendingAcceptance(owner, paneId)
+    setActionError(null)
+  }
+
+  function makePending(frozen: FrozenCommandBatchRequest): PendingAcceptance {
+    return {
+      owner: { ...owner },
+      target: frozen.target,
+      request: frozen.request,
+      branchDraft: frozen.branchDraft,
+      composerParts: frozen.composerParts,
+      generation: generationRef.current,
+      unknownOutcome: false,
+    }
+  }
+
+  function startAcceptance(frozen: FrozenCommandBatchRequest): void {
+    const pending = makePending(frozen)
+    pendingAcceptanceRef.current = pending
+    setPendingAcceptance(pending)
+    savePendingAcceptance(owner, paneId, pending)
+    setParts([])
+    void submitFrozenAcceptance(pending)
+  }
+
+  async function submitFrozenAcceptance(pending: PendingAcceptance): Promise<void> {
+    try {
+      const response = await agentPaneService.acceptCommandBatch(pending.request)
+      const stillActive =
+        pendingAcceptanceRef.current?.generation === pending.generation
+        && samePaneTarget(targetRef.current, pending.target)
+      if (!stillActive) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(response.thread.threadId) })
+        return
+      }
+      pendingAcceptanceRef.current = null
+      setPendingAcceptance(null)
+      clearPendingAcceptance(owner, paneId)
+      generationRef.current += 1
+      const bound: PaneTarget = { kind: 'BOUND_THREAD', threadId: response.thread.threadId }
+      targetRef.current = bound
+      setTargetState(bound)
+      if (partsRef.current.length === 0) {
+        clearStoredComposerDraft(composerScope)
+        setPartsState([])
+      } else {
+        storeComposerDraft(composerScope, partsRef.current)
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(response.thread.threadId) })
+      await queryClient.invalidateQueries({
+        queryKey: ['agent-pane', 'sessions', owner.type, owner.id],
+      })
+    } catch (error) {
+      const currentPending = pendingAcceptanceRef.current
+      const stillActive =
+        currentPending?.generation === pending.generation
+        && samePaneTarget(targetRef.current, pending.target)
+      if (!stillActive) {
+        return
+      }
+      if (!isDefiniteAcceptanceFailure(error)) {
+        const unknown = { ...pending, unknownOutcome: true }
+        setPendingAcceptance(unknown)
+        savePendingAcceptance(owner, paneId, unknown)
+        setActionError(errorMessage(error, t('ai.runtime.action.requestFailed')))
+        return
+      }
+      pendingAcceptanceRef.current = null
+      setPendingAcceptance(null)
+      clearPendingAcceptance(owner, paneId)
+      setParts(prependFrozenComposerParts(pending.composerParts, partsRef.current))
+      setLocalDraft(preserveCurrentBranchDraft(pending.branchDraft, localDraftRef.current))
+      const presented = presentConflict(error)
+      if (presented != null) {
+        setConflict(presented)
+      } else {
+        setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
+      }
+      if (presented != null) {
+        await refreshPaneProjection()
+      }
+    }
+  }
+
+  function retryAcceptance(): void {
+    if (pendingAcceptance == null) {
+      return
+    }
+    const retry = { ...pendingAcceptance, unknownOutcome: false }
+    pendingAcceptanceRef.current = retry
+    setPendingAcceptance(retry)
+    savePendingAcceptance(owner, paneId, retry)
+    void submitFrozenAcceptance(retry)
+  }
+
+  function handleSubmit(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]) {
+    if (isBoundTarget(target)) {
+      void controller.submitMessage(payloadParts, localDraftParts)
+      return
+    }
+    if (pendingAcceptance != null) {
+      setActionError(t('ai.runtime.action.acceptancePending'))
+      return
+    }
+    const payload = trimMessageParts(payloadParts ?? parts)
+    if (
+      !hasMessageContent(payload)
+      || slashQueryOf(payload) != null
+      || activeDraft == null
+      || (isEntryTarget(target) && treeEntriesQuery.data == null)
+      || entryBaseDraft == null
+    ) {
+      return
+    }
+    try {
+      const frozen = buildAcceptanceRequest({
+        owner,
+        target,
+        draft: activeDraft,
+        base: entryBaseDraft,
+        parts: payload,
+      })
+      onFocus?.()
+      startAcceptance(frozen)
+    } catch (error) {
+      setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
+    }
+  }
+
+  function handleCommand(command: ThreadCommand): void {
+    onFocus?.()
+    if (command.disabled) {
+      if (command.disabledReason) {
+        setActionError(command.disabledReason)
+      }
+      return
+    }
+    switch (command.id) {
+      case 'thread':
+        if (pendingAcceptance != null) {
+          setActionError(t('ai.runtime.action.acceptancePending'))
+          return
+        }
+        setInteraction('thread-sessions')
+        return
+      case 'tree':
+        if (pendingAcceptance != null) {
+          setActionError(t('ai.runtime.action.acceptancePending'))
+          return
+        }
+        if (currentSessionId == null) {
+          setActionError(t('ai.runtime.action.threadNotLoaded'))
+          return
+        }
+        setInteraction('tree')
+        return
+      case 'new':
+        changeTarget({ kind: 'NEW_SESSION_DRAFT' }, activeDraft)
+        return
+      case 'agent':
+        setInteraction('agent')
+        return
+      case 'environment':
+        setInteraction('environment')
+        return
+      case 'yolo':
+        if (isBoundTarget(target)) {
+          branchPanel.setYoloEnabled(!(branchPanel.draft?.yoloEnabled ?? false))
+        } else {
+          setLocalDraft((current) => current ? { ...current, yoloEnabled: !current.yoloEnabled } : current)
+        }
+        return
+      case 'debug':
+        if (isBoundTarget(target)) {
+          boundViews.switchMode(boundViews.mode === 'debug' ? 'conversation' : 'debug')
+        }
+        return
+      case 'shortcuts':
+        setInteraction('shortcuts')
+        return
+      case 'compact':
+      case 'stop':
+        controller.runCommand(command)
+        return
+      case 'models':
+      case 'upload':
+        return
+    }
+  }
+
+  function selectAgent(agentName: string): void {
+    const agent = agents.find((item) => item.name === agentName)
+    if (agent == null) {
+      setActionError(t('ai.runtime.action.agentUnresolvable', { selectedAgent: agentName }))
+      return
+    }
+    if (isBoundTarget(target)) {
+      if (!branchPanel.selectAgent(agentName)) {
+        setActionError(t('ai.runtime.action.agentUnresolvable', { selectedAgent: agentName }))
+        return
+      }
+    } else {
+      setLocalDraft((current) => materializeAgentBranchDraft(
+        agent,
+        models,
+        current,
+        defaults.yoloEnabled ?? false,
+        defaults.environment ?? null,
+      ))
+    }
+    setInteraction(null)
+    setActionError(null)
+  }
+
+  function selectEnvironment(environment: EnvironmentBindingDTO | null): void {
+    if (isBoundTarget(target)) {
+      branchPanel.selectEnvironment(environment)
+    } else {
+      setLocalDraft((current) => current ? { ...current, environment } : current)
+    }
+    setInteraction(null)
+  }
+
+  function selectEntry(entry: HarnessSessionEntryDTO): void {
+    const draft = branchDraftFromEntry(entry, activeDraft)
+    setThreadNavigationSessionId(null)
+    changeTarget({
+      kind: 'ENTRY_DRAFT',
+      sessionId: entry.sessionId,
+      startEntryId: entry.entryId,
+    }, draft)
+  }
+
+  function selectSession(session: RuntimeSessionSummaryDTO): void {
+    setThreadNavigationSessionId(session.sessionId)
+    if (session.threadCount === 0) {
+      setInteraction('tree')
+      return
+    }
+    setInteraction('thread-threads')
+  }
+
+  function selectThread(thread: RuntimeThreadSummaryDTO): void {
+    changeTarget({ kind: 'BOUND_THREAD', threadId: thread.threadId }, activeDraft)
+  }
+
+  async function refreshPaneProjection(): Promise<void> {
+    if (isBoundTarget(target)) {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(target.threadId) })
+    }
+    await queryClient.invalidateQueries({
+      queryKey: ['agent-pane', 'sessions', owner.type, owner.id],
+    })
+  }
+
+  const boundViews = useBoundThreadPanelViews(boundThreadId, controller)
+  const boundLabels = useBoundThreadPanelLabels(environments, controller)
+  const commands = threadCommandsForTarget(
+    target,
+    isBoundTarget(target) ? controller.manualCompaction : null,
+  )
+  const pending = pendingAcceptance != null || controller.pending
+  const composerDraft = isBoundTarget(target) ? controller.draft : parts
+  const composer: ChatPanelComposerInput = {
+    parts: composerDraft,
+    pending,
+    disabled:
+      pending
+      || (isBoundTarget(target)
+        ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
+        : activeDraft == null || (isEntryTarget(target) && treeEntriesQuery.data == null)),
+    onPartsChange: isBoundTarget(target) ? controller.setDraft : setParts,
+    onSubmit: handleSubmit,
+    onCommand: handleCommand,
+    commands,
+    focusOnEscape: focused,
+    settings: activeDraft == null ? undefined : {
+      model: activeDraft.model,
+      models,
+      yoloEnabled: activeDraft.yoloEnabled,
+      onModelChange: (model) => {
+        if (isBoundTarget(target)) {
+          branchPanel.selectModel(model)
+        } else {
+          setLocalDraft((current) => current ? { ...current, model } : current)
+        }
+      },
+      onYoloChange: (enabled) => {
+        if (isBoundTarget(target)) {
+          branchPanel.setYoloEnabled(enabled)
+        } else {
+          setLocalDraft((current) => current ? { ...current, yoloEnabled: enabled } : current)
+        }
+      },
+    },
+  }
+
+  const interactionPanel = renderInteractionPanel()
+  const environment = activeDraft?.environment ?? null
+  const environmentReadyByName = useMemo(
+    () => new Map(environments.map((item) => [item.name, item.ready])),
+    [environments],
+  )
+  const environmentReady = environment == null
+    ? undefined
+    : environmentReadyByName.get(environment.name) ?? false
+  const { gitBranch } = useEnvironmentWorkspaceMetadata(environment, environmentReady)
+  const error = actionError
+    ?? (isBoundTarget(target) ? branchPanel.yoloError ?? controller.actionError : null)
+    ?? (isEntryTarget(target) && treeEntriesQuery.error
+      ? errorMessage(treeEntriesQuery.error, t('ai.chat.history.loadFailed'))
+      : null)
+
+  if (isBoundTarget(target)) {
+    const transcript = buildBoundThreadTranscript({
+      controller,
+      threadId: target.threadId,
+      initialConversationScrollTop: boundViews.initialConversationScrollTop,
+    })
+    const activity: ChatPanelActivityInput = {
+      working: controller.working,
+      widgets: boundViews.selectedRecord
+        ? <ThreadEventDetail record={boundViews.selectedRecord} onClose={() => boundViews.selectEvent(null)} />
+        : null,
+      onDecideTaskApproval: (threadId, invocationId, decision) => {
+        void controller.decideApproval(invocationId, decision, threadId)
+      },
+      actionError: error,
+      onDismissActionError: () => {
+        setActionError(null)
+        branchPanel.dismissYoloError()
+        controller.dismissActionError()
+      },
+    }
+    return (
+      <section className={`chat-pane ${focused ? 'focused' : ''}`} data-pane-id={paneId} onMouseDown={onFocus}>
+        <ChatPanel
+          labels={boundLabels}
+          transcript={transcript}
+          mainView={boundViews.mainView}
+          composer={{ ...composer, pending: controller.pending, disabled: composer.disabled }}
+          activity={activity}
+        />
+        {interactionPanel}
+        <ConflictPresenter
+          conflict={conflict}
+          onRefresh={() => void refreshPaneProjection()}
+          onRetry={pendingAcceptance?.unknownOutcome ? retryAcceptance : undefined}
+          onClose={() => setConflict(null)}
+        />
+      </section>
+    )
+  }
+
+  return (
+    <section className={`chat-pane ${focused ? 'focused' : ''}`} data-pane-id={paneId} onMouseDown={onFocus}>
+      <ThreadPanel
+        transcript={{
+          messages: [],
+          queuedMessages: [],
+          bodyRef: controller.bodyRef,
+          loading: false,
+          error: null,
+        }}
+        composer={{ ...composer, interactionPanel }}
+        activity={{
+          working: false,
+          actionError: error,
+          onDismissActionError: () => setActionError(null),
+        }}
+        slots={{
+          footer: (
+            <ThreadStatusFooter
+              environment={environment}
+              environmentReady={environmentReady}
+              gitBranch={gitBranch}
+            />
+          ),
+        }}
+      />
+      {pendingAcceptance?.unknownOutcome ? (
+        <div className="thread-acceptance-retry">
+          <button type="button" className="btn-primary" onClick={retryAcceptance}>
+            {t('ai.runtime.conflict.retry')}
+          </button>
+          <button type="button" className="ghost-btn" onClick={abandonPendingAcceptance}>
+            {t('shared.cancel')}
+          </button>
+        </div>
+      ) : null}
+      <ConflictPresenter
+        conflict={conflict}
+        onRefresh={() => void refreshPaneProjection()}
+        onRetry={pendingAcceptance?.unknownOutcome ? retryAcceptance : undefined}
+        onClose={() => setConflict(null)}
+      />
+    </section>
+  )
+
+  function renderInteractionPanel() {
+    if (interaction === 'agent') {
+      return (
+        <AgentSelectionPanel
+          agents={agents.map((agent) => ({ name: agent.name, description: agent.description }))}
+          selectedAgentName={activeDraft?.agentName}
+          selectionPending={pending}
+          onClose={() => setInteraction(null)}
+          onSelect={selectAgent}
+        />
+      )
+    }
+    if (interaction === 'environment') {
+      return (
+        <EnvironmentWorkspacePanel
+          environments={environments}
+          current={environment}
+          pending={pending}
+          onClose={() => setInteraction(null)}
+          onSelect={selectEnvironment}
+        />
+      )
+    }
+    if (interaction === 'shortcuts') {
+      return <ThreadShortcutsPanel onClose={() => setInteraction(null)} />
+    }
+    if (interaction === 'tree') {
+      return (
+        <HistoryBranchPanel
+          entries={treeEntriesQuery.data ?? []}
+          currentHeadEntryId={isBoundTarget(target) ? controller.thread?.headEntryId : target.kind === 'ENTRY_DRAFT' ? target.startEntryId : null}
+          loading={treeEntriesQuery.isLoading}
+          queryError={treeEntriesQuery.error}
+          onClose={() => setInteraction(null)}
+          onSelectEntry={(entry) => {
+            selectEntry(entry)
+            setInteraction(null)
+          }}
+        />
+      )
+    }
+    if (interaction === 'thread-sessions') {
+      return (
+        <SelectionPanel
+          title={t('ai.runtime.session.select')}
+          items={(sessionsQuery.data ?? []).map(sessionSelectionItem)}
+          loading={sessionsQuery.isLoading}
+          emptyText={t('ai.runtime.session.empty')}
+          onClose={() => setInteraction(null)}
+          onSelect={(id) => {
+            const session = sessionsQuery.data?.find((item) => item.sessionId === id)
+            if (session) {
+              selectSession(session)
+            }
+          }}
+        />
+      )
+    }
+    if (interaction === 'thread-threads') {
+      return (
+        <SelectionPanel
+          title={t('ai.runtime.thread.select')}
+          items={(threadsQuery.data ?? []).map(threadSelectionItem)}
+          loading={threadsQuery.isLoading}
+          emptyText={t('ai.runtime.thread.noThreads')}
+          onClose={() => {
+            setInteraction('thread-sessions')
+            setThreadNavigationSessionId(null)
+          }}
+          onSelect={(id) => {
+            const thread = threadsQuery.data?.find((item) => item.threadId === id)
+            if (thread) {
+              selectThread(thread)
+            }
+          }}
+        />
+      )
+    }
+    return null
+  }
+}
+
+function cloneDraft(draft: BranchDraft): BranchDraft {
+  return {
+    ...draft,
+    environment: draft.environment ? { ...draft.environment } : null,
+    model: { ...draft.model },
+    activeTools: [...draft.activeTools],
+  }
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+  return fallback
+}
+
+function branchDraftFromEntry(
+  entry: HarnessSessionEntryDTO,
+  fallback: BranchDraft | null,
+): BranchDraft | null {
+  if (fallback == null) {
+    return null
+  }
+  const payload = parsePayload(entry.payloadJson)
+  const settings = isRecord(payload.settings) ? payload.settings : null
+  if (settings == null) {
+    return cloneDraft(fallback)
+  }
+  const model = isRecord(settings.model) ? settings.model : null
+  return {
+    ...cloneDraft(fallback),
+    environment: decodeEnvironment(settings.environment, fallback.environment),
+    agentName: typeof settings.agentName === 'string' ? settings.agentName : fallback.agentName,
+    model: {
+      providerName: typeof model?.providerName === 'string' ? model.providerName : fallback.model.providerName,
+      modelName: typeof model?.modelName === 'string' ? model.modelName : fallback.model.modelName,
+      variant: typeof model?.variant === 'string' ? model.variant : fallback.model.variant,
+    },
+    activeTools: Array.isArray(settings.activeTools)
+      ? settings.activeTools.filter((item): item is string => typeof item === 'string')
+      : fallback.activeTools,
+  }
+}
+
+function branchDraftFromEntryPath(
+  entries: HarnessSessionEntryDTO[],
+  targetEntryId: string,
+  fallback: BranchDraft | null,
+): BranchDraft | null {
+  if (fallback == null) {
+    return null
+  }
+  const byId = new Map(entries.map((entry) => [entry.entryId, entry]))
+  const path: HarnessSessionEntryDTO[] = []
+  const visited = new Set<string>()
+  let cursor: string | null = targetEntryId
+  while (cursor != null && !visited.has(cursor)) {
+    visited.add(cursor)
+    const entry = byId.get(cursor)
+    if (entry == null) {
+      break
+    }
+    path.push(entry)
+    cursor = entry.parentEntryId
+  }
+  let draft = cloneDraft(fallback)
+  for (const entry of path.reverse()) {
+    draft = branchDraftFromEntry(entry, draft) ?? draft
+  }
+  return draft
+}
+
+function decodeEnvironment(
+  value: unknown,
+  fallback: EnvironmentBindingDTO | null,
+): EnvironmentBindingDTO | null {
+  if (value == null) {
+    return value === null ? null : fallback
+  }
+  if (!isRecord(value) || typeof value.name !== 'string' || typeof value.workspacePath !== 'string') {
+    return fallback
+  }
+  return { name: value.name, workspacePath: value.workspacePath }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function sessionSelectionItem(session: RuntimeSessionSummaryDTO) {
+  return {
+    id: session.sessionId,
+    title: session.firstMessagePreview || session.sessionId,
+    subtitle: `${formatBackendDate(session.lastActivityAt)} · ${session.threadCount} Threads`,
+    badge: session.sessionId,
+  }
+}
+
+function threadSelectionItem(thread: RuntimeThreadSummaryDTO) {
+  return {
+    id: thread.threadId,
+    title: thread.headMessagePreview || thread.threadId,
+    subtitle: `${formatBackendDate(thread.updatedAt)} · ${thread.status}`,
+    badge: thread.threadId,
+  }
+}

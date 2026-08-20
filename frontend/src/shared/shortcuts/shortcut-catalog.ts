@@ -6,7 +6,7 @@
  * - labelKey / descriptionKey 必须存在于 i18n（测试会校验翻译可解析，
  *   缺失键渲染为 ⟦missing:key⟧ 会被拒绝）。
  */
-export type ShortcutScope = 'application' | 'thread' | 'events' | 'canvas'
+export type ShortcutScope = 'application' | 'thread' | 'debug' | 'canvas'
 
 export interface ShortcutDefinition {
   /** 稳定唯一 id，如 `application.escape`。 */
@@ -23,14 +23,14 @@ export interface ShortcutDefinition {
 export const SHORTCUT_SCOPE_ORDER: readonly ShortcutScope[] = [
   'application',
   'thread',
-  'events',
+  'debug',
   'canvas',
 ]
 
 export const SHORTCUT_SCOPE_TITLE_KEYS: Record<ShortcutScope, string> = {
   application: 'ai.runtime.shortcuts.group.application',
   thread: 'ai.runtime.shortcuts.group.thread',
-  events: 'ai.runtime.shortcuts.group.events',
+  debug: 'ai.runtime.shortcuts.group.debug',
   canvas: 'ai.runtime.shortcuts.group.canvas',
 }
 
@@ -86,18 +86,18 @@ export const SHORTCUT_CATALOG: ShortcutDefinition[] = [
     descriptionKey: 'ai.runtime.shortcuts.commandEdges',
   },
   {
-    id: 'events.nav',
-    scope: 'events',
+    id: 'debug.nav',
+    scope: 'debug',
     keys: '↑ / ↓',
-    labelKey: 'ai.runtime.shortcuts.label.eventsNav',
-    descriptionKey: 'ai.runtime.shortcuts.eventsNav',
+    labelKey: 'ai.runtime.shortcuts.label.debugNav',
+    descriptionKey: 'ai.runtime.shortcuts.debugNav',
   },
   {
-    id: 'events.escape',
-    scope: 'events',
+    id: 'debug.escape',
+    scope: 'debug',
     keys: 'Esc',
-    labelKey: 'ai.runtime.shortcuts.label.eventsEscape',
-    descriptionKey: 'ai.runtime.shortcuts.eventsEscape',
+    labelKey: 'ai.runtime.shortcuts.label.debugEscape',
+    descriptionKey: 'ai.runtime.shortcuts.debugEscape',
   },
   {
     id: 'canvas.escape',

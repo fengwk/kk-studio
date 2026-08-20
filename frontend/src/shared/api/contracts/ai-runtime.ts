@@ -129,26 +129,6 @@ export type HarnessThreadCommandCreateDTO =
   | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
   | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environment: EnvironmentBindingDTO | null }
 
-/** 原子化的 Thread mailbox 入队请求；期望游标来自最新的 thread DTO。 */
-export interface HarnessThreadCommandBatchDTO {
-  expectedHeadEntryId: string
-  expectedNextCommandSequence: string
-  commands: HarnessThreadCommandCreateDTO[]
-}
-
-/** 以完整的 branch settings 快照原子化创建 Thread；title 可为 null。 */
-export interface HarnessThreadCreateDTO {
-  title: string | null
-  branchSettings: HarnessBranchSettingsDTO
-  yoloEnabled: boolean
-}
-
-/** Thread head 重定位请求；expectedRevision 是精确的 revision CAS 游标。 */
-export interface HarnessThreadHeadUpdateDTO {
-  targetEntryId: string
-  expectedRevision: string
-}
-
 /**
  * Thread YOLO policy 直接更新请求；expectedRevision 是精确的 revision CAS 游标
  * （同值请求在任何 CAS 之前即成功 no-op）。
@@ -261,4 +241,87 @@ export interface HarnessThreadSnapshotDTO {
   modelInvocation: ModelInvocationDTO | null
   toolInvocations: ToolInvocationDTO[]
   modelAttemptFailures: ModelAttemptFailureDTO[]
+  manualCompaction: ManualCompactionDTO
+}
+
+export interface ManualCompactionDTO {
+  available: boolean
+  disabledReason: string | null
+}
+
+export interface AgentRuntimeOwnerDTO {
+  type: 'CHAT' | 'CANVAS'
+  id: string
+}
+
+export interface NewSessionCommandTargetDTO {
+  kind: 'NEW_SESSION'
+  sessionId: string
+  threadId: string
+  rootSettings: HarnessBranchSettingsDTO
+  yoloEnabled: boolean
+}
+
+export interface EntryCommandTargetDTO {
+  kind: 'ENTRY'
+  sessionId: string
+  startEntryId: string
+  threadId: string
+  yoloEnabled: boolean
+}
+
+export interface ThreadCommandTargetDTO {
+  kind: 'THREAD'
+  threadId: string
+  expectedHeadEntryId: string
+  expectedNextCommandSequence: string
+}
+
+export type AgentCommandTargetDTO =
+  | NewSessionCommandTargetDTO
+  | EntryCommandTargetDTO
+  | ThreadCommandTargetDTO
+
+export interface AgentCommandBatchRequestDTO {
+  owner: AgentRuntimeOwnerDTO
+  target: AgentCommandTargetDTO
+  commands: HarnessThreadCommandCreateDTO[]
+}
+
+export interface RuntimeSessionSummaryDTO {
+  sessionId: string
+  createdAt: BackendDateTime
+  lastActivityAt: BackendDateTime
+  firstMessagePreview: string
+  threadCount: number
+}
+
+export interface RuntimeThreadSummaryDTO {
+  threadId: string
+  createdAt: BackendDateTime
+  updatedAt: BackendDateTime
+  status: string
+  model: HarnessModelSelectionDTO | null
+  headMessagePreview: string
+}
+
+export interface AgentCommandBatchResponseDTO {
+  session: {
+    sessionId: string
+    createdAt: BackendDateTime
+  } | null
+  rootEntry: HarnessSessionEntryDTO | null
+  thread: HarnessThreadDTO
+  acceptedCommands: HarnessThreadCommandDTO[]
+  replayed: boolean
+}
+
+export interface ManualCompactionRequestDTO {
+  expectedRevision: string
+}
+
+export interface ManualCompactionResponseDTO {
+  thread: HarnessThreadDTO
+  turnStartEntryId: string
+  modelInvocationId: string | null
 }

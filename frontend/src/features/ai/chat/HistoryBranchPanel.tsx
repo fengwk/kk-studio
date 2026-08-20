@@ -1,15 +1,7 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type RefObject,
-} from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { ThreadInteractionPanel } from '@/features/ai/runtime/thread-panel/ThreadInteractionPanel'
 import {
   activeAncestry,
-  branchTarget,
   buildSessionEntryTree,
   isOnActivePath,
   parseHistorySearchTokens,
@@ -34,117 +26,75 @@ const ENTRY_KIND_LABEL_KEYS: Record<SessionEntryKind, string> = {
   other: 'ai.chat.history.system',
 }
 
+/** 选择 Entry 只切换本地 ENTRY_DRAFT，绝不调用 durable control API。 */
 export function HistoryBranchPanel({
   entries,
   currentHeadEntryId,
   loading,
   queryError,
-  pending,
-  rebindError,
   onClose,
-  onRebind,
+  onSelectEntry,
 }: {
   entries: HarnessSessionEntryDTO[]
   currentHeadEntryId?: string | null
   loading: boolean
   queryError: unknown
-  pending: boolean
-  /** 已格式化的 rebind 失败信息（包含 409）；原样渲染，确保不会被吞掉。 */
-  rebindError: string | null
   onClose: () => void
-  /** 通过 PUT /threads/{id}/head 将当前 Thread head 重定位到选中的 Entry。 */
-  onRebind: (entry: HarnessSessionEntryDTO) => void
+  onSelectEntry: (entry: HarnessSessionEntryDTO) => void
 }) {
   const { t, locale } = useI18n()
   const [filter, setFilter] = useState<SessionTreeFilter>('conversation')
   const [searchQuery, setSearchQuery] = useState('')
-  const searchTokens = useMemo(() => parseHistorySearchTokens(searchQuery), [searchQuery])
-  const rows = useMemo(
-    () => {
-      void locale
-      return buildSessionEntryTree(entries, filter, searchTokens)
-    },
-    [entries, filter, locale, searchTokens],
-  )
+  const tokens = useMemo(() => parseHistorySearchTokens(searchQuery), [searchQuery])
+  const rows = useMemo(() => {
+    void locale
+    return buildSessionEntryTree(entries, filter, tokens)
+  }, [entries, filter, locale, tokens])
   const ancestry = useMemo(
     () => activeAncestry(entries, currentHeadEntryId ?? null),
     [entries, currentHeadEntryId],
   )
-  const [selectedEntry, setSelectedEntry] = useState<HarnessSessionEntryDTO | null>(null)
-  const selectedEntryRef = useRef<HTMLButtonElement | null>(null)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const selectedEntryId = selectedEntry?.entryId
-  const selectedIndex = rows.findIndex((row) => row.entry.entryId === selectedEntryId)
-
-  // 默认选中当前 head；每当行集合发生变化（filter、search 或异步加载的 entries）时，
-  // 重新挂接到最近的可见祖先。
-  useEffect(() => {
-    setSelectedEntry((current) => resolveSelection(rows, entries, current?.entryId ?? currentHeadEntryId ?? null))
-  }, [rows, entries, currentHeadEntryId])
+  const [selected, setSelected] = useState<HarnessSessionEntryDTO | null>(null)
+  const selectedRef = useRef<HTMLButtonElement | null>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const selectedId = selected?.entryId
+  const selectedIndex = rows.findIndex((row) => row.entry.entryId === selectedId)
 
   useEffect(() => {
-    selectedEntryRef.current?.scrollIntoView?.({ block: 'nearest' })
-  }, [selectedEntryId])
-
+    setSelected((current) => resolveSelection(rows, entries, current?.entryId ?? currentHeadEntryId ?? null))
+  }, [currentHeadEntryId, entries, rows])
   useEffect(() => {
-    searchInputRef.current?.focus({ preventScroll: true })
+    selectedRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [selectedId])
+  useEffect(() => {
+    searchRef.current?.focus({ preventScroll: true })
   }, [])
 
-  const canRebind = Boolean(
-    selectedEntry && branchTarget(selectedEntry).headEntryId,
-  ) && !loading && !pending
-  const effectiveClose = pending ? () => undefined : onClose
-  const selectableRows = useMemo(
-    () => rows.filter((row) => Boolean(branchTarget(row.entry).headEntryId)),
-    [rows],
-  )
-
   function moveSelection(delta: number) {
-    if (pending || selectableRows.length === 0) {
+    if (rows.length === 0) {
       return
     }
-    const currentIndex = Math.max(
-      0,
-      selectableRows.findIndex((row) => row.entry.entryId === selectedEntryId),
-    )
-    const nextIndex = (
-      currentIndex + delta + selectableRows.length
-    ) % selectableRows.length
-    setSelectedEntry(selectableRows[nextIndex]?.entry ?? null)
+    const index = Math.max(0, selectedIndex)
+    setSelected(rows[(index + delta + rows.length) % rows.length]?.entry ?? null)
   }
 
-  function handlePanelKeyDown(event: KeyboardEvent<HTMLElement>) {
+  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229) {
       return
     }
     if (event.key === 'Escape') {
       event.preventDefault()
       event.stopPropagation()
-      effectiveClose()
-      return
-    }
-    if (event.target instanceof HTMLSelectElement) {
-      return
-    }
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      onClose()
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       event.stopPropagation()
       moveSelection(event.key === 'ArrowDown' ? 1 : -1)
-      return
-    }
-    if (event.key === 'Enter' && canRebind && selectedEntry) {
+    } else if (event.key === 'Enter' && selected) {
       event.preventDefault()
       event.stopPropagation()
-      onRebind(selectedEntry)
+      onSelectEntry(selected)
     }
-  }
-
-  function changeFilter(nextFilter: SessionTreeFilter) {
-    setFilter(nextFilter)
-  }
-
-  function changeSearch(next: string) {
-    setSearchQuery(next)
   }
 
   return (
@@ -152,35 +102,28 @@ export function HistoryBranchPanel({
       title={t('ai.chat.history.title')}
       className="history-branch-panel"
       bodyClassName="history-branch-body"
-      closeDisabled={pending}
-      busy={loading || pending}
-      onClose={effectiveClose}
-      onKeyDown={handlePanelKeyDown}
+      busy={loading}
+      onClose={onClose}
+      onKeyDown={onKeyDown}
       controls={(
         <div className="history-branch-controls">
           <select
             className="history-branch-filter"
             value={filter}
             aria-label={t('ai.chat.history.filter')}
-            disabled={pending}
-            onChange={(event) => changeFilter(event.target.value as SessionTreeFilter)}
+            onChange={(event) => setFilter(event.target.value as SessionTreeFilter)}
           >
-            {FILTERS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {t(item.labelKey)}
-              </option>
-            ))}
+            {FILTERS.map((item) => <option key={item.value} value={item.value}>{t(item.labelKey)}</option>)}
           </select>
           <label className="history-branch-search">
             <span className="sr-only">{t('ai.chat.history.search')}</span>
             <input
-              ref={searchInputRef}
+              ref={searchRef}
               type="search"
               value={searchQuery}
               placeholder={t('ai.chat.history.search')}
               aria-label={t('ai.chat.history.search')}
-              disabled={pending}
-              onChange={(event) => changeSearch(event.target.value)}
+              onChange={(event) => setSearchQuery(event.target.value)}
             />
           </label>
         </div>
@@ -194,14 +137,14 @@ export function HistoryBranchPanel({
             })}
           </span>
           <div className="history-branch-actions">
-            <button type="button" className="ghost-btn" onClick={effectiveClose} disabled={pending}>
+            <button type="button" className="ghost-btn" onClick={onClose}>
               {t('ai.chat.history.cancel')}
             </button>
             <button
               type="button"
               className="btn-primary"
-              disabled={!canRebind}
-              onClick={() => selectedEntry && onRebind(selectedEntry)}
+              disabled={loading || selected == null}
+              onClick={() => selected && onSelectEntry(selected)}
             >
               {t('ai.chat.history.continue')}
             </button>
@@ -210,101 +153,78 @@ export function HistoryBranchPanel({
       )}
     >
       {loading ? <div className="state-block">{t('ai.chat.history.loading')}</div> : null}
-      {queryError ? (
-        <div className="state-block danger" role="alert">{t('ai.chat.history.loadFailed')}</div>
-      ) : null}
-      {!loading && !queryError && searchTokens.length > 0 && rows.length === 0 ? (
+      {queryError ? <div className="state-block danger" role="alert">{t('ai.chat.history.loadFailed')}</div> : null}
+      {!loading && !queryError && rows.length === 0 ? (
         <div className="state-block">
-          {t('ai.chat.history.noMatch', { query: searchQuery.trim() })}
+          {tokens.length > 0
+            ? t('ai.chat.history.noMatch', { query: searchQuery.trim() })
+            : t('ai.chat.history.empty')}
         </div>
       ) : null}
-      {!loading && !queryError && searchTokens.length === 0 && rows.length === 0 ? (
-        <div className="state-block">{t('ai.chat.history.empty')}</div>
-      ) : null}
       {!loading && !queryError && rows.length > 0 ? (
-        <div
-          className="history-branch-list"
-          role="list"
-          aria-label={t('ai.chat.history.list')}
-        >
+        <div className="history-branch-list" role="list" aria-label={t('ai.chat.history.list')}>
           {rows.map((row) => (
-            <HistoryBranchRow
+            <HistoryRow
               key={row.entry.entryId}
               row={row}
-              selected={selectedEntry?.entryId === row.entry.entryId}
-              pending={pending}
-              onSelect={setSelectedEntry}
-              selectedEntryRef={selectedEntryRef}
+              selected={row.entry.entryId === selectedId}
+              selectedRef={selectedRef}
               isOnPath={isOnActivePath(ancestry, row.entry.entryId)}
               isHead={row.entry.entryId === currentHeadEntryId}
-              isBranchable={Boolean(branchTarget(row.entry).headEntryId)}
+              onSelect={setSelected}
             />
           ))}
         </div>
       ) : null}
-      {rebindError ? <div className="state-block danger" role="alert">{rebindError}</div> : null}
     </ThreadInteractionPanel>
   )
 }
 
-function HistoryBranchRow({
+function HistoryRow({
   row,
   selected,
-  pending,
-  onSelect,
-  selectedEntryRef,
+  selectedRef,
   isOnPath,
   isHead,
-  isBranchable,
+  onSelect,
 }: {
   row: SessionTreeEntry
   selected: boolean
-  pending: boolean
-  onSelect: (entry: HarnessSessionEntryDTO) => void
-  selectedEntryRef: RefObject<HTMLButtonElement | null>
+  selectedRef: RefObject<HTMLButtonElement | null>
   isOnPath: boolean
   isHead: boolean
-  isBranchable: boolean
+  onSelect: (entry: HarnessSessionEntryDTO) => void
 }) {
   const { t } = useI18n()
-  const connectorText = renderTreePrefix(row)
-  const ariaLabel = t('ai.chat.history.entryAria', {
-    kind: t(ENTRY_KIND_LABEL_KEYS[row.kind]),
-    preview: row.preview,
-    path: isOnPath ? ` · ${t('ai.chat.history.currentPath')}` : '',
-    head: isHead ? ` · ${t('ai.chat.history.currentPosition')}` : '',
-  })
   return (
     <div role="listitem">
       <button
         type="button"
         aria-pressed={selected}
         aria-current={isHead ? 'true' : undefined}
-        aria-label={ariaLabel}
+        aria-label={t('ai.chat.history.entryAria', {
+          kind: t(ENTRY_KIND_LABEL_KEYS[row.kind]),
+          preview: row.preview,
+          path: isOnPath ? ` · ${t('ai.chat.history.currentPath')}` : '',
+          head: isHead ? ` · ${t('ai.chat.history.currentPosition')}` : '',
+        })}
         className={`history-branch-entry${selected ? ' selected' : ''}${isHead ? ' head' : ''}${isOnPath ? ' on-path' : ''}`}
-        disabled={!isBranchable || pending}
-        ref={selected ? selectedEntryRef : undefined}
+        ref={selected ? selectedRef : undefined}
         onClick={() => onSelect(row.entry)}
       >
-        <span className="history-branch-entry-cursor" aria-hidden="true">
-          {selected ? '›' : ''}
-        </span>
-        {connectorText ? <span className="history-branch-entry-glyphs" aria-hidden="true">{connectorText}</span> : null}
+        <span className="history-branch-entry-cursor" aria-hidden="true">{selected ? '›' : ''}</span>
+        <span className="history-branch-entry-glyphs" aria-hidden="true">{treePrefix(row)}</span>
         {isOnPath ? <span className="history-branch-entry-path" aria-hidden="true">•</span> : null}
         <span className="history-branch-entry-kind">{t(ENTRY_KIND_LABEL_KEYS[row.kind])}</span>
         <span className="history-branch-entry-sep" aria-hidden="true">·</span>
         <span className="history-branch-entry-preview">{row.preview}</span>
-        {isHead ? (
-          <span className="history-branch-entry-head">
-            {t('ai.chat.history.currentPosition')}
-          </span>
-        ) : null}
+        {isHead ? <span className="history-branch-entry-head">{t('ai.chat.history.currentPosition')}</span> : null}
       </button>
     </div>
   )
 }
 
-function renderTreePrefix(row: SessionTreeEntry): string {
+function treePrefix(row: SessionTreeEntry): string {
   if (row.depth === 0) {
     return ''
   }
@@ -312,9 +232,9 @@ function renderTreePrefix(row: SessionTreeEntry): string {
   for (let level = 0; level < row.depth; level += 1) {
     if (row.hasBranchConnector && level === row.depth - 1) {
       parts.push(row.isLastSibling ? '└─ ' : '├─ ')
-      continue
+    } else {
+      parts.push(row.ancestorConnectors[level]?.continues ? '│  ' : '   ')
     }
-    parts.push(row.ancestorConnectors[level]?.continues ? '│  ' : '   ')
   }
   return parts.join('')
 }
