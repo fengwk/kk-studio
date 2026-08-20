@@ -15,6 +15,9 @@ public interface ChatRepository {
   /** 行级锁定读取（{@code for update}），用于深删除时固定 Chat 版本与关联枚举。 */
   Chat lockById(UUID id);
 
+  /** KEY SHARE 锁定读取：归属授权路径用于阻止 Chat 删除但不串行化同 Chat 的并发接受。 */
+  Chat lockForKeyShare(UUID id);
+
   boolean create(Chat chat);
 
   /** 基于 (id, expectedVersion) 的原子 CAS 更新。 */

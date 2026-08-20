@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime.NewCommandPreflight;
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
@@ -295,7 +295,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
    * original 字节并摄入，任何失败整体回滚）。消息结构：contents[0] 是 manifest 表格，contents[1+i] 是第 i 个引用的 label 段落；物化后在每个
    * label 段落之后追加对应 RESOURCE。
    */
-  private NewCommandPreflight mediaPreflight(
+  private AcceptancePreflight mediaPreflight(
       CanvasFunctionExecutionContext context, H3ReferenceManifest manifest) {
     StorageBlobIngestService ingestService = ingestServices.getIfAvailable();
     if (ingestService == null) {
@@ -303,7 +303,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
           "global storage is not available; H3 prompt media cannot be externalized");
     }
     List<H3ReferenceManifest.Item> items = manifest.items();
-    return (tx, sessionId, commands) -> {
+    return (tx, session, commands) -> {
       List<NewThreadCommand> prepared = new ArrayList<>(commands.size());
       for (NewThreadCommand command : commands) {
         if (!(command.payload() instanceof CustomMessageCommandPayload custom)) {
@@ -324,13 +324,11 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
             throw new IllegalStateException("H3 prompt label mismatch at index " + i);
           }
           contents.add(label);
-          contents.add(ingestMedia(sessionId, context, items.get(i), ingestService));
+          contents.add(ingestMedia(session.id(), context, items.get(i), ingestService));
         }
         prepared.add(
-            new NewThreadCommand(
-                new CustomMessageCommandPayload(new AgentMessage(message.role(), contents)),
-                command.clientCommandId(),
-                command.requestHash()));
+            command.withPayload(
+                new CustomMessageCommandPayload(new AgentMessage(message.role(), contents))));
       }
       return List.copyOf(prepared);
     };

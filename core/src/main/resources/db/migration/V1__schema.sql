@@ -117,19 +117,16 @@ create table canvas_document (
     id uuid primary key,
     title varchar(256) not null,
     version bigint not null default 0,
-    thread_id uuid,
     created_at timestamptz(3) not null default current_timestamp,
     updated_at timestamptz(3) not null default current_timestamp,
     constraint ck_canvas_document_title_nonblank check (btrim(title) <> ''),
-    constraint ck_canvas_document_version_nonneg check (version >= 0),
-    constraint uk_canvas_document_thread unique (thread_id)
+    constraint ck_canvas_document_version_nonneg check (version >= 0)
 );
 
-comment on table canvas_document is 'Canvas 聚合头：version 是单调递增的 graph 版本（command expected 游标与 patch 坐标系的公共基准），thread_id 可空并唯一绑定至多一个根 Harness Thread';
+comment on table canvas_document is 'Canvas 聚合头：version 是单调递增的 graph 版本（command expected 游标与 patch 坐标系的公共基准）；Harness 会话归属由 canvas_session 表持有';
 comment on column canvas_document.id is 'Canvas 全局唯一 UUID（服务端生成）';
 comment on column canvas_document.title is '规范化标题（NFKC trim 后非空，<= 256 字符）';
 comment on column canvas_document.version is 'graph 版本：任何成功命令批或 Function Run 状态前进恰好 +1';
-comment on column canvas_document.thread_id is '绑定的根 Harness Thread（可空，深删除显式执行）';
 comment on column canvas_document.created_at is '创建时间（毫秒精度）';
 comment on column canvas_document.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
 
@@ -295,39 +292,34 @@ create table canvas_command_dedup (
     canvas_id uuid not null,
     command_id uuid not null,
     request_hash char(64) not null,
-    applied_version bigint not null,
-    created_at timestamptz(3) not null default current_timestamp,
     constraint pk_canvas_command_dedup primary key (canvas_id, command_id),
-    constraint ck_canvas_command_dedup_request_hash check (request_hash ~ '^[0-9a-f]{64}$'),
-    constraint ck_canvas_command_dedup_applied_version_nonneg check (applied_version >= 0)
+    constraint ck_canvas_command_dedup_request_hash check (request_hash ~ '^[0-9a-f]{64}$')
 );
 
-comment on table canvas_command_dedup is '命令批幂等：相同 (canvas_id, command_id) 只能以相同 request_hash 精确回放一次，applied_version 记录应用的 graph 版本';
+comment on table canvas_command_dedup is '命令批幂等：相同 (canvas_id, command_id) 只能以相同 request_hash 精确回放一次；graph 版本由 canvas_document.version 游标负责，本表不冗余存储';
 comment on column canvas_command_dedup.canvas_id is '所属 Canvas';
 comment on column canvas_command_dedup.command_id is '客户端幂等 UUID';
 comment on column canvas_command_dedup.request_hash is '整批命令的 SHA-256（64 位小写十六进制）';
-comment on column canvas_command_dedup.applied_version is '应用后达到的 graph 版本';
-comment on column canvas_command_dedup.created_at is '创建时间（毫秒精度）';
 
-create table canvas_function_resource_ref (
+create table canvas_function_resource_pin (
     canvas_id uuid not null,
     node_id uuid not null,
     request_id uuid not null,
     role varchar(16) not null,
     resource_id uuid not null,
-    constraint pk_canvas_function_resource_ref primary key (canvas_id, node_id, request_id, role, resource_id),
-    constraint ck_canvas_function_resource_ref_role check (role in ('INPUT', 'OUTPUT'))
+    constraint pk_canvas_function_resource_pin primary key (canvas_id, node_id, request_id, role, resource_id),
+    constraint ck_canvas_function_resource_pin_role check (role in ('INPUT', 'OUTPUT'))
 );
 
-comment on table canvas_function_resource_ref is 'Function Run 生命周期内对资源的 pin：INPUT 为启动时冻结的引用资源，OUTPUT 为预分配的目标资源；只保护生命周期，绝不参与 blob 引用计数';
-comment on column canvas_function_resource_ref.canvas_id is '所属 Canvas';
-comment on column canvas_function_resource_ref.node_id is 'Function 节点';
-comment on column canvas_function_resource_ref.request_id is 'Run 请求 UUID';
-comment on column canvas_function_resource_ref.role is 'pin 角色：INPUT / OUTPUT';
-comment on column canvas_function_resource_ref.resource_id is '被 pin 的资源（OUTPUT 可为尚未物化的预分配 id）';
+comment on table canvas_function_resource_pin is 'Function Run 生命周期内对资源的 pin：INPUT 为启动时冻结的引用资源，OUTPUT 为预分配的目标资源；只保护生命周期，绝不参与 blob 引用计数';
+comment on column canvas_function_resource_pin.canvas_id is '所属 Canvas';
+comment on column canvas_function_resource_pin.node_id is 'Function 节点';
+comment on column canvas_function_resource_pin.request_id is 'Run 请求 UUID';
+comment on column canvas_function_resource_pin.role is 'pin 角色：INPUT / OUTPUT';
+comment on column canvas_function_resource_pin.resource_id is '被 pin 的资源（OUTPUT 可为尚未物化的预分配 id）';
 
-create index idx_canvas_function_resource_ref_resource
-    on canvas_function_resource_ref (canvas_id, resource_id);
+create index idx_canvas_function_resource_pin_resource
+    on canvas_function_resource_pin (canvas_id, resource_id);
 
 create table chat (
     id                  uuid          primary key,
@@ -743,22 +735,50 @@ comment on index idx_harness_work_available is 'claimNextWork 按 (available_at,
 comment on index idx_harness_work_lease_until is '过期 lease 扫描索引';
 
 ------------------------------------------------------------------------------
--- 3. Application-owned tables referencing harness_thread
+-- 3. Application-owned tables binding Chat/Canvas owners to harness_session
+--
+-- chat_session / canvas_session 是 owner 与 Harness Session 的一对一归属边：
+-- session_id 是主键（一个 Session 至多被一个 owner 持有）。Chat 与 Canvas 的互斥
+-- 由应用在归属创建事务内强制（锁定 harness_session 行后检查另一张归属表），数据库 FK
+-- 只作为末道防线（说明 Session 与 owner 都必须存在），不引入多态 owner 表。
 ------------------------------------------------------------------------------
-create table chat_thread (
+create table chat_session (
+    session_id  uuid          not null,
     chat_id     uuid          not null,
-    thread_id   uuid          not null,
     created_at  timestamptz(3) not null default current_timestamp,
-    constraint pk_chat_thread primary key (chat_id, thread_id),
-    constraint uk_chat_thread_thread unique (thread_id),
-    constraint fk_chat_thread_chat foreign key (chat_id)
-        references chat (id) on delete cascade,
-    constraint fk_chat_thread_thread foreign key (thread_id)
-        references harness_thread (id) on delete cascade
+    constraint pk_chat_session primary key (session_id),
+    constraint fk_chat_session_session foreign key (session_id)
+        references harness_session (id) on delete restrict,
+    constraint fk_chat_session_chat foreign key (chat_id)
+        references chat (id) on delete restrict
 );
 
-create index idx_chat_thread_thread
-    on chat_thread (thread_id, chat_id);
+create index idx_chat_session_chat
+    on chat_session (chat_id, session_id);
+
+comment on table chat_session is 'Chat 持有的 Harness Session 归属边：每个 Session 至多关联一个 Chat';
+comment on column chat_session.session_id is 'Harness Session 的全局唯一 UUID（PK，同 canvas_session 互斥）';
+comment on column chat_session.chat_id is '所属 Chat（owner listing 索引）';
+comment on column chat_session.created_at is '归属创建时间（毫秒精度）';
+
+create table canvas_session (
+    session_id  uuid          not null,
+    canvas_id   uuid          not null,
+    created_at  timestamptz(3) not null default current_timestamp,
+    constraint pk_canvas_session primary key (session_id),
+    constraint fk_canvas_session_session foreign key (session_id)
+        references harness_session (id) on delete restrict,
+    constraint fk_canvas_session_canvas foreign key (canvas_id)
+        references canvas_document (id) on delete restrict
+);
+
+create index idx_canvas_session_canvas
+    on canvas_session (canvas_id, session_id);
+
+comment on table canvas_session is 'Canvas 持有的 Harness Session 归属边：每个 Session 至多关联一个 Canvas';
+comment on column canvas_session.session_id is 'Harness Session 的全局唯一 UUID（PK，同 chat_session 互斥）';
+comment on column canvas_session.canvas_id is '所属 Canvas（owner listing 索引）';
+comment on column canvas_session.created_at is '归属创建时间（毫秒精度）';
 
 
 ------------------------------------------------------------------------------
@@ -786,18 +806,14 @@ create trigger trg_harness_thread_revision_notify
     for each row execute function harness_thread_revision_notify();
 
 ------------------------------------------------------------------------------
--- 5. Canvas ownership, same-canvas composite FKs, thread binding and version
+-- 5. Canvas ownership, same-canvas composite FKs and version
 --    NOTIFY hint.
 --
 -- All Canvas ownership FKs are ON DELETE RESTRICT: deletion is always driven
 -- by the application in explicit order (pins -> runs -> resources -> links ->
--- nodes -> groups -> dedup -> document), never by cascades that could bypass
+-- nodes -> groups -> dedup -> sessions -> document), never by cascades that could bypass
 -- StorageBlobManager refcounts.
 ------------------------------------------------------------------------------
-
-alter table canvas_document
-    add constraint fk_canvas_document_thread foreign key (thread_id)
-    references harness_thread (id) on delete restrict;
 
 alter table canvas_group
     add constraint fk_canvas_group_canvas foreign key (canvas_id)
@@ -839,8 +855,8 @@ alter table canvas_function_run
     add constraint fk_canvas_function_run_node foreign key (node_id)
     references canvas_node (id) on delete restrict;
 
-alter table canvas_function_resource_ref
-    add constraint fk_canvas_function_resource_ref_node
+alter table canvas_function_resource_pin
+    add constraint fk_canvas_function_resource_pin_node
     foreign key (canvas_id, node_id)
     references canvas_node (canvas_id, id) on delete restrict;
 

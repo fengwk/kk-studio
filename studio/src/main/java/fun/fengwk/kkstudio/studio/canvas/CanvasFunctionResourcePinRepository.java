@@ -4,11 +4,11 @@ import java.util.List;
 import java.util.UUID;
 
 /** Function Run 资源 pin 的持久化端口。 */
-public interface CanvasFunctionResourceRefRepository {
+public interface CanvasFunctionResourcePinRepository {
 
-  void addAll(List<CanvasFunctionResourceRef> refs);
+  void addAll(List<CanvasFunctionResourcePin> refs);
 
-  List<CanvasFunctionResourceRef> findByRun(UUID canvasId, UUID nodeId, UUID requestId);
+  List<CanvasFunctionResourcePin> findByRun(UUID canvasId, UUID nodeId, UUID requestId);
 
   boolean deleteByRun(UUID canvasId, UUID nodeId, UUID requestId);
 

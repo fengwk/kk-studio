@@ -104,9 +104,6 @@ class CanvasRealtimeServiceTest {
   private static CanvasSnapshot snapshot(long version) {
     Instant now = Instant.parse("2026-08-12T00:00:00Z");
     return new CanvasSnapshot(
-        new CanvasDocument(CANVAS, "canvas", version, null, now, now),
-        List.of(),
-        List.of(),
-        List.of());
+        new CanvasDocument(CANVAS, "canvas", version, now, now), List.of(), List.of(), List.of());
   }
 }
