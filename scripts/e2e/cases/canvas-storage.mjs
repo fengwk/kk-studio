@@ -28,7 +28,7 @@ registerCase({
     assert(UUID_TEXT.test(canvas.id), JSON.stringify(canvas))
     assertDecimalVersion(canvas.version, 'canvas.version')
     assert(canvas.version === '0', JSON.stringify(canvas))
-    assert(canvas.threadId === null, JSON.stringify(canvas))
+    assert(!('threadId' in canvas), `Canvas must not expose threadId: ${JSON.stringify(canvas)}`)
 
     // 通用 S3 预签名端点不能触碰 Canvas/blob key 命名空间。
     const { json: comfyuiPresignJson } = await ctx.call(

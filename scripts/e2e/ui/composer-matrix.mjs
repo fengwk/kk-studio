@@ -11,14 +11,17 @@ import {
 import { assertReadOnlyZeroFooter } from './assertions.mjs'
 import { runRefactorContractMatrix } from './refactor-contracts.mjs'
 import {
+  acceptCommandBatch,
   branchSettingsOf,
+  chatOwner,
   createChat,
-  createChatThread,
-  enqueueCommands,
   getThreadSnapshot,
+  materializeEntryThread,
+  materializeNewSession,
   setAgentCommand,
+  setModelCommand,
   stopThread,
-  updateThreadHead,
+  threadTarget,
   userMessageCommand,
   waitForDurableMessages,
   waitForQuiescentThread,
@@ -1090,29 +1093,44 @@ async function createDurableHistoryFixture(
       agentName: target.agent.name,
       yoloEnabled: false,
     })
-    const branchSettings = branchSettingsOf(target.agent, target.model)
-    const created = await createChatThread(apiCtx, state.chat.id, {
-      title: null,
+    // 主 Thread：NEW_SESSION 用不存在的 Agent 确定性物化（第一条消息随物化批入队），
+    // 后续 messages 每条一个 THREAD batch（产品 HTTP 面一个 batch 只允许恰一条 USER_MESSAGE）。
+    const owner = chatOwner(state.chat.id)
+    const sessionId = cid()
+    const threadId = cid()
+    const missingAgentName = `e2e-ui-missing-${cid().slice(0, 8)}`
+    const created = await materializeNewSession(apiCtx, {
+      owner,
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
       yoloEnabled: false,
-      branchSettings,
+      commands: [userMessageCommand(messages[0], cid())],
     })
-    state.threadId = created.thread.threadId
-    for (let index = 0; index < extraThreadCount; index += 1) {
-      const extra = await createChatThread(apiCtx, state.chat.id, {
-        title: null,
-        yoloEnabled: false,
-        branchSettings,
+    state.threadId = String(threadId)
+    for (const message of messages.slice(1)) {
+      const current = await getThreadSnapshot(apiCtx, state.threadId)
+      await acceptCommandBatch(apiCtx, {
+        owner,
+        target: threadTarget({
+          threadId: state.threadId,
+          expectedHeadEntryId: current.thread.headEntryId,
+          expectedNextCommandSequence: current.thread.nextCommandSequence,
+        }),
+        commands: [userMessageCommand(message, cid())],
       })
-      state.extraThreadIds.push(extra.thread.threadId)
     }
-    await enqueueCommands(apiCtx, state.threadId, {
-      expectedHeadEntryId: created.thread.headEntryId,
-      expectedNextCommandSequence: created.thread.nextCommandSequence,
-      commands: [
-        setAgentCommand(`e2e-ui-missing-${cid().slice(0, 8)}`, cid()),
-        ...messages.map((message) => userMessageCommand(message, cid())),
-      ],
-    })
+    for (let index = 0; index < extraThreadCount; index += 1) {
+      const extra = await materializeNewSession(apiCtx, {
+        owner,
+        sessionId: cid(),
+        threadId: cid(),
+        rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
+        yoloEnabled: false,
+        commands: [userMessageCommand(`extra ${index} ${cid().slice(0, 8)}`, cid())],
+      })
+      state.extraThreadIds.push(String(extra.thread.threadId))
+    }
     await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 60_000,
       intervalMs: 100,
@@ -1153,30 +1171,31 @@ async function createBranchedHistoryFixture(
       agentName: target.agent.name,
       yoloEnabled: false,
     })
-    const branchSettings = branchSettingsOf(target.agent, target.model)
-    const created = await createChatThread(apiCtx, state.chat.id, {
-      title: null,
+    const owner = chatOwner(state.chat.id)
+    const sessionId = cid()
+    const threadId = cid()
+    const missingAgentName = `e2e-ui-missing-${cid().slice(0, 8)}`
+    const created = await materializeNewSession(apiCtx, {
+      owner,
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
       yoloEnabled: false,
-      branchSettings,
+      commands: [userMessageCommand(trunkMessage, cid())],
     })
-    state.threadId = created.thread.threadId
+    state.threadId = String(threadId)
     for (let index = 0; index < extraThreadCount; index += 1) {
-      const extra = await createChatThread(apiCtx, state.chat.id, {
-        title: null,
+      const extra = await materializeNewSession(apiCtx, {
+        owner,
+        sessionId: cid(),
+        threadId: cid(),
+        rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
         yoloEnabled: false,
-        branchSettings,
+        commands: [userMessageCommand(`extra ${index} ${cid().slice(0, 8)}`, cid())],
       })
-      state.extraThreadIds.push(extra.thread.threadId)
+      state.extraThreadIds.push(String(extra.thread.threadId))
     }
 
-    await enqueueCommands(apiCtx, state.threadId, {
-      expectedHeadEntryId: created.thread.headEntryId,
-      expectedNextCommandSequence: created.thread.nextCommandSequence,
-      commands: [
-        setAgentCommand(`e2e-ui-missing-${cid().slice(0, 8)}`, cid()),
-        userMessageCommand(trunkMessage, cid()),
-      ],
-    })
     const { snapshot: trunk } = await waitForDurableMessages(
       apiCtx,
       state.threadId,
@@ -1184,25 +1203,36 @@ async function createBranchedHistoryFixture(
     )
     const branchPointEntryId = trunk.thread.headEntryId
 
-    await enqueueCommands(apiCtx, state.threadId, {
-      expectedHeadEntryId: trunk.thread.headEntryId,
-      expectedNextCommandSequence: trunk.thread.nextCommandSequence,
-      commands: originalMessages.map((message) => userMessageCommand(message, cid())),
-    })
+    // 原分支：originalMessages 逐条 THREAD batch。
+    for (const message of originalMessages) {
+      const current = await getThreadSnapshot(apiCtx, state.threadId)
+      await acceptCommandBatch(apiCtx, {
+        owner,
+        target: threadTarget({
+          threadId: state.threadId,
+          expectedHeadEntryId: current.thread.headEntryId,
+          expectedNextCommandSequence: current.thread.nextCommandSequence,
+        }),
+        commands: [userMessageCommand(message, cid())],
+      })
+    }
     const { snapshot: original } = await waitForDurableMessages(
       apiCtx,
       state.threadId,
       [trunkMessage, ...originalMessages],
     )
-    const moved = await updateThreadHead(apiCtx, state.threadId, {
-      targetEntryId: branchPointEntryId,
-      expectedRevision: original.thread.revision,
-    })
-    await enqueueCommands(apiCtx, state.threadId, {
-      expectedHeadEntryId: moved.headEntryId,
-      expectedNextCommandSequence: moved.nextCommandSequence,
+
+    // 分支：ENTRY 在同 Session branchPoint 下开新 Thread，写 alternateMessage。
+    const alternateThreadId = cid()
+    const branched = await materializeEntryThread(apiCtx, {
+      owner,
+      sessionId,
+      startEntryId: branchPointEntryId,
+      threadId: alternateThreadId,
+      yoloEnabled: false,
       commands: [userMessageCommand(alternateMessage, cid())],
     })
+    state.threadId = String(branched.thread.threadId)
     await waitForDurableMessages(
       apiCtx,
       state.threadId,
@@ -1305,29 +1335,67 @@ async function createHoldingQueueFixture(
       agentName: state.agent.name,
       yoloEnabled: false,
     })
-    const created = await createChatThread(apiCtx, state.chat.id, {
-      title: null,
+    const owner = chatOwner(state.chat.id)
+    const sessionId = cid()
+    const threadId = cid()
+    // 先以不存在的 Agent 确定性物化空闲 Thread，再在 mock 上通过 THREAD batch 启动真实 hold turn。
+    await materializeNewSession(apiCtx, {
+      owner,
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-ui-hold-missing-${suffix}` },
+        {
+          providerName: state.model.providerName,
+          modelName: state.model.name,
+          variant: 'default',
+        },
+      ),
       yoloEnabled: false,
-      branchSettings: branchSettingsOf(state.agent, {
-        providerName: state.model.providerName,
-        modelName: state.model.name,
-        variant: 'default',
-      }),
+      commands: [userMessageCommand(`hold materialize ${suffix}`, cid())],
     })
-    state.threadId = created.thread.threadId
-    await enqueueCommands(apiCtx, state.threadId, {
-      expectedHeadEntryId: created.thread.headEntryId,
-      expectedNextCommandSequence: created.thread.nextCommandSequence,
-      commands: [userMessageCommand(historicalMessage, cid())],
+    state.threadId = String(threadId)
+    const idle = await waitForQuiescentThread(apiCtx, state.threadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    await acceptCommandBatch(apiCtx, {
+      owner,
+      target: threadTarget({
+        threadId: state.threadId,
+        expectedHeadEntryId: idle.headEntryId,
+        expectedNextCommandSequence: idle.nextCommandSequence,
+      }),
+      commands: [
+        setAgentCommand(state.agent.name, cid()),
+        setModelCommand(
+          {
+            providerName: state.model.providerName,
+            modelName: state.model.name,
+            variant: 'default',
+          },
+          cid(),
+        ),
+        userMessageCommand(historicalMessage, cid()),
+      ],
     })
     await mock.waitForRequest()
 
     const active = await waitForActiveModel(apiCtx, state.threadId)
-    await enqueueCommands(apiCtx, state.threadId, {
-      expectedHeadEntryId: active.thread.headEntryId,
-      expectedNextCommandSequence: active.thread.nextCommandSequence,
-      commands: queuedMessages.map((message) => userMessageCommand(message, cid())),
-    })
+    // queuedMessages 逐条 THREAD batch（产品 HTTP 面一个 batch 只允许恰一条 USER_MESSAGE）。
+    let cursor = active.thread
+    for (const message of queuedMessages) {
+      const accepted = await acceptCommandBatch(apiCtx, {
+        owner,
+        target: threadTarget({
+          threadId: state.threadId,
+          expectedHeadEntryId: cursor.headEntryId,
+          expectedNextCommandSequence: cursor.nextCommandSequence,
+        }),
+        commands: [userMessageCommand(message, cid())],
+      })
+      cursor = accepted.thread
+    }
     await waitForQueuedMessages(apiCtx, state.threadId, queuedMessages.length)
     return fixtureOf(state)
   } catch (error) {
