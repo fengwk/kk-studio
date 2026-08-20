@@ -29,7 +29,6 @@ export function SettingsCard({
   timing?: ApplyTiming
   children: ReactNode
 }) {
-  const { t } = useI18n()
   const titleId = useId()
   return (
     <section className="settings-card" aria-labelledby={titleId}>
@@ -38,7 +37,7 @@ export function SettingsCard({
           <h2 id={titleId}>{title}</h2>
           {timing ? <ApplyTimingBadge timing={timing} /> : null}
         </div>
-        {description ? <p>{t(description)}</p> : null}
+        {description ? <p>{description}</p> : null}
       </header>
       {children}
     </section>
@@ -75,7 +74,6 @@ export function SettingsSwitchRow({
   fieldPath?: string
   nullable?: boolean
 }) {
-  const { t } = useI18n()
   return (
     <div
       className="settings-row"
@@ -84,7 +82,7 @@ export function SettingsSwitchRow({
     >
       <div className="settings-row-text">
         <strong>{label}</strong>
-        {description ? <span className="settings-row-description">{t(description)}</span> : null}
+        {description ? <span className="settings-row-description">{description}</span> : null}
       </div>
       <button
         type="button"
@@ -125,7 +123,6 @@ export function SettingsTextField({
   nullable?: boolean
 }) {
   const fieldId = useId()
-  const { t } = useI18n()
   return (
     <div
       className="settings-field"
@@ -145,7 +142,7 @@ export function SettingsTextField({
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       />
-      {hint ? <span className="settings-field-hint">{t(hint)}</span> : null}
+      {hint ? <span className="settings-field-hint">{hint}</span> : null}
     </div>
   )
 }
@@ -178,7 +175,6 @@ export function SettingsNumberField({
   nullable?: boolean
 }) {
   const fieldId = useId()
-  const { t } = useI18n()
   return (
     <div
       className="settings-field"
@@ -202,7 +198,7 @@ export function SettingsNumberField({
         disabled={disabled}
         onChange={(event) => onChange(sanitizeIntegerInput(event.target.value))}
       />
-      {hint ? <span className="settings-field-hint">{t(hint)}</span> : null}
+      {hint ? <span className="settings-field-hint">{hint}</span> : null}
     </div>
   )
 }

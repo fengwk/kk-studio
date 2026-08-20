@@ -46,6 +46,34 @@ class SystemSettingsDtoContractTest {
   }
 
   @Test
+  void rejectsUnknownFieldsAtEverySchemaNestingLevel() throws Exception {
+    assertRejectsUnknown(
+        () ->
+            objectMapper.readValue(
+                "{\"sections\":[{\"unknown\":1}]}", SystemSettingsSchemaDTO.class));
+    assertRejectsUnknown(
+        () ->
+            objectMapper.readValue(
+                "{\"key\":\"tool\",\"labelKey\":\"l\",\"descriptionKey\":\"d\",\"restartRequired\":false,"
+                    + "\"groups\":[{\"key\":\"g\",\"labelKey\":\"l\",\"descriptionKey\":\"d\","
+                    + "\"restartRequired\":false,\"applyTiming\":null,\"unknown\":1}]}",
+                SystemSettingsSchemaDTO.class));
+    assertRejectsUnknown(
+        () ->
+            objectMapper.readValue(
+                "{\"key\":\"g\",\"labelKey\":\"l\",\"descriptionKey\":\"d\",\"restartRequired\":false,"
+                    + "\"applyTiming\":null,\"fields\":[{\"path\":\"p\",\"labelKey\":\"l\",\"hintKey\":null,"
+                    + "\"type\":\"TEXT\",\"nullable\":false,\"min\":null,\"max\":null,\"options\":null,"
+                    + "\"unknown\":1}]}",
+                SystemSettingsSchemaDTO.GroupDTO.class));
+    assertRejectsUnknown(
+        () ->
+            objectMapper.readValue(
+                "{\"value\":\"allow\",\"labelKey\":\"l\",\"unknown\":1}",
+                SystemSettingsSchemaDTO.OptionDTO.class));
+  }
+
+  @Test
   void dtoWireNamesMatchTheCanonicalContract() throws Exception {
     String json = objectMapper.writeValueAsString(defaultSections());
     assertTrue(json.contains("\"tool\""), "tool section must serialize: " + json);

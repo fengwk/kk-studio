@@ -14,7 +14,7 @@ import {
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
 import { useI18n } from '@/shared/i18n'
-import { validateSystemSettingsSchema } from '@/features/settings/SystemSettingsSchemaRenderer'
+import { validateSystemSettingsSchema } from '@/features/settings/system-settings-schema-validation'
 import {
   presentConflict,
   type ConflictPresentation,
@@ -56,7 +56,7 @@ export function useSystemSettingsEditor() {
 
   const authoritative = query.data ?? null
   const draft = draftSnapshot?.sections ?? null
-  const schema = schemaQuery.data ?? null
+  const rawSchema = schemaQuery.data ?? null
 
   // 只在还没有快照时从权威数据派生（首次 hydration，捕获当时的 version 作为 baseVersion）；
   // 后台刷新既不复位 baseVersion，也不覆盖用户正在编辑的 draft。
@@ -79,6 +79,15 @@ export function useSystemSettingsEditor() {
     }
     return JSON.stringify(draft) !== JSON.stringify(authoritativeSections)
   }, [authoritativeSections, draft])
+
+  // 只有通过 fail-closed 校验的 schema 才交给 UI：SettingsPage 拿到的 schema 为 null 时
+  // 不会构建任何 server tab，invalid schema 永远进不了渲染器。
+  const schema = useMemo(() => {
+    if (rawSchema == null || draft == null) {
+      return rawSchema
+    }
+    return validateSystemSettingsSchema(rawSchema, draft) == null ? rawSchema : null
+  }, [draft, rawSchema])
 
   const version = authoritative?.version ?? null
 
@@ -153,16 +162,6 @@ export function useSystemSettingsEditor() {
     setConflict(null)
   }, [])
 
-  const updateSection = useCallback(
-    <K extends keyof SystemSettingsSectionsDraft>(section: K, value: SystemSettingsSectionsDraft[K]) => {
-      // 只替换 section 内容，baseVersion 保持快照原值不动。
-      setDraftSnapshot((prev) =>
-        prev ? { ...prev, sections: { ...prev.sections, [section]: value } } : prev,
-      )
-    },
-    [],
-  )
-
   const updateDraft = useCallback((sections: SystemSettingsSectionsDraft) => {
     setDraftSnapshot((prev) => (prev ? { ...prev, sections } : prev))
   }, [])
@@ -186,13 +185,12 @@ export function useSystemSettingsEditor() {
     if (schemaQuery.isError) {
       return t('settings.error.schema')
     }
-    if (schema != null && draft != null) {
-      return validateSystemSettingsSchema(schema, draft) == null
-        ? null
-        : t('settings.error.schema')
+    // schema 已经过 fail-closed 校验（无效时为 null）：只要加载成功但 UI 拿不到 schema，就是无效。
+    if (rawSchema != null && draft != null && schema == null) {
+      return t('settings.error.schema')
     }
     return null
-  }, [draft, schema, schemaQuery.isError, t])
+  }, [draft, rawSchema, schema, schemaQuery.isError, t])
 
   return {
     loading: (query.isLoading || schemaQuery.isLoading) && draft === null,
@@ -209,9 +207,7 @@ export function useSystemSettingsEditor() {
     draftError,
     version,
     draft,
-    updateSection,
     updateDraft,
-    authoritativeSections,
     schema,
   }
 }
