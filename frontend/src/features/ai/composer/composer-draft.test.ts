@@ -7,7 +7,9 @@ import {
 } from '@/features/ai/composer/composer-draft'
 import {
   createAttachmentPart,
+  createResourcePart,
   createTextPart,
+  partsToMessageContents,
   partsToText,
 } from '@/features/ai/composer/composer-parts'
 
@@ -47,8 +49,38 @@ describe('composer draft storage', () => {
     // 前后空白和换行属于用户草稿，持久化后必须逐字恢复。
     storeComposerDraft(scope, [createTextPart('  first\nsecond  ')], storage)
 
-    expect(storage.getItem(composerDraftStorageKey(scope))).toBe('  first\nsecond  ')
+    expect(JSON.parse(storage.getItem(composerDraftStorageKey(scope)) ?? '')).toEqual({
+      version: 2,
+      parts: [{ type: 'text', text: '  first\nsecond  ' }],
+    })
     expect(partsToText(loadStoredComposerDraft(scope, storage))).toBe('  first\nsecond  ')
+  })
+
+  it('round-trips ordered text and durable resources with fresh part ids', () => {
+    const storage = new MemoryStorage()
+    const scope = 'thread:t1'
+    const source = [
+      createTextPart('before'),
+      createResourcePart('00000000-0000-0000-0000-000000000001', 'a.txt', ''),
+      createTextPart('after'),
+    ]
+
+    storeComposerDraft(scope, source, storage)
+    const restored = loadStoredComposerDraft(scope, storage)
+
+    expect(partsToMessageContents(restored)).toEqual([
+      { type: 'TEXT', text: 'before' },
+      {
+        type: 'RESOURCE',
+        blobId: '00000000-0000-0000-0000-000000000001',
+        name: 'a.txt',
+        preview: '',
+      },
+      { type: 'TEXT', text: 'after' },
+    ])
+    expect(restored.map((part) => part.partId)).not.toEqual(
+      source.map((part) => part.partId),
+    )
   })
 
   it('clears storage for blank or attachment-bearing drafts', () => {
@@ -83,5 +115,17 @@ describe('composer draft storage', () => {
       ),
     ).toBe('recovered')
     expect(partsToText(restoreComposerDraft(scope, [], storage))).toBe('stored')
+  })
+
+  it('fails closed and removes malformed persisted drafts', () => {
+    const storage = new MemoryStorage()
+    const scope = 'thread:t1'
+    storage.setItem(
+      composerDraftStorageKey(scope),
+      '{"version":2,"parts":[{"type":"resource","blobId":"b","name":"n","unknown":true}]}',
+    )
+
+    expect(loadStoredComposerDraft(scope, storage)).toEqual([])
+    expect(storage.getItem(composerDraftStorageKey(scope))).toBeNull()
   })
 })

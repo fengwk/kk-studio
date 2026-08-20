@@ -88,7 +88,7 @@ export function useComposerMessageHistory({
     const currentIndex = Math.max(0, Math.min(cursorRef.current, scratchIndex))
     if (
       currentIndex === scratchIndex
-      && scratchRef.current.some((part) => part.type === 'attachment')
+      && scratchRef.current.some((part) => part.type !== 'text')
     ) {
       return false
     }

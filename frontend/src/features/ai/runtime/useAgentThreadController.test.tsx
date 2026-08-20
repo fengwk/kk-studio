@@ -12,7 +12,14 @@ import {
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
 import { branchDraftFromThread, type BranchDraft } from '@/features/ai/chat/branch-draft'
-import { createAttachmentPart, createTextPart, partsToText, type ComposerPart } from '@/features/ai/composer/composer-parts'
+import {
+  createAttachmentPart,
+  createTextPart,
+  partsToMessageContents,
+  partsToText,
+  type ComposerPart,
+} from '@/features/ai/composer/composer-parts'
+import { pendingStopStorageKey } from '@/features/ai/runtime/pending-stop-sidecar'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { agentService } from '@/shared/api/agent-service'
@@ -161,6 +168,7 @@ function buildBatchFor(
 describe('useAgentThreadController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     realtimeSockets = new FakeWebSocketHarness()
     vi.mocked(agentService.listAgents).mockResolvedValue({
       pageNumber: 1,
@@ -211,6 +219,7 @@ describe('useAgentThreadController', () => {
       thread: threadFixture(),
       stoppedTurnEndEntryId: null,
       cancelledCommandCount: 0,
+      cancelledUserMessages: [],
     } as HarnessThreadStopResultDTO)
     vi.mocked(harnessService.decideApproval).mockImplementation(
       async (_threadId, invocationId) =>
@@ -768,6 +777,7 @@ describe('useAgentThreadController', () => {
         thread: threadFixture(),
         stoppedTurnEndEntryId: null,
         cancelledCommandCount: 0,
+        cancelledUserMessages: [],
       } as HarnessThreadStopResultDTO)
 
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
@@ -790,6 +800,117 @@ describe('useAgentThreadController', () => {
     // 稳定的幂等键在瞬态失败后仍然保留。
     expect(secondStopArg?.stopRequestId).toBe(firstStopArg?.stopRequestId)
     expect(secondStopArg?.expectedRevision).toBe('0')
+  })
+
+  it('restores cancelled text and resources once after an ambiguous Stop retry', async () => {
+    vi.mocked(harnessService.stopThread)
+      .mockRejectedValueOnce(new Error('response lost'))
+      .mockResolvedValueOnce({
+        status: 'REPLAYED',
+        thread: threadFixture(),
+        stoppedTurnEndEntryId: null,
+        cancelledCommandCount: 2,
+        cancelledUserMessages: [
+          {
+            sequence: '1',
+            clientCommandId: 'c1',
+            messageJson:
+              '{"role":"USER","contents":[{"type":"text","text":"cancelled"}]}',
+          },
+          {
+            sequence: '2',
+            clientCommandId: 'c2',
+            messageJson:
+              '{"role":"USER","contents":[{"type":"resource","blobId":"00000000-0000-0000-0000-000000000001","name":"a.txt","preview":"p"}]}',
+          },
+        ],
+      } as HarnessThreadStopResultDTO)
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    act(() => result.current.setDraft([createTextPart('current')]))
+
+    await act(async () => {
+      await result.current.stopThread()
+    })
+    expect(partsToText(result.current.draft)).toBe('current')
+
+    await act(async () => {
+      await result.current.stopThread()
+    })
+    expect(partsToMessageContents(result.current.draft)).toEqual([
+      { type: 'TEXT', text: 'cancelled\n\n' },
+      {
+        type: 'RESOURCE',
+        blobId: '00000000-0000-0000-0000-000000000001',
+        name: 'a.txt',
+        preview: 'p',
+      },
+      { type: 'TEXT', text: '\n\ncurrent' },
+    ])
+    expect(localStorage.getItem(pendingStopStorageKey(THREAD_ID))).toBeNull()
+  })
+
+  it('applies concurrent replay-equivalent Stop responses at most once', async () => {
+    vi.mocked(harnessService.stopThread).mockResolvedValue({
+      status: 'REPLAYED',
+      thread: threadFixture(),
+      stoppedTurnEndEntryId: null,
+      cancelledCommandCount: 1,
+      cancelledUserMessages: [
+        {
+          sequence: '1',
+          clientCommandId: 'c1',
+          messageJson:
+            '{"role":"USER","contents":[{"type":"text","text":"cancelled"}]}',
+        },
+      ],
+    } as HarnessThreadStopResultDTO)
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    await act(async () => {
+      await Promise.all([
+        result.current.stopThread(),
+        result.current.stopThread(),
+      ])
+    })
+
+    expect(harnessService.stopThread).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]?.stopRequestId).toBe(
+      vi.mocked(harnessService.stopThread).mock.calls[1]?.[1]?.stopRequestId,
+    )
+    expect(partsToText(result.current.draft)).toBe('cancelled')
+  })
+
+  it('restores the persisted pending Stop identity after remount', async () => {
+    vi.mocked(harnessService.stopThread).mockRejectedValueOnce(new Error('response lost'))
+    const first = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await waitFor(() => expect(first.result.current.disabled).toBe(false))
+
+    await act(async () => {
+      await first.result.current.stopThread()
+    })
+    const firstBody = vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]
+    expect(localStorage.getItem(pendingStopStorageKey(THREAD_ID))).not.toBeNull()
+    first.unmount()
+
+    vi.mocked(harnessService.stopThread).mockResolvedValue({
+      status: 'REPLAYED',
+      thread: threadFixture(),
+      stoppedTurnEndEntryId: null,
+      cancelledCommandCount: 0,
+      cancelledUserMessages: [],
+    } as HarnessThreadStopResultDTO)
+    const second = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await waitFor(() => expect(second.result.current.disabled).toBe(false))
+    await waitFor(() => expect(second.result.current.stopReplayPending).toBe(true))
+
+    await act(async () => {
+      await second.result.current.stopThread()
+    })
+    const replayBody = vi.mocked(harnessService.stopThread).mock.calls[1]?.[1]
+    expect(replayBody).toEqual(firstBody)
+    expect(localStorage.getItem(pendingStopStorageKey(THREAD_ID))).toBeNull()
   })
 
   it('retires an ambiguous stop when the snapshot proves the old Turn ended and mints a fresh id', async () => {
@@ -832,6 +953,7 @@ describe('useAgentThreadController', () => {
       thread: threadFixture({ headEntryId: 'e-turn1-end', revision: '2' }),
       stoppedTurnEndEntryId: null,
       cancelledCommandCount: 0,
+      cancelledUserMessages: [],
     } as HarnessThreadStopResultDTO)
     await act(async () => {
       await result.current.stopThread()
@@ -849,6 +971,7 @@ describe('useAgentThreadController', () => {
         thread: threadFixture(),
         stoppedTurnEndEntryId: null,
         cancelledCommandCount: 0,
+        cancelledUserMessages: [],
       } as HarnessThreadStopResultDTO)
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -878,6 +1001,7 @@ describe('useAgentThreadController', () => {
         thread: threadFixture(),
         stoppedTurnEndEntryId: null,
         cancelledCommandCount: 0,
+        cancelledUserMessages: [],
       } as HarnessThreadStopResultDTO)
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -956,6 +1080,7 @@ describe('useAgentThreadController', () => {
       thread: turn2,
       stoppedTurnEndEntryId: null,
       cancelledCommandCount: 0,
+      cancelledUserMessages: [],
     } as HarnessThreadStopResultDTO)
     await act(async () => {
       await result.current.stopThread()

@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
+import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -32,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
@@ -163,7 +165,14 @@ class StudioHarnessThreadControllerTest {
   void stopAndApprovalRoutesRemainAvailable() throws Exception {
     when(runtime.stop(any()))
         .thenReturn(
-            new StopResult(false, HarnessRuntimeTestFixtures.thread(id(1)), id(9), 2, List.of()));
+            new StopResult(
+                false,
+                HarnessRuntimeTestFixtures.thread(id(1)),
+                id(9),
+                2,
+                List.of(
+                    new CancelledUserMessage(
+                        1L, id(50), List.of(new TextMessageContent("hello"))))));
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
     mockMvc
         .perform(
@@ -172,7 +181,13 @@ class StudioHarnessThreadControllerTest {
                 .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedRevision\":\"3\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("STOPPED"))
-        .andExpect(jsonPath("$.data.cancelledCommandCount").value(2));
+        .andExpect(jsonPath("$.data.cancelledCommandCount").value(2))
+        .andExpect(jsonPath("$.data.cancelledUserMessages[0].sequence").value("1"))
+        .andExpect(jsonPath("$.data.cancelledUserMessages[0].clientCommandId").value(idText(50)))
+        .andExpect(
+            jsonPath("$.data.cancelledUserMessages[0].messageJson")
+                .value(
+                    "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}"));
 
     when(runtime.decideToolApproval(any(ToolApprovalCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.waitingApprovalTool());
