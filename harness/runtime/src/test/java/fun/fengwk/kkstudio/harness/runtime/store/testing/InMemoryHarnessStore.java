@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
@@ -9,7 +7,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -810,12 +807,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       if (turnStart.payload().type() != EntryType.TURN_START) {
         throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
       }
-      boolean compactionInvocation = invocation.request().compaction() != null;
       TurnStartPayload turnStartPayload = (TurnStartPayload) turnStart.payload();
-      if (turnStartPayload.reason() == TurnStartReason.COMPACTION != compactionInvocation) {
-        throw new IllegalArgumentException(
-            "TURN_START reason COMPACTION must match the invocation compaction purpose");
-      }
       if (!turnStartPayload.ownerThreadId().equals(invocation.threadId())) {
         throw new IllegalArgumentException(
             "turn start ownerThreadId must equal the model invocation threadId");
@@ -824,6 +816,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
       if (contextWindow == null || contextWindow <= 0) {
         throw new IllegalArgumentException(
             "model invocations require a positive turn start contextWindow");
+      }
+      Integer maxOutputTokens = turnStartPayload.maxOutputTokens();
+      if (maxOutputTokens == null || maxOutputTokens <= 0) {
+        throw new IllegalArgumentException(
+            "model invocations require positive turn start maxOutputTokens");
       }
       // 新 durable invocation 初始状态不变量：READY / attempt=0 / 无 terminal facts（record 配合保证后者）。
       if (invocation.status() != ModelInvocationStatus.READY || invocation.attempt() != 0) {
@@ -883,10 +880,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
         return;
       }
       Entry result = requireExistingEntry(resultEntryId);
-      boolean compactionInvocation = invocation.request().compaction() != null;
-      if (compactionInvocation && result.payload().type() == EntryType.COMPACTION) {
-        requireValidCompactionResult(invocation, result);
-      }
+      boolean compactionInvocation = isCompactionInvocation(invocation);
       if (!isModelResultEntry(result, compactionInvocation)) {
         throw new IllegalArgumentException(
             compactionInvocation
@@ -920,61 +914,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    /**
-     * COMPACTION 结果 Entry 只接受 SUCCEEDED invocation：payload 元数据必须与冻结请求逐字段一致，且 firstKept / cut /
-     * prefix（存在时）引用必须存在于 result 路径上、位于 result Entry 之前并满足 firstKept &lt;= cut、prefix &lt; cut；
-     * 引用缺失或顺序非法视为分支损坏，fail closed。
-     */
-    private void requireValidCompactionResult(ModelInvocation invocation, Entry result) {
-      if (invocation.status() != ModelInvocationStatus.SUCCEEDED) {
-        throw new IllegalArgumentException(
-            "compaction result entry requires a SUCCEEDED invocation status");
+    private boolean isCompactionInvocation(ModelInvocation invocation) {
+      Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
+      if (!(turnStart.payload() instanceof TurnStartPayload payload)) {
+        throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
       }
-      CompactionRequest request = invocation.request().compaction();
-      CompactionPayload payload = (CompactionPayload) result.payload();
-      if (payload.phase() != request.phase()
-          || payload.trigger() != request.trigger()
-          || payload.tokensBefore() != request.tokensBefore()
-          || !payload.firstKeptEntryId().equals(request.firstKeptEntryId())
-          || !payload.cutEntryId().equals(request.cutEntryId())
-          || !Objects.equals(payload.turnPrefixStartEntryId(), request.turnPrefixStartEntryId())) {
-        throw new IllegalArgumentException(
-            "compaction result payload metadata must match the frozen compaction request");
-      }
-      requireValidCompactionReferences(invocation, result);
-    }
-
-    /** 切分引用必须是 result Entry 的祖先且满足 firstKept <= cut、prefix < cut（存在时）。 */
-    private void requireValidCompactionReferences(ModelInvocation invocation, Entry result) {
-      CompactionRequest request = invocation.request().compaction();
-      List<Entry> entries = loadEntryPath(result.id()).entries();
-      int resultIndex = entries.size() - 1; // result 是路径 head，其引用必须全部在其之前
-      int firstKeptIndex = indexOfId(entries, request.firstKeptEntryId());
-      int cutIndex = indexOfId(entries, request.cutEntryId());
-      UUID prefixId = request.turnPrefixStartEntryId();
-      int prefixIndex = prefixId == null ? -1 : indexOfId(entries, prefixId);
-      boolean referencesBeforeResult =
-          firstKeptIndex >= 0
-              && firstKeptIndex < resultIndex
-              && cutIndex >= 0
-              && cutIndex < resultIndex
-              && (prefixId == null || (prefixIndex >= 0 && prefixIndex < resultIndex));
-      if (!referencesBeforeResult
-          || firstKeptIndex > cutIndex
-          || (prefixId != null && prefixIndex >= cutIndex)) {
-        throw new IllegalArgumentException(
-            "compaction result references must exist on the result path before the result entry"
-                + " with firstKeptEntryId <= cutEntryId and turnPrefixStartEntryId < cutEntryId");
-      }
-    }
-
-    private static int indexOfId(List<Entry> entries, UUID entryId) {
-      for (int i = 0; i < entries.size(); i++) {
-        if (entries.get(i).id().equals(entryId)) {
-          return i;
-        }
-      }
-      return -1;
+      return payload.compaction() != null;
     }
 
     private static boolean isModelResultEntry(Entry entry, boolean compactionInvocation) {

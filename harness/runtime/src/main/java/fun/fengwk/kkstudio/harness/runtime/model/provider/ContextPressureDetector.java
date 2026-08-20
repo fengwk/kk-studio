@@ -115,6 +115,23 @@ public final class ContextPressureDetector {
     return reachedWindow(facts) || strictLengthNearWindow(facts);
   }
 
+  /**
+   * 只基于成功 terminal response 的 generation/usage/window 判断 silent context wall。
+   *
+   * <p>该路径没有 Provider 错误文本，因此不需要伪造 {@link ProviderType}；仅执行 authoritative usage 与严格 LENGTH 两条规则。
+   */
+  public static boolean detectResponse(
+      GenerationStopReason stopReason, ModelUsage usage, long contextWindow) {
+    if (contextWindow <= 0) {
+      throw new IllegalArgumentException("contextWindow must be positive");
+    }
+    Objects.requireNonNull(usage, "usage");
+    return promptTokens(usage) >= contextWindow
+        || (stopReason == GenerationStopReason.LENGTH
+            && usage.outputTokens() == 0
+            && promptTokens(usage) >= (long) Math.ceil(contextWindow * 0.99d));
+  }
+
   /** rate limit / throttling 永不为 context pressure；adapter classify 与 future ThreadProcessor 共用。 */
   public static boolean isRateLimited(ContextPressureFacts facts) {
     Objects.requireNonNull(facts, "facts");

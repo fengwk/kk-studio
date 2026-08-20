@@ -14,10 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -114,5 +118,98 @@ class HarnessRuntimeStopContinuationTest {
     assertEquals(2L, stored.revision());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
     assertEquals(8, path.entries().size());
+  }
+
+  @Test
+  void stopClosesOwnedHistoryPhaseGapWithExactCompactionBarrier() {
+    // HISTORY 成功后的 continueModel obligation 必须可被 Stop durable 关闭，不能只依赖删除 THREAD Work。
+    UUID[] ids =
+        store.transaction(
+            tx -> {
+              UUID sessionId = tx.nextId();
+              UUID rootId = tx.nextId();
+              UUID inputStartId = tx.nextId();
+              UUID userId = tx.nextId();
+              UUID assistantId = tx.nextId();
+              UUID inputEndId = tx.nextId();
+              UUID historyStartId = tx.nextId();
+              UUID historyResultId = tx.nextId();
+              UUID historyEndId = tx.nextId();
+              UUID threadId = tx.nextId();
+              tx.insertSession(HarnessRuntimeTestSupport.session(sessionId));
+              tx.insertEntry(HarnessRuntimeTestSupport.rootEntry(rootId, sessionId));
+              tx.insertEntry(
+                  HarnessRuntimeTestSupport.turnStartEntry(
+                      inputStartId, sessionId, rootId, T5, threadId));
+              tx.insertEntry(
+                  HarnessRuntimeTestSupport.userMessageEntry(userId, sessionId, inputStartId, T5));
+              tx.insertEntry(
+                  HarnessRuntimeTestSupport.assistantEntry(assistantId, sessionId, userId, T5));
+              tx.insertEntry(
+                  new Entry(
+                      inputEndId,
+                      sessionId,
+                      assistantId,
+                      new TurnEndPayload(inputStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      T5));
+              CompactionStart history =
+                  new CompactionStart(
+                      CompactionPhase.HISTORY,
+                      CompactionTrigger.THRESHOLD,
+                      settings().model(),
+                      assistantId,
+                      userId,
+                      null);
+              tx.insertEntry(
+                  new Entry(
+                      historyStartId,
+                      sessionId,
+                      inputEndId,
+                      new TurnStartPayload(
+                          TurnStartReason.COMPACTION,
+                          settings(),
+                          threadId,
+                          100_000,
+                          16_384,
+                          history),
+                      T5));
+              tx.insertEntry(
+                  new Entry(
+                      historyResultId,
+                      sessionId,
+                      historyStartId,
+                      new CompactionPayload("history summary"),
+                      T5));
+              tx.insertEntry(
+                  new Entry(
+                      historyEndId,
+                      sessionId,
+                      historyResultId,
+                      new TurnEndPayload(
+                          historyStartId, TurnEndOutcome.COMPLETED, true, null, null),
+                      T5));
+              tx.insertThread(HarnessRuntimeTestSupport.thread(threadId, sessionId, historyEndId));
+              return new UUID[] {threadId, historyEndId, historyResultId, assistantId, userId};
+            });
+
+    UUID stopRequestId = TestIds.id(99);
+    StopResult first = runtime.stop(new StopCommand(ids[0], stopRequestId, 0));
+    assertStopped(first);
+    ThreadState stored = store.transaction(tx -> tx.lockThread(ids[0]).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
+    assertEquals(11, path.entries().size());
+    TurnStartPayload barrierStart = (TurnStartPayload) path.entries().get(8).payload();
+    assertEquals(TurnStartReason.COMPACTION, barrierStart.reason());
+    assertEquals(CompactionPhase.TURN_PREFIX, barrierStart.compaction().phase());
+    assertEquals(ids[3], barrierStart.compaction().cutEntryId());
+    assertEquals(ids[4], barrierStart.compaction().turnPrefixStartEntryId());
+    assertEquals(ids[2], barrierStart.compaction().historyCompactionEntryId());
+    TurnEndPayload barrierEnd = (TurnEndPayload) path.head().payload();
+    assertEquals(TurnEndOutcome.STOPPED, barrierEnd.outcome());
+    assertEquals(stopRequestId, barrierEnd.closeRequestId());
+
+    StopResult replay = runtime.stop(new StopCommand(ids[0], stopRequestId, 0));
+    assertTrue(replay.replayed());
+    assertEquals(first.stoppedTurnEndEntryId(), replay.stoppedTurnEndEntryId());
   }
 }

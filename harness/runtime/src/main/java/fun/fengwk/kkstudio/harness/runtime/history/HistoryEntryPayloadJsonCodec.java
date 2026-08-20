@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -44,7 +45,8 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> SUBAGENT_CONTEXT_FIELDS =
       orderedSet("parentThreadId", "rootThreadId", "taskInvocationId", "depth");
   private static final Set<String> TURN_START_FIELDS =
-      orderedSet("reason", "settings", "ownerThreadId", "contextWindow");
+      orderedSet(
+          "reason", "settings", "ownerThreadId", "contextWindow", "maxOutputTokens", "compaction");
   private static final Set<String> MESSAGE_FIELDS =
       orderedSet("message", "assistantMetadata", "toolResultMetadata");
   private static final Set<String> CUSTOM_FIELDS =
@@ -57,16 +59,7 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> ATTEMPT_SNAPSHOT_FIELDS =
       orderedSet("attempt", "sequence", "text", "thinking");
   private static final Set<String> ASSISTANT_ABORTED_FIELDS = orderedSet("message");
-  private static final Set<String> COMPACTION_FIELDS =
-      orderedSet(
-          "phase",
-          "trigger",
-          "tokensBefore",
-          "complete",
-          "summaryText",
-          "firstKeptEntryId",
-          "cutEntryId",
-          "turnPrefixStartEntryId");
+  private static final Set<String> COMPACTION_FIELDS = orderedSet("summaryText");
   private static final Set<String> TURN_END_FIELDS =
       orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
   private static final Set<String> ERROR_FIELDS = orderedSet("code", "message");
@@ -174,6 +167,16 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.put("contextWindow", value.contextWindow());
     }
+    if (value.maxOutputTokens() == null) {
+      node.putNull("maxOutputTokens");
+    } else {
+      node.put("maxOutputTokens", value.maxOutputTokens());
+    }
+    if (value.compaction() == null) {
+      node.putNull("compaction");
+    } else {
+      node.set("compaction", encodeCompactionStart(value.compaction()));
+    }
     return node;
   }
 
@@ -252,18 +255,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ObjectNode encodeCompaction(CompactionPayload value) {
     ObjectNode node = NODES.objectNode();
-    node.put("phase", value.phase().name());
-    node.put("trigger", value.trigger().name());
-    node.put("tokensBefore", value.tokensBefore());
-    node.put("complete", value.complete());
     node.put("summaryText", value.summaryText());
-    node.put("firstKeptEntryId", value.firstKeptEntryId().toString());
-    node.put("cutEntryId", value.cutEntryId().toString());
-    if (value.turnPrefixStartEntryId() == null) {
-      node.putNull("turnPrefixStartEntryId");
-    } else {
-      node.put("turnPrefixStartEntryId", value.turnPrefixStartEntryId().toString());
-    }
     return node;
   }
 
@@ -339,7 +331,9 @@ public final class HistoryEntryPayloadJsonCodec {
             TurnStartReason.class, HistoryValueCodecs.text(node, "reason"), "TURN_START.reason"),
         HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "TURN_START.settings"),
         HistoryValueCodecs.requiredPositiveId(node, "ownerThreadId", "TURN_START"),
-        HistoryValueCodecs.nullablePositiveInt(node, "contextWindow", "TURN_START"));
+        HistoryValueCodecs.nullablePositiveInt(node, "contextWindow", "TURN_START"),
+        HistoryValueCodecs.nullablePositiveInt(node, "maxOutputTokens", "TURN_START"),
+        decodeNullableCompactionStart(node.get("compaction")));
   }
 
   private static MessagePayload decodeMessage(JsonNode value) {
@@ -441,19 +435,59 @@ public final class HistoryEntryPayloadJsonCodec {
   private static CompactionPayload decodeCompaction(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "COMPACTION");
     HistoryValueCodecs.requireExactFields(node, COMPACTION_FIELDS, "COMPACTION");
-    return new CompactionPayload(
+    return new CompactionPayload(HistoryValueCodecs.text(node, "summaryText"));
+  }
+
+  private static final Set<String> COMPACTION_START_FIELDS =
+      orderedSet(
+          "phase",
+          "trigger",
+          "executionModel",
+          "cutEntryId",
+          "turnPrefixStartEntryId",
+          "historyCompactionEntryId");
+
+  private static ObjectNode encodeCompactionStart(CompactionStart start) {
+    ObjectNode node = NODES.objectNode();
+    node.put("phase", start.phase().name());
+    node.put("trigger", start.trigger().name());
+    node.set("executionModel", HistoryValueCodecs.encodeModelSelection(start.executionModel()));
+    node.put("cutEntryId", start.cutEntryId().toString());
+    if (start.turnPrefixStartEntryId() == null) {
+      node.putNull("turnPrefixStartEntryId");
+    } else {
+      node.put("turnPrefixStartEntryId", start.turnPrefixStartEntryId().toString());
+    }
+    if (start.historyCompactionEntryId() == null) {
+      node.putNull("historyCompactionEntryId");
+    } else {
+      node.put("historyCompactionEntryId", start.historyCompactionEntryId().toString());
+    }
+    return node;
+  }
+
+  private static CompactionStart decodeNullableCompactionStart(JsonNode value) {
+    if (value.isNull()) {
+      return null;
+    }
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.compaction");
+    HistoryValueCodecs.requireExactFields(node, COMPACTION_START_FIELDS, "TURN_START.compaction");
+    return new CompactionStart(
         HistoryValueCodecs.readEnum(
-            CompactionPhase.class, HistoryValueCodecs.text(node, "phase"), "COMPACTION.phase"),
+            CompactionPhase.class,
+            HistoryValueCodecs.text(node, "phase"),
+            "TURN_START.compaction.phase"),
         HistoryValueCodecs.readEnum(
             CompactionTrigger.class,
             HistoryValueCodecs.text(node, "trigger"),
-            "COMPACTION.trigger"),
-        HistoryValueCodecs.requiredNonNegativeLong(node, "tokensBefore", "COMPACTION"),
-        HistoryValueCodecs.requiredBoolean(node, "complete", "COMPACTION"),
-        HistoryValueCodecs.text(node, "summaryText"),
-        HistoryValueCodecs.requiredPositiveId(node, "firstKeptEntryId", "COMPACTION"),
-        HistoryValueCodecs.requiredPositiveId(node, "cutEntryId", "COMPACTION"),
-        HistoryValueCodecs.nullablePositiveId(node, "turnPrefixStartEntryId", "COMPACTION"));
+            "TURN_START.compaction.trigger"),
+        HistoryValueCodecs.decodeModelSelection(
+            node.get("executionModel"), "TURN_START.compaction.executionModel"),
+        HistoryValueCodecs.requiredPositiveId(node, "cutEntryId", "TURN_START.compaction"),
+        HistoryValueCodecs.nullablePositiveId(
+            node, "turnPrefixStartEntryId", "TURN_START.compaction"),
+        HistoryValueCodecs.nullablePositiveId(
+            node, "historyCompactionEntryId", "TURN_START.compaction"));
   }
 
   private static TurnEndPayload decodeTurnEnd(JsonNode value) {

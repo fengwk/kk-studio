@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -35,7 +34,12 @@ public final class ModelAttemptMaterialization {
           "attempt materialization validation requires a pending terminal attach transition");
     }
     List<Entry> materialized = failuresAfterBasis(stored, resultPath);
-    if (stored.request().compaction() == null) {
+    if (isCompactionInvocation(stored, resultPath)) {
+      if (!materialized.isEmpty()) {
+        throw new IllegalArgumentException(
+            "compaction result paths must not materialize model attempt failures");
+      }
+    } else {
       if (materialized.size() != stored.failedAttempts().size()) {
         throw new IllegalArgumentException(
             "model result path must materialize every failed attempt exactly once");
@@ -43,9 +47,6 @@ public final class ModelAttemptMaterialization {
       for (int index = 0; index < materialized.size(); index++) {
         requireSameFailure(stored.failedAttempts().get(index), materialized.get(index));
       }
-    } else if (!materialized.isEmpty()) {
-      throw new IllegalArgumentException(
-          "compaction result paths must not materialize model attempt failures");
     }
     if (stored.status().isTerminal()) {
       requireTerminalResult(stored, resultPath);
@@ -107,32 +108,56 @@ public final class ModelAttemptMaterialization {
     }
   }
 
+  /** 从 immutable TURN_START 事实判断 Invocation 是否属于 Compaction turn。 */
+  public static boolean isCompactionInvocation(ModelInvocation invocation, EntryPath resultPath) {
+    for (Entry entry : resultPath.entries()) {
+      if (entry.id().equals(invocation.turnStartEntryId())
+          && entry.payload() instanceof TurnStartPayload start) {
+        return start.compaction() != null;
+      }
+    }
+    throw new IllegalArgumentException(
+        "model result path must contain the invocation turnStartEntryId");
+  }
+
+  private static TurnStartPayload requiredTurnStart(
+      ModelInvocation invocation, EntryPath resultPath) {
+    for (Entry entry : resultPath.entries()) {
+      if (entry.id().equals(invocation.turnStartEntryId())
+          && entry.payload() instanceof TurnStartPayload start) {
+        return start;
+      }
+    }
+    throw new IllegalArgumentException(
+        "model result path must contain the invocation turnStartEntryId");
+  }
+
   /**
    * SUCCEEDED model 的结果 Entry payload 必须完整等于按当前 frozen 事实重放的结果：normal（无 compaction）为 {@link
    * HistoryPayloadMapper#assistantPayload} 的 ASSISTANT payload；compaction 为 {@link
-   * CompactionSummaryAssembler#resultPayload} 的 COMPACTION payload（{@code preResultPath} 是
-   * resultPath 去掉 head 结果后的前缀，保证 TURN_PREFIX / HISTORY 组装上下文与 apply 时一致）。任何字段漂移（text / thinking /
-   * tool call renderer / metadata / summary text）都必须被拒。
+   * CompactionResultEvaluator#evaluate} 的 payload（{@code preResultPath} 是 resultPath 去掉 head
+   * 结果后的前缀，保证 TURN_PREFIX / HISTORY 组装上下文与 apply 时一致）。任何字段漂移（text / thinking / tool call renderer /
+   * metadata / summary text）都必须被拒。
    */
   private static void requireSuccessfulResult(ModelInvocation invocation, EntryPath resultPath) {
     EntryPayload resultPayload = resultPath.head().payload();
-    CompactionRequest compaction = invocation.request().compaction();
-    if (compaction == null) {
-      MessagePayload expected =
-          new HistoryPayloadMapper()
-              .assistantPayload(invocation.result(), invocation.request().toolBindings());
+    TurnStartPayload start = requiredTurnStart(invocation, resultPath);
+    if (start.compaction() != null) {
+      EntryPayload expected =
+          CompactionResultEvaluator.evaluate(
+              preResultPath(resultPath), start.compaction(), invocation.result());
       if (!expected.equals(resultPayload)) {
         throw new IllegalArgumentException(
-            "model result must materialize the exact assistant payload");
+            "model result must materialize the exact compaction payload");
       }
       return;
     }
-    CompactionPayload expected =
-        CompactionSummaryAssembler.resultPayload(
-            compaction, invocation.result().text(), preResultPath(resultPath));
+    MessagePayload expected =
+        new HistoryPayloadMapper()
+            .assistantPayload(invocation.result(), invocation.request().toolBindings());
     if (!expected.equals(resultPayload)) {
       throw new IllegalArgumentException(
-          "model result must materialize the exact compaction payload");
+          "model result must materialize the exact assistant payload");
     }
   }
 
@@ -241,6 +266,7 @@ public final class ModelAttemptMaterialization {
     }
     boolean afterBasis = false;
     boolean foundBasis = false;
+    boolean compaction = isCompactionInvocation(attached, resultPath);
     int expectedAttempt = 1;
     for (Entry entry : entries) {
       if (entry.id().equals(attached.basisHeadEntryId())) {
@@ -252,7 +278,7 @@ public final class ModelAttemptMaterialization {
         continue;
       }
       if (entry.payload() instanceof ModelAttemptFailurePayload failure) {
-        if (attached.request().compaction() != null) {
+        if (compaction) {
           throw new IllegalArgumentException(
               "compaction result paths must not materialize model attempt failures");
         }
@@ -267,7 +293,7 @@ public final class ModelAttemptMaterialization {
     if (!foundBasis) {
       throw new IllegalArgumentException("model result path must contain basisHeadEntryId");
     }
-    if (attached.request().compaction() == null && expectedAttempt - 1 != attached.attempt() - 1) {
+    if (!compaction && expectedAttempt - 1 != attached.attempt() - 1) {
       throw new IllegalArgumentException(
           "materialized model attempt failures must be exactly the confirmed attempt prefix:"
               + " expected "

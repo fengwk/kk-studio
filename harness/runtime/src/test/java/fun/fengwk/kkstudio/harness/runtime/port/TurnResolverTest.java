@@ -24,15 +24,20 @@ class TurnResolverTest {
   }
 
   @Test
-  void resolvedRequiresASpecAndPositiveContextWindow() {
+  void resolvedRequiresSpecAndPositiveBudgets() {
     TurnResolver.Resolved resolved =
-        new TurnResolver.Resolved(PortTestData.modelRequest(), 100_000);
+        new TurnResolver.Resolved(PortTestData.modelRequest(), 100_000, 16_384);
     assertEquals(PortTestData.modelRequest(), resolved.spec());
     assertEquals(100_000, resolved.contextWindow());
-    assertThrows(NullPointerException.class, () -> new TurnResolver.Resolved(null, 100_000));
+    assertEquals(16_384, resolved.maxOutputTokens());
+    assertThrows(
+        NullPointerException.class, () -> new TurnResolver.Resolved(null, 100_000, 16_384));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new TurnResolver.Resolved(PortTestData.modelRequest(), 0));
+        () -> new TurnResolver.Resolved(PortTestData.modelRequest(), 0, 16_384));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new TurnResolver.Resolved(PortTestData.modelRequest(), 100_000, 0));
   }
 
   @Test
@@ -56,7 +61,7 @@ class TurnResolverTest {
   @Test
   void modelRequestSpecStaysFrozenInTheResult() {
     ModelRequestSpec spec = PortTestData.modelRequest();
-    TurnResolver.Resolved resolved = new TurnResolver.Resolved(spec, 100_000);
+    TurnResolver.Resolved resolved = new TurnResolver.Resolved(spec, 100_000, 16_384);
     assertEquals(spec, resolved.spec());
   }
 }

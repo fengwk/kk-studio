@@ -90,8 +90,7 @@ final class InvocationCodecTestFixtures {
         List.of(binding),
         List.of(new SkillBinding("review", "Review code", ENVIRONMENT_ID)),
         List.of(),
-        provider.cacheControl(),
-        null);
+        provider.cacheControl());
   }
 
   static ModelRequestSpec platformModelRequest() {
@@ -105,8 +104,7 @@ final class InvocationCodecTestFixtures {
         List.of(binding),
         List.of(new SkillBinding("review", "Review code", null)),
         List.of(),
-        provider.cacheControl(),
-        null);
+        provider.cacheControl());
   }
 
   private static ModelPricing pricing() {

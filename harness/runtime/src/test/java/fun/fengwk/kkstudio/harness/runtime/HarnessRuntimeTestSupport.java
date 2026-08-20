@@ -260,7 +260,8 @@ final class HarnessRuntimeTestSupport {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.CONTINUATION, settings(), threadId, 100_000),
+                  new TurnStartPayload(
+                      TurnStartReason.CONTINUATION, settings(), threadId, 100_000, 16_384, null),
                   T1));
           ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
           tx.insertThread(thread);
@@ -501,7 +502,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** 另一个 Session，自带 ROOT（跨 session 的 MOVE_HEAD 目标来源）。 */
+  /** 另一个 Session，自带 ROOT（跨 Session 所有权校验 fixture）。 */
   static UUID seedForeignRoot(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -702,7 +703,8 @@ final class HarnessRuntimeTestSupport {
         id,
         sessionId,
         parentId,
-        new TurnStartPayload(TurnStartReason.INPUT, settings(), ownerThreadId, 100_000),
+        new TurnStartPayload(
+            TurnStartReason.INPUT, settings(), ownerThreadId, 100_000, 16_384, null),
         createdAt);
   }
 
@@ -862,8 +864,7 @@ final class HarnessRuntimeTestSupport {
         bindings,
         List.of(),
         List.of(),
-        ProviderCacheControl.none(),
-        null);
+        ProviderCacheControl.none());
   }
 
   /** 由同一 frozen request + ProviderResponse 经 HistoryPayloadMapper 精确生成 live assistant Entry。 */
@@ -920,8 +921,7 @@ final class HarnessRuntimeTestSupport {
         List.of(),
         List.of(),
         List.of(),
-        provider.cacheControl(),
-        null);
+        provider.cacheControl());
   }
 
   static ProviderResponse responseWithToolCalls(String... toolCallIds) {

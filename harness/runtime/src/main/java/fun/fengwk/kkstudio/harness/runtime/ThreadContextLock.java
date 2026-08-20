@@ -35,7 +35,7 @@ final class ThreadContextLock {
     return load(tx, thread, tx.loadEntryPath(thread.headEntryId()));
   }
 
-  /** 在锁内分类，复用已加载的 path（例如 MOVE_HEAD 的 head path）。 */
+  /** 在锁内分类，并允许调用方复用已加载的 head path。 */
   static LockedThreadContext load(HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
     ModelInvocation model = null;
     List<ToolInvocation> siblings = List.of();

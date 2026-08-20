@@ -4,21 +4,16 @@ import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCod
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.platformModelRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 
 import java.util.List;
 
@@ -44,7 +39,7 @@ class ModelRequestSpecJsonCodecTest {
             + "\"sourceEnvironment\":{\"name\":\"123e4567-e89b-12d3-a456-426614174000\","
             + "\"workspacePath\":\".\"}}],\"subagentBindings\":[],\"cacheControl\":"
             + providerCodec.encodeCacheControlNode(request.cacheControl())
-            + ",\"compaction\":null}";
+            + "}";
 
     assertEquals(expected, codec.encode(request));
     assertEquals(request, codec.decode(expected));
@@ -66,8 +61,7 @@ class ModelRequestSpecJsonCodecTest {
             base.toolBindings(),
             base.skillBindings(),
             List.of(new SubagentBinding("reviewer", "Review changes")),
-            base.cacheControl(),
-            null);
+            base.cacheControl());
 
     String encoded = codec.encode(request);
     assertTrue(
@@ -85,44 +79,16 @@ class ModelRequestSpecJsonCodecTest {
     assertFalse(encoded.has("yoloEnabled"));
     assertFalse(encoded.has("contextWindow"));
     assertFalse(encoded.has("messages"));
-    assertNull(codec.decodeNode(encoded).compaction());
+    assertFalse(encoded.has("compaction"));
   }
 
   @Test
-  void roundTripsCompactionRequestWithNumericTokensBefore() {
-    ModelRequestSpec base = environmentModelRequest();
-    ModelRequestSpec request =
-        new ModelRequestSpec(
-            base.providerType(),
-            base.model(),
-            base.variant(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            base.cacheControl(),
-            new CompactionRequest(
-                CompactionPhase.FULL,
-                CompactionTrigger.THRESHOLD,
-                500L,
-                TestIds.id(2L),
-                TestIds.id(4L),
-                null));
-
-    String encoded = codec.encode(request);
-    assertTrue(
-        encoded.contains(
-            "\"compaction\":{\"phase\":\"FULL\",\"trigger\":\"THRESHOLD\","
-                + "\"tokensBefore\":500,\"firstKeptEntryId\":\"00000000-0000-0000-0000-000000000002\","
-                + "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\","
-                + "\"turnPrefixStartEntryId\":null}"),
-        encoded);
-    assertEquals(request, codec.decode(encoded));
-
-    ObjectNode object = (ObjectNode) codec.encodeNode(request);
-    ObjectNode compaction = (ObjectNode) object.get("compaction");
-    compaction.put("tokensBefore", "500");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(object));
+  void rejectsLegacyCompactionField() {
+    // Compaction metadata belongs exclusively to TURN_START; old request fields must not
+    // round-trip.
+    ObjectNode legacy = encodedNode();
+    legacy.putNull("compaction");
+    assertInvalid(legacy);
   }
 
   @Test

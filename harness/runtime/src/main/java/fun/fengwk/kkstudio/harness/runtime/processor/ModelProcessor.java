@@ -2,7 +2,9 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
@@ -193,7 +195,7 @@ public final class ModelProcessor implements AutoCloseable {
             claim,
             dispatched.threadId(),
             proposedAttempt,
-            dispatched.request(),
+            dispatched.compaction(),
             config,
             clock,
             scheduler,
@@ -347,8 +349,25 @@ public final class ModelProcessor implements AutoCloseable {
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
     tx.updateModelInvocation(model.beginDispatch(now));
     tx.updateThread(thread.touchRevision(now));
+    Entry turnStart =
+        tx.findEntry(model.turnStartEntryId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "model invocation "
+                            + model.id()
+                            + " references missing turn start "
+                            + model.turnStartEntryId()));
+    if (!(turnStart.payload() instanceof TurnStartPayload start)) {
+      throw new IllegalStateException(
+          "model invocation " + model.id() + " turnStartEntryId does not reference a TURN_START");
+    }
     return new Prepare.Dispatched(
-        thread.id(), model.basisHeadEntryId(), model.attempt(), model.request());
+        thread.id(),
+        model.basisHeadEntryId(),
+        model.attempt(),
+        model.request(),
+        start.compaction() != null);
   }
 
   /** 在 MODEL claim 仍 owned 期间加载不可变 basis EntryPath，并纯重建内存 ProviderRequest。 */
@@ -522,7 +541,12 @@ public final class ModelProcessor implements AutoCloseable {
 
     record Lost() implements Prepare {}
 
-    record Dispatched(UUID threadId, UUID basisHeadEntryId, int attempt, ModelRequestSpec request)
+    record Dispatched(
+        UUID threadId,
+        UUID basisHeadEntryId,
+        int attempt,
+        ModelRequestSpec request,
+        boolean compaction)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

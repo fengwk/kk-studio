@@ -4,9 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
@@ -57,11 +54,6 @@ public final class ModelRequestSpecJsonCodec {
       subagents.add(encodeSubagent(subagent));
     }
     node.set("cacheControl", PROVIDER_CODEC.encodeCacheControlNode(spec.cacheControl()));
-    if (spec.compaction() == null) {
-      node.putNull("compaction");
-    } else {
-      node.set("compaction", encodeCompaction(spec.compaction()));
-    }
     return node;
   }
 
@@ -81,8 +73,7 @@ public final class ModelRequestSpecJsonCodec {
         "toolBindings",
         "skillBindings",
         "subagentBindings",
-        "cacheControl",
-        "compaction");
+        "cacheControl");
     ArrayNode preambleNodes =
         InvocationJsonSupport.array(
             InvocationJsonSupport.required(node, "preambleMessages", CONTEXT), "preambleMessages");
@@ -111,9 +102,6 @@ public final class ModelRequestSpecJsonCodec {
     for (JsonNode subagentNode : subagentNodes) {
       subagentBindings.add(decodeSubagent(subagentNode));
     }
-    JsonNode compactionNode = InvocationJsonSupport.declared(node, "compaction", CONTEXT);
-    CompactionRequest compaction =
-        compactionNode.isNull() ? null : decodeCompaction(compactionNode);
     return new ModelRequestSpec(
         InvocationJsonSupport.requiredEnum(node, "providerType", ProviderType.class, CONTEXT),
         MODEL_CODEC.decodeDescriptorNode(InvocationJsonSupport.required(node, "model", CONTEXT)),
@@ -123,43 +111,7 @@ public final class ModelRequestSpecJsonCodec {
         skillBindings,
         subagentBindings,
         PROVIDER_CODEC.decodeCacheControlNode(
-            InvocationJsonSupport.required(node, "cacheControl", CONTEXT)),
-        compaction);
-  }
-
-  private static ObjectNode encodeCompaction(CompactionRequest compaction) {
-    ObjectNode node = InvocationJsonSupport.NODES.objectNode();
-    node.put("phase", compaction.phase().name());
-    node.put("trigger", compaction.trigger().name());
-    node.put("tokensBefore", compaction.tokensBefore());
-    node.put("firstKeptEntryId", compaction.firstKeptEntryId().toString());
-    node.put("cutEntryId", compaction.cutEntryId().toString());
-    if (compaction.turnPrefixStartEntryId() == null) {
-      node.putNull("turnPrefixStartEntryId");
-    } else {
-      node.put("turnPrefixStartEntryId", compaction.turnPrefixStartEntryId().toString());
-    }
-    return node;
-  }
-
-  private static CompactionRequest decodeCompaction(JsonNode value) {
-    ObjectNode node = InvocationJsonSupport.object(value, "compaction");
-    InvocationJsonSupport.requireFields(
-        node,
-        "compaction",
-        "phase",
-        "trigger",
-        "tokensBefore",
-        "firstKeptEntryId",
-        "cutEntryId",
-        "turnPrefixStartEntryId");
-    return new CompactionRequest(
-        InvocationJsonSupport.requiredEnum(node, "phase", CompactionPhase.class, "compaction"),
-        InvocationJsonSupport.requiredEnum(node, "trigger", CompactionTrigger.class, "compaction"),
-        InvocationJsonSupport.nonNegativeLong(node, "tokensBefore", "compaction"),
-        InvocationJsonSupport.requiredUuid(node, "firstKeptEntryId", "compaction"),
-        InvocationJsonSupport.requiredUuid(node, "cutEntryId", "compaction"),
-        InvocationJsonSupport.nullableUuid(node, "turnPrefixStartEntryId", "compaction"));
+            InvocationJsonSupport.required(node, "cacheControl", CONTEXT)));
   }
 
   private static ObjectNode encodeSkill(SkillBinding skill) {

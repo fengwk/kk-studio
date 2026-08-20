@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 
 import org.junit.jupiter.api.AfterEach;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -32,12 +33,18 @@ abstract class ThreadProcessorTestBase {
   }
 
   protected final Fixture fixture() {
-    return fixture(null);
+    return fixture((HarnessStore) null);
   }
 
   /** {@code processorStore} 非空时 processor 使用包装 store（seed / 断言仍用 {@code fixture.store}）。 */
   protected final Fixture fixture(HarnessStore processorStore) {
     Fixture fixture = new Fixture(processorStore);
+    fixtures.add(fixture);
+    return fixture;
+  }
+
+  protected final Fixture fixture(CompactionConfig compactionConfig) {
+    Fixture fixture = new Fixture(compactionConfig);
     fixtures.add(fixture);
     return fixture;
   }
