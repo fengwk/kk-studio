@@ -53,6 +53,8 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
   private static final UUID SESSION_ID = new UUID(0L, 9_900_000L);
   private static final UUID ROOT_ENTRY_ID = new UUID(0L, 9_900_001L);
   private static final UUID THREAD_ID = new UUID(0L, 9_900_002L);
+  private static final String MATERIALIZATION_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =
@@ -139,10 +141,13 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         SESSION_ID,
         ROOT_PAYLOAD_JSON);
     jdbc.update(
-        "insert into harness_thread (id, head_entry_id, yolo_enabled, next_command_sequence,"
-            + " revision, created_at, updated_at) values (?, ?, false, 1, 0, now(), now())",
+        "insert into harness_thread (id, session_id, head_entry_id, materialization_hash,"
+            + " yolo_enabled, next_command_sequence, revision, created_at, updated_at)"
+            + " values (?, ?, ?, ?, false, 1, 0, now(), now())",
         THREAD_ID,
-        ROOT_ENTRY_ID);
+        SESSION_ID,
+        ROOT_ENTRY_ID,
+        MATERIALIZATION_HASH);
     jdbc.update(
         "insert into harness_work (target_type, target_id, available_at, wake_version)"
             + " values ('THREAD', ?, now(), 1)",

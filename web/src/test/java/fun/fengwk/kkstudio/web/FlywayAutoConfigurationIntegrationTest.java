@@ -83,12 +83,39 @@ class FlywayAutoConfigurationIntegrationTest {
         assertTrue(seed.next());
         assertEquals(1L, seed.getLong(1), "dev seed must be visible through the multi-data-source");
       }
-      try (ResultSet chatThread =
+      try (ResultSet ownerSessionTables =
           st.executeQuery(
               "select count(*) from information_schema.tables"
-                  + " where table_schema = 'public' and table_name = 'chat_thread'")) {
-        assertTrue(chatThread.next());
-        assertEquals(1L, chatThread.getLong(1), "Chat↔Thread table must be part of V1");
+                  + " where table_schema = 'public'"
+                  + " and table_name in ('chat_session', 'canvas_session')")) {
+        assertTrue(ownerSessionTables.next());
+        assertEquals(
+            2L,
+            ownerSessionTables.getLong(1),
+            "Chat/Canvas owner-to-Session tables must be part of V1");
+      }
+      try (ResultSet ownerSessionForeignKeys =
+          st.executeQuery(
+              "select count(*) from information_schema.table_constraints"
+                  + " where table_schema = 'public'"
+                  + " and table_name in ('chat_session', 'canvas_session')"
+                  + " and constraint_type = 'FOREIGN KEY'")) {
+        assertTrue(ownerSessionForeignKeys.next());
+        assertEquals(
+            4L,
+            ownerSessionForeignKeys.getLong(1),
+            "owner-to-Session relations must retain real owner and Harness Session FKs");
+      }
+      try (ResultSet legacyThreadRelations =
+          st.executeQuery(
+              "select count(*) from information_schema.tables"
+                  + " where table_schema = 'public'"
+                  + " and table_name in ('chat_thread', 'canvas_thread')")) {
+        assertTrue(legacyThreadRelations.next());
+        assertEquals(
+            0L,
+            legacyThreadRelations.getLong(1),
+            "clean-slate V1 must not retain legacy owner-to-Thread relation tables");
       }
     }
   }
