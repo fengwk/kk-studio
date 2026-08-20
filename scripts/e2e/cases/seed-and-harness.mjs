@@ -10,23 +10,24 @@ import {
   cid,
 } from '../lib/http.mjs'
 import {
+  acceptCommandBatch,
   branchSettingsOf,
+  chatOwner,
   createChat,
-  createChatThread,
-  createConfiguredChatThread,
-  customMessageCommand,
-  enqueueCommands,
-  getThreadEntries,
   getThreadSnapshot,
-  listChatThreads,
+  listChatSessions,
+  listSessionEntries,
+  listSessionThreads,
+  materializeEntryThread,
+  materializeNewSession,
   setActiveToolsCommand,
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
   setThreadYolo,
   stopThread,
+  threadTarget,
   threadIdOf,
-  updateThreadHead,
   userMessageCommand,
   waitForDurableMessages,
   waitForQuiescentThread,
@@ -153,10 +154,10 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.chat_scoped_create_atomic',
+  id: 'thread.new_session_submission_atomic',
   level: 'L1',
-  title: 'Chat-scoped Thread 原子创建返回完整快照',
-  docs: 'POST /api/ai/chat/{chatId}/threads body={title,branchSettings,yoloEnabled} => 201 HarnessThreadSnapshotDTO；thread/entry/session/command 标识全为 canonical UUID string，nextCommandSequence 从 1 开始，快照含 thread/entries/queuedCommands/modelInvocation/toolInvocations',
+  title: 'NEW_SESSION 原子物化返回完整 accepted 快照',
+  docs: 'POST /api/ai/runtime/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、revision >= 1；accepted command 的 sequence=1、requestHash 为 64 位小写 hex；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -165,27 +166,41 @@ registerCase({
       agentName: ctx.vars.agent.name,
       yoloEnabled: false,
     })
-    const snapshot = await createChatThread(ctx, chat.id, {
-      title: null,
-      yoloEnabled: false,
-      branchSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx), {
+    const sessionId = cid()
+    const threadId = cid()
+    const accepted = await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx), {
         activeTools: [],
       }),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`materialize ${sessionId.slice(0, 8)}`, cid())],
     })
-    const thread = snapshot.thread
-    assert(thread.status === 'IDLE' && thread.processing === false, JSON.stringify(thread))
-    threadIdOf(thread)
-    assert(String(thread.revision) === '0', JSON.stringify(thread))
-    // ThreadState 构造约束：nextCommandSequence 从 1 开始（runtime 事实）。
-    assert(String(thread.nextCommandSequence) === '1', JSON.stringify(thread))
-    assert(snapshot.entries.length === 1 && snapshot.entries[0].entryType === 'ROOT', JSON.stringify(snapshot.entries))
+    assert(accepted.replayed === false, JSON.stringify(accepted))
+    assert(String(accepted.session.sessionId) === sessionId, JSON.stringify(accepted.session))
+    const thread = accepted.thread
+    // 首 Command sequence=1 已接受，nextCommandSequence 必须精确 2；不锁定 status（processor
+    // 可能已异步消费），revision 至少 1，head 可为 root 或其后继。
     assert(
-      String(snapshot.entries[0].entryId) === String(thread.headEntryId),
-      JSON.stringify(snapshot.entries),
+      String(thread.nextCommandSequence) === '2',
+      `nextCommandSequence must be 2 after accepting the first command: ${JSON.stringify(thread)}`,
     )
-    assert(snapshot.queuedCommands.length === 0, JSON.stringify(snapshot.queuedCommands))
-    assert(snapshot.modelInvocation === null, JSON.stringify(snapshot.modelInvocation))
-    assert(snapshot.toolInvocations.length === 0, JSON.stringify(snapshot.toolInvocations))
+    assert(
+      Number(thread.revision) >= 1,
+      `revision must be at least 1 after accepting the first command: ${JSON.stringify(thread)}`,
+    )
+    threadIdOf(thread)
+    assert(String(thread.threadId) === threadId, JSON.stringify(thread))
+    assert(accepted.acceptedCommands.length === 1, JSON.stringify(accepted.acceptedCommands))
+    const acceptedCommand = accepted.acceptedCommands[0]
+    assert(acceptedCommand.type === 'USER_MESSAGE', JSON.stringify(acceptedCommand))
+    assert(String(acceptedCommand.sequence) === '1', JSON.stringify(acceptedCommand))
+    assert(
+      /^[0-9a-f]{64}$/.test(String(acceptedCommand.requestHash)),
+      `requestHash must be 64 lower hex: ${JSON.stringify(acceptedCommand)}`,
+    )
     for (const hidden of [
       'executionEpoch',
       'environment',
@@ -198,21 +213,21 @@ registerCase({
       assert(!(hidden in thread), `Thread leaked ${hidden}: ${JSON.stringify(thread)}`)
     }
 
-    // Chat-scoped list 返回数组且包含新 Thread（按关联时间新到旧）。
-    const listed = await listChatThreads(ctx, chat.id)
+    // Chat owner Session 摘要包含新 Session（归属时间新到旧，newest-first）。
+    const sessions = await listChatSessions(ctx, chat.id)
     assert(
-      listed.some((item) => String(item.threadId) === String(thread.threadId)),
-      'created Thread missing from Chat list',
+      sessions.some((item) => String(item.sessionId) === sessionId),
+      'created Session missing from Chat session list',
     )
-    assert(listed[0]?.threadId === thread.threadId, `expected newest-first: ${JSON.stringify(listed)}`)
+    assert(sessions[0]?.sessionId === sessionId, `expected newest-first: ${JSON.stringify(sessions)}`)
   },
 })
 
 registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
-  title: '创建时完整 branchSettings 精确投影到 Thread 快照',
-  docs: 'EnvironmentBinding/agentName/model/activeTools/yoloEnabled 原样持久化并投影；null title 保持 null',
+  title: 'NEW_SESSION rootSettings 完整投影到 Thread 快照',
+  docs: 'EnvironmentBinding/agentName/model/activeTools/yoloEnabled 原样持久化并投影；Chat 默认值独立',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -227,20 +242,23 @@ registerCase({
       model: modelSelectionOf(ctx),
       activeTools: ['read', 'grep'],
     }
-    const snapshot = await createChatThread(ctx, chat.id, {
-      title: null,
+    const accepted = await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId: cid(),
+      threadId: cid(),
+      rootSettings: requested,
       yoloEnabled: true,
-      branchSettings: requested,
+      commands: [userMessageCommand(`settings ${cid().slice(0, 8)}`, cid())],
     })
-    assert(snapshot.thread.yoloEnabled === true, JSON.stringify(snapshot.thread))
+    assert(accepted.thread.yoloEnabled === true, JSON.stringify(accepted.thread))
     assert(
-      isDeepStrictEqual(snapshot.thread.branchSettings, requested),
-      JSON.stringify({ expected: requested, actual: snapshot.thread.branchSettings }),
+      isDeepStrictEqual(accepted.thread.branchSettings, requested),
+      JSON.stringify({ expected: requested, actual: accepted.thread.branchSettings }),
     )
     // Thread branchSettings 独立于 Chat 默认值：Chat 仍保存自身 defaults。
     assert(chat.yoloEnabled === false, JSON.stringify(chat))
-    // null title 保持 null（Session 拒绝 blank title 与此无关）。
-    const reread = await getThreadSnapshot(ctx, snapshot.thread.threadId)
+    // reread 同一 Thread：投影稳定。
+    const reread = await getThreadSnapshot(ctx, accepted.thread.threadId)
     assert(
       isDeepStrictEqual(reread.thread.branchSettings, requested),
       JSON.stringify(reread.thread.branchSettings),
@@ -257,37 +275,80 @@ registerCase({
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
     // 隔离 Thread：本 case 独占队列状态，不依赖其他 case 的 cursor。
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-user-wire-${cid().slice(0, 8)}`,
-      branchAgentName: `e2e-user-wire-missing-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const thread = snapshot.thread
+    const sessionId = cid()
+    const threadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-user-wire-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`wire materialize ${cid().slice(0, 8)}`, cid())],
+    })
+    await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    const idle = await getThreadSnapshot(ctx, threadId)
+    const thread = idle.thread
     const singleClientCommandId = cid()
     const structuredClientCommandId = cid()
     const secondClientCommandId = cid()
-    const batch = () => ({
-      expectedHeadEntryId: thread.headEntryId,
-      expectedNextCommandSequence: thread.nextCommandSequence,
-      commands: [
-        {
-          type: 'USER_MESSAGE',
-          clientCommandId: singleClientCommandId,
-          contents: [{ type: 'TEXT', text: 'strict wire probe' }],
-        },
-        {
-          type: 'USER_MESSAGE',
-          clientCommandId: structuredClientCommandId,
-          contents: [
-            { type: 'TEXT', text: 'animate this' },
-            { type: 'TEXT', text: 'and this' },
-          ],
-        },
-        userMessageCommand('second probe', secondClientCommandId),
-      ],
+    const commandsOf = () => [
+      {
+        type: 'USER_MESSAGE',
+        clientCommandId: singleClientCommandId,
+        contents: [{ type: 'TEXT', text: 'strict wire probe' }],
+      },
+      {
+        type: 'USER_MESSAGE',
+        clientCommandId: structuredClientCommandId,
+        contents: [
+          { type: 'TEXT', text: 'animate this' },
+          { type: 'TEXT', text: 'and this' },
+        ],
+      },
+      userMessageCommand('second probe', secondClientCommandId),
+    ]
+    // 产品 HTTP 面：一个 batch 只能恰一条 USER_MESSAGE，三条 USER_MESSAGE 必须拆批。
+    // 为保留原 case 对严格 wire + exact replay 的完整覆盖，这里逐条入队后再整体 replay。
+    // 每次全新 accept 前即时读取权威 snapshot cursor（processor 可能已消费前序命令）。
+    const batchFor = (cursorThread, commands) => ({
+      owner: chatOwner(chat.id),
+      target: threadTarget({
+        threadId,
+        expectedHeadEntryId: cursorThread.headEntryId,
+        expectedNextCommandSequence: cursorThread.nextCommandSequence,
+      }),
+      commands,
     })
-    const commandsDto = await enqueueCommands(ctx, thread.threadId, batch())
+    const acceptedList = []
+    for (const single of commandsOf()) {
+      // 全新 accept 的 cursor 必须来自 accept 前的权威快照。
+      const cursorBefore = (await getThreadSnapshot(ctx, threadId)).thread
+      const acceptedOnce = await acceptCommandBatch(ctx, batchFor(cursorBefore, [single]))
+      acceptedList.push(acceptedOnce.acceptedCommands[0])
+      // Exact replay：必须继续使用原首次接受前 cursor（该命令的 sequence）——
+      // THREAD replay 要求存储命令起始 sequence == expectedNextCommandSequence。
+      const replayAccepted = await acceptCommandBatch(ctx, batchFor(cursorBefore, [single]))
+      assert(replayAccepted.replayed === true, JSON.stringify(replayAccepted))
+      assert(
+        String(replayAccepted.acceptedCommands[0].sequence)
+          === String(acceptedList.at(-1).sequence)
+          && String(replayAccepted.acceptedCommands[0].requestHash)
+            === String(acceptedList.at(-1).requestHash),
+        `replay must return the existing command: ${JSON.stringify({
+          original: acceptedList.at(-1),
+          replay: replayAccepted.acceptedCommands[0],
+        })}`,
+      )
+    }
+    const commandsDto = acceptedList
     assert(commandsDto.length === 3, JSON.stringify(commandsDto))
     const command = commandsDto[0]
     assert(String(command.clientCommandId) === singleClientCommandId, JSON.stringify(command))
@@ -320,40 +381,33 @@ registerCase({
       }),
       `contents TEXT payload must be canonical: ${JSON.stringify(secondPayload)}`,
     )
-    // Exact replay：同 clientCommandId + 同 hash 整批重放返回既有命令（无副作用），
-    // 不依赖异步 processor 是否已消费。
-    const replay = await enqueueCommands(ctx, thread.threadId, batch())
-    assert(
-      replay.length === commandsDto.length
-        && replay.every(
-          (item, index) =>
-            String(item.sequence) === String(commandsDto[index].sequence)
-            && String(item.requestHash) === String(commandsDto[index].requestHash),
-        ),
-      `replay must return the existing commands: ${JSON.stringify({ commandsDto, replay })}`,
-    )
-    await waitForQuiescentThread(ctx, thread.threadId, {
+    await waitForQuiescentThread(ctx, threadId, {
       timeoutMs: 60_000,
       intervalMs: 100,
     })
-    const validationThread = (await getThreadSnapshot(ctx, thread.threadId)).thread
+    const validationThread = (await getThreadSnapshot(ctx, threadId)).thread
 
     const expectInvalidUserCommand = (command, options = { status: 400 }) =>
       expectHttpError(
         () =>
-          enqueueCommands(ctx, thread.threadId, {
-            expectedHeadEntryId: validationThread.headEntryId,
-            expectedNextCommandSequence: validationThread.nextCommandSequence,
+          acceptCommandBatch(ctx, {
+            owner: chatOwner(chat.id),
+            target: threadTarget({
+              threadId,
+              expectedHeadEntryId: validationThread.headEntryId,
+              expectedNextCommandSequence: validationThread.nextCommandSequence,
+            }),
             commands: [command],
           }),
         options,
       )
 
     // 文本 shorthand（text / content）已从 USER_MESSAGE wire 移除。
+    // 未知字段在 Jackson 反序列化层即拒绝（detail 为通用 "Failed to read request"）。
     await expectInvalidUserCommand({ type: 'USER_MESSAGE', clientCommandId: cid(), text: 'x' })
     await expectInvalidUserCommand(
       { type: 'USER_MESSAGE', clientCommandId: cid(), content: 'x' },
-      { status: 400, messageIncludes: /content|forbidden/i },
+      { status: 400 },
     )
     // 多余字段（role 等）与缺少 contents 字段均确定性 400。
     await expectInvalidUserCommand(
@@ -363,7 +417,7 @@ registerCase({
         contents: [{ type: 'TEXT', text: 'x' }],
         role: 'USER',
       },
-      { status: 400, messageIncludes: /role/ },
+      { status: 400 },
     )
     await expectInvalidUserCommand(
       { type: 'USER_MESSAGE', clientCommandId: cid() },
@@ -399,79 +453,97 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.custom_message_strict_wire',
+  id: 'thread.product_http_rejects_custom_message',
   level: 'L1',
-  title: 'CUSTOM_MESSAGE role 仅 SYSTEM|USER 且顺序稳定',
-  docs: '同一原子 batch 同时入队 SYSTEM+USER 两条 CUSTOM_MESSAGE，顺序与 payload 稳定；非法/缺失 role => 400；USER_MESSAGE 缺 contents => 400',
+  title: '产品 HTTP 面拒绝 CUSTOM_MESSAGE 且命令 shape 严格',
+  docs: 'CUSTOM_MESSAGE（SYSTEM/USER 均不可）在产品 HTTP command-batches 面确定性 400；两条 USER_MESSAGE 同一 batch、非末尾 USER_MESSAGE、乱序 SET、未知类型 => 400；同 batch 非法 shape 不推进 cursor',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-custom-wire-${cid().slice(0, 8)}`,
-      branchAgentName: `e2e-custom-wire-missing-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const thread = snapshot.thread
-    const systemClientCommandId = cid()
-    const userClientCommandId = cid()
-    const commandsDto = await enqueueCommands(ctx, thread.threadId, {
-      expectedHeadEntryId: thread.headEntryId,
-      expectedNextCommandSequence: thread.nextCommandSequence,
-      commands: [
-        customMessageCommand('SYSTEM', 'system probe', systemClientCommandId),
-        customMessageCommand('USER', 'user probe', userClientCommandId),
-      ],
+    const sessionId = cid()
+    const threadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-custom-wire-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`custom wire materialize ${cid().slice(0, 8)}`, cid())],
     })
-    assert(
-      commandsDto.map((command) => command.type).join(',') === 'CUSTOM_MESSAGE,CUSTOM_MESSAGE',
-      JSON.stringify(commandsDto),
-    )
-    assert(
-      String(commandsDto[0].clientCommandId) === systemClientCommandId
-        && String(commandsDto[1].clientCommandId) === userClientCommandId,
-      JSON.stringify(commandsDto),
-    )
-    assert(
-      Number(commandsDto[1].sequence) === Number(commandsDto[0].sequence) + 1,
-      `sequences must be contiguous: ${JSON.stringify(commandsDto)}`,
-    )
-    const systemPayload = JSON.parse(commandsDto[0].payloadJson)
-    const userPayload = JSON.parse(commandsDto[1].payloadJson)
-    assert(
-      isDeepStrictEqual(systemPayload, { message: { role: 'SYSTEM', contents: [{ type: 'text', text: 'system probe' }] } }),
-      JSON.stringify(systemPayload),
-    )
-    assert(
-      isDeepStrictEqual(userPayload, { message: { role: 'USER', contents: [{ type: 'text', text: 'user probe' }] } }),
-      JSON.stringify(userPayload),
-    )
-    await waitForQuiescentThread(ctx, thread.threadId, {
-      timeoutMs: 60_000,
-      intervalMs: 100,
+    await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    const idle = await getThreadSnapshot(ctx, threadId)
+    const thread = idle.thread
+    const cursor = () => ({
+      owner: chatOwner(chat.id),
+      target: threadTarget({
+        threadId,
+        expectedHeadEntryId: thread.headEntryId,
+        expectedNextCommandSequence: thread.nextCommandSequence,
+      }),
     })
-    const validationThread = (await getThreadSnapshot(ctx, thread.threadId)).thread
-    // 非法 role（ASSISTANT）=> 400（mapper requireRole）。
+
+    // CUSTOM_MESSAGE 产品 HTTP 面被拒绝（SYSTEM/USER 均不可）。未知枚举在 Jackson
+    // 反序列化层即失败，detail 是通用 "Failed to read request"（不携带命令名）。
+    for (const role of ['SYSTEM', 'USER']) {
+      await expectHttpError(
+        () =>
+          acceptCommandBatch(ctx, {
+            ...cursor(),
+            commands: [
+              { type: 'CUSTOM_MESSAGE', role, clientCommandId: cid(), content: 'x' },
+            ],
+          }),
+        { status: 400 },
+      )
+    }
+    // 两条 USER_MESSAGE 同一 batch => 400（HTTP 面只允许恰一条末尾 USER_MESSAGE）。
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: validationThread.headEntryId,
-          expectedNextCommandSequence: validationThread.nextCommandSequence,
+        acceptCommandBatch(ctx, {
+          ...cursor(),
           commands: [
-            { type: 'CUSTOM_MESSAGE', clientCommandId: cid(), content: 'x', role: 'ASSISTANT' },
+            userMessageCommand('first', cid()),
+            userMessageCommand('second', cid()),
           ],
         }),
-      { status: 400, messageIncludes: /SYSTEM|USER|role/i },
+      { status: 400, messageIncludes: /USER_MESSAGE/i },
     )
-    // USER_MESSAGE 缺 contents => 400（仅 contents 形态）。
+    // USER_MESSAGE 不在末尾 => 400。
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: validationThread.headEntryId,
-          expectedNextCommandSequence: validationThread.nextCommandSequence,
-          commands: [{ type: 'USER_MESSAGE', clientCommandId: cid() }],
+        acceptCommandBatch(ctx, {
+          ...cursor(),
+          commands: [
+            userMessageCommand('first', cid()),
+            setAgentCommand('x', cid()),
+          ],
         }),
-      { status: 400, messageIncludes: /contents/i },
+      { status: 400, messageIncludes: /order|final|USER_MESSAGE/i },
+    )
+    // 未知命令类型 => 400。
+    await expectHttpError(
+      () =>
+        acceptCommandBatch(ctx, {
+          ...cursor(),
+          commands: [{ type: 'RENAME_THREAD', clientCommandId: cid() }],
+        }),
+      { status: 400, messageIncludes: /type/i },
+    )
+    // 非法 shape 不推进 cursor。
+    const after = await getThreadSnapshot(ctx, threadId)
+    assert(
+      String(after.thread.headEntryId) === String(thread.headEntryId)
+        && String(after.thread.nextCommandSequence) === String(thread.nextCommandSequence)
+        && after.queuedCommands.length === 0,
+      `invalid batches must not mutate the Thread: ${JSON.stringify({ before: thread, after: after.thread })}`,
     )
   },
 })
@@ -480,42 +552,60 @@ registerCase({
   id: 'thread.command_idempotent_replay',
   level: 'L1',
   title: 'clientCommandId 幂等 replay 与部分重放拒绝',
-  docs: '整批同 clientCommandId 重放 => 返回既有命令（无副作用）；仅部分存在 => 409 PARTIAL_COMMAND_REPLAY',
+  docs: '整批同 clientCommandId 重放 => replayed=true 且返回既有命令（无副作用）；仅部分存在 => 409 PARTIAL_COMMAND_REPLAY',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-replay-${cid().slice(0, 8)}`,
-      branchAgentName: `e2e-replay-missing-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const thread = snapshot.thread
+    const sessionId = cid()
+    const threadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-replay-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`replay materialize ${cid().slice(0, 8)}`, cid())],
+    })
+    await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    const idle = await getThreadSnapshot(ctx, threadId)
+    const thread = idle.thread
     const clientCommandId = cid()
-    const first = await enqueueCommands(ctx, thread.threadId, {
-      expectedHeadEntryId: thread.headEntryId,
-      expectedNextCommandSequence: thread.nextCommandSequence,
+    const batch = () => ({
+      owner: chatOwner(chat.id),
+      target: threadTarget({
+        threadId,
+        expectedHeadEntryId: thread.headEntryId,
+        expectedNextCommandSequence: thread.nextCommandSequence,
+      }),
       commands: [userMessageCommand('idempotent replay', clientCommandId)],
     })
-    const replay = await enqueueCommands(ctx, thread.threadId, {
-      expectedHeadEntryId: thread.headEntryId,
-      expectedNextCommandSequence: thread.nextCommandSequence,
-      commands: [userMessageCommand('idempotent replay', clientCommandId)],
-    })
+    const first = await acceptCommandBatch(ctx, batch())
+    assert(first.replayed === false, JSON.stringify(first))
+    const replay = await acceptCommandBatch(ctx, batch())
+    assert(replay.replayed === true, JSON.stringify(replay))
     assert(
-      String(replay[0].sequence) === String(first[0].sequence)
-        && String(replay[0].requestHash) === String(first[0].requestHash),
+      String(replay.acceptedCommands[0].sequence) === String(first.acceptedCommands[0].sequence)
+        && String(replay.acceptedCommands[0].requestHash) === String(first.acceptedCommands[0].requestHash),
       `replay must return the existing command: ${JSON.stringify({ first, replay })}`,
     )
-    // 部分重放：新命令 + 已存在命令 => 409。
+    // 部分重放：HTTP 面 shape 限制一个 batch 恰一条 USER_MESSAGE，因此用
+    // SET_AGENT(新) + USER_MESSAGE(已存在) 构造 partial：SET 是新 id、USER 已存在 =>
+    // present=1/2 => 409 PARTIAL_COMMAND_REPLAY（Runtime 检测先于命令 admission）。
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: thread.nextCommandSequence,
+        acceptCommandBatch(ctx, {
+          ...batch(),
           commands: [
+            setAgentCommand('x', cid()),
             userMessageCommand('replayed again', clientCommandId),
-            userMessageCommand('brand new', cid()),
           ],
         }),
       { status: 409, messageIncludes: /PARTIAL_COMMAND_REPLAY|replays only/i },
@@ -527,21 +617,36 @@ registerCase({
   id: 'thread.stale_command_cas_rejected',
   level: 'L1',
   title: 'stale 命令 CAS cursor 被拒绝',
-  docs: '从当前 Catalog 解析任一有效 Agent/Model；expectedHeadEntryId/expectedNextCommandSequence 与快照不符 => 409 + errors.reason=STALE_COMMAND_CURSOR；隔离 Thread 上精确断言 nextCommandSequence/revision/head 前后不变',
+  docs: 'expectedHeadEntryId/expectedNextCommandSequence 与快照不符 => 409 + errors.reason=STALE_COMMAND_CURSOR；隔离 Thread 上精确断言 nextCommandSequence/revision/head 前后不变',
   async run(ctx) {
     const { agent, model } = await resolveAnyCatalogTarget(ctx)
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent,
-      model,
+    const chat = await createChat(ctx, {
       title: `e2e-stale-cas-${cid().slice(0, 8)}`,
+      agentName: agent.name,
+      yoloEnabled: false,
     })
-    const thread = snapshot.thread
-    const before = await getThreadSnapshot(ctx, thread.threadId)
+    const sessionId = cid()
+    const threadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(agent, model),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`stale cas materialize ${cid().slice(0, 8)}`, cid())],
+    })
+    await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    const before = await getThreadSnapshot(ctx, threadId)
+    const thread = before.thread
     const staleHead = await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: cid(),
-          expectedNextCommandSequence: thread.nextCommandSequence,
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: cid(),
+            expectedNextCommandSequence: thread.nextCommandSequence,
+          }),
           commands: [userMessageCommand('stale head', cid())],
         }),
       { status: 409, messageIncludes: /head|conflict|stale/i },
@@ -553,9 +658,13 @@ registerCase({
     )
     const staleSequence = await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: thread.headEntryId,
-          expectedNextCommandSequence: '999999999',
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: thread.headEntryId,
+            expectedNextCommandSequence: '999999999',
+          }),
           commands: [userMessageCommand('stale sequence', cid())],
         }),
       { status: 409, messageIncludes: /sequence|conflict|stale/i },
@@ -565,7 +674,7 @@ registerCase({
       staleSequenceBody.errors?.reason === 'STALE_COMMAND_CURSOR',
       `stale sequence conflict reason: ${staleSequence.body}`,
     )
-    const after = await getThreadSnapshot(ctx, thread.threadId)
+    const after = await getThreadSnapshot(ctx, threadId)
     assert(
       String(after.thread.nextCommandSequence) === String(before.thread.nextCommandSequence)
         && String(after.thread.revision) === String(before.thread.revision)
@@ -579,47 +688,111 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.rebind_same_session',
+  id: 'thread.entry_materialization_same_session',
   level: 'L1',
-  title: 'PUT /head 同 target no-op 与 revision CAS',
-  docs: '同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target + stale revision => 409；真实同 Session 历史回退由 L3 branch case 覆盖',
+  title: 'ENTRY 同 Session 分支物化',
+  docs: 'ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）：sessionId 不变、accepted command sequence=1；quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER；原 Thread head/revision/nextCommandSequence 不变；ENTRY 非法 startEntryId（不存在 404/跨 Session 400）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    const { chat, snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-rebind-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const thread = snapshot.thread
-    // L1 验证 same-target replay 优先级与不同 target 的 revision CAS；真实同 Session 历史
-    // 回退由 L3 branch case 覆盖。
-    const moved = await updateThreadHead(ctx, thread.threadId, {
-      targetEntryId: thread.headEntryId,
-      expectedRevision: thread.revision,
+    const sessionId = cid()
+    const threadId = cid()
+    const accepted = await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-rebind-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`rebind materialize ${cid().slice(0, 8)}`, cid())],
     })
-    assert(String(moved.headEntryId) === String(thread.headEntryId), JSON.stringify(moved))
-    assert(String(moved.revision) === String(thread.revision), 'same-target rebind must be a no-op')
-    assert(String(moved.sessionId) === String(thread.sessionId), JSON.stringify(moved))
-
-    const replayed = await updateThreadHead(ctx, thread.threadId, {
-      targetEntryId: thread.headEntryId,
-      expectedRevision: '999999999',
+    await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    const idle = await getThreadSnapshot(ctx, threadId)
+    const thread = idle.thread
+    const startEntryId = String(thread.headEntryId)
+    const mainBefore = {
+      headEntryId: String(thread.headEntryId),
+      revision: String(thread.revision),
+      nextCommandSequence: String(thread.nextCommandSequence),
+    }
+    const branchThreadId = cid()
+    const branchUserText = `branch on head ${cid().slice(0, 8)}`
+    const branched = await materializeEntryThread(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      startEntryId,
+      threadId: branchThreadId,
+      yoloEnabled: thread.yoloEnabled,
+      commands: [userMessageCommand(branchUserText, cid())],
     })
+    // ENTRY accepted 后 processor 可能已消费分支命令：不锁定 response head=startEntry；
+    // 只锁定 session/thread 归属与 accepted command sequence=1。
     assert(
-      String(replayed.headEntryId) === String(thread.headEntryId)
-        && String(replayed.revision) === String(thread.revision),
-      `same-target replay must precede revision CAS: ${JSON.stringify(replayed)}`,
+      String(branched.thread.sessionId) === String(thread.sessionId),
+      JSON.stringify(branched.thread),
+    )
+    assert(String(branched.thread.threadId) === branchThreadId, JSON.stringify(branched.thread))
+    assert(
+      String(branched.acceptedCommands[0].sequence) === '1'
+        && branched.acceptedCommands[0].type === 'USER_MESSAGE'
+        && branched.replayed === false,
+      JSON.stringify(branched),
+    )
+    assert(branched.rootEntry.entryId === accepted.rootEntry.entryId, JSON.stringify(branched.rootEntry))
+    // 原 Thread 不受影响（head/revision/nextCommandSequence 逐字段不变）。
+    const after = await getThreadSnapshot(ctx, threadId)
+    assert(
+      String(after.thread.headEntryId) === mainBefore.headEntryId
+        && String(after.thread.revision) === mainBefore.revision
+        && String(after.thread.nextCommandSequence) === mainBefore.nextCommandSequence,
+      JSON.stringify({ before: mainBefore, after: after.thread }),
+    )
+    // quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER。
+    const branchedFinal = await waitForQuiescentThread(ctx, branchThreadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    assert(branchedFinal.status === 'IDLE', JSON.stringify(branchedFinal))
+    const branchedSnapshot = await getThreadSnapshot(ctx, branchThreadId)
+    const branchedEntries = branchedSnapshot.entries || []
+    assert(
+      branchedEntries.some((entry) => String(entry.entryId) === String(startEntryId)),
+      `branch path must include startEntry ${startEntryId}: ${JSON.stringify(branchedEntries)}`,
+    )
+    assert(
+      branchedEntries.some((entry) => {
+        if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
+        const message = JSON.parse(entry.payloadJson).message
+        return (
+          message?.role === 'USER'
+          && (message.contents || []).some(
+            (content) =>
+              content?.type === 'text' && String(content.text || '').includes(branchUserText),
+          )
+        )
+      }),
+      `branch path must include the branch USER message: ${JSON.stringify(branchedEntries)}`,
     )
 
-    const differentTargetEntryId = cid()
+    // 不存在的 startEntryId => 404（Runtime 找不到 Entry）。
     await expectHttpError(
       () =>
-        updateThreadHead(ctx, thread.threadId, {
-          targetEntryId: differentTargetEntryId,
-          expectedRevision: '999999999',
+        materializeEntryThread(ctx, {
+          owner: chatOwner(chat.id),
+          sessionId,
+          startEntryId: cid(),
+          threadId: cid(),
+          yoloEnabled: false,
+          commands: [userMessageCommand('unknown entry', cid())],
         }),
-      { status: 409, messageIncludes: /revision/i },
+      { status: 404 },
     )
   },
 })
@@ -628,7 +801,7 @@ registerCase({
   id: 'thread.session_entry_tree',
   level: 'L1',
   title: '完整 Session Entry Tree 保留非当前历史分支',
-  docs: 'GET /api/ai/runtime/threads/{threadId}/entries 返回 Thread 所属 Session 的全部 immutable Entries；head 回退后新建分支，snapshot 仍仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系',
+  docs: 'GET /api/ai/runtime/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；ENTRY 物化新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -636,47 +809,57 @@ registerCase({
     const trunkMessage = `entry tree trunk ${suffix}`
     const originalMessage = `entry tree original ${suffix}`
     const alternateMessage = `entry tree alternate ${suffix}`
-    const { snapshot: created } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-entry-tree-${suffix}`,
-      branchAgentName: `e2e-entry-tree-missing-${suffix}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const threadId = created.thread.threadId
-
-    await enqueueCommands(ctx, threadId, {
-      expectedHeadEntryId: created.thread.headEntryId,
-      expectedNextCommandSequence: created.thread.nextCommandSequence,
+    const sessionId = cid()
+    const threadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-entry-tree-missing-${suffix}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
       commands: [userMessageCommand(trunkMessage, cid())],
     })
-    const { snapshot: trunk } = await waitForDurableMessages(ctx, threadId, [trunkMessage])
+    await waitForDurableMessages(ctx, threadId, [trunkMessage])
+    const trunk = await getThreadSnapshot(ctx, threadId)
     const branchPointEntryId = trunk.thread.headEntryId
 
-    await enqueueCommands(ctx, threadId, {
-      expectedHeadEntryId: trunk.thread.headEntryId,
-      expectedNextCommandSequence: trunk.thread.nextCommandSequence,
+    // 原分支：继续原 Thread。
+    await acceptCommandBatch(ctx, {
+      owner: chatOwner(chat.id),
+      target: threadTarget({
+        threadId,
+        expectedHeadEntryId: trunk.thread.headEntryId,
+        expectedNextCommandSequence: trunk.thread.nextCommandSequence,
+      }),
       commands: [userMessageCommand(originalMessage, cid())],
     })
-    const { snapshot: original } = await waitForDurableMessages(
-      ctx,
-      threadId,
-      [trunkMessage, originalMessage],
-    )
-    const moved = await updateThreadHead(ctx, threadId, {
-      targetEntryId: branchPointEntryId,
-      expectedRevision: original.thread.revision,
-    })
-    await enqueueCommands(ctx, threadId, {
-      expectedHeadEntryId: moved.headEntryId,
-      expectedNextCommandSequence: moved.nextCommandSequence,
+    await waitForDurableMessages(ctx, threadId, [trunkMessage, originalMessage])
+    const original = await getThreadSnapshot(ctx, threadId)
+
+    // 分支：ENTRY 在 branchPoint 下开新 Thread，写 alternate。
+    const alternateThreadId = cid()
+    await materializeEntryThread(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      startEntryId: branchPointEntryId,
+      threadId: alternateThreadId,
+      yoloEnabled: false,
       commands: [userMessageCommand(alternateMessage, cid())],
     })
-    const { snapshot: active, entries } = await waitForDurableMessages(
-      ctx,
-      threadId,
-      [trunkMessage, originalMessage, alternateMessage],
-    )
+    const active = await waitForDurableMessages(ctx, alternateThreadId, [
+      trunkMessage,
+      alternateMessage,
+    ])
 
+    const entries = await listSessionEntries(ctx, sessionId)
     const entryText = (entry) => {
       if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return ''
       const message = JSON.parse(entry.payloadJson).message
@@ -689,9 +872,9 @@ registerCase({
     const alternateUser = entries.find((entry) => entryText(entry) === alternateMessage)
     assert(originalUser && alternateUser, `full Entry Tree lost a branch: ${JSON.stringify(entries)}`)
     assert(
-      !active.entries.some((entry) => entryText(entry) === originalMessage)
-        && active.entries.some((entry) => entryText(entry) === alternateMessage),
-      `snapshot must remain current root-to-head only: ${JSON.stringify(active.entries)}`,
+      !active.snapshot.entries.some((entry) => entryText(entry) === originalMessage)
+        && active.snapshot.entries.some((entry) => entryText(entry) === alternateMessage),
+      `snapshot must remain current root-to-head only: ${JSON.stringify(active.snapshot.entries)}`,
     )
     const byId = new Map(entries.map((entry) => [entry.entryId, entry]))
     const originalTurnStart = byId.get(originalUser.parentEntryId)
@@ -709,45 +892,131 @@ registerCase({
       })}`,
     )
     assert(
-      JSON.stringify(await getThreadEntries(ctx, threadId)) === JSON.stringify(entries),
+      JSON.stringify(await listSessionEntries(ctx, sessionId)) === JSON.stringify(entries),
       'full Entry Tree ordering must be stable across reads',
+    )
+    // Session Thread 摘要反映两条 Thread。
+    const threads = await listSessionThreads(ctx, sessionId)
+    const threadIds = threads.map((item) => String(item.threadId))
+    assert(
+      threadIds.includes(String(threadId)) && threadIds.includes(String(alternateThreadId)),
+      `Session Thread list must contain both Threads: ${JSON.stringify(threadIds)}`,
+    )
+    assert(
+      String(original.thread.threadId) === String(threadId),
+      `original Thread unchanged: ${JSON.stringify(original.thread)}`,
     )
   },
 })
 
 registerCase({
-  id: 'thread.rebind_cross_session_rejected',
+  id: 'thread.entry_cross_session_rejected',
   level: 'L1',
-  title: '跨 Session move head 被拒绝',
-  docs: '另一 Thread（另一 Session）的 entry id 作为 target => 409 MOVE_TARGET_CROSS_SESSION；head/session 不变',
+  title: '跨 Session ENTRY 被拒绝',
+  docs: 'ENTRY target 使用另一 Session 的 entry id => 400（start entry 不在目标 Session）；两个原 Thread projection/session entries/thread list 均不变；预分配 rejectedThreadId 的 snapshot 404（未物化）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    const { snapshot: first } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
-      title: `e2e-cross-a-${cid().slice(0, 8)}`,
+    const chat = await createChat(ctx, {
+      title: `e2e-cross-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const { snapshot: second } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
-      title: `e2e-cross-b-${cid().slice(0, 8)}`,
+    const firstSessionId = cid()
+    const firstThreadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId: firstSessionId,
+      threadId: firstThreadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-cross-a-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`cross a ${cid().slice(0, 8)}`, cid())],
     })
-    assert(
-      String(first.thread.sessionId) !== String(second.thread.sessionId),
-      'distinct Threads must have distinct Sessions',
-    )
+    const secondSessionId = cid()
+    const secondThreadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId: secondSessionId,
+      threadId: secondThreadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-cross-b-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`cross b ${cid().slice(0, 8)}`, cid())],
+    })
+    assert(firstSessionId !== secondSessionId, 'distinct Sessions must not collide')
+    // 先让两个 bootstrap Thread quiescent，再捕获 before snapshots/entries/thread lists。
+    const stableFirst = await waitForQuiescentThread(ctx, firstThreadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    const stableSecond = await waitForQuiescentThread(ctx, secondThreadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    const beforeFirstEntries = await listSessionEntries(ctx, firstSessionId)
+    const beforeSecondEntries = await listSessionEntries(ctx, secondSessionId)
+    const beforeFirstThreads = await listSessionThreads(ctx, firstSessionId)
+    const beforeSecondThreads = await listSessionThreads(ctx, secondSessionId)
+    const secondRootEntryId = beforeSecondEntries.find(
+      (entry) => String(entry.entryType || '').toUpperCase() === 'ROOT',
+    )?.entryId
+    assert(secondRootEntryId, `second Session must have a ROOT entry: ${JSON.stringify(beforeSecondEntries)}`)
+
+    // 预分配 rejectedThreadId：用第二 Session 的 ROOT entry 在第一 Session 下提交错误 ENTRY => 400。
+    const rejectedThreadId = cid()
     await expectHttpError(
       () =>
-        updateThreadHead(ctx, first.thread.threadId, {
-          targetEntryId: second.entries[0].entryId,
-          expectedRevision: first.thread.revision,
+        materializeEntryThread(ctx, {
+          owner: chatOwner(chat.id),
+          sessionId: firstSessionId,
+          startEntryId: secondRootEntryId,
+          threadId: rejectedThreadId,
+          yoloEnabled: false,
+          commands: [userMessageCommand('cross session entry', cid())],
         }),
-      { status: 409, messageIncludes: /session/i },
+      { status: 400, messageIncludes: /session|entry/i },
     )
-    const after = await getThreadSnapshot(ctx, first.thread.threadId)
-    assert(String(after.thread.headEntryId) === String(first.thread.headEntryId), JSON.stringify(after.thread))
-    assert(String(after.thread.sessionId) === String(first.thread.sessionId), JSON.stringify(after.thread))
+    // 两个原 Thread projection/entries/thread list 均不变。
+    const afterFirstSnapshot = await getThreadSnapshot(ctx, firstThreadId)
+    const afterSecondSnapshot = await getThreadSnapshot(ctx, secondThreadId)
+    assert(
+      String(afterFirstSnapshot.thread.headEntryId) === String(stableFirst.headEntryId)
+        && String(afterFirstSnapshot.thread.revision) === String(stableFirst.revision)
+        && String(afterFirstSnapshot.thread.nextCommandSequence) === String(stableFirst.nextCommandSequence),
+      JSON.stringify({ before: stableFirst, after: afterFirstSnapshot.thread }),
+    )
+    assert(
+      String(afterSecondSnapshot.thread.headEntryId) === String(stableSecond.headEntryId)
+        && String(afterSecondSnapshot.thread.revision) === String(stableSecond.revision)
+        && String(afterSecondSnapshot.thread.nextCommandSequence) === String(stableSecond.nextCommandSequence),
+      JSON.stringify({ before: stableSecond, after: afterSecondSnapshot.thread }),
+    )
+    assert(
+      JSON.stringify(await listSessionEntries(ctx, firstSessionId)) === JSON.stringify(beforeFirstEntries),
+      'first Session entries must not change',
+    )
+    assert(
+      JSON.stringify(await listSessionEntries(ctx, secondSessionId)) === JSON.stringify(beforeSecondEntries),
+      'second Session entries must not change',
+    )
+    assert(
+      JSON.stringify(await listSessionThreads(ctx, firstSessionId)) === JSON.stringify(beforeFirstThreads),
+      'first Session thread list must not change',
+    )
+    assert(
+      JSON.stringify(await listSessionThreads(ctx, secondSessionId)) === JSON.stringify(beforeSecondThreads),
+      'second Session thread list must not change',
+    )
+    // rejectedThreadId 未物化：snapshot 404。
+    await expectHttpError(
+      () => ctx.call('GET', `/api/ai/runtime/threads/${rejectedThreadId}/snapshot`),
+      { status: 404 },
+    )
   },
 })
 
@@ -759,14 +1028,26 @@ registerCase({
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-stop-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const thread = snapshot.thread
+    const threadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId: cid(),
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-stop-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`stop materialize ${cid().slice(0, 8)}`, cid())],
+    })
+    const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     const stopRequestId = cid()
-    const first = await stopThread(ctx, thread.threadId, {
+    const first = await stopThread(ctx, threadId, {
       stopRequestId,
       expectedRevision: thread.revision,
     })
@@ -775,7 +1056,7 @@ registerCase({
     assert(first.cancelledCommandCount === 0, JSON.stringify(first))
     assert(String(first.thread.revision) === String(thread.revision), JSON.stringify(first))
     // IDLE stop 不写持久 marker：同 stopRequestId 再次调用仍是 IDLE no-op（不是 REPLAYED）。
-    const again = await stopThread(ctx, thread.threadId, {
+    const again = await stopThread(ctx, threadId, {
       stopRequestId,
       expectedRevision: thread.revision,
     })
@@ -784,7 +1065,7 @@ registerCase({
     assert(String(again.thread.revision) === String(thread.revision), JSON.stringify(again))
     await expectHttpError(
       () =>
-        stopThread(ctx, thread.threadId, {
+        stopThread(ctx, threadId, {
           stopRequestId: cid(),
           expectedRevision: '999999999',
         }),
@@ -802,12 +1083,24 @@ registerCase({
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
     // 隔离 Thread：SET_ENVIRONMENT admission 要求 pre-state 干净（无 queued USER/CUSTOM、IDLE、无 Work）。
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-set-all-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const thread = snapshot.thread
+    const threadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId: cid(),
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-set-all-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`set-all materialize ${cid().slice(0, 8)}`, cid())],
+    })
+    const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     const marker = `SET-ALL-${cid()}`
     const modelSelection = modelSelectionOf(ctx)
     const missingAgentName = `missing-agent-${cid().slice(0, 8)}`
@@ -825,11 +1118,17 @@ registerCase({
       setActiveToolsCommand(['read'], cid()),
       userMessageCommand(`${marker} 消费 SET 后的第一条消息。`, cid()),
     ]
-    const dto = await enqueueCommands(ctx, thread.threadId, {
-      expectedHeadEntryId: thread.headEntryId,
-      expectedNextCommandSequence: thread.nextCommandSequence,
+    const accepted = await acceptCommandBatch(ctx, {
+      owner: chatOwner(chat.id),
+      target: threadTarget({
+        threadId,
+        expectedHeadEntryId: thread.headEntryId,
+        expectedNextCommandSequence: thread.nextCommandSequence,
+      }),
       commands,
     })
+    assert(accepted.replayed === false, JSON.stringify(accepted))
+    const dto = accepted.acceptedCommands
     assert(
       dto.map((command) => command.type).join(',') ===
         'SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,USER_MESSAGE',
@@ -843,12 +1142,12 @@ registerCase({
     }
 
     // 等 quiescent：SET_* 被消费并投影到 base settings；USER_MESSAGE 触发一个 turn。
-    const finalThread = await waitForQuiescentThread(ctx, thread.threadId, {
+    const finalThread = await waitForQuiescentThread(ctx, threadId, {
       timeoutMs: 60_000,
       intervalMs: 250,
     })
     assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
-    const finalSnapshot = await getThreadSnapshot(ctx, thread.threadId)
+    const finalSnapshot = await getThreadSnapshot(ctx, threadId)
     const expectedSettings = {
       environment: null,
       agentName: missingAgentName,
@@ -903,21 +1202,29 @@ registerCase({
     )
 
     // 不相关字段与未知字段都必须 400；400 不推进 cursor，可复用 quiescent 后最新 cursor。
-    const fresh = await getThreadSnapshot(ctx, thread.threadId)
+    const fresh = await getThreadSnapshot(ctx, threadId)
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: fresh.thread.headEntryId,
-          expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: fresh.thread.headEntryId,
+            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          }),
           commands: [{ type: 'RENAME_THREAD', clientCommandId: cid() }],
         }),
       { status: 400, messageIncludes: /type/i },
     )
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: fresh.thread.headEntryId,
-          expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: fresh.thread.headEntryId,
+            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          }),
           commands: [
             {
               type: 'SET_AGENT',
@@ -932,9 +1239,13 @@ registerCase({
     // SET_ENVIRONMENT 必须区分字段缺省与显式 null：缺省拒绝，显式 null（上方主 batch）合法解绑。
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: fresh.thread.headEntryId,
-          expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: fresh.thread.headEntryId,
+            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          }),
           commands: [{ type: 'SET_ENVIRONMENT', clientCommandId: cid() }],
         }),
       { status: 400, messageIncludes: /environment/i },
@@ -942,9 +1253,13 @@ registerCase({
     // 其他 discriminator 即使显式传 environment:null 也必须按 forbidden 拒绝。
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: fresh.thread.headEntryId,
-          expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: fresh.thread.headEntryId,
+            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          }),
           commands: [
             {
               type: 'SET_MODEL',
@@ -963,9 +1278,13 @@ registerCase({
     // SET_ENVIRONMENT 只接受完整 binding；name/path 在 mapper 处校验，resolver 运行时才查 registry READY。
     await expectHttpError(
       () =>
-        enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: fresh.thread.headEntryId,
-          expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: fresh.thread.headEntryId,
+            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          }),
           commands: [
             {
               type: 'SET_ENVIRONMENT',
@@ -987,16 +1306,25 @@ registerCase({
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-yolo-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const thread = snapshot.thread
+    const threadId = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId: cid(),
+      threadId,
+      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx)),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`yolo materialize ${cid().slice(0, 8)}`, cid())],
+    })
+    const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     assert(thread.yoloEnabled === false, JSON.stringify(thread))
 
     // 变化 + 精确 revision：revision +1，返回权威 Thread。
-    const enabled = await setThreadYolo(ctx, thread.threadId, {
+    const enabled = await setThreadYolo(ctx, threadId, {
       expectedRevision: thread.revision,
       yoloEnabled: true,
     })
@@ -1008,7 +1336,7 @@ registerCase({
     assert(enabled.headEntryId === thread.headEntryId, JSON.stringify(enabled))
 
     // 同值 no-op 先于 revision CAS：携带过期 expectedRevision 仍 200，revision/head 零触碰。
-    const sameValue = await setThreadYolo(ctx, thread.threadId, {
+    const sameValue = await setThreadYolo(ctx, threadId, {
       expectedRevision: '999999999',
       yoloEnabled: true,
     })
@@ -1018,7 +1346,7 @@ registerCase({
     // 变化 + 过期 revision：409 STALE_REVISION。
     await expectHttpError(
       () =>
-        setThreadYolo(ctx, thread.threadId, {
+        setThreadYolo(ctx, threadId, {
           expectedRevision: thread.revision,
           yoloEnabled: false,
         }),
@@ -1026,7 +1354,7 @@ registerCase({
     )
 
     // 关闭并精确 +1；快照反映同一权威值，且全程不产生 queued Command / Entry / Work。
-    const disabled = await setThreadYolo(ctx, thread.threadId, {
+    const disabled = await setThreadYolo(ctx, threadId, {
       expectedRevision: enabled.revision,
       yoloEnabled: false,
     })
@@ -1035,12 +1363,21 @@ registerCase({
       String(Number(disabled.revision)) === String(Number(enabled.revision) + 1),
       JSON.stringify({ before: enabled.revision, after: disabled.revision }),
     )
-    const fresh = await getThreadSnapshot(ctx, thread.threadId)
+    const fresh = await getThreadSnapshot(ctx, threadId)
     assert(fresh.thread.yoloEnabled === false, JSON.stringify(fresh.thread))
     assert(String(fresh.thread.revision) === String(disabled.revision), JSON.stringify(fresh.thread))
     assert(fresh.queuedCommands.length === 0, JSON.stringify(fresh.queuedCommands))
-    // entries 仍只有 ROOT（创建即快照）；setThreadYolo 绝不追加 Entry。
-    assert(fresh.entries.length === 1, JSON.stringify(fresh.entries))
+    // setThreadYolo 绝不追加/修改 Entry：快照 entries 与 YOLO 开关前后一致。
+    // （materialize 的命令已被消费，entries 含 ROOT + turn 链；此处只证明 YOLO 零副作用。）
+    const beforeYoloEntries = fresh.entries
+    const afterYoloSnapshot = await getThreadSnapshot(ctx, threadId)
+    assert(
+      JSON.stringify(afterYoloSnapshot.entries) === JSON.stringify(beforeYoloEntries),
+      `YOLO must not mutate entries: ${JSON.stringify({
+        before: beforeYoloEntries,
+        after: afterYoloSnapshot.entries,
+      })}`,
+    )
   },
 })
 

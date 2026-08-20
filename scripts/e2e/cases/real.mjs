@@ -9,19 +9,22 @@ import {
   cid,
 } from '../lib/http.mjs'
 import {
+  acceptCommandBatch,
   approveToolInvocation,
   branchSettingsOf,
   canonicalUuid,
+  chatOwner,
   createChat,
-  createChatThread,
-  createConfiguredChatThread,
-  enqueueCommands,
   getThread,
   getThreadSnapshot,
   listEnvironments,
+  materializeEntryThread,
+  materializeNewSession,
+  setAgentCommand,
+  setModelCommand,
   snapshotEntries,
   stopThread,
-  updateThreadHead,
+  threadTarget,
   userMessageCommand,
   waitForModelTextDeltaAfterEventSubscribed,
   waitForQuiescentThread,
@@ -40,19 +43,23 @@ registerCase({
       ctx.vars.provider?.configured && ctx.vars.provider?.baseUrl,
       'minimax requires TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY',
     )
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-real-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const tid = snapshot.thread.threadId
+    const sessionId = cid()
+    const tid = cid()
     const marker = `只回复单词 OK，不要调用工具，不要解释。${cid().slice(0, 6)}`
-    const commandsDto = await enqueueCommands(ctx, tid, {
-      expectedHeadEntryId: snapshot.thread.headEntryId,
-      expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+    const accepted = await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId: tid,
+      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx)),
+      yoloEnabled: false,
       commands: [userMessageCommand(marker, cid())],
     })
-    assert(commandsDto[0].type === 'USER_MESSAGE', JSON.stringify(commandsDto))
+    assert(accepted.acceptedCommands[0].type === 'USER_MESSAGE', JSON.stringify(accepted.acceptedCommands))
     const finalThread = await waitForQuiescentThread(ctx, tid, {
       timeoutMs: 180_000,
       intervalMs: 500,
@@ -103,7 +110,8 @@ registerCase({
       `expected COMPLETED TURN_END: ${JSON.stringify(turnEndPayload)}`,
     )
     ctx.vars.realThreadId = tid
-    ctx.vars.realSessionId = snapshot.thread.sessionId
+    ctx.vars.realSessionId = accepted.session.sessionId
+    ctx.vars.realChatId = chat.id
     ctx.vars.assistantEntryId = String(assistantEntry.entryId)
     ctx.vars.turnEndEntryId = String(entries[turnEndIndex].entryId)
     ctx.writeArtifact('real-turn.json', JSON.stringify(threadSnapshot, null, 2))
@@ -161,10 +169,11 @@ registerCase({
         agentName: parentAgent.name,
         yoloEnabled: false,
       })
-      const snapshot = await createChatThread(ctx, chat.id, {
-        title: null,
-        yoloEnabled: false,
-        branchSettings: branchSettingsOf(
+      const accepted = await materializeNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: cid(),
+        threadId: cid(),
+        rootSettings: branchSettingsOf(
           parentAgent,
           {
             providerName: ctx.vars.seedModel.providerName,
@@ -173,11 +182,7 @@ registerCase({
           },
           { environment: null, activeTools: ['task'] },
         ),
-      })
-      const parentThreadId = String(snapshot.thread.threadId)
-      await enqueueCommands(ctx, parentThreadId, {
-        expectedHeadEntryId: snapshot.thread.headEntryId,
-        expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+        yoloEnabled: false,
         commands: [
           userMessageCommand(
             `Use task with subagent_type "${childAgent.name}" and ask it to return exactly ${marker}.`,
@@ -185,6 +190,7 @@ registerCase({
           ),
         ],
       })
+      const parentThreadId = String(accepted.thread.threadId)
       const finalThread = await waitForQuiescentThread(ctx, parentThreadId, {
         timeoutMs: 300_000,
         intervalMs: 500,
@@ -271,21 +277,40 @@ registerCase({
     const initialMarker = `QUEUE-INITIAL-${cid()}`
     const firstMarker = `QUEUE-FIRST-${cid()}`
     const secondMarker = `QUEUE-SECOND-${cid()}`
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-queue-batch-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
     })
-    const tid = String(snapshot.thread.threadId)
+    const sessionId = cid()
+    const tid = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId: tid,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-queue-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`queue materialize ${cid().slice(0, 8)}`, cid())],
+    })
+    const idle = await waitForQuiescentThread(ctx, tid, { timeoutMs: 60_000, intervalMs: 100 })
     const { signal: firstDelta, startResult } =
       await waitForModelTextDeltaAfterEventSubscribed(
         ctx,
         tid,
         () =>
-          enqueueCommands(ctx, tid, {
-            expectedHeadEntryId: snapshot.thread.headEntryId,
-            expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+          acceptCommandBatch(ctx, {
+            owner: chatOwner(chat.id),
+            target: threadTarget({
+              threadId: tid,
+              expectedHeadEntryId: idle.headEntryId,
+              expectedNextCommandSequence: idle.nextCommandSequence,
+            }),
             commands: [
+              setAgentCommand(ctx.vars.agent.name, cid()),
+              setModelCommand(modelSelectionOf(ctx), cid()),
               userMessageCommand(
                 `${initialMarker}\n不要调用工具。立即逐行输出 80 行短句，每行以“批次等待”开头并带连续编号；`
                   + '不要总结，不要提前结束。',
@@ -296,7 +321,8 @@ registerCase({
         { timeoutMs: 90_000 },
       )
     assert(
-      Array.isArray(startResult) && startResult.length === 1 && startResult[0].type === 'USER_MESSAGE',
+      Array.isArray(startResult?.acceptedCommands)
+        && startResult.acceptedCommands.at(-1).type === 'USER_MESSAGE',
       `initial message batch: ${JSON.stringify(startResult)}`,
     )
     assert(firstDelta.text.trim(), `expected non-empty text delta: ${JSON.stringify(firstDelta)}`)
@@ -304,14 +330,29 @@ registerCase({
     // 运行中入队：一次原子 batch 两条 USER_MESSAGE。cursor 在入队时推进（消费不推进），
     // 运行中快照 cursor 必然有效；sequence 连续由同一 batch 保证。
     const running = await getThreadSnapshot(ctx, tid)
-    const queued = await enqueueCommands(ctx, tid, {
-      expectedHeadEntryId: running.thread.headEntryId,
-      expectedNextCommandSequence: running.thread.nextCommandSequence,
+    const firstQueued = await acceptCommandBatch(ctx, {
+      owner: chatOwner(chat.id),
+      target: threadTarget({
+        threadId: tid,
+        expectedHeadEntryId: running.thread.headEntryId,
+        expectedNextCommandSequence: running.thread.nextCommandSequence,
+      }),
       commands: [
         userMessageCommand(`${firstMarker}\n这是下一 turn 队列批次的第一条消息。`, cid()),
+      ],
+    })
+    const secondQueued = await acceptCommandBatch(ctx, {
+      owner: chatOwner(chat.id),
+      target: threadTarget({
+        threadId: tid,
+        expectedHeadEntryId: firstQueued.thread.headEntryId,
+        expectedNextCommandSequence: firstQueued.thread.nextCommandSequence,
+      }),
+      commands: [
         userMessageCommand(`${secondMarker}\n结合前一条消息，只回复单词 BATCHED，不要解释。`, cid()),
       ],
     })
+    const queued = [...firstQueued.acceptedCommands, ...secondQueued.acceptedCommands]
     assert(queued.length === 2, JSON.stringify(queued))
     assert(
       Number(queued[1].sequence) === Number(queued[0].sequence) + 1,
@@ -379,29 +420,50 @@ registerCase({
       + '不要总结，不要提前结束。'
     const followUpPrompt =
       `${followUpMarker}\n只回复单词 CONTINUED，不要调用工具，不要解释。`
-    const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+    const chat = await createChat(ctx, {
       title: `e2e-stop-partial-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
       yoloEnabled: false,
     })
-    const tid = String(snapshot.thread.threadId)
+    const sessionId = cid()
+    const tid = cid()
+    await materializeNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId: tid,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-stop-partial-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`stop partial materialize ${cid().slice(0, 8)}`, cid())],
+    })
+    const idle = await waitForQuiescentThread(ctx, tid, { timeoutMs: 60_000, intervalMs: 100 })
 
     const { signal: firstDelta, startResult } =
       await waitForModelTextDeltaAfterEventSubscribed(
         ctx,
         tid,
         () =>
-          enqueueCommands(ctx, tid, {
-            expectedHeadEntryId: snapshot.thread.headEntryId,
-            expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
-            commands: [userMessageCommand(initialPrompt, cid())],
+          acceptCommandBatch(ctx, {
+            owner: chatOwner(chat.id),
+            target: threadTarget({
+              threadId: tid,
+              expectedHeadEntryId: idle.headEntryId,
+              expectedNextCommandSequence: idle.nextCommandSequence,
+            }),
+            commands: [
+              setAgentCommand(ctx.vars.agent.name, cid()),
+              setModelCommand(modelSelectionOf(ctx), cid()),
+              userMessageCommand(initialPrompt, cid()),
+            ],
           }),
         { timeoutMs: 90_000 },
       )
-    // startResult 是 command DTO 数组（202 accepted），不是 {status}。
+    // startResult 是 accepted envelope（202），acceptedCommands 是 command DTO 数组。
     assert(
-      Array.isArray(startResult) && startResult.length === 1 && startResult[0].type === 'USER_MESSAGE',
+      Array.isArray(startResult?.acceptedCommands)
+        && startResult.acceptedCommands.at(-1).type === 'USER_MESSAGE',
       `initial message batch: ${JSON.stringify(startResult)}`,
     )
     assert(firstDelta.text.trim(), `expected non-empty text delta: ${JSON.stringify(firstDelta)}`)
@@ -471,12 +533,16 @@ registerCase({
       JSON.stringify({ firstDelta, beforeStop, stop, replay, entriesAfterStop }, null, 2),
     )
 
-    const followUp = await enqueueCommands(ctx, tid, {
-      expectedHeadEntryId: stop.thread.headEntryId,
-      expectedNextCommandSequence: stop.thread.nextCommandSequence,
+    const followUp = await acceptCommandBatch(ctx, {
+      owner: chatOwner(chat.id),
+      target: threadTarget({
+        threadId: tid,
+        expectedHeadEntryId: stop.thread.headEntryId,
+        expectedNextCommandSequence: stop.thread.nextCommandSequence,
+      }),
       commands: [userMessageCommand(followUpPrompt, cid())],
     })
-    assert(followUp.length === 1, `follow-up batch: ${JSON.stringify(followUp)}`)
+    assert(followUp.acceptedCommands.length === 1, `follow-up batch: ${JSON.stringify(followUp)}`)
     const finalThread = await waitForQuiescentThread(ctx, tid, {
       timeoutMs: 120_000,
       intervalMs: 500,
@@ -525,57 +591,76 @@ registerCase({
 })
 
 registerCase({
-  id: 'branch.same_session_move_head',
+  id: 'branch.same_session_entry_thread',
   level: 'L3',
-  title: '同 Session 分支：同一 Thread head 回退到历史 assistant 后继续',
+  title: 'ENTRY 同 Session 分支物化（真实分支 turn）',
   requires: ['real', 'branch'],
-  docs: '在 real.text_turn 的同一 Thread 上，从 TURN_END head 回退到该 Session 内历史 assistant Entry：sessionId 不变、revision+1、root-to-head 路径切换到分支并继续产生分支 turn（不创建另一 Thread/Session）',
+  docs: '在 real.text_turn 的同一 Session 历史 assistant Entry 下用 ENTRY target 开新 Thread（不复制 Entry）：sessionId 不变、新 Thread root-to-head 路径包含 startEntry 与分支 USER、分支 turn 继续产生独立 assistant；原 Thread head/revision/nextCommandSequence 不变',
   async run(ctx) {
     if (!ctx.vars.realThreadId) await getCase('real.text_turn').run(ctx)
     const mainTid = ctx.vars.realThreadId
     const sessionId = ctx.vars.realSessionId
+    const chatId = ctx.vars.realChatId
     const assistantEntryId = ctx.vars.assistantEntryId
-    // 同一 Thread：head 当前在 TURN_END，回退到同 Session 历史 assistant MESSAGE Entry。
+    // 同 Session 分支：ENTRY 在历史 assistant MESSAGE Entry 下开新 Thread（不复制 Entry）。
     const current = await getThread(ctx, mainTid)
     assert(String(current.sessionId) === String(sessionId), JSON.stringify(current))
-    const moved = await updateThreadHead(ctx, mainTid, {
-      targetEntryId: assistantEntryId,
-      expectedRevision: current.revision,
+    const mainBefore = {
+      headEntryId: current.headEntryId,
+      revision: current.revision,
+      nextCommandSequence: current.nextCommandSequence,
+    }
+    const branchThreadId = cid()
+    const branchUserText = '在分支上只回复单词 BRANCH，不要调用工具。'
+    const branched = await materializeEntryThread(ctx, {
+      owner: chatOwner(chatId),
+      sessionId,
+      startEntryId: assistantEntryId,
+      threadId: branchThreadId,
+      yoloEnabled: current.yoloEnabled,
+      commands: [userMessageCommand(branchUserText, cid())],
     })
-    assert(String(moved.headEntryId) === String(assistantEntryId), JSON.stringify(moved))
+    // ENTRY accepted 后 processor 可能已消费分支命令：不锁定 response head=startEntry；
+    // 只锁定 session/thread 归属与 accepted command sequence=1。
+    assert(String(branched.thread.sessionId) === String(sessionId), JSON.stringify(branched.thread))
     assert(
-      String(moved.sessionId) === String(sessionId),
-      `branch must stay in the same Session: ${JSON.stringify({ sessionId, moved })}`,
+      String(branched.thread.threadId) === branchThreadId,
+      JSON.stringify(branched.thread),
     )
     assert(
-      Number(moved.revision) === Number(current.revision) + 1,
-      'move head must advance revision',
+      String(branched.acceptedCommands[0].sequence) === '1'
+        && branched.acceptedCommands[0].type === 'USER_MESSAGE'
+        && branched.replayed === false,
+      JSON.stringify(branched),
+    )
+    // 原 Thread 不动（head/revision/nextCommandSequence 逐字段不变）。
+    const mainAfter = await getThread(ctx, mainTid)
+    assert(
+      String(mainAfter.headEntryId) === String(mainBefore.headEntryId)
+        && String(mainAfter.revision) === String(mainBefore.revision)
+        && String(mainAfter.nextCommandSequence) === String(mainBefore.nextCommandSequence),
+      JSON.stringify({ before: mainBefore, after: mainAfter }),
     )
 
-    await enqueueCommands(ctx, mainTid, {
-      expectedHeadEntryId: moved.headEntryId,
-      expectedNextCommandSequence: moved.nextCommandSequence,
-      commands: [userMessageCommand('在分支上只回复单词 BRANCH，不要调用工具。', cid())],
-    })
-    const finalThread = await waitForQuiescentThread(ctx, mainTid, {
+    const finalThread = await waitForQuiescentThread(ctx, branchThreadId, {
       timeoutMs: 180_000,
       intervalMs: 500,
     })
     assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
+    const entries = await snapshotEntries(ctx, branchThreadId)
+    // root-to-head 路径：startEntry 与分支 USER 都必须在 path 上，分支 assistant 在 USER 之后。
     assert(
-      Number(finalThread.revision) > Number(moved.revision),
-      `branch turn must advance revision beyond the move: ${JSON.stringify(finalThread)}`,
+      entries.some((entry) => String(entry.entryId) === String(assistantEntryId)),
+      `branch path must include the startEntry: ${JSON.stringify(entries)}`,
     )
-    const entries = await snapshotEntries(ctx, mainTid)
-    // root-to-head 路径切换：分支 USER 位于历史 assistant 之后，新 assistant 在其后。
-    const branchUserIndex = findUserEntryIndex(entries, '在分支上只回复单词 BRANCH')
+    const branchUserIndex = findUserEntryIndex(entries, branchUserText)
     const assistantIndex = entries.findIndex(
       (entry) =>
         String(entry.entryId) === String(normalAssistantEntries(entries).at(-1)?.entryId),
     )
     assert(
       branchUserIndex >= 0 && branchUserIndex < assistantIndex,
-      `branch turn must follow the moved head: ${JSON.stringify(entries)}`,
+      `branch turn must follow the branch head: ${JSON.stringify(entries)}`,
     )
     const branchAssistant = normalAssistantEntries(entries).at(-1)
     const text = messageText(branchAssistant)
@@ -781,10 +866,11 @@ registerCase({
         agentName: toolAgent.name,
         yoloEnabled: false,
       })
-      const snapshot = await createChatThread(ctx, chat.id, {
-        title: null,
-        yoloEnabled: false,
-        branchSettings: branchSettingsOf(
+      const accepted = await materializeNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: cid(),
+        threadId: cid(),
+        rootSettings: branchSettingsOf(
           toolAgent,
           {
             providerName: ctx.vars.seedModel.providerName,
@@ -793,15 +879,7 @@ registerCase({
           },
           { environment, activeTools: ['read'] },
         ),
-      })
-      const tid = snapshot.thread.threadId
-      assert(
-        JSON.stringify(snapshot.thread.branchSettings.environment) === JSON.stringify(environment),
-        JSON.stringify(snapshot.thread.branchSettings),
-      )
-      await enqueueCommands(ctx, tid, {
-        expectedHeadEntryId: snapshot.thread.headEntryId,
-        expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+        yoloEnabled: false,
         commands: [
           userMessageCommand(
             '必须调用 read 工具读取文件 e2e-resource.txt，使用参数 {"path":"e2e-resource.txt"}，'
@@ -810,6 +888,11 @@ registerCase({
           ),
         ],
       })
+      const tid = accepted.thread.threadId
+      assert(
+        JSON.stringify(accepted.thread.branchSettings.environment) === JSON.stringify(environment),
+        JSON.stringify(accepted.thread.branchSettings),
+      )
       // 非 YOLO：等待 durable TOOL_WAITING_APPROVAL 状态（快照 classifier 投影）。
       let waiting = null
       let terminal = null
