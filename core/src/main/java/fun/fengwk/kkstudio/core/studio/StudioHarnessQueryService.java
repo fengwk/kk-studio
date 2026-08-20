@@ -18,13 +18,13 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.studio.canvas.CanvasSessionRepository;
@@ -150,10 +150,12 @@ public class StudioHarnessQueryService {
     dto.setCreatedAt(thread.createdAt());
     dto.setUpdatedAt(thread.updatedAt());
     dto.setStatus(status(context));
-    dto.setModel(
-        snapshot.entryPath().baseSettings().model().providerName()
-            + "/"
-            + snapshot.entryPath().baseSettings().model().modelName());
+    var selection = snapshot.entryPath().baseSettings().model();
+    HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
+    model.setProviderName(selection.providerName());
+    model.setModelName(selection.modelName());
+    model.setVariant(selection.variant());
+    dto.setModel(model);
     dto.setHeadMessagePreview(headMessagePreview(snapshot));
     return dto;
   }
@@ -238,6 +240,9 @@ public class StudioHarnessQueryService {
     if (message == null) {
       return null;
     }
+    if (message.role() == AgentMessageRole.SYSTEM) {
+      return null;
+    }
     String text = firstText(message);
     return text == null ? firstResourceName(message) : text;
   }
@@ -265,9 +270,6 @@ public class StudioHarnessQueryService {
     for (AgentMessageContent content : message.contents()) {
       if (content instanceof ResourceMessageContent resource) {
         return resource.name();
-      }
-      if (content instanceof AttachmentMessageContent attachment) {
-        return attachment.uploadId().toString();
       }
     }
     return null;

@@ -18,6 +18,8 @@ import fun.fengwk.kkstudio.core.studio.StudioOwner;
 import fun.fengwk.kkstudio.core.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -60,6 +62,7 @@ class StudioCommandAcceptanceServiceIntegrationTest extends S3WebPostgresTestSup
   @Autowired private ChatService chatService;
   @Autowired private CanvasCommandService canvasCommandService;
   @Autowired private StudioCommandAcceptanceService acceptanceService;
+  @Autowired private HarnessRuntime harnessRuntime;
   @Autowired private ChatSessionRepository chatSessionRepository;
   @Autowired private CanvasSessionRepository canvasSessionRepository;
   @Autowired private StorageUploadService storageUploadService;
@@ -176,6 +179,31 @@ class StudioCommandAcceptanceServiceIntegrationTest extends S3WebPostgresTestSup
 
     assertEquals(1, chatSessionRepository.listSessionIds(chatId).size());
     assertEquals(0, canvasSessionRepository.listSessionIds(canvasId).size());
+    assertEquals(1, count("harness_session", "id", sessionId));
+    assertEquals(1, count("harness_thread", "id", threadId));
+  }
+
+  @Test
+  void productOwnerCannotClaimAnExistingInternalSessionThroughReplay() {
+    UUID chatId = createChat("internal-session-owner");
+    UUID sessionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    AcceptCommandsCommand command =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+            List.of(
+                new NewThreadCommand(
+                    new UserMessageCommandPayload(
+                        new AgentMessage(
+                            AgentMessageRole.USER, List.of(new TextMessageContent("internal")))),
+                    UUID.randomUUID())));
+    harnessRuntime.acceptCommands(command, AcceptancePreflight.IDENTITY);
+
+    // 逆证：无 owner relation 的内部 Session 即使能命中 Runtime exact replay，也不能被产品 owner 接管。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> acceptanceService.accept(new StudioOwner(StudioOwnerType.CHAT, chatId), command));
+    assertEquals(0, count("chat_session", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
   }

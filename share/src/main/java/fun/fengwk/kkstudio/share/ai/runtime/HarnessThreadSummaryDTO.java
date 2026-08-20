@@ -22,8 +22,8 @@ public class HarnessThreadSummaryDTO {
   /** 从当前 Thread context、Invocation 与 queued Command 派生的状态。 */
   private String status;
 
-  /** 当前 head branch 的公开 Model ref（providerName/modelName）。 */
-  private String model;
+  /** 当前 head branch 的完整 Model selection。 */
+  private HarnessModelSelectionDTO model;
 
   /** 当前 head 上最近的用户可读消息预览；没有消息时显式为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
