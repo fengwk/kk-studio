@@ -41,8 +41,8 @@ import java.util.UUID;
  * owner 的归属边持有），再调用 {@link HarnessRuntime#acceptCommands} 把 Runtime store（同一
  * DataSource、PROPAGATION_REQUIRED）加入同一事务。仅在全新接受时调用内部 preflight：NEW_SESSION 原子插入 owner relation （锁
  * harness_session 行 + 检查另一张归属表），所有 target 把 USER_MESSAGE 的瞬时 ATTACHMENT 物化为 durable RESOURCE 并维护
- * Session blob ref。精确 replay 时 Runtime 不调用 preflight，因此不会重复插入归属、不会重复消费 upload；但本服务在调用 Runtime 前 仍完成
- * owner 授权，不能借 replay 绕过归属。
+ * Session blob ref，同时只允许 RESOURCE 复用目标 Session 已拥有的 ref。精确 replay 时 Runtime 不调用 preflight，因此不会重复
+ * 插入归属、不会重复消费 upload；但本服务在调用 Runtime 前仍完成 owner 授权，不能借 replay 绕过归属。
  *
  * <p>owner 正常请求使用 KEY SHARE（不阻塞同 owner 的并发接受），owner 删除路径由 {@link HarnessSessionDeletionService}
  * 走排他锁；本服务绝不暴露 Chat 专属 createThread/submitCommands 或 Canvas first-send 形态的便利方法。
@@ -164,7 +164,7 @@ public class StudioCommandAcceptanceService {
       if (target instanceof AcceptCommandsTarget.NewSession) {
         createOwnership(tx, session.id(), owner);
       }
-      return materializeAttachments(session.id(), commands);
+      return prepareUserContents(session.id(), commands);
     };
   }
 
@@ -191,9 +191,10 @@ public class StudioCommandAcceptanceService {
   }
 
   /**
-   * 把 USER_MESSAGE 的瞬时 ATTACHMENT(uploadId) 物化为 durable RESOURCE，保持 clientCommandId/requestHash 不变。
+   * 准备 USER_MESSAGE 内容：瞬时 ATTACHMENT(uploadId) 物化为 durable RESOURCE，已有 RESOURCE 校验 Session
+   * ownership；保持 clientCommandId/requestHash 不变。
    */
-  private List<NewThreadCommand> materializeAttachments(
+  private List<NewThreadCommand> prepareUserContents(
       UUID sessionId, List<NewThreadCommand> commands) {
     List<NewThreadCommand> prepared = new ArrayList<>(commands.size());
     for (NewThreadCommand command : commands) {
@@ -206,6 +207,8 @@ public class StudioCommandAcceptanceService {
       for (AgentMessageContent content : message.contents()) {
         if (content instanceof AttachmentMessageContent attachment) {
           contents.add(consumeAttachment(sessionId, attachment));
+        } else if (content instanceof ResourceMessageContent resource) {
+          contents.add(requireOwnedResource(sessionId, resource));
         } else {
           contents.add(content);
         }
@@ -240,6 +243,21 @@ public class StudioCommandAcceptanceService {
     refManager.retainRef(sessionId, ready.blobId());
     uploadService.delete(uploadId);
     return new ResourceMessageContent(ready.blobId(), ready.filename(), null);
+  }
+
+  /** RESOURCE 只复用当前 Session 已持有的 durable ref，不新增 retain，也不信任跨 Session blob id。 */
+  private ResourceMessageContent requireOwnedResource(
+      UUID sessionId, ResourceMessageContent resource) {
+    SessionBlobRefManager refManager = refManagers.getIfAvailable();
+    if (refManager == null) {
+      throw new IllegalArgumentException(
+          "global storage is not enabled; resource content is unavailable");
+    }
+    if (!refManager.contains(sessionId, resource.blobId())) {
+      throw new IllegalArgumentException(
+          "resource blob " + resource.blobId() + " is not owned by session " + sessionId);
+    }
+    return resource;
   }
 
   private HarnessRuntime requireRuntime() {

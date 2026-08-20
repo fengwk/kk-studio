@@ -16,12 +16,17 @@ import fun.fengwk.kkstudio.core.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
+import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
@@ -32,6 +37,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 
 import java.util.List;
@@ -187,6 +193,101 @@ class HarnessRuntimeWebMapperTest {
     assertEquals(idText(2), json.path("turnStartEntryId").asText());
     assertTrue(json.has("modelInvocationId"));
     assertNull(dto.getModelInvocationId());
+  }
+
+  @Test
+  void mapsStopCancellationMessagesAsCanonicalAgentJson() throws Exception {
+    StopResult result =
+        new StopResult(
+            false,
+            HarnessRuntimeTestFixtures.thread(id(1)),
+            null,
+            2,
+            List.of(
+                new CancelledUserMessage(1L, id(50), List.of(new TextMessageContent("first"))),
+                new CancelledUserMessage(
+                    2L,
+                    id(51),
+                    List.of(new ResourceMessageContent(id(70), "report.txt", "preview")))));
+
+    HarnessThreadStopResultDTO dto =
+        HarnessRuntimeWebMapper.toStopResultDto(result, HarnessRuntimeTestFixtures.idleSnapshot());
+    JsonNode json = MAPPER.readTree(MAPPER.writeValueAsString(dto));
+
+    assertEquals(2, json.path("cancelledUserMessages").size());
+    assertEquals("1", json.path("cancelledUserMessages").get(0).path("sequence").asText());
+    assertEquals(
+        idText(50), json.path("cancelledUserMessages").get(0).path("clientCommandId").asText());
+    assertEquals(
+        "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"first\"}]}",
+        json.path("cancelledUserMessages").get(0).path("messageJson").asText());
+    assertEquals(
+        "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\",\"blobId\":\""
+            + idText(70)
+            + "\",\"name\":\"report.txt\",\"preview\":\"preview\"}]}",
+        json.path("cancelledUserMessages").get(1).path("messageJson").asText());
+
+    HarnessThreadStopResultDTO replay =
+        HarnessRuntimeWebMapper.toStopResultDto(
+            new StopResult(
+                true,
+                result.thread(),
+                result.stoppedTurnEndEntryId(),
+                result.cancelledCommandCount(),
+                result.cancelledUserMessages()),
+            HarnessRuntimeTestFixtures.idleSnapshot());
+    assertEquals("REPLAYED", replay.getStatus());
+    assertEquals(dto.getCancelledUserMessages(), replay.getCancelledUserMessages());
+
+    HarnessThreadStopResultDTO empty =
+        HarnessRuntimeWebMapper.toStopResultDto(
+            new StopResult(false, result.thread(), null, 0, List.of()),
+            HarnessRuntimeTestFixtures.idleSnapshot());
+    assertTrue(empty.getCancelledUserMessages().isEmpty());
+  }
+
+  @Test
+  void resourceContentUsesStrictShape() {
+    HarnessUserMessageContentDTO resource = new HarnessUserMessageContentDTO();
+    resource.setType("RESOURCE");
+    resource.setBlobId(idText(70));
+    resource.setName("report.txt");
+    resource.setPreview(null);
+    HarnessCommandCreateDTO command = command("USER_MESSAGE", "resource");
+    command.setContents(List.of(resource));
+
+    AcceptCommandsCommand mapped =
+        HarnessRuntimeWebMapper.toAcceptCommandsCommand(request(threadTarget(), command));
+    UserMessageCommandPayload payload =
+        assertInstanceOf(UserMessageCommandPayload.class, mapped.commands().getFirst().payload());
+    ResourceMessageContent content =
+        assertInstanceOf(ResourceMessageContent.class, payload.message().contents().getFirst());
+    assertEquals(id(70), content.blobId());
+    assertEquals("report.txt", content.name());
+    assertNull(content.preview());
+
+    resource.setUploadId(idText(71));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toAcceptCommandsCommand(request(threadTarget(), command)));
+
+    HarnessUserMessageContentDTO missingName = new HarnessUserMessageContentDTO();
+    missingName.setType("RESOURCE");
+    missingName.setBlobId(idText(70));
+    HarnessCommandCreateDTO invalid = command("USER_MESSAGE", "missing-name");
+    invalid.setContents(List.of(missingName));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toAcceptCommandsCommand(request(threadTarget(), invalid)));
+
+    HarnessUserMessageContentDTO text = new HarnessUserMessageContentDTO();
+    text.setType("TEXT");
+    text.setText("hello");
+    text.setBlobId(idText(70));
+    invalid.setContents(List.of(text));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toAcceptCommandsCommand(request(threadTarget(), invalid)));
   }
 
   private static HarnessCommandBatchDTO request(
