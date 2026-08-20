@@ -41,8 +41,8 @@ public class HarnessUserMessageContentDTO {
   }
 
   @JsonSetter("uploadId")
-  public void setUploadId(String uploadId) {
-    this.uploadId = uploadId;
+  public void setUploadId(Object uploadId) {
+    this.uploadId = HarnessRuntimeDtoSupport.requireJsonString(uploadId, "content.uploadId");
     this.uploadIdFieldPresent = true;
   }
 

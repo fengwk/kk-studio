@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
 /** 冻结进 branch settings 快照的不可变 provider/model/variant 选择。 */
@@ -13,4 +14,9 @@ public class HarnessModelSelectionDTO {
 
   /** 必填模型变体 id（canonical text，≤128 字符），必须是模型 config 中存在的 variants[].id。 */
   private String variant;
+
+  @JsonAnySetter
+  public void rejectUnknownField(String name, Object value) {
+    throw new IllegalArgumentException("unknown model selection field: " + name);
+  }
 }
