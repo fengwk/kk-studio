@@ -1214,17 +1214,14 @@ CanvasAgentPane(owner={CANVAS, canvasId})
                     │
                     ▼
                AgentPane
-               ├── PaneTargetStore
-               ├── useAgentPaneController
-               ├── SessionThreadPicker
-               ├── SessionTreePanel
-               ├── DraftThreadPane
-               └── BoundThreadPane
-                   └── ThreadPanel
-                       ├── ConversationView
-                       ├── DebugView
-                       ├── WidgetStack
-                       └── ThreadComposer
+               ├── PaneTargetStore（pane-scoped PendingAcceptance sidecar）
+               ├── useAgentPaneController（三态 FSM）
+               ├── InteractionPanels（SelectionPanel / HistoryBranchPanel / ThreadInteractionPanel）
+               ├── draft target ──────────────► ThreadPanel（ThreadComposer + WidgetStack + Footer）
+               └── BOUND_THREAD ──► ChatPanel ──► ThreadPanel
+                                                ├── ConversationView
+                                                ├── DebugView
+                                                └── WidgetStack / ThreadComposer
 ```
 
 模块职责：
@@ -1236,6 +1233,13 @@ PaneTargetStore
 useAgentPaneController
   三态 FSM、命令可用性、导航门控、first-send materialization
 
+AgentPane
+  owner wrapper 之下的共享 pane：draft 与 bound 都渲染 ThreadPanel，BOUND_THREAD 经 ChatPanel
+  注入 transcript/activity
+
+ChatPanel
+  面板级 Thread 适配器：基于 ThreadPanel 封装 transcript/activity/composer 输入
+
 useAgentThreadController
   Bound Thread snapshot、realtime、enqueue、stop、approval、yolo
 
@@ -1245,11 +1249,8 @@ ThreadProjectionCache
 ThreadComposer
   ComposerPart 编辑、上传、history、selection bookmark、Stop prepend transaction
 
-SessionThreadPicker
-  Session -> Thread 两级搜索；零 Thread Session 转 EntryDraft
-
-SessionTreePanel
-  展示 Session Tree；选 Entry 只返回 ENTRY_DRAFT
+SelectionPanel / HistoryBranchPanel / ThreadInteractionPanel
+  Session/Thread/Agent/Environment 选择、Entry Tree 与 slash 命令共用的交互面板
 ```
 
 禁止再分别实现 Chat/Canvas command switch、draft send pipeline 或 runtime client。
@@ -1267,7 +1268,7 @@ SessionTreePanel
 | `/models` | 修改本地 BranchDraft；随下一条输入提交 `SET_MODEL` |
 | `/tree` | 选择当前 Session 的 Entry，并切换到 `ENTRY_DRAFT` |
 | `/stop` | 停止当前 Thread 并恢复被取消的用户消息 |
-| `/compact` | 在 Bound Thread 发起手动压缩：先经 availability 门控（THREAD_BUSY / OWNERSHIP_BARRIER / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT 等），再以 expectedRevision CAS 提交 MANUAL Compaction Turn |
+| `/compact` | 在 Bound Thread 发起手动压缩：先经 availability 门控（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT），再以 expectedRevision CAS 提交 MANUAL Compaction Turn |
 | `/new` | 切换到 `NEW_SESSION_DRAFT` |
 | `/upload` | 插入 ordered upload part |
 | `/debug` | Conversation 与当前 Thread Debug View 间切换 |
@@ -1891,7 +1892,7 @@ sentinel UUID / 空串代替 NULL
 - [ ] Stop Compaction 后迟到 Model 结果不能 append。
 - [ ] file sections 由 Runtime 重算，malformed reserved tags fail closed。
 - [ ] complete file sections 每次从 ROOT 到 cut 累计重算。
-- [ ] MANUAL `/compact`：availability 门控与 expectedRevision CAS 缺一不可，THREAD_BUSY / OWNERSHIP_BARRIER / BELOW_MINIMUM / NOTHING_TO_COMPACT 等 disabledReason 确定性返回。
+- [ ] MANUAL `/compact`：availability 门控与 expectedRevision CAS 缺一不可，THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT disabledReason 确定性返回。
 - [ ] 不存在 summary replacement hook、branch summary 或 copied retainedTail。
 
 ### 18.5 Stop

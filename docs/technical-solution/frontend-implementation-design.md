@@ -62,7 +62,7 @@ POST /api/ai/runtime/command-batches
 - **非 409（网络/不确定）**：保留 frozen `PendingAcceptance`（请求 + composerSnapshot），恢复 composer 文本，并把 exact plan 交给 controller `replayRef`（byte-for-byte 重放，同 command id + 原始 cursors）；只收到权威成功响应才切换 `BOUND_THREAD`。
 - **known 409**：服务端明确未接受 stale batch（如 `MATERIALIZATION_ID_REUSED`/`STALE_COMMAND_CURSOR`）。不绑定 Thread、清 `PendingAcceptance`、恢复 composer 文本、invalidate/refetch 新 snapshot；**不**设置 replay——下一次 submit 基于新 snapshot 构造 fresh cursors + fresh command IDs。
 
-`ChatWorkspacePane` 的 recovery state 为 `{threadId, content, replay?}`；BoundThreadPane 接收独立 `initialDraft` 与可选 `initialReplay`，controller 以 `initialDraft` 恢复文本、仅在 `initialReplay` 存在时设置 `replayRef`；Chat 切换/Thread 切换清理 recovery。
+`PendingAcceptance` 是 pane-scoped 的 frozen first-send 状态（frozen request + composerParts + branchDraft），由 `useAgentPaneController` sidecar 持有；unknown outcome 以 frozen request exact replay；definite failure 恢复 frozen composer/branch draft；success 才切 `BOUND_THREAD`。
 
 Create Chat 的默认 Environment 使用 `EnvironmentWorkspacePanel` 两阶段选择：先选 READY Environment，再浏览并明确确认当前 Workspace；只有确认后才保存完整 `{name, workspacePath}`，不把选择 Environment 静默折叠为 `workspacePath:'.'`。
 
@@ -308,11 +308,11 @@ frontend/src
 ├── platform/
 ├── features/ai/
 │   ├── catalog/
-│   ├── chat/            # ChatWorkspacePane / BlankComposerPane / BoundThreadPane / command-batch-plan
+│   ├── chat/            # ChatWorkspacePane owner wrapper / branch-draft / command-batch-plan / SelectionPanel 系交互面板
 │   ├── environment/
-│   └── runtime/         # useAgentThreadController / useHarnessThreadRealtime / thread-timeline / thread-events / thread-panel（transcript、event view、shortcuts、composer）/ task-status / thread-notifications
+│   └── runtime/         # AgentPane / useAgentPaneController / ChatPanel / ThreadPanel / useAgentThreadController / useHarnessThreadRealtime / thread-timeline / thread-events / task-status / thread-notifications
 ├── features/canvas/
-├── features/settings/      # 七个 Settings Tab；General 为浏览器偏好，其余为服务端 SystemSettings 聚合编辑器
+├── features/settings/      # General 本地偏好（local-only）+ server schema sections 动态渲染，无固定七个手写 Tab
 ├── shared/api/
 │   ├── contracts/ai-catalog.ts
 │   ├── contracts/ai-chat.ts
