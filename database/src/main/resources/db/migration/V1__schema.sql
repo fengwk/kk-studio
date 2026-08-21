@@ -1011,28 +1011,29 @@ comment on index idx_storage_upload_expiry is
 -- Session 级 Blob 引用：Session 的持久化 message（USER/RESOURCE 与 TOOL 结果）通过本表持有 storage_blob 的
 -- 活跃引用。ref_count 维护完全由应用层 SessionBlobRefManager 显式执行（insert+retain / delete+release 成对），
 -- 绝不依赖 ON DELETE CASCADE 或触发器；两个 FK 都是 RESTRICT，删除 Session / blob 前必须先删除本表对应行。
-create table harness_session_blob_ref (
+-- 本表属于应用层业务（非 Harness runtime 协议），因此不使用 harness_ 前缀。
+create table session_blob_ref (
     session_id  uuid          not null,
     blob_id     uuid          not null,
     created_at  timestamptz(3) not null default current_timestamp,
-    constraint pk_harness_session_blob_ref primary key (session_id, blob_id),
-    constraint fk_harness_session_blob_ref_session foreign key (session_id)
-        references harness_session (id),
-    constraint fk_harness_session_blob_ref_blob foreign key (blob_id)
-        references storage_blob (id)
+    constraint pk_session_blob_ref primary key (session_id, blob_id),
+    constraint fk_session_blob_ref_session foreign key (session_id)
+        references harness_session (id) on delete restrict,
+    constraint fk_session_blob_ref_blob foreign key (blob_id)
+        references storage_blob (id) on delete restrict
 );
 
-create index idx_harness_session_blob_ref_blob
-    on harness_session_blob_ref (blob_id, session_id);
+create index idx_session_blob_ref_blob
+    on session_blob_ref (blob_id, session_id);
 
-comment on table harness_session_blob_ref is
+comment on table session_blob_ref is
     'Session 与 storage_blob 的显式引用边：每行恰好对应一次 blob retain，删除时由应用层逐行 release；'
     'FK 均为 RESTRICT，深删除必须先删本表';
-comment on column harness_session_blob_ref.session_id is '所属 Harness Session（RESTRICT FK）';
-comment on column harness_session_blob_ref.blob_id is '被引用的全局 blob（RESTRICT FK，ACTIVE 行）';
-comment on column harness_session_blob_ref.created_at is '引用创建时间（timestamptz，毫秒精度）';
+comment on column session_blob_ref.session_id is '所属 Harness Session（RESTRICT FK）';
+comment on column session_blob_ref.blob_id is '被引用的全局 blob（RESTRICT FK，ACTIVE 行）';
+comment on column session_blob_ref.created_at is '引用创建时间（timestamptz，毫秒精度）';
 
-comment on index idx_harness_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
+comment on index idx_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
 
 ------------------------------------------------------------------------------
 -- 7. Canvas resource blob FK (must follow the global blob storage section)

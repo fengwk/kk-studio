@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.core.storage.persistence;
 import java.util.List;
 import java.util.UUID;
 
-/** {@code harness_session_blob_ref} 持久化契约：Session 与 blob 的显式引用边。 */
+/** {@code session_blob_ref} 持久化契约：Session 与 blob 的显式引用边。 */
 public interface SessionBlobRefRepository {
 
   /** 幂等插入引用行（{@code on conflict do nothing}）；返回是否新插入。 */
