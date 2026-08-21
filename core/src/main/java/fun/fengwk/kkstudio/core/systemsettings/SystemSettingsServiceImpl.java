@@ -14,8 +14,9 @@ import java.util.Objects;
 /**
  * 单行 system settings 的 CAS 读写；数据库行是权威，服务只在读回时严格解码并校验。
  *
- * <p>PUT 成功后不直接更新内存：先在 {@code afterCommit} 回调中回读权威聚合再 {@link SystemSettingsSnapshot#replace}，
- * 事务回滚绝不触碰内存快照。无活跃事务同步（纯单元测试路径）时退化为直接回读替换，保证快照与数据库一致。
+ * <p>PUT 成功后不直接更新内存：先在 {@code afterCommit} 回调中回读权威聚合再 {@link SystemSettingsSnapshot#replace}， 然后
+ * {@link SystemSettingsChangePublisher#publish()}
+ * 唤醒其他节点回读。事务回滚绝不触碰内存快照、也不发布。无活跃事务同步（纯单元测试路径）时退化为直接回读替换并发布。
  */
 @Service
 public class SystemSettingsServiceImpl implements SystemSettingsService {
@@ -25,14 +26,17 @@ public class SystemSettingsServiceImpl implements SystemSettingsService {
   private final SystemSettingsRepository systemSettingsRepository;
   private final SystemSettingsCodec systemSettingsCodec;
   private final SystemSettingsSnapshot systemSettingsSnapshot;
+  private final SystemSettingsChangePublisher changePublisher;
 
   public SystemSettingsServiceImpl(
       SystemSettingsRepository systemSettingsRepository,
       SystemSettingsCodec systemSettingsCodec,
-      SystemSettingsSnapshot systemSettingsSnapshot) {
+      SystemSettingsSnapshot systemSettingsSnapshot,
+      SystemSettingsChangePublisher changePublisher) {
     this.systemSettingsRepository = Objects.requireNonNull(systemSettingsRepository, "repository");
     this.systemSettingsCodec = Objects.requireNonNull(systemSettingsCodec, "codec");
     this.systemSettingsSnapshot = Objects.requireNonNull(systemSettingsSnapshot, "snapshot");
+    this.changePublisher = Objects.requireNonNull(changePublisher, "changePublisher");
   }
 
   @Override
@@ -81,15 +85,19 @@ public class SystemSettingsServiceImpl implements SystemSettingsService {
           new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-              SystemSettingsRepository.SystemSettingsRecord record = requireRecord();
-              systemSettingsSnapshot.replace(record.settings());
+              applyAuthoritativeSnapshot();
             }
           });
     } else {
-      // 无事务同步（纯单元测试 / 非事务调用路径）：直接回读替换，保证快照与数据库一致。
-      SystemSettingsRepository.SystemSettingsRecord record = requireRecord();
-      systemSettingsSnapshot.replace(record.settings());
+      // 无事务同步（纯单元测试 / 非事务调用路径）：直接回读替换并发布，保证快照与数据库一致。
+      applyAuthoritativeSnapshot();
     }
+  }
+
+  private void applyAuthoritativeSnapshot() {
+    SystemSettingsRepository.SystemSettingsRecord record = requireRecord();
+    systemSettingsSnapshot.replace(record.settings());
+    changePublisher.publish();
   }
 
   private SystemSettingsRepository.SystemSettingsRecord requireRecord() {

@@ -50,10 +50,11 @@ public class RuntimeToolsConfiguration {
       ThreadSelectedSkillLookup skillLookup,
       SkillBodyLoader skillBodyLoader,
       SystemSettingsSnapshot systemSettingsSnapshot) {
-    // skill 正文加载超时：读取共享启动快照的 tool.skillLoadTimeoutMillis（装配期一次 DB 读取，DB 变更需重启生效）；再无默认值。
-    Duration loadTimeout =
-        Duration.ofMillis(systemSettingsSnapshot.get().tool().skillLoadTimeoutMillis());
-    return new LoadSkillTool(skillLookup, skillBodyLoader, loadTimeout);
+    // skill 正文加载超时：每次 execute 从 SystemSettingsSnapshot 现读 tool.skillLoadTimeoutMillis。
+    return new LoadSkillTool(
+        skillLookup,
+        skillBodyLoader,
+        () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().skillLoadTimeoutMillis()));
   }
 
   @Bean

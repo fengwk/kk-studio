@@ -93,8 +93,9 @@ describe('system settings schema renderer', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
     const section = renderSection(schema, 'tool')
-    // 抹掉 gateway 的显式 timing，模拟「section 不整体重启但该 group 重启生效」的元数据。
+    // 抹掉 gateway 的显式 timing 并标 restart，模拟「section 不整体重启但该 group 重启生效」的元数据。
     section.groups[2]!.applyTiming = null
+    section.groups[2]!.restartRequired = true
     const { container } = render(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
@@ -125,11 +126,11 @@ describe('system settings schema renderer', () => {
   it('does not repeat restart badges per card when the whole section is restart', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'environment')
+    const section = renderSection(schema, 'integrations')
     const { container } = render(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
-    // section 级 RestartNotice 恰好一个；所有 card 内不得再有 restart 徽标。
+    // integrations 整 section 仍是重启生效：section 级 RestartNotice 恰好一个；card 内不得再重复徽标。
     expect(screen.getByRole('note')).toBeInTheDocument()
     expect(screen.getAllByText('重启后生效')).toHaveLength(1)
     const cards = container.querySelectorAll('.settings-card')

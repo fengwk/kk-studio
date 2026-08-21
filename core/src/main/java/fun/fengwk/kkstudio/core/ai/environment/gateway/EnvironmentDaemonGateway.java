@@ -87,7 +87,7 @@ public class EnvironmentDaemonGateway
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
   private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
   private final EnvironmentGatewayProperties properties;
-  private final SystemSettings.Environment environment;
+  private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
   private final EnvironmentReadyListener environmentReadyListener;
   private final Map<String, ConnectionState> connections = new HashMap<>();
@@ -107,7 +107,7 @@ public class EnvironmentDaemonGateway
       EnvironmentReadyListener environmentReadyListener) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.environment = Objects.requireNonNull(snapshot, "snapshot").get().environment();
+    this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.environmentReadyListener =
         Objects.requireNonNull(environmentReadyListener, "environmentReadyListener");
@@ -115,7 +115,11 @@ public class EnvironmentDaemonGateway
 
   /** 心跳过期超时（毫秒）：环境按不可用处理的租约时长。 */
   Duration heartbeatTimeout() {
-    return Duration.ofMillis(environment.heartbeatTimeoutMillis());
+    return Duration.ofMillis(environment().heartbeatTimeoutMillis());
+  }
+
+  private SystemSettings.Environment environment() {
+    return snapshot.get().environment();
   }
 
   @Override
@@ -555,7 +559,7 @@ public class EnvironmentDaemonGateway
         resultCodec.decodeResultForInvocation(
             envelope.payloadJson(),
             wireInvocationId(active),
-            environment.maxResourceBytes(),
+            environment().maxResourceBytes(),
             false);
     ToolResult mapped =
         new ToolResult(active.call.id(), result.contents(), result.error(), result.detailsJson());
@@ -569,7 +573,10 @@ public class EnvironmentDaemonGateway
     // 绝不属于 transport gateway。
     ToolResult result =
         resultCodec.decodeResultForInvocation(
-            envelope.payloadJson(), wireInvocationId(active), environment.maxResourceBytes(), true);
+            envelope.payloadJson(),
+            wireInvocationId(active),
+            environment().maxResourceBytes(),
+            true);
     ToolResult mapped =
         new ToolResult(active.call.id(), result.contents(), result.error(), result.detailsJson());
     deferred.add(() -> active.listener.onComplete(mapped));

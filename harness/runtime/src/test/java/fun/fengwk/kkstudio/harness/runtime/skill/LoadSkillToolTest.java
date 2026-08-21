@@ -85,6 +85,24 @@ class LoadSkillToolTest {
     assertEquals(Duration.ofSeconds(2), loader.timeout);
   }
 
+  /** 加载超时在每次 execute 现读 supplier：构造后改值必须传到 SkillBodyLoader。 */
+  @Test
+  void usesLiveLoadTimeoutSupplierOnEachExecute() throws Exception {
+    ThreadSelectedSkillLookup lookup =
+        (invocationId, threadId) -> List.of(new SkillBinding("dev", "Developer rules", PLATFORM));
+    RecordingBodyLoader loader = new RecordingBodyLoader();
+    loader.result = new SkillBodyLoader.SkillBodyLoadResult.Loaded("dev", "# Skill\n");
+    AtomicReference<Duration> timeout = new AtomicReference<>(Duration.ofSeconds(2));
+    LoadSkillTool tool = new LoadSkillTool(lookup, loader, timeout::get);
+
+    execute(tool, UUID.fromString("00000000-0000-0000-0000-00000000002a"), "{\"name\":\"dev\"}");
+    assertEquals(Duration.ofSeconds(2), loader.timeout);
+
+    timeout.set(Duration.ofSeconds(9));
+    execute(tool, UUID.fromString("00000000-0000-0000-0000-00000000002a"), "{\"name\":\"dev\"}");
+    assertEquals(Duration.ofSeconds(9), loader.timeout);
+  }
+
   @Test
   void rejectsUnselectedSkillAndOfflineSource() throws Exception {
     ThreadSelectedSkillLookup lookup =

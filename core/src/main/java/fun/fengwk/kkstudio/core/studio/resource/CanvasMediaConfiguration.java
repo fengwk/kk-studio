@@ -39,7 +39,7 @@ public class CanvasMediaConfiguration {
     }
     return new FfmpegStorageMediaProbe(
         properties,
-        snapshot.get().storageMedia(),
+        snapshot,
         Objects.requireNonNull(storageService.getIfAvailable(), "storageService"),
         objectMapper);
   }
@@ -55,7 +55,7 @@ public class CanvasMediaConfiguration {
     }
     return new CanvasBlobPreviewService(
         properties,
-        snapshot.get().storageMedia(),
+        snapshot,
         Objects.requireNonNull(storageService.getIfAvailable(), "storageService"));
   }
 

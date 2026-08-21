@@ -118,7 +118,22 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sections[0].groups[2].applyTiming").value("NEXT_INVOCATION"))
         // restartRequired section 标记：aiRuntime live，tool 不需要重启。
         .andExpect(jsonPath("$.data.sections[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[1].restartRequired").value(false));
+        .andExpect(jsonPath("$.data.sections[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[1].groups[2].key").value("tool.gateway"))
+        .andExpect(jsonPath("$.data.sections[1].groups[2].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[1].groups[2].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.data.sections[2].key").value("environment"))
+        .andExpect(jsonPath("$.data.sections[2].restartRequired").value(true))
+        .andExpect(jsonPath("$.data.sections[2].groups[0].key").value("environment.runtime"))
+        .andExpect(jsonPath("$.data.sections[2].groups[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[2].groups[0].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.data.sections[2].groups[1].key").value("environment.transport"))
+        .andExpect(jsonPath("$.data.sections[2].groups[1].restartRequired").value(true))
+        .andExpect(jsonPath("$.data.sections[2].groups[1].applyTiming").value("RESTART"))
+        .andExpect(jsonPath("$.data.sections[4].key").value("storageMedia"))
+        .andExpect(jsonPath("$.data.sections[4].groups[1].key").value("storageMedia.canvasMedia"))
+        .andExpect(jsonPath("$.data.sections[4].groups[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[4].groups[1].applyTiming").value("NEXT_INVOCATION"));
   }
 
   @Test

@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.core.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -32,19 +33,17 @@ public class CanvasBlobPreviewService {
   private static final long MAX_PREVIEW_INPUT = 512L * 1024 * 1024;
 
   private final CanvasMediaProperties properties;
-  private final SystemSettings.StorageMedia storageMedia;
+  private final SystemSettingsSnapshot snapshot;
   private final S3StorageService storageService;
-  private final MediaProcessRunner processRunner;
+  private final MediaProcessRunner processRunner = new MediaProcessRunner();
 
   public CanvasBlobPreviewService(
       CanvasMediaProperties properties,
-      SystemSettings.StorageMedia storageMedia,
+      SystemSettingsSnapshot snapshot,
       S3StorageService storageService) {
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
+    this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.storageService = Objects.requireNonNull(storageService, "storageService");
-    this.processRunner =
-        new MediaProcessRunner(Duration.ofMillis(storageMedia.canvasMediaProcessTimeoutMillis()));
   }
 
   /**
@@ -99,23 +98,31 @@ public class CanvasBlobPreviewService {
         List.of(
             "-vf",
             "scale="
-                + storageMedia.thumbnailMaxDimension()
+                + storageMedia().thumbnailMaxDimension()
                 + ":"
-                + storageMedia.thumbnailMaxDimension()
+                + storageMedia().thumbnailMaxDimension()
                 + ":force_original_aspect_ratio=decrease",
             "-frames:v",
             "1",
             "-c:v",
             "libwebp",
             "-quality",
-            Integer.toString(storageMedia.thumbnailQuality()),
+            Integer.toString(storageMedia().thumbnailQuality()),
             "-an"));
     command.add(preview.toString());
-    processRunner.run(command, stdout, stderr);
+    processRunner.run(
+        command,
+        stdout,
+        stderr,
+        Duration.ofMillis(storageMedia().canvasMediaProcessTimeoutMillis()));
     if (!isNonEmptyFile(preview)) {
       throw new IllegalArgumentException("ffmpeg did not create preview.webp");
     }
     return preview;
+  }
+
+  private SystemSettings.StorageMedia storageMedia() {
+    return snapshot.get().storageMedia();
   }
 
   private static boolean isPreviewable(String mediaType) {

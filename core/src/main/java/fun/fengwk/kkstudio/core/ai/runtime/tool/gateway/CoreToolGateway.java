@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.plugin.PluginBranchViewLoader;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.plugin.ContributionId;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
@@ -67,6 +68,7 @@ import java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy;
 import java.util.concurrent.ThreadPoolExecutor.DiscardPolicy;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * Production {@link ToolGateway}：冻结 Tool request 的权限 preflight 与 admission 路由。
@@ -131,7 +133,8 @@ public final class CoreToolGateway implements ToolGateway {
   private final Path workdir;
   private final Path environmentRoot;
   private final ExecutorService executor;
-  private final ToolGatewayConfig config;
+  private final Supplier<Duration> busyRetryDelay;
+  private final Supplier<Duration> overloadRetryDelay;
   private final Clock clock;
 
   public CoreToolGateway(
@@ -145,8 +148,9 @@ public final class CoreToolGateway implements ToolGateway {
       HarnessRuntimeProperties runtimeProperties,
       int resourceMaxBytes,
       @Qualifier("toolGatewayExecutor") ExecutorService executor,
-      ToolGatewayConfig config,
+      SystemSettingsSnapshot snapshot,
       Clock clock) {
+    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
     this(
         toolFactories,
         pluginCatalog,
@@ -159,7 +163,8 @@ public final class CoreToolGateway implements ToolGateway {
         runtimeProperties.resolvedEnvironmentRoot(),
         resourceMaxBytes,
         executor,
-        config,
+        () -> Duration.ofMillis(settings.get().tool().toolGatewayBusyRetryMillis()),
+        () -> Duration.ofMillis(settings.get().tool().toolGatewayOverloadRetryMillis()),
         clock);
   }
 
@@ -183,7 +188,8 @@ public final class CoreToolGateway implements ToolGateway {
         permissionEvaluator,
         toolSettingsProvider,
         resourceStore,
-        runtimeProperties,
+        runtimeProperties.resolvedWorkdir(),
+        runtimeProperties.resolvedEnvironmentRoot(),
         resourceMaxBytes,
         executor,
         config,
@@ -233,6 +239,38 @@ public final class CoreToolGateway implements ToolGateway {
       ExecutorService executor,
       ToolGatewayConfig config,
       Clock clock) {
+    this(
+        toolFactories,
+        pluginCatalog,
+        pluginBranchViewLoader,
+        remoteTransport,
+        permissionEvaluator,
+        toolSettingsProvider,
+        resourceStore,
+        workdir,
+        environmentRoot,
+        resourceMaxBytes,
+        executor,
+        Objects.requireNonNull(config, "config")::busyRetryDelay,
+        config::overloadRetryDelay,
+        clock);
+  }
+
+  private CoreToolGateway(
+      ToolFactories toolFactories,
+      PluginCatalog pluginCatalog,
+      PluginBranchViewLoader pluginBranchViewLoader,
+      RemoteToolTransport remoteTransport,
+      PermissionEvaluator permissionEvaluator,
+      ToolSettingsProvider toolSettingsProvider,
+      ResourceStore resourceStore,
+      Path workdir,
+      Path environmentRoot,
+      int resourceMaxBytes,
+      ExecutorService executor,
+      Supplier<Duration> busyRetryDelay,
+      Supplier<Duration> overloadRetryDelay,
+      Clock clock) {
     this.toolFactories = Objects.requireNonNull(toolFactories, "toolFactories");
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.pluginBranchViewLoader =
@@ -248,7 +286,8 @@ public final class CoreToolGateway implements ToolGateway {
     this.environmentRoot =
         Objects.requireNonNull(environmentRoot, "environmentRoot").toAbsolutePath().normalize();
     this.executor = Objects.requireNonNull(executor, "executor");
-    this.config = Objects.requireNonNull(config, "config");
+    this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
+    this.overloadRetryDelay = Objects.requireNonNull(overloadRetryDelay, "overloadRetryDelay");
     this.clock = Objects.requireNonNull(clock, "clock");
     rejectUnsafeExecutorPolicies(executor);
     rejectInlineExecutor(executor);
@@ -369,7 +408,7 @@ public final class CoreToolGateway implements ToolGateway {
       log.warn(
           "tool gateway executor rejected platform execution for invocation {}",
           execution.invocationId());
-      return new ToolGateway.Overloaded(config.overloadRetryDelay());
+      return new ToolGateway.Overloaded(overloadRetryDelay.get());
     } catch (RuntimeException ambiguous) {
       // 可能已启动：cancel 唤醒等待任务并使其中止，按 Indeterminate 收敛，绝不抛。
       bridge.cancel();
@@ -552,7 +591,7 @@ public final class CoreToolGateway implements ToolGateway {
     } catch (RemoteToolBusyException busy) {
       // 同 Environment 已有 active remote invocation：INVOKE 肯定未发送，由 Harness 按固定延迟重新 admission，
       // 不创建 durable error。
-      return new ToolGateway.Busy(config.busyRetryDelay());
+      return new ToolGateway.Busy(busyRetryDelay.get());
     } catch (RemoteToolUnavailableException unavailable) {
       // 发送前目标不可用（路由缺失/未注册/未 READY/心跳过期）：肯定未开始，且当前分支配置下重试不会改变结论——
       // 确定性拒绝，让模型看到 durable 错误结果并继续收敛。

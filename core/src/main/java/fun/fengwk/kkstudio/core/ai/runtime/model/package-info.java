@@ -11,7 +11,7 @@
  * Runtime listener。gateway 绝不读写 HarnessStore，且不会在 {@code start} 返回前投递任何 listener 回调。
  *
  * <p>{@link fun.fengwk.kkstudio.core.ai.runtime.model.ModelExecutionConfiguration} 拥有共享虚拟线程
- * executor 与 {@link fun.fengwk.kkstudio.core.ai.runtime.model.ModelGatewayConfig} 的生命周期； 两个适配器的
- * Provider I/O 都运行在该 executor 上。
+ * executor；busy 重试延迟由 {@link fun.fengwk.kkstudio.core.ai.runtime.model.CoreModelGateway} 在每次 start
+ * 从 SystemSettingsSnapshot 现读。两个适配器的 Provider I/O 都运行在该 executor 上。
  */
 package fun.fengwk.kkstudio.core.ai.runtime.model;

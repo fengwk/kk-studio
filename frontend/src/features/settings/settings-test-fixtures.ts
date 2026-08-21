@@ -337,8 +337,8 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'tool.gateway',
             labelKey: 'settings.section.tool.gateway.title',
             descriptionKey: 'settings.section.tool.gateway.description',
-            restartRequired: true,
-            applyTiming: 'RESTART',
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'tool.modelGatewayBusyRetryMillis',
@@ -391,25 +391,15 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         restartRequired: true,
         groups: [
           {
-            key: 'environment.gateway',
-            labelKey: 'settings.section.environment.title',
-            descriptionKey: 'settings.section.environment.description',
-            restartRequired: true,
-            applyTiming: null,
+            key: 'environment.runtime',
+            labelKey: 'settings.section.environment.runtime.title',
+            descriptionKey: 'settings.section.environment.runtime.description',
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'environment.maxResourceBytes',
                 labelKey: 'settings.field.environment.maxResourceBytes',
-                hintKey: null,
-                type: 'LONG',
-                nullable: false,
-                min: 1,
-                max: null,
-                options: null,
-              },
-              {
-                path: 'environment.maxMessageBytes',
-                labelKey: 'settings.field.environment.maxMessageBytes',
                 hintKey: null,
                 type: 'LONG',
                 nullable: false,
@@ -430,6 +420,25 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'environment.directoryListTimeoutMillis',
                 labelKey: 'settings.field.environment.directoryListTimeoutMillis',
+                hintKey: null,
+                type: 'LONG',
+                nullable: false,
+                min: 1,
+                max: null,
+                options: null,
+              },
+            ],
+          },
+          {
+            key: 'environment.transport',
+            labelKey: 'settings.section.environment.transport.title',
+            descriptionKey: 'settings.section.environment.transport.description',
+            restartRequired: true,
+            applyTiming: 'RESTART',
+            fields: [
+              {
+                path: 'environment.maxMessageBytes',
+                labelKey: 'settings.field.environment.maxMessageBytes',
                 hintKey: null,
                 type: 'LONG',
                 nullable: false,
@@ -893,8 +902,8 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'storageMedia.canvasMedia',
             labelKey: 'settings.section.storageMedia.canvasMedia.title',
             descriptionKey: 'settings.section.storageMedia.canvasMedia.description',
-            restartRequired: true,
-            applyTiming: null,
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'storageMedia.canvasMediaProcessTimeoutMillis',

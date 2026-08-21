@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.core.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageMediaFacts;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -44,22 +44,20 @@ public class FfmpegStorageMediaProbe implements StorageMediaProbe {
   private static final long MAX_PROBE_SIZE = 100L * 1024 * 1024;
 
   private final CanvasMediaProperties properties;
-  private final SystemSettings.StorageMedia storageMedia;
+  private final SystemSettingsSnapshot snapshot;
   private final S3StorageService storageService;
   private final ObjectMapper objectMapper;
-  private final MediaProcessRunner processRunner;
+  private final MediaProcessRunner processRunner = new MediaProcessRunner();
 
   public FfmpegStorageMediaProbe(
       CanvasMediaProperties properties,
-      SystemSettings.StorageMedia storageMedia,
+      SystemSettingsSnapshot snapshot,
       S3StorageService storageService,
       ObjectMapper objectMapper) {
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
+    this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.storageService = Objects.requireNonNull(storageService, "storageService");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-    this.processRunner =
-        new MediaProcessRunner(Duration.ofMillis(storageMedia.canvasMediaProcessTimeoutMillis()));
   }
 
   @Override
@@ -111,7 +109,8 @@ public class FfmpegStorageMediaProbe implements StorageMediaProbe {
             "json",
             original.toString()),
         stdout,
-        stderr);
+        stderr,
+        Duration.ofMillis(snapshot.get().storageMedia().canvasMediaProcessTimeoutMillis()));
     if (!isNonEmptyFile(stdout)) {
       throw new IllegalArgumentException("ffprobe produced no JSON output");
     }

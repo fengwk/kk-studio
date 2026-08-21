@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.CurrentEnvironmentContext;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.BranchView;
 import fun.fengwk.kkstudio.harness.plugin.ContextProjectorContribution;
@@ -104,7 +103,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final ToolCatalog toolCatalog;
   private final PluginCatalog pluginCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final SystemSettings.Environment environmentSettings;
+  private final SystemSettingsSnapshot snapshot;
   private final CompactionConfigProvider compactionConfigProvider;
   private final SubagentConfigProvider subagentConfigProvider;
   private final AgentPromptComposer promptComposer;
@@ -140,7 +139,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.environmentSettings = Objects.requireNonNull(snapshot, "snapshot").get().environment();
+    this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
     this.subagentConfigProvider =
@@ -468,7 +467,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + environmentName);
     }
     if (!environment.isReady(
-        now, Duration.ofMillis(environmentSettings.heartbeatTimeoutMillis()))) {
+        now, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis()))) {
       throw rejection(
           "agent skills require the latest selected environment which is not ready: "
               + environmentName);
