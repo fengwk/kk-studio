@@ -60,6 +60,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription("updated");
     update.setSystemPrompt(definition.getSystemPrompt());
+    update.setModel(definition.getModel());
     update.setVariant(definition.getVariant());
     update.setConfig(definition.getConfig());
     update.setExpectedVersion(definition.getVersion());
@@ -74,6 +75,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
     AgentDefinitionUpdateDTO stale = new AgentDefinitionUpdateDTO();
     stale.setDescription("stale");
+    stale.setModel(definition.getModel());
     stale.setConfig(definition.getConfig());
     stale.setExpectedVersion(definition.getVersion());
     assertThrows(
@@ -115,6 +117,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
       AgentDefinitionUpdateDTO removeReference = new AgentDefinitionUpdateDTO();
       removeReference.setDescription(parent.getDescription());
       removeReference.setSystemPrompt(parent.getSystemPrompt());
+      removeReference.setModel(parent.getModel());
       removeReference.setVariant(parent.getVariant());
       removeReference.setConfig(parent.getConfig());
       removeReference.getConfig().setSubagents(List.of());
@@ -156,6 +159,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
       assertNull(created.getVariant());
       AgentDefinitionUpdateDTO invalidUpdate = new AgentDefinitionUpdateDTO();
       invalidUpdate.setDescription(created.getDescription());
+      invalidUpdate.setModel(created.getModel());
       invalidUpdate.setVariant("missing");
       invalidUpdate.setConfig(created.getConfig());
       invalidUpdate.setExpectedVersion(created.getVersion());
@@ -165,6 +169,45 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     } finally {
       agentDefinitionService.deleteAgent(created.getName(), created.getVersion());
       agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+      agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
+    }
+  }
+
+  @Test
+  public void rebindsDefaultModelOnUpdateAndRejectsMissingTarget() {
+    String suffix = Long.toString(System.nanoTime());
+    AgentProviderDTO provider = provider("agent-rebind-provider-" + suffix);
+    AgentModelDTO original = model(provider.getName(), "agent-rebind-original-" + suffix);
+    AgentModelDTO next = model(provider.getName(), "agent-rebind-next-" + suffix);
+    String originalRef = provider.getName() + "/" + original.getName();
+    String nextRef = provider.getName() + "/" + next.getName();
+    AgentDefinitionDTO definition =
+        agentDefinitionService.createAgent(agent(originalRef, "agent-rebind-" + suffix));
+    try {
+      AgentDefinitionUpdateDTO rebind = new AgentDefinitionUpdateDTO();
+      rebind.setDescription(definition.getDescription());
+      rebind.setSystemPrompt(definition.getSystemPrompt());
+      rebind.setModel(nextRef);
+      rebind.setVariant(null);
+      rebind.setConfig(definition.getConfig());
+      rebind.setExpectedVersion(definition.getVersion());
+      AgentDefinitionDTO updated = agentDefinitionService.updateAgent(definition.getName(), rebind);
+      assertEquals(nextRef, updated.getModel());
+      assertNull(updated.getVariant());
+
+      AgentDefinitionUpdateDTO missing = new AgentDefinitionUpdateDTO();
+      missing.setDescription(updated.getDescription());
+      missing.setModel(provider.getName() + "/missing-" + suffix);
+      missing.setConfig(updated.getConfig());
+      missing.setExpectedVersion(updated.getVersion());
+      assertThrows(
+          AiResourceNotFoundException.class,
+          () -> agentDefinitionService.updateAgent(updated.getName(), missing));
+      definition = updated;
+    } finally {
+      agentDefinitionService.deleteAgent(definition.getName(), definition.getVersion());
+      agentModelService.deleteModel(provider.getName(), next.getName(), next.getVersion());
+      agentModelService.deleteModel(provider.getName(), original.getName(), original.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
   }

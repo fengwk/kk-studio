@@ -150,7 +150,6 @@ export function AgentForm({
           aria-describedby={modelUnavailable ? 'agent-model-identity-status' : undefined}
           value={draft.model}
           required
-          disabled={mode === 'edit'}
           options={modelOptions}
           onChange={(model) => onChange(applyAgentModelSelection(draft, model, models))}
         />

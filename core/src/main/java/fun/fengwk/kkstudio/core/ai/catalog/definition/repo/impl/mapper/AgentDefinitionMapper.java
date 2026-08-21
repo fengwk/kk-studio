@@ -80,6 +80,7 @@ public interface AgentDefinitionMapper extends BaseMapper {
       """
       update agent_definition
       set description = #{agent.description}, system_prompt = #{agent.systemPrompt},
+          model_provider_name = #{agent.modelProviderName}, model_name = #{agent.modelName},
           variant = #{agent.variant}, config = cast(#{agent.configJson} as jsonb),
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where name = #{agent.name} and version = #{expectedVersion}

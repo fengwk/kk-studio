@@ -267,6 +267,7 @@ describe('AI domain utilities', () => {
     expect(toEditableAgentUpdate(agentInput)).toEqual({
       description: 'desc',
       systemPrompt: 'prompt',
+      model: 'minimax/MiniMax-M2.7',
       variant: 'default',
       config: {
         tools: ['search'],

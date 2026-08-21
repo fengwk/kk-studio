@@ -195,7 +195,7 @@ canvas.api_version_contract
 
 L1 的关键语义断言：
 
-- Provider/Agent name 与 Model `(providerName,name)` 创建、更新、硬删除、同名重建；记录存续期间名称不可修改，DELETE 带 `expectedVersion` 硬删除后列表不再出现，同名立即可重建且 `version` 从 `"0"` 重新开始并读取到新数据（删除前数据不残留）；
+- Provider/Agent name 与 Model `(providerName,name)` 创建、更新、硬删除、同名重建；记录存续期间名称不可修改，DELETE 带 `expectedVersion` 硬删除后列表不再出现，同名立即可重建且 `version` 从 `"0"` 重新开始并读取到新数据（删除前数据不残留）；Agent PUT 可更换 default model；
 - Agent config 的 `tools`/`skills`/`subagents` 三个列表**必填**（缺失 400），元素去重、非空白短名；`tools` 只允许可选目录中的名称（未知 400），`subagents` 是 Agent 名称 allowlist——引用锁定（被引用的 Agent 不可删除，DELETE 409；移除引用后即可硬删除），未知引用 404；
 - `GET /api/ai/catalog/tools` 只返回可选 Platform/Environment 目录：`load_skill`/`task` 两个内部 Platform Tool 绝不出现；Goal 插件 `create_goal/get_goal/update_goal` 必须作为可选 ToolCatalog 能力通过 Agent config 校验；
 - Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `EnvironmentBinding{name, workspacePath}`（可为 null，两字段同存同空）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
@@ -386,7 +386,7 @@ GET /api/ai/catalog/tools
 - Catalog PUT/DELETE 的 `expectedVersion` 使用十进制字符串；
 - 空白名称、Provider/Agent 名称含 `/`、缺字段、非法 variant、非法 config 和未知字段返回 `400`；
 - 未知名称返回 `404`，版本冲突返回 `409`；
-- 三张名称资源表（agent_provider/agent_model/agent_definition）均为硬删除：删除后同名可重建，重建行的 `version` 从 `"0"` 重新开始；记录存续期间名称（Provider/Agent name、Model 的 `providerName/name`）不可修改。
+- 三张名称资源表（agent_provider/agent_model/agent_definition）均为硬删除：删除后同名可重建，重建行的 `version` 从 `"0"` 重新开始；记录存续期间名称（Provider/Agent name、Model 的 `providerName/name`）不可修改。Agent PUT 可更换 default `model`（目标必须存在，variant 必须属于新 model）。
 
 ### Chat 与 Thread
 

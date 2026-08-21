@@ -112,25 +112,6 @@ export function normalizeCreateAgentDraftSelection(
   )
 }
 
-/**
- * 编辑模式持有持久化的 model 引用。当该 model 未加载时，保持 variant 不变，因为没有可信的 model config
- * 可用于推导选项。
- */
-export function normalizeEditAgentDraftSelection(
-  draft: AgentDraft,
-  immutableModelRef: string,
-  models: AgentModelView[],
-): AgentDraft {
-  const identityDraft =
-    draft.model === immutableModelRef
-      ? draft
-      : { ...draft, model: immutableModelRef }
-  const selectedModel = models.find((model) => modelRef(model) === immutableModelRef)
-  return selectedModel
-    ? normalizeAgentDraftDefaultVariant(identityDraft, models)
-    : identityDraft
-}
-
 export function applyAgentModelSelection(
   draft: AgentDraft,
   model: string,
