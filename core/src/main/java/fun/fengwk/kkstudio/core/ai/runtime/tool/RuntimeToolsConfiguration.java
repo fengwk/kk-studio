@@ -8,21 +8,21 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfigProvider;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentRunRegistry;
-import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.plugin.ToolContribution;
 import fun.fengwk.kkstudio.harness.plugin.ToolVisibility;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.skill.SkillBodyLoader;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentRunRegistry;
+import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
@@ -37,8 +37,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 把普通 runtime 工具（当前为 {@code load_skill}）装配为 Spring {@code Tool} bean，并为 {@code ToolFactories} 暴露为
- * {@link ToolFactory} bean；插件 Tool 由冻结 {@link PluginCatalog} 独立贡献。
+ * 把普通 runtime 工具（当前为 {@code load_skill} 与 {@code task}）装配为 Spring {@code Tool} bean，并为 {@code
+ * ToolFactories} 暴露为 {@link ToolFactory} bean；插件 Tool 由冻结 {@link PluginCatalog} 独立贡献。
  */
 @Configuration(proxyBeanMethods = false)
 public class RuntimeToolsConfiguration {
@@ -100,7 +100,7 @@ public class RuntimeToolsConfiguration {
       @Qualifier("subagentTaskExecutor") ExecutorService executor,
       ObjectMapper objectMapper) {
     return new TaskTool(
-        runtimeProvider,
+        () -> runtimeProvider.getIfAvailable(),
         settingsMaterializer,
         subagentConfigProvider,
         runRegistry,

@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "description": "Create or replace the durable goal of the current branch.",
+  "properties": {
+    "objective": {
+      "type": "string",
+      "description": "Durable, evidence-checkable objective covering the outcome, verification surface, constraints, boundaries, iteration policy, and blocked stop condition."
+    },
+    "tokenBudget": {
+      "type": "integer",
+      "description": "Optional positive token budget, only when explicitly requested."
+    }
+  },
+  "required": ["objective"],
+  "additionalProperties": false
+}

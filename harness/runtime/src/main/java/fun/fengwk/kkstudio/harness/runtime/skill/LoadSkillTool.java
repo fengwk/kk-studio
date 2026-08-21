@@ -14,16 +14,12 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -47,11 +43,7 @@ public final class LoadSkillTool implements Tool {
           ToolType.PLATFORM,
           SkillToolPrompts.load("load_skill.md"),
           NAME,
-          new ToolParamsSchema(
-              "按精确短名称加载已选中的 skill 正文。",
-              Map.of("name", new ToolStringSchema("来自 available_skills 的精确短 skill 名。")),
-              Set.of("name"),
-              false),
+          SkillToolPrompts.schema("load_skill.schema.json"),
           ToolSideEffect.READ_ONLY,
           Duration.ofMinutes(1));
 

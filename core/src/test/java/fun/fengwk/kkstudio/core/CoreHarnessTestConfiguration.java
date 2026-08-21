@@ -4,7 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
+import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 
 /**
  * Core 测试上下文的 Harness 装配基座。

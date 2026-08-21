@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
@@ -140,6 +141,26 @@ class AgentPromptComposerTest {
 
     assertTrue(result.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), result);
     assertFalse(result.contains("${defaultMaxTurns}"), result);
+  }
+
+  /** Agent 正文只渲染模板声明的 date/workspace 变量；未声明时原文保留，声明的 workspace 缺失时留空。 */
+  @Test
+  void rendersDeclaredAgentBodyVariablesOnly() {
+    String withBoth = "Today is ${date} in ${workspace}.";
+    String bodyOnly = "No placeholders here.";
+    String dateOnly = "Today is ${date}.";
+    EnvironmentBinding binding = TestEnvironmentBindings.binding("env");
+    CurrentEnvironmentContext selected =
+        new CurrentEnvironmentContext(binding, null, LocalDate.of(2026, 8, 9), null);
+
+    String rendered = composer.compose(withBoth, selected, List.of(), List.of());
+    assertTrue(rendered.startsWith("Today is 2026-08-09 in ."), rendered);
+
+    String unselectedDate = composer.compose(dateOnly, none(), List.of(), List.of());
+    assertTrue(unselectedDate.startsWith("Today is 2026-08-09."), unselectedDate);
+
+    String renderedBodyOnly = composer.compose(bodyOnly, none(), List.of(), List.of());
+    assertTrue(renderedBodyOnly.startsWith("No placeholders here."), renderedBodyOnly);
   }
 
   /** skills/subagents 列表不可为空引用。 */

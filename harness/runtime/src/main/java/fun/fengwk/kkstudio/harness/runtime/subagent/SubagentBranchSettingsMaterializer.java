@@ -1,0 +1,11 @@
+package fun.fengwk.kkstudio.harness.runtime.subagent;
+
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
+
+/** 按最新 Agent/Model catalog 物化子 Agent branch settings 的窄端口；由 Core 实现，TaskTool 每次决策现读。 */
+public interface SubagentBranchSettingsMaterializer {
+
+  /** 物化 {@code agentName} 在 {@code environment} 上、深度为 {@code depth} 的完整 branch settings。 */
+  BranchSettings materialize(String agentName, EnvironmentBinding environment, int depth);
+}

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.core.ai.runtime;
+package fun.fengwk.kkstudio.harness.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

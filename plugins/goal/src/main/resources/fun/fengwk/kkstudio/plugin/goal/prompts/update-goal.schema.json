@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "description": "Update the durable goal of the current branch to a terminal state.",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["complete", "blocked"],
+      "description": "The terminal status: \"complete\" when every objective requirement is satisfied, \"blocked\" when the same blocking condition has repeated."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Detailed rationale and concrete evidence supporting this completion or blocked status."
+    }
+  },
+  "required": ["status", "reason"],
+  "additionalProperties": false
+}

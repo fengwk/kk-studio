@@ -297,11 +297,11 @@ durable mutation
 
 ## 11. Subagent 委派（task）
 
-`task` 是内部 `PLATFORM` Tool，由 Core `TaskTool` 实现，**不增加表、状态机或调度器**：父 Thread 的 ToolInvocation 照常走 approval/Work/ToolProcessor，子 Agent 则是另一个普通 durable Harness Thread（其执行仍由既有 ThreadProcessor 驱动）。
+`task` 是内部 `PLATFORM` Tool，由 `harness.runtime.subagent.TaskTool` 实现，**不增加表、状态机或调度器**：父 Thread 的 ToolInvocation 照常走 approval/Work/ToolProcessor，子 Agent 则是另一个普通 durable Harness Thread（其执行仍由既有 ThreadProcessor 驱动）。
 
 - 子 Thread 创建复用 `runtime.acceptCommands(NEW_SESSION, SubagentContext)`：原子创建 Session + ROOT（`SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}`；普通根 depth=1，子 Session 从 2 开始；rootThreadId 在整棵委派树不变）+ Thread（yolo 继承父 Thread）+ Commands（SYSTEM CUSTOM_MESSAGE + USER_MESSAGE prompt）；branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（activeTools = config.tools + skills 非空时内部 `load_skill` + subagents 非空且 depth < maxDepth 时内部 `task`）。
 - 委派权限冻结在父 `ModelRequestSpec.subagentBindings`（Agent 名称 + 描述）；TaskTool 执行只消费该冻结 allowlist，绝不重读父 Agent 配置扩权。运行中由 `TaskTool` 经内部 `HarnessThreadChangeSource` 事件化观察子 Thread（`ChangeGate.awaitChange` 等 revision wake 到达才读 snapshot，无固定轮询）：以 durable 指纹（revision/head/model/tool siblings）判定活动，idle 超时排除 active tool 时间；约 1s 一次基于缓存 snapshot 发布非 durable `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整 JSON 快照）。活动 task 的进程内 registry 只 relay 扁平 descendant 状态给祖先心跳，使根 Thread 可审批任意深度调用；durable 子 Thread 仍是唯一执行事实。`maxTurns` 软预算达界后每 5 turn 入队 SYSTEM `CUSTOM_MESSAGE` 提醒。
-- 恢复（`session_id` = 子 ThreadId，canonical UUID）要求同 parent/root 归属且子 Thread quiescent，resume 用 THREAD target + settings diff + prompt 的用户输入 batch；Stop/取消子 Thread 保留可恢复 Session（`cancelChild` 复用 `HarnessRuntime.stop` 的 `task-{invocationId}-cancel` stopRequestId）。进程内 `SubagentRunRegistry` 在同一 synchronized reservation 中执行每父直接子级上限 `subagentMaxConcurrency`（默认 10）与同 root tree 总上限 `subagentMaxTotalConcurrency`（null 表示不限），resume 同样占槽并受单飞保护；超限直接拒绝而非排队。两个值由 SystemSettings schema/UI 配置并在重启后生效，进程重启后的执行事实仍只由 durable Thread 恢复。
+- 恢复（`session_id` = 子 ThreadId，canonical UUID）要求同 parent/root 归属且子 Thread quiescent，resume 用 THREAD target + settings diff + prompt 的用户输入 batch；Stop/取消子 Thread 保留可恢复 Session（`cancelChild` 复用 `HarnessRuntime.stop` 的 `task-{invocationId}-cancel` stopRequestId）。进程内 `SubagentRunRegistry` 在同一 synchronized reservation 中执行每父直接子级上限 `subagentMaxConcurrency`（默认 10）与同 root tree 总上限 `subagentMaxTotalConcurrency`（null 表示不限），resume 同样占槽并受单飞保护；超限直接拒绝而非排队。两个值由 SystemSettings schema/UI 配置，每个新 turn / 新 task 调用现读；进程重启后的执行事实仍只由 durable Thread 恢复。
 - 子 Agent 的工具审批仍复用既有 `decideToolApproval`（以子 ThreadId 定位），approval 事实/`WAITING_APPROVAL` 语义与父 Thread 完全一致；子工具执行经同一 ToolGateway 管线，权限判定同 YOLO/Allow/Ask/Deny 规则。
 
 相关文档：

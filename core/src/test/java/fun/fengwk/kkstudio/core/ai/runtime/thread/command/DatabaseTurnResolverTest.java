@@ -24,8 +24,6 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
-import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
@@ -85,6 +83,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -730,8 +730,9 @@ class DatabaseTurnResolverTest {
     assertEquals(List.of(), depthLimitedRequest.toolBindings());
   }
 
+  /** allowlist 指向不存在的 subagent 时立即拒绝，绝不静默跳过。 */
   @Test
-  void rejectsMissingSubagentOrTaskDescriptorWithoutSilentFallback() {
+  void rejectsMissingSubagentWithoutSilentFallback() {
     Fixture fixture = taskFixture();
     fixture.agentConfig.setSubagents(List.of("ghost"));
     assertEquals(
@@ -740,8 +741,12 @@ class DatabaseTurnResolverTest {
             .rejected(fixture.path(settings(null, "default", List.of(TaskTool.NAME))))
             .error()
             .message());
+  }
 
-    fixture =
+  /** task descriptor 来自注入的 TaskTool 现拼，不依赖 ToolCatalog 启动快照。 */
+  @Test
+  void bindsLiveTaskDescriptorWhenCatalogSnapshotOmitsTask() {
+    Fixture fixture =
         new Fixture(
             List.of(),
             List.of(),
@@ -753,12 +758,10 @@ class DatabaseTurnResolverTest {
             true);
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review");
-    assertEquals(
-        "task tool not found",
-        fixture
-            .rejected(fixture.path(settings(null, "default", List.of(TaskTool.NAME))))
-            .error()
-            .message());
+    ModelRequestSpec request =
+        fixture.resolved(fixture.path(settings(null, "default", List.of(TaskTool.NAME))));
+    assertEquals(TaskTool.NAME, request.toolBindings().getFirst().descriptor().name());
+    assertEquals(TaskTool.VERSION, request.toolBindings().getFirst().descriptor().version());
   }
 
   @Test
@@ -1789,6 +1792,18 @@ class DatabaseTurnResolverTest {
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
       SubagentConfig subagentConfig = new SubagentConfig(2, 10, null, Duration.ZERO, 50);
+      TaskTool taskTool = mock(TaskTool.class);
+      when(taskTool.descriptor())
+          .thenReturn(
+              new ToolDescriptor(
+                  TaskTool.NAME,
+                  TaskTool.VERSION,
+                  ToolType.PLATFORM,
+                  "task",
+                  TaskTool.RENDERER_KEY,
+                  new ToolParamsSchema("task", Map.of(), Set.of(), false),
+                  ToolSideEffect.NON_IDEMPOTENT,
+                  Duration.ZERO));
       resolver =
           new DatabaseTurnResolver(
               agents,
@@ -1804,6 +1819,7 @@ class DatabaseTurnResolverTest {
               () -> new CompactionConfig(20_000, null),
               () -> subagentConfig,
               new AgentPromptComposer(() -> subagentConfig),
+              taskTool,
               clock);
     }
 

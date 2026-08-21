@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -68,6 +70,14 @@ class ToolExecutionNormalizationTest {
     assertEquals("{\"path\":\"a.txt\"}", normalized.argumentsJson());
     assertEquals(original.id(), normalized.id());
     assertEquals(original.toolName(), normalized.toolName());
+    assertNotSame(original, normalized);
+  }
+
+  /** 无需改写时 validateFor 返回同一实例，冻结 call identity 得以保留。 */
+  @Test
+  void validateForReturnsSameInstanceWhenUnchanged() {
+    ToolCall original = new ToolCall("call-1", "read", "{\"path\":\"a.txt\"}");
+    assertSame(original, original.validateFor(DESCRIPTOR));
   }
 
   /** path 与 filePath 同时存在时执行请求仍因 additionalProperties 失败，归一化不掩盖冲突。 */

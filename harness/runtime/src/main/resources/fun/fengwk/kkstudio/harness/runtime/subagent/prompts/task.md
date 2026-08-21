@@ -10,9 +10,3 @@ Usage:
 - When `session_id` is provided, the subagent resumes that session with its existing context. Provide the new direction, additional context, or updated objective based on its progress and current blocker. Do not merely repeat the previous prompt.
 - Resume a session only while its existing context remains useful. Start a new task when the objective or scope has materially changed.
 - The subagent returns its report to the main agent, not directly to the user. Review and integrate the result yourself. The returned envelope includes a resumable identifier in the form `<task id="...">`.
-
-Parameters:
-- `subagent_type` (required): A subagent type listed in `<available_subagents>`.
-- `prompt` (required): Complete instructions for a new task or updated direction for a resumed task.
-- `maxTurns` (optional): A positive interaction-turn budget. The default is `${defaultMaxTurns}`. An unfinished child must return a phase report at the budget; use a smaller value early to verify its path or when frequent parent-child interaction is needed.
-- `session_id` (optional): The `<task id="...">` value of the session to resume.

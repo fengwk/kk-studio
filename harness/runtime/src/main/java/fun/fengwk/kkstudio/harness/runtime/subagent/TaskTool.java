@@ -1,20 +1,19 @@
-package fun.fengwk.kkstudio.core.ai.runtime.task;
+package fun.fengwk.kkstudio.harness.runtime.subagent;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.core.ai.runtime.ChangeGate;
-import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.runtime.ChangeGate;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -54,20 +53,16 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /** 以普通 durable Harness Thread 运行隔离子 Agent 的内部 task 平台工具。 */
 public final class TaskTool implements Tool {
@@ -80,18 +75,17 @@ public final class TaskTool implements Tool {
   private static final int REPORT_FALLBACK_MAX_CHARS = 8_000;
   private static final long STATUS_HEARTBEAT_NANOS = Duration.ofSeconds(1).toNanos();
 
-  private final ObjectProvider<HarnessRuntime> runtimeProvider;
-  private final AgentBranchSettingsMaterializer settingsMaterializer;
+  private final Supplier<HarnessRuntime> runtimeProvider;
+  private final SubagentBranchSettingsMaterializer settingsMaterializer;
   private final SubagentConfigProvider configProvider;
   private final SubagentRunRegistry runRegistry;
   private final HarnessThreadChangeSource changeSource;
   private final ExecutorService executor;
   private final ObjectMapper objectMapper;
-  private final ToolDescriptor descriptor;
 
   public TaskTool(
-      ObjectProvider<HarnessRuntime> runtimeProvider,
-      AgentBranchSettingsMaterializer settingsMaterializer,
+      Supplier<HarnessRuntime> runtimeProvider,
+      SubagentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfigProvider configProvider,
       SubagentRunRegistry runRegistry,
       HarnessThreadChangeSource changeSource,
@@ -105,33 +99,24 @@ public final class TaskTool implements Tool {
     this.changeSource = Objects.requireNonNull(changeSource, "changeSource");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-    this.descriptor =
-        new ToolDescriptor(
-            NAME,
-            VERSION,
-            ToolType.PLATFORM,
-            TaskPrompts.toolDescription(configProvider.subagentConfig().maxTurns()),
-            RENDERER_KEY,
-            new ToolParamsSchema(
-                "委派一个隔离、可恢复的子 Agent Session。",
-                Map.of(
-                    "subagent_type",
-                    new ToolStringSchema("必须来自 system prompt 中 available_subagents 的 Agent 名称。"),
-                    "prompt",
-                    new ToolStringSchema("交给子 Agent 的完整、自洽任务说明。"),
-                    "maxTurns",
-                    new ToolIntegerSchema("可选正数软回合预算；达到后要求子 Agent 返回阶段报告。"),
-                    "session_id",
-                    new ToolStringSchema("可选的既有 task id；提供时恢复该子 Agent Session。")),
-                Set.of("subagent_type", "prompt"),
-                false),
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ZERO);
   }
 
+  /**
+   * 每次调用按当前 {@link SubagentConfig#maxTurns()} 现拼 descriptor：描述与 schema 的默认 maxTurns 随 aiRuntime 配置
+   * live 生效，绝不冻结装配期快照。
+   */
   @Override
   public ToolDescriptor descriptor() {
-    return descriptor;
+    int defaultMaxTurns = configProvider.subagentConfig().maxTurns();
+    return new ToolDescriptor(
+        NAME,
+        VERSION,
+        ToolType.PLATFORM,
+        SubagentPrompts.taskToolDescription(),
+        RENDERER_KEY,
+        SubagentPrompts.taskInputSchema(defaultMaxTurns),
+        ToolSideEffect.NON_IDEMPOTENT,
+        Duration.ZERO);
   }
 
   @Override
@@ -547,7 +532,7 @@ public final class TaskTool implements Tool {
       return false;
     }
     CustomMessageCommandPayload reminderPayload =
-        new CustomMessageCommandPayload(AgentMessage.system(TaskPrompts.maxTurnsReminder()));
+        new CustomMessageCommandPayload(AgentMessage.system(SubagentPrompts.maxTurnsReminder()));
     NewThreadCommand reminder =
         new NewThreadCommand(
             reminderPayload,
@@ -846,7 +831,7 @@ public final class TaskTool implements Tool {
   }
 
   private HarnessRuntime requireRuntime() {
-    HarnessRuntime runtime = runtimeProvider.getIfAvailable();
+    HarnessRuntime runtime = runtimeProvider.get();
     if (runtime == null) {
       throw new IllegalStateException("HarnessRuntime is not available");
     }

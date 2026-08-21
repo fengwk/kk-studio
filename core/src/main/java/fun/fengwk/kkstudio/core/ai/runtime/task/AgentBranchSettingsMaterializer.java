@@ -12,6 +12,9 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentBranchSettingsMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
@@ -21,7 +24,7 @@ import java.util.Objects;
 
 /** 按最新 Agent/Model catalog 为新建或恢复的子 Agent 物化完整 branch settings。 */
 @Component
-public final class AgentBranchSettingsMaterializer {
+public final class AgentBranchSettingsMaterializer implements SubagentBranchSettingsMaterializer {
 
   private final AgentDefinitionRepository agentRepository;
   private final AgentModelRepository modelRepository;
