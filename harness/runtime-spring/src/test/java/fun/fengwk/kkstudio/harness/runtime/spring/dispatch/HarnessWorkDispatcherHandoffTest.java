@@ -355,7 +355,8 @@ class HarnessWorkDispatcherHandoffTest {
             (threadId, path, preparation) -> {
               throw new AssertionError("resolver must not be called for a quiescent thread");
             },
-            new ThreadProcessorConfig(leaseConfig, Duration.ofSeconds(1), CompactionConfig.DEFAULT),
+            new ThreadProcessorConfig(
+                leaseConfig, Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT),
             clock,
             processorScheduler);
     ModelProcessor modelProcessor =
@@ -363,7 +364,7 @@ class HarnessWorkDispatcherHandoffTest {
             store,
             modelGateway,
             sink,
-            new ModelProcessorConfig(leaseConfig, noRetry, Duration.ofSeconds(5)),
+            new ModelProcessorConfig(leaseConfig, () -> noRetry, Duration.ofSeconds(5)),
             clock,
             processorScheduler);
     ToolProcessor toolProcessor =
@@ -372,7 +373,7 @@ class HarnessWorkDispatcherHandoffTest {
             toolGateway,
             sink,
             new ToolProcessorConfig(
-                leaseConfig, noRetry, Duration.ofSeconds(7), Duration.ofSeconds(9)),
+                leaseConfig, () -> noRetry, Duration.ofSeconds(7), Duration.ofSeconds(9)),
             clock,
             processorScheduler);
     HarnessWorkDispatcher dispatcher =

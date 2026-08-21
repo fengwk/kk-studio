@@ -180,7 +180,7 @@ class TaskToolTest {
     return new TaskTool(
         runtimeProvider,
         settingsMaterializer,
-        cfg,
+        () -> cfg,
         registry,
         changeSource,
         executor,
@@ -272,7 +272,7 @@ class TaskToolTest {
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
     stubChildSnapshots(runtime, child, terminal);
-    when(settingsMaterializer.materialize(eq("reviewer"), eq(null), eq(2), any()))
+    when(settingsMaterializer.materialize(eq("reviewer"), eq(null), eq(2)))
         .thenReturn(childSettings);
     RecordingListener listener = new RecordingListener();
     ToolExecutionRequest request =
@@ -379,8 +379,7 @@ class TaskToolTest {
     ThreadSnapshot terminal = resumeTerminalSnapshot(resumed, "resumed and finished");
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubSnapshots(runtime, RESUME_THREAD_ID, resumed, resumed, terminal);
-    when(settingsMaterializer.materialize(eq("reviewer"), isNull(), eq(2), any()))
-        .thenReturn(target);
+    when(settingsMaterializer.materialize(eq("reviewer"), isNull(), eq(2))).thenReturn(target);
     RecordingListener listener = new RecordingListener();
 
     tool.execute(
@@ -620,7 +619,7 @@ class TaskToolTest {
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
     stubChildSnapshots(runtime, child, terminal);
-    when(settingsMaterializer.materialize(eq("reviewer"), isNull(), eq(3), any()))
+    when(settingsMaterializer.materialize(eq("reviewer"), isNull(), eq(3)))
         .thenReturn(childSettings);
     RecordingListener listener = new RecordingListener();
 
@@ -703,8 +702,7 @@ class TaskToolTest {
             CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of(queuedCommand()));
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
     CountDownLatch observed = new CountDownLatch(1);
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
@@ -778,8 +776,7 @@ class TaskToolTest {
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
     CountDownLatch observed = new CountDownLatch(1);
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
@@ -850,8 +847,7 @@ class TaskToolTest {
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
     CountDownLatch observed = new CountDownLatch(1);
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
@@ -937,8 +933,7 @@ class TaskToolTest {
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     AtomicReference<Thread> observationThread = new AtomicReference<>();
     CountDownLatch observed = new CountDownLatch(1);
     AtomicInteger reads = new AtomicInteger();
@@ -986,8 +981,7 @@ class TaskToolTest {
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -1035,8 +1029,7 @@ class TaskToolTest {
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     AtomicInteger reads = new AtomicInteger();
@@ -1099,8 +1092,7 @@ class TaskToolTest {
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
     CountDownLatch initialRead = new CountDownLatch(1);
     CountDownLatch idleRead = new CountDownLatch(1);
@@ -1214,8 +1206,7 @@ class TaskToolTest {
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
         .thenAnswer(
@@ -1269,8 +1260,7 @@ class TaskToolTest {
     ThreadSnapshot terminal = completedChildSnapshot(child, "done after turns");
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubChildSnapshots(runtime, child, threeTurns, eightTurns, eightTurns, terminal);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     // NEW_SESSION 接受返回 child；THREAD reminder 接受计数，超过 2 次后抛冲突（被观察循环跳过，不中断本轮）。
     AtomicInteger enqueues = new AtomicInteger();
     when(runtime.acceptCommands(any(AcceptCommandsCommand.class), any(AcceptancePreflight.class)))
@@ -1338,8 +1328,7 @@ class TaskToolTest {
     ThreadSnapshot terminal = continueModelHeadSnapshot(false, 1L);
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     stubAcceptNewSession(runtime, child);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     long start = System.nanoTime();
     AtomicInteger reads = new AtomicInteger();
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
@@ -1691,7 +1680,7 @@ class TaskToolTest {
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot terminal = completedChildSnapshot(child, "recovered report");
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(settingsMaterializer.materialize(eq(childSettings.agentName()), isNull(), anyInt(), any()))
+    when(settingsMaterializer.materialize(eq(childSettings.agentName()), isNull(), anyInt()))
         .thenReturn(childSettings);
     // 序列 [child, child, terminal]：第一次执行 NEW_SESSION 接受抛冲突（失败），第二次执行恢复成功。
     stubChildSnapshots(runtime, child, child, terminal);
@@ -1770,8 +1759,7 @@ class TaskToolTest {
     ThreadSnapshot running =
         runningRootSnapshot(RESUME_THREAD_ID, CHILD_ROOT_ENTRY_ID, 6L, List.of(), List.of());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
-        .thenReturn(childSettings);
+    when(settingsMaterializer.materialize(any(), isNull(), anyInt())).thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
     when(runtime.getThreadSnapshot(RESUME_THREAD_ID))
         .thenAnswer(
@@ -1841,7 +1829,7 @@ class TaskToolTest {
             List.of(new SubagentBinding(childSettings.agentName(), "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(settingsMaterializer.materialize(eq(childSettings.agentName()), isNull(), anyInt(), any()))
+    when(settingsMaterializer.materialize(eq(childSettings.agentName()), isNull(), anyInt()))
         .thenReturn(childSettings);
     stubAcceptNewSession(runtime, child);
   }

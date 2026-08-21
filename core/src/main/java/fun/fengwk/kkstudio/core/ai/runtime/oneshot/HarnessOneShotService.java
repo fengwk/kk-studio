@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.ai.runtime.ChangeGate;
 import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -48,19 +48,19 @@ public final class HarnessOneShotService {
 
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
-  private final SubagentConfig subagentConfig;
+  private final SubagentConfigProvider configProvider;
   private final HarnessThreadChangeSource changeSource;
 
   @Autowired
   public HarnessOneShotService(
       ObjectProvider<HarnessRuntime> runtimes,
       AgentBranchSettingsMaterializer settingsMaterializer,
-      SubagentConfig subagentConfig,
+      SubagentConfigProvider configProvider,
       HarnessThreadChangeSource changeSource) {
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.settingsMaterializer =
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
-    this.subagentConfig = Objects.requireNonNull(subagentConfig, "subagentConfig");
+    this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
     this.changeSource = Objects.requireNonNull(changeSource, "changeSource");
   }
 
@@ -91,9 +91,7 @@ public final class HarnessOneShotService {
     }
     HarnessRuntime runtime = requireRuntime();
     var settings =
-        settingsMaterializer
-            .materialize(agentName, environment, 1, subagentConfig)
-            .withActiveTools(List.of());
+        settingsMaterializer.materialize(agentName, environment, 1).withActiveTools(List.of());
     CustomMessageCommandPayload systemPayload =
         new CustomMessageCommandPayload(AgentMessage.system(systemMessage));
     CustomMessageCommandPayload userPayload = new CustomMessageCommandPayload(userMessage);

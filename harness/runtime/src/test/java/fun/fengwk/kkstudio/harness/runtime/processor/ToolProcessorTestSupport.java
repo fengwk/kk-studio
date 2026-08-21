@@ -147,7 +147,7 @@ final class ToolProcessorTestSupport {
               gateway,
               sink,
               new ToolProcessorConfig(
-                  LEASE_CONFIG, retryPolicy, PREFLIGHT_FAILURE_DELAY, BUSY_FALLBACK_DELAY),
+                  LEASE_CONFIG, () -> retryPolicy, PREFLIGHT_FAILURE_DELAY, BUSY_FALLBACK_DELAY),
               clock,
               scheduler);
     }
