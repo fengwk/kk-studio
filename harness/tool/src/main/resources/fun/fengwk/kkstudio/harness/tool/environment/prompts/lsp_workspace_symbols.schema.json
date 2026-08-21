@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Existing source file path used to resolve the workspace root."
+    },
+    "workdir": {
+      "type": "string",
+      "description": "Working directory for resolving relative paths. Defaults to the agent's current working directory. If provided, relative paths resolve from that directory."
+    },
+    "query": {
+      "type": "string",
+      "description": "Symbol search query."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum number of results to display locally. Defaults to 50."
+    }
+  },
+  "required": ["path", "query"],
+  "additionalProperties": false
+}
