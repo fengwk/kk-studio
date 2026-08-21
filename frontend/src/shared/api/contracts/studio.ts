@@ -50,11 +50,11 @@ export interface CanvasResourceDTO {
   textContent: string | null
   kind: CanvasResourceKind
   mediaType: string | null
-  /** wire 是 Java long 的十进制字符串或 null，由 studio-service adapter 归一化为 number|null。 */
+  /** wire 是 Java long 的十进制字符串或 null，由 studio-codec 归一化为 number|null。 */
   sizeBytes: number | null
   width: number | null
   height: number | null
-  /** wire 是 Java long 的十进制字符串或 null，由 studio-service adapter 归一化为 number|null。 */
+  /** wire 是 Java long 的十进制字符串或 null，由 studio-codec 归一化为 number|null。 */
   durationMs: number | null
   createdAt: string
 }
