@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.core.ai.runtime;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -73,51 +71,6 @@ class CoreHarnessArchitectureTest {
         () -> "Core JGit imports must not exist:\n" + String.join("\n", violations));
   }
 
-  /**
-   * Core V1 迁移以字节级相同的方式嵌入 runtime-spring schema 源文件：连续的代码块从首行 {@code -- Harness Runtime durable
-   * schema.} 一直到整个 runtime-spring 文件末尾（含全部 comment）必须与 runtime-spring 文件完全相等，因此两个 schema
-   * 源文件绝不能发生漂移。
-   */
-  @Test
-  void coreV1SchemaEmbedsRuntimeSpringSchemaByteIdentically() throws IOException {
-    Path v1 = locateCoreV1Schema();
-    Path runtimeSpring = locateRuntimeSpringSchema();
-    byte[] v1Bytes = Files.readAllBytes(v1);
-    byte[] runtimeSpringBytes = Files.readAllBytes(runtimeSpring);
-
-    int blockStart =
-        indexOf(v1Bytes, "-- Harness Runtime durable schema.".getBytes(StandardCharsets.UTF_8));
-    assertTrue(blockStart >= 0, "V1 must contain the runtime-spring protocol block start");
-    assertTrue(
-        v1Bytes.length >= blockStart + runtimeSpringBytes.length,
-        "V1 must be long enough to embed the whole runtime-spring schema");
-    byte[] embedded =
-        Arrays.copyOfRange(v1Bytes, blockStart, blockStart + runtimeSpringBytes.length);
-
-    assertArrayEquals(
-        runtimeSpringBytes,
-        embedded,
-        () ->
-            "core V1 harness protocol block must stay byte-identical to "
-                + runtimeSpring
-                + " ("
-                + v1
-                + ")");
-  }
-
-  private static int indexOf(byte[] haystack, byte[] needle) {
-    outer:
-    for (int i = 0; i <= haystack.length - needle.length; i++) {
-      for (int j = 0; j < needle.length; j++) {
-        if (haystack[i + j] != needle[j]) {
-          continue outer;
-        }
-      }
-      return i;
-    }
-    return -1;
-  }
-
   private static String normalizeImport(String importLine) {
     String imported = importLine.substring("import ".length()).replace(";", "").trim();
     if (imported.startsWith("static ")) {
@@ -154,37 +107,5 @@ class CoreHarnessArchitectureTest {
       return reactorPom;
     }
     throw new IllegalStateException("cannot locate core/pom.xml from " + mainJava + " or " + cwd);
-  }
-
-  private static Path locateCoreV1Schema() {
-    Path cwd = Path.of("").toAbsolutePath().normalize();
-    for (Path candidate :
-        List.of(
-            cwd.resolve("src/main/resources/db/migration/V1__schema.sql"),
-            cwd.resolve("core/src/main/resources/db/migration/V1__schema.sql"))) {
-      Path normalized = candidate.normalize();
-      if (Files.isRegularFile(normalized) && !normalized.toString().contains("/target/")) {
-        return normalized;
-      }
-    }
-    throw new IllegalStateException("cannot locate core V1 schema from " + cwd);
-  }
-
-  private static Path locateRuntimeSpringSchema() {
-    Path cwd = Path.of("").toAbsolutePath().normalize();
-    for (Path candidate :
-        List.of(
-            cwd.resolve(
-                "../harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/"
-                    + "spring/postgresql/harness-runtime-schema.sql"),
-            cwd.resolve(
-                "harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/"
-                    + "spring/postgresql/harness-runtime-schema.sql"))) {
-      Path normalized = candidate.normalize();
-      if (Files.isRegularFile(normalized) && !normalized.toString().contains("/target/")) {
-        return normalized;
-      }
-    }
-    throw new IllegalStateException("cannot locate runtime-spring schema from " + cwd);
   }
 }

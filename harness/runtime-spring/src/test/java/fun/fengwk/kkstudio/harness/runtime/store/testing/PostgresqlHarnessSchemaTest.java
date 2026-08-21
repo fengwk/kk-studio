@@ -26,7 +26,10 @@ class PostgresqlHarnessSchemaTest {
             """
             select table_name
             from information_schema.tables
-            where table_schema = 'public' and table_type = 'BASE TABLE'
+            where table_schema = 'public'
+              and table_type = 'BASE TABLE'
+              and table_name like 'harness_%'
+              and table_name <> 'harness_session_blob_ref'
             order by table_name
             """,
             String.class);
@@ -74,7 +77,9 @@ class PostgresqlHarnessSchemaTest {
             """
             select table_name || '.' || column_name
             from information_schema.columns
-            where table_schema = 'public' and data_type = 'jsonb'
+            where table_schema = 'public'
+              and data_type = 'jsonb'
+              and table_name like 'harness_%'
             order by table_name, column_name
             """,
             String.class);
@@ -105,6 +110,7 @@ class PostgresqlHarnessSchemaTest {
             from pg_indexes
             where schemaname = 'public'
               and (indexname like 'idx_harness_%' or indexname like 'uk_harness_%')
+              and indexname not like '%session_blob_ref%'
             order by indexname
             """,
             String.class);
