@@ -723,7 +723,7 @@ class ToolProcessorPreflightTest {
             fixture.sink,
             new ToolProcessorConfig(
                 ToolProcessorTestSupport.LEASE_CONFIG,
-                ToolProcessorTestSupport.NO_RETRY,
+                () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,

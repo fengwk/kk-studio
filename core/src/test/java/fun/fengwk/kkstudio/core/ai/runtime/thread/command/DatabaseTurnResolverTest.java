@@ -1801,9 +1801,9 @@ class DatabaseTurnResolverTest {
               pluginCatalog,
               environmentRegistry,
               new SystemSettingsSnapshot(SystemSettings.DEFAULT),
-              new CompactionConfig(20_000, null),
-              subagentConfig,
-              new AgentPromptComposer(subagentConfig),
+              () -> new CompactionConfig(20_000, null),
+              () -> subagentConfig,
+              new AgentPromptComposer(() -> subagentConfig),
               clock);
     }
 

@@ -46,7 +46,8 @@ class AgentBranchSettingsMaterializerTest {
             agentRepository,
             modelRepository,
             new AgentDefinitionConfigCodec(new ObjectMapper()),
-            new AgentModelRuntimeConfigParser(new ObjectMapper()));
+            new AgentModelRuntimeConfigParser(new ObjectMapper()),
+            () -> config);
     config = new SubagentConfig(MAX_DEPTH, 10, null, Duration.ZERO, 50);
   }
 
@@ -76,7 +77,7 @@ class AgentBranchSettingsMaterializerTest {
         "{\"tools\":[\"get_goal\"],\"skills\":[\"math\"],\"subagents\":[\"beta\"]}",
         validModelConfig());
 
-    BranchSettings settings = materializer.materialize("alpha", ENV, 1, config);
+    BranchSettings settings = materializer.materialize("alpha", ENV, 1);
 
     assertEquals(ENV, settings.environment());
     assertEquals("alpha", settings.agentName());
@@ -93,11 +94,11 @@ class AgentBranchSettingsMaterializerTest {
         "{\"tools\":[\"get_goal\"],\"skills\":[],\"subagents\":[\"beta\"]}",
         validModelConfig());
 
-    BranchSettings atLimit = materializer.materialize("alpha", ENV, MAX_DEPTH, config);
+    BranchSettings atLimit = materializer.materialize("alpha", ENV, MAX_DEPTH);
     assertEquals(List.of("get_goal"), atLimit.activeTools());
     assertFalse(atLimit.activeTools().contains(TaskTool.NAME));
 
-    BranchSettings beyond = materializer.materialize("alpha", ENV, MAX_DEPTH + 1, config);
+    BranchSettings beyond = materializer.materialize("alpha", ENV, MAX_DEPTH + 1);
     assertFalse(beyond.activeTools().contains(TaskTool.NAME));
   }
 
@@ -106,7 +107,7 @@ class AgentBranchSettingsMaterializerTest {
   void honorsExplicitAgentVariantOverride() {
     stub("alpha", "fast", "{\"tools\":[],\"skills\":[],\"subagents\":[]}", validModelConfig());
 
-    BranchSettings settings = materializer.materialize("alpha", ENV, 1, config);
+    BranchSettings settings = materializer.materialize("alpha", ENV, 1);
 
     assertEquals(new ModelSelection("openai", "gpt-x", "fast"), settings.model());
   }
@@ -117,16 +118,14 @@ class AgentBranchSettingsMaterializerTest {
     when(agentRepository.getByName("ghost")).thenReturn(null);
     IllegalArgumentException missingAgent =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize("ghost", ENV, 1, config));
+            IllegalArgumentException.class, () -> materializer.materialize("ghost", ENV, 1));
     assertTrue(missingAgent.getMessage().contains("subagent not found: ghost"));
 
     stub("alpha", null, "{\"tools\":[],\"skills\":[],\"subagents\":[]}", validModelConfig());
     when(modelRepository.getByProviderNameAndName("openai", "gpt-x")).thenReturn(null);
     IllegalArgumentException missingModel =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize("alpha", ENV, 1, config));
+            IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV, 1));
     assertTrue(
         missingModel.getMessage().contains("subagent model not found: openai/gpt-x"),
         missingModel.getMessage());
@@ -138,8 +137,7 @@ class AgentBranchSettingsMaterializerTest {
         validModelConfig());
     IllegalArgumentException missingVariant =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize("alpha", ENV, 1, config));
+            IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV, 1));
     assertTrue(
         missingVariant
             .getMessage()
@@ -153,16 +151,14 @@ class AgentBranchSettingsMaterializerTest {
     stub("alpha", null, "not-json", validModelConfig());
     IllegalArgumentException agentConfigError =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize("alpha", ENV, 1, config));
+            IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV, 1));
     assertTrue(agentConfigError.getMessage().contains("invalid subagent configuration: alpha"));
     assertInstanceOf(IllegalStateException.class, agentConfigError.getCause());
 
     stub("alpha", null, "{\"tools\":[],\"skills\":[],\"subagents\":[]}", "not-json");
     IllegalArgumentException modelConfigError =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize("alpha", ENV, 1, config));
+            IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV, 1));
     assertTrue(
         modelConfigError.getMessage().contains("invalid subagent model configuration: alpha"));
     assertInstanceOf(IllegalArgumentException.class, modelConfigError.getCause());

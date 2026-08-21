@@ -22,10 +22,10 @@ public final class AgentPromptComposer {
   private static final DateTimeFormatter DATE_FORMAT =
       DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT);
 
-  private final SubagentConfig subagentConfig;
+  private final SubagentConfigProvider configProvider;
 
-  public AgentPromptComposer(SubagentConfig subagentConfig) {
-    this.subagentConfig = Objects.requireNonNull(subagentConfig, "subagentConfig");
+  public AgentPromptComposer(SubagentConfigProvider configProvider) {
+    this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
   }
 
   public String compose(
@@ -55,7 +55,7 @@ public final class AgentPromptComposer {
               .render(
                   Map.of(
                       "taskInstructions",
-                      TaskPrompts.systemInstructions(subagentConfig.maxTurns()),
+                      TaskPrompts.systemInstructions(configProvider.subagentConfig().maxTurns()),
                       "subagents",
                       subagentEntries(subagents))));
     }

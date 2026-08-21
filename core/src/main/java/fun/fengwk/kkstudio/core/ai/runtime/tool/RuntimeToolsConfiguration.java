@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfigProvider;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentRunRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
@@ -62,16 +63,21 @@ public class RuntimeToolsConfiguration {
     return ToolFactory.singleton(loadSkillTool);
   }
 
-  /** task/subagent 的并发与预算快照：读取共享启动快照的 {@code aiRuntime.subagent*}（装配期一次 DB 读取，DB 变更需重启生效）。 */
+  /**
+   * task/subagent 的并发与预算现读通道：每次决策点从 {@link SystemSettingsSnapshot} 映射 {@code aiRuntime.subagent*}。
+   */
   @Bean
-  public SubagentConfig subagentConfig(SystemSettingsSnapshot systemSettingsSnapshot) {
-    SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
-    return new SubagentConfig(
-        aiRuntime.subagentMaxDepth(),
-        aiRuntime.subagentMaxConcurrency(),
-        aiRuntime.subagentMaxTotalConcurrency(),
-        Duration.ofMillis(aiRuntime.subagentIdleTimeoutMillis()),
-        aiRuntime.subagentMaxTurns());
+  public SubagentConfigProvider subagentConfigProvider(
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    return () -> {
+      SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
+      return new SubagentConfig(
+          aiRuntime.subagentMaxDepth(),
+          aiRuntime.subagentMaxConcurrency(),
+          aiRuntime.subagentMaxTotalConcurrency(),
+          Duration.ofMillis(aiRuntime.subagentIdleTimeoutMillis()),
+          aiRuntime.subagentMaxTurns());
+    };
   }
 
   @Bean
@@ -88,7 +94,7 @@ public class RuntimeToolsConfiguration {
   public TaskTool taskTool(
       ObjectProvider<HarnessRuntime> runtimeProvider,
       AgentBranchSettingsMaterializer settingsMaterializer,
-      SubagentConfig subagentConfig,
+      SubagentConfigProvider subagentConfigProvider,
       SubagentRunRegistry runRegistry,
       HarnessThreadChangeSource changeSource,
       @Qualifier("subagentTaskExecutor") ExecutorService executor,
@@ -96,7 +102,7 @@ public class RuntimeToolsConfiguration {
     return new TaskTool(
         runtimeProvider,
         settingsMaterializer,
-        subagentConfig,
+        subagentConfigProvider,
         runRegistry,
         changeSource,
         executor,

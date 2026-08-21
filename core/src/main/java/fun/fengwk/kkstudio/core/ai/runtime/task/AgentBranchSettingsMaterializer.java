@@ -27,20 +27,22 @@ public final class AgentBranchSettingsMaterializer {
   private final AgentModelRepository modelRepository;
   private final AgentDefinitionConfigCodec configCodec;
   private final AgentModelRuntimeConfigParser modelConfigParser;
+  private final SubagentConfigProvider configProvider;
 
   public AgentBranchSettingsMaterializer(
       AgentDefinitionRepository agentRepository,
       AgentModelRepository modelRepository,
       AgentDefinitionConfigCodec configCodec,
-      AgentModelRuntimeConfigParser modelConfigParser) {
+      AgentModelRuntimeConfigParser modelConfigParser,
+      SubagentConfigProvider configProvider) {
     this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
     this.configCodec = Objects.requireNonNull(configCodec, "configCodec");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
+    this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
   }
 
-  public BranchSettings materialize(
-      String agentName, EnvironmentBinding environment, int depth, SubagentConfig subagentConfig) {
+  public BranchSettings materialize(String agentName, EnvironmentBinding environment, int depth) {
     AgentDefinition agent = agentRepository.getByName(agentName);
     if (agent == null) {
       throw new IllegalArgumentException("subagent not found: " + agentName);
@@ -81,7 +83,7 @@ public final class AgentBranchSettingsMaterializer {
     if (!config.getSkills().isEmpty()) {
       activeTools.add(LoadSkillTool.NAME);
     }
-    if (!config.getSubagents().isEmpty() && depth < subagentConfig.maxDepth()) {
+    if (!config.getSubagents().isEmpty() && depth < configProvider.subagentConfig().maxDepth()) {
       activeTools.add(TaskTool.NAME);
     }
     return new BranchSettings(

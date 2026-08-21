@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlWorkListener;
@@ -105,7 +106,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private RedisRealtimeConfig redisRealtimeConfig;
   @Autowired private RealtimeEventSink realtimeEventSink;
   @Autowired private RealtimeEventSource realtimeEventSource;
-  @Autowired private InvocationRetryPolicy invocationRetryPolicy;
+  @Autowired private InvocationRetryPolicyProvider invocationRetryPolicyProvider;
   @Autowired private ThreadProcessor threadProcessor;
   @Autowired private ModelProcessor modelProcessor;
   @Autowired private ToolProcessor toolProcessor;
@@ -147,7 +148,7 @@ class HarnessRuntimeConfigurationTest {
             InvocationRetryBackoffStrategy.EXPONENTIAL,
             Duration.ofSeconds(2),
             Duration.ofSeconds(60)),
-        invocationRetryPolicy);
+        invocationRetryPolicyProvider.retryPolicy());
   }
 
   @Test

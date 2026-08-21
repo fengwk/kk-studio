@@ -48,14 +48,18 @@ HTTP wire 上的 Java `Long` 使用非负十进制字符串，`Integer` 使用 J
 | Section | 内容 | 生效时机 |
 | --- | --- | --- |
 | `tool` | permission、默认 YOLO、Model/Tool Gateway 重试延迟、skill 加载超时 | permission：下一次 preflight；defaultYolo：下一次未显式指定模式的 Chat 创建；其余：重启 |
-| `aiRuntime` | invocation retry；`compactionKeepRecentTokens` 与可空 fallback model；subagent depth/idle/turn，以及每父 `subagentMaxConcurrency=10`、每 root tree 可空 `subagentMaxTotalConcurrency`（null 表示不限） | 重启 |
+| `aiRuntime` | invocation retry；`compactionKeepRecentTokens` 与可空 fallback model；subagent depth/idle/turn，以及每父 `subagentMaxConcurrency=10`、每 root tree 可空 `subagentMaxTotalConcurrency`（null 表示不限） | live：下一次 invocation（retry 判定 / 压缩规划 / task spawn/reserve） |
 | `environment` | daemon heartbeat、目录查询和消息/资源预算 | 重启 |
 | `integrations` | ComfyUI、OpenCLI Hub、Seedance、GPT Image 2、MiniMax H3 非敏感参数 | 重启 |
 | `storageMedia` | S3 启用、上传/预签名预算、Canvas 媒体处理预算 | 重启 |
 | `advanced` | processor、dispatcher、executor、realtime 与事件通道预算 | 重启 |
 
-`SystemSettingsSnapshot` 是装配期唯一读取点；所有长生命周期 bean 共享同一个启动快照。
-`SystemSettingsToolSettingsProvider` 是唯一运行期现读通道：permission 在下一次权限预检时生效，
+`SystemSettingsSnapshot` 是进程内 live 快照：启动时读取一次，PUT 在事务 `afterCommit` 成功后以回读的
+权威聚合原子替换（回滚绝不更新内存）。aiRuntime 的 compaction / retry / subagent 决策点经
+`CompactionConfigProvider` / `InvocationRetryPolicyProvider` / `SubagentConfigProvider` 每次现读快照，
+无需重启；同一 ModelInvocation 的 retry 仍重放冻结 spec，live 只影响新的 retry 判定、新的压缩规划与新的 task spawn。
+其余 restart-required 配置 bean 仍共享装配期读取的同一快照值，DB 变更需重启生效。
+`SystemSettingsToolSettingsProvider` 是运行期按调用现读通道：permission 在下一次权限预检时生效，
 defaultYolo 在下一次 Chat 创建读取默认值时生效。
 
 ## 4. Settings UI

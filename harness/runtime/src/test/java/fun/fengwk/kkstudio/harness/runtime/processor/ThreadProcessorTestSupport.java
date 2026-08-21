@@ -1198,7 +1198,8 @@ final class ThreadProcessorTestSupport {
           new ThreadProcessor(
               processorStore == null ? store : processorStore,
               resolver,
-              new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, compactionConfig),
+              new ThreadProcessorConfig(
+                  LEASE_CONFIG, RESOLVE_FAILURE_DELAY, () -> compactionConfig),
               clock,
               scheduler);
     }

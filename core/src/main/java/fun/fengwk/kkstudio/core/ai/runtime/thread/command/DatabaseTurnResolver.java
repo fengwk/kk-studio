@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.CurrentEnvironmentContext;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfigProvider;
 import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.plugin.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -105,8 +105,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final PluginCatalog pluginCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
   private final SystemSettings.Environment environmentSettings;
-  private final CompactionConfig compactionConfig;
-  private final SubagentConfig subagentConfig;
+  private final CompactionConfigProvider compactionConfigProvider;
+  private final SubagentConfigProvider subagentConfigProvider;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
   private final ProviderMessageProjector messageProjector;
@@ -124,8 +124,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
       PluginCatalog pluginCatalog,
       LiveEnvironmentRegistry environmentRegistry,
       SystemSettingsSnapshot snapshot,
-      CompactionConfig compactionConfig,
-      SubagentConfig subagentConfig,
+      CompactionConfigProvider compactionConfigProvider,
+      SubagentConfigProvider subagentConfigProvider,
       AgentPromptComposer promptComposer,
       Clock clock) {
     this.agentDefinitionRepository =
@@ -139,8 +139,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.environmentSettings = Objects.requireNonNull(snapshot, "snapshot").get().environment();
-    this.compactionConfig = Objects.requireNonNull(compactionConfig, "compactionConfig");
-    this.subagentConfig = Objects.requireNonNull(subagentConfig, "subagentConfig");
+    this.compactionConfigProvider =
+        Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
+    this.subagentConfigProvider =
+        Objects.requireNonNull(subagentConfigProvider, "subagentConfigProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.messageProjector = new ProviderMessageProjector();
@@ -292,8 +294,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
     int actualModelMaxOutput = maxOutputTokens(parsedModel, variant);
     long budget =
-        compactionConfig.outputBudget(
-            preparation.phase(), actualModelMaxOutput, preparation.removedPrefixTokens());
+        compactionConfigProvider
+            .compactionConfig()
+            .outputBudget(
+                preparation.phase(), actualModelMaxOutput, preparation.removedPrefixTokens());
     if (budget <= 0 || budget > Integer.MAX_VALUE) {
       throw rejection("compaction output budget must be a positive int, got " + budget);
     }
@@ -373,7 +377,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       activeTools.add(LoadSkillTool.NAME);
     }
     if (!config.getSubagents().isEmpty()
-        && sessionDepth(path) < subagentConfig.maxDepth()
+        && sessionDepth(path) < subagentConfigProvider.subagentConfig().maxDepth()
         && !activeTools.contains(TaskTool.NAME)) {
       activeTools.add(TaskTool.NAME);
     }
@@ -507,7 +511,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * Agent 配置扩权。
    */
   private List<SubagentBinding> resolveSubagents(List<String> names, EntryPath path) {
-    if (names.isEmpty() || sessionDepth(path) >= subagentConfig.maxDepth()) {
+    if (names.isEmpty()
+        || sessionDepth(path) >= subagentConfigProvider.subagentConfig().maxDepth()) {
       return List.of();
     }
     List<SubagentBinding> bindings = new ArrayList<>(names.size());

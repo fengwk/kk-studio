@@ -461,8 +461,8 @@ final class ToolExecution implements ToolGateway.Listener {
     ToolSideEffect sideEffect = request.binding().descriptor().sideEffect();
     if (failure.retryable()
         && sideEffect != ToolSideEffect.NON_IDEMPOTENT
-        && config.retryPolicy().allowsRetry(attempt)) {
-      Duration delay = config.retryPolicy().delayBeforeRetry(attempt);
+        && config.retryPolicyProvider().retryPolicy().allowsRetry(attempt)) {
+      Duration delay = config.retryPolicyProvider().retryPolicy().delayBeforeRetry(attempt);
       boolean committed = safeTerminal(() -> commitRetry(delay));
       if (committed) {
         log.info(
