@@ -117,7 +117,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | 作为请求目标的 Thread/Entry/Catalog 名称不存在（snapshot/system-prompt/compact/stop 路径） | 404 |
 | 命令 cursor / revision CAS 过期、terminal apply pending、跨 Session materialization 冲突、ordered replay 冲突 | 409 |
 | approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`）、已决定但请求不匹配（`APPROVAL_DECISION_MISMATCH`） | 409（approval 路径的 Thread/target 缺失不是 404） |
-| 命令 batch 被接受进入 mailbox | 200（返回 `session/rootEntry/thread/acceptedCommands/replayed` 权威投影） |
+| 命令 batch 被接受进入 mailbox | 202（返回 `session/rootEntry/thread/acceptedCommands/replayed` 权威投影） |
 | 手动压缩 availability 不满足（THREAD_BUSY / OWNERSHIP_BARRIER / BELOW_MINIMUM / NOTHING_TO_COMPACT 等）或 expectedRevision 过期 | 409 |
 
 HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字段不随语言变化。

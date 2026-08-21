@@ -2,8 +2,8 @@ import type {
   AgentCommandBatchRequestDTO,
   AgentRuntimeOwnerDTO,
   HarnessBranchSettingsDTO,
-  HarnessThreadDTO,
   HarnessCommandCreateDTO,
+  HarnessThreadDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import {
   buildBranchDiffCommands,
@@ -82,13 +82,14 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
   if (contents.length === 0) {
     throw new Error('A command batch requires non-empty contents')
   }
+  const firstContent = contents[0]
+  if (firstContent == null) {
+    throw new Error('A command batch requires non-empty contents')
+  }
   const message: HarnessCommandCreateDTO = {
     type: 'USER_MESSAGE',
     clientCommandId: createId(),
-    contents: contents as [
-      { type: 'TEXT'; text: string } | { type: 'ATTACHMENT'; uploadId: string },
-      ...Array<{ type: 'TEXT'; text: string } | { type: 'ATTACHMENT'; uploadId: string }>,
-    ],
+    contents: [firstContent, ...contents.slice(1)],
   }
   const commands =
     input.target.kind === 'NEW_SESSION_DRAFT'

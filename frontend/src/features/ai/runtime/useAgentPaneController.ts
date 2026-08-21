@@ -310,9 +310,21 @@ export function useAgentPaneController({
     setPartsState(next)
   }
 
+  /** 事件同步栅栏：state commit 前也能看到刚写入 pendingAcceptanceRef。 */
+  function hasPendingOperation(): boolean {
+    return pendingAcceptanceRef.current != null
+      || controller.pending
+      || controller.compactPending
+      || controller.stopPending
+      || controller.stopReplayPending
+      || controller.approvalPending
+      || controller.replayPending
+      || controller.queuedCommands.length > 0
+  }
+
   function changeTarget(next: PaneTarget, draft: BranchDraft | null = activeDraft): boolean {
-    if (pendingAcceptance != null) {
-      setActionError(t('ai.runtime.action.acceptancePending'))
+    if (hasPendingOperation()) {
+      setActionError(t('ai.runtime.action.operationPending'))
       return false
     }
     generationRef.current += 1
@@ -448,8 +460,8 @@ export function useAgentPaneController({
       void controller.submitMessage(payloadParts, localDraftParts)
       return
     }
-    if (pendingAcceptance != null) {
-      setActionError(t('ai.runtime.action.acceptancePending'))
+    if (hasPendingOperation()) {
+      setActionError(t('ai.runtime.action.operationPending'))
       return
     }
     const payload = trimMessageParts(payloadParts ?? parts)
@@ -488,15 +500,15 @@ export function useAgentPaneController({
     }
     switch (command.id) {
       case 'thread':
-        if (pendingAcceptance != null) {
-          setActionError(t('ai.runtime.action.acceptancePending'))
+        if (hasPendingOperation()) {
+          setActionError(t('ai.runtime.action.operationPending'))
           return
         }
         setInteraction('thread-sessions')
         return
       case 'tree':
-        if (pendingAcceptance != null) {
-          setActionError(t('ai.runtime.action.acceptancePending'))
+        if (hasPendingOperation()) {
+          setActionError(t('ai.runtime.action.operationPending'))
           return
         }
         if (currentSessionId == null) {
@@ -611,7 +623,14 @@ export function useAgentPaneController({
     target,
     isBoundTarget(target) ? controller.manualCompaction : null,
   )
-  const pending = pendingAcceptance != null || controller.pending
+  const pending = pendingAcceptance != null
+    || controller.pending
+    || controller.compactPending
+    || controller.stopPending
+    || controller.stopReplayPending
+    || controller.approvalPending
+    || controller.replayPending
+    || controller.queuedCommands.length > 0
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
   const composer: ChatPanelComposerInput = {
     parts: composerDraft,

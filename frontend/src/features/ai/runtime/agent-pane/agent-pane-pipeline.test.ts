@@ -15,6 +15,7 @@ import { threadCommandsForTarget, THREAD_COMMANDS } from '@/features/ai/runtime/
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
 import {
   createAttachmentPart,
+  createResourcePart,
   createTextPart,
 } from '@/features/ai/composer/composer-parts'
 import { ApiError } from '@/shared/api/client'
@@ -181,6 +182,30 @@ describe('AgentPane acceptance pipeline', () => {
       contents: [{ type: 'ATTACHMENT', uploadId: 'server-upload-id' }],
     })
     expect(plan.composerParts).toEqual([local])
+  })
+
+  it('keeps durable RESOURCE contents in the frozen request and recovery draft', () => {
+    const resource = createResourcePart('blob-1', 'report.txt', 'preview')
+
+    const plan = buildAcceptanceRequest({
+      owner: { type: 'CHAT', id: 'chat-1' },
+      target: { kind: 'NEW_SESSION_DRAFT' },
+      draft: baseDraft,
+      base: baseDraft,
+      parts: [resource],
+      createId: () => 'resource-command',
+    })
+
+    expect(plan.request.commands[0]).toMatchObject({
+      type: 'USER_MESSAGE',
+      contents: [{
+        type: 'RESOURCE',
+        blobId: 'blob-1',
+        name: 'report.txt',
+        preview: 'preview',
+      }],
+    })
+    expect(plan.composerParts).toEqual([resource])
   })
 
   it('keeps frozen request identity and handles definite conflict branches explicitly', () => {
