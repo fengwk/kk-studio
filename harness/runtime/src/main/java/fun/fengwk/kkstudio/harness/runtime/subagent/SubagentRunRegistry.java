@@ -51,8 +51,8 @@ public final class SubagentRunRegistry {
               + ")");
     }
     int rootActive = activeByRoot.getOrDefault(rootThreadId, 0);
-    Integer maxTotal = config.maxTotalConcurrency();
-    if (maxTotal != null && rootActive >= maxTotal) {
+    int maxTotal = config.maxTotalConcurrency();
+    if (maxTotal > 0 && rootActive >= maxTotal) {
       throw new IllegalArgumentException(
           "subagent tree concurrency limit reached (" + rootActive + "/" + maxTotal + ")");
     }

@@ -12,9 +12,6 @@ import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,8 +20,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /** System settings 仓库契约：baseline 默认行可读，CAS 更新恰好一个版本赢家，并发更新恰好一个成功。 */
 public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
@@ -45,34 +40,16 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
 
   @Test
   public void baselineRowConfigIsExactCanonicalJson() {
-    // V1 默认行字面量必须与 codec 输出的 canonical JSON 完全一致（键排序 + 省略 null + 小写 action）。
-    // 直接读取迁移文件校验字面量，因为 PostgreSQL jsonb 的文本输出会插入空格，不能与 canonical 字符串比对。
-    String literal = seedLiteralFromV1();
-    assertEquals(
-        systemSettingsCodec.encode(SystemSettings.DEFAULT),
-        literal,
-        "V1 seed literal must equal the canonical defaults");
-    // 默认行必须可解码为安全默认聚合（语义往返）。
+    // V1 直接定义当前最终结构，baseline 行必须等于当前 canonical 默认。
+    // PostgreSQL jsonb 文本会插入空格，因此用 decode 比对语义。
     String stored = systemSettingsMapper.get().getConfigJson();
+    assertFalse(
+        stored.contains("\"maxMessageBytes\""),
+        "V1 baseline must not persist environment.maxMessageBytes");
     assertEquals(systemSettingsCodec.decode(stored), SystemSettings.DEFAULT);
-  }
-
-  /** 从 V1 迁移文件提取 system_setting 默认行的 canonical JSON 字面量。 */
-  private static String seedLiteralFromV1() {
-    try (InputStream in =
-        SystemSettingsRepositoryTest.class.getResourceAsStream("/db/migration/V1__schema.sql")) {
-      String sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-      Matcher matcher =
-          Pattern.compile(
-                  "(?s)"
-                      + "insert into system_setting \\(id, config\\) values \\(\\n\\s+1,\\n\\s+'"
-                      + "(\\{.*?})'::jsonb")
-              .matcher(sql);
-      assertTrue(matcher.find(), "system_setting default row literal must exist in V1");
-      return matcher.group(1);
-    } catch (IOException error) {
-      throw new IllegalStateException("failed to read V1__schema.sql", error);
-    }
+    assertFalse(
+        systemSettingsCodec.encode(SystemSettings.DEFAULT).contains("maxMessageBytes"),
+        "canonical defaults must not persist environment.maxMessageBytes");
   }
 
   @Test

@@ -169,10 +169,7 @@ class LiveEnvironmentQueryServiceImplTest {
         SystemSettings.Tool.DEFAULT,
         SystemSettings.AiRuntime.DEFAULT,
         new SystemSettings.Environment(
-            base.maxResourceBytes(),
-            base.maxMessageBytes(),
-            heartbeatTimeoutMillis,
-            base.directoryListTimeoutMillis()),
+            base.maxResourceBytes(), heartbeatTimeoutMillis, base.directoryListTimeoutMillis()),
         SystemSettings.Integrations.DEFAULT,
         SystemSettings.StorageMedia.DEFAULT,
         SystemSettings.Advanced.DEFAULT);

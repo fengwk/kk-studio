@@ -1,13 +1,16 @@
 package fun.fengwk.kkstudio.web.environment;
 
+import jakarta.websocket.Session;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.adapter.NativeWebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonEndpoint;
+import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -19,13 +22,18 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
   public static final String PATH = "/api/ai/environment/daemon/v2";
 
   private final EnvironmentDaemonEndpoint endpoint;
+  private final int maxMessageBytes;
 
-  public EnvironmentDaemonWebSocketHandler(EnvironmentDaemonEndpoint endpoint) {
+  public EnvironmentDaemonWebSocketHandler(
+      EnvironmentDaemonEndpoint endpoint, EnvironmentGatewayProperties gatewayProperties) {
     this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
+    this.maxMessageBytes =
+        Objects.requireNonNull(gatewayProperties, "gatewayProperties").requireMaxMessageBytes();
   }
 
   @Override
   public void afterConnectionEstablished(WebSocketSession session) {
+    applyMessageBuffer(session);
     endpoint.open(new SpringWebSocketConnection(session));
   }
 
@@ -42,6 +50,18 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
   @Override
   public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
     endpoint.close(session.getId());
+  }
+
+  private void applyMessageBuffer(WebSocketSession session) {
+    session.setTextMessageSizeLimit(maxMessageBytes);
+    session.setBinaryMessageSizeLimit(maxMessageBytes);
+    if (session instanceof NativeWebSocketSession nativeSession) {
+      Session jsrSession = nativeSession.getNativeSession(Session.class);
+      if (jsrSession != null) {
+        jsrSession.setMaxTextMessageBufferSize(maxMessageBytes);
+        jsrSession.setMaxBinaryMessageBufferSize(maxMessageBytes);
+      }
+    }
   }
 
   private static final class SpringWebSocketConnection implements EnvironmentDaemonConnection {

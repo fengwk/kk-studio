@@ -26,7 +26,7 @@ class SubagentRunRegistryTest {
     return new UUID(0L, value);
   }
 
-  private static SubagentConfig config(int maxConcurrency, Integer maxTotalConcurrency) {
+  private static SubagentConfig config(int maxConcurrency, int maxTotalConcurrency) {
     return new SubagentConfig(2, maxConcurrency, maxTotalConcurrency, ONE_MS, 50);
   }
 
@@ -34,7 +34,7 @@ class SubagentRunRegistryTest {
   @Test
   void enforcesMaxConcurrencyPerParent() {
     SubagentRunRegistry registry = new SubagentRunRegistry();
-    SubagentConfig config = config(1, null);
+    SubagentConfig config = config(1, 0);
 
     try (SubagentRunRegistry.Reservation first = registry.reserve(id(1), id(1), null, config)) {
       IllegalArgumentException error =
@@ -72,11 +72,24 @@ class SubagentRunRegistryTest {
     }
   }
 
+  /** maxTotalConcurrency 为 0 时不设树级上限。 */
+  @Test
+  void allowsUnlimitedConcurrencyWhenMaxTotalIsZero() {
+    SubagentRunRegistry registry = new SubagentRunRegistry();
+    SubagentConfig config = config(10, 0);
+
+    try (SubagentRunRegistry.Reservation r1 = registry.reserve(id(1), id(9), null, config);
+        SubagentRunRegistry.Reservation r2 = registry.reserve(id(2), id(9), null, config);
+        SubagentRunRegistry.Reservation r3 = registry.reserve(id(3), id(9), null, config)) {
+      assertTrue(true);
+    }
+  }
+
   /** 同一 resume session 同时只能有一个 reservation 持有；释放后可恢复。 */
   @Test
   void rejectsResumeSessionWhileRunning() {
     SubagentRunRegistry registry = new SubagentRunRegistry();
-    SubagentConfig config = config(10, null);
+    SubagentConfig config = config(10, 0);
 
     try (SubagentRunRegistry.Reservation first = registry.reserve(id(1), id(1), id(42), config)) {
       IllegalArgumentException error =
@@ -96,7 +109,7 @@ class SubagentRunRegistryTest {
   @Test
   void rejectsAttachingAnAlreadyRunningThread() {
     SubagentRunRegistry registry = new SubagentRunRegistry();
-    SubagentConfig config = config(10, null);
+    SubagentConfig config = config(10, 0);
 
     try (SubagentRunRegistry.Reservation first = registry.reserve(id(1), id(1), null, config)) {
       first.attach(id(200));
@@ -127,7 +140,7 @@ class SubagentRunRegistryTest {
   @Test
   void rejectsReattachingWithDifferentThread() {
     SubagentRunRegistry registry = new SubagentRunRegistry();
-    SubagentConfig config = config(10, null);
+    SubagentConfig config = config(10, 0);
 
     try (SubagentRunRegistry.Reservation reservation =
         registry.reserve(id(1), id(1), null, config)) {
@@ -173,7 +186,7 @@ class SubagentRunRegistryTest {
   @Test
   void relaysDescendantStatusesToAncestors() {
     SubagentRunRegistry registry = new SubagentRunRegistry();
-    SubagentConfig config = config(10, null);
+    SubagentConfig config = config(10, 0);
     SubagentRunRegistry.Reservation child = registry.reserve(id(1), id(1), null, config);
     SubagentRunRegistry.Reservation grandchild = registry.reserve(id(2), id(1), null, config);
     child.attach(id(2));
@@ -198,7 +211,7 @@ class SubagentRunRegistryTest {
   @Test
   void notifiesDescendantSubscribersOnPublishAttachAndRelease() {
     SubagentRunRegistry registry = new SubagentRunRegistry();
-    SubagentConfig config = config(10, null);
+    SubagentConfig config = config(10, 0);
     List<String> events = new ArrayList<>();
     try (SubagentRunRegistry.ChangeSubscription subscription =
         registry.subscribeDescendants(id(1), () -> events.add("wake"))) {
@@ -233,7 +246,7 @@ class SubagentRunRegistryTest {
   @Test
   void publishingOwnStatusDoesNotWakeDescendantSelfSubscriber() {
     SubagentRunRegistry registry = new SubagentRunRegistry();
-    SubagentConfig config = config(10, null);
+    SubagentConfig config = config(10, 0);
     SubagentRunRegistry.Reservation child = registry.reserve(id(1), id(1), null, config);
     child.attach(id(2));
     List<String> selfWakes = new ArrayList<>();
@@ -260,7 +273,7 @@ class SubagentRunRegistryTest {
   @Test
   void isolatesCallbackFailuresAndRunsOutsideRegistryLock() throws Exception {
     SubagentRunRegistry registry = new SubagentRunRegistry();
-    SubagentConfig config = config(10, null);
+    SubagentConfig config = config(10, 0);
     SubagentRunRegistry.Reservation child = registry.reserve(id(1), id(1), null, config);
     child.attach(id(2));
     List<String> healthyWakes = new CopyOnWriteArrayList<>();

@@ -13,10 +13,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * afterCommit} 成功后通过 {@link #replace} 原子替换为回读的权威 {@link SystemSettings}，并发布 Redis
  * 唤醒。其他节点在订阅确认成功（含重连）与收到唤醒时回读数据库再 {@link #replace}。回滚绝不更新内存。 {@link #get()} 每次返回当前值。
  *
- * <p>live 决策点（aiRuntime
- * compaction/retry/subagent、tool.gateway、environment.runtime、storageMedia.canvasMedia，以及
- * permission/defaultYolo）每次现读。其余 restart-required 配置 bean 仍在装配期读取 {@link #get()}。本类是唯一装配期 DB
- * 读取点，不允许各配置各自再注入 {@code SystemSettingsProvider} 现读现解。
+ * <p>live 决策点（aiRuntime compaction/retry/subagent、tool.gateway、environment.runtime、
+ * storageMedia.canvasMedia，以及 permission/defaultYolo）每次现读。其余 restart-required 配置 bean 仍在装配期读取
+ * {@link #get()}。本类是唯一装配期 DB 读取点，不允许各配置各自再注入 {@code SystemSettingsProvider} 现读现解。
  */
 @Component
 public class SystemSettingsSnapshot {

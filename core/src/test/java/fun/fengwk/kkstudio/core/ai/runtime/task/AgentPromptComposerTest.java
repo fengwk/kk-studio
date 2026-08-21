@@ -28,8 +28,7 @@ class AgentPromptComposerTest {
   private static final int DEFAULT_MAX_TURNS = 7;
 
   private final AgentPromptComposer composer =
-      new AgentPromptComposer(
-          () -> new SubagentConfig(2, 10, null, Duration.ZERO, DEFAULT_MAX_TURNS));
+      new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, Duration.ZERO, DEFAULT_MAX_TURNS));
 
   private static SkillBinding skill(String name, String description) {
     return new SkillBinding(name, description, null);

@@ -234,7 +234,7 @@ public class SystemSettingsCodec {
         toModelSelection(dto.getCompactionFallbackModel()),
         requiredInt(dto.getSubagentMaxDepth(), "aiRuntime.subagentMaxDepth"),
         requiredInt(dto.getSubagentMaxConcurrency(), "aiRuntime.subagentMaxConcurrency"),
-        dto.getSubagentMaxTotalConcurrency(),
+        requiredInt(dto.getSubagentMaxTotalConcurrency(), "aiRuntime.subagentMaxTotalConcurrency"),
         requiredMillis(dto.getSubagentIdleTimeoutMillis(), "aiRuntime.subagentIdleTimeoutMillis"),
         requiredInt(dto.getSubagentMaxTurns(), "aiRuntime.subagentMaxTurns"));
   }
@@ -245,7 +245,6 @@ public class SystemSettingsCodec {
     }
     return new SystemSettings.Environment(
         requiredMillis(dto.getMaxResourceBytes(), "environment.maxResourceBytes"),
-        requiredMillis(dto.getMaxMessageBytes(), "environment.maxMessageBytes"),
         requiredMillis(dto.getHeartbeatTimeoutMillis(), "environment.heartbeatTimeoutMillis"),
         requiredMillis(
             dto.getDirectoryListTimeoutMillis(), "environment.directoryListTimeoutMillis"));
@@ -496,7 +495,6 @@ public class SystemSettingsCodec {
       SystemSettings.Environment environment) {
     SystemSettingsEnvironmentDTO dto = new SystemSettingsEnvironmentDTO();
     dto.setMaxResourceBytes(environment.maxResourceBytes());
-    dto.setMaxMessageBytes(environment.maxMessageBytes());
     dto.setHeartbeatTimeoutMillis(environment.heartbeatTimeoutMillis());
     dto.setDirectoryListTimeoutMillis(environment.directoryListTimeoutMillis());
     return dto;

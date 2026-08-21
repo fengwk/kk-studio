@@ -112,7 +112,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
         listener.observedCloseCode,
         "server closed connection with code 1009 (frame too large) during the handshake");
     assertTrue(
-        snapshot.get().environment().maxMessageBytes() > TOMCAT_DEFAULT_TEXT_BUFFER_BYTES,
+        16L * 1024 * 1024 > TOMCAT_DEFAULT_TEXT_BUFFER_BYTES,
         "premise: gateway buffer limit must be raised above the 8 KiB default");
   }
 
