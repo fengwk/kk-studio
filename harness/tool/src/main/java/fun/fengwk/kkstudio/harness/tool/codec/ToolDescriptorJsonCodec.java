@@ -99,6 +99,23 @@ public final class ToolDescriptorJsonCodec {
     return write(writeParamsSchema(schema));
   }
 
+  /**
+   * 从 canonical input schema JSON 文本解码 {@link ToolParamsSchema}；任何非法结构抛 {@link
+   * IllegalArgumentException}。
+   */
+  public ToolParamsSchema decodeInputSchema(String json) {
+    if (json == null) {
+      throw new IllegalArgumentException("json must not be null");
+    }
+    JsonNode root;
+    try {
+      root = MAPPER.readTree(json);
+    } catch (JsonProcessingException error) {
+      throw new IllegalArgumentException("malformed tool input schema JSON", error);
+    }
+    return readParamsSchema(root, "inputSchema");
+  }
+
   private static void writeDescriptor(ObjectNode target, ToolDescriptor descriptor) {
     target.put("name", descriptor.name());
     target.put("version", descriptor.version());

@@ -1,26 +1,18 @@
-搜索文件内容并返回匹配行。
+Search file contents and return matching lines.
 
-用法：
-- 使用 `grep` 搜索仓库内容。
-- 始终传入明确的 `path`。
-- 增加 `timeout_seconds` 前，优先缩小 path 或 pattern。默认超时通常足够；除非确实需要大范围扫描，否则不建议显式设置。
-- 将 `grep` 结果视为候选位置，而不是编辑上下文。执行 `grep` 后，在编辑前使用带目标 `offset`/`limit` 的 `read` 检查足够的周边代码。
-- 内容搜索遵守 `.gitignore`。
-- 当 `path` 是单个二进制文件时，`grep` 返回清晰的错误，而不是输出二进制内容。
-- `multiline=true` 启用跨行匹配。
+Usage:
+- Use `grep` for repository content search.
+- Always pass an explicit `path`.
+- Prefer narrowing the path or pattern before increasing `timeout_seconds`. The default timeout is usually sufficient, and explicitly setting a timeout is not recommended unless a broader scan is truly necessary.
+- Treat `grep` results as candidate locations, not editing context. After `grep`, use `read` with targeted `offset`/`limit` to inspect enough surrounding code before editing.
+- The content search respects `.gitignore`.
+- When `path` is a single binary file, `grep` returns a clear error instead of binary output.
+- `pattern` is a regular expression by default; use `literal=true` for exact text.
+- `multiline=true` enables matching across line breaks. Use it when the pattern contains an actual newline or the regex newline escape `\n`; in JSON/tool-call payloads that regex escape is written as `\\n`.
+- Do not search from broad roots such as `/`, `~`, or `$HOME`.
 
-参数：
-- `pattern`（必填）
-- `path`（必填）
-- `workdir`（可选，默认：daemon 当前工作目录；提供后从该目录解析相对路径）
-- `include`（可选）
-- `ignore_case`（可选，默认：false）
-- `literal`（可选，默认：false）
-- `multiline`（可选，默认：false）
-- `limit`（可选，默认：100）
-- `timeout_seconds`（可选，默认：15）
-
-示例：
+Examples:
 - `grep({ pattern: "createDemoDirectory", path: "src", workdir: "packages/web", literal: true })`
 - `grep({ pattern: "create.*Directory", path: "src", workdir: "services/api", ignore_case: true })`
 - `grep({ pattern: "TODO", path: "src", include: "**/*.ts", timeout_seconds: 30 })`
+- `grep({ pattern: "start\\nend", path: "src", multiline: true })`

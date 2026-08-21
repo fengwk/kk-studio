@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "Shell command to execute."
+    },
+    "workdir": {
+      "type": "string",
+      "description": "Working directory for the command. Defaults to the agent's current working directory. If provided, the command runs from that directory and relative paths in the command resolve from it. Prefer this over embedding `cd ... &&` in `command`."
+    },
+    "timeout_seconds": {
+      "type": "integer",
+      "description": "Positive timeout in seconds. Defaults to 120 (2 minutes). For commands that may run longer, provide a larger value."
+    }
+  },
+  "required": ["command"],
+  "additionalProperties": false
+}
