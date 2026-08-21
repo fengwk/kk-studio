@@ -1,19 +1,11 @@
 import { lazy, Suspense } from 'react'
-import {
-  ChatCardsPanel,
-  ChatWorkspacePage,
-  CreateChatModal,
-} from '@/features/ai/chat'
-import { ChatRuntime } from '@/features/ai/chat/ChatRuntime'
-import {
-  useChatRuntime,
-  useOptionalChatRuntime,
-} from '@/features/ai/chat/ChatRuntimeContext'
 import { useOptionalCatalogRuntime } from '@/features/ai/catalog/CatalogRuntimeContext'
-import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
+import { CreateChatDialog as LazyCreateChatDialog } from '@/features/ai/extensions/CreateChatDialog'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
 
+const ChatsRoute = lazy(() => import('@/features/ai/chat/ChatsRoute'))
+const ChatWorkspacePage = lazy(() => import('@/features/ai/chat/ChatWorkspaceRoute'))
 const AgentsPage = lazy(async () => {
   const module = await import('@/features/ai/catalog/AgentsPage')
   return { default: module.AgentsPage }
@@ -40,31 +32,11 @@ const ConfirmActionModal = lazy(async () => {
 })
 
 export function ChatsPage({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
   return (
-    <ChatRuntime>
-      <ChatsFrame>{children}</ChatsFrame>
-    </ChatRuntime>
-  )
-}
-
-function ChatsPanel() {
-  const controller = useChatRuntime()
-  return <ChatCardsPanel {...controller.chatPanelProps} />
-}
-
-function ChatsFrame({ children }: ExtensionComponentProps) {
-  const controller = useChatRuntime()
-  return (
-    <AiConsoleFrame
-      search={controller.search}
-      onSearchChange={controller.setSearch}
-      busy={controller.busy}
-      error={controller.error}
-      mutationError={controller.mutationError}
-      content={<ChatsPanel />}
-    >
-      {children}
-    </AiConsoleFrame>
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.chat.loading')}</div>}>
+      <ChatsRoute>{children}</ChatsRoute>
+    </Suspense>
   )
 }
 
@@ -96,8 +68,7 @@ export function ProvidersRoute({ children }: ExtensionComponentProps) {
 }
 
 export function CreateChatDialog() {
-  const controller = useOptionalChatRuntime()
-  return controller ? <CreateChatModal {...controller.createChatModal} /> : null
+  return <LazyCreateChatDialog />
 }
 
 export function ResourceEditorDialog() {
@@ -137,10 +108,10 @@ export function EnvironmentsRoute({ children }: ExtensionComponentProps) {
 }
 
 export function ChatWorkspaceRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
   return (
-    <>
-      <ChatWorkspacePage />
-      {children}
-    </>
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.chat.loading')}</div>}>
+      <ChatWorkspacePage>{children}</ChatWorkspacePage>
+    </Suspense>
   )
 }
