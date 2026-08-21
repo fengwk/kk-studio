@@ -269,8 +269,8 @@ registerCase({
 registerCase({
   id: 'thread.user_message_strict_wire',
   level: 'L1',
-  title: 'USER_MESSAGE 严格 wire（仅 contents TEXT/ATTACHMENT）与 exact replay',
-  docs: 'USER_MESSAGE 只接受一个非空有序 contents 列表（TEXT/ATTACHMENT）；text/content shorthand、role、未知字段、空 contents、IMAGE/AUDIO/VIDEO 内容类型与非 canonical uploadId => 400；202 payloadJson 是 canonical AgentMessage 且响应携带 64 位小写 hex requestHash；同 batch exact replay 返回既有命令（sequence/requestHash 稳定）',
+  title: 'USER_MESSAGE 严格结构化 contents 与 exact replay',
+  docs: 'USER_MESSAGE 只接受一个非空有序 contents 列表（TEXT/ATTACHMENT/RESOURCE）；本免费 case 覆盖 TEXT 正向与 text/content shorthand、role、未知字段、空 contents、IMAGE/AUDIO/VIDEO、非 canonical uploadId 等非法 shape；RESOURCE 正向与 Session ownership 由 chat.attachment_upload_contract 覆盖。202 payloadJson 是 canonical AgentMessage 且响应携带 64 位小写 hex requestHash；同 batch exact replay 返回既有命令（sequence/requestHash 稳定）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)

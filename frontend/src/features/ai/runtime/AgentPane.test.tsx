@@ -605,6 +605,36 @@ describe('AgentPane orchestration', () => {
     expect(agentPaneService.listSessionEntries).toHaveBeenCalledWith('session-1')
   })
 
+  it('blocks target navigation while an exact Stop replay is pending', async () => {
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    localStorage.setItem(
+      `kkstudio.ai.pending-stop.v1:${THREAD_ID}`,
+      JSON.stringify({
+        stopRequestId: 'stop-1',
+        expectedRevision: '0',
+        basisHeadEntryId: 'head-1',
+        basisRevision: '0',
+      }),
+    )
+    const hook = renderController()
+    await waitFor(() => expect(hook.result.current.controller.stopReplayPending).toBe(true))
+    expect(hook.result.current.pending).toBe(true)
+    expect(hook.result.current.composer.pending).toBe(true)
+
+    act(() => hook.result.current.composer.onCommand(testCommand('new')))
+    expect(hook.result.current.target).toEqual({
+      kind: 'BOUND_THREAD',
+      threadId: THREAD_ID,
+    })
+    expect(hook.result.current.error).toContain('等待完成或精确重试')
+
+    act(() => hook.result.current.composer.onCommand(testCommand('thread')))
+    expect(hook.result.current.interaction).toBeNull()
+  })
+
   it('keeps a background realtime revision from changing the persisted target', async () => {
     const user = userEvent.setup()
     vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(

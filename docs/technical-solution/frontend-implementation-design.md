@@ -80,7 +80,7 @@ YOLO 是直接控制面（`PUT /yolo`，基于 snapshot revision 的 CAS）：Bo
 
 - batch 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 来自最新 snapshot Thread DTO（THREAD target）。
 - `USER_MESSAGE` 之外的命令携带 pane 本地 draft 的对应字段（diff 相对 `effectiveBase`，避免重发 in-flight 设置）。
-- 服务端 200 返回权威 `session/rootEntry/thread/acceptedCommands/replayed`；queued 命令由 ThreadProcessor 收割，前端以 snapshot 轮询/事件通道投影。
+- 服务端 202 返回权威 `session/rootEntry/thread/acceptedCommands/replayed`；queued 命令由 ThreadProcessor 收割，前端以 snapshot/事件通道投影。
 
 ### 共享 Attachment Pill Composer
 

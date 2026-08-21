@@ -111,7 +111,13 @@ function isCommandContent(value: unknown): boolean {
   if (value.type === 'TEXT') {
     return typeof value.text === 'string'
   }
-  return value.type === 'ATTACHMENT' && nonBlank(value.uploadId)
+  if (value.type === 'ATTACHMENT') {
+    return nonBlank(value.uploadId)
+  }
+  return value.type === 'RESOURCE'
+    && nonBlank(value.blobId)
+    && nonBlank(value.name)
+    && (value.preview == null || typeof value.preview === 'string')
 }
 
 function isCommand(value: unknown): value is HarnessCommandCreateDTO {
@@ -164,9 +170,13 @@ function isComposerPart(value: unknown): value is ComposerPart {
   if (value.type === 'text') {
     return typeof value.text === 'string'
   }
-  return value.type === 'attachment'
-    && nonBlank(value.uploadId)
-    && typeof value.filename === 'string'
+  if (value.type === 'attachment') {
+    return nonBlank(value.uploadId) && typeof value.filename === 'string'
+  }
+  return value.type === 'resource'
+    && nonBlank(value.blobId)
+    && nonBlank(value.name)
+    && (value.preview === undefined || typeof value.preview === 'string')
 }
 
 function isPendingAcceptanceValue(value: unknown): value is PendingAcceptance {

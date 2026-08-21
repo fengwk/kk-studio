@@ -14,7 +14,10 @@ import {
   type PendingAcceptance,
   type PaneTarget,
 } from '@/features/ai/runtime/agent-pane'
-import { createTextPart } from '@/features/ai/composer/composer-parts'
+import {
+  createResourcePart,
+  createTextPart,
+} from '@/features/ai/composer/composer-parts'
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>()
@@ -303,6 +306,39 @@ describe('PaneTarget durable-local FSM', () => {
       composerParts: [{ partId: 'p1', type: 'attachment', uploadId: 'u1', filename: 'file.txt' }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    const resource = createResourcePart('blob-1', 'resource.txt', 'preview')
+    setPending({
+      request: {
+        ...validRequest,
+        commands: [{
+          type: 'USER_MESSAGE',
+          clientCommandId: 'c1',
+          contents: [{
+            type: 'RESOURCE',
+            blobId: 'blob-1',
+            name: 'resource.txt',
+            preview: 'preview',
+          }],
+        }],
+      },
+      composerParts: [resource],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    setPending({
+      request: {
+        ...validRequest,
+        commands: [{
+          type: 'USER_MESSAGE',
+          clientCommandId: 'c1',
+          contents: [{ type: 'RESOURCE', blobId: 'blob-1', name: '' }],
+        }],
+      },
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    setPending({
+      composerParts: [{ ...resource, blobId: '' }],
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setPending({
       composerParts: [{ partId: 'p1', type: 'attachment', uploadId: '', filename: 'file.txt' }],
     })

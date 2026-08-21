@@ -179,7 +179,7 @@ queued `SET_ENVIRONMENT` 只在后续 INPUT 边界消费，因此 enqueue 不再
 | 命令 cursor 过期（`STALE_COMMAND_CURSOR`）、revision 过期（`STALE_REVISION`）、terminal apply pending、materialization ID 复用（`MATERIALIZATION_ID_REUSED`）、ordered replay 冲突 | 409 |
 | approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`） | 409 |
 | approval 已决定且请求未精确 replay 存储决策（`APPROVAL_DECISION_MISMATCH`） | 409 |
-| 命令 batch 被接受进入 mailbox | 200（返回 `session/rootEntry/thread/acceptedCommands/replayed` 权威投影） |
+| 命令 batch 被接受进入 mailbox | 202（返回 `session/rootEntry/thread/acceptedCommands/replayed` 权威投影） |
 | 手动压缩 availability 不满足或 expectedRevision 过期 | 409 |
 
 typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAND_ID_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`MATERIALIZATION_ID_REUSED`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`。409 的统一错误信封在 `errors.reason` 暴露该稳定枚举，并在 `errors.detail` 保留诊断文本；客户端只能按稳定 reason 做恢复决策。持久化不变量破坏（错误 ownership、mixed sibling、非连续 ordinal、count mismatch）保持 `IllegalStateException`，绝不降级为业务冲突。注意 approval 路径的 Thread/target 缺失同样映射 409（`APPROVAL_NOT_APPLICABLE`），不是 404。
@@ -261,8 +261,7 @@ public record ModelRequestSpec(
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
     List<SubagentBinding> subagentBindings,
-    ProviderCacheControl cacheControl,
-    CompactionRequest compaction) {}
+    ProviderCacheControl cacheControl) {}
 ```
 
 - `providerType` 随 invocation 冻结：每次 attempt 仍读取当前 Provider 行的 credential/base URL/timeout，但当前行的 type 必须与 spec 一致，不一致时本次 attempt 确定性失败（禁止在同一 invocation 中切换协议）。不持久化完整 history `messages`、可由 `toolBindings` 派生的 `ProviderRequest.tools`、顶层 Environment、YOLO、contextWindow 与 attempt-only Resource URL。
@@ -270,7 +269,7 @@ public record ModelRequestSpec(
 - tool/skill/subagent binding 名称各自不得重复；每个 environment-bound tool/skill 必须引用同一 Environment route。
 - `SubagentBinding(name, description)`：`name` 是 canonical 非空短名（≤64 字符），`description` 是可空展示描述快照（≤512 字符）；随 spec 冻结，task 执行绝不依据后续 Agent 配置扩权。
 - `contextWindow` 只在 `TurnStartPayload` 中持久化（见 §2），不在 spec 中重复保存。
-- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent bindings 必须全为空。`CompactionPayload` 只含 `summaryText`；`phase/trigger/executionModel/cutEntryId/turnPrefixStartEntryId/historyCompactionEntryId` 冻结在 `CompactionStart`（存于 TURN_START），Entry ID 是 canonical UUID strings，complete 由 phase 与 TURN_END outcome 派生。
+- 压缩元数据不进入 `ModelRequestSpec`：调用是否为 compaction 由 `basisHeadEntryId` 末尾的 owned `TURN_START.compaction` 识别。该调用要求 tool/skill/subagent bindings 全为空；`CompactionPayload` 只含 `summaryText`，`phase/trigger/executionModel/cutEntryId/turnPrefixStartEntryId/historyCompactionEntryId` 冻结在 `CompactionStart`，complete 由 phase 与 TURN_END outcome 派生。
 - `ToolBinding(descriptor, type, environment, plugin)`：`PLATFORM` binding 的 environment 为 null，`ENVIRONMENT` binding 指向具体 binding（可为 null）；descriptor 的 type 与 binding type 一致。
 - `plugin` 为 null 或 `PluginToolBinding(pluginId, contributionLocalName, stateAccesses)`；仅 `PLATFORM` 可携带 plugin，identifier 必须 canonical，state accesses 按 customType 唯一且 mode 仅 `READ` / `WRITE`。该 provenance 随 spec 冻结，retry 不按工具名重新归属。
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。

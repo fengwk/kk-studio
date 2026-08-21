@@ -203,7 +203,7 @@ L1 的关键语义断言：
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId` 均为 canonical UUID string；`nextCommandSequence`、`revision` 为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
 - snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）、`modelAttemptFailures`（只暴露当前 active Model 尚未物化的失败 attempt；item 为 `modelInvocationId/turnStartEntryId/basisHeadEntryId/attempt/sequence/text/thinking/errorCode/errorMessage/failedAt/retryAt`，其中 `sequence` 是 HTTP decimal string）；
 - THREAD target 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 的统一信封携带 `errors.reason=STALE_COMMAND_CURSOR`，且 Thread 状态（sequence/revision/head）逐字段不变；
-- `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT)` 列表：`TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`text`/`content` 文本 shorthand 已移除（`text` 为未知字段、`content` 对 USER_MESSAGE 禁用）；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段与非 canonical uploadId 返回 400；`CUSTOM_MESSAGE` 在产品 HTTP 面确定性 400（产品用户消息只有 USER_MESSAGE）；
+- `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT/RESOURCE)` 列表：`TEXT(text)`；`ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`RESOURCE(blobId,name,preview?)`（只复用目标 Session 已有 blob ref，不重复 retain，新/跨 Session 拒绝并回滚）。`text`/`content` 文本 shorthand 已移除；`IMAGE/AUDIO/VIDEO`、未知/多余字段与非 canonical id 返回 400；`CUSTOM_MESSAGE` 在产品 HTTP 面确定性 400；
 - 命令响应携带 `requestHash`（raw 命令 canonical SHA-256，64 位小写 hex）与 `sequence`；同 `clientCommandId` + 同 hash 整批重放幂等返回既有命令且不二次消费 upload；部分重放 409；replay/400 不依赖异步消费时序；
 - `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS` 四类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；yolo 走直接控制面（`PUT /yolo`）绝不进入 mailbox；
 - `PUT /yolo` body `{expectedRevision,yoloEnabled}`：同值请求在任何 revision CAS 之前 no-op 成功（过期 expectedRevision 不冲突、revision 零触碰）；值变化时 revision 精确 +1 并返回权威 Thread，过期 revision 409 `STALE_REVISION`；不创建 Command/Entry/Work；
@@ -237,8 +237,8 @@ L1 的关键语义断言：
 - `chat.attachment_upload_contract` 仅在 `--with-canvas-storage` 下执行：通用存储
   reserve -> 真实 presigned PUT -> complete -> USER_MESSAGE `ATTACHMENT(uploadId)`
   原子消费；入队响应 `requestHash` 为 64 位小写 hex、durable payload 为
-  `resource(blobId,name,preview)`；整批重放幂等不二次消费；已消费/未 READY upload 与
-  `IMAGE/AUDIO/VIDEO` 内容类型确定性 400。
+  `resource(blobId,name,preview)`；整批重放幂等不二次消费；同 Session `RESOURCE` 可重提且
+  新/跨 Session 引用整体回滚；已消费/未 READY upload 与 `IMAGE/AUDIO/VIDEO` 内容类型确定性 400。
 - `chat.attachment_inline_image_latest_agent_tools` 仅在 `--with-canvas-storage` 下执行：本地
   OpenAI Responses mock 捕获真实 Provider 请求；Thread 创建后更新同名 Agent 的工具集合，下一
   turn 必须忽略历史 `branchSettings.activeTools` 并发送最新 `read/grep`；本地 MinIO 图片必须作为
@@ -448,7 +448,7 @@ GET  /api/storage/blobs/{blobId}/presigned-original|preview
 - 响应 `HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed}`：`replayed=true` 表示整批精确 replay（NEW_SESSION/ENTRY 按 materialization hash、THREAD 按 clientCommandId + requestHash）；
 - owner 授权：NEW_SESSION 确认 owner 存在；ENTRY/THREAD 确认目标 Session 已由该 owner 持有（Chat/Canvas 归属互斥）；`CUSTOM_MESSAGE` 与未知 target/command 类型在产品 HTTP 面确定性 400。
 
-`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId,name,preview)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE`（SYSTEM/USER 均不可）与未知类型在产品 HTTP 面确定性 400，不再有产品可用的自定义消息命令。四类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environment)`（完整 `{name, workspacePath}` 对象或 null，字段必须显式出现）、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`，多余字段一律 400；产品 HTTP batch 的 commands 必须是固定顺序 `SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS` 前缀 + 恰一条末尾 `USER_MESSAGE`（两条 USER_MESSAGE、非末尾、乱序 SET 均 400，多条消息必须拆成多个 THREAD batch）。YOLO 不再是 command：`PUT /api/ai/runtime/threads/{threadId}/yolo` 直接更新 Thread policy（`{expectedRevision,yoloEnabled}` CAS，同值在任何 CAS 前 no-op 成功，值变化 revision 精确 +1，stale 409），绝不进入 mailbox。
+`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素允许 `TEXT(text)`、`ATTACHMENT(uploadId)` 与 `RESOURCE(blobId,name,preview?)`。`uploadId` 是通用存储 reserve/complete 得到的 READY upload，入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable resource -> session blob ref -> 删除 upload；整批重放绝不二次消费。RESOURCE 用于 Stop 恢复后的 durable pill 重提，只允许目标 Session 已有的 blob ref，不重复 retain；新/跨 Session 引用 400 且 materialization 整体回滚。`text`/`content` shorthand、`IMAGE/AUDIO/VIDEO`、未知/多余字段、空 contents 与非 canonical id 一律 400。命令响应携带 `requestHash` 与 `sequence`；固定 SET 前缀、末尾单 USER_MESSAGE 与 YOLO 直接控制面规则保持不变。
 
 ENTRY 分支与 stop 均通过既有写面表达：
 
@@ -458,7 +458,7 @@ ENTRY 分支与 stop 均通过既有写面表达：
 ```
 
 - 历史回退/分支不再有 `PUT /head`：ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（head 直接指向目标 Entry，不复制 Entry），原 Thread 不动；`startEntryId` 不存在 404、跨 Session 400；
-- `POST /stop` 响应 `{status, thread, stoppedTurnEndEntryId, cancelledCommandCount}`；status 三态：
+- `POST /stop` 响应 `{status, thread, stoppedTurnEndEntryId, cancelledCommandCount, cancelledUserMessages[]}`；取消消息按 sequence 升序，元素为 `{sequence,clientCommandId,messageJson}`，用于前端恢复 TEXT/RESOURCE Composer parts；status 三态：
   - `STOPPED`：真实停止一个 Turn（revision+1，`stoppedTurnEndEntryId` 非空，TURN_END closeRequestId = raw `stopRequestId`，按被关闭 TURN_START 的 `ownerThreadId` 界定 Thread 作用域）；
   - `REPLAYED`：同 `stopRequestId` 再次调用，在 Thread 锁内做 Session 级查找命中同 owner 的持久 STOPPED TURN_END（在 revision CAS 之前，revision 不再变化，返回同一 `stoppedTurnEndEntryId`）；另一 Thread 相同 raw id 被忽略而非冲突；
   - `IDLE`：无活动 Turn（无持久 marker，`stoppedTurnEndEntryId=null`；同 `stopRequestId` 再调用仍是 IDLE，不是 REPLAYED）；

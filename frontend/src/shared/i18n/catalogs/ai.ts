@@ -1890,6 +1890,10 @@ export const aiCatalog = {
     'en-US': 'A previous acceptance is still awaiting a definite result',
     'zh-CN': '上一条接受请求仍在等待确定结果',
   },
+  'ai.runtime.action.operationPending': {
+    'en-US': 'The current Thread still has an operation awaiting completion or exact replay',
+    'zh-CN': '当前 Thread 仍有操作等待完成或精确重试',
+  },
   'ai.environment.loading': {
     'en-US': 'Loading Environments',
     'zh-CN': '正在加载 Environments',

@@ -26,15 +26,16 @@ import { getCase, registerCase } from '../lib/registry.mjs'
  *
  * <p>通用存储端点 reserve -> 真实 presigned PUT -> complete -> READY uploadId 经命令 batch 的
  * ATTACHMENT(uploadId) 消费：入队响应携带 canonical requestHash、durable payload 为
- * resource(blobId,name,preview)；同 batch 整批重放返回既有命令且不二次消费；upload 行消费后再次提交
- * 同一 uploadId 确定性 400；IMAGE/AUDIO/VIDEO 内容类型与 PENDING upload 均 400。
+ * resource(blobId,name,preview)；同 batch 整批重放返回既有命令且不二次消费；同 Session 可用 RESOURCE
+ * 重新提交该 blob 且不要求 upload handle，跨/新 Session RESOURCE 确定性拒绝；upload 行消费后再次提交同一
+ * uploadId 确定性 400；IMAGE/AUDIO/VIDEO 内容类型与 PENDING upload 均 400。
  */
 registerCase({
   id: 'chat.attachment_upload_contract',
   level: 'L1',
   requires: ['canvas-storage'],
   title: 'USER_MESSAGE ATTACHMENT 消费与 requestHash 契约',
-  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 作为 NEW_SESSION 首条消息原子物化；响应 requestHash 为 64 位小写 hex，durable payload 为 resource(blobId,name,preview)；同批精确重放 replayed=true 不二次消费；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
+  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 作为 NEW_SESSION 首条消息原子物化；响应 requestHash 为 64 位小写 hex，durable payload 为 resource(blobId,name,preview)；同批精确重放 replayed=true 不二次消费；同 Session RESOURCE 可重提且跨/新 Session 拒绝；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -141,15 +142,66 @@ registerCase({
     const snapshotAfterReplay = await getThreadSnapshot(ctx, String(threadId))
     assert(snapshotAfterReplay.queuedCommands.length === 0, JSON.stringify(snapshotAfterReplay.queuedCommands))
 
-    // 6. upload 行已消费：同一 uploadId 的 NEW 命令确定性 400。
+    // 6. Stop/草稿恢复使用的 RESOURCE 可在同 Session 重提，不需要已消费的 upload handle。
+    const resourceCommand = {
+      type: 'USER_MESSAGE',
+      clientCommandId: cid(),
+      contents: [{
+        type: 'RESOURCE',
+        blobId,
+        name: 'e2e-attachment.txt',
+        preview: 'restored resource',
+      }],
+    }
+    const resourceAccepted = await acceptCommandBatch(ctx, {
+      owner: chatOwner(chat.id),
+      target: threadTarget({
+        threadId,
+        expectedHeadEntryId: snapshotAfterReplay.thread.headEntryId,
+        expectedNextCommandSequence: snapshotAfterReplay.thread.nextCommandSequence,
+      }),
+      commands: [resourceCommand],
+    })
+    const resourcePayload = JSON.parse(resourceAccepted.acceptedCommands[0].payloadJson)
+    assert(resourcePayload.message.contents[0].type === 'resource', JSON.stringify(resourcePayload))
+    assert(String(resourcePayload.message.contents[0].blobId) === blobId, JSON.stringify(resourcePayload))
+    assert(resourcePayload.message.contents[0].name === 'e2e-attachment.txt', JSON.stringify(resourcePayload))
+    assert(resourcePayload.message.contents[0].preview === 'restored resource', JSON.stringify(resourcePayload))
+    await waitForQuiescentThread(ctx, String(threadId), {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    const snapshotAfterResource = await getThreadSnapshot(ctx, String(threadId))
+
+    // 7. 相同 blob 不能借 RESOURCE wire 注入没有该 Session ref 的 NEW_SESSION。
+    const rejectedSessionId = cid()
+    const rejectedThreadId = cid()
+    await expectHttpError(
+      () =>
+        materializeNewSession(ctx, {
+          owner: chatOwner(chat.id),
+          sessionId: rejectedSessionId,
+          threadId: rejectedThreadId,
+          rootSettings,
+          yoloEnabled: false,
+          commands: [{ ...resourceCommand, clientCommandId: cid() }],
+        }),
+      { status: 400 },
+    )
+    await expectHttpError(
+      () => ctx.call('GET', `/api/ai/runtime/threads/${rejectedThreadId}/snapshot`),
+      { status: 404 },
+    )
+
+    // 8. upload 行已消费：同一 uploadId 的 NEW 命令确定性 400。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
           owner: chatOwner(chat.id),
           target: threadTarget({
             threadId,
-            expectedHeadEntryId: snapshotAfterReplay.thread.headEntryId,
-            expectedNextCommandSequence: snapshotAfterReplay.thread.nextCommandSequence,
+            expectedHeadEntryId: snapshotAfterResource.thread.headEntryId,
+            expectedNextCommandSequence: snapshotAfterResource.thread.nextCommandSequence,
           }),
           commands: [
             { type: 'USER_MESSAGE', clientCommandId: cid(), contents: [{ type: 'ATTACHMENT', uploadId }] },
@@ -158,7 +210,7 @@ registerCase({
       { status: 400 },
     )
 
-    // 7. IMAGE/AUDIO/VIDEO 结构化内容类型全部 400。
+    // 9. IMAGE/AUDIO/VIDEO 结构化内容类型全部 400。
     for (const media of ['IMAGE', 'AUDIO', 'VIDEO']) {
       await expectHttpError(
         () =>
@@ -166,8 +218,8 @@ registerCase({
             owner: chatOwner(chat.id),
             target: threadTarget({
               threadId,
-              expectedHeadEntryId: snapshotAfterReplay.thread.headEntryId,
-              expectedNextCommandSequence: snapshotAfterReplay.thread.nextCommandSequence,
+              expectedHeadEntryId: snapshotAfterResource.thread.headEntryId,
+              expectedNextCommandSequence: snapshotAfterResource.thread.nextCommandSequence,
             }),
             commands: [
               {
@@ -181,7 +233,7 @@ registerCase({
       )
     }
 
-    // 8. PENDING（未 complete）upload 同样确定性 400。
+    // 10. PENDING（未 complete）upload 同样确定性 400。
     const { json: pendingReserveJson } = await ctx.call('POST', '/api/storage/uploads', {
       filename: 'pending.bin',
       mediaType: 'application/octet-stream',
@@ -195,8 +247,8 @@ registerCase({
           owner: chatOwner(chat.id),
           target: threadTarget({
             threadId,
-            expectedHeadEntryId: snapshotAfterReplay.thread.headEntryId,
-            expectedNextCommandSequence: snapshotAfterReplay.thread.nextCommandSequence,
+            expectedHeadEntryId: snapshotAfterResource.thread.headEntryId,
+            expectedNextCommandSequence: snapshotAfterResource.thread.nextCommandSequence,
           }),
           commands: [
             {

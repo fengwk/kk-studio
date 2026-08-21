@@ -215,8 +215,7 @@ public record ModelRequestSpec(
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
     List<SubagentBinding> subagentBindings,
-    ProviderCacheControl cacheControl,
-    CompactionRequest compaction) {}
+    ProviderCacheControl cacheControl) {}
 ```
 
 不持久化：
@@ -288,7 +287,8 @@ Provider tool definitions每次由 bindings 派生，不保存第二份。
 
 #### compaction
 
-普通请求为 null。Compaction 请求冻结（`CompactionStart`，存于 TURN_START）：
+压缩元数据不进入 `ModelRequestSpec`。调用是否为 compaction 由 basis EntryPath 末尾的 owned
+`TURN_START.compaction` 识别；冻结形状为：
 
 ```text
 phase
