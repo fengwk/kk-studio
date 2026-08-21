@@ -143,12 +143,13 @@ class AgentPromptComposerTest {
     assertFalse(result.contains("${defaultMaxTurns}"), result);
   }
 
-  /** Agent 正文只渲染模板声明的 date/workspace 变量；未声明时原文保留，声明的 workspace 缺失时留空。 */
+  /** Agent 正文只替换 date/workspace/cwd；未知或未闭合占位符原文保留，不把 shell 示例打成规划失败。 */
   @Test
   void rendersDeclaredAgentBodyVariablesOnly() {
     String withBoth = "Today is ${date} in ${workspace}.";
     String bodyOnly = "No placeholders here.";
     String dateOnly = "Today is ${date}.";
+    String mixed = "cwd=${cwd} keep ${JAVA_HOME} and ${unterminated";
     EnvironmentBinding binding = TestEnvironmentBindings.binding("env");
     CurrentEnvironmentContext selected =
         new CurrentEnvironmentContext(binding, null, LocalDate.of(2026, 8, 9), null);
@@ -161,6 +162,10 @@ class AgentPromptComposerTest {
 
     String renderedBodyOnly = composer.compose(bodyOnly, none(), List.of(), List.of());
     assertTrue(renderedBodyOnly.startsWith("No placeholders here."), renderedBodyOnly);
+
+    String renderedMixed = composer.compose(mixed, selected, List.of(), List.of());
+    assertTrue(
+        renderedMixed.startsWith("cwd=. keep ${JAVA_HOME} and ${unterminated"), renderedMixed);
   }
 
   /** skills/subagents 列表不可为空引用。 */

@@ -125,7 +125,7 @@ describe('system settings schema renderer', () => {
   it('does not repeat restart badges per card when the whole section is restart', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'aiRuntime')
+    const section = renderSection(schema, 'environment')
     const { container } = render(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )

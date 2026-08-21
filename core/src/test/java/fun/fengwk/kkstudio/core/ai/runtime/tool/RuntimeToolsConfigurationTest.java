@@ -11,9 +11,8 @@ import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
 import java.time.Duration;
 
 /**
- * 验证 {@link RuntimeToolsConfiguration#subagentConfig} 把 {@code SystemSettings.AiRuntime} 的五个
- * subagent 字段完整映射为 {@link SubagentConfig}。纯 JUnit 单元测试：不启动 Spring/Postgres，直接构造 {@code new
- * RuntimeToolsConfiguration().subagentConfig(...)}。
+ * 验证 {@link RuntimeToolsConfiguration#subagentConfigProvider} 把 {@code SystemSettings.AiRuntime}
+ * 的五个 subagent 字段完整映射为 {@link SubagentConfig}。纯 JUnit 单元测试：不启动 Spring/Postgres，直接构造 provider 现读。
  */
 class RuntimeToolsConfigurationTest {
 
