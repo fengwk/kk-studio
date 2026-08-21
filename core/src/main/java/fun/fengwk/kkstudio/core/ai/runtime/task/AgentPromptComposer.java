@@ -4,13 +4,11 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.prompt.PromptTemplate;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentPrompts;
 
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -64,27 +62,48 @@ public final class AgentPromptComposer {
   }
 
   /**
-   * Agent 正文按模板声明渲染：只提供当前 Environment 可解析的 {@code date}/{@code workspace} 变量，声明之外的变量
-   * 保持原文（调用方负责承诺正文不含其它占位符）。
+   * Agent 正文只替换已知 {@code date}/{@code workspace}/{@code cwd}；其它 {@code ${...}} 与未闭合占位符保持原文，避免 把
+   * shell/文档示例打成规划失败。
    */
   private static String renderAgentBody(String systemPrompt, CurrentEnvironmentContext context) {
-    PromptTemplate body = new PromptTemplate("agent-body", systemPrompt);
-    List<String> declared = body.variables();
-    if (declared.isEmpty()) {
-      return systemPrompt;
-    }
-    Map<String, String> values = new HashMap<>();
-    if (declared.contains("date")) {
-      values.put("date", DATE_FORMAT.format(context.currentDate()));
-    }
-    if (declared.contains("workspace")) {
-      String workspace = context.binding() == null ? "" : context.binding().workspacePath();
-      if (workspace == null || workspace.isBlank() || "none".equals(workspace)) {
-        workspace = "";
+    String workspace = "";
+    if (context.binding() != null) {
+      String path = context.binding().workspacePath();
+      if (path != null && !path.isBlank() && !"none".equals(path)) {
+        workspace = path;
       }
-      values.put("workspace", workspace);
     }
-    return body.render(values);
+    return substituteKnown(
+        systemPrompt,
+        Map.of(
+            "date", DATE_FORMAT.format(context.currentDate()),
+            "workspace", workspace,
+            "cwd", workspace));
+  }
+
+  private static String substituteKnown(String raw, Map<String, String> known) {
+    StringBuilder result = new StringBuilder(raw.length());
+    int cursor = 0;
+    while (true) {
+      int open = raw.indexOf("${", cursor);
+      if (open < 0) {
+        result.append(raw, cursor, raw.length());
+        return result.toString();
+      }
+      int close = raw.indexOf('}', open + 2);
+      if (close < 0) {
+        result.append(raw, cursor, raw.length());
+        return result.toString();
+      }
+      String name = raw.substring(open + 2, close);
+      result.append(raw, cursor, open);
+      if (known.containsKey(name)) {
+        result.append(known.get(name));
+      } else {
+        result.append(raw, open, close + 1);
+      }
+      cursor = close + 1;
+    }
   }
 
   private static String currentEnvironment(CurrentEnvironmentContext context) {

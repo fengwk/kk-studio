@@ -23,7 +23,7 @@ public final class PromptTemplate {
   private final String raw;
   private final List<String> variables;
 
-  public PromptTemplate(String resourceName, String raw) {
+  PromptTemplate(String resourceName, String raw) {
     this.resourceName = Objects.requireNonNull(resourceName, "resourceName");
     this.raw = Objects.requireNonNull(raw, "raw");
     this.variables = parseVariables(raw);

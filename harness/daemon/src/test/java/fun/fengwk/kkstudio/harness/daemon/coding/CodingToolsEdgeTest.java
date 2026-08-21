@@ -36,6 +36,7 @@ class CodingToolsEdgeTest {
 
   @TempDir Path environmentRoot;
 
+  /** 错误类型与未知字段必须在执行前拒绝；integer 数字字符串会被归一化，因此 grep 用非数字文本证明类型失败。 */
   @Test
   void everyDescriptorRejectsWrongTypedAndUnknownArguments() {
     Tool[] tools = {
@@ -49,7 +50,7 @@ class CodingToolsEdgeTest {
       "{\"path\":\"x\",\"content\":1}",
       "{\"path\":\"x\",\"old_string\":\"a\",\"new_string\":\"b\",\"replace_all\":\"yes\"}",
       "{\"command\":\"echo x\",\"workdir\":1}",
-      "{\"pattern\":\"x\",\"path\":\".\",\"limit\":\"1\"}",
+      "{\"pattern\":\"x\",\"path\":\".\",\"limit\":\"one\"}",
       "{\"pattern\":\"*\",\"path\":\".\",\"timeout_seconds\":false}"
     };
     for (int index = 0; index < tools.length; index++) {

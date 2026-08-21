@@ -71,8 +71,8 @@ import java.util.concurrent.TimeUnit;
  * HarnessRuntime}、store、processor 与 realtime 适配）仍然可用，只是不启动调度。生命周期顺序：启动 dispatcher 后 listener，停止
  * listener 后 dispatcher；processor 关闭与 executor shutdown 由 Spring 按依赖逆序 destroy 保证。
  *
- * <p>processor/dispatcher/资源/重试/事件等运行软策略统一读取共享启动快照 {@link SystemSettingsSnapshot}（装配期一次 DB 读取，DB
- * 变更需重启生效）；本组合根不持有任何硬编码的重复默认值。
+ * <p>Advanced/resource 等部署软策略从共享 {@link SystemSettingsSnapshot} 在装配期读取（DB 变更需重启）；aiRuntime 的 retry
+ * 经 {@link InvocationRetryPolicyProvider} 每次判定点现读。本组合根不持有任何硬编码的重复默认值。
  *
  * <p>所有 executor 线程均为 daemon 并以 {@code destroyMethod = "shutdown"} 交给 Spring 持有生命周期；dispatcher 使用
  * fail-fast 单线程 drain executor 与 bounded AbortPolicy worker executor。
