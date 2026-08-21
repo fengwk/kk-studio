@@ -209,7 +209,7 @@ Daemon 回调使用连续 sequence；相同 sequence 的完全相同 envelope �
 `ACK` / `ERROR` 只描述 transport，不单独改写 durable 状态。`DaemonToolResultCodec` 使用严格 JSON shape；Gateway 的 COMPLETED 解码会把 Resource 引用读回并校验为瞬时 Binary 内容，**不直接形成最终 durable file URI**：
 
 - daemon coding tool 自身可因输出超过 preview 限制（默认 2000 行 / 50KB）或二进制内容产生 Resource（daemon 侧 `resourceStore.store` 落盘并返回 ref）；ANSI terminal 文本中的 ESC 不单独触发二进制判定，常见彩色测试输出仍以可读 Text 投影；
-- core 对 Text/Json >8KB 及 Binary 内容统一在 `ToolResultExternalizer`（CoreToolGateway callback bridge）外部化：先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 与计划精确相等。Text/Json 的 durable `ResourceToolContent` 同时携带最多 16 KiB 的 UTF-8 安全 preview（能完整容纳时原样保留，否则稳定前缀加截断标记）；Binary preview 为 null。codec 继续接受旧的无 preview Resource JSON。
+- core 对 Text/Json >8KB 及 Binary 内容统一在 `ToolResultExternalizer`（CoreToolGateway callback bridge）外部化：先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 与计划精确相等。Text/Json 的 durable `ResourceToolContent` 同时携带最多 16 KiB 的 UTF-8 安全 preview（能完整容纳时原样保留，否则稳定前缀加截断标记）；Binary preview 为 null。preview 是可选字段，缺省时按 null 解码。
 
 terminal CAS 成功后请求 owning Thread Work；CAS 失败表示 ownership 已丢失，仅丢弃本地 handle。
 

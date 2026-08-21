@@ -1403,9 +1403,9 @@ class DatabaseTurnResolverTest {
     assertEquals(1200, resolved.spec().variant().maxOutputTokens());
   }
 
-  /** 逆证：clean-slate 契约不再暴露旧压缩 DTO 或其复制到 spec 的 metadata。 */
+  /** CompactionPreparation 保持最小，派生 token/window 与 compaction metadata 不进入 ModelRequestSpec。 */
   @Test
-  void cleanSlateContractsHaveNoLegacyCompactionMetadata() {
+  void compactionFactsStayOutOfPreparationAndModelRequestSpec() {
     assertThrows(
         NoSuchMethodException.class,
         () -> CompactionPreparation.class.getDeclaredMethod("tokensBefore"));

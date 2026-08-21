@@ -68,7 +68,7 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | Chat 卡片 | `ChatDTO`：标题、Agent/YOLO 可见设置、版本 |
 | Chat 工作区 | `localStorage` 中的八个 Pane 槽位 |
 | Pane | 本地 `PaneTarget`（NEW_SESSION_DRAFT / ENTRY_DRAFT / BOUND_THREAD 三态）；pendingAcceptance/pendingStop 等 sidecar 只存浏览器本地 |
-| Blank pane | 本地 `BranchDraft`（frozenDraft）物化自 Chat defaults + Catalog |
+| Draft pane | 本地 `BranchDraft`（frozenDraft）物化自 Chat defaults + Catalog |
 | Bound pane | `branchState` 从 snapshot `branchSettings` 初始化；queued SET_* 投影 `effectiveBase` |
 | Composer | 双层输入与控制栏；Permission 仅 Default/YOLO，Model/Variant 使用 anchored 两级菜单；每次发送构造 SET_* diff batch + `USER_MESSAGE`（不携带 role） |
 | Thread transcript | `HarnessThreadSnapshotDTO` 的 entries（root-to-head）、queuedCommands、活跃 Invocation 与尚未物化的 `modelAttemptFailures` |

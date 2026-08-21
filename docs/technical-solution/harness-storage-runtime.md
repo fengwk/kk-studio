@@ -71,7 +71,7 @@ fresh enqueue 事务：锁 Session KEY SHARE → 锁 Thread → 双 CAS（head/s
 | --- | --- |
 | `thread_id` / `turn_start_entry_id` | `(thread_id, turn_start_entry_id)` 唯一 |
 | `basis_head_entry_id` | 创建时的 head |
-| `request` | compact `ModelRequestSpec` JSON（providerType/model/variant/preamble/toolBindings/skillBindings/subagentBindings/cacheControl/可空 compaction metadata；无 history messages/tools/YOLO/contextWindow；Provider/Model 只按名称引用） |
+| `request` | compact `ModelRequestSpec` JSON（providerType/model/variant/preamble/toolBindings/skillBindings/subagentBindings/cacheControl；无 history messages/tools/YOLO/contextWindow/compaction metadata；Provider/Model 只按名称引用）。压缩身份由 `basis_head_entry_id` 对应 path 末尾的 `TURN_START.compaction` 表达 |
 | `status` | READY/DISPATCHING/RUNNING/SUCCEEDED/FAILED/CANCELLED/UNKNOWN |
 | `attempt` | `>= 0` |
 | `stream_checkpoint` | 当前 attempt 的单调安全 checkpoint；text/thinking 归一化为非 null，至少一侧非空且纯空白合法；retry 时归档后清空，防止跨 attempt partial 混入 |
@@ -182,7 +182,7 @@ Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation sib
   `storage_blob`，写入 `resource(blobId,name,preview)`，并通过
   `harness_session_blob_ref` 为 Session 持有 Blob。没有 materializer 时，含 Resource 的成功结果
   fail closed，瞬时 URI 绝不进入 durable message。
-- Provider attempt 从 `storage_blob` 读取权威媒体事实：支持的图片从原始 Blob 受限读取（30 MiB）并生成 attempt-only `data:<mediaType>;base64,...`，避免远端 Provider 访问本地/私网预签名 URL；audio/video 暂使用新鲜预签名 URL。Provider adapter 把 source 统一作为 URI 交给 SDK 的 URI 重载，禁止误走 raw Base64 重载。durable invocation request 只保存 `blobId/name/preview`。前端 durable 渲染走 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview`；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation file/s3 引用兼容。
+- Provider attempt 从 `storage_blob` 读取权威媒体事实：支持的图片从原始 Blob 受限读取（30 MiB）并生成 attempt-only `data:<mediaType>;base64,...`，避免远端 Provider 访问本地/私网预签名 URL；audio/video 暂使用新鲜预签名 URL。Provider adapter 把 source 统一作为 URI 交给 SDK 的 URI 重载，禁止误走 raw Base64 重载。durable invocation request 只保存 `blobId/name/preview`。前端 durable 渲染走 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview`；`GET /api/ai/runtime/resources/{sha256}` 只处理瞬时/Invocation file/s3 引用。
 
 ## 11. 验证入口
 

@@ -350,8 +350,8 @@ describe('Canvas generic generation panel', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('provider failed')
   })
 
-  it('shows the legacy header with the real model label and the true run status', () => {
-    // The header reuses the old kicker/status grammar while displaying registry data.
+  it('shows the generation header with the real model label and the true run status', () => {
+    // Header 同时展示 registry label、kicker 与真实运行状态。
     const view = renderPanel()
     const header = view.container.querySelector('.generation-panel-head')
     expect(header).not.toBeNull()

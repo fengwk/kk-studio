@@ -1,8 +1,8 @@
 # Harness Session、Thread、Pane 与 Command 模型
 
-本文定义 kk-studio Harness Runtime 的最终 Session Tree、Thread materialization、Command mailbox、Chat/Canvas 归属、Pane 交互、Stop 恢复、上传生命周期和前端模块边界。
+本文定义 kk-studio Harness Runtime 当前生效的 Session Tree、Thread materialization、Command mailbox、Chat/Canvas 归属、Pane 交互、Stop 恢复、上传生命周期和前端模块边界。
 
-本方案按 clean-slate 实施：数据库直接重建最终 V1，不保留兼容 API、旧字段、旧命令别名、增量迁移、双读双写或过渡状态。
+系统使用单一 clean-slate V1 schema、严格 API/codec 与单轨读写路径。
 
 ## 1. 核心模型
 
@@ -1279,8 +1279,6 @@ SelectionPanel / HistoryBranchPanel / ThreadInteractionPanel
 | `/debug` | Conversation 与当前 Thread Debug View 间切换 |
 | `/shortcuts` | 打开快捷键目录 |
 
-`/events` 不存在，也不保留 alias。
-
 ### 10.2 可用性
 
 | PaneTarget | 可用命令 |
@@ -1664,16 +1662,16 @@ canvas_function_resource_ref 不存在
 canvas_function_resource_pin 及 idx_canvas_function_resource_pin_resource 存在
 harness_thread 含 session_id、materialization_hash 与同 Session head FK
 harness_thread_command 含 cancel_request_id 与 cancel receipt index
-chat_session、canvas_session、harness_session_blob_ref 使用本节最终结构
+chat_session、canvas_session、harness_session_blob_ref 使用本节定义的结构
 ```
 
 ### 12.7 后端边界映射
 
 - `ThreadState` / `HarnessThreadDTO` 的 `sessionId` 必填；`materializationHash` 只属于领域/Store。PostgreSQL Thread 读写显式携带 `session_id`，head 由同 Session FK 约束。
-- `HarnessRuntime.acceptCommands(target, acceptancePreflight)` 是唯一命令接受原语；facade 不提供 standalone create、head relocation 或 delete。深删除由 Core `HarnessSessionDeletionService` 经 `HarnessStore.Transaction` 按 Work/Invocation/Command/Thread/Entry/Session 顺序编排。
+- `HarnessRuntime.acceptCommands(target, acceptancePreflight)` 是唯一命令接受原语；Session/Thread materialization 是该原语接受首批 Command 的事务结果。深删除由 Core `HarnessSessionDeletionService` 经 `HarnessStore.Transaction` 按 Work/Invocation/Command/Thread/Entry/Session 顺序编排。
 - complete Compaction checkpoint 可沿 EntryPath 共享；incomplete HISTORY 与 normal continuation obligation 都要求 `TURN_START.ownerThreadId == current Thread`。`CompactionPayload` 只含 `summaryText`，其余冻结事实位于 `TURN_START.compaction`。
 - Chat 与 Canvas 都通过 `StudioCommandAcceptanceService` 绑定 Session ownership；`ChatServiceImpl.deleteChat` 按 `chat_session` 深删 Sessions，Canvas 按 `canvas_session` 深删 Sessions。Canvas document/DTO 不持有 Thread id。
-- 产品写入口为 `POST /api/ai/runtime/command-batches`；Session 查询为 owner-scoped sessions、`GET /api/ai/runtime/sessions/{sessionId}/threads` 与 `/entries`。不存在 Chat/Canvas 专属 Thread create 或 head update API。
+- 产品写入口为 `POST /api/ai/runtime/command-batches`；Session 查询为 owner-scoped sessions、`GET /api/ai/runtime/sessions/{sessionId}/threads` 与 `/entries`；Thread head 只由 Runtime 沿当前分支推进。
 - Command acceptance DTO 使用 NEW_SESSION / ENTRY / THREAD target；Stop DTO 返回 `status/thread/stoppedTurnEndEntryId/cancelledCommandCount/cancelledUserMessages(sequence,clientCommandId,messageJson)`，无独立 `replayed` 字段。
 - `CanvasCommandDedupDO` / Mapper 只处理 `canvasId/commandId/requestHash`；Function Run 的 Resource 生命周期边使用 `CanvasFunctionResourcePin` 命名。
 
@@ -1761,7 +1759,7 @@ Task Session：
 - SYSTEM soft steering 使用只含 SYSTEM CUSTOM_MESSAGE 的 steering batch；
 - resume 时 Agent/Model/Tools 变化与下一条 prompt 放入同一用户输入 batch。
 
-## 16. 目标代码形态
+## 16. 代码形态
 
 ```text
 AcceptCommandsTarget 三态
@@ -1789,7 +1787,7 @@ dev/e2e/test seed
 PostgreSQL schema structure tests
 ```
 
-clean-slate V1 是唯一 schema 基线：只有 `V1__schema.sql` + profile seeds，NULL 表示缺失，无增量 schema chain（无 V2/V3、无 ALTER/backfill migration、无双写与旧 DTO/命令 alias）。
+`V1__schema.sql` 与 runtime schema mirror 定义唯一 schema 基线，profile seeds 只写环境数据；缺失事实使用 NULL。部署不维护增量 schema migration chain 或并行写路径。
 
 ## 18. 自动化验收
 
@@ -1901,7 +1899,7 @@ clean-slate V1 是唯一 schema 基线：只有 `V1__schema.sql` + profile seeds
 - [ ] `/tree` 选择不创建 Thread。
 - [ ] Canvas `/new` 不修改 Canvas Graph。
 - [ ] `/debug` 完整可用（Conversation/Debug 互斥主视图）。
-- [ ] 切换 Pane 不停止后台 Thread，旧 realtime 不抢回 active target。
+- [ ] 切换 Pane 不停止后台 Thread，非活动 Thread 的迟到 realtime 不修改 active target。
 
 ### 18.8 结构与覆盖率
 

@@ -219,7 +219,7 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   @Test
-  void compactionCodecRejectsLegacyAndWrongTypedFields() {
+  void compactionCodecRejectsUnknownAndWrongTypedFields() {
     String canonical = "{\"summaryText\":\"summary\"}";
     assertEquals(new CompactionPayload("summary"), CODEC.decode(EntryType.COMPACTION, canonical));
     assertThrows(

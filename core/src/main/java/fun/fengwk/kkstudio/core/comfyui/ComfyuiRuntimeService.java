@@ -40,7 +40,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -353,9 +352,7 @@ public class ComfyuiRuntimeService {
     root.set("outputs", outputs == null ? objectMapper.createObjectNode() : outputs.deepCopy());
     ArrayNode files = root.putArray("files");
     if (outputs != null && outputs.isObject()) {
-      Iterator<Map.Entry<String, JsonNode>> nodes = outputs.fields();
-      while (nodes.hasNext()) {
-        Map.Entry<String, JsonNode> node = nodes.next();
+      for (Map.Entry<String, JsonNode> node : outputs.properties()) {
         appendOutputFiles(files, job.getId(), node.getKey(), node.getValue());
       }
     }
@@ -367,9 +364,7 @@ public class ComfyuiRuntimeService {
     if (nodeOutput == null || !nodeOutput.isObject()) {
       return;
     }
-    Iterator<Map.Entry<String, JsonNode>> mediaFields = nodeOutput.fields();
-    while (mediaFields.hasNext()) {
-      Map.Entry<String, JsonNode> media = mediaFields.next();
+    for (Map.Entry<String, JsonNode> media : nodeOutput.properties()) {
       JsonNode value = media.getValue();
       if (value.isArray()) {
         for (int i = 0; i < value.size(); i++) {

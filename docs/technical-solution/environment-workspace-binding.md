@@ -14,7 +14,7 @@ Environment 的选择在持久化与 wire 上都是**原子**的完整绑定 `{n
 
 - `chat.environment` 是可空的**默认**完整 binding（两列同存同空）：空面板/线程草稿以此为起点，发送前可更改或清空。Chat 设置不复制到 Thread。
 - Thread 的 `BranchSettings.environment` 是 durable 快照中的唯一路由身份：ROOT/TURN_START 完整冻结，Resolver 按 **latest-snapshot-wins** 读取（只使用最近一个快照，null/缺失/不可用绝不向更旧快照回退）。
-- 前端 Blank pane 的 draft 从 Chat 默认 binding 物化（可 null）；Bound pane 从 snapshot `branchSettings` 初始化；整个 binding 原子比较/复制，绝不单独透传 name。
+- 前端 Draft pane 从 Chat 默认 binding 物化（可 null）；Bound pane 从 snapshot `branchSettings` 初始化；整个 binding 原子比较/复制，绝不单独透传 name。
 
 ## 3. SET_ENVIRONMENT：缺省 vs 显式 null
 
@@ -33,7 +33,7 @@ Environment 的选择在持久化与 wire 上都是**原子**的完整绑定 `{n
 
 `GET /api/ai/environments/{name}/directories?path=.` 是 control-plane 只读查询（不走 Tool Invocation/Permission，不占 active tool slot）：
 
-- `path` 缺省 `'.'`；响应 `path`/`parentPath`/entry `path` 都是 canonical wire 路径；`parentPath` 必须等于请求 `path` 的 lexical 父路径（root 与单段路径均为 `'.'`）；`displayPath` 固定为**请求 `path` 的最后一段**（root 为 `'.'`），只作展示，codec 层严格拒绝任何其它值（含旧/恶意 daemon 泄漏的本地绝对路径）；entry 只含 `{name,path}` 且 `name` 必须等于 `path` 最后一段，且 `entries` 不得超过 1000 条。
+- `path` 缺省 `'.'`；响应 `path`/`parentPath`/entry `path` 都是 canonical wire 路径；`parentPath` 必须等于请求 `path` 的 lexical 父路径（root 与单段路径均为 `'.'`）；`displayPath` 固定为**请求 `path` 的最后一段**（root 为 `'.'`），只作展示，codec 层严格拒绝任何其它值或本地绝对路径泄漏；entry 只含 `{name,path}` 且 `name` 必须等于 `path` 最后一段，且 `entries` 不得超过 1000 条。
 - daemon 侧 `EnvironmentDirectoryBrowser`：`resolve().normalize()` 后 `toRealPath()` canonicalize，越出 root 即 `INVALID_PATH`；列表默认不暴露 symlink 目录；显式请求 root 内 symlink alias 时回显 alias 本身，内部只用 real path 校验与读取；只列真实目录、按名称稳定排序、最多 1000 条（超出置 `truncated`）；无法编码为合法 wire 子路径的本地目录名被跳过；不存在 → `NOT_FOUND`，非目录 → `NOT_DIRECTORY`，本地 IO 失败 → `IO_ERROR`。目录文件系统 IO 提交到 daemon 级共享有界单 worker。
 - HTTP 映射：`ENVIRONMENT_NOT_FOUND`/`NOT_FOUND` → 404，`ENVIRONMENT_UNAVAILABLE` → 409，`INVALID_PATH`/`NOT_DIRECTORY` → 400，`TIMEOUT` → 504，`IO_ERROR` → 502。
 

@@ -60,21 +60,21 @@ class RuntimeModuleArchitectureTest {
         Files.isDirectory(runtimeModelPackage),
         "runtime model package tree must exist: " + runtimeModelPackage);
 
-    Path deletedLegacyModelPackage = main.resolve("fun/fengwk/kkstudio/harness/model");
+    Path forbiddenModelPackage = main.resolve("fun/fengwk/kkstudio/harness/model");
     assertFalse(
-        Files.exists(deletedLegacyModelPackage),
-        "deleted legacy model package tree must not exist: " + deletedLegacyModelPackage);
+        Files.exists(forbiddenModelPackage),
+        "runtime sources must stay under harness.runtime: " + forbiddenModelPackage);
 
-    Path deletedKernelPackage = main.resolve("fun/fengwk/kkstudio/harness/kernel");
+    Path forbiddenKernelPackage = main.resolve("fun/fengwk/kkstudio/harness/kernel");
     assertFalse(
-        Files.exists(deletedKernelPackage),
-        "deleted harness.kernel package tree must not exist: " + deletedKernelPackage);
+        Files.exists(forbiddenKernelPackage),
+        "harness.kernel package tree must not exist: " + forbiddenKernelPackage);
 
     Path moduleRoot = main.getParent().getParent().getParent();
-    Path deletedKernelModule = moduleRoot.resolveSibling("kernel");
+    Path forbiddenKernelModule = moduleRoot.resolveSibling("kernel");
     assertFalse(
-        Files.exists(deletedKernelModule),
-        "deleted harness/kernel module directory must not exist: " + deletedKernelModule);
+        Files.exists(forbiddenKernelModule),
+        "harness/kernel module directory must not exist: " + forbiddenKernelModule);
 
     Path harnessRoot = moduleRoot.getParent();
     assertHarnessModules(harnessRoot.resolve("pom.xml"));

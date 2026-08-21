@@ -106,7 +106,7 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 | Entry | 对话与运行审计事实，只允许十种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
 | HarnessThread | durable 字段为 `sessionId`、`headEntryId`、`materializationHash`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，只允许六类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)）；YOLO 是 Thread 直接控制面 |
-| ModelInvocation | 一次持久化 `basisHeadEntryId + compact ModelRequestSpec`（providerType/model/variant/preamble/toolBindings/skillBindings/subagentBindings/cacheControl/可空 compaction metadata；无 messages/tools/YOLO/contextWindow）的 Provider 执行及其状态、attempt-local checkpoint、连续 `failedAttempts` 与 terminal 事实；完整 ProviderRequest 每次 attempt 由 Materializer 从 EntryPath + spec 内存重建 |
+| ModelInvocation | 一次持久化 `basisHeadEntryId + compact ModelRequestSpec`（providerType/model/variant/preamble/toolBindings/skillBindings/subagentBindings/cacheControl；无 messages/tools/YOLO/contextWindow/compaction metadata）的 Provider 执行及其状态、attempt-local checkpoint、连续 `failedAttempts` 与 terminal 事实；完整 ProviderRequest 每次 attempt 由 Materializer 从 EntryPath + spec 内存重建，压缩身份由 basis EntryPath 末尾的 `TURN_START.compaction` 表达 |
 | ToolInvocation | 一次 ToolCall（`call` + 可空 `binding`）的 approval、状态、结果与 `effects`；插件 provenance/access 随 binding 冻结，unknown tool 槽位 binding 为 null，非空 effects 只允许出现在 `SUCCEEDED` 且 terminal immutable |
 | SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；task id/session_id 即子 ThreadId（canonical UUID） |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
@@ -117,12 +117,12 @@ Session、Environment、status 与 branch settings 都从 head Entry 分支派�
 
 ## 5. 创建、发送与执行
 
-`POST /api/ai/runtime/command-batches` 是唯一产品写入口：一个事务内原子接受 owner + target + commands，并在 NEW_SESSION/ENTRY 时创建 Session（唯一 ROOT，携带完整 `BranchSettings`）、head 指向 ROOT/startEntry 的 Thread（`nextCommandSequence=1`、`revision=0`）、owner relation、Commands 与 Work；创建只作为首批 Command 的副作用发生，无 standalone create API。`/tree` 选择 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零写入）。
+`POST /api/ai/runtime/command-batches` 是唯一产品写入口：一个事务内原子接受 owner + target + commands，并在 NEW_SESSION/ENTRY 时创建 Session（唯一 ROOT，携带完整 `BranchSettings`）、head 指向 ROOT/startEntry 的 Thread（`nextCommandSequence=1`、`revision=0`）、owner relation、Commands 与 Work。Session/Thread materialization 只发生在首批 Command 被接受时；`/tree` 选择 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零写入）。
 
 发送路径如下：
 
 ```text
-Blank first send:
+NEW_SESSION_DRAFT submission:
   POST /api/ai/runtime/command-batches       -> NEW_SESSION target 原子创建 Session + ROOT + Thread
                                                 + owner relation + Commands + Work
 

@@ -383,11 +383,9 @@ abstract class LangChainModelProvider implements ModelProvider {
         builder.description(schema.get("description").asText());
       }
       Map<String, JsonSchemaElement> properties = new LinkedHashMap<>();
-      schema
-          .path("properties")
-          .fields()
-          .forEachRemaining(
-              entry -> properties.put(entry.getKey(), schemaElement(entry.getValue())));
+      for (Map.Entry<String, JsonNode> entry : schema.path("properties").properties()) {
+        properties.put(entry.getKey(), schemaElement(entry.getValue()));
+      }
       if (!properties.isEmpty()) {
         builder.addProperties(properties);
       }

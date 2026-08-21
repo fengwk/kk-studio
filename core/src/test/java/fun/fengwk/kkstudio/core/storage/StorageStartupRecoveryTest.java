@@ -83,8 +83,8 @@ class StorageStartupRecoveryTest {
   @Test
   void skipsRecoveryWhenStorageServicesAreAbsent() {
     // S3 未启用时 StorageUploadService/StorageBlobManager 不装配：监听器必须安全跳过。
-    ObjectProvider<StorageUploadService> uploads = mock(ObjectProvider.class);
-    ObjectProvider<StorageBlobManager> blobs = mock(ObjectProvider.class);
+    ObjectProvider<StorageUploadService> uploads = emptyProvider();
+    ObjectProvider<StorageBlobManager> blobs = emptyProvider();
 
     new StorageStartupRecovery(uploads, blobs).onApplicationEvent(null);
 
@@ -96,6 +96,12 @@ class StorageStartupRecoveryTest {
     @SuppressWarnings("unchecked")
     ObjectProvider<T> provider = mock(ObjectProvider.class);
     when(provider.getIfAvailable()).thenReturn(value);
+    return provider;
+  }
+
+  private static <T> ObjectProvider<T> emptyProvider() {
+    @SuppressWarnings("unchecked")
+    ObjectProvider<T> provider = mock(ObjectProvider.class);
     return provider;
   }
 

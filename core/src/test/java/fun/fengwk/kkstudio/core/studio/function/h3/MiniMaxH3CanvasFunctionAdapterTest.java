@@ -66,6 +66,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     adapter = newAdapter(snapshot);
   }
 
+  @SuppressWarnings("unchecked")
   private MiniMaxH3CanvasFunctionAdapter newAdapter(SystemSettingsSnapshot snapshot) {
     ObjectProvider<StandardComfyuiClient> clients = mock(ObjectProvider.class);
     when(clients.getIfAvailable()).thenReturn(comfy);

@@ -13,7 +13,7 @@ bounded realtime cache/overlay，S3 保存全局 Blob 与 ComfyUI 临时对象�
 - Catalog 的稳定自然键保持不变：Provider/Agent 使用 `name`，Model 使用
   `(provider_name, name)`，ComfyUI Workflow 使用唯一 `api_name`。
 - Provider response ID、Tool call ID、ComfyUI prompt ID 等外部 opaque ID 保持字符串。
-- V1 是 clean-slate schema；不维护兼容迁移、双读双写或全局 bigint sequence。
+- V1 是唯一 schema 基线；profile seeds 与 schema 分离，缺失事实使用 NULL，实体身份不使用全局 bigint sequence。
 
 ## 2. Catalog 与 ComfyUI
 
