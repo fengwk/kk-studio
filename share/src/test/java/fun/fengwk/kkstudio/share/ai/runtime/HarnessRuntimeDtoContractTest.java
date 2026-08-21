@@ -92,7 +92,7 @@ class HarnessRuntimeDtoContractTest {
         () ->
             MAPPER.readValue(
                 """
-                {"expectedRevision":"0","unknown":true}
+                {"expectedVersion":"0","unknown":true}
                 """,
                 HarnessThreadCompactDTO.class));
   }
@@ -114,7 +114,7 @@ class HarnessRuntimeDtoContractTest {
         () ->
             MAPPER.readValue(
                 """
-                {"expectedRevision":1}
+                {"expectedVersion":1}
                 """,
                 HarnessThreadCompactDTO.class));
   }

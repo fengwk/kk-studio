@@ -9,7 +9,7 @@ Runtime 领域包包括 `history`（Entry）、`thread`（Thread/Command/Classif
 ```text
 实体 id（threadId/sessionId/entryId/invocationId/clientCommandId/stopRequestId/decisionId） -> canonical UUID
 command sequence / nextCommandSequence -> [1-9][0-9]*
-revision / afterRevision / Model attempt sequence -> 0|[1-9][0-9]*
+version / afterVersion / Model attempt sequence -> 0|[1-9][0-9]*
 ```
 
 非法格式由 mapper 抛 `IllegalArgumentException`，Controller 统一映射为 400。Catalog 资源使用永久名称身份：Provider/Agent 是 `name`，Model 是 `(providerName, name)`。
@@ -24,14 +24,14 @@ public record ThreadState(
     String materializationHash, // 创建请求 canonical SHA-256，仅用于首次 materialization replay
     boolean yoloEnabled,
     long nextCommandSequence, // 必须 >= 1（创建即为 1）
-    long revision,           // 必须 >= 0
+    long version,           // 必须 >= 0
     Instant createdAt,
     Instant updatedAt) {}
 ```
 
 - `headEntryId` 必须是本 Thread Session 的已提交 Entry id；Thread 的当前 Session、Environment、status 与 branch settings 由 head Entry 分支派生。
 - 已提交 Entry append-only；每个 Session 只有一个无 parent ROOT。
-- 创建 Thread 时 `nextCommandSequence=1`、`revision=0`；`validateTransition` 强制每次可见变化 revision 恰好 +1，exact replay 恒接受。
+- 创建 Thread 时 `nextCommandSequence=1`、`version=0`；`validateTransition` 强制每次可见变化 version 恰好 +1，exact replay 恒接受。
 - `materializationHash` 是服务端基于 canonical semantic request 计算的 SHA-256（覆盖 materialization target、Session/起点 Entry/客户端预分配 Thread id、初始 YOLO、ROOT settings/SubagentContext 与第一批 ordered Command 的 `clientCommandId + requestHash`），只用于第一次 materialization 的精确重放与 ID 复用冲突检测，不参与后续执行。
 
 Entry 类型固定为十种：
@@ -120,13 +120,13 @@ SET_ACTIVE_TOOLS
 
 ### Fresh batch admission
 
-全新 batch 才做双 cursor CAS（任一不匹配 → `STALE_COMMAND_CURSOR` 409），成功后一次性预留全部 sequence（`nextCommandSequence += commands.length`，revision +1）、全部命令写入 QUEUED、请求 THREAD Work，整体原子提交。
+全新 batch 才做双 cursor CAS（任一不匹配 → `STALE_COMMAND_CURSOR` 409），成功后一次性预留全部 sequence（`nextCommandSequence += commands.length`，version +1）、全部命令写入 QUEUED、请求 THREAD Work，整体原子提交。
 
 queued `SET_ENVIRONMENT` 只在后续 INPUT 边界消费，因此 enqueue 不再要求当前 Thread quiescent；即使 Thread 处于 live Model/Tool 或已有 queued 消息/THREAD Work 也照常接受。Exact replay 绕过 cursor admission 检查。
 
 ### YOLO 直接控制面
 
-`PUT /{threadId}/yolo` body `{expectedRevision, yoloEnabled}`：锁 Thread 后同值请求在任何 revision CAS 之前按原样返回当前 Thread（网络重试 no-op，revision/updatedAt 零触碰）；值变化必须匹配 `expectedRevision`（否则 `STALE_REVISION` 409），随后一个原子步骤更新 `yoloEnabled` 且 revision 精确 +1。返回权威 Thread DTO（与 `POST /{threadId}/compact`/`POST /stop` 一致）。不创建 Command/Entry/Work，不唤醒 processors。
+`PUT /{threadId}/yolo` body `{expectedVersion, yoloEnabled}`：锁 Thread 后同值请求在任何 version CAS 之前按原样返回当前 Thread（网络重试 no-op，version/updatedAt 零触碰）；值变化必须匹配 `expectedVersion`（否则 `STALE_VERSION` 409），随后一个原子步骤更新 `yoloEnabled` 且 version 精确 +1。返回权威 Thread DTO（与 `POST /{threadId}/compact`/`POST /stop` 一致）。不创建 Command/Entry/Work，不唤醒 processors。
 
 ## 4. Snapshot
 
@@ -134,9 +134,9 @@ queued `SET_ENVIRONMENT` 只在后续 INPUT 边界消费，因此 enqueue 不再
 
 ```json
 {
-  "revision": "7",
+  "version": "7",
   "thread": { "threadId": "00000000-0000-0000-0000-000000000001", "sessionId": "00000000-0000-0000-0000-000000000002", "headEntryId": "00000000-0000-0000-0000-000000000005",
-              "yoloEnabled": false, "nextCommandSequence": "4", "revision": "7",
+              "yoloEnabled": false, "nextCommandSequence": "4", "version": "7",
               "status": "MODEL_READY", "processing": true, "branchSettings": {...},
               "createTime": "...", "updateTime": "..." },
   "entries": [ ... root-to-head path ... ],
@@ -162,7 +162,7 @@ queued `SET_ENVIRONMENT` 只在后续 INPUT 边界消费，因此 enqueue 不再
 }
 ```
 
-- `manualCompaction` 是瞬时 advisory sidecar（`HarnessManualCompactionDTO{available, disabledReason?}`，disabledReason ∈ `THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT`），每次 snapshot 现算；提交 `POST /{threadId}/compact` 仍以 expectedRevision CAS 守护。
+- `manualCompaction` 是瞬时 advisory sidecar（`HarnessManualCompactionDTO{available, disabledReason?}`，disabledReason ∈ `THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT`），每次 snapshot 现算；提交 `POST /{threadId}/compact` 仍以 expectedVersion CAS 守护。
 
 - `entries` 是当前 head 的 root-to-head path（recursive CTE 顺序）。
 - `modelInvocation` 是当前 open Turn 的活跃 Model（**单数**；无则 null）；`toolInvocations` 是其 Tool siblings。`modelAttemptFailures` 只在 `ModelActive` / `ModelTerminalPending` context 暴露该 invocation 尚未物化的连续 TRANSIENT 失败前缀，按 attempt 递增；compaction、Tool、IDLE/historical/continuation context 返回空列表。
@@ -174,15 +174,15 @@ queued `SET_ENVIRONMENT` 只在后续 INPUT 边界消费，因此 enqueue 不再
 
 | 情形 | HTTP |
 | --- | --- |
-| DTO 字段非法、实体 id 非 canonical UUID、sequence/revision 非 strict decimal、未知命令 type、非 canonical 名称 | 400 |
+| DTO 字段非法、实体 id 非 canonical UUID、sequence/version 非 strict decimal、未知命令 type、非 canonical 名称 | 400 |
 | 作为请求目标的 Thread/Entry 不存在（snapshot、system-prompt、compact、stop 路径） | 404 |
-| 命令 cursor 过期（`STALE_COMMAND_CURSOR`）、revision 过期（`STALE_REVISION`）、terminal apply pending、materialization ID 复用（`MATERIALIZATION_ID_REUSED`）、ordered replay 冲突 | 409 |
+| 命令 cursor 过期（`STALE_COMMAND_CURSOR`）、version 过期（`STALE_VERSION`）、terminal apply pending、materialization ID 复用（`MATERIALIZATION_ID_REUSED`）、ordered replay 冲突 | 409 |
 | approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`） | 409 |
 | approval 已决定且请求未精确 replay 存储决策（`APPROVAL_DECISION_MISMATCH`） | 409 |
 | 命令 batch 被接受进入 mailbox | 202（返回 `session/rootEntry/thread/acceptedCommands/replayed` 权威投影） |
-| 手动压缩 availability 不满足或 expectedRevision 过期 | 409 |
+| 手动压缩 availability 不满足或 expectedVersion 过期 | 409 |
 
-typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAND_ID_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`MATERIALIZATION_ID_REUSED`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`。409 的统一错误信封在 `errors.reason` 暴露该稳定枚举，并在 `errors.detail` 保留诊断文本；客户端只能按稳定 reason 做恢复决策。持久化不变量破坏（错误 ownership、mixed sibling、非连续 ordinal、count mismatch）保持 `IllegalStateException`，绝不降级为业务冲突。注意 approval 路径的 Thread/target 缺失同样映射 409（`APPROVAL_NOT_APPLICABLE`），不是 404。
+typed 冲突 reason 全集：`STALE_VERSION`、`STALE_COMMAND_CURSOR`、`COMMAND_ID_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`MATERIALIZATION_ID_REUSED`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`。409 的统一错误信封在 `errors.reason` 暴露该稳定枚举，并在 `errors.detail` 保留诊断文本；客户端只能按稳定 reason 做恢复决策。持久化不变量破坏（错误 ownership、mixed sibling、非连续 ordinal、count mismatch）保持 `IllegalStateException`，绝不降级为业务冲突。注意 approval 路径的 Thread/target 缺失同样映射 409（`APPROVAL_NOT_APPLICABLE`），不是 404。
 
 ## 6. Head 推进
 
@@ -193,7 +193,7 @@ typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAN
 ## 7. Stop
 
 ```java
-public record StopCommand(UUID threadId, UUID stopRequestId, long expectedRevision) {}
+public record StopCommand(UUID threadId, UUID stopRequestId, long expectedVersion) {}
 ```
 
 协议（在 Thread 行锁内）：
@@ -202,14 +202,14 @@ public record StopCommand(UUID threadId, UUID stopRequestId, long expectedRevisi
 lock Thread
   -> load head path（root 推导 session）
   -> load session 全部不可变 Entry（含兄弟分支）
-  -> findReplay(ownerThreadId == thread.id, stopRequestId)   // 在 revision CAS 之前
+  -> findReplay(ownerThreadId == thread.id, stopRequestId)   // 在 version CAS 之前
   -> 命中 -> REPLAYED（返回与原 Stop 相同的 stoppedTurnEndEntryId /
                        cancelledCommandCount / cancelledUserMessages，零 mutation）
-  -> revision CAS（STALE_REVISION 409）
+  -> version CAS（STALE_VERSION 409）
   -> 无 live Turn（IDLE）：
-       有 queued Commands -> 取消它们（cancelled_at），revision +1（touchRevision），
+       有 queued Commands -> 取消它们（cancelled_at），version +1（touchVersion），
                             不写任何 stop marker，返回 IDLE + cancelledCommandCount
-       无 queued          -> 真正 no-op（revision 不变，返回原 Thread）
+       无 queued          -> 真正 no-op（version 不变，返回原 Thread）
   -> CONTINUATION_DUE：
        追加 TURN_START(CONTINUATION) + ASSISTANT_ERROR(CANCELLED)
        再追加 TURN_END(STOPPED, USER_STOP)
@@ -220,12 +220,12 @@ lock Thread
        Tool siblings         -> 按当前状态写 CANCELLED/UNKNOWN Tool Result
        追加 TURN_END(STOPPED, USER_STOP)
        取消全部 queued Commands（cancelled_at）
-       更新 Thread（advanceHead，revision +1）并清理/唤醒 Work
+       更新 Thread（advanceHead，version +1）并清理/唤醒 Work
 ```
 
 Stop 成功关闭 live Turn 的同一事务内：先净化 Work mailbox（deleteWork 的 owner 校验反查 Model/Tool Invocation 行），再删除全部 Tool Invocations、删除父 ModelInvocation（删除前执行与 `ModelAttemptMaterialization` 等价的严格校验），advance Thread；closed turn 不保留任何 Invocation 行，迟到 callback 因行已删除或 claim 失效而 no-op。
 
-`StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 revision +1，**不写 durable stop 标记**；无 queued 时真正 no-op，同 `stopRequestId` 再调用仍是 IDLE 而非 REPLAYED）、`REPLAYED`（精确重放先前 receipt，不重复取消命令）。HTTP DTO 固定为 `{status,thread,stoppedTurnEndEntryId,cancelledCommandCount,cancelledUserMessages[]}`，无独立 `replayed` 字段；取消消息按 sequence 升序，以 `{sequence,clientCommandId,messageJson}` 暴露 canonical USER AgentMessage。durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」，在 Thread 锁内做 Session 级不可变查找：同 raw `stopRequestId` 只在自己的 turn 上产生 replay，另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到同 Session 的兄弟分支后仍可命中。STOPPED 的不确定重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedRevision`，服务端 replay 先于 CAS；marker-free IDLE 若已取消 queued 并推进 revision，响应丢失后的旧 revision 重试可返回 `STALE_REVISION`，客户端按权威 snapshot 的 basis fence 收敛。
+`StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 version +1，**不写 durable stop 标记**；无 queued 时真正 no-op，同 `stopRequestId` 再调用仍是 IDLE 而非 REPLAYED）、`REPLAYED`（精确重放先前 receipt，不重复取消命令）。HTTP DTO 固定为 `{status,thread,stoppedTurnEndEntryId,cancelledCommandCount,cancelledUserMessages[]}`，无独立 `replayed` 字段；取消消息按 sequence 升序，以 `{sequence,clientCommandId,messageJson}` 暴露 canonical USER AgentMessage。durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」，在 Thread 锁内做 Session 级不可变查找：同 raw `stopRequestId` 只在自己的 turn 上产生 replay，另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到同 Session 的兄弟分支后仍可命中。STOPPED 的不确定重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedVersion`，服务端 replay 先于 CAS；marker-free IDLE 若已取消 queued 并推进 version，响应丢失后的旧 version 重试可返回 `STALE_VERSION`，客户端按权威 snapshot 的 basis fence 收敛。
 
 ## 8. Tool approval
 
@@ -244,8 +244,8 @@ durable `approval` JSON 使用领域枚举 `ALLOWED` / `DENIED`（不是输入�
 
 - 未决定请求必须命中锁定的 TOOL_ACTIVE 上下文中的 `WAITING_APPROVAL` Invocation；mutation 与 `decidedAt` 抬升到已锁定
   Thread/head/Model/siblings/approval 的最新 durable 时间，Work request 保持原始本地调度时钟；`ALLOWED` → `READY`（请求 TOOL
-  Work），`DENIED` → `FAILED`（请求 THREAD Work）；revision 恰好 touch 一次。
-- 已决定请求按 `(threadId, toolInvocationId, decisionId)` 精确 replay：返回当前锁定 Invocation（原 `decidedAt` 保留），无 revision bump、无 Work 请求；不一致 → `APPROVAL_DECISION_MISMATCH` 409。
+  Work），`DENIED` → `FAILED`（请求 THREAD Work）；version 恰好 touch 一次。
+- 已决定请求按 `(threadId, toolInvocationId, decisionId)` 精确 replay：返回当前锁定 Invocation（原 `decidedAt` 保留），无 version bump、无 Work 请求；不一致 → `APPROVAL_DECISION_MISMATCH` 409。
 - 前端对同一 decision 复用同一 `decisionId`；切换 decision 时 mint 新 ID。
 
 ## 9. Invocation 持久化与请求重建
@@ -330,7 +330,7 @@ public record ProviderResponse(
 - phase/complete 固定：HISTORY 为 incomplete；FULL/TURN_PREFIX 为 complete。completed HISTORY 用 `continueModel=true` 机械启动 TURN_PREFIX；complete OVERFLOW 用 true 启动一次 immediate retry；成功 THRESHOLD FULL/TURN_PREFIX/fallback 仅在压缩前存在 same-owner normal continuation 时以 true 恢复该 obligation，foreign owner 不可借用。
 - HISTORY 之后只读取紧邻、已完成且 metadata 匹配的 partial；TURN_PREFIX 不扫描更早 stale partial。direct TURN_PREFIX 的 history 文本固定为 `No prior history.`。
 - Threshold freshness 只被 complete CompactionPayload 消费；普通 FAILED/CANCELLED/UNKNOWN turn 与 Resolver Rejected turn 不覆盖当前 Thread 最新成功 usage。THRESHOLD 在 active ContinuationDue 或 queued user demand 边界执行，context tokens 为最近 compatible owned successful Provider usage 加其后可见消息估算（含 ToolResult）；完全 idle 且无 demand 不自唤醒。FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止立即原地重试。shared-history ownership barrier 是 Entry-only 事实：`TurnStartPayload.ownerThreadId != currentThreadId` 的 shared turn 停止向前借用 usage，不查询其它 Thread 的 Invocation 行。
-- **MANUAL**：`compactThread(CompactThreadCommand{threadId, expectedRevision})` 先锁 Thread 校验 expectedRevision，经 `manualDecision` 计算 availability（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT），再以 `CompactionTrigger.MANUAL` 构建 plan；plan 短事务 → 事务外 Resolver → 第二事务提交 COMPACTION Turn + MODEL Work（commitManual 再次校验 revision + source head + queued 快照，消费零 Command）。与自动触发共用 MODEL Work、一次 fallback 与 crash recovery。
+- **MANUAL**：`compactThread(CompactThreadCommand{threadId, expectedVersion})` 先锁 Thread 校验 expectedVersion，经 `manualDecision` 计算 availability（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT），再以 `CompactionTrigger.MANUAL` 构建 plan；plan 短事务 → 事务外 Resolver → 第二事务提交 COMPACTION Turn + MODEL Work（commitManual 再次校验 version + source head + queued 快照，消费零 Command）。与自动触发共用 MODEL Work、一次 fallback 与 crash recovery。
 - `<read-files>` / `<modified-files>` 是 Runtime-owned reserved section：previous summary 入 prompt 前剥离，response 在 terminal success 前校验并剥离，最后只追加一次从完整 durable branch history 重算的 canonical 清单；modified 覆盖 read，空白或破坏 reserved 标签结构的 path 忽略。
 - immediate overflow recovery continuation 再次 OVERFLOW 时不再压缩；该失败 Entry/TURN_END 保持 durable。
 
@@ -355,8 +355,8 @@ record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable b
 ## 11. Realtime
 
 - `RealtimeEventSink.append` 只写 bounded Redis projection；sink 失败不改变 durable terminal。
-- 浏览器经应用事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）订阅：`revision`/`version` 事件携带 durable cursor（canonical 非负十进制），`realtime` 事件的 data 是 Redis delta envelope JSON 对象且不携带 cursor。
-- 客户端恢复顺序：REST snapshot → 应用事件通道订阅（`subscribed` ack 携带建立瞬间 cursor）→ Redis realtime overlay；durable revision 是唯一恢复游标。
+- 浏览器经应用事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）订阅：`version`/`version` 事件携带 durable cursor（canonical 非负十进制），`realtime` 事件的 data 是 Redis delta envelope JSON 对象且不携带 cursor。
+- 客户端恢复顺序：REST snapshot → 应用事件通道订阅（`subscribed` ack 携带建立瞬间 cursor）→ Redis realtime overlay；durable version 是唯一恢复游标。
 - 前端把 `resultJson`/`errorJson` 当作 terminal 边界：durable terminal projection 无条件压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后移除 overlay。
 - snapshot failure 以 `(modelInvocationId, attempt)` fence 同 attempt 的 stale Model overlay；只有 invocation 仍处于相同 attempt 的 READY/DISPATCHING 时该 failure 是 live retry countdown，下一 attempt 已 RUNNING 后转为静态历史。终态 error 将 checkpoint partial 与 `errorJson` 分开投影，刷新后由 `MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR.attempt` 恢复相同可见轨迹。
 - Runtime 不向 RealtimeEventSink 发布 compaction ModelDelta；其 checkpoint 仅作 Stop/恢复 durable fact。前端再按 `TURN_START(COMPACTION)...TURN_END` 状态化抑制该 turn 的 COMPACTION/ERROR/ABORTED Entry，latest turn 是 COMPACTION 时也不渲染 snapshot Model overlay。

@@ -104,8 +104,8 @@ class HarnessRuntimeAcceptInitialTest {
     assertTrue(thread.yoloEnabled());
     // materialization hash 是服务端 deterministic 64 位小写 SHA-256。
     assertTrue(thread.materializationHash().matches("[0-9a-f]{64}"));
-    // 初始 thread revision 0，accept 后恰好 +1；next sequence 从 1 起推进 1。
-    assertEquals(1L, thread.revision());
+    // 初始 thread version 0，accept 后恰好 +1；next sequence 从 1 起推进 1。
+    assertEquals(1L, thread.version());
     assertEquals(2L, thread.nextCommandSequence());
 
     List<ThreadCommand> commands =
@@ -140,7 +140,7 @@ class HarnessRuntimeAcceptInitialTest {
   }
 
   /**
-   * exact materialization replay：同 session + 同 hash 返回现有接受事实（replayed=true），不写新行、不 bump revision。
+   * exact materialization replay：同 session + 同 hash 返回现有接受事实（replayed=true），不写新行、不 bump version。
    */
   @Test
   void newSessionExactReplayReturnsExistingAcceptanceFacts() {
@@ -152,16 +152,16 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(first.session(), replay.session());
     assertEquals(first.thread().id(), replay.thread().id());
     assertEquals(first.thread().headEntryId(), replay.thread().headEntryId());
-    assertEquals(first.thread().revision(), replay.thread().revision());
+    assertEquals(first.thread().version(), replay.thread().version());
     // replay 不创建第二条命令。
     ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow());
-    assertEquals(1L, thread.revision());
+    assertEquals(1L, thread.version());
     assertEquals(2L, thread.nextCommandSequence());
   }
 
   /**
    * 初始 replay：materialize 第二批后，重放初始请求只按 clientCommandId 返回原始初始命令（sequence 从 1 连续），顺序与 terminal
-   * 状态为当前值，且不产生 revision mutation（replay 只命中初始批次，不返回第二批）。
+   * 状态为当前值，且不产生 version mutation（replay 只命中初始批次，不返回第二批）。
    */
   @Test
   void newSessionReplayAfterSecondBatchReturnsOnlyTheInitialCommands() {
@@ -178,7 +178,7 @@ class HarnessRuntimeAcceptInitialTest {
             List.of(userMessageCommand(TestIds.id(2), "c"))),
         AcceptancePreflight.IDENTITY);
     ThreadState before = store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow());
-    assertEquals(2L, before.revision());
+    assertEquals(2L, before.version());
 
     AcceptedCommands replay = runtime.acceptCommands(initial, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
@@ -191,7 +191,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertTrue(
         replay.acceptedCommands().stream()
             .allMatch(command -> command.state() == ThreadCommandState.QUEUED));
-    // 无 revision mutation：replay 后 projection 与 stored 均未推进。
+    // 无 version mutation：replay 后 projection 与 stored 均未推进。
     assertEquals(before, replay.thread());
     assertEquals(before, store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow()));
   }
@@ -343,7 +343,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(baseline.rootEntryId(), thread.headEntryId());
     List<Entry> entries = store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId()));
     assertEquals(1, entries.size());
-    assertEquals(1L, thread.revision());
+    assertEquals(1L, thread.version());
     assertEquals(2L, thread.nextCommandSequence());
     assertTrue(
         store
@@ -365,7 +365,7 @@ class HarnessRuntimeAcceptInitialTest {
     AcceptedCommands first = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
     AcceptedCommands replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
-    assertEquals(first.thread().revision(), replay.thread().revision());
+    assertEquals(first.thread().version(), replay.thread().version());
     assertEquals(first.thread().nextCommandSequence(), replay.thread().nextCommandSequence());
   }
 

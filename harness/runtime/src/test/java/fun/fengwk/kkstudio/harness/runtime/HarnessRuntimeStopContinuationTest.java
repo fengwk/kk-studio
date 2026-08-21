@@ -70,7 +70,7 @@ class HarnessRuntimeStopContinuationTest {
     StopResult result = runtime.stop(new StopCommand(threadId, TestIds.id(1), 2));
     assertStopped(result);
     assertEquals(1, result.cancelledCommandCount());
-    assertEquals(3L, result.thread().revision());
+    assertEquals(3L, result.thread().version());
     assertTrue(result.thread().yoloEnabled());
 
     ThreadState stored = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
@@ -115,7 +115,7 @@ class HarnessRuntimeStopContinuationTest {
     assertStopped(result);
     assertEquals(0, result.cancelledCommandCount());
     ThreadState stored = store.transaction(tx -> tx.lockThread(chain.threadId()).orElseThrow());
-    assertEquals(2L, stored.revision());
+    assertEquals(2L, stored.version());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
     assertEquals(8, path.entries().size());
   }

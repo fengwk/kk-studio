@@ -75,8 +75,8 @@ class HarnessRuntimeApprovalTest {
     assertEquals(decided, stored);
 
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    // fixture 已推进一次 head（revision 1），决定再 +1。
-    assertEquals(2L, thread.revision());
+    // fixture 已推进一次 head（version 1），决定再 +1。
+    assertEquals(2L, thread.version());
 
     Work toolWork =
         store.transaction(
@@ -108,7 +108,7 @@ class HarnessRuntimeApprovalTest {
     assertEquals(ToolApprovalDecision.DENIED, decided.approval().decision());
     assertEquals("DENIED", decided.error().kind());
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertEquals(2L, thread.revision());
+    assertEquals(2L, thread.version());
     Work threadWork =
         store.transaction(
             tx ->
@@ -142,7 +142,7 @@ class HarnessRuntimeApprovalTest {
   }
 
   @Test
-  void exactReplayWithFreshNowPreservesDecidedAtWithoutRevisionOrWorkBump() {
+  void exactReplayWithFreshNowPreservesDecidedAtWithoutVersionOrWorkBump() {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     ToolInvocation first =
@@ -156,7 +156,7 @@ class HarnessRuntimeApprovalTest {
     assertEquals(T5, replay.approval().decidedAt());
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     // 一次真实决定（fixture head advance + decision）= 2；replay 不再 bump。
-    assertEquals(2L, thread.revision());
+    assertEquals(2L, thread.version());
     Work toolWork =
         store.transaction(
             tx ->
@@ -184,7 +184,7 @@ class HarnessRuntimeApprovalTest {
     assertEquals(first.approval(), replay.approval());
     assertEquals(T5, replay.approval().decidedAt());
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertEquals(2L, thread.revision());
+    assertEquals(2L, thread.version());
   }
 
   @Test
@@ -362,8 +362,8 @@ class HarnessRuntimeApprovalTest {
       pool.shutdownNow();
     }
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    // 两次调用只有一次真实决定：revision 恰好 +1（fixture head advance 1 + 一次决定 1）。
-    assertEquals(2L, thread.revision());
+    // 两次调用只有一次真实决定：version 恰好 +1（fixture head advance 1 + 一次决定 1）。
+    assertEquals(2L, thread.version());
     Work toolWork =
         store.transaction(
             tx ->

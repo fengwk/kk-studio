@@ -8,16 +8,16 @@ import java.util.List;
 /**
  * Coherent Thread 快照投影。
  *
- * <p>Thread、Entry、Command 与 Invocation 字段来自同一数据库快照；{@code revision} 是 durable invalidation
- * cursor。{@code manualCompaction} 是随后计算的瞬时 advisory sidecar，实际提交始终由同一 {@code revision} 做最终
+ * <p>Thread、Entry、Command 与 Invocation 字段来自同一数据库快照；{@code version} 是 durable invalidation
+ * cursor。{@code manualCompaction} 是随后计算的瞬时 advisory sidecar，实际提交始终由同一 {@code version} 做最终
  * fence。列表默认为不可变空列表。
  */
 @Data
 public class HarnessThreadSnapshotDTO {
   /**
-   * durable invalidation cursor：strict non-negative decimal string，等于 {@link #thread} 的 revision。
+   * durable invalidation cursor：strict non-negative decimal string，等于 {@link #thread} 的 version。
    */
-  private String revision;
+  private String version;
 
   /** 同一数据库快照下的完整 Thread 投影。 */
   private HarnessThreadDTO thread;
@@ -38,6 +38,6 @@ public class HarnessThreadSnapshotDTO {
   /** 当前 Model context 尚未物化的 failed attempt 历史（不可变列表，默认空）。 */
   private List<ModelAttemptFailureDTO> modelAttemptFailures = List.of();
 
-  /** 当前瞬时手动压缩可用性；实际提交仍由 compact 请求的 expectedRevision 守护。 */
+  /** 当前瞬时手动压缩可用性；实际提交仍由 compact 请求的 expectedVersion 守护。 */
   private HarnessManualCompactionDTO manualCompaction;
 }

@@ -10,8 +10,8 @@ import { assert, envelopeData, sleep } from './http.mjs'
  * - GET  /api/ai/runtime/sessions/{sessionId}/threads   Session 下 Thread 摘要
  * - GET  /api/ai/runtime/sessions/{sessionId}/entries   完整不可变 Entry Tree
  * - GET  /api/ai/runtime/threads/{id}/snapshot    一致快照（单事务）
- * - PUT  /api/ai/runtime/threads/{id}/yolo        {expectedRevision,yoloEnabled}（revision CAS）
- * - POST /api/ai/runtime/threads/{id}/stop        {stopRequestId,expectedRevision}（同 id 幂等 replay）
+ * - PUT  /api/ai/runtime/threads/{id}/yolo        {expectedVersion,yoloEnabled}（version CAS）
+ * - POST /api/ai/runtime/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay）
  * - POST /api/ai/runtime/threads/{id}/tool-invocations/{toolInvocationId}/approval
  * - WS   /api/events/v1                           应用级 Thread/Canvas 事件订阅
  * - GET  /api/ai/environment                       只读 Environment 注册表（name = canonical 路由身份）
@@ -82,7 +82,7 @@ export function threadIdOf(thread) {
     thread.nextCommandSequence && /^[1-9]\d*$/.test(String(thread.nextCommandSequence)),
     `nextCommandSequence starts at 1: ${JSON.stringify(thread)}`,
   )
-  nonNegativeDecimal(thread.revision, 'revision')
+  nonNegativeDecimal(thread.version, 'version')
   return threadId
 }
 
@@ -491,16 +491,16 @@ export function setActiveToolsCommand(activeTools, clientCommandId) {
 }
 
 /**
- * 直接更新 Thread YOLO policy（PUT /yolo，revision CAS）：同值请求在任何 CAS 之前即成功 no-op；
- * 值变化且 revision 不匹配 => 409 STALE_REVISION。返回权威 Thread DTO。
+ * 直接更新 Thread YOLO policy（PUT /yolo，version CAS）：同值请求在任何 CAS 之前即成功 no-op；
+ * 值变化且 version 不匹配 => 409 STALE_VERSION。返回权威 Thread DTO。
  */
-export async function setThreadYolo(ctx, threadId, { expectedRevision, yoloEnabled }) {
+export async function setThreadYolo(ctx, threadId, { expectedVersion, yoloEnabled }) {
   assert(typeof yoloEnabled === 'boolean', 'yoloEnabled must be boolean')
   const { status, json } = await ctx.call(
     'PUT',
     `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/yolo`,
     {
-      expectedRevision: nonNegativeDecimal(expectedRevision, 'expectedRevision'),
+      expectedVersion: nonNegativeDecimal(expectedVersion, 'expectedVersion'),
       yoloEnabled,
     },
   )
@@ -510,15 +510,15 @@ export async function setThreadYolo(ctx, threadId, { expectedRevision, yoloEnabl
   return updated
 }
 
-/** 原子 stop（stopRequestId 幂等 replay；revision CAS）。 */
-export async function stopThread(ctx, threadId, { stopRequestId, expectedRevision }) {
+/** 原子 stop（stopRequestId 幂等 replay；version CAS）。 */
+export async function stopThread(ctx, threadId, { stopRequestId, expectedVersion }) {
   assert(stopRequestId && typeof stopRequestId === 'string', 'stopRequestId required')
   const { status, json } = await ctx.call(
     'POST',
     `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/stop`,
     {
       stopRequestId,
-      expectedRevision: nonNegativeDecimal(expectedRevision, 'expectedRevision'),
+      expectedVersion: nonNegativeDecimal(expectedVersion, 'expectedVersion'),
     },
   )
   assert(status === 200, `stop status ${status}: ${JSON.stringify(json)}`)
@@ -538,7 +538,7 @@ export async function stopThread(ctx, threadId, { stopRequestId, expectedRevisio
 /**
  * 决定一次 Tool approval（decisionId 幂等；冲突 decision 409）。返回当前 ToolInvocationDTO。
  * Java 事实：HarnessToolApprovalDTO {decision: ALLOW|DENY, decisionId, actor, reason}；
- * ALLOWED 恢复为 READY 并请求 TOOL Work，DENIED 终止为 FAILED；Thread revision touch 一次。
+ * ALLOWED 恢复为 READY 并请求 TOOL Work，DENIED 终止为 FAILED；Thread version touch 一次。
  */
 export async function approveToolInvocation(
   ctx,

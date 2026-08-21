@@ -128,7 +128,7 @@ final class ThreadProcessorTestSupport {
 
   private ThreadProcessorTestSupport() {}
 
-  /** 构造有合法 materializationHash 的 ThreadState：revision 0 / nextCommandSequence 1。 */
+  /** 构造有合法 materializationHash 的 ThreadState：version 0 / nextCommandSequence 1。 */
   static ThreadState threadState(UUID threadId, UUID sessionId, UUID headEntryId, Instant now) {
     return new ThreadState(
         threadId, sessionId, headEntryId, MATERIALIZATION_HASH, false, 1L, 0L, now, now);
@@ -614,12 +614,12 @@ final class ThreadProcessorTestSupport {
         });
   }
 
-  /** 仅推进 Thread 的 durable 时间/revision，保持 head 与 policy 不变。 */
+  /** 仅推进 Thread 的 durable 时间/version，保持 head 与 policy 不变。 */
   static void touchThreadTimestamp(InMemoryHarnessStore store, UUID threadId, Instant updatedAt) {
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(thread.touchRevision(updatedAt));
+          tx.updateThread(thread.touchVersion(updatedAt));
           return null;
         });
   }

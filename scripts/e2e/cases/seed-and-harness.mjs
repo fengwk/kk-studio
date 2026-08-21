@@ -157,7 +157,7 @@ registerCase({
   id: 'thread.new_session_submission_atomic',
   level: 'L1',
   title: 'NEW_SESSION 原子物化返回完整 accepted 快照',
-  docs: 'POST /api/ai/runtime/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、revision >= 1；accepted command 的 sequence=1、requestHash 为 64 位小写 hex；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
+  docs: 'POST /api/ai/runtime/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1、requestHash 为 64 位小写 hex；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -182,14 +182,14 @@ registerCase({
     assert(String(accepted.session.sessionId) === sessionId, JSON.stringify(accepted.session))
     const thread = accepted.thread
     // 首 Command sequence=1 已接受，nextCommandSequence 必须精确 2；不锁定 status（processor
-    // 可能已异步消费），revision 至少 1，head 可为 root 或其后继。
+    // 可能已异步消费），version 至少 1，head 可为 root 或其后继。
     assert(
       String(thread.nextCommandSequence) === '2',
       `nextCommandSequence must be 2 after accepting the first command: ${JSON.stringify(thread)}`,
     )
     assert(
-      Number(thread.revision) >= 1,
-      `revision must be at least 1 after accepting the first command: ${JSON.stringify(thread)}`,
+      Number(thread.version) >= 1,
+      `version must be at least 1 after accepting the first command: ${JSON.stringify(thread)}`,
     )
     threadIdOf(thread)
     assert(String(thread.threadId) === threadId, JSON.stringify(thread))
@@ -617,7 +617,7 @@ registerCase({
   id: 'thread.stale_command_cas_rejected',
   level: 'L1',
   title: 'stale 命令 CAS cursor 被拒绝',
-  docs: 'expectedHeadEntryId/expectedNextCommandSequence 与快照不符 => 409 + errors.reason=STALE_COMMAND_CURSOR；隔离 Thread 上精确断言 nextCommandSequence/revision/head 前后不变',
+  docs: 'expectedHeadEntryId/expectedNextCommandSequence 与快照不符 => 409 + errors.reason=STALE_COMMAND_CURSOR；隔离 Thread 上精确断言 nextCommandSequence/version/head 前后不变',
   async run(ctx) {
     const { agent, model } = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -677,7 +677,7 @@ registerCase({
     const after = await getThreadSnapshot(ctx, threadId)
     assert(
       String(after.thread.nextCommandSequence) === String(before.thread.nextCommandSequence)
-        && String(after.thread.revision) === String(before.thread.revision)
+        && String(after.thread.version) === String(before.thread.version)
         && String(after.thread.headEntryId) === String(before.thread.headEntryId),
       `stale batches must not mutate the Thread: ${JSON.stringify({
         before: before.thread,
@@ -691,7 +691,7 @@ registerCase({
   id: 'thread.entry_materialization_same_session',
   level: 'L1',
   title: 'ENTRY 同 Session 分支物化',
-  docs: 'ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）：sessionId 不变、accepted command sequence=1；quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER；原 Thread head/revision/nextCommandSequence 不变；ENTRY 非法 startEntryId（不存在 404/跨 Session 400）',
+  docs: 'ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）：sessionId 不变、accepted command sequence=1；quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER；原 Thread head/version/nextCommandSequence 不变；ENTRY 非法 startEntryId（不存在 404/跨 Session 400）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -719,7 +719,7 @@ registerCase({
     const startEntryId = String(thread.headEntryId)
     const mainBefore = {
       headEntryId: String(thread.headEntryId),
-      revision: String(thread.revision),
+      version: String(thread.version),
       nextCommandSequence: String(thread.nextCommandSequence),
     }
     const branchThreadId = cid()
@@ -746,11 +746,11 @@ registerCase({
       JSON.stringify(branched),
     )
     assert(branched.rootEntry.entryId === accepted.rootEntry.entryId, JSON.stringify(branched.rootEntry))
-    // 原 Thread 不受影响（head/revision/nextCommandSequence 逐字段不变）。
+    // 原 Thread 不受影响（head/version/nextCommandSequence 逐字段不变）。
     const after = await getThreadSnapshot(ctx, threadId)
     assert(
       String(after.thread.headEntryId) === mainBefore.headEntryId
-        && String(after.thread.revision) === mainBefore.revision
+        && String(after.thread.version) === mainBefore.version
         && String(after.thread.nextCommandSequence) === mainBefore.nextCommandSequence,
       JSON.stringify({ before: mainBefore, after: after.thread }),
     )
@@ -986,13 +986,13 @@ registerCase({
     const afterSecondSnapshot = await getThreadSnapshot(ctx, secondThreadId)
     assert(
       String(afterFirstSnapshot.thread.headEntryId) === String(stableFirst.headEntryId)
-        && String(afterFirstSnapshot.thread.revision) === String(stableFirst.revision)
+        && String(afterFirstSnapshot.thread.version) === String(stableFirst.version)
         && String(afterFirstSnapshot.thread.nextCommandSequence) === String(stableFirst.nextCommandSequence),
       JSON.stringify({ before: stableFirst, after: afterFirstSnapshot.thread }),
     )
     assert(
       String(afterSecondSnapshot.thread.headEntryId) === String(stableSecond.headEntryId)
-        && String(afterSecondSnapshot.thread.revision) === String(stableSecond.revision)
+        && String(afterSecondSnapshot.thread.version) === String(stableSecond.version)
         && String(afterSecondSnapshot.thread.nextCommandSequence) === String(stableSecond.nextCommandSequence),
       JSON.stringify({ before: stableSecond, after: afterSecondSnapshot.thread }),
     )
@@ -1023,8 +1023,8 @@ registerCase({
 registerCase({
   id: 'thread.stop_idle_noop',
   level: 'L1',
-  title: 'IDLE stop 为 no-op 且 stale revision 被拒绝',
-  docs: 'POST /stop body={stopRequestId,expectedRevision}；IDLE 无 queued 时 status=IDLE、stoppedTurnEndEntryId=null、revision 不变；同 stopRequestId 再次调用仍为 IDLE no-op（IDLE 不写持久 marker，无 replay）；stale revision => 409。真实 STOPPED/REPLAYED 由 L2 real.stop_partial_continue 覆盖',
+  title: 'IDLE stop 为 no-op 且 stale version 被拒绝',
+  docs: 'POST /stop body={stopRequestId,expectedVersion}；IDLE 无 queued 时 status=IDLE、stoppedTurnEndEntryId=null、version 不变；同 stopRequestId 再次调用仍为 IDLE no-op（IDLE 不写持久 marker，无 replay）；stale version => 409。真实 STOPPED/REPLAYED 由 L2 real.stop_partial_continue 覆盖',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1049,27 +1049,27 @@ registerCase({
     const stopRequestId = cid()
     const first = await stopThread(ctx, threadId, {
       stopRequestId,
-      expectedRevision: thread.revision,
+      expectedVersion: thread.version,
     })
     assert(first.status === 'IDLE', JSON.stringify(first))
     assert(first.stoppedTurnEndEntryId === null, JSON.stringify(first))
     assert(first.cancelledCommandCount === 0, JSON.stringify(first))
-    assert(String(first.thread.revision) === String(thread.revision), JSON.stringify(first))
+    assert(String(first.thread.version) === String(thread.version), JSON.stringify(first))
     // IDLE stop 不写持久 marker：同 stopRequestId 再次调用仍是 IDLE no-op（不是 REPLAYED）。
     const again = await stopThread(ctx, threadId, {
       stopRequestId,
-      expectedRevision: thread.revision,
+      expectedVersion: thread.version,
     })
     assert(again.status === 'IDLE', JSON.stringify(again))
     assert(again.stoppedTurnEndEntryId === null, JSON.stringify(again))
-    assert(String(again.thread.revision) === String(thread.revision), JSON.stringify(again))
+    assert(String(again.thread.version) === String(thread.version), JSON.stringify(again))
     await expectHttpError(
       () =>
         stopThread(ctx, threadId, {
           stopRequestId: cid(),
-          expectedRevision: '999999999',
+          expectedVersion: '999999999',
         }),
-      { status: 409, messageIncludes: /revision/i },
+      { status: 409, messageIncludes: /version/i },
     )
   },
 })
@@ -1301,8 +1301,8 @@ registerCase({
 registerCase({
   id: 'thread.yolo_direct_update',
   level: 'L1',
-  title: 'Thread YOLO 直接控制面（revision CAS 与同值 no-op）',
-  docs: 'PUT /api/ai/runtime/threads/{id}/yolo {expectedRevision,yoloEnabled} => 200 权威 Thread；同值请求在任何 CAS 之前 no-op 成功（过期 revision 不冲突、revision 零触碰）；值变化时 revision 精确 +1，过期 revision => 409 STALE_REVISION；不创建 Command/Entry/Work',
+  title: 'Thread YOLO 直接控制面（version CAS 与同值 no-op）',
+  docs: 'PUT /api/ai/runtime/threads/{id}/yolo {expectedVersion,yoloEnabled} => 200 权威 Thread；同值请求在任何 CAS 之前 no-op 成功（过期 version 不冲突、version 零触碰）；值变化时 version 精确 +1，过期 version => 409 STALE_VERSION；不创建 Command/Entry/Work',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1323,49 +1323,49 @@ registerCase({
     const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     assert(thread.yoloEnabled === false, JSON.stringify(thread))
 
-    // 变化 + 精确 revision：revision +1，返回权威 Thread。
+    // 变化 + 精确 version：version +1，返回权威 Thread。
     const enabled = await setThreadYolo(ctx, threadId, {
-      expectedRevision: thread.revision,
+      expectedVersion: thread.version,
       yoloEnabled: true,
     })
     assert(enabled.yoloEnabled === true, JSON.stringify(enabled))
     assert(
-      String(Number(enabled.revision)) === String(Number(thread.revision) + 1),
-      JSON.stringify({ before: thread.revision, after: enabled.revision }),
+      String(Number(enabled.version)) === String(Number(thread.version) + 1),
+      JSON.stringify({ before: thread.version, after: enabled.version }),
     )
     assert(enabled.headEntryId === thread.headEntryId, JSON.stringify(enabled))
 
-    // 同值 no-op 先于 revision CAS：携带过期 expectedRevision 仍 200，revision/head 零触碰。
+    // 同值 no-op 先于 version CAS：携带过期 expectedVersion 仍 200，version/head 零触碰。
     const sameValue = await setThreadYolo(ctx, threadId, {
-      expectedRevision: '999999999',
+      expectedVersion: '999999999',
       yoloEnabled: true,
     })
     assert(sameValue.yoloEnabled === true, JSON.stringify(sameValue))
-    assert(String(sameValue.revision) === String(enabled.revision), JSON.stringify(sameValue))
+    assert(String(sameValue.version) === String(enabled.version), JSON.stringify(sameValue))
 
-    // 变化 + 过期 revision：409 STALE_REVISION。
+    // 变化 + 过期 version：409 STALE_VERSION。
     await expectHttpError(
       () =>
         setThreadYolo(ctx, threadId, {
-          expectedRevision: thread.revision,
+          expectedVersion: thread.version,
           yoloEnabled: false,
         }),
-      { status: 409, messageIncludes: /revision/i },
+      { status: 409, messageIncludes: /version/i },
     )
 
     // 关闭并精确 +1；快照反映同一权威值，且全程不产生 queued Command / Entry / Work。
     const disabled = await setThreadYolo(ctx, threadId, {
-      expectedRevision: enabled.revision,
+      expectedVersion: enabled.version,
       yoloEnabled: false,
     })
     assert(disabled.yoloEnabled === false, JSON.stringify(disabled))
     assert(
-      String(Number(disabled.revision)) === String(Number(enabled.revision) + 1),
-      JSON.stringify({ before: enabled.revision, after: disabled.revision }),
+      String(Number(disabled.version)) === String(Number(enabled.version) + 1),
+      JSON.stringify({ before: enabled.version, after: disabled.version }),
     )
     const fresh = await getThreadSnapshot(ctx, threadId)
     assert(fresh.thread.yoloEnabled === false, JSON.stringify(fresh.thread))
-    assert(String(fresh.thread.revision) === String(disabled.revision), JSON.stringify(fresh.thread))
+    assert(String(fresh.thread.version) === String(disabled.version), JSON.stringify(fresh.thread))
     assert(fresh.queuedCommands.length === 0, JSON.stringify(fresh.queuedCommands))
     // setThreadYolo 绝不追加/修改 Entry：快照 entries 与 YOLO 开关前后一致。
     // （materialize 的命令已被消费，entries 含 ROOT + turn 链；此处只证明 YOLO 零副作用。）

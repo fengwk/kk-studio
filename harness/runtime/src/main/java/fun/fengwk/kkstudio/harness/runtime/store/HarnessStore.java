@@ -127,7 +127,7 @@ public interface HarnessStore {
      * 更新 Thread current state。要求行存在且已在本事务锁定（{@link #lockThread} 或同事务 {@link #insertThread}），并通过共享
      * transition validation（{@link ThreadState#validateTransition}）：id / sessionId /
      * materializationHash / createdAt 不得改变，headEntryId 必须指向已存在 Entry 且属于 Thread 的
-     * Session，nextCommandSequence / revision / updatedAt 不得回退，任何对外字段变化必须 revision 精确 +1。未锁定抛 {@link
+     * Session，nextCommandSequence / version / updatedAt 不得回退，任何对外字段变化必须 version 精确 +1。未锁定抛 {@link
      * IllegalStateException}，行不存在、身份改变、非法 transition 或 head 不存在/跨 Session 抛 {@link
      * IllegalArgumentException}。
      */

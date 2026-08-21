@@ -42,7 +42,7 @@ ASSISTANT_ERROR, ASSISTANT_ABORTED, COMPACTION, TURN_END
 | `materialization_hash` | `char(64)`，`^[0-9a-f]{64}$`；创建请求 canonical SHA-256，仅用于首次 materialization replay |
 | `yolo_enabled` | Thread 运行时策略 |
 | `next_command_sequence` | `>= 1`；创建即 1 |
-| `revision` | `>= 0`；可见变化恰好 +1 |
+| `version` | `>= 0`；可见变化恰好 +1 |
 | `created_at` / `updated_at` | `updated_at >= created_at` |
 
 Thread 行保存 Session 归属与 materialization identity；Environment/status/epoch/lease/runnable 不落行，由 head Entry 分支派生或由 snapshot 投影计算。每次写前 `ThreadState.validateTransition` 校验。
@@ -61,7 +61,7 @@ Thread 行保存 Session 归属与 materialization identity；Environment/status
 
 queued 查询用 partial index：`consumed_turn_start_entry_id is null and cancelled_at is null`。
 
-fresh enqueue 事务：锁 Session KEY SHARE → 锁 Thread → 双 CAS（head/sequence）→ 预留 sequence（`next_command_sequence += N`，revision +1）→ 写入全部命令 → 更新 THREAD Work。queued SET_ENVIRONMENT 只在后续 INPUT 边界消费，enqueue 不再要求当前 Thread quiescent。Ordered command-set replay 在这些 cursor/admission 检查之前返回既有行。
+fresh enqueue 事务：锁 Session KEY SHARE → 锁 Thread → 双 CAS（head/sequence）→ 预留 sequence（`next_command_sequence += N`，version +1）→ 写入全部命令 → 更新 THREAD Work。queued SET_ENVIRONMENT 只在后续 INPUT 边界消费，enqueue 不再要求当前 Thread quiescent。Ordered command-set replay 在这些 cursor/admission 检查之前返回既有行。
 
 ## 5. Invocation 表
 
@@ -137,7 +137,7 @@ durable mutation
 - realtime event 没有业务恢复语义，也不用于审计；`RealtimeEventSink.append` 失败不改变 durable terminal。
 - `TOOL_PARTIAL` 除普通工具进度外，还承载 task 委派的**完整 JSON 快照心跳**（`details.kind=task.status`，约 1s 一次）：它不是 delta，顶层状态可携带扁平 `descendants` 活动子树 relay，前端按规范化快照整帧替换/语义去重；心跳丢失只影响实时展示，恢复仍来自子 Thread 的 durable snapshot。
 - Stream 长度受配置策略（max length）约束，下一次写入时应用。
-- 浏览器订阅经应用事件通道（`/api/events/v1`）：`revision`/`version` 事件携带 PostgreSQL durable cursor，Redis stream id 不暴露为 wire cursor；重连重订阅后重新读取 snapshot，再从 live edge 接收新 delta。
+- 浏览器订阅经应用事件通道（`/api/events/v1`）：`version`/`version` 事件携带 PostgreSQL durable cursor，Redis stream id 不暴露为 wire cursor；重连重订阅后重新读取 snapshot，再从 live edge 接收新 delta。
 - Model delta 对应的安全 `stream_checkpoint` 由 Processor **先**持久化，commit 后才 best-effort 发布 Redis delta；terminal `resultJson`/`errorJson` 本身是 durable 边界，不依赖 terminal overlay 事件，客户端据此覆盖并最终移除流式投影。
 
 ## 8. 事务与锁序
@@ -171,7 +171,7 @@ Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation sib
 | terminal/Stop 物化失败 attempt 不一致 | Store 拒绝整个 attach 事务；不得清空 invocation audit 或推进 head |
 | terminal callback 重复 | invocation token/attempt/terminal CAS；terminal result/effects 不可变 |
 | 插件 sibling stale snapshot | materialize 时按 `(pluginId, customType)` 的 frozen READ/WRITE 声明机械写入 `SIBLING_STATE_CONFLICT` FAILED，不 dispatch |
-| Stop/terminal 与并发 acceptance | revision CAS 与 claim ownership fencing |
+| Stop/terminal 与并发 acceptance | version CAS 与 claim ownership fencing |
 
 ## 10. Resource store
 

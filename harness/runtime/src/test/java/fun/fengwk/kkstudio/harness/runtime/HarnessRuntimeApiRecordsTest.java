@@ -275,7 +275,7 @@ class HarnessRuntimeApiRecordsTest {
                     new CancelledUserMessage(1L, TestIds.id(9), List.<AgentMessageContent>of()))));
   }
 
-  /** ThreadState 最终形状：materializationHash/sessionId 不可变，任何可见变更 revision 严格 +1。 */
+  /** ThreadState 最终形状：materializationHash/sessionId 不可变，任何可见变更 version 严格 +1。 */
   @Test
   void threadStateFinalShapeIsImmutableAndHashGuarded() {
     ThreadState thread = storeThread();
@@ -336,11 +336,11 @@ class HarnessRuntimeApiRecordsTest {
                     0,
                     thread.createdAt(),
                     thread.updatedAt())));
-    // 任何可见变更（YOLO/head/seq）都必须 revision +1；setYoloEnabled 自身恰好 bump 一次是可接受的精确迁移。
+    // 任何可见变更（YOLO/head/seq）都必须 version +1；setYoloEnabled 自身恰好 bump 一次是可接受的精确迁移。
     ThreadState bumped = thread.setYoloEnabled(true, T0.plusMillis(1));
-    assertEquals(1L, bumped.revision());
+    assertEquals(1L, bumped.version());
     ThreadState.validateTransition(thread, bumped);
-    // 显式构造 yolo 变更但 revision 未 +1 的候选必须被拒。
+    // 显式构造 yolo 变更但 version 未 +1 的候选必须被拒。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -464,8 +464,8 @@ class HarnessRuntimeApiRecordsTest {
   @Test
   void conflictExceptionCarriesTypedReasonAndMessage() {
     HarnessRuntimeConflictException error =
-        new HarnessRuntimeConflictException(Reason.STALE_REVISION, "stale");
-    assertEquals(Reason.STALE_REVISION, error.reason());
+        new HarnessRuntimeConflictException(Reason.STALE_VERSION, "stale");
+    assertEquals(Reason.STALE_VERSION, error.reason());
     assertEquals("stale", error.getMessage());
     assertThrows(NullPointerException.class, () -> new HarnessRuntimeConflictException(null, "x"));
   }

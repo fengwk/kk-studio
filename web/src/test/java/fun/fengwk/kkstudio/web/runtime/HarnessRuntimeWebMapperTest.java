@@ -177,11 +177,11 @@ class HarnessRuntimeWebMapperTest {
   @Test
   void mapsCompactCommandAndNullableCompactResult() throws Exception {
     HarnessThreadCompactDTO request = new HarnessThreadCompactDTO();
-    request.setExpectedRevision("7");
+    request.setExpectedVersion("7");
     CompactThreadCommand command =
         HarnessRuntimeWebMapper.toCompactThreadCommand(THREAD_ID, request);
     assertEquals(id(1), command.threadId());
-    assertEquals(7L, command.expectedRevision());
+    assertEquals(7L, command.expectedVersion());
 
     CompactThreadResult result =
         new CompactThreadResult(HarnessRuntimeTestFixtures.thread(id(1)), id(2), null);

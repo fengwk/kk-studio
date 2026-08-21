@@ -149,7 +149,7 @@ export async function runRefactorContractMatrix(ui) {
             && modelPayload.model?.variant === 'review',
             `queued SET_MODEL does not match the UI selection: ${JSON.stringify(modelPayload)}`,
           )
-          // yolo 是直接控制面：选择 YOLO 立即 PUT /yolo（基于 snapshot revision 的 CAS），
+          // yolo 是直接控制面：选择 YOLO 立即 PUT /yolo（基于 snapshot version 的 CAS），
           // 绝不进入 command batch；Thread 快照反映权威值。
           const fresh = await getThreadSnapshot(apiCtx, fixture.threadId)
           assert(
@@ -1071,7 +1071,7 @@ async function cleanupCompletedUsageFixture(state) {
     ) {
       await stopThread(state.apiCtx, state.threadId, {
         stopRequestId: cid(),
-        expectedRevision: snapshot.thread.revision,
+        expectedVersion: snapshot.thread.version,
       })
     }
   })
@@ -1126,7 +1126,7 @@ async function cleanupActiveTaskFixture(state) {
     ) {
       await stopThread(state.apiCtx, state.threadId, {
         stopRequestId: cid(),
-        expectedRevision: snapshot.thread.revision,
+        expectedVersion: snapshot.thread.version,
       })
     }
   })
@@ -1186,7 +1186,7 @@ async function cleanupToolCardFixture(state) {
     ) {
       await stopThread(state.apiCtx, state.threadId, {
         stopRequestId: cid(),
-        expectedRevision: snapshot.thread.revision,
+        expectedVersion: snapshot.thread.version,
       })
     }
   })

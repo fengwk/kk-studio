@@ -5,7 +5,7 @@ import lombok.Data;
 import java.time.Instant;
 
 /**
- * HarnessThread 查询投影；实体 id 均为 canonical UUID string，{@code revision} 为 durable snapshot
+ * HarnessThread 查询投影；实体 id 均为 canonical UUID string，{@code version} 为 durable snapshot
  * cursor（非负十进制字符串）。
  *
  * <p>{@code status} 与 {@code processing} 由 Thread 快照确定性派生（processing 仅 IDLE 为 false）， 不属于 durable
@@ -29,7 +29,7 @@ public class HarnessThreadDTO {
   private String nextCommandSequence;
 
   /** PostgreSQL authoritative durable projection cursor (non-negative decimal bigint string)。 */
-  private String revision;
+  private String version;
 
   /** 展示状态（派生）：{@code IDLE / CONTINUATION_DUE / MODEL_<status> / TOOL_<status> / APPLYING}。 */
   private String status;

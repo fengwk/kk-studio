@@ -83,7 +83,7 @@ class HarnessRuntimeAcceptThreadTest {
 
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(2L, thread.nextCommandSequence());
-    assertEquals(1L, thread.revision());
+    assertEquals(1L, thread.version());
     assertTrue(
         store
             .<Boolean>transaction(
@@ -131,7 +131,7 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(first.acceptedCommands(), replay.acceptedCommands());
     ThreadState threadState =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertEquals(1L, threadState.revision());
+    assertEquals(1L, threadState.version());
   }
 
   /**
@@ -180,7 +180,7 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(first.acceptedCommands(), replay.acceptedCommands());
     ThreadState threadState =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertEquals(1L, threadState.revision());
+    assertEquals(1L, threadState.version());
   }
 
   /** replay 校验首 sequence 必须等于 expected next：期望不匹配是 order 冲突。 */
@@ -295,11 +295,11 @@ class HarnessRuntimeAcceptThreadTest {
                     userMessageCommand(TestIds.id(4), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(idleResult.replayed());
-    // 只入队 + 推进 cursor：revision +1、nextSeq 1->3、head 不变。
+    // 只入队 + 推进 cursor：version +1、nextSeq 1->3、head 不变。
     ThreadState idleThread = store.transaction(tx -> tx.lockThread(idle.threadId()).orElseThrow());
     assertEquals(idle.rootEntryId(), idleThread.headEntryId());
     assertEquals(3L, idleThread.nextCommandSequence());
-    assertEquals(1L, idleThread.revision());
+    assertEquals(1L, idleThread.version());
   }
 
   /**

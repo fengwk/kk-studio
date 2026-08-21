@@ -286,7 +286,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "materialization_hash",
         "yolo_enabled",
         "next_command_sequence",
-        "revision",
+        "version",
         "created_at",
         "updated_at");
     assertColumns(
@@ -616,8 +616,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void revisionNotifyTriggerIsTheOnlyHarnessTriggerAndNeverMutatesRevision() throws SQLException {
-    // 整个 public schema 中仅有两个用户 trigger：harness thread revision hint 与 canvas document version hint。
+  void versionNotifyTriggerIsTheOnlyHarnessTriggerAndNeverMutatesVersion() throws SQLException {
+    // 整个 public schema 中仅有两个用户 trigger：harness thread version hint 与 canvas document version hint。
     Set<String> triggers = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -630,35 +630,35 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("trg_harness_thread_revision_notify", "trg_canvas_document_version_notify"),
+        Set.of("trg_harness_thread_version_notify", "trg_canvas_document_version_notify"),
         triggers,
-        "no legacy trigger (revision bump, activation notify, child revision) may remain");
+        "no legacy trigger (version bump, activation notify, child version) may remain");
 
     String definition =
         singleString(
             "select pg_get_triggerdef(oid) from pg_trigger"
-                + " where tgname = 'trg_harness_thread_revision_notify'");
+                + " where tgname = 'trg_harness_thread_version_notify'");
     assertTrue(
-        definition.contains("AFTER INSERT OR UPDATE OF revision"),
-        () -> "trigger must fire after insert or revision update: " + definition);
+        definition.contains("AFTER INSERT OR UPDATE OF version"),
+        () -> "trigger must fire after insert or version update: " + definition);
     assertTrue(
-        definition.contains("harness_thread_revision_notify"),
+        definition.contains("harness_thread_version_notify"),
         () -> "trigger must invoke the notify function: " + definition);
 
     // notify 函数本身是唯一允许执行 notify 的地方；其函数体从不修改
-    // revision（只读取 NEW/OLD 并发出 pg_notify）。
+    // version（只读取 NEW/OLD 并发出 pg_notify）。
     String functionSource =
         singleString(
             "select prosrc from pg_proc"
                 + " where pronamespace = 'public'::regnamespace"
-                + " and proname = 'harness_thread_revision_notify'");
+                + " and proname = 'harness_thread_version_notify'");
     assertTrue(functionSource.contains("pg_notify"), () -> "notify function must call pg_notify");
     assertTrue(
-        functionSource.contains("harness_thread_revision"),
-        () -> "notify function must use the harness_thread_revision channel");
+        functionSource.contains("harness_thread_version"),
+        () -> "notify function must use the harness_thread_version channel");
     assertTrue(
-        !functionSource.contains("revision := ") && !functionSource.contains("revision = revision"),
-        () -> "notify function must never mutate revision: " + functionSource);
+        !functionSource.contains("version := ") && !functionSource.contains("version = version"),
+        () -> "notify function must never mutate version: " + functionSource);
 
     // canvas version hint 触发器同样只做 NOTIFY，永不写版本。
     String canvasDefinition =
@@ -680,7 +680,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         canvasFunctionSource.contains("canvas_version"),
         () -> "canvas notify function must use the canvas_version channel");
 
-    // 除两个 notify 辅助函数外不存在其它 public 函数：revision/version 自增函数已移除。
+    // 除两个 notify 辅助函数外不存在其它 public 函数：version 自增函数已移除。
     Set<String> functions = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -693,12 +693,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("harness_thread_revision_notify", "canvas_document_version_notify"),
+        Set.of("harness_thread_version_notify", "canvas_document_version_notify"),
         functions,
-        "the database must never mutate revision/version; only the notify helpers may exist");
+        "the database must never mutate version; only the notify helpers may exist");
 
-    // 行为：trigger 在 INSERT 与 revision 写入时触发，但绝不修改存储的
-    // revision 值；非 revision 的应用层更新则完全不会动到 revision。
+    // 行为：trigger 在 INSERT 与 version 写入时触发，但绝不修改存储的
+    // version 值；非 version 的应用层更新则完全不会动到 version。
     UUID threadId = uuid(700L);
     UUID sessionId = uuid(701L);
     UUID rootEntryId = uuid(702L);
@@ -707,14 +707,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     }
     try (Connection conn = newConnection();
         PreparedStatement ps =
-            conn.prepareStatement("update harness_thread set revision = 7 where id = ?")) {
+            conn.prepareStatement("update harness_thread set version = 7 where id = ?")) {
       ps.setObject(1, threadId);
       assertEquals(1, ps.executeUpdate());
     }
     assertEquals(
         7L,
-        singleLong("select revision from harness_thread where id = '" + threadId + "'"),
-        "revision must stay exactly what the application wrote");
+        singleLong("select version from harness_thread where id = '" + threadId + "'"),
+        "version must stay exactly what the application wrote");
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement("update harness_thread set yolo_enabled = true where id = ?")) {
@@ -723,8 +723,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     }
     assertEquals(
         7L,
-        singleLong("select revision from harness_thread where id = '" + threadId + "'"),
-        "a non-revision update must not touch revision");
+        singleLong("select version from harness_thread where id = '" + threadId + "'"),
+        "a non-version update must not touch version");
   }
 
   /** 插入一个最小合法 Thread 行：Session -> ROOT Entry -> Thread。 */
@@ -740,7 +740,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         PreparedStatement thread =
             conn.prepareStatement(
                 "insert into harness_thread (id, session_id, head_entry_id, materialization_hash,"
-                    + " yolo_enabled, next_command_sequence, revision, created_at, updated_at)"
+                    + " yolo_enabled, next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
                     + "', false, 1, 0, current_timestamp, current_timestamp)")) {
@@ -891,7 +891,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertEquals(
         Set.of(),
         deferred,
-        "revision and head binding are runtime-owned: no FK needs deferral in the new protocol");
+        "version and head binding are runtime-owned: no FK needs deferral in the new protocol");
   }
 
   @Test

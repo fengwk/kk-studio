@@ -6,7 +6,7 @@
 
 - 当前没有已知的高、中优先级正确性或架构问题。
 - Environment 固定工具目录不扩张；9 个 coding tool 的模型可见 schema 与 pi-base 对齐，2 个 MCP bridge 维持 kk-studio 的既有集成边界。
-- `task` 与 Harness one-shot 的 durable Thread 观察由 PostgreSQL revision 通知唤醒；无事件时不重复读取 snapshot。
+- `task` 与 Harness one-shot 的 durable Thread 观察由 PostgreSQL version 通知唤醒；无事件时不重复读取 snapshot。
 - Canvas Function 的 start/checkpoint/terminal 都在事务内前进 Canvas version 并发布 node patch；前端不轮询 Function run。
 - Bound Chat 与 Canvas Bound 共用 branch draft/batch/view 编排；Composer 与 Canvas controller 的 timer/ref-heavy 状态机已拆为独立 hooks。
 - 保留的周期等待只用于 lease/heartbeat、安全恢复、外部系统状态或 Environment liveness，不承担可由现有内部事件替代的主流程状态同步。
@@ -44,7 +44,7 @@
 
 | Tool | Schema | Visibility / side effect | 当前边界 |
 | --- | --- | --- | --- |
-| `task` v1 | required `subagent_type`, `prompt`; optional `maxTurns`, `session_id` | internal `PLATFORM` / `NON_IDEMPOTENT` | schema、resume、并发、深度、result envelope 与 pi-base 对齐；durable Thread 观察由 revision event 驱动，1s status heartbeat 复用缓存 snapshot |
+| `task` v1 | required `subagent_type`, `prompt`; optional `maxTurns`, `session_id` | internal `PLATFORM` / `NON_IDEMPOTENT` | schema、resume、并发、深度、result envelope 与 pi-base 对齐；durable Thread 观察由 version event 驱动，1s status heartbeat 复用缓存 snapshot |
 | `load_skill` v1 | required `name` | internal `PLATFORM` / `READ_ONLY` | kk-studio 既有能力；只加载当前 invocation 已选且具有 Environment body 的 skill，取消会中断 pending future |
 | `create_goal` v2 | required `objective`; optional `tokenBudget` | selectable plugin / `IDEMPOTENT` | 模型可见 schema 与 pi-base 对齐；写入当前 branch durable snapshot |
 | `get_goal` v2 | 无参数 | selectable plugin / `READ_ONLY` | 读取当前 branch 最新 Goal |
@@ -63,12 +63,12 @@ Goal 插件只实现上述模型工具的 durable snapshot 协议，不实现 pi
 | 路径 | 当前机制 | 是否读取内部 durable 状态 | 保留理由 |
 | --- | --- | --- | --- |
 | Harness work dispatch | PostgreSQL `LISTEN/NOTIFY` 唤醒 + 低频 periodic safety poll | safety poll 会 claim work | NOTIFY 不是 durable queue；周期兜底用于启动、丢通知和恢复 |
-| TaskTool child observation | `HarnessThreadChangeSource` revision/resync + registry descendant signal | 仅首次与 revision wake 读取 snapshot | 主流程事件驱动；取消主动 wake；heartbeat 使用缓存 |
-| Harness one-shot | `HarnessThreadChangeSource` revision/resync | 仅首次与 revision wake 读取 snapshot | 100ms timed wait 只检查 caller active/deadline，不读取 snapshot |
+| TaskTool child observation | `HarnessThreadChangeSource` version/resync + registry descendant signal | 仅首次与 version wake 读取 snapshot | 主流程事件驱动；取消主动 wake；heartbeat 使用缓存 |
+| Harness one-shot | `HarnessThreadChangeSource` version/resync | 仅首次与 version wake 读取 snapshot | 100ms timed wait 只检查 caller active/deadline，不读取 snapshot |
 | Canvas graph/run | `canvas_version` PostgreSQL notification + `/changes` patch/snapshot | 前端按 version event 拉取 | Function run 不再有 800ms polling |
 | Application event connection | WebSocket callback + reconnect backoff + 20s heartbeat | 否 | transport liveness 与断线恢复 |
 | Work heartbeat | fixed-rate lease renew | 是，更新 work lease | 分布式 ownership 协议，不是 UI 状态轮询 |
-| Environment 列表 | 页面可见时 10s React Query refresh | 是 | Daemon/进程 liveness 边界；当前 wire 没有 Environment collection revision |
+| Environment 列表 | 页面可见时 10s React Query refresh | 是 | Daemon/进程 liveness 边界；当前 wire 没有 Environment collection version |
 | ComfyUI / Seedance / OpenCLI | adapter 专用 executor 中按外部 API 状态等待 | 否（外部系统） | 外部平台没有可复用的 kk-studio 事件源；均有 timeout、取消和测试 |
 | PostgreSQL listener | `getNotifications(5s)` + 1s reconnect backoff | 仅收到通知后读当前 cursor | socket wait 与重连，不是固定查询业务表 |
 
@@ -76,7 +76,7 @@ Goal 插件只实现上述模型工具的 durable snapshot 协议，不实现 pi
 
 - Task/one-shot 无事件时固定读取 Thread snapshot；
 - Canvas RUNNING node 的固定 `refetchInterval`；
-- 用 heartbeat 替代 durable revision 或 version 事实。
+- 用 heartbeat 替代 durable version 或 version 事实。
 
 ## 4. 前端职责边界
 

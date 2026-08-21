@@ -109,7 +109,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertFalse(end.continueModel());
     assertEquals(
         path.entries().get(4).id(), thread(fixture.store, baseline.threadId()).headEntryId());
-    assertEquals(1L, thread(fixture.store, baseline.threadId()).revision());
+    assertEquals(1L, thread(fixture.store, baseline.threadId()).version());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
@@ -204,7 +204,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
       assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tool.id())));
     }
     assertEquals(assistant.id(), thread(fixture.store, baseline.threadId()).headEntryId());
-    assertEquals(1L, thread(fixture.store, baseline.threadId()).revision());
+    assertEquals(1L, thread(fixture.store, baseline.threadId()).version());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
@@ -747,6 +747,6 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(3, path(real, baseline.threadId()).entries().size());
     assertNull(model(real, modelId).resultEntryId());
     assertEquals(baseline.userEntryId(), thread(real, baseline.threadId()).headEntryId());
-    assertEquals(0L, thread(real, baseline.threadId()).revision());
+    assertEquals(0L, thread(real, baseline.threadId()).version());
   }
 }

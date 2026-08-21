@@ -30,7 +30,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * Stop 控制面竞态：Thread 加锁与 revision CAS 在 Approval 和 branch mutation 之间只允许一种线性化，而确定性的赢家顺序测试保留 Approval
+ * Stop 控制面竞态：Thread 加锁与 version CAS 在 Approval 和 branch mutation 之间只允许一种线性化，而确定性的赢家顺序测试保留 Approval
  * 的 replay 语义。
  */
 class HarnessRuntimeStopConcurrencyTest {
@@ -99,7 +99,7 @@ class HarnessRuntimeStopConcurrencyTest {
         assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
         assertConflict(approvalAttempt, Reason.APPROVAL_NOT_APPLICABLE);
       } else {
-        assertConflict(stopAttempt, Reason.STALE_REVISION);
+        assertConflict(stopAttempt, Reason.STALE_VERSION);
         ToolInvocation tool =
             store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
         assertEquals(ToolInvocationStatus.READY, tool.status());
@@ -154,7 +154,7 @@ class HarnessRuntimeStopConcurrencyTest {
       ThreadState thread =
           store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
       assertEquals(2L, thread.nextCommandSequence());
-      assertEquals(1L, thread.revision());
+      assertEquals(1L, thread.version());
     } finally {
       pool.shutdownNow();
     }

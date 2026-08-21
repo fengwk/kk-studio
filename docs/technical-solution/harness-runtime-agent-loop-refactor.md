@@ -68,7 +68,7 @@ flowchart TD
 | 数据 | 职责 | 生命周期 |
 | --- | --- | --- |
 | `harness_entry` | 对话、Tool outcome、compaction、turn boundary 等永久事实 | Session 删除前 |
-| `harness_thread` | 当前 head、YOLO、command cursor、revision | Thread 删除前 |
+| `harness_thread` | 当前 head、YOLO、command cursor、version | Thread 删除前 |
 | `harness_thread_command` | 有序输入、请求幂等与终态命令记录 | Thread 删除前 |
 | `harness_model_invocation` | 当前 turn 的模型执行及其未完成 Tool batch 的共享父上下文 | 本 turn `TURN_END` 前 |
 | `harness_tool_invocation` | 当前 Tool batch 中尚未写入 ToolResult Entry 的调用槽位 | Tool batch apply 前 |
@@ -144,7 +144,7 @@ public record ThreadState(
     UUID headEntryId,
     boolean yoloEnabled,
     long nextCommandSequence,
-    long revision,
+    long version,
     String materializationHash, // 创建请求 canonical SHA-256，仅用于首次 materialization replay
     Instant createdAt,
     Instant updatedAt) {}
@@ -155,16 +155,16 @@ public record ThreadState(
 YOLO 是直接控制操作，不经过 ThreadCommand 排队。Runtime 提供：
 
 ```text
-setThreadYolo(threadId, expectedRevision, enabled)
+setThreadYolo(threadId, expectedVersion, enabled)
 ```
 
 事务语义：
 
 ```text
 lock Thread
-  -> 值相同：在 revision CAS 前 no-op，支持网络重试
-  -> revision CAS
-  -> 值变化：更新 yoloEnabled，revision +1
+  -> 值相同：在 version CAS 前 no-op，支持网络重试
+  -> version CAS
+  -> 值变化：更新 yoloEnabled，version +1
   -> commit
 ```
 
@@ -758,7 +758,7 @@ Model request materialization发生在有效 MODEL claim 内，但不持有长�
 
 Stop 的 durable replay key 是「被关闭 turn 的 TURN_START.ownerThreadId + closeRequestId」：Thread 锁内 Session 级
 不可变查找使 owning Thread 的当前 head 已推进到后续 descendant 时仍能精确 replay，另一 Thread 的相同 raw id 被忽略
-而非冲突；revision 只用于未 replay 的首发 CAS。
+而非冲突；version 只用于未 replay 的首发 CAS。
 
 Stop 成功关闭 live turn 的同一事务必须：
 
@@ -840,7 +840,7 @@ HISTORY/TURN_PREFIX 继续使用 CompactionStart 冻结的 Entry IDs（`cutEntry
 
 ### 18.4 Manual compaction
 
-`compactThread(CompactThreadCommand{threadId, expectedRevision})`：锁 Thread 校验 expectedRevision → `manualDecision` 计算 availability（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT）→ 以 `CompactionTrigger.MANUAL` 构建 plan → 事务外 Resolver → 第二事务提交 COMPACTION Turn + MODEL Work（commitManual 再次校验 revision + source head + queued 快照，消费零 Command）。与自动触发共用 MODEL Work、一次 fallback 与 crash recovery。snapshot 的 `manualCompaction` availability 是瞬时 advisory sidecar，提交成功以 expectedRevision CAS 守护。
+`compactThread(CompactThreadCommand{threadId, expectedVersion})`：锁 Thread 校验 expectedVersion → `manualDecision` 计算 availability（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT）→ 以 `CompactionTrigger.MANUAL` 构建 plan → 事务外 Resolver → 第二事务提交 COMPACTION Turn + MODEL Work（commitManual 再次校验 version + source head + queued 快照，消费零 Command）。与自动触发共用 MODEL Work、一次 fallback 与 crash recovery。snapshot 的 `manualCompaction` availability 是瞬时 advisory sidecar，提交成功以 expectedVersion CAS 守护。
 
 ### 18.5 Context projection
 
@@ -985,7 +985,7 @@ attempt state
 
 ### 23.5 YOLO
 
-- direct update 修改 Thread revision，不创建 Command/Entry/Work。
+- direct update 修改 Thread version，不创建 Command/Entry/Work。
 - Model request/spec 不含 YOLO。
 - Tool READY preflight 读取最新 Thread YOLO。
 - YOLO=true 不调用 permission evaluator。

@@ -30,7 +30,7 @@ import java.util.List;
 import java.util.function.Function;
 
 /**
- * 空闲 Stop：不创建任何 Entry，queued Command 在同一 now 被取消，revision 被精确推进一次， 仅删除 Work 不会触发 revision
+ * 空闲 Stop：不创建任何 Entry，queued Command 在同一 now 被取消，version 被精确推进一次， 仅删除 Work 不会触发 version
  * bump，任何删除失败都会让整个事务回滚。
  */
 class HarnessRuntimeStopIdleTest {
@@ -51,12 +51,12 @@ class HarnessRuntimeStopIdleTest {
     assertFalse(result.replayed());
     assertNull(result.stoppedTurnEndEntryId());
     assertEquals(0, result.cancelledCommandCount());
-    assertEquals(0L, result.thread().revision());
+    assertEquals(0L, result.thread().version());
     assertEquals(baseline.rootEntryId(), result.thread().headEntryId());
   }
 
   @Test
-  void idleWithQueuedCommandsCancelsAllAtOneNowAndBumpsRevisionExactlyOnce() {
+  void idleWithQueuedCommandsCancelsAllAtOneNowAndBumpsVersionExactlyOnce() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("a"), TestIds.id(1));
     seedQueuedCommand(store, baseline.threadId(), 2L, userMessagePayload("b"), TestIds.id(2));
@@ -64,7 +64,7 @@ class HarnessRuntimeStopIdleTest {
     assertFalse(result.replayed());
     assertNull(result.stoppedTurnEndEntryId());
     assertEquals(2, result.cancelledCommandCount());
-    assertEquals(1L, result.thread().revision());
+    assertEquals(1L, result.thread().version());
     assertEquals(1L, result.thread().nextCommandSequence());
     List<ThreadCommand> commands =
         store.transaction(
@@ -86,14 +86,14 @@ class HarnessRuntimeStopIdleTest {
   }
 
   @Test
-  void idleWorkOnlyDeletionDoesNotBumpRevision() {
+  void idleWorkOnlyDeletionDoesNotBumpVersion() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     seedThreadWork(store, baseline.threadId());
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertFalse(result.replayed());
     assertNull(result.stoppedTurnEndEntryId());
     assertEquals(0, result.cancelledCommandCount());
-    assertEquals(0L, result.thread().revision());
+    assertEquals(0L, result.thread().version());
     assertFalse(
         store
             .transaction(
@@ -102,13 +102,13 @@ class HarnessRuntimeStopIdleTest {
   }
 
   @Test
-  void idleWithCommandsAndWorkBumpsRevisionAndDeletesTheWorkRow() {
+  void idleWithCommandsAndWorkBumpsVersionAndDeletesTheWorkRow() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("a"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(1, result.cancelledCommandCount());
-    assertEquals(1L, result.thread().revision());
+    assertEquals(1L, result.thread().version());
     assertFalse(
         store
             .transaction(
@@ -120,9 +120,9 @@ class HarnessRuntimeStopIdleTest {
     assertEquals(ThreadCommandState.CANCELLED, command.state());
   }
 
-  /** deleteWork 是 final mutation：失败时整个事务回滚，Command 取消与 revision bump 都不落盘。 */
+  /** deleteWork 是 final mutation：失败时整个事务回滚，Command 取消与 version bump 都不落盘。 */
   @Test
-  void deleteFailureRollsBackCommandsRevisionAndWorkDeletion() {
+  void deleteFailureRollsBackCommandsVersionAndWorkDeletion() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("a"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
@@ -132,7 +132,7 @@ class HarnessRuntimeStopIdleTest {
         IllegalStateException.class,
         () -> failingRuntime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0)));
     ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    assertEquals(0L, thread.revision());
+    assertEquals(0L, thread.version());
     ThreadCommand command =
         store.transaction(
             tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());

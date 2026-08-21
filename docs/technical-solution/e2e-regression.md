@@ -200,15 +200,15 @@ L1 的关键语义断言：
 - `GET /api/ai/catalog/tools` 只返回可选 Platform/Environment 目录：`load_skill`/`task` 两个内部 Platform Tool 绝不出现；Goal 插件 `create_goal/get_goal/update_goal` 必须作为可选 ToolCatalog 能力通过 Agent config 校验；
 - Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `EnvironmentBinding{name, workspacePath}`（可为 null，两字段同存同空）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
 - NEW_SESSION materialization body 携带完整 `rootSettings`（同构于原 `branchSettings`），202 返回 `HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed}`；`replayed=false` 表示全新接受；
-- Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId` 均为 canonical UUID string；`nextCommandSequence`、`revision` 为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
+- Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId` 均为 canonical UUID string；`nextCommandSequence`、`version` 为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
 - snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）、`modelAttemptFailures`（只暴露当前 active Model 尚未物化的失败 attempt；item 为 `modelInvocationId/turnStartEntryId/basisHeadEntryId/attempt/sequence/text/thinking/errorCode/errorMessage/failedAt/retryAt`，其中 `sequence` 是 HTTP decimal string）；
-- THREAD target 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 的统一信封携带 `errors.reason=STALE_COMMAND_CURSOR`，且 Thread 状态（sequence/revision/head）逐字段不变；
+- THREAD target 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 的统一信封携带 `errors.reason=STALE_COMMAND_CURSOR`，且 Thread 状态（sequence/version/head）逐字段不变；
 - `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT/RESOURCE)` 列表：`TEXT(text)`；`ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`RESOURCE(blobId,name,preview?)`（只复用目标 Session 已有 blob ref，不重复 retain，新/跨 Session 拒绝并回滚）。`text`/`content` 文本 shorthand 已移除；`IMAGE/AUDIO/VIDEO`、未知/多余字段与非 canonical id 返回 400；`CUSTOM_MESSAGE` 在产品 HTTP 面确定性 400；
 - 命令响应携带 `requestHash`（raw 命令 canonical SHA-256，64 位小写 hex）与 `sequence`；同 `clientCommandId` + 同 hash 整批重放幂等返回既有命令且不二次消费 upload；部分重放 409；replay/400 不依赖异步消费时序；
 - `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS` 四类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；yolo 走直接控制面（`PUT /yolo`）绝不进入 mailbox；
-- `PUT /yolo` body `{expectedRevision,yoloEnabled}`：同值请求在任何 revision CAS 之前 no-op 成功（过期 expectedRevision 不冲突、revision 零触碰）；值变化时 revision 精确 +1 并返回权威 Thread，过期 revision 409 `STALE_REVISION`；不创建 Command/Entry/Work；
-- ENTRY target 在既有 Session 既有 Entry 下开新 Thread：sessionId 不变、accepted command sequence=1、quiescent 后分支 Thread 的 root→head 路径必须包含 startEntry 与分支 USER、rootEntry 不变；`startEntryId` 不存在 404、跨 Session 400；原 Thread 的 head/revision/nextCommandSequence 逐字段不变；
-- `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
+- `PUT /yolo` body `{expectedVersion,yoloEnabled}`：同值请求在任何 version CAS 之前 no-op 成功（过期 expectedVersion 不冲突、version 零触碰）；值变化时 version 精确 +1 并返回权威 Thread，过期 version 409 `STALE_VERSION`；不创建 Command/Entry/Work；
+- ENTRY target 在既有 Session 既有 Entry 下开新 Thread：sessionId 不变、accepted command sequence=1、quiescent 后分支 Thread 的 root→head 路径必须包含 startEntry 与分支 USER、rootEntry 不变；`startEntryId` 不存在 404、跨 Session 400；原 Thread 的 head/version/nextCommandSequence 逐字段不变；
+- `POST /stop` body `{stopRequestId,expectedVersion}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、version 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale version 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
 - `model.attempt_failure_visibility` 免费 L1：先通过 `/api/events/v1` 建立 Thread 订阅并收到 `subscribed` ack；case 内 `node:http` OpenAI-compatible SSE mock 的首次 Provider attempt 随后流出确定性 text partial，再通过断连触发 LangChain4j `TRANSIENT`。事件通道必须观测到该 partial；活跃期轮询同一快照精确断言 `modelAttemptFailures`（`attempt=1`、HTTP decimal-string `sequence`、text/thinking、error、合法 `failedAt/retryAt`），立即 retry 的 Provider `messages` 必须与失败前完全一致且不含失败 partial/error；quiescent 后断言 `MODEL_ATTEMPT_FAILURE` 位于成功 assistant 之前且 payload 保留 partial/error/retryAt、未物化列表清空；第二 turn 的 mock request `messages` 同样不含失败 attempt 的 partial/thinking/error，两个 turn 均 `COMPLETED`，成功 assistant 不拼接失败 partial；
 - `events.heartbeat_keepalive` 使用 Node 原生 WebSocket 直连 `/api/events/v1`，不建立资源订阅，在 25 秒上限内等待严格 `{version:1,type:"heartbeat"}`；收到后连接必须仍为 OPEN。服务端所有连接共享单个 scheduler，case 不创建客户端 ping 协议或第三方 WS 依赖；
@@ -216,7 +216,7 @@ L1 的关键语义断言：
 - `settings.system_contract_cas` 免费 L1：GET 必须返回六个完整 section，`version` 与 Long 字段为 canonical decimal string，已删除的无消费者字段不得残留；完整聚合 PUT 以 `expectedVersion` CAS 推进版本并回读新值；权限 tool name 首尾空白返回 400，stale version 返回 409，两类失败都不得推进版本；`finally` 以最新版本重试恢复原值并再次回读断言，不能污染后续 case。
 - `canvas.api_version_contract` 免费 L1：create/list/get/commands 使用 canonical UUID id 与
   十进制字符串 graph `version`（数据库 `canvas_document.version` 仍是 bigint，wire 是 canonical
-  非负十进制字符串，`graphRevision` 字段不存在）；`expectedVersion` CAS stale 409；
+  非负十进制字符串，`graphVersion` 字段不存在）；`expectedVersion` CAS stale 409；
   同 `commandId` 精确回放返回当前版本的确定性空 patch（version 不前进），同 id 不同内容
   409；`changes?afterVersion=0` 在缓存完整时返回连续 `0→1` patch，缓存缺失/gap 时回退
   权威 snapshot，尾部版本返回空 delta；`RENAME_GROUP` 更新标题只发 group UPSERT patch
@@ -262,7 +262,7 @@ tool.read_turn
 | `real.text_turn` | `--real` | 真实 Provider 文本轮次；durable `TURN_START -> USER -> assistant MESSAGE -> TURN_END(COMPLETED)` 边界（TurnPlanBuilder 先追加 TURN_START 再追加 USER/CUSTOM）；IDLE 后 `modelInvocation=null`（快照无 `modelInvocations[]` 历史列表） |
 | `real.task_delegation` | `--real` | 父 Agent config 携带 `subagents=[child]` 且 branch `activeTools` 含 `task`：真实 Model 调用内部 `task`，创建 durable 子 Thread（ROOT 携带 `subagentContext{parentThreadId,rootThreadId,taskInvocationId,depth=2}`）；最终 TOOL MESSAGE 冻结 `rendererKey=task` 与 `<task id state>` envelope，`id` 即子 ThreadId |
 | `real.queued_command_batch` | `--real` | 运行中用最新 cursor 连续两个 THREAD batch 各入队一条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
-| `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/revision+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 revision exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
+| `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/version+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 version exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
 | `branch.same_session_entry_thread` | `--real --with-branch` | ENTRY target 在 real.text_turn 的同 Session 历史 assistant Entry 下开新 Thread（不复制 Entry）；sessionId 不变、accepted command sequence=1、分支 turn 在 startEntry 之后继续产生独立 assistant；原 Thread projection 不变 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；`rootPath` 存在；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `daemon.directories` | `--with-tools` | `GET /api/ai/environments/{name}/directories` 缺省 `path="."` 浏览 root（canonical 相对 wire path；`displayPath` 等于请求 `path` 的最后一段，root 为 `'.'`，只作展示、绝不暴露 daemon 本地绝对路径；root `parentPath="."`；`truncated` 布尔；`gitBranch` 可空；entries 只含直属子目录 `{name,path}`：`name` 等于 `path` 最后一段、`path` 是请求目录的直接子路径）；显式 `path="."` 与缺省一致；`..` 段 400 `INVALID_PATH`、不存在目录 404 `NOT_FOUND`、非法环境名 400 `INVALID_ENVIRONMENT_NAME` |
@@ -454,15 +454,15 @@ ENTRY 分支与 stop 均通过既有写面表达：
 
 ```json
 { "target": { "type": "ENTRY", "sessionId": "...", "startEntryId": "00000000-0000-0000-0000-000000000005", "threadId": "...", "yoloEnabled": false } }
-{ "stopRequestId": "00000000-0000-0000-0000-000000000201", "expectedRevision": "0" }
+{ "stopRequestId": "00000000-0000-0000-0000-000000000201", "expectedVersion": "0" }
 ```
 
 - ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（head 直接指向目标 Entry，不复制 Entry），原 Thread 保持不变；`startEntryId` 不存在时返回 404，跨 Session 时返回 400；
 - `POST /stop` 响应 `{status, thread, stoppedTurnEndEntryId, cancelledCommandCount, cancelledUserMessages[]}`；取消消息按 sequence 升序，元素为 `{sequence,clientCommandId,messageJson}`，用于前端恢复 TEXT/RESOURCE Composer parts；status 三态：
-  - `STOPPED`：真实停止一个 Turn（revision+1，`stoppedTurnEndEntryId` 非空，TURN_END closeRequestId = raw `stopRequestId`，按被关闭 TURN_START 的 `ownerThreadId` 界定 Thread 作用域）；
-  - `REPLAYED`：同 `stopRequestId` 再次调用，在 Thread 锁内做 Session 级查找命中同 owner 的持久 STOPPED TURN_END（在 revision CAS 之前，revision 不再变化，返回同一 `stoppedTurnEndEntryId`）；另一 Thread 相同 raw id 被忽略而非冲突；
+  - `STOPPED`：真实停止一个 Turn（version+1，`stoppedTurnEndEntryId` 非空，TURN_END closeRequestId = raw `stopRequestId`，按被关闭 TURN_START 的 `ownerThreadId` 界定 Thread 作用域）；
+  - `REPLAYED`：同 `stopRequestId` 再次调用，在 Thread 锁内做 Session 级查找命中同 owner 的持久 STOPPED TURN_END（在 version CAS 之前，version 不再变化，返回同一 `stoppedTurnEndEntryId`）；另一 Thread 相同 raw id 被忽略而非冲突；
   - `IDLE`：无活动 Turn（无持久 marker，`stoppedTurnEndEntryId=null`；同 `stopRequestId` 再调用仍是 IDLE，不是 REPLAYED）；
-  - stale revision 409；
+  - stale version 409；
 - 命令 batch 整批同 `clientCommandId` + 同 `requestHash` 重放返回既有命令（sequence/requestHash 稳定）；仅部分存在 409 `PARTIAL_COMMAND_REPLAY`。
 
 Tool approval：
@@ -503,7 +503,7 @@ GET  /api/storage/blobs/{blobId}/presigned-preview
   （shape-only，不限定 version/variant 位）；CanvasDocumentDTO **没有** `threadId` 字段
   （绑定关系由 owner-aware command-batches 的 Session 归属边表达）；graph 版本 wire 是
   canonical 非负十进制字符串（数据库 `canvas_document.version` 仍是 bigint/Java long 整数，
-  不存在 `graphRevision` 字段）；
+  不存在 `graphVersion` 字段）；
 - `POST /commands` body 为 `{expectedVersion, commandId, commands[]}`：`expectedVersion`
   是精确 CAS 游标（十进制字符串，stale 409 `VERSION_CONFLICT`）；`commandId` 是整批幂等键——同 id 同
   内容精确回放返回 `{baseVersion:version, version, [], [], []}` 空 patch（版本为十进制字符串），
@@ -523,9 +523,9 @@ GET  /api/storage/blobs/{blobId}/presigned-preview
 - WebSocket `/api/events/v1`：所有帧都带 `version:1`。客户端帧
   `{version:1, type:'subscribe'|'unsubscribe', resource:{kind,id}}`（kind 为 `thread`/`canvas`，
   id 为 canonical UUID）；服务端帧 `subscribed{resource,cursor}`（cursor 为 canonical 非负十进制，
-  即订阅建立瞬间的 durable revision/version）、
-  `event{resource,name,data}`（name 为 `revision`/`realtime`/`version`，revision/version 事件额外带
-  canonical `cursor`，data 分别为 `{revision:"N"}`/`{version:"N"}`/realtime codec JSON 对象）、
+   即订阅建立瞬间的 durable version）、
+   `event{resource,name,data}`（name 为 `version`/`realtime`，version 事件额外带
+  canonical `cursor`，data 分别为 `{version:"N"}`/`{version:"N"}`/realtime codec JSON 对象）、
   `resync{resource}`、`error{code,message[,resource]}`；ack 游标之后的事件不丢失，事件帧不先于 ack 帧；
   未知资源只回资源级 `RESOURCE_NOT_FOUND`（带 resource）并保持连接，非法帧/发送过载回
   `INVALID_FRAME`/`BACKPRESSURE` 后关闭连接；
@@ -552,8 +552,8 @@ WebSocket /api/ai/environment/daemon/v2
 
 默认 L1 API 不执行 task Tool；前端单测覆盖 `task.status` 解析、renderer 分发、TaskStatusWidget 与审批转发，免费 UI case `ui.chat.task_status.bound_widget` 使用本地 parent/child OpenAI-compatible mock 验证真实 task heartbeat 的浏览器呈现。完整 durable 子 Thread 与终态 envelope 仍由显式 `--real` 的 `real.task_delegation` 覆盖。
 
-WebSocket `/api/events/v1`：Thread 订阅 ack cursor 是 canonical decimal durable revision，Redis
-realtime delta 经 `event{name:'realtime'}` 投递；revision/version 事件只携带 ack 之后的前进值
+WebSocket `/api/events/v1`：Thread 订阅 ack cursor 是 canonical decimal durable version，Redis
+ realtime delta 经 `event{name:'realtime'}` 投递；version 事件只携带 ack 之后的前进值
 （`event{name,cursor,data}`，十进制字符串，客户端随后拉 snapshot/changes），`resync` 要求整体快照；连接级 `{version:1,type:'heartbeat'}` 每 20 秒保活，由 `events.heartbeat_keepalive` 覆盖。
 
 ## 5. MiniMax-H3 手工 smoke

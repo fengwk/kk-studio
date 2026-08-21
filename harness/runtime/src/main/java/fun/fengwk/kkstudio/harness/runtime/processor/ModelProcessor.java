@@ -92,9 +92,9 @@ public final class ModelProcessor implements AutoCloseable {
    * per-invocation guard 覆盖 prepare 到 registry 插入：同一 claim（同 lease token）重复 / 并发投递直接返回
    * LOST_OWNERSHIP（不 cancel、不 mutation）；不同新 token（已通过 Work-only 校验，旧 lease 必然过期）先 supersede 旧本地
    * execution 再 prepare。prepare 短事务按 Thread -&gt; ModelInvocation -&gt; Work 锁序二次校验：READY 转
-   * DISPATCHING + Thread revision+1（事务外启动 heartbeat / Gateway）；DISPATCHING / RUNNING（旧 lease
-   * 过期恢复）收敛为 UNKNOWN + revision+1 + 请求 THREAD Work + complete MODEL Work，绝不重放 Provider；terminal
-   * 行只确保 THREAD Work 请求 （resultEntryId 仍 null 时）后 complete MODEL Work，不重复 bump revision。
+   * DISPATCHING + Thread version+1（事务外启动 heartbeat / Gateway）；DISPATCHING / RUNNING（旧 lease
+   * 过期恢复）收敛为 UNKNOWN + version+1 + 请求 THREAD Work + complete MODEL Work，绝不重放 Provider；terminal 行只确保
+   * THREAD Work 请求 （resultEntryId 仍 null 时）后 complete MODEL Work，不重复 bump version。
    */
   public ProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
@@ -348,7 +348,7 @@ public final class ModelProcessor implements AutoCloseable {
     // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
     tx.updateModelInvocation(model.beginDispatch(now));
-    tx.updateThread(thread.touchRevision(now));
+    tx.updateThread(thread.touchVersion(now));
     Entry turnStart =
         tx.findEntry(model.turnStartEntryId())
             .orElseThrow(
@@ -424,14 +424,12 @@ public final class ModelProcessor implements AutoCloseable {
             ProviderErrorKind.TRANSIENT,
             "model work lease expired; provider outcome cannot be confirmed");
     tx.updateModelInvocation(model.unknown(error, now));
-    tx.updateThread(thread.touchRevision(now));
+    tx.updateThread(thread.touchVersion(now));
     tx.completeWork(claim, now);
     return new Prepare.Terminated();
   }
 
-  /**
-   * terminal 行：resultEntryId 仍 null 时确保 THREAD Work 请求，然后 complete MODEL Work；不重复 bump revision。
-   */
+  /** terminal 行：resultEntryId 仍 null 时确保 THREAD Work 请求，然后 complete MODEL Work；不重复 bump version。 */
   private Prepare cleanupTerminal(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
@@ -450,9 +448,7 @@ public final class ModelProcessor implements AutoCloseable {
     return new Prepare.Terminated();
   }
 
-  /**
-   * admission 肯定未开始（Busy / 异常）：DISPATCHING -&gt; READY + revision+1 + 按延迟 reschedule MODEL Work。
-   */
+  /** admission 肯定未开始（Busy / 异常）：DISPATCHING -&gt; READY + version+1 + 按延迟 reschedule MODEL Work。 */
   private boolean bounceDispatch(ClaimedWork claim, Prepare.Dispatched dispatched, Duration delay) {
     Instant now = clock.instant();
     return Boolean.TRUE.equals(
@@ -471,21 +467,19 @@ public final class ModelProcessor implements AutoCloseable {
                 return false;
               }
               tx.updateModelInvocation(model.dispatchBusy(now));
-              tx.updateThread(thread.touchRevision(now));
+              tx.updateThread(thread.touchVersion(now));
               tx.rescheduleWork(claim, now, now.plus(delay));
               return true;
             }));
   }
 
-  /** admission 明确拒绝：rejectDispatch FAILED + revision+1 + 请求 THREAD Work + complete MODEL Work。 */
+  /** admission 明确拒绝：rejectDispatch FAILED + version+1 + 请求 THREAD Work + complete MODEL Work。 */
   private boolean rejectDispatch(
       ClaimedWork claim, Prepare.Dispatched dispatched, ModelInvocationError error) {
     return terminalDispatch(claim, dispatched, (model, now) -> model.rejectDispatch(error, now));
   }
 
-  /**
-   * admission 不确定：unknown UNKNOWN（attempt+1）+ revision+1 + 请求 THREAD Work + complete MODEL Work。
-   */
+  /** admission 不确定：unknown UNKNOWN（attempt+1）+ version+1 + 请求 THREAD Work + complete MODEL Work。 */
   private boolean unknownDispatch(
       ClaimedWork claim, Prepare.Dispatched dispatched, ModelInvocationError error) {
     return terminalDispatch(claim, dispatched, (model, now) -> model.unknown(error, now));
@@ -517,7 +511,7 @@ public final class ModelProcessor implements AutoCloseable {
                   throw new ClaimLostSignal();
                 }
                 tx.updateModelInvocation(transition.apply(model, now));
-                tx.updateThread(thread.touchRevision(now));
+                tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim, now);
                 return true;
               }));

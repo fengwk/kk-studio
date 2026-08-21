@@ -122,9 +122,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * complete、request 与 reschedule 始终使用未抬升的本地 lease clock，避免未来 durable 时间改变 lease 语义。
  *
  * <p>压缩触发正交：soft threshold 在尚未完成的 continuation 边界或下一条真实 user demand 到达时 gate；hard overflow
- * 立即压缩并只恢复一次； {@link #compactThread} 以 expectedRevision 同步提交 MANUAL plan。所有 trigger 共用 MODEL
- * Work、一次 fallback 与 deterministic no-gain；切分先 HISTORY 再以 continueModel obligation 机械启动
- * TURN_PREFIX。压缩消费零 queued Command，另一 Thread 拥有的共享历史 turn 不压缩。
+ * 立即压缩并只恢复一次； {@link #compactThread} 以 expectedVersion 同步提交 MANUAL plan。所有 trigger 共用 MODEL Work、一次
+ * fallback 与 deterministic no-gain；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零
+ * queued Command，另一 Thread 拥有的共享历史 turn 不压缩。
  */
 @Slf4j
 public final class ThreadProcessor {
@@ -198,7 +198,7 @@ public final class ThreadProcessor {
     }
   }
 
-  /** 返回 Thread 当前的手动压缩可用性；结果是瞬时 projection，提交仍由 expectedRevision 做最终 CAS。 */
+  /** 返回 Thread 当前的手动压缩可用性；结果是瞬时 projection，提交仍由 expectedVersion 做最终 CAS。 */
   public ManualCompactionAvailability manualCompactionAvailability(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
@@ -215,7 +215,7 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 手动压缩控制：短事务 plan，事务外 resolve，再以 expected revision/source head/command snapshot 原子提交 COMPACTION
+   * 手动压缩控制：短事务 plan，事务外 resolve，再以 expected version/source head/command snapshot 原子提交 COMPACTION
    * Turn 与 MODEL Work。resolve 前崩溃零持久化；提交成功后不依赖进程内 intent。
    */
   public CompactThreadResult compactThread(CompactThreadCommand command) {
@@ -345,8 +345,8 @@ public final class ThreadProcessor {
                 () ->
                     new HarnessRuntimeNotFoundException(
                         "thread " + command.threadId() + " does not exist"));
-    if (thread.revision() != command.expectedRevision()) {
-      throw staleManualRevision(command, thread);
+    if (thread.version() != command.expectedVersion()) {
+      throw staleManualVersion(command, thread);
     }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
     ManualDecision decision = manualDecision(tx, thread, path);
@@ -1140,8 +1140,8 @@ public final class ThreadProcessor {
 
   /**
    * 第二事务 CAS 提交。要求当前 Thread head == planned source head、cutoff 内 queued Command 与 planned
-   * 快照逐字段相等（允许 sequence &gt; cutoff 的新命令，不 CAS revision / nextCommandSequence），claim token 活跃；最终
-   * Thread 更新使用第二事务锁到的当前 YOLO（speculative plan 创建时的旧值绝不写回）并保留其最新 nextCommandSequence， revision 精确
+   * 快照逐字段相等（允许 sequence &gt; cutoff 的新命令，不 CAS version / nextCommandSequence），claim token 活跃；最终
+   * Thread 更新使用第二事务锁到的当前 YOLO（speculative plan 创建时的旧值绝不写回）并保留其最新 nextCommandSequence， version 精确
    * +1。锁序为 Thread -&gt; Commands -&gt; Model -&gt; Work：全部低序 mutation 先完成，claimed THREAD Work 的
    * final fence 最后执行（失败抛 {@link ClaimLostSignal} 整事务回滚）。任何 head / 快照 / claim 损失一律抛 {@link
    * ClaimLostSignal} 回滚（零 durable mutation），由 {@link #process} 映射为 LOST_OWNERSHIP。
@@ -1170,13 +1170,13 @@ public final class ThreadProcessor {
                 () ->
                     new HarnessRuntimeNotFoundException(
                         "thread " + command.threadId() + " does not exist"));
-    if (thread.revision() != command.expectedRevision()
+    if (thread.version() != command.expectedVersion()
         || !thread.headEntryId().equals(plan.sourceHeadEntryId())) {
-      throw staleManualRevision(command, thread);
+      throw staleManualVersion(command, thread);
     }
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
     if (!snapshotMatches(plan, queued)) {
-      throw staleManualRevision(command, thread);
+      throw staleManualVersion(command, thread);
     }
     if (!plan.consumedCommands().isEmpty()) {
       throw new IllegalStateException("manual compaction must not consume commands");
@@ -1449,16 +1449,16 @@ public final class ThreadProcessor {
     }
   }
 
-  private static HarnessRuntimeConflictException staleManualRevision(
+  private static HarnessRuntimeConflictException staleManualVersion(
       CompactThreadCommand command, ThreadState thread) {
     return new HarnessRuntimeConflictException(
-        HarnessRuntimeConflictException.Reason.STALE_REVISION,
+        HarnessRuntimeConflictException.Reason.STALE_VERSION,
         "thread "
             + thread.id()
-            + " revision "
-            + thread.revision()
+            + " version "
+            + thread.version()
             + " does not match expected "
-            + command.expectedRevision());
+            + command.expectedVersion());
   }
 
   private static HarnessRuntimeConflictException manualUnavailable(

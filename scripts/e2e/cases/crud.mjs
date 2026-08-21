@@ -648,7 +648,7 @@ registerCase({
     try {
       // materialize 快照可能已含 processor 消费；只断言结构，不锁定瞬时 status。
       const firstThread = first.accepted.thread
-      assert(/^\d+$/.test(String(firstThread.revision)), JSON.stringify(firstThread))
+      assert(/^\d+$/.test(String(firstThread.version)), JSON.stringify(firstThread))
       assert(firstThread.sessionId && firstThread.headEntryId, JSON.stringify(firstThread))
 
       // 精确 preview 断言依赖 USER entry 已 durable 物化：先等三个 Thread 的 turn 收敛。

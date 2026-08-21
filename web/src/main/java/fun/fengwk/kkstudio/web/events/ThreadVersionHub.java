@@ -22,23 +22,23 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.Consumer;
 
 /**
- * PostgreSQL Thread revision 失效通知的进程内 fan-out。
+ * PostgreSQL Thread version 失效通知的进程内 fan-out。
  *
- * <p>LISTEN/NOTIFY 故意只作为唤醒信号。收到通知后，本 hub 先读取当前持久 revision 再通知订阅者；LISTEN 启动/重连成功时广播
- * resync，因为断连期间的通知不可恢复。{@link #subscribe} 先注册 consumer 再读当前 revision 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
+ * <p>LISTEN/NOTIFY 故意只作为唤醒信号。收到通知后，本 hub 先读取当前持久 version 再通知订阅者；LISTEN 启动/重连成功时广播
+ * resync，因为断连期间的通知不可恢复。{@link #subscribe} 先注册 consumer 再读当前 version 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
  */
 @Slf4j
 @Component
-final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSource {
+final class ThreadVersionHub implements SmartLifecycle, ThreadVersionEventSource {
 
-  static final String CHANNEL = "harness_thread_revision";
+  static final String CHANNEL = "harness_thread_version";
 
   private final DataSource dataSource;
   private final Map<UUID, Set<Consumer<Event>>> subscribers = new ConcurrentHashMap<>();
   private volatile boolean running;
   private volatile Thread listenerThread;
 
-  ThreadRevisionHub(DataSource dataSource) {
+  ThreadVersionHub(DataSource dataSource) {
     this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
   }
 
@@ -57,7 +57,7 @@ final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSour
           return threadSubscribers;
         });
     try {
-      long cursor = currentRevision(threadId);
+      long cursor = currentVersion(threadId);
       return new SourceSubscribed(cursor, () -> release(threadId, consumer));
     } catch (RuntimeException error) {
       release(threadId, consumer);
@@ -80,7 +80,7 @@ final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSour
       return;
     }
     running = true;
-    Thread thread = new Thread(this::listen, "thread-revision-listen");
+    Thread thread = new Thread(this::listen, "thread-version-listen");
     thread.setDaemon(true);
     listenerThread = thread;
     thread.start();
@@ -116,20 +116,20 @@ final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSour
           PGNotification[] notifications = pgConnection.getNotifications(5_000);
           if (notifications != null) {
             for (PGNotification notification : notifications) {
-              publishCurrentRevision(connection, notification.getParameter());
+              publishCurrentVersion(connection, notification.getParameter());
             }
           }
         }
       } catch (SQLException | RuntimeException error) {
         if (running) {
-          log.warn("thread revision LISTEN connection lost; reconnecting", error);
+          log.warn("thread version LISTEN connection lost; reconnecting", error);
           sleep();
         }
       }
     }
   }
 
-  private void publishCurrentRevision(Connection connection, String rawThreadId)
+  private void publishCurrentVersion(Connection connection, String rawThreadId)
       throws SQLException {
     UUID threadId;
     try {
@@ -138,7 +138,7 @@ final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSour
       return;
     }
     try (PreparedStatement statement =
-        connection.prepareStatement("select revision from harness_thread where id = ?")) {
+        connection.prepareStatement("select version from harness_thread where id = ?")) {
       statement.setObject(1, threadId);
       try (ResultSet result = statement.executeQuery()) {
         if (result.next()) {
@@ -148,10 +148,10 @@ final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSour
     }
   }
 
-  private long currentRevision(UUID threadId) {
+  private long currentVersion(UUID threadId) {
     try (Connection connection = dataSource.getConnection();
         PreparedStatement statement =
-            connection.prepareStatement("select revision from harness_thread where id = ?")) {
+            connection.prepareStatement("select version from harness_thread where id = ?")) {
       statement.setObject(1, threadId);
       try (ResultSet result = statement.executeQuery()) {
         if (!result.next()) {
@@ -160,7 +160,7 @@ final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSour
         return result.getLong(1);
       }
     } catch (SQLException error) {
-      throw new IllegalStateException("cannot read current thread revision", error);
+      throw new IllegalStateException("cannot read current thread version", error);
     }
   }
 
@@ -177,7 +177,7 @@ final class ThreadRevisionHub implements SmartLifecycle, ThreadRevisionEventSour
           consumer.accept(event);
         } catch (RuntimeException error) {
           log.warn(
-              "thread revision subscriber callback failed threadId={}; skipping", threadId, error);
+              "thread version subscriber callback failed threadId={}; skipping", threadId, error);
         }
       }
     }

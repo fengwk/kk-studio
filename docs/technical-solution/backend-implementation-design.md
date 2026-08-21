@@ -85,11 +85,11 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | POST | `/api/ai/runtime/command-batches` | 唯一产品写入口：owner + NEW_SESSION/ENTRY/THREAD target + commands；NEW_SESSION 原子创建 Session、ROOT（BranchSettings）、Thread、owner relation、Commands 与 Work |
 | GET | `/api/ai/runtime/sessions/{sessionId}/threads` | Session 内 Thread summary 列表 |
 | GET | `/api/ai/runtime/sessions/{sessionId}/entries` | Session 的完整 immutable Entry Tree，包含非当前 head 的历史分支 |
-| GET | `/api/ai/runtime/threads/{threadId}/snapshot` | revision、entries（root-to-head）、queuedCommands、活跃 Invocation、尚未物化的 Model attempt failures 与 manualCompaction availability |
+| GET | `/api/ai/runtime/threads/{threadId}/snapshot` | version、entries（root-to-head）、queuedCommands、活跃 Invocation、尚未物化的 Model attempt failures 与 manualCompaction availability |
 | GET | `/api/ai/runtime/threads/{threadId}/system-prompt` | 按当前 root-to-head branch 现算的只读 system prompt 预览 |
-| POST | `/api/ai/runtime/threads/{threadId}/compact` | 手动压缩：`{expectedRevision}` CAS 提交 MANUAL Compaction Turn |
-| PUT | `/api/ai/runtime/threads/{threadId}/yolo` | 直接更新 Thread YOLO policy（revision CAS；同值 no-op 前于 CAS） |
-| POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedRevision}`；STOPPED/IDLE/REPLAYED |
+| POST | `/api/ai/runtime/threads/{threadId}/compact` | 手动压缩：`{expectedVersion}` CAS 提交 MANUAL Compaction Turn |
+| PUT | `/api/ai/runtime/threads/{threadId}/yolo` | 直接更新 Thread YOLO policy（version CAS；同值 no-op 前于 CAS） |
+| POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedVersion}`；STOPPED/IDLE/REPLAYED |
 | POST | `/api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval` | `{decision: ALLOW|DENY, decisionId, actor, reason}` |
 | WebSocket | `/api/events/v1` | 浏览器事件通道（thread/canvas 订阅；协议见 [application-event-channel.md](application-event-channel.md)） |
 | GET | `/api/ai/runtime/resources/{sha256}` | 瞬时/Invocation `ResourceRef` 下载：Core `ManagedResourceDownloadService` 按 `mediaType`/`size`/可选 `name` 重建引用，Web 只负责 attachment + `X-Content-Type-Options: nosniff`；Entry history 的 Blob Resource 不走该端点 |
@@ -107,18 +107,18 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 
 ## 5. 请求与错误
 
-`POST /command-batches` 请求包含 `owner`、`target`（NEW_SESSION/ENTRY/THREAD）与命令数组（每项 `clientCommandId`）。THREAD target 携带 `expectedHeadEntryId`、`expectedNextCommandSequence`；NEW_SESSION 携带 `sessionId`/`threadId`/`rootSettings`/`yoloEnabled`；ENTRY 携带 `sessionId`/`startEntryId`/`threadId`/`yoloEnabled`。`POST /{threadId}/compact` 包含 `expectedRevision`。`POST /stop` 包含 `stopRequestId` 与 `expectedRevision`。
+`POST /command-batches` 请求包含 `owner`、`target`（NEW_SESSION/ENTRY/THREAD）与命令数组（每项 `clientCommandId`）。THREAD target 携带 `expectedHeadEntryId`、`expectedNextCommandSequence`；NEW_SESSION 携带 `sessionId`/`threadId`/`rootSettings`/`yoloEnabled`；ENTRY 携带 `sessionId`/`startEntryId`/`threadId`/`yoloEnabled`。`POST /{threadId}/compact` 包含 `expectedVersion`。`POST /stop` 包含 `stopRequestId` 与 `expectedVersion`。
 
 统一行为：
 
 | 情况 | HTTP |
 | --- | --- |
-| DTO、名称格式、Model config、Model ref、id/sequence/revision 格式非法（实体 id 非 canonical UUID、sequence/revision 非 decimal string）或请求体中的 Catalog 引用非法 | 400 |
+| DTO、名称格式、Model config、Model ref、id/sequence/version 格式非法（实体 id 非 canonical UUID、sequence/version 非 decimal string）或请求体中的 Catalog 引用非法 | 400 |
 | 作为请求目标的 Thread/Entry/Catalog 名称不存在（snapshot/system-prompt/compact/stop 路径） | 404 |
-| 命令 cursor / revision CAS 过期、terminal apply pending、跨 Session materialization 冲突、ordered replay 冲突 | 409 |
+| 命令 cursor / version CAS 过期、terminal apply pending、跨 Session materialization 冲突、ordered replay 冲突 | 409 |
 | approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`）、已决定但请求不匹配（`APPROVAL_DECISION_MISMATCH`） | 409（approval 路径的 Thread/target 缺失不是 404） |
 | 命令 batch 被接受进入 mailbox | 202（返回 `session/rootEntry/thread/acceptedCommands/replayed` 权威投影） |
-| 手动压缩 availability 不满足（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT）或 expectedRevision 过期 | 409 |
+| 手动压缩 availability 不满足（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT）或 expectedVersion 过期 | 409 |
 
 HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字段不随语言变化。
 
@@ -131,8 +131,8 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | `StudioHarnessThreadController` | 仅映射 `HarnessRuntime` 门面 + typed 异常翻译 |
 | `HarnessRuntime` | `acceptCommands`/`findThreadCommand`/`stop`/`decideToolApproval`/`setThreadYolo`/`getThreadSnapshot`/`getSessionEntries`/`listThreadsBySession` 单事务控制面；不暴露 delete/create |
 | `ThreadProcessor` | Agent Loop single-action reducer：每次 claim 恰好一个分类动作，下一动作由同事务 requestWork 驱动，返回 COMPLETED/RESCHEDULED/LOST_OWNERSHIP；Model terminal apply 前按序物化失败 attempt，TURN_END 同事务删除 Model/Tool Invocation；另提供 `compactThread`/`manualCompactionAvailability` |
-| `ModelProcessor` | 有效 claim 内由 `ModelRequestMaterializer` 从 basisHeadEntryId + spec 重建内存 ProviderRequest、两阶段激活、checkpoint/failedAttempts/terminal 持久化、terminal-once、Thread revision touch、Work/realtime 与 reschedule；不写 Entry/head |
-| `ToolProcessor` | READY 边界临时构造 executable request（binding 非空）、两阶段激活、preflight 前读取当前 Thread YOLO 短路、接收已验证/外部化的 terminal `ToolSuccess(result, effects)`、领域校验与严格 terminal CAS，并维护 Thread revision/Work/realtime；不写 Entry/head |
+| `ModelProcessor` | 有效 claim 内由 `ModelRequestMaterializer` 从 basisHeadEntryId + spec 重建内存 ProviderRequest、两阶段激活、checkpoint/failedAttempts/terminal 持久化、terminal-once、Thread version touch、Work/realtime 与 reschedule；不写 Entry/head |
+| `ToolProcessor` | READY 边界临时构造 executable request（binding 非空）、两阶段激活、preflight 前读取当前 Thread YOLO 短路、接收已验证/外部化的 terminal `ToolSuccess(result, effects)`、领域校验与严格 terminal CAS，并维护 Thread version/Work/realtime；不写 Entry/head |
 | `DatabaseTurnResolver` | 以 candidate path 解析冻结 compact `ModelRequestSpec`（providerType/model/variant/preamble/tool/skill/subagent bindings/cacheControl；无 YOLO/contextWindow/messages）；每个新 turn 从最新 Agent config 派生 tools/skills/subagents，历史 activeTools 不参与能力计算；冻结插件 contribution/state accesses，并注入插件 context projection；普通解析按单一 Clock instant 构造 `CurrentEnvironmentContext`；ENVIRONMENT 工具按最新 binding 绑定、规划不拒绝；skills 非空时派生 `load_skill` 且要求 Environment live；subagents 非空且 depth < maxDepth 时派生 `task`；planning 拒绝共用 `PLANNING_FAILED` |
 | `AgentPromptComposer` | 组合 system prompt 的唯一边界：Agent 正文 → `<current_environment>`（只输出有值的 name/workspace/system/date/note，`none` 整行省略）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令）；动态字段 XML escape，日期严格为 yyyy-MM-dd；prompt 模板是 strict classpath resource（Pi 派生资源同目录保留 MIT `NOTICE`） |
 | `TaskTool` | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：校验冻结 allowlist、以 `runtime.acceptCommands(NEW_SESSION, SubagentContext)` 原子创建子 Session/ROOT/Thread 并入队 prompt（resume 用 THREAD target）、经内部 Thread change source 事件化观察并发布 `task.status` 心跳、以 `<task id state>` envelope 结束 |
@@ -147,10 +147,10 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 - 参数 `{subagent_type, prompt, maxTurns?, session_id?}` 严格校验；`subagent_type` 必须命中父 Invocation 冻结的 `subagentBindings`（执行绝不重读父 Agent 配置）。
 - 新建时按 `AgentBranchSettingsMaterializer` 物化子 Agent branch settings（继承父 branch 的完整 `EnvironmentBinding` 与父 Thread 的 YOLO），以 `runtime.acceptCommands(NEW_SESSION, SubagentContext)` 原子创建 Session + ROOT（`SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}`）+ Thread（yolo 继承父 Thread）+ Commands（SYSTEM CUSTOM_MESSAGE + USER_MESSAGE task prompt）；`clientCommandId` 以 `task-{invocationId}-{ordinal}` 稳定生成。
 - 恢复（`session_id`，子 ThreadId）：要求 ROOT 的 parent/root 归属与当前父一致、子 Thread quiescent（无 model/tool siblings/queued、head 非 continueModel TURN_END）；目标 Agent 可在恢复时切换。
-- 观察等待期间：先订阅内部 `HarnessThreadChangeSource`（web 组合根把 PostgreSQL Thread revision 通知适配为纯 wake）与 `SubagentRunRegistry` descendant 订阅，再读首次权威 durable snapshot；此后只在 revision/resync 唤醒后重读 snapshot 并判断 terminal、reminder 与按 active-tools 语义计算 idle deadline（idle 超时排除 active tool 时间；deadline 到点由限时等待本身唤醒，不重读 snapshot），descendant 唤醒只重读进程内 relay。约 1s 一次基于缓存 snapshot 发布非 durable `TOOL_PARTIAL` 心跳（完整 JSON 快照，`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）；心跳与 descendant 唤醒绝不重读 durable snapshot。`descendants` 由进程内活动 registry 扁平 relay 给祖先，仅用于实时展示和审批寻址；`turns >= maxTurns` 起每 5 turn 入队一条 SYSTEM `CUSTOM_MESSAGE` 软提醒；达到 idle 超时/被取消时 `stop` 子 Thread 并保留可恢复 Session（取消 single-owner：整个 TaskExecution 至多执行一条 3-attempt stop 重试序列）。
+- 观察等待期间：先订阅内部 `HarnessThreadChangeSource`（web 组合根把 PostgreSQL Thread version 通知适配为纯 wake）与 `SubagentRunRegistry` descendant 订阅，再读首次权威 durable snapshot；此后只在 version/resync 唤醒后重读 snapshot 并判断 terminal、reminder 与按 active-tools 语义计算 idle deadline（idle 超时排除 active tool 时间；deadline 到点由限时等待本身唤醒，不重读 snapshot），descendant 唤醒只重读进程内 relay。约 1s 一次基于缓存 snapshot 发布非 durable `TOOL_PARTIAL` 心跳（完整 JSON 快照，`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）；心跳与 descendant 唤醒绝不重读 durable snapshot。`descendants` 由进程内活动 registry 扁平 relay 给祖先，仅用于实时展示和审批寻址；`turns >= maxTurns` 起每 5 turn 入队一条 SYSTEM `CUSTOM_MESSAGE` 软提醒；达到 idle 超时/被取消时 `stop` 子 Thread 并保留可恢复 Session（取消 single-owner：整个 TaskExecution 至多执行一条 3-attempt stop 重试序列）。
 - 终态 ToolResult 为 `<task id state>` envelope（`<task_result>` / `<task_error>`，报告正文最多保留 8000 字符），`details.kind=task.result`；`state` 为 `completed` / `error` / `cancelled`。
 
-子 Agent 配置由 `SubagentConfigProvider` 在每个新 turn / 新 task 调用从 `SystemSettings.AiRuntime` 现读：`subagentMaxDepth=2`、`subagentMaxConcurrency=10`（每父）、`subagentMaxTotalConcurrency`（每根，默认不限）、`subagentIdleTimeoutMillis=0`（默认禁用）、`subagentMaxTurns=50`。观察不配置轮询间隔：`HarnessOneShotService.await` 与 `TaskTool.awaitResult` 都通过 `harness.runtime.HarnessThreadChangeSource` 订阅 durable revision 变化（web 组合根适配现有 `ThreadRevisionEventSource`），无事件时不重复读取 durable snapshot；生产环境缺少该内部 change source 时 Spring 装配直接失败（fail-closed，不回退 polling）。`SubagentRunRegistry` 只做进程内并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
+子 Agent 配置由 `SubagentConfigProvider` 在每个新 turn / 新 task 调用从 `SystemSettings.AiRuntime` 现读：`subagentMaxDepth=2`、`subagentMaxConcurrency=10`（每父）、`subagentMaxTotalConcurrency`（每根，默认不限）、`subagentIdleTimeoutMillis=0`（默认禁用）、`subagentMaxTurns=50`。观察不配置轮询间隔：`HarnessOneShotService.await` 与 `TaskTool.awaitResult` 都通过 `harness.runtime.HarnessThreadChangeSource` 订阅 durable version 变化（web 组合根适配现有 `ThreadVersionEventSource`），无事件时不重复读取 durable snapshot；生产环境缺少该内部 change source 时 Spring 装配直接失败（fail-closed，不回退 polling）。`SubagentRunRegistry` 只做进程内并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
 
 权限保持既有管线：YOLO 在加载 settings/evaluator 之前直接 Allow；否则 Allow/Ask/Deny，Ask 即既有 ToolInvocation `WAITING_APPROVAL`，不存在第二套权限实体；子 Thread 继承父 Thread YOLO，子工具审批仍走同一 `POST /tool-invocations/{id}/approval` 端点（携带子 ThreadId）。
 
@@ -163,7 +163,7 @@ GET /api/ai/runtime/threads/{threadId}/snapshot
 -> WS subscribe {version:1, type:'subscribe', resource:{kind:'thread', id}}
 ```
 
-`subscribed` ack 携带订阅建立瞬间的 durable revision；其后的事件保证送达（事件帧不先于 ack 帧）。`revision` 事件只触发 snapshot invalidate，Redis `realtime` delta 只作为临时 overlay；`resync` 要求整体快照。重连重订阅后重新读取 snapshot，Redis Stream 不承担恢复职责。完整帧协议见 [application-event-channel.md](application-event-channel.md)。
+`subscribed` ack 携带订阅建立瞬间的 durable version；其后的事件保证送达（事件帧不先于 ack 帧）。`version` 事件只触发 snapshot invalidate，Redis `realtime` delta 只作为临时 overlay；`resync` 要求整体快照。重连重订阅后重新读取 snapshot，Redis Stream 不承担恢复职责。完整帧协议见 [application-event-channel.md](application-event-channel.md)。
 
 ## 8. 代码入口
 

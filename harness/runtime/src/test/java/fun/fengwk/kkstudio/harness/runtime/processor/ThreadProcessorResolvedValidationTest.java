@@ -97,8 +97,8 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
     assertEquals(
         ThreadCommandState.QUEUED,
         command(fixture.store, baseline.threadId(), userCommand).state());
-    // 零 Thread mutation：seedCommand 的 reserveCommandSequences 已 +1，失败的校验没有再次改变 revision / head。
-    assertEquals(1L, thread(fixture.store, baseline.threadId()).revision());
+    // 零 Thread mutation：seedCommand 的 reserveCommandSequences 已 +1，失败的校验没有再次改变 version / head。
+    assertEquals(1L, thread(fixture.store, baseline.threadId()).version());
     assertEquals(baseline.rootEntryId(), thread(fixture.store, baseline.threadId()).headEntryId());
     // 零 Invocation mutation：candidate TURN_START 下不存在任何 ModelInvocation。
     UUID candidateTurnStartIdUuid = fixture.resolver.lastPath.entries().get(1).id();

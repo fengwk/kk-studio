@@ -49,7 +49,7 @@ class ToolProcessorAdmissionTest {
     return fixture;
   }
 
-  /** Started：markRunning + revision+1，保留本地 execution 与 heartbeat。 */
+  /** Started：markRunning + version+1，保留本地 execution 与 heartbeat。 */
   @Test
   void startedMarksRunningAndKeepsLocalExecution() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
@@ -66,7 +66,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(ToolInvocationStatus.RUNNING, tool.status());
     assertEquals(1, tool.attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(1, fixture.gateway.startCalls);
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
     assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
@@ -103,7 +103,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(1, tool.attempt());
     assertEquals(1, fixture.sink.events.size());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -112,7 +112,7 @@ class ToolProcessorAdmissionTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** Busy：DISPATCHING -&gt; READY + revision+1，按 retryAfter reschedule，attempt 不变。 */
+  /** Busy：DISPATCHING -&gt; READY + version+1，按 retryAfter reschedule，attempt 不变。 */
   @Test
   void busyBouncesToReadyWithoutAdvancingAttempt() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
@@ -128,7 +128,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(ToolInvocationStatus.READY, tool.status());
     assertEquals(0, tool.attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertNotNull(toolWork);
     assertEquals(ToolProcessorTestSupport.NOW.plusSeconds(5), toolWork.availableAt());
@@ -180,10 +180,10 @@ class ToolProcessorAdmissionTest {
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
         toolWork.availableAt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
-  /** Rejected：rejectDispatch FAILED + revision+1 + THREAD wake + complete TOOL Work，attempt 不变。 */
+  /** Rejected：rejectDispatch FAILED + version+1 + THREAD wake + complete TOOL Work，attempt 不变。 */
   @Test
   void rejectedFailsInvocationAndWakesThread() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
@@ -201,7 +201,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(0, tool.attempt());
     assertEquals(error, tool.error());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -228,7 +228,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(1, tool.attempt());
     assertEquals(error, tool.error());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -253,7 +253,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(1, tool.attempt());
     assertEquals("GATEWAY_UNKNOWN", tool.error().kind());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
   }
 
@@ -275,7 +275,7 @@ class ToolProcessorAdmissionTest {
         ToolInvocationStatus.DISPATCHING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -297,7 +297,7 @@ class ToolProcessorAdmissionTest {
         ToolInvocationStatus.DISPATCHING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** Rejected 且期间 ownership 丢失：LOST_OWNERSHIP。 */
@@ -447,8 +447,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixtureA.store, fixtureA.toolInvocationId).attempt());
     assertEquals(
-        2,
-        ToolProcessorTestSupport.thread(fixtureA.store, fixtureA.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixtureA.store, fixtureA.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixtureA.store, fixtureA.baseline.threadId())
@@ -491,7 +490,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(claimed.leaseUntil(), toolWork.leaseUntil());
   }
 
-  /** 成功结果经 Started 到达：partial + success 顺序发布，revision 每次 +1。 */
+  /** 成功结果经 Started 到达：partial + success 顺序发布，version 每次 +1。 */
   @Test
   void partialAndSuccessCallbacksPublishInOrder() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
@@ -513,7 +512,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(1, tool.attempt());
     assertEquals("answer", ((TextToolContent) tool.result().contents().get(0)).text());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /**
@@ -544,7 +543,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -572,7 +571,7 @@ class ToolProcessorAdmissionTest {
         ToolInvocationStatus.UNKNOWN,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /**
@@ -655,8 +654,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixtureA.store, fixtureA.toolInvocationId).attempt());
     assertEquals(
-        2,
-        ToolProcessorTestSupport.thread(fixtureA.store, fixtureA.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixtureA.store, fixtureA.baseline.threadId()).version());
   }
 
   /**
@@ -690,7 +688,7 @@ class ToolProcessorAdmissionTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /**

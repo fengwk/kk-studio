@@ -370,7 +370,7 @@ class HarnessRuntimeApprovalLockingTest {
   }
 
   /**
-   * 决策时间戳在 Thread 锁获取之后读取：store 代理在 lockThread 时把可变时钟从 T5 推进到 T6，决定与 revision bump
+   * 决策时间戳在 Thread 锁获取之后读取：store 代理在 lockThread 时把可变时钟从 T5 推进到 T6，决定与 version bump
    * 必须使用推进后的时间（锁前捕获会留下 decidedAt/updatedAt=T5）。
    */
   @Test

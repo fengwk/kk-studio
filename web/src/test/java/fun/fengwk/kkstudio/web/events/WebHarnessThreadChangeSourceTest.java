@@ -20,16 +20,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-/** web adapter 把 {@link ThreadRevisionEventSource} 的 cursor/handle 语义透传给 core 内部 wake 源。 */
+/** web adapter 把 {@link ThreadVersionEventSource} 的 cursor/handle 语义透传给 core 内部 wake 源。 */
 class WebHarnessThreadChangeSourceTest {
 
   private static final UUID THREAD_ID = new UUID(0L, 7L);
 
-  /** revision 与 resync 事件都折叠为纯 wake；释放幂等透传到底层 handle。 */
+  /** version 与 resync 事件都折叠为纯 wake；释放幂等透传到底层 handle。 */
   @Test
   void passesCursorAndHandleThroughWithPureWakeSignals() throws Exception {
-    ThreadRevisionEventSource delegate = mock(ThreadRevisionEventSource.class);
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> consumer = new AtomicReference<>();
+    ThreadVersionEventSource delegate = mock(ThreadVersionEventSource.class);
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> consumer = new AtomicReference<>();
     AtomicBoolean handleClosed = new AtomicBoolean();
     SourceSubscribed subscribed = new SourceSubscribed(42L, () -> handleClosed.set(true));
     when(delegate.subscribe(eq(THREAD_ID), any()))
@@ -47,9 +47,9 @@ class WebHarnessThreadChangeSourceTest {
     verify(delegate).subscribe(eq(THREAD_ID), any());
     assertEquals(42L, subscribed.cursor(), "subscribe cursor must pass through unchanged");
 
-    consumer.get().accept(new ThreadRevisionEventSource.Event("5", false));
-    consumer.get().accept(new ThreadRevisionEventSource.Event(null, true));
-    assertEquals(2, wakes.size(), "revision and resync events must both wake the consumer");
+    consumer.get().accept(new ThreadVersionEventSource.Event("5", false));
+    consumer.get().accept(new ThreadVersionEventSource.Event(null, true));
+    assertEquals(2, wakes.size(), "version and resync events must both wake the consumer");
 
     subscription.close();
     assertTrue(handleClosed.get(), "close must release the underlying hub handle");
@@ -62,7 +62,7 @@ class WebHarnessThreadChangeSourceTest {
   /** 委托抛未知 Thread 异常时原样传播，且不产生可释放的句柄。 */
   @Test
   void propagatesUnknownThreadAndRejectsNulls() {
-    ThreadRevisionEventSource delegate = mock(ThreadRevisionEventSource.class);
+    ThreadVersionEventSource delegate = mock(ThreadVersionEventSource.class);
     when(delegate.subscribe(eq(THREAD_ID), any()))
         .thenThrow(new IllegalArgumentException("unknown thread"));
     WebHarnessThreadChangeSource source = new WebHarnessThreadChangeSource(delegate);

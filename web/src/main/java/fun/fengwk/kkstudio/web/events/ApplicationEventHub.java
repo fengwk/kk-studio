@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 传输无关的事件通道 Hub：按资源维护本地订阅与上游生命周期，供 WebSocket 等传输层使用。
  *
- * <p>每个资源只有一组共享上游（Thread = revision source + realtime source；Canvas = version source）：首个本地
+ * <p>每个资源只有一组共享上游（Thread = version source + realtime source；Canvas = version source）：首个本地
  * 订阅建立上游，最后一个释放时关闭；重复订阅幂等由传输层保证。订阅原子返回建立瞬间的 durable cursor 作为 {@code subscribed} ack 游标——上游注册先于
  * cursor 读取，且 fan-out 与「读取 cursor + 注册订阅者」在同一把 资源锁内互斥，因此 ack cursor 之后的事件不因注册竞态丢失（cursor
  * 之前的由客户端随后拉取的 snapshot/changes 覆盖）。
@@ -44,12 +44,10 @@ final class ApplicationEventHub implements AutoCloseable {
   }
 
   /** 投递给传输层的资源信号。 */
-  sealed interface Signal permits Signal.Revision, Signal.Realtime, Signal.Version, Signal.Resync {
-    record Revision(String revision) implements Signal {}
+  sealed interface Signal permits Signal.Version, Signal.Realtime, Signal.Resync {
+    record Version(String version) implements Signal {}
 
     record Realtime(RealtimeEvent event) implements Signal {}
-
-    record Version(long version) implements Signal {}
 
     record Resync() implements Signal {}
   }
@@ -73,9 +71,9 @@ final class ApplicationEventHub implements AutoCloseable {
     void close();
   }
 
-  private final ThreadRevisionEventSource revisionSource;
+  private final ThreadVersionEventSource threadVersionSource;
   private final RealtimeEventSource realtimeSource;
-  private final CanvasVersionEventSource versionSource;
+  private final CanvasVersionEventSource canvasVersionSource;
   private final int maxBufferedSignals;
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
 
@@ -93,13 +91,13 @@ final class ApplicationEventHub implements AutoCloseable {
    * 在装配时传入）；溢出折叠为单个 {@link Signal.Resync}，保证可恢复且内存有界。
    */
   ApplicationEventHub(
-      ThreadRevisionEventSource revisionSource,
+      ThreadVersionEventSource threadVersionSource,
       RealtimeEventSource realtimeSource,
-      CanvasVersionEventSource versionSource,
+      CanvasVersionEventSource canvasVersionSource,
       int maxBufferedSignals) {
-    this.revisionSource = Objects.requireNonNull(revisionSource, "revisionSource");
+    this.threadVersionSource = Objects.requireNonNull(threadVersionSource, "threadVersionSource");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
-    this.versionSource = Objects.requireNonNull(versionSource, "versionSource");
+    this.canvasVersionSource = Objects.requireNonNull(canvasVersionSource, "canvasVersionSource");
     if (maxBufferedSignals <= 0) {
       throw new IllegalArgumentException("maxBufferedSignals must be positive");
     }
@@ -140,9 +138,9 @@ final class ApplicationEventHub implements AutoCloseable {
         } catch (RuntimeException error) {
           state.retired = true;
           resources.remove(resource, state);
-          closeQuietly(state.revisionHandle);
+          closeQuietly(state.threadVersionHandle);
           closeQuietly(state.realtimeHandle);
-          closeQuietly(state.versionHandle);
+          closeQuietly(state.canvasVersionHandle);
           throw error;
         }
         LocalSubscription subscription =
@@ -180,9 +178,9 @@ final class ApplicationEventHub implements AutoCloseable {
           }
           state.retired = true;
           resources.remove(state.key, state);
-          closeQuietly(state.revisionHandle);
+          closeQuietly(state.threadVersionHandle);
           closeQuietly(state.realtimeHandle);
-          closeQuietly(state.versionHandle);
+          closeQuietly(state.canvasVersionHandle);
           for (LocalSubscription subscription : state.subscribers) {
             subscription.markClosed();
           }
@@ -195,30 +193,30 @@ final class ApplicationEventHub implements AutoCloseable {
   private void establishUpstream(ResourceState state) {
     switch (state.key.kind()) {
       case THREAD -> {
-        SourceSubscribed revision =
-            revisionSource.subscribe(state.key.id(), event -> fanoutRevision(state, event));
-        state.revisionHandle = revision.handle();
+        SourceSubscribed version =
+            threadVersionSource.subscribe(state.key.id(), event -> fanoutVersion(state, event));
+        state.threadVersionHandle = version.handle();
         state.realtimeHandle =
             realtimeSource.subscribe(
                 state.key.id(),
                 event -> fanout(state, new Signal.Realtime(event)),
                 () -> fanout(state, new Signal.Resync()));
-        state.cursor = revision.cursor();
+        state.cursor = version.cursor();
       }
       case CANVAS -> {
         SourceSubscribed version =
-            versionSource.subscribe(state.key.id(), event -> fanoutVersion(state, event));
-        state.versionHandle = version.handle();
+            canvasVersionSource.subscribe(state.key.id(), event -> fanoutVersion(state, event));
+        state.canvasVersionHandle = version.handle();
         state.cursor = version.cursor();
       }
     }
   }
 
-  private void fanoutRevision(ResourceState state, ThreadRevisionEventSource.Event event) {
+  private void fanoutVersion(ResourceState state, ThreadVersionEventSource.Event event) {
     if (event.resync()) {
       fanout(state, new Signal.Resync());
     } else {
-      fanout(state, new Signal.Revision(event.revision()));
+      fanout(state, new Signal.Version(event.version()));
     }
   }
 
@@ -226,7 +224,7 @@ final class ApplicationEventHub implements AutoCloseable {
     if (event.resync()) {
       fanout(state, new Signal.Resync());
     } else {
-      fanout(state, new Signal.Version(event.version()));
+      fanout(state, new Signal.Version(Long.toString(event.version())));
     }
   }
 
@@ -277,9 +275,9 @@ final class ApplicationEventHub implements AutoCloseable {
         state.retired = true;
         // 先移除 map entry 再关闭上游：并发 subscribe 只能取得全新状态，不会复用正在退役的旧状态。
         resources.remove(subscription.resource, state);
-        closeQuietly(state.revisionHandle);
+        closeQuietly(state.threadVersionHandle);
         closeQuietly(state.realtimeHandle);
-        closeQuietly(state.versionHandle);
+        closeQuietly(state.canvasVersionHandle);
       }
     }
   }
@@ -299,9 +297,9 @@ final class ApplicationEventHub implements AutoCloseable {
     private final ResourceKey key;
     private final Set<LocalSubscription> subscribers = new HashSet<>();
     private final List<Signal> early = new ArrayList<>();
-    private AutoCloseable revisionHandle;
+    private AutoCloseable threadVersionHandle;
     private AutoCloseable realtimeHandle;
-    private AutoCloseable versionHandle;
+    private AutoCloseable canvasVersionHandle;
     private long cursor;
 
     /** 已淘汰（最后释放/建立失败/hub close）：上游回调一律丢弃；只在状态锁内读写。 */
@@ -380,14 +378,10 @@ final class ApplicationEventHub implements AutoCloseable {
       }
     }
 
-    /** 投递信号；revision/version 信号过滤掉不晚于 ack cursor 的陈旧值。 */
+    /** 投递信号；version 信号过滤掉不晚于 ack cursor 的陈旧值。 */
     private void deliver(Signal signal) {
-      if (signal instanceof Signal.Revision revision) {
-        if (Long.parseLong(revision.revision()) <= cursor) {
-          return;
-        }
-      } else if (signal instanceof Signal.Version version) {
-        if (version.version() <= cursor) {
+      if (signal instanceof Signal.Version version) {
+        if (Long.parseLong(version.version()) <= cursor) {
           return;
         }
       }

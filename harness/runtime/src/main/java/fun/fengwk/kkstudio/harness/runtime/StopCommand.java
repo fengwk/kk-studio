@@ -10,13 +10,13 @@ import java.util.UUID;
  * TURN_END 引用的 TURN_START 的 {@code ownerThreadId} 界定作用域（Session 级查找）：同一 raw id 可在不同 Thread 上
  * 独立使用，绝不在 Thread 之间产生别名冲突。
  */
-public record StopCommand(UUID threadId, UUID stopRequestId, long expectedRevision) {
+public record StopCommand(UUID threadId, UUID stopRequestId, long expectedVersion) {
 
   public StopCommand {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(stopRequestId, "stopRequestId");
-    if (expectedRevision < 0) {
-      throw new IllegalArgumentException("expectedRevision must not be negative");
+    if (expectedVersion < 0) {
+      throw new IllegalArgumentException("expectedVersion must not be negative");
     }
   }
 }

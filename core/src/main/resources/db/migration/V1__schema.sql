@@ -14,9 +14,9 @@
 -- `harness/runtime-spring/.../postgresql/harness-runtime-schema.sql` and must
 -- stay byte-identical to that file (guarded by an architecture test).
 -- HarnessRuntime owns every execution id via the injected Supplier<UUID>
--- (production: UUID::randomUUID) and owns `revision`; the database never
+-- (production: UUID::randomUUID) and owns `version`; the database never
 -- mutates them. The only V1 additions around it are the application business
--- tables and the thread revision NOTIFY hint trigger (section 4).
+-- tables and the thread version NOTIFY hint trigger (section 4).
 --
 -- Canvas is fully UUID: every Canvas-generated id is allocated by the
 -- application (client for node/group/request/command ids, server for
@@ -386,7 +386,7 @@ comment on column system_setting.updated_at is '最后更新时间（毫秒精�
 
 insert into system_setting (id, config) values (
     1,
-    '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"canvasFunctionExecutorCoreSize":2,"canvasFunctionExecutorMaxSize":4,"canvasFunctionExecutorQueueCapacity":64,"canvasRealtimeMaxLength":5000,"dispatcherLeaseDurationMillis":30000,"dispatcherMaxDispatchTasks":64,"dispatcherPollIntervalMillis":1000,"dispatcherRejectionDelayMillis":1000,"dispatcherWorkerConcurrency":16,"dispatcherWorkerQueueCapacity":64,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"redisRealtimeRetryDelayMillis":1000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionKeepRecentTokens":20000,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentIdleTimeoutMillis":0,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTurns":50},"environment":{"directoryListTimeoutMillis":10000,"heartbeatTimeoutMillis":60000,"maxMessageBytes":16777216,"maxResourceBytes":8388608},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":"http://vps-opencli-hub:8080","connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3Enabled":false,"s3PresignDefaultExpiresSeconds":600,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":3600},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"skillLoadTimeoutMillis":30000,"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
+    '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"canvasFunctionExecutorCoreSize":2,"canvasFunctionExecutorMaxSize":4,"canvasFunctionExecutorQueueCapacity":64,"canvasRealtimeMaxLength":5000,"dispatcherLeaseDurationMillis":30000,"dispatcherMaxDispatchTasks":64,"dispatcherPollIntervalMillis":1000,"dispatcherRejectionDelayMillis":1000,"dispatcherWorkerConcurrency":16,"dispatcherWorkerQueueCapacity":64,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"redisRealtimeRetryDelayMillis":1000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionKeepRecentTokens":20000,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentIdleTimeoutMillis":0,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},"environment":{"directoryListTimeoutMillis":10000,"heartbeatTimeoutMillis":60000,"maxResourceBytes":8388608},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":"http://vps-opencli-hub:8080","connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3Enabled":false,"s3PresignDefaultExpiresSeconds":600,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":3600},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"skillLoadTimeoutMillis":30000,"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
 );
 
 ------------------------------------------------------------------------------
@@ -478,7 +478,7 @@ create table harness_thread (
     materialization_hash char(64) not null,
     yolo_enabled boolean not null,
     next_command_sequence bigint not null check (next_command_sequence >= 1),
-    revision bigint not null check (revision >= 0),
+    version bigint not null check (version >= 0),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     constraint fk_harness_thread_session foreign key (session_id)
@@ -491,14 +491,14 @@ create table harness_thread (
     constraint ck_harness_thread_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，revision 随每次对外字段变化精确 +1；session_id 与 materialization_hash 创建后不可变，head 必须与 session 同 Session';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 materialization_hash 创建后不可变，head 必须与 session 同 Session';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
 comment on column harness_thread.materialization_hash is 'NEW_SESSION/ENTRY 的服务端 64 位小写 SHA-256 materialization 身份键（创建后不可变，不对产品 DTO 暴露）';
 comment on column harness_thread.yolo_enabled is '当前 yolo 模式开关';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
-comment on column harness_thread.revision is '并发控制版本：任何对外字段变化必须 +1';
+comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';
 comment on column harness_thread.created_at is 'Thread 创建时间（毫秒精度）';
 comment on column harness_thread.updated_at is 'Thread 最后更新时间（毫秒精度），不得早于 created_at';
 
@@ -782,28 +782,28 @@ comment on column canvas_session.created_at is '归属创建时间（毫秒精�
 
 
 ------------------------------------------------------------------------------
--- 4. Thread revision NOTIFY hint
+-- 4. Thread version NOTIFY hint
 --
--- revision is owned by HarnessRuntime; PostgreSQL never bumps it. This trigger
+-- version is owned by HarnessRuntime; PostgreSQL never bumps it. This trigger
 -- is only a wake-up hint for in-process projection listeners: it notifies when
--- a Thread row is inserted or its revision column actually changed, and never
+-- a Thread row is inserted or its version column actually changed, and never
 -- mutates the row. The NOTIFY payload is the canonical UUID text of
 -- `harness_thread.id` (`new.id::text`); there are deliberately no child-table
--- revision triggers.
+-- version triggers.
 ------------------------------------------------------------------------------
 
-create or replace function harness_thread_revision_notify()
+create or replace function harness_thread_version_notify()
 returns trigger language plpgsql as $$
 begin
-    if tg_op = 'INSERT' or new.revision is distinct from old.revision then
-        perform pg_notify('harness_thread_revision', new.id::text);
+    if tg_op = 'INSERT' or new.version is distinct from old.version then
+        perform pg_notify('harness_thread_version', new.id::text);
     end if;
     return new;
 end $$;
 
-create trigger trg_harness_thread_revision_notify
-    after insert or update of revision on harness_thread
-    for each row execute function harness_thread_revision_notify();
+create trigger trg_harness_thread_version_notify
+    after insert or update of version on harness_thread
+    for each row execute function harness_thread_version_notify();
 
 ------------------------------------------------------------------------------
 -- 5. Canvas ownership, same-canvas composite FKs and version

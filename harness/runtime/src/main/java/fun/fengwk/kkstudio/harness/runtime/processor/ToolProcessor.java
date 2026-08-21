@@ -38,13 +38,13 @@ import java.util.function.BiFunction;
  *
  * <p>状态机：READY + approval null 在 ensure 完整 lease margin 后于事务外执行 {@link ToolGateway#preflight}
  * （preflight 期间由本地 heartbeat 维持 lease）；锁内 YOLO 快照为 true 时跳过 preflight 直接 Allow（不调用 evaluator /
- * gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt; beginDispatch （Thread revision 只 +1）后进入
- * admission；Ask 转 WAITING_APPROVAL（revision+1 + complete，不 request THREAD）； Deny 转
- * FAILED（revision+1 + THREAD wake + complete）；preflight 抛异常保持 READY / approval null / revision 不变，
- * 按 {@code preflightFailureDelay} reschedule。READY + completed approval 同事务 beginDispatch +
- * revision+1 后直接 admission。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING / RUNNING 旧 lease 恢复为
- * UNKNOWN（DISPATCHING 消费 proposed attempt，RUNNING 保留）+ revision+1 + THREAD wake + complete，绝不重放
- * Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump revision。
+ * gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt; beginDispatch （Thread version 只 +1）后进入
+ * admission；Ask 转 WAITING_APPROVAL（version+1 + complete，不 request THREAD）； Deny 转 FAILED（version+1
+ * + THREAD wake + complete）；preflight 抛异常保持 READY / approval null / version 不变， 按 {@code
+ * preflightFailureDelay} reschedule。READY + completed approval 同事务 beginDispatch + version+1 后直接
+ * admission。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING / RUNNING 旧 lease 恢复为
+ * UNKNOWN（DISPATCHING 消费 proposed attempt，RUNNING 保留）+ version+1 + THREAD wake + complete，绝不重放
+ * Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump version。
  *
  * <p>admission 与回调并发协议与 {@link ModelProcessor} 一致：claimOwned Work-only 前置校验 -&gt; per-invocation
  * guard -&gt; registry；Started 后 handle 先安全 attach 再短事务校验 lease + DISPATCHING + proposed attempt 后
@@ -177,7 +177,7 @@ public final class ToolProcessor implements AutoCloseable {
     return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim, now).isEmpty()));
   }
 
-  /** 按锁序 Thread -&gt; Model -&gt; Tool -&gt; Work 读取并分支当前 durable 状态；不重放、不重复 bump revision。 */
+  /** 按锁序 Thread -&gt; Model -&gt; Tool -&gt; Work 读取并分支当前 durable 状态；不重放、不重复 bump version。 */
   private Prepare prepare(HarnessStore.Transaction tx, ClaimedWork claim) {
     Instant now = clock.instant();
     UUID invocationId = claim.target().id();
@@ -211,7 +211,7 @@ public final class ToolProcessor implements AutoCloseable {
 
   /**
    * READY：approval null 走 preflight（ensure 完整 lease margin 后事务外执行，期间 heartbeat 维持 lease）；completed
-   * approval 同事务 beginDispatch + revision+1 后直接 admission。
+   * approval 同事务 beginDispatch + version+1 后直接 admission。
    *
    * <p>YOLO 决策在锁内完成：锁 Thread 后读取的 {@code yoloEnabled} 为 true 时直接返回 {@link Prepare.Allowed}（一次
    * preflight 只做一次控制决定，不调用 gateway / evaluator，后续切换不追溯已完成的 admission）；false 才走普通 gateway preflight。
@@ -239,11 +239,11 @@ public final class ToolProcessor implements AutoCloseable {
       return new Prepare.Preflight(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
     }
     tx.updateToolInvocations(List.of(tool.beginDispatch(now)));
-    tx.updateThread(thread.touchRevision(now));
+    tx.updateThread(thread.touchVersion(now));
     return new Prepare.Dispatched(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
   }
 
-  /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump revision、不 request THREAD。 */
+  /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump version、不 request THREAD。 */
   private Prepare waitingApproval(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       return new Prepare.Lost();
@@ -267,14 +267,14 @@ public final class ToolProcessor implements AutoCloseable {
         new ToolInvocationError(
             "LEASE_EXPIRED", "tool work lease expired; tool outcome cannot be confirmed");
     tx.updateToolInvocations(List.of(tool.unknown(error, now)));
-    tx.updateThread(thread.touchRevision(now));
+    tx.updateThread(thread.touchVersion(now));
     tx.completeWork(claim, now);
     return new Prepare.Terminated();
   }
 
   /**
    * terminal 行：始终确保 THREAD Work 请求（outcome 尚未物化才可能有 terminal 行），然后 complete TOOL Work；不重复 bump
-   * revision。
+   * version。
    */
   private Prepare cleanupTerminal(
       HarnessStore.Transaction tx,
@@ -294,7 +294,7 @@ public final class ToolProcessor implements AutoCloseable {
   /**
    * 事务外 preflight：先建本地 execution 并启动 heartbeat（preflight 期间维持 lease，且 close / cancel 可中止），再调用
    * {@link ToolGateway#preflight}。preflight 抛异常 / 返回 null（确定无副作用）时保持 READY / approval null /
-   * revision 不变，按配置延迟 reschedule；所有结果提交前二次校验 claim + READY + attempt + approval null，lost 完整 no-op。
+   * version 不变，按配置延迟 reschedule；所有结果提交前二次校验 claim + READY + attempt + approval null，lost 完整 no-op。
    */
   private ProcessResult preflight(ClaimedWork claim, Prepare.Preflight preflight) {
     UUID invocationId = claim.target().id();
@@ -370,7 +370,7 @@ public final class ToolProcessor implements AutoCloseable {
 
   /**
    * Allow（含 YOLO 直接 Allow）：在同一短事务把 READY / null approval 顺序转换 markApprovalNotRequired -&gt;
-   * beginDispatch （Store 允许同 tx 连续 update），Thread revision 只 +1；然后进入 admission。二次校验失败（lost /
+   * beginDispatch （Store 允许同 tx 连续 update），Thread version 只 +1；然后进入 admission。二次校验失败（lost /
    * 状态被并发改写）完整 no-op。
    *
    * <p>{@code execution} 为 null 表示 YOLO 直接 Allow 路径（未创建事务外 preflight execution）：admission 段在 {@link
@@ -404,7 +404,7 @@ public final class ToolProcessor implements AutoCloseable {
                   ToolInvocation approved = tool.markApprovalNotRequired(now);
                   tx.updateToolInvocations(List.of(approved));
                   tx.updateToolInvocations(List.of(approved.beginDispatch(now)));
-                  tx.updateThread(thread.touchRevision(now));
+                  tx.updateThread(thread.touchVersion(now));
                   return true;
                 }));
     if (!dispatched) {
@@ -418,8 +418,7 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * Ask：READY -&gt; WAITING_APPROVAL(request reason)，revision+1，complete TOOL Work；不 request
-   * THREAD。
+   * Ask：READY -&gt; WAITING_APPROVAL(request reason)，version+1，complete TOOL Work；不 request THREAD。
    */
   private ProcessResult applyPreflightAsk(
       ClaimedWork claim, Prepare.Preflight preflight, ToolExecution execution, String reason) {
@@ -442,7 +441,7 @@ public final class ToolProcessor implements AutoCloseable {
                     return false;
                   }
                   tx.updateToolInvocations(List.of(tool.requestApproval(reason, now)));
-                  tx.updateThread(thread.touchRevision(now));
+                  tx.updateThread(thread.touchVersion(now));
                   tx.completeWork(claim, now);
                   return true;
                 }));
@@ -450,7 +449,7 @@ public final class ToolProcessor implements AutoCloseable {
     return committed ? ProcessResult.TERMINATED : ProcessResult.LOST_OWNERSHIP;
   }
 
-  /** Deny：READY -&gt; FAILED(error)，revision+1，request THREAD Work，complete。 */
+  /** Deny：READY -&gt; FAILED(error)，version+1，request THREAD Work，complete。 */
   private ProcessResult applyPreflightDeny(
       ClaimedWork claim,
       Prepare.Preflight preflight,
@@ -482,7 +481,7 @@ public final class ToolProcessor implements AutoCloseable {
                       throw new ClaimLostSignal();
                     }
                     tx.updateToolInvocations(List.of(tool.fail(error, now)));
-                    tx.updateThread(thread.touchRevision(now));
+                    tx.updateThread(thread.touchVersion(now));
                     tx.completeWork(claim, now);
                     return true;
                   }));
@@ -494,7 +493,7 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * preflight 失败（抛异常 / null）：二次校验 claim + READY + attempt + approval null 后仅 reschedule，无 revision。
+   * preflight 失败（抛异常 / null）：二次校验 claim + READY + attempt + approval null 后仅 reschedule，无 version。
    */
   private boolean reschedulePreflight(
       ClaimedWork claim, Prepare.Preflight preflight, Duration delay) {
@@ -665,7 +664,7 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * admission 肯定未开始（Busy / Overloaded / 异常）：DISPATCHING -&gt; READY + revision+1 + 按延迟 reschedule
+   * admission 肯定未开始（Busy / Overloaded / 异常）：DISPATCHING -&gt; READY + version+1 + 按延迟 reschedule
    * TOOL Work（attempt 不变）。
    */
   private boolean bounceDispatch(ClaimedWork claim, Prepare.Dispatched dispatched, Duration delay) {
@@ -686,14 +685,14 @@ public final class ToolProcessor implements AutoCloseable {
                 return false;
               }
               tx.updateToolInvocations(List.of(tool.dispatchBusy(now)));
-              tx.updateThread(thread.touchRevision(now));
+              tx.updateThread(thread.touchVersion(now));
               tx.rescheduleWork(claim, now, now.plus(delay));
               return true;
             }));
   }
 
   /**
-   * admission 明确拒绝：rejectDispatch FAILED + revision+1 + 请求 THREAD Work + complete TOOL Work（attempt
+   * admission 明确拒绝：rejectDispatch FAILED + version+1 + 请求 THREAD Work + complete TOOL Work（attempt
    * 不变）。
    */
   private boolean rejectDispatch(
@@ -701,7 +700,7 @@ public final class ToolProcessor implements AutoCloseable {
     return terminalDispatch(claim, dispatched, (tool, now) -> tool.rejectDispatch(error, now));
   }
 
-  /** admission 不确定：unknown UNKNOWN（attempt+1）+ revision+1 + 请求 THREAD Work + complete TOOL Work。 */
+  /** admission 不确定：unknown UNKNOWN（attempt+1）+ version+1 + 请求 THREAD Work + complete TOOL Work。 */
   private boolean unknownDispatch(
       ClaimedWork claim, Prepare.Dispatched dispatched, ToolInvocationError error) {
     return terminalDispatch(claim, dispatched, (tool, now) -> tool.unknown(error, now));
@@ -733,7 +732,7 @@ public final class ToolProcessor implements AutoCloseable {
                   throw new ClaimLostSignal();
                 }
                 tx.updateToolInvocations(List.of(transition.apply(tool, now)));
-                tx.updateThread(thread.touchRevision(now));
+                tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim, now);
                 return true;
               }));

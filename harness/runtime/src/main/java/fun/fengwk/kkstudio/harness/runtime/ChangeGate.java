@@ -10,13 +10,13 @@ package fun.fengwk.kkstudio.harness.runtime;
  */
 public final class ChangeGate {
 
-  private long revision;
+  private long version;
   private long descendants;
   private long cancel;
 
-  /** durable revision / resync 唤醒。 */
-  public synchronized void revision() {
-    revision++;
+  /** durable version / resync 唤醒。 */
+  public synchronized void version() {
+    version++;
     notifyAll();
   }
 
@@ -33,7 +33,7 @@ public final class ChangeGate {
   }
 
   public synchronized State snapshot() {
-    return new State(revision, descendants, cancel);
+    return new State(version, descendants, cancel);
   }
 
   /**
@@ -62,8 +62,8 @@ public final class ChangeGate {
   }
 
   private boolean changed(State since) {
-    return revision != since.revision || descendants != since.descendants || cancel != since.cancel;
+    return version != since.version || descendants != since.descendants || cancel != since.cancel;
   }
 
-  public record State(long revision, long descendants, long cancel) {}
+  public record State(long version, long descendants, long cancel) {}
 }

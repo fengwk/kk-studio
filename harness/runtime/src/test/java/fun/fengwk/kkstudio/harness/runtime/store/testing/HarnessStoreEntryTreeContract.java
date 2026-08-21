@@ -332,7 +332,7 @@ public abstract class HarnessStoreEntryTreeContract {
                   locked.headEntryId(),
                   true,
                   3,
-                  locked.revision() + 1,
+                  locked.version() + 1,
                   locked.createdAt(),
                   T2));
         });
@@ -340,7 +340,7 @@ public abstract class HarnessStoreEntryTreeContract {
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertTrue(committed.yoloEnabled());
     assertEquals(3L, committed.nextCommandSequence());
-    assertEquals(1L, committed.revision());
+    assertEquals(1L, committed.version());
     assertEquals(T2, committed.updatedAt());
   }
 
@@ -361,7 +361,7 @@ public abstract class HarnessStoreEntryTreeContract {
                           locked.headEntryId(),
                           locked.yoloEnabled(),
                           locked.nextCommandSequence(),
-                          locked.revision(),
+                          locked.version(),
                           T1,
                           T2));
                 }));
@@ -383,7 +383,7 @@ public abstract class HarnessStoreEntryTreeContract {
                       inserted.headEntryId(),
                       true,
                       inserted.nextCommandSequence(),
-                      inserted.revision() + 1,
+                      inserted.version() + 1,
                       inserted.createdAt(),
                       T2));
               return id;

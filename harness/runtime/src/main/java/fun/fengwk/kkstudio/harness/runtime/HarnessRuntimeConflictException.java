@@ -24,8 +24,8 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
 
   /** Harness control plane 冲突分类的封闭集合。 */
   public enum Reason {
-    /** 受 revision 守护的 control 请求与当前 Thread revision 不匹配。 */
-    STALE_REVISION,
+    /** 受 version 守护的 control 请求与当前 Thread version 不匹配。 */
+    STALE_VERSION,
     /** 新 command batch 所期望的 head/next-command-sequence 游标已过期。 */
     STALE_COMMAND_CURSOR,
     /** Ordered replay：已存在的 clientCommandId 携带了不同的 payload。 */

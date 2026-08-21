@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * getThreadSessionEntries：返回 Session 全树（含非当前 head 的历史分支），且不改变 snapshot 的 root-to-head 投影与 revision。
+ * getThreadSessionEntries：返回 Session 全树（含非当前 head 的历史分支），且不改变 snapshot 的 root-to-head 投影与 version。
  */
 class HarnessRuntimeSessionEntriesTest {
 
@@ -78,7 +78,7 @@ class HarnessRuntimeSessionEntriesTest {
         entries.stream().map(Entry::id).toList());
     assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
     assertEquals(
-        1L, store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow()).revision());
+        1L, store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow()).version());
   }
 
   @Test
@@ -88,11 +88,11 @@ class HarnessRuntimeSessionEntriesTest {
   }
 
   @Test
-  void sessionEntryQueryDoesNotBumpRevision() {
+  void sessionEntryQueryDoesNotBumpVersion() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     runtime.getSessionEntries(baseline.sessionId());
     runtime.getSessionEntries(baseline.sessionId());
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertEquals(0L, thread.revision());
+    assertEquals(0L, thread.version());
   }
 }

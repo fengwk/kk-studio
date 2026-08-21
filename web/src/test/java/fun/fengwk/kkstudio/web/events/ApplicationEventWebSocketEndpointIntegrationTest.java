@@ -147,7 +147,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     assertEquals(202, threadResponse.statusCode(), threadResponse.body());
     JsonNode created = MAPPER.readTree(threadResponse.body()).path("data");
     assertEquals(threadId, created.path("thread").path("threadId").asText());
-    String revision = created.path("thread").path("revision").asText();
+    String version = created.path("thread").path("version").asText();
 
     FrameCollector collector = new FrameCollector();
     WebSocket socket = connect(collector);
@@ -163,7 +163,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
         "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + threadId
             + "\"},\"cursor\":\""
-            + revision
+            + version
             + "\"}",
         collector.nextText());
     socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);

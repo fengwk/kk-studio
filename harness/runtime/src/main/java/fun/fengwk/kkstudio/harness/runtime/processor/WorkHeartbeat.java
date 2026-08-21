@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 单个 claim 的进程内 lease heartbeat（后续 Thread / Tool processor 复用）。
  *
- * <p>只 renew 当前 Work 的 lease，不触碰 Thread / Invocation / revision；任何 renew 失败（行删除 / token 不匹配 / lease
+ * <p>只 renew 当前 Work 的 lease，不触碰 Thread / Invocation / version；任何 renew 失败（行删除 / token 不匹配 / lease
  * 过期）都视为 lost ownership：停止 heartbeat 并通知 owner 立即关闭本地执行。
  *
  * <p>线程安全：{@link #start} 最多成功一次，{@link #stop} 与 {@link #start} 在同一个锁内交错，stop 先于 start 时 start

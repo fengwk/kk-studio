@@ -37,23 +37,23 @@ public class ApplicationEventConfiguration {
   }
 
   /**
-   * 内部观察者（TaskTool / HarnessOneShotService）的 Thread change 源：复用 {@link ThreadRevisionEventSource}
+   * 内部观察者（TaskTool / HarnessOneShotService）的 Thread change 源：复用 {@link ThreadVersionEventSource}
    * 的原子订阅与 resync 语义，只保留纯 wake 信号。
    */
   @Bean
   public HarnessThreadChangeSource harnessThreadChangeSource(
-      ThreadRevisionEventSource revisionSource) {
-    return new WebHarnessThreadChangeSource(revisionSource);
+      ThreadVersionEventSource versionSource) {
+    return new WebHarnessThreadChangeSource(versionSource);
   }
 
   @Bean(destroyMethod = "close")
   public ApplicationEventHub applicationEventHub(
-      ThreadRevisionEventSource revisionSource,
+      ThreadVersionEventSource threadVersionSource,
       RealtimeEventSource realtimeSource,
-      CanvasVersionEventSource versionSource,
+      CanvasVersionEventSource canvasVersionSource,
       ApplicationEventSettings settings) {
     return new ApplicationEventHub(
-        revisionSource, realtimeSource, versionSource, settings.queueCapacity());
+        threadVersionSource, realtimeSource, canvasVersionSource, settings.queueCapacity());
   }
 
   /** 全应用事件连接共享一个 heartbeat scheduler；每次 tick 只做异步发送队列入队。 */

@@ -7,17 +7,17 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 把 web 的 {@link ThreadRevisionEventSource}（PostgreSQL LISTEN fan-out）适配为 core 内部 {@link
+ * 把 web 的 {@link ThreadVersionEventSource}（PostgreSQL LISTEN fan-out）适配为 core 内部 {@link
  * HarnessThreadChangeSource}。
  *
- * <p>直接透传既有「先注册再读 cursor、断线 resync」语义：本适配只把带 payload 的 revision 事件折叠为纯 wake 信号，自身不维护第二套
+ * <p>直接透传既有「先注册再读 cursor、断线 resync」语义：本适配只把带 payload 的 version 事件折叠为纯 wake 信号，自身不维护第二套
  * LISTEN/订阅状态。返回句柄的 {@code close()} 幂等透传到底层 {@link SourceSubscribed#handle()}。
  */
 final class WebHarnessThreadChangeSource implements HarnessThreadChangeSource {
 
-  private final ThreadRevisionEventSource delegate;
+  private final ThreadVersionEventSource delegate;
 
-  WebHarnessThreadChangeSource(ThreadRevisionEventSource delegate) {
+  WebHarnessThreadChangeSource(ThreadVersionEventSource delegate) {
     this.delegate = Objects.requireNonNull(delegate, "delegate");
   }
 

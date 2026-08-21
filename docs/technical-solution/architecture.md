@@ -104,7 +104,7 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 | Pane | 浏览器 `localStorage` 中的八个固定槽位、布局、焦点和每个槽位的 `PaneTarget`（NEW_SESSION_DRAFT / ENTRY_DRAFT / BOUND_THREAD 三态） |
 | Session | 一棵 append-only Entry Tree 的边界；只在第一批 Command 被原子接受时创建 |
 | Entry | 对话与运行审计事实，只允许十种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
-| HarnessThread | durable 字段为 `sessionId`、`headEntryId`、`materializationHash`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Environment/status 由 head Entry 分支派生 |
+| HarnessThread | durable 字段为 `sessionId`、`headEntryId`、`materializationHash`、`yoloEnabled`、`nextCommandSequence`、`version` 与时间；Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，只允许六类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)）；YOLO 是 Thread 直接控制面 |
 | ModelInvocation | 一次持久化 `basisHeadEntryId + compact ModelRequestSpec`（providerType/model/variant/preamble/toolBindings/skillBindings/subagentBindings/cacheControl；无 messages/tools/YOLO/contextWindow/compaction metadata）的 Provider 执行及其状态、attempt-local checkpoint、连续 `failedAttempts` 与 terminal 事实；完整 ProviderRequest 每次 attempt 由 Materializer 从 EntryPath + spec 内存重建，压缩身份由 basis EntryPath 末尾的 `TURN_START.compaction` 表达 |
 | ToolInvocation | 一次 ToolCall（`call` + 可空 `binding`）的 approval、状态、结果与 `effects`；插件 provenance/access 随 binding 冻结，unknown tool 槽位 binding 为 null，非空 effects 只允许出现在 `SUCCEEDED` 且 terminal immutable |
@@ -117,7 +117,7 @@ Session、Environment、status 与 branch settings 都从 head Entry 分支派�
 
 ## 5. 创建、发送与执行
 
-`POST /api/ai/runtime/command-batches` 是唯一产品写入口：一个事务内原子接受 owner + target + commands，并在 NEW_SESSION/ENTRY 时创建 Session（唯一 ROOT，携带完整 `BranchSettings`）、head 指向 ROOT/startEntry 的 Thread（`nextCommandSequence=1`、`revision=0`）、owner relation、Commands 与 Work。Session/Thread materialization 只发生在首批 Command 被接受时；`/tree` 选择 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零写入）。
+`POST /api/ai/runtime/command-batches` 是唯一产品写入口：一个事务内原子接受 owner + target + commands，并在 NEW_SESSION/ENTRY 时创建 Session（唯一 ROOT，携带完整 `BranchSettings`）、head 指向 ROOT/startEntry 的 Thread（`nextCommandSequence=1`、`version=0`）、owner relation、Commands 与 Work。Session/Thread materialization 只发生在首批 Command 被接受时；`/tree` 选择 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零写入）。
 
 发送路径如下：
 
@@ -137,7 +137,7 @@ ENTRY_DRAFT / Bound Thread 的每次发送:
   -> TURN_END(COMPLETED, continueModel=true) -> continuation，直到 Model 无 ToolCall
 ```
 
-`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 command acceptance/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread revision、维护 Work，并发布 realtime overlay。Model terminal apply 与 Stop 会先把普通 invocation 的 `failedAttempts` 物化为透明 `MODEL_ATTEMPT_FAILURE` Entry，再写唯一 Assistant 结果。插件 Tool terminal success 先由 `CoreToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
+`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 command acceptance/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread version、维护 Work，并发布 realtime overlay。Model terminal apply 与 Stop 会先把普通 invocation 的 `failedAttempts` 物化为透明 `MODEL_ATTEMPT_FAILURE` Entry，再写唯一 Assistant 结果。插件 Tool terminal success 先由 `CoreToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
 
 ## 6. Canvas
 
@@ -160,7 +160,7 @@ command/function 状态变化才前进 +1；Harness command acceptance 不前移
 PostgreSQL 是唯一 durable truth，`harness_work` 是 Harness 唯一调度 mailbox（NOTIFY 只是可用性
 提示）。Harness Redis Streams 只保存有界 realtime overlay；浏览器先读取 REST snapshot，再经应用
 事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）
-订阅 durable `revision` 与 realtime delta。
+订阅 durable `version` 与 realtime delta。
 
 Canvas 使用同一原则：PostgreSQL 实体与 `canvas_document.version` 是事实源，Redis Stream 只保存事务
 提交后的 bounded Patch Cache，PostgreSQL `NOTIFY canvas_version` 只唤醒事件通道的 version source。`/changes` 仅在
@@ -172,7 +172,7 @@ cache 覆盖连续版本时返回 Patch；任何 gap、损坏或 Redis 不可用
 
 - 子 Thread ROOT payload 携带可选 `subagentContext {parentThreadId, rootThreadId, taskInvocationId, depth}`；`task` 的 id/session_id 是子 ThreadId（canonical UUID）。
 - 委派权限在父 ModelRequestSpec 冻结为 `subagentBindings`（Agent 名称 + 描述 allowlist）；执行绝不重读父 Agent 配置扩权。子 Agent branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且未达最大深度时 task`）。
-- 运行期控制全部是配置（`SubagentConfig`）：`maxDepth`、每父/每根并发上限、idle 超时、`maxTurns` 软预算；观察完全事件驱动（`ChangeGate.awaitChange` 等 revision wake 到达才读 snapshot，无固定轮询）；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth。恢复（`session_id`）要求同 parent/root 归属且子 Thread quiescent；Stop/取消保留可恢复 Session。
+- 运行期控制全部是配置（`SubagentConfig`）：`maxDepth`、每父/每根并发上限、idle 超时、`maxTurns` 软预算；观察完全事件驱动（`ChangeGate.awaitChange` 等 version wake 到达才读 snapshot，无固定轮询）；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth。恢复（`session_id`）要求同 parent/root 归属且子 Thread quiescent；Stop/取消保留可恢复 Session。
 - 进度经非 durable Redis `TOOL_PARTIAL` 心跳（约 1s）发布完整 JSON 快照（`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）；`descendants` 是进程内 relay 的扁平活动子树状态，使根 Thread 可直接处理任意深度审批，且不参与调度或终态判定。前端整帧替换而非增量合并。最终 ToolResult 是 `<task id state>` envelope（`<task_result>` / `<task_error>`），`details.kind=task.result`。
 
 详细契约见 [harness-runtime-architecture.md](harness-runtime-architecture.md)、[harness-runtime-contracts.md](harness-runtime-contracts.md) 与 [harness-storage-runtime.md](harness-storage-runtime.md)。

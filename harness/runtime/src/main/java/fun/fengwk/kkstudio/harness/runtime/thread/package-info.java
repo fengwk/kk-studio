@@ -2,7 +2,7 @@
  * Canonical Thread domain：durable Thread state、live/historical 分类与 command mailbox。
  *
  * <p>类型对齐 PostgreSQL {@code harness_thread}。{@link ThreadState} 是目标 {@code harness_thread} 的
- * durable current state：它只保存 Thread 自身拥有的 head cursor、YOLO policy、Command sequence 与对外 revision，不复制
+ * durable current state：它只保存 Thread 自身拥有的 head cursor、YOLO policy、Command sequence 与对外 version，不复制
  * Environment/Agent/Model 等 Entry branch facts，也不保存 status、open turn、epoch 或 processor lease。
  *
  * <p>{@link ThreadContext} 与 {@link ThreadContextClassifier} 是纯、非持久化的 Thread live/historical

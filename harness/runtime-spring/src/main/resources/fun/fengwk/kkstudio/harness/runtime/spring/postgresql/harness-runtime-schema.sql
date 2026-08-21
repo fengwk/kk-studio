@@ -74,7 +74,7 @@ create table harness_thread (
     materialization_hash char(64) not null,
     yolo_enabled boolean not null,
     next_command_sequence bigint not null check (next_command_sequence >= 1),
-    revision bigint not null check (revision >= 0),
+    version bigint not null check (version >= 0),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     constraint fk_harness_thread_session foreign key (session_id)
@@ -87,14 +87,14 @@ create table harness_thread (
     constraint ck_harness_thread_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，revision 随每次对外字段变化精确 +1；session_id 与 materialization_hash 创建后不可变，head 必须与 session 同 Session';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 materialization_hash 创建后不可变，head 必须与 session 同 Session';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
 comment on column harness_thread.materialization_hash is 'NEW_SESSION/ENTRY 的服务端 64 位小写 SHA-256 materialization 身份键（创建后不可变，不对产品 DTO 暴露）';
 comment on column harness_thread.yolo_enabled is '当前 yolo 模式开关';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
-comment on column harness_thread.revision is '并发控制版本：任何对外字段变化必须 +1';
+comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';
 comment on column harness_thread.created_at is 'Thread 创建时间（毫秒精度）';
 comment on column harness_thread.updated_at is 'Thread 最后更新时间（毫秒精度），不得早于 created_at';
 

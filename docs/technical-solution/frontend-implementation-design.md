@@ -12,7 +12,7 @@
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
 | Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `system-prompt` / `compact` / `yolo` / `stop` / `tool-invocations/{id}/approval`；`/api/ai/runtime/sessions/{sessionId}` 的 `threads` / `entries`；`/api/ai/runtime/command-batches`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
-| Realtime | REST snapshot first；应用事件 WebSocket（durable `revision`/`resync` + 无 cursor 的 Redis realtime overlay） |
+| Realtime | REST snapshot first；应用事件 WebSocket（durable `version`/`resync` + 无 cursor 的 Redis realtime overlay） |
 | 浏览器路由 | `BrowserRouter`，服务端对 SPA 路径回退 `index.html` |
 | 视觉规范 | [前端设计规范](../product-design/frontend-design-system.md) |
 
@@ -76,7 +76,7 @@ SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
            SET_ACTIVE_TOOLS）
 + USER_MESSAGE（不携带 role）
 ```
-YOLO 是直接控制面（`PUT /yolo`，基于 snapshot revision 的 CAS）：Bound pane 选择 YOLO 时
+YOLO 是直接控制面（`PUT /yolo`，基于 snapshot version 的 CAS）：Bound pane 选择 YOLO 时
 乐观更新 draft 并立即 PUT，成功只对齐 base+draft 的 yolo、失败回滚并暴露错误；绝不进入命令 batch。
 
 - batch 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 来自最新 snapshot Thread DTO（THREAD target）。
@@ -233,8 +233,8 @@ mainView?.debug ?? ThreadConversationView   # 互斥：任一时刻只有一个�
 ## 8. Approval / Stop 身份
 
 - **Approval**：同一 `(invocationId, decision)` 复用同一 `decisionId`；切换 ALLOW↔DENY mint 新 ID；输入 `ALLOW`/`DENY`，durable 值 `ALLOWED`/`DENIED`；成功后 invalidate snapshot + chats。
-- **Stop**：完整 `PendingStopOperation {stopRequestId, expectedRevision, basisHeadEntryId, basisRevision}` 以 per-Thread local sidecar 保存。重试发送**完全相同** body（同 ID + 原始 expectedRevision，绝不从新 snapshot 重推导）；成功/已知 409/basis 变化时清空，网络失败或强制 rebind 保留并暴露 `stopReplayPending`。HTTP 成功结果的 ordered `cancelledUserMessages {sequence,clientCommandId,messageJson}` 被转为 TEXT/RESOURCE parts，消息之间及恢复前缀与当前草稿之间固定插入两个换行；同一 stopRequestId 最多应用一次。RESOURCE 重新提交时只允许目标 Session 已有 blob ref，不重复 retain。
-- **Manual Compaction**：`compactThread(threadId, {expectedRevision})` 以 snapshot 的 `revision` 为 CAS 提交 `POST /{threadId}/compact`；命令入口 `/compact` 由 `manualCompaction.available` 门控（disabledReason 展示原因）；成功后 invalidate snapshot。availability 是瞬时 advisory（每次 snapshot 现算），提交成功以 expectedRevision 守护。
+- **Stop**：完整 `PendingStopOperation {stopRequestId, expectedVersion, basisHeadEntryId, basisVersion}` 以 per-Thread local sidecar 保存。重试发送**完全相同** body（同 ID + 原始 expectedVersion，绝不从新 snapshot 重推导）；成功/已知 409/basis 变化时清空，网络失败或强制 rebind 保留并暴露 `stopReplayPending`。HTTP 成功结果的 ordered `cancelledUserMessages {sequence,clientCommandId,messageJson}` 被转为 TEXT/RESOURCE parts，消息之间及恢复前缀与当前草稿之间固定插入两个换行；同一 stopRequestId 最多应用一次。RESOURCE 重新提交时只允许目标 Session 已有 blob ref，不重复 retain。
+- **Manual Compaction**：`compactThread(threadId, {expectedVersion})` 以 snapshot 的 `version` 为 CAS 提交 `POST /{threadId}/compact`；命令入口 `/compact` 由 `manualCompaction.available` 门控（disabledReason 展示原因）；成功后 invalidate snapshot。availability 是瞬时 advisory（每次 snapshot 现算），提交成功以 expectedVersion 守护。
 
 ## 9. Snapshot-first realtime / gap / terminal / duplicate
 
@@ -242,7 +242,7 @@ mainView?.debug ?? ThreadConversationView   # 互斥：任一时刻只有一个�
 `sessions.entries(sessionId)` 仅在 `/tree` 打开时按需查询）：
 
 1. 读取 snapshot；经 `useApplicationEvents().subscribe({kind:'thread', id})` 订阅：`subscribed`
-   （首次订阅与每次重连重订阅后都会到达）、`revision`、`resync` 与资源级 `error` 都只
+   （首次订阅与每次重连重订阅后都会到达）、`version`、`resync` 与资源级 `error` 都只
    invalidate snapshot。订阅状态过渡（`subscription` 从 null 初始化、或 threadId 刚切换）**不清空**
    snapshot-seeded overlay：只有 Thread 消失或订阅真正禁用（`!threadId || !subscriptionReady`）
    才清空，因此 snapshot 首次就含 terminal-pending tool result 时，overlay 在

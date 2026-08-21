@@ -41,7 +41,7 @@ class ToolProcessorPreflightTest {
   }
 
   /**
-   * Allow：同一短事务顺序 markApprovalNotRequired -&gt; beginDispatch（Thread revision 只 +1），随后 markRunning
+   * Allow：同一短事务顺序 markApprovalNotRequired -&gt; beginDispatch（Thread version 只 +1），随后 markRunning
    * +1，preflight 收到冻结 request。
    */
   @Test
@@ -65,7 +65,7 @@ class ToolProcessorPreflightTest {
     assertNotNull(tool.approval());
     assertFalse(tool.approval().required());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(1, fixture.gateway.startCalls);
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
     assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
@@ -79,7 +79,7 @@ class ToolProcessorPreflightTest {
   }
 
   /**
-   * Ask：READY -&gt; WAITING_APPROVAL(request reason)，revision+1，complete TOOL Work；不 request
+   * Ask：READY -&gt; WAITING_APPROVAL(request reason)，version+1，complete TOOL Work；不 request
    * THREAD、不执行。
    */
   @Test
@@ -101,7 +101,7 @@ class ToolProcessorPreflightTest {
     assertEquals("needs confirmation", tool.approval().reason());
     assertEquals(0, tool.attempt());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         1,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -111,7 +111,7 @@ class ToolProcessorPreflightTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** Deny：READY -&gt; FAILED(error)，revision+1，request THREAD Work，complete。 */
+  /** Deny：READY -&gt; FAILED(error)，version+1，request THREAD Work，complete。 */
   @Test
   void denyFailsAndWakesThread() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -129,7 +129,7 @@ class ToolProcessorPreflightTest {
     assertEquals(error, tool.error());
     assertEquals(0, tool.attempt());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -140,7 +140,7 @@ class ToolProcessorPreflightTest {
   }
 
   /**
-   * preflight 抛异常（确定无执行）：保持 READY / approval null / revision 不变，按 preflightFailureDelay reschedule。
+   * preflight 抛异常（确定无执行）：保持 READY / approval null / version 不变，按 preflightFailureDelay reschedule。
    */
   @Test
   void preflightExceptionReschedulesWithoutMutation() {
@@ -158,7 +158,7 @@ class ToolProcessorPreflightTest {
     assertEquals(0, tool.attempt());
     assertNull(tool.approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertNotNull(toolWork);
     assertEquals(
@@ -190,7 +190,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
@@ -220,7 +220,7 @@ class ToolProcessorPreflightTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** READY + ALLOWED decision：同样跳过 preflight 直接 admission。 */
@@ -362,7 +362,7 @@ class ToolProcessorPreflightTest {
     assertNotNull(tool.approval());
     assertFalse(tool.approval().required());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
     assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
     assertEquals(1, fixture.gateway.executions.get(0).proposedAttempt());
@@ -377,7 +377,7 @@ class ToolProcessorPreflightTest {
     assertEquals("token-" + fixture.toolInvocationId, toolWork.leaseToken());
   }
 
-  /** YOLO=true 不改变 WAITING_APPROVAL：已进入审批的 Tool 保留原审批请求，不因打开 YOLO 自动放行（不执行、不 bump revision）。 */
+  /** YOLO=true 不改变 WAITING_APPROVAL：已进入审批的 Tool 保留原审批请求，不因打开 YOLO 自动放行（不执行、不 bump version）。 */
   @Test
   void yoloTrueLeavesWaitingApprovalUntouched() {
     ToolProcessorTestSupport.Fixture fixture =
@@ -426,7 +426,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.preflightCallsCount);
     assertEquals(0, fixture.gateway.startCalls);
     assertFalse(fixture.processor.hasActiveExecution());
@@ -472,7 +472,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
     assertFalse(fixture.processor.hasActiveExecution());
   }
@@ -563,7 +563,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
@@ -604,7 +604,7 @@ class ToolProcessorPreflightTest {
         ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** preflight 返回 null 且期间 claim 已 lost：null 分支同样二次校验失败，LOST_OWNERSHIP。 */
@@ -620,7 +620,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
   }
 
@@ -639,7 +639,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
   }
 
@@ -679,7 +679,7 @@ class ToolProcessorPreflightTest {
         ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         1,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -743,7 +743,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
@@ -802,7 +802,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
@@ -849,7 +849,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
