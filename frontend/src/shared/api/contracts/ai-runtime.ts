@@ -55,7 +55,7 @@ export interface HarnessSessionEntryDTO {
 }
 
 /**
- * HarnessThread 查询投影；id 均为 canonical UUID string，revision 是持久快照游标。
+ * HarnessThread 查询投影；id 均为 canonical UUID string，version 是持久快照游标。
  *
  * status/processing 是派生的展示字段（只有 IDLE 时 processing 才为 false）；
  * branchSettings 是 head Entry branch 的完整 settings 快照。
@@ -71,7 +71,7 @@ export interface HarnessThreadDTO {
   /** 已分配的 command sequence 高水位标记 + 1。 */
   nextCommandSequence: string
   /** PostgreSQL 权威持久投影游标（非负十进制 bigint 字符串）。 */
-  revision: string
+  version: string
   /** 展示状态（派生）：IDLE / CONTINUATION_DUE / MODEL_* / TOOL_* / APPLYING。 */
   status: string
   /** 运行时当前是否正在处理此 Thread（派生字段）。 */
@@ -131,18 +131,18 @@ export type HarnessCommandCreateDTO =
   | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environment: EnvironmentBindingDTO | null }
 
 /**
- * Thread YOLO policy 直接更新请求；expectedRevision 是精确的 revision CAS 游标
+ * Thread YOLO policy 直接更新请求；expectedVersion 是精确的 version CAS 游标
  * （同值请求在任何 CAS 之前即成功 no-op）。
  */
 export interface HarnessThreadYoloUpdateDTO {
-  expectedRevision: string
+  expectedVersion: string
   yoloEnabled: boolean
 }
 
 /** Thread 停止请求；stopRequestId 是稳定的幂等键。 */
 export interface HarnessThreadStopDTO {
   stopRequestId: string
-  expectedRevision: string
+  expectedVersion: string
 }
 
 /**
@@ -242,10 +242,10 @@ export interface ModelAttemptFailureDTO {
  * toolInvocations 是它的 tool 兄弟调用；modelAttemptFailures 只包含当前 Model context
  * 尚未物化的失败 attempt。
  * manualCompaction 是 advisory sidecar：它只表示当前快照时刻的手动压缩可用性，
- * 不是 durable Thread 状态，提交 compact 时仍必须以最新 revision 重新校验。
+ * 不是 durable Thread 状态，提交 compact 时仍必须以最新 version 重新校验。
  */
 export interface HarnessThreadSnapshotDTO {
-  revision: string
+  version: string
   thread: HarnessThreadDTO
   entries: HarnessSessionEntryDTO[]
   queuedCommands: HarnessThreadCommandDTO[]
@@ -328,7 +328,7 @@ export interface AgentCommandBatchResponseDTO {
 }
 
 export interface ManualCompactionRequestDTO {
-  expectedRevision: string
+  expectedVersion: string
 }
 
 export interface ManualCompactionResponseDTO {

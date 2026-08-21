@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentForm } from '@/features/ai/catalog/AiAgentResourceForm'
+import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
 import type {
@@ -124,7 +125,7 @@ describe('AgentForm current contracts', () => {
     // 未显式选择 Skill 目录来源时没有任何 live skill 候选。
     expect(screen.queryByLabelText(/dev/)).not.toBeInTheDocument()
     expect(screen.getByText('暂无候选 Skills')).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText(SOURCE_LABEL), 'local')
+    await chooseSelectOption(user, SOURCE_LABEL, 'local')
     expect(screen.getByLabelText(/dev/)).not.toBeChecked()
     await user.click(screen.getByLabelText(/dev/))
     expect(screen.getByLabelText(/dev/)).toBeChecked()
@@ -173,7 +174,7 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
-    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveValue('')
+    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveAttribute('data-value', '')
     expect(screen.queryByLabelText(/dev/)).not.toBeInTheDocument()
     const ghost = screen.getByLabelText(/ghost-skill/)
     expect(ghost).toBeChecked()
@@ -205,7 +206,7 @@ describe('AgentForm current contracts', () => {
       )
     }
     render(<Harness />)
-    await user.selectOptions(screen.getByLabelText(SOURCE_LABEL), 'local')
+    await chooseSelectOption(user, SOURCE_LABEL, 'local')
     expect(screen.getByLabelText(/dev/)).toBeInTheDocument()
     expect(screen.getByLabelText(/ops/)).toBeInTheDocument()
     expect(screen.queryByLabelText(/docs/)).not.toBeInTheDocument()
@@ -213,7 +214,7 @@ describe('AgentForm current contracts', () => {
     await user.click(screen.getByLabelText(/ops/))
 
     // 切换来源：只显示 remote 的 skills；同名 short name 仍是同一持久化名称，local 独有的 ops 成为可移除 orphan。
-    await user.selectOptions(screen.getByLabelText(SOURCE_LABEL), 'remote')
+    await chooseSelectOption(user, SOURCE_LABEL, 'remote')
     expect(screen.getByLabelText(/dev/)).toBeChecked()
     expect(screen.getByLabelText(/docs/)).toBeInTheDocument()
     const opsOrphan = screen.getByLabelText(/ops/)
@@ -239,10 +240,10 @@ describe('AgentForm current contracts', () => {
       />,
     )
 
-    await user.selectOptions(screen.getByLabelText(SOURCE_LABEL), 'local')
+    await chooseSelectOption(user, SOURCE_LABEL, 'local')
     expect(onChange).not.toHaveBeenCalled()
     // 回到无来源同样只动组件本地浏览状态，绝不触碰 AgentDraft。
-    await user.selectOptions(screen.getByLabelText(SOURCE_LABEL), '')
+    await chooseSelectOption(user, SOURCE_LABEL, '（无）')
     expect(onChange).not.toHaveBeenCalled()
 
     await user.click(screen.getByLabelText(/dev/))
@@ -270,15 +271,14 @@ describe('AgentForm current contracts', () => {
     )
 
     const sourceSelect = screen.getByLabelText(SOURCE_LABEL)
-    // 空/无是显式可选选项（不是 placeholder），选择后可以回到无来源。
+    await user.click(sourceSelect)
     expect(screen.getByRole('option', { name: '（无）' })).not.toBeDisabled()
-
-    await user.selectOptions(sourceSelect, 'local')
+    await user.click(screen.getByRole('option', { name: 'local' }))
     expect(screen.getByLabelText(/dev/)).toBeChecked()
     expect(screen.queryByLabelText(/docs/)).not.toBeInTheDocument()
 
-    await user.selectOptions(sourceSelect, '')
-    expect(sourceSelect).toHaveValue('')
+    await chooseSelectOption(user, SOURCE_LABEL, '（无）')
+    expect(sourceSelect).toHaveAttribute('data-value', '')
     // 回到无来源：没有 live 候选，已选名称保留为可移除 orphan。
     expect(screen.queryByLabelText(/docs/)).not.toBeInTheDocument()
     const devOrphan = screen.getByLabelText(/dev/)
@@ -315,8 +315,9 @@ describe('AgentForm current contracts', () => {
 
     // 选项只列出 ready===true 的 Environment；状态文本 READY 但 ready=false 的 stale 被排除。
     const sourceSelect = screen.getByLabelText(SOURCE_LABEL)
+    await user.click(sourceSelect)
     expect(screen.queryByRole('option', { name: 'stale' })).not.toBeInTheDocument()
-    await user.selectOptions(sourceSelect, 'local')
+    await user.click(screen.getByRole('option', { name: 'local' }))
 
     // 刷新后 local 失效（仍 READY 但 ready=false）：保留为禁用不可用选项、无 live 候选、已选名称保留为 orphan。
     rerender(
@@ -327,14 +328,15 @@ describe('AgentForm current contracts', () => {
         onChange={() => undefined}
       />,
     )
-    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveValue('local')
+    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveAttribute('data-value', 'local')
+    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveTextContent('local (不可用)')
+    await user.click(screen.getByLabelText(SOURCE_LABEL))
     expect(screen.getByRole('option', { name: 'local (不可用)' })).toBeDisabled()
     // 没有 live 候选：已选 dev 只作为可移除 orphan 保留（带不可用标记），不是 live 候选。
     const devOption = screen.getByLabelText(/dev/).closest('.capability-option')
     expect(devOption).toHaveClass('is-offline')
     expect(devOption).toHaveClass('is-missing')
     expect(screen.getByLabelText(/dev/)).toBeChecked()
-    expect(screen.getByText('local (不可用)')).toBeInTheDocument()
   })
 
   it('keeps tools available even when zero live Environments exist', () => {
@@ -353,7 +355,7 @@ describe('AgentForm current contracts', () => {
 
     expect(screen.getByLabelText(/bash/)).toBeInTheDocument()
     expect(screen.getByLabelText(/read/)).toBeInTheDocument()
-    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveValue('')
+    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveAttribute('data-value', '')
     expect(screen.getByText('暂无候选 Skills')).toBeInTheDocument()
   })
 
@@ -414,8 +416,8 @@ describe('AgentForm current contracts', () => {
       />,
     )
 
-    await user.selectOptions(screen.getByLabelText(SOURCE_LABEL), 'local')
-    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveValue('local')
+    await chooseSelectOption(user, SOURCE_LABEL, 'local')
+    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveAttribute('data-value', 'local')
 
     // 打开另一个 Agent 的编辑器：浏览选择重置为未选择。
     rerender(
@@ -430,7 +432,7 @@ describe('AgentForm current contracts', () => {
         onChange={() => undefined}
       />,
     )
-    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveValue('')
+    expect(screen.getByLabelText(SOURCE_LABEL)).toHaveAttribute('data-value', '')
     expect(screen.queryByLabelText(/dev/)).not.toBeInTheDocument()
   })
 
@@ -459,16 +461,15 @@ describe('AgentForm current contracts', () => {
       )
 
       const modelSelect = screen.getByLabelText('Default Model')
-      expect(modelSelect).toHaveValue(modelName)
+      expect(modelSelect).toHaveAttribute('data-value', modelName)
       expect(modelSelect).toBeDisabled()
       expect(modelSelect).toHaveAttribute('aria-describedby', 'agent-model-identity-status')
-      expect(screen.getByRole('option', { name: `${modelName} (不可用)` })).toBeDisabled()
+      expect(modelSelect).toHaveTextContent(`${modelName} (不可用)`)
 
       const variantSelect = screen.getByLabelText('Default Variant Override')
       expect(variantSelect).toBeDisabled()
       expect(variantSelect).toHaveAttribute('aria-describedby', 'agent-model-variant-status')
-      expect(screen.getByRole('option', { name: 'persisted-override (不可用)' })).toBeDisabled()
-      expect(screen.queryByRole('option', { name: 'fast' })).not.toBeInTheDocument()
+      expect(variantSelect).toHaveTextContent('persisted-override (不可用)')
       expect(screen.getByText('不可用；保存其他字段时仍保留原始身份。')).toBeInTheDocument()
       expect(
         screen.getByText('引用的 Model 未加载，Variant 选项不可用；已保存的覆盖值会保留。'),

@@ -299,7 +299,7 @@
   font-size: 11px;
 }
 
-.canvas-feature .revision-pill {
+.canvas-feature .version-pill {
   flex: 0 0 auto;
   padding: 4px 8px;
   border: 1px solid var(--line);
@@ -1787,7 +1787,7 @@ body.canvas-chat-panel-resizing * {
     height: 36px;
   }
 
-  .canvas-feature .revision-pill {
+  .canvas-feature .version-pill {
     display: none;
   }
 }

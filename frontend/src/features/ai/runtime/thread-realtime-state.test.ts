@@ -319,7 +319,7 @@ describe('thread realtime state', () => {
       sequence: 2,
     })
     // 非法的 checkpoint JSON 视为不存在 -> RUNNING 保持空 base，确保
-    // 第一条 realtime delta 不会丢失（checkpoint flush 不会提升 revision）。
+    // 第一条 realtime delta 不会丢失（checkpoint flush 不会提升 version）。
     expect(snapshotModelStream('7', { ...invocation, streamCheckpointJson: 'not-json' })).toMatchObject({
       attempt: 1,
       sequence: 0,

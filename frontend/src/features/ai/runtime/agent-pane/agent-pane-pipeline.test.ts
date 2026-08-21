@@ -35,7 +35,7 @@ const thread: HarnessThreadDTO = {
   headEntryId: '99999999-8888-4777-8666-555555555555',
   yoloEnabled: false,
   nextCommandSequence: '9',
-  revision: '7',
+  version: '7',
   status: 'IDLE',
   processing: false,
   branchSettings: {

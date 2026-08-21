@@ -8,8 +8,8 @@
  * server -> client（JSON 文本，所有帧带 version=1）：
  * - {"version":1,"type":"subscribed","resource":{...},"cursor":"<canonical>"}
  *   订阅已在 wire 上建立（首次与重连后都会发送）；cursor 是资源当前游标。
- * - {"version":1,"type":"event","resource":{...},"name":"revision"|"realtime"|"version","data":{...},"cursor":"<canonical>"}
- *   - thread revision：data {"revision":"N"}，cursor 必带且与 data.revision 完全相等。
+ * - {"version":1,"type":"event","resource":{...},"name":"version"|"realtime"|"version","data":{...},"cursor":"<canonical>"}
+ *   - thread version：data {"version":"N"}，cursor 必带且与 data.version 完全相等。
  *   - thread realtime：data 为 Redis delta envelope 的 JSON 对象（如 MODEL_DELTA），绝不携带 cursor。
  *   - canvas version：data {"version":"N"}，cursor 必带且与 data.version 完全相等。
  * - {"version":1,"type":"resync","resource":{...}}：需要整体替换为全量快照。
@@ -18,8 +18,8 @@
  *
  * 解码是真正严格的：version 必须为 1、每种 type/name 只接受精确字段集、
  * 多余/未知字段一律拒绝；resource 精确只有 kind+id 且 id 必须是 canonical
- * UUID（小写十六进制）；resource/name 组合必须合法（thread 仅 revision|realtime，
- * canvas 仅 version）；cursor 与 revision/version data 必须是 canonical 非负
+ * UUID（小写十六进制）；resource/name 组合必须合法（thread 仅 version|realtime，
+ * canvas 仅 version）；cursor 与 version data 必须是 canonical 非负
  * 十进制字符串，durable 事件的 cursor 必须存在且与 data 值完全相等；realtime
  * data 必须是非数组 JSON 对象且不得携带 cursor。畸形消息永远不会到达 listeners。
  */
@@ -31,7 +31,7 @@ export interface ApplicationEventResource {
   id: string
 }
 
-export type ApplicationEventName = 'revision' | 'realtime' | 'version'
+export type ApplicationEventName = 'version' | 'realtime'
 
 /** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
 export type ApplicationEventCursor = string
@@ -40,12 +40,12 @@ export type ApplicationEventClientMessage =
   | { version: 1; type: 'subscribe'; resource: ApplicationEventResource }
   | { version: 1; type: 'unsubscribe'; resource: ApplicationEventResource }
 
-/** thread 的持久 revision 事件：cursor 必带且与 data.revision 完全相等。 */
-type ApplicationEventThreadRevisionEvent = {
+/** thread 的持久 version 事件：cursor 必带且与 data.version 完全相等。 */
+type ApplicationEventThreadVersionEvent = {
   type: 'event'
   resource: ApplicationEventResource & { kind: 'thread' }
-  name: 'revision'
-  data: { revision: ApplicationEventCursor }
+  name: 'version'
+  data: { version: ApplicationEventCursor }
   cursor: ApplicationEventCursor
 }
 
@@ -69,7 +69,7 @@ type ApplicationEventCanvasVersionEvent = {
 export type ApplicationEventServerMessage =
   | { type: 'heartbeat' }
   | { type: 'subscribed'; resource: ApplicationEventResource; cursor: ApplicationEventCursor }
-  | ApplicationEventThreadRevisionEvent
+  | ApplicationEventThreadVersionEvent
   | ApplicationEventThreadRealtimeEvent
   | ApplicationEventCanvasVersionEvent
   | { type: 'resync'; resource: ApplicationEventResource }
@@ -122,16 +122,16 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
       if (resource == null || !isEventName(parsed.name)) {
         return null
       }
-      // resource/name 组合必须合法：thread 仅 revision|realtime，canvas 仅 version。
+      // resource/name 组合必须合法：thread 仅 version|realtime，canvas 仅 version。
       if (isThreadResource(resource)) {
-        if (parsed.name === 'revision') {
-          const revision = parseSingleCursorField(parsed.data, 'revision')
-          // durable 事件必须携带 canonical cursor，且与 data.revision 完全相等。
-          if (revision == null || parsed.cursor !== revision) {
+        if (parsed.name === 'version') {
+          const version = parseSingleCursorField(parsed.data, 'version')
+          // durable 事件必须携带 canonical cursor，且与 data.version 完全相等。
+          if (version == null || parsed.cursor !== version) {
             return null
           }
-          const data = { revision }
-          return { type: 'event', resource, name: 'revision', data, cursor: data.revision }
+          const data = { version }
+          return { type: 'event', resource, name: 'version', data, cursor: data.version }
         }
         if (parsed.name === 'realtime') {
           // realtime 事件绝不携带 cursor；data 必须是非数组 JSON 对象。
@@ -220,7 +220,7 @@ function parseResource(value: unknown): ApplicationEventResource | null {
 }
 
 function isEventName(value: unknown): value is ApplicationEventName {
-  return value === 'revision' || value === 'realtime' || value === 'version'
+  return value === 'version' || value === 'realtime'
 }
 
 /** resource.kind 判别守卫：保证 thread/canvas 各自的事件组合在类型层面也合法。 */
@@ -240,10 +240,10 @@ function parseCursor(value: unknown): ApplicationEventCursor | null {
   return typeof value === 'string' && CANONICAL_DECIMAL.test(value) ? value : null
 }
 
-/** durable（revision/version）事件的精确 data：单字段对象且字段值为 canonical 十进制字符串。 */
+/** durable version 事件的精确 data：单字段对象且字段值为 canonical 十进制字符串。 */
 function parseSingleCursorField(
   data: unknown,
-  key: 'revision' | 'version',
+  key: 'version',
 ): ApplicationEventCursor | null {
   if (!isRecord(data) || Object.keys(data).length !== 1) {
     return null

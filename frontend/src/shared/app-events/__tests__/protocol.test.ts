@@ -53,16 +53,16 @@ describe('decodeServerMessage', () => {
           version: 1,
           type: 'event',
           resource: threadResource,
-          name: 'revision',
-          data: { revision: '43' },
+          name: 'version',
+          data: { version: '43' },
           cursor: '43',
         }),
       ),
     ).toEqual({
       type: 'event',
       resource: threadResource,
-      name: 'revision',
-      data: { revision: '43' },
+      name: 'version',
+      data: { version: '43' },
       cursor: '43',
     })
     expect(
@@ -197,8 +197,8 @@ describe('decodeServerMessage', () => {
       version: 1,
       type: 'event',
       resource: threadResource,
-      name: 'revision',
-      data: { revision: '3' },
+      name: 'version',
+      data: { version: '3' },
     }
     expect(decodeServerMessage(JSON.stringify({ ...event, cursor: 'abc' }))).toBeNull()
     expect(decodeServerMessage(JSON.stringify(event))).toBeNull()
@@ -209,25 +209,25 @@ describe('decodeServerMessage', () => {
     expect(
       decodeServerMessage(JSON.stringify({ ...threadBase, name: 'snapshot', data: {} })),
     ).toBeNull()
-    // revision data 必须是精确单字段 {revision}。
+    // version data 必须是精确单字段 {version}。
     expect(
       decodeServerMessage(
         JSON.stringify({
           ...threadBase,
-          name: 'revision',
-          data: { revision: '3', extra: true },
+          name: 'version',
+          data: { version: '3', extra: true },
           cursor: '3',
         }),
       ),
     ).toBeNull()
     expect(
       decodeServerMessage(
-        JSON.stringify({ ...threadBase, name: 'revision', data: {}, cursor: '3' }),
+        JSON.stringify({ ...threadBase, name: 'version', data: {}, cursor: '3' }),
       ),
     ).toBeNull()
     expect(
       decodeServerMessage(
-        JSON.stringify({ ...threadBase, name: 'revision', data: { version: '3' }, cursor: '3' }),
+        JSON.stringify({ ...threadBase, name: 'unknown_event', data: { version: '3' }, cursor: '3' }),
       ),
     ).toBeNull()
     // version data 必须是精确单字段 {version}。
@@ -264,8 +264,8 @@ describe('decodeServerMessage', () => {
       version: 1,
       type: 'event',
       resource: threadResource,
-      name: 'revision',
-      data: { revision: '1' },
+      name: 'version',
+      data: { version: '1' },
       cursor: '1',
       extra: true,
     }
@@ -302,8 +302,8 @@ describe('decodeServerMessage', () => {
           version: 1,
           type: 'event',
           resource: tainted,
-          name: 'revision',
-          data: { revision: '1' },
+          name: 'version',
+          data: { version: '1' },
           cursor: '1',
         }),
       ),
@@ -319,19 +319,7 @@ describe('decodeServerMessage', () => {
   })
 
   it('rejects cross-resource illegal names', () => {
-    // canvas 上不允许 thread 的 revision/realtime；thread 上不允许 canvas 的 version。
-    expect(
-      decodeServerMessage(
-        JSON.stringify({
-          version: 1,
-          type: 'event',
-          resource: canvasResource,
-          name: 'revision',
-          data: { revision: '1' },
-          cursor: '1',
-        }),
-      ),
-    ).toBeNull()
+    // canvas 上不允许 realtime
     expect(
       decodeServerMessage(
         JSON.stringify({
@@ -348,24 +336,23 @@ describe('decodeServerMessage', () => {
         JSON.stringify({
           version: 1,
           type: 'event',
-          resource: threadResource,
-          name: 'version',
-          data: { version: '1' },
-          cursor: '1',
+          resource: canvasResource,
+          name: 'realtime',
+          data: { type: 'MODEL_DELTA' },
         }),
       ),
     ).toBeNull()
   })
 
   it('rejects durable events with a missing or mismatched cursor', () => {
-    const revision = {
+    const threadVersion = {
       version: 1,
       type: 'event',
       resource: threadResource,
-      name: 'revision',
-      data: { revision: '3' },
+      name: 'version',
+      data: { version: '3' },
     }
-    const version = {
+    const canvasVersion = {
       version: 1,
       type: 'event',
       resource: canvasResource,
@@ -373,13 +360,13 @@ describe('decodeServerMessage', () => {
       data: { version: '3' },
     }
     // 缺失 cursor。
-    expect(decodeServerMessage(JSON.stringify(revision))).toBeNull()
-    expect(decodeServerMessage(JSON.stringify(version))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify(threadVersion))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify(canvasVersion))).toBeNull()
     // cursor 与 data 值不相等（含非 canonical 表示与非字符串）。
-    expect(decodeServerMessage(JSON.stringify({ ...revision, cursor: '4' }))).toBeNull()
-    expect(decodeServerMessage(JSON.stringify({ ...version, cursor: '4' }))).toBeNull()
-    expect(decodeServerMessage(JSON.stringify({ ...revision, cursor: '03' }))).toBeNull()
-    expect(decodeServerMessage(JSON.stringify({ ...version, cursor: 3 }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ ...threadVersion, cursor: '4' }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ ...canvasVersion, cursor: '4' }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ ...threadVersion, cursor: '03' }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({ ...threadVersion, cursor: 3 }))).toBeNull()
   })
 
   it('rejects realtime events carrying a cursor', () => {
@@ -428,14 +415,14 @@ describe('backend wire samples', () => {
     })
   })
 
-  it('decodes the backend thread revision event frame', () => {
+  it('decodes the backend thread version event frame', () => {
     const raw =
-      `{"version":1,"type":"event","resource":{"kind":"thread","id":"${THREAD_ID}"},"name":"revision","data":{"revision":"43"},"cursor":"43"}`
+      `{"version":1,"type":"event","resource":{"kind":"thread","id":"${THREAD_ID}"},"name":"version","data":{"version":"43"},"cursor":"43"}`
     expect(decodeServerMessage(raw)).toEqual({
       type: 'event',
       resource: { kind: 'thread', id: THREAD_ID },
-      name: 'revision',
-      data: { revision: '43' },
+      name: 'version',
+      data: { version: '43' },
       cursor: '43',
     })
   })

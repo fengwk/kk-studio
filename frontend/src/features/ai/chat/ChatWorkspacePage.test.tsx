@@ -104,7 +104,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     headEntryId: 'head-1',
     yoloEnabled: false,
     nextCommandSequence: '1',
-    revision: '0',
+    version: '0',
     status: 'IDLE',
     processing: false,
     branchSettings: {
@@ -121,7 +121,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
 
 function snapshot(currentThread = thread()): HarnessThreadSnapshotDTO {
   return {
-    revision: currentThread.revision,
+    version: currentThread.version,
     thread: currentThread,
     entries: [],
     queuedCommands: [],

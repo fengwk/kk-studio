@@ -308,7 +308,7 @@ describe('AppShell locale selector', () => {
 
     const chineseTriggers = screen.getAllByRole('button', { name: '语言: 中文' })
     expect(chineseTriggers).toHaveLength(2)
-    expect(chineseTriggers.map((trigger) => trigger.querySelector('.locale-selector-current')?.textContent)).toEqual([
+    expect(chineseTriggers.map((trigger) => trigger.querySelector('.ui-select-value')?.textContent)).toEqual([
       '中文',
       '中文',
     ])
@@ -332,7 +332,7 @@ describe('AppShell locale selector', () => {
     expect(document.documentElement.lang).toBe('en-US')
     const englishTriggers = screen.getAllByRole('button', { name: 'Language: English' })
     expect(englishTriggers).toHaveLength(2)
-    expect(englishTriggers.map((trigger) => trigger.querySelector('.locale-selector-current')?.textContent)).toEqual([
+    expect(englishTriggers.map((trigger) => trigger.querySelector('.ui-select-value')?.textContent)).toEqual([
       'English',
       'English',
     ])

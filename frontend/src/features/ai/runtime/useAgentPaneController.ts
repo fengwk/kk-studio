@@ -234,7 +234,7 @@ export function useAgentPaneController({
           {
             onSubscribed: refresh,
             onEvent: (name) => {
-              if (name === 'revision') {
+              if (name === 'version') {
                 refresh()
               }
             },

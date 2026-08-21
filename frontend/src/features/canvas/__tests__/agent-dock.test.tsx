@@ -116,7 +116,7 @@ function threadFixture(overrides: Partial<HarnessThreadDTO> = {}): HarnessThread
     headEntryId: 'h1',
     yoloEnabled: false,
     nextCommandSequence: '1',
-    revision: '0',
+    version: '0',
     status: 'IDLE',
     processing: false,
     branchSettings: {
@@ -136,7 +136,7 @@ function snapshotOf(
   overrides: Partial<HarnessThreadSnapshotDTO> = {},
 ): HarnessThreadSnapshotDTO {
   return {
-    revision: currentThread.revision,
+    version: currentThread.version,
     thread: currentThread,
     entries: [],
     queuedCommands: [],
@@ -202,7 +202,7 @@ beforeEach(() => {
   vi.mocked(agentPaneService.listSessionEntries).mockResolvedValue([])
   vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({ text: '' })
   vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
-    Promise.resolve(threadFixture({ threadId, yoloEnabled: data.yoloEnabled, revision: '1' })),
+    Promise.resolve(threadFixture({ threadId, yoloEnabled: data.yoloEnabled, version: '1' })),
   )
 })
 

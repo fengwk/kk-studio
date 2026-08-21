@@ -29,14 +29,14 @@ export interface HarnessThreadRealtimeState {
  * Snapshot 优先的 realtime 订阅。
  *
  * 1) 先加载权威的 PostgreSQL snapshot。
- * 2) 在其持久化 revision 之后监听。Redis 支撑的 {@code realtime} MODEL_DELTA / TOOL_PARTIAL
+ * 2) 在其持久化 version 之后监听。Redis 支撑的 {@code realtime} MODEL_DELTA / TOOL_PARTIAL
  *    事件渲染为瞬态 overlay，直到持久化 Entries 到达；重连与流丢失后 PostgreSQL 仍是
  *    权威来源。Redis 永远不是持久化事实。
  */
 export function useHarnessThreadRealtime(
   threadId: string,
   enabled: boolean,
-  revision: string | undefined,
+  version: string | undefined,
   modelInvocation: ModelInvocationDTO | null,
   toolInvocations: ToolInvocationDTO[],
 ): HarnessThreadRealtimeState {
@@ -48,7 +48,7 @@ export function useHarnessThreadRealtime(
   )
   const [subscription, setSubscription] = useState<{
     threadId: string
-    revision: string
+    version: string
   } | null>(null)
   const modelStreamRef = useRef<RealtimeModelStream | null>(null)
   const toolStreamsRef = useRef<Map<string, RealtimeToolStream>>(new Map())
@@ -62,7 +62,7 @@ export function useHarnessThreadRealtime(
   // TOOL_PARTIAL 的有界精确去重指纹（Redis 可能重投递）：按
   // thread:invocation:attempt 分组，因此 attempt 变化/终态 snapshot 会自然淘汰它们。
   const toolPartialFingerprintsRef = useRef<Map<string, Set<string>>>(new Map())
-  const subscriptionReady = enabled && revision != null
+  const subscriptionReady = enabled && version != null
 
   const { requestGapRecovery, clearRecoveryLoop } = useGapRecoveryLoop(
     queryClient,
@@ -72,12 +72,12 @@ export function useHarnessThreadRealtime(
 
   useEffect(() => {
     setSubscription((current) => {
-      if (!subscriptionReady || revision == null) {
+      if (!subscriptionReady || version == null) {
         return null
       }
-      return current?.threadId === threadId ? current : { threadId, revision }
+      return current?.threadId === threadId ? current : { threadId, version }
     })
-  }, [revision, subscriptionReady, threadId])
+  }, [version, subscriptionReady, threadId])
 
   useEffect(() => {
     invocationRef.current = modelInvocation
@@ -306,7 +306,7 @@ export function useHarnessThreadRealtime(
       setToolStreams(new Map(streams))
     }
 
-    // 应用级 manager 订阅：revision/resync/subscribed/error 都触发 snapshot
+    // 应用级 manager 订阅：version/resync/subscribed/error 都触发 snapshot
     // 对账（subscribed 在首次订阅与每次重连重订阅后到达，关闭断线窗口）；
     // realtime 事件走 overlay reducer。连接与重连由单例 Connection 负责。
     const unsubscribe = applicationEvents.subscribe(
@@ -314,7 +314,7 @@ export function useHarnessThreadRealtime(
       {
         onSubscribed: invalidateSnapshot,
         onEvent: (name, data) => {
-          if (name === 'revision') {
+          if (name === 'version') {
             invalidateSnapshot()
           } else if (name === 'realtime') {
             handleRealtime(data)

@@ -39,8 +39,8 @@ export interface SystemSettingsAiRuntimeDTO {
   compactionFallbackModel: HarnessModelSelectionDTO | null
   subagentMaxDepth: number
   subagentMaxConcurrency: number
-  /** null 表示不额外限制（无 cap）。 */
-  subagentMaxTotalConcurrency: number | null
+  /** 0 表示不额外限制（无 cap）。 */
+  subagentMaxTotalConcurrency: number
   /** 0 表示关闭。 */
   subagentIdleTimeoutMillis: DecimalLong
   subagentMaxTurns: number
@@ -48,7 +48,6 @@ export interface SystemSettingsAiRuntimeDTO {
 
 export interface SystemSettingsEnvironmentDTO {
   maxResourceBytes: DecimalLong
-  maxMessageBytes: DecimalLong
   heartbeatTimeoutMillis: DecimalLong
   directoryListTimeoutMillis: DecimalLong
 }

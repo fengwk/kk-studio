@@ -357,7 +357,7 @@ export function parseStreamCheckpoint(
  * 从活动 ModelInvocation 的持久 checkpoint 中派生瞬态 model overlay。
  *
  * - RUNNING 状态的 invocation 若 checkpoint 尚未 flush（checkpoint flush 不会
- *   提升 revision），会得到一个 sequence 为 0 的空 base，确保第一条
+ *   提升 version），会得到一个 sequence 为 0 的空 base，确保第一条
  *   realtime delta 不会被永久丢弃；其 attempt 始终等于 invocation.attempt。
  * - 若 checkpoint 的 attempt 与 invocation.attempt 不一致，同样视为陈旧并忽略。
  * - 终止态的 result/error 若 resultEntryId 仍为 null，绝不能误以为是已落地的
@@ -416,7 +416,7 @@ export function snapshotModelStream(
   }
   if (checkpoint == null || checkpoint.attempt !== invocation.attempt) {
     // 尚未 flush 或 attempt 已陈旧：保持空的 streaming base，以确保活动
-    // attempt 的第一条 delta 不丢失（checkpoint flush 不会提升 revision）。
+    // attempt 的第一条 delta 不丢失（checkpoint flush 不会提升 version）。
     return { ...base, status: 'streaming' }
   }
   return {

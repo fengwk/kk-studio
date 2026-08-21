@@ -107,21 +107,21 @@ export function canRetryStaleMessageBatch(
 
 /**
  * 由 stopThread（在每次复用前同步执行）与被动清理 effect 共享的 basis 栅栏：
- * 当且仅当权威 snapshot 证明 pending 操作的 basis 已变化（head 或 revision 已
+ * 当且仅当权威 snapshot 证明 pending 操作的 basis 已变化（head 或 version 已
  * 前进 => 旧 Turn 已结束或 Thread 已前进）时，该操作会被失效。stopThread
  * 内部的同步失效可以关闭 snapshot 已前进但 effect 尚未 flush 的窗口——
- * 在新 Turn 上的下一次 Stop 必须派生全新 id，绝不能把旧 id 复用给更新后的 revision。
+ * 在新 Turn 上的下一次 Stop 必须派生全新 id，绝不能把旧 id 复用给更新后的 version。
  */
 export function retireStaleStopPending(
   pending: PendingStopOperation | null,
-  thread: { headEntryId: string; revision: string } | null,
+  thread: { headEntryId: string; version: string } | null,
 ): PendingStopOperation | null {
   if (pending == null || thread == null) {
     return pending
   }
   if (
     thread.headEntryId !== pending.basisHeadEntryId
-    || thread.revision !== pending.basisRevision
+    || thread.version !== pending.basisVersion
   ) {
     return null
   }
@@ -177,7 +177,7 @@ export function useAgentThreadController(
   const realtime = useHarnessThreadRealtime(
     threadId,
     Boolean(threadId) && snapshotQuery.isSuccess,
-    thread?.revision,
+    thread?.version,
     modelInvocation,
     toolInvocations,
   )
@@ -289,13 +289,13 @@ export function useAgentThreadController(
   }
 
   const stopMutation = useMutation({
-    mutationFn: (body: { stopRequestId: string; expectedRevision: string }) =>
+    mutationFn: (body: { stopRequestId: string; expectedVersion: string }) =>
       harnessService.stopThread(threadId, body),
   })
 
   const compactMutation = useMutation({
-    mutationFn: (expectedRevision: string) =>
-      agentPaneService.compactThread(threadId, { expectedRevision }),
+    mutationFn: (expectedVersion: string) =>
+      agentPaneService.compactThread(threadId, { expectedVersion }),
     onSuccess: async () => {
       setConflict(null)
       await queryClient.invalidateQueries({
@@ -305,8 +305,8 @@ export function useAgentThreadController(
   })
 
   /**
-   * 409 意味着本地 revision 已过期或 Thread 未处于静默状态。给出明确提示并重新拉取
-   * 目标 Thread，使下一次尝试携带当前的 revision。
+   * 409 意味着本地 version 已过期或 Thread 未处于静默状态。给出明确提示并重新拉取
+   * 目标 Thread，使下一次尝试携带当前的 version。
    */
   function reportMutationError(error: unknown, fallbackKey: string, targetThreadId = threadId) {
     if (isConflictError(error)) {
@@ -501,7 +501,7 @@ export function useAgentThreadController(
     setConflict(null)
     const operationThreadId = threadId
     // 同步 basis 栅栏：绝不复用 basis 已不再匹配「当前」渲染 snapshot 的待决操作
-    //（head/revision 已移动 => 旧 Turn 已结束或 Thread 已前进）。在这里——而不仅仅在
+    //（head/version 已移动 => 旧 Turn 已结束或 Thread 已前进）。在这里——而不仅仅在
     // 被动清理 effect 中——退役，可以关闭「snapshot 已前进但 effect 尚未 flush」时
     // 调用 Stop 的窗口。
     const pending = retireStaleStopPending(pendingStopRef.current, thread)
@@ -511,13 +511,13 @@ export function useAgentThreadController(
       clearPendingStop(threadId)
     }
     // 含混重试：复用「精确」的先前操作（相同的 stopRequestId + 原始
-    // expectedRevision + basis）。全新的 Stop 会针对当前 snapshot 铸造新操作；
-    // 原始 expectedRevision 绝不会从更新的 snapshot 重新推导。
+    // expectedVersion + basis）。全新的 Stop 会针对当前 snapshot 铸造新操作；
+    // 原始 expectedVersion 绝不会从更新的 snapshot 重新推导。
     const operation = pending ?? {
       stopRequestId: createStopRequestId(),
-      expectedRevision: thread.revision,
+      expectedVersion: thread.version,
       basisHeadEntryId: thread.headEntryId,
-      basisRevision: thread.revision,
+      basisVersion: thread.version,
     }
     if (pending == null) {
       pendingStopRef.current = operation
@@ -527,7 +527,7 @@ export function useAgentThreadController(
     return stopMutation
       .mutateAsync({
         stopRequestId: operation.stopRequestId,
-        expectedRevision: operation.expectedRevision,
+        expectedVersion: operation.expectedVersion,
       })
       .then(async (result) => {
         if (boundThreadIdRef.current !== operationThreadId) {
@@ -568,7 +568,7 @@ export function useAgentThreadController(
       .catch((error: unknown) => {
         const stillBound = boundThreadIdRef.current === operationThreadId
         if (isConflictError(error)) {
-          // 已知 409：操作未被接受（revision 过期 / 未静默 /
+          // 已知 409：操作未被接受（version 过期 / 未静默 /
           // 终态 apply 待处理 / id 被复用）。清除它；下一次 stop 会针对
           // 刷新的 snapshot 铸造新操作。
           clearPendingStop(operationThreadId)
@@ -598,7 +598,7 @@ export function useAgentThreadController(
     setActionError(null)
     setConflict(null)
     return compactMutation
-      .mutateAsync(thread.revision)
+      .mutateAsync(thread.version)
       .then(() => undefined)
       .catch((error: unknown) => {
         reportMutationError(error, 'ai.runtime.action.compactFailed')
@@ -606,7 +606,7 @@ export function useAgentThreadController(
   }
 
   // 权威 snapshot 的 basis 协调：当存在含混的 Stop 操作时，一旦 snapshot 证明其 basis
-  // 已变化（head 或 revision 已移动 => 旧 Turn 已结束或 Thread 已前进），就退役该操作，
+  // 已变化（head 或 version 已移动 => 旧 Turn 已结束或 Thread 已前进），就退役该操作，
   // 使在新 Turn 上发起的 Stop 始终使用全新 id。该 effect 只在确有操作待决时起作用——
   // hook 初始挂载从不清理任何东西。stopThread 本身在每次复用前同步执行同一栅栏。
   useEffect(() => {
@@ -618,7 +618,7 @@ export function useAgentThreadController(
     }
     // thread 每次 refetch 都是新的 snapshot 对象；只有其身份字段参与栅栏判定。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread?.headEntryId, thread?.revision, thread?.threadId])
+  }, [thread?.headEntryId, thread?.version, thread?.threadId])
 
   return {
     sessionId,
