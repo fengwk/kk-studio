@@ -136,7 +136,7 @@ public class HarnessSessionDeletionService {
     }
   }
 
-  /** release Session 级 blob 引用（ref_count 对账 + 删除 harness_session_blob_ref 行），先于 Session 删除。 */
+  /** release Session 级 blob 引用（ref_count 对账 + 删除 session_blob_ref 行），先于 Session 删除。 */
   private void releaseSessionBlobRefs(SessionBlobRefManager refManager, UUID sessionId) {
     if (refManager != null) {
       for (UUID blobId : refManager.listBlobIds(sessionId)) {

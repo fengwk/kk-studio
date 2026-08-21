@@ -184,7 +184,7 @@ class StudioCommandAcceptanceServiceIntegrationTest extends S3WebPostgresTestSup
     assertEquals(0, count("chat_session", "session_id", sessionId));
     assertEquals(0, count("harness_session", "id", sessionId));
     assertEquals(0, count("harness_entry", "session_id", sessionId));
-    assertEquals(0, count("harness_session_blob_ref", "session_id", sessionId));
+    assertEquals(0, count("session_blob_ref", "session_id", sessionId));
     assertEquals(0, count("harness_thread", "id", threadId));
     assertEquals(0, count("harness_thread_command", "thread_id", threadId));
     assertEquals(0, count("harness_work", "target_id", threadId));
@@ -212,9 +212,7 @@ class StudioCommandAcceptanceServiceIntegrationTest extends S3WebPostgresTestSup
                         UUID.randomUUID()))));
     UUID blobId =
         jdbc.queryForObject(
-            "select blob_id from harness_session_blob_ref where session_id = ?",
-            UUID.class,
-            sessionId);
+            "select blob_id from session_blob_ref where session_id = ?", UUID.class, sessionId);
     long refCountBefore =
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId);
 
@@ -239,7 +237,7 @@ class StudioCommandAcceptanceServiceIntegrationTest extends S3WebPostgresTestSup
     assertEquals(
         refCountBefore,
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
-    assertEquals(1, count("harness_session_blob_ref", "session_id", sessionId));
+    assertEquals(1, count("session_blob_ref", "session_id", sessionId));
 
     // 同一 blob 不能被带入没有 ref 的新 Session；relation 与全部 Harness facts 必须一起回滚。
     UUID foreignSessionId = UUID.randomUUID();

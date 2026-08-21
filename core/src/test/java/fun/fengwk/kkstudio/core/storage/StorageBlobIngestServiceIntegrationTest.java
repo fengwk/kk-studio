@@ -65,7 +65,7 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
     seedSession(SESSION_B);
   }
 
-  /** harness_session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。 */
+  /** session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。 */
   private void seedSession(UUID sessionId) {
     jdbc.update(
         "insert into harness_session (id, created_at) values (?, current_timestamp)", sessionId);
@@ -82,8 +82,7 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
         "new ingest must create the row with ref_count = 1 (the paired ref)");
     assertEquals(1, storage.blobRowCount());
     assertTrue(refManager.contains(SESSION_A, blobId));
-    assertEquals(
-        1, jdbc.queryForObject("select count(*) from harness_session_blob_ref", Integer.class));
+    assertEquals(1, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
     assertArrayEquals(
         content,
         s3Storage.objectBytes(StorageObjectKeys.blobOriginal(blobId)),
@@ -93,8 +92,7 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
     UUID again = tx.execute(status -> ingestService.ingest(SESSION_A, content, "text/plain"));
     assertEquals(blobId, again, "same session + same bytes must dedup to the same blob");
     assertEquals(1L, storage.blobRefCount(blobId.toString()));
-    assertEquals(
-        1, jdbc.queryForObject("select count(*) from harness_session_blob_ref", Integer.class));
+    assertEquals(1, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
   }
 
   @Test
@@ -108,14 +106,13 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
         2L,
         storage.blobRefCount(first.toString()),
         "each session ref must be counted exactly once");
-    assertEquals(
-        2, jdbc.queryForObject("select count(*) from harness_session_blob_ref", Integer.class));
+    assertEquals(2, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
     assertEquals(1, storage.blobRowCount());
   }
 
   @Test
   void failureAfterPutStillCleansUpCandidateObject() {
-    // putObject 成功之后、ref 配对之前失败（未知 session 触发 harness_session_blob_ref 的 RESTRICT FK 拒绝）：
+    // putObject 成功之后、ref 配对之前失败（未知 session 触发 session_blob_ref 的 RESTRICT FK 拒绝）：
     // 候选对象清理必须在 put 后立即注册，任何后续 DB 失败都会回收对象，绝不留孤儿。
     byte[] content = "cleanup me".getBytes(StandardCharsets.UTF_8);
     UUID unknownSession = new UUID(0L, 99L);
@@ -123,8 +120,7 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
         DataIntegrityViolationException.class,
         () -> tx.execute(status -> ingestService.ingest(unknownSession, content, "text/plain")));
     assertEquals(0, storage.blobRowCount(), "failed ingest must leave no blob row");
-    assertEquals(
-        0, jdbc.queryForObject("select count(*) from harness_session_blob_ref", Integer.class));
+    assertEquals(0, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
     assertEquals(
         0,
         s3Storage.objectCount(),
@@ -151,8 +147,7 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
       // 预期回滚。
     }
     assertEquals(0, storage.blobRowCount(), "rolled-back ingest must leave no blob row");
-    assertEquals(
-        0, jdbc.queryForObject("select count(*) from harness_session_blob_ref", Integer.class));
+    assertEquals(0, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
     assertEquals(
         0, s3Storage.objectCount(), "rolled-back candidate object must be cleaned after rollback");
   }
