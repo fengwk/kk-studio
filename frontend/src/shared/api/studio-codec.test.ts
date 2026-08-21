@@ -119,6 +119,8 @@ describe('studio codec', () => {
     expect(snapshot.nodes[0]?.transform).toEqual({ x: 1, y: 2, width: 100, height: 80 })
     expect(snapshot.groups[0]?.id).toBe(GROUP_ID)
     expect(snapshot.links[0]).toEqual(linkPayload())
+    expect(snapshot.nodes[0]?.resources[0]?.kind).toBe('TEXT')
+    expect(snapshot.nodes[0]?.run?.status).toBe('SUCCEEDED')
   })
 
   it('decodes a document list and a patch with both REMOVE and UPSERT forms', () => {
@@ -167,13 +169,91 @@ describe('studio codec', () => {
     expect(snapshot.nodes[0]?.function).toBeNull()
     expect(snapshot.nodes[0]?.run).toBeNull()
     expect(snapshot.nodes[0]?.groupId).toBeNull()
+    expect(snapshot.nodes[0]?.resources[0]?.blobId).toBeNull()
+    expect(snapshot.nodes[0]?.resources[0]?.textContent).toBeNull()
+    expect(snapshot.nodes[0]?.resources[0]?.mediaType).toBeNull()
     expect(snapshot.nodes[0]?.resources[0]?.width).toBe(10)
+    expect(snapshot.nodes[0]?.resources[0]?.height).toBe(20)
     expect(snapshot.nodes[0]?.resources[0]?.sizeBytes).toBeNull()
     expect(snapshot.nodes[0]?.resources[0]?.durationMs).toBeNull()
 
     const changes: CanvasChangesDTO = decodeCanvasChanges({ patches: [], snapshot: null })
     expect(changes.snapshot).toBeNull()
     expect(changes.patches).toEqual([])
+  })
+
+  it('rejects undefined/missing nullable fields instead of treating them as null', () => {
+    const missingResourceField = (field: string) => {
+      const resource = { ...resourcePayload(), [field]: undefined }
+      return {
+        ...snapshotPayload(),
+        nodes: [{ ...nodePayload(), resources: [resource] }],
+      }
+    }
+    for (const field of ['blobId', 'textContent', 'mediaType', 'sizeBytes', 'width', 'height', 'durationMs']) {
+      expect(() => decodeCanvasSnapshot(missingResourceField(field))).toThrow(
+        `resource.${field} must be explicitly null`,
+      )
+    }
+
+    const missingNodeField = (field: string) => {
+      const node = { ...nodePayload(), [field]: undefined }
+      return { ...snapshotPayload(), nodes: [node] }
+    }
+    for (const field of ['groupId', 'function', 'run']) {
+      expect(() => decodeCanvasSnapshot(missingNodeField(field))).toThrow(
+        `node.${field} must be explicitly null`,
+      )
+    }
+
+    const missingRunError = {
+      ...snapshotPayload(),
+      nodes: [{ ...nodePayload(), run: { ...nodePayload().run, error: undefined } }],
+    }
+    expect(() => decodeCanvasSnapshot(missingRunError)).toThrow('node.run.error must be explicitly null')
+
+    const missingChangesSnapshot = { patches: [], snapshot: undefined }
+    expect(() => decodeCanvasChanges(missingChangesSnapshot)).toThrow('changes.snapshot must be explicitly null')
+  })
+
+  it('rejects invalid resource kind and function run status', () => {
+    const invalidKind = {
+      ...snapshotPayload(),
+      nodes: [{
+        ...nodePayload(),
+        resources: [{ ...resourcePayload(), kind: 'SVG' }],
+      }],
+    }
+    expect(() => decodeCanvasSnapshot(invalidKind)).toThrow('resource.kind must be one of')
+
+    const invalidStatus = {
+      ...snapshotPayload(),
+      nodes: [{
+        ...nodePayload(),
+        run: { ...nodePayload().run, status: 'PENDING' },
+      }],
+    }
+    expect(() => decodeCanvasSnapshot(invalidStatus)).toThrow('node.run.status must be one of')
+  })
+
+  it('rejects unknown patch operations instead of defaulting to UPSERT', () => {
+    const invalidGroupOp = {
+      ...patchPayload(),
+      groups: [{ op: 'REPLACE', group: groupPayload() }],
+    }
+    expect(() => decodeCanvasPatch(invalidGroupOp)).toThrow('group patch.op must be one of')
+
+    const invalidNodeOp = {
+      ...patchPayload(),
+      nodes: [{ op: 'REPLACE', node: nodePayload() }],
+    }
+    expect(() => decodeCanvasPatch(invalidNodeOp)).toThrow('node patch.op must be one of')
+
+    const invalidLinkOp = {
+      ...patchPayload(),
+      links: [{ op: 'REPLACE', link: linkPayload() }],
+    }
+    expect(() => decodeCanvasPatch(invalidLinkOp)).toThrow('link patch.op must be one of')
   })
 
   it('decodes changes with patches and a snapshot', () => {
@@ -195,6 +275,13 @@ describe('studio codec', () => {
     }
     expect(error).toBeInstanceOf(ApiError)
     expect((error as ApiError).message).toContain('document list')
+  })
+
+  it('fails closed when top-level payloads are not objects', () => {
+    expect(() => decodeCanvasDocument(null)).toThrow('document must be an object')
+    expect(() => decodeCanvasSnapshot(null)).toThrow('snapshot must be an object')
+    expect(() => decodeCanvasPatch(null)).toThrow('patch must be an object')
+    expect(() => decodeCanvasChanges(null)).toThrow('changes must be an object')
   })
 
   it.each([
@@ -244,6 +331,23 @@ describe('studio codec', () => {
       baseVersion: '01',
     }
     expect(() => decodeCanvasPatch(payload)).toThrow('canonical non-negative decimal string')
+  })
+
+  it('fails closed for non-finite transform numbers and non-string long values', () => {
+    const nonFiniteTransform = {
+      ...snapshotPayload(),
+      nodes: [{ ...nodePayload(), transform: { ...nodePayload().transform, x: '1' } }],
+    }
+    expect(() => decodeCanvasSnapshot(nonFiniteTransform)).toThrow('node.transform.x must be a finite number')
+
+    const numericLong = {
+      ...snapshotPayload(),
+      nodes: [{
+        ...nodePayload(),
+        resources: [{ ...resourcePayload(), sizeBytes: 12 }],
+      }],
+    }
+    expect(() => decodeCanvasSnapshot(numericLong)).toThrow('resource.sizeBytes must be a canonical')
   })
 
   it('fails closed for patch op without required REMOVE fields', () => {
