@@ -8,12 +8,12 @@ import { validateSystemSettingsSchema } from '@/features/settings/system-setting
 import {
   makeSettingsDto,
   makeSettingsSchema,
-} from '@/features/settings/settings-test-fixtures'
+} from '@/test-support/settings-test-fixtures'
 import { settingsSectionsToDraft } from '@/features/settings/system-settings-draft'
 import { agentService } from '@/shared/api/agent-service'
 import type { AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import type { SystemSettingsSchemaDTO } from '@/shared/api/contracts/system-settings'
-import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
+import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {

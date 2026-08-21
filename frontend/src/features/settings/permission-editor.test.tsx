@@ -8,7 +8,7 @@ import type { PermissionGroupDraft } from '@/features/settings/system-settings-d
 import { agentService } from '@/shared/api/agent-service'
 import type { ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
 import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
-import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
+import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {

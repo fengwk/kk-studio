@@ -9,9 +9,9 @@ import type {
 } from '@/shared/api/contracts/system-settings'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
-import { makeSettingsDto, makeSettingsSchema } from '@/features/settings/settings-test-fixtures'
+import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
 import { SettingsPage } from '@/features/settings/SettingsPage'
-import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
+import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }))
 

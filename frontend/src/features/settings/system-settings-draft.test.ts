@@ -7,7 +7,7 @@ import {
   setDraftValue,
   settingsSectionsToDraft,
 } from '@/features/settings/system-settings-draft'
-import { makeSettingsDto } from '@/features/settings/settings-test-fixtures'
+import { makeSettingsDto } from '@/test-support/settings-test-fixtures'
 
 describe('system settings draft codec', () => {
   it('derives a string-value draft from the wire aggregate (Long stays string, Integer becomes string)', () => {

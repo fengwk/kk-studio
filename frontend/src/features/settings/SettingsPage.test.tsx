@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BrowserPreferencesProvider,
 } from '@/features/settings/browser-preferences'
-import { makeSettingsDto, makeSettingsSchema } from '@/features/settings/settings-test-fixtures'
+import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
 import { setLocale } from '@/shared/i18n'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 
