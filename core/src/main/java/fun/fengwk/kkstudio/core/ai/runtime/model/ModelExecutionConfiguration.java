@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime.model;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -9,6 +10,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.model.provider.AnthropicProviderAdapt
 import fun.fengwk.kkstudio.core.ai.runtime.model.provider.GoogleProviderAdapter;
 import fun.fengwk.kkstudio.core.ai.runtime.model.provider.OpenAiProviderAdapter;
 import fun.fengwk.kkstudio.core.ai.runtime.model.provider.OpenAiResponsesProviderAdapter;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -17,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -45,6 +48,22 @@ public class ModelExecutionConfiguration {
   @ConditionalOnMissingBean
   public Clock modelExecutionClock() {
     return Clock.systemUTC();
+  }
+
+  /**
+   * 生产 {@link CoreModelGateway}：与测试共用唯一构造器。Busy 重试延迟是 live supplier——每次 {@code Busy} 判定从
+   * SystemSettingsSnapshot 现读 {@code tool.modelGatewayBusyRetryMillis}。
+   */
+  @Bean
+  @ConditionalOnMissingBean(CoreModelGateway.class)
+  public CoreModelGateway coreModelGateway(
+      ProviderResolutionService providerResolution,
+      @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor,
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    return new CoreModelGateway(
+        providerResolution,
+        modelExecutionExecutor,
+        () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().modelGatewayBusyRetryMillis()));
   }
 
   @Bean(name = "openaiProviderFactory")

@@ -1,11 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime.model;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -65,7 +61,6 @@ import java.util.function.Supplier;
  * 个信号）；溢出确定性选择恰好一次 UNKNOWN。
  */
 @Slf4j
-@Component
 public final class CoreModelGateway implements ModelGateway {
 
   /** 回调桥缓冲队列的保守上限：adversarial Provider 同步回调绝不能无界缓冲。 */
@@ -75,17 +70,9 @@ public final class CoreModelGateway implements ModelGateway {
   private final ExecutorService executor;
   private final Supplier<Duration> busyRetryDelay;
 
-  @Autowired
-  public CoreModelGateway(
-      ProviderResolutionService providerResolution,
-      @Qualifier("modelExecutionExecutor") ExecutorService executor,
-      SystemSettingsSnapshot snapshot) {
-    this(providerResolution, executor, liveBusyRetry(snapshot));
-  }
-
   /**
-   * package-private 测试 seam：语义与生产一致——每次 {@code Busy} 判定现读 {@code busyRetryDelay}（生产每次 start 从
-   * SystemSettingsSnapshot 现读）。
+   * 生产与测试共用的唯一构造器。{@code busyRetryDelay} 在每次 {@code Busy} 判定时现读，由装配方决定来源——生产装配传入
+   * SystemSettingsSnapshot 的 live supplier（每次 start 从 {@code tool.modelGatewayBusyRetryMillis} 现读）。
    */
   CoreModelGateway(
       ProviderResolutionService providerResolution,
@@ -96,11 +83,6 @@ public final class CoreModelGateway implements ModelGateway {
     this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
     rejectUnsafeExecutorPolicies(executor);
     rejectInlineExecutor(executor);
-  }
-
-  private static Supplier<Duration> liveBusyRetry(SystemSettingsSnapshot snapshot) {
-    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
-    return () -> Duration.ofMillis(settings.get().tool().modelGatewayBusyRetryMillis());
   }
 
   @Override
