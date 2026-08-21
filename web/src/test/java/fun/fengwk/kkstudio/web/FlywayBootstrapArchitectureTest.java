@@ -62,8 +62,9 @@ class FlywayBootstrapArchitectureTest {
   @Test
   void exactlyOneBaselineMigrationExistsAcrossTheWholeRepository() throws IOException {
     Path root = repositoryRoot();
+    List<Path> files = repositoryFiles(root);
     List<String> migrations =
-        walkRepository(root)
+        files.stream()
             .filter(path -> path.getFileName().toString().equals("V1__schema.sql"))
             .map(root::relativize)
             .map(Path::toString)
@@ -74,7 +75,7 @@ class FlywayBootstrapArchitectureTest {
         migrations,
         "V1 baseline must exist exactly once across the whole repository, owned by the database module");
     assertFalse(
-        walkRepository(root)
+        files.stream()
             .anyMatch(path -> path.getFileName().toString().equals("harness-runtime-schema.sql")),
         "no file in the repository may keep the old schema mirror");
   }
@@ -108,13 +109,18 @@ class FlywayBootstrapArchitectureTest {
             "<artifactId>flyway-database-postgresql</artifactId>\n            <scope>test</scope>"));
   }
 
-  /** 遍历整个仓库的常规文件，跳过生成/依赖目录（.git/.workspace/target/node_modules/dist/coverage/reports 等）。 */
-  private static Stream<Path> walkRepository(Path root) throws IOException {
-    return Files.walk(root).filter(Files::isRegularFile).filter(path -> isGenerated(root, path));
+  /** 一次性物化整个仓库的常规文件（跳过生成/依赖目录），Stream 在方法内关闭。 */
+  private static List<Path> repositoryFiles(Path root) throws IOException {
+    try (Stream<Path> paths = Files.walk(root)) {
+      return paths
+          .filter(Files::isRegularFile)
+          .filter(path -> isRepositorySource(root, path))
+          .toList();
+    }
   }
 
-  /** 路径任一段命中生成/依赖目录名时跳过。 */
-  private static boolean isGenerated(Path root, Path path) {
+  /** 路径任一段命中生成/依赖目录名（.git/.workspace/target/node_modules/dist/coverage/reports 等）时不算仓库源文件。 */
+  private static boolean isRepositorySource(Path root, Path path) {
     for (Path segment : root.relativize(path)) {
       if (GENERATED_DIRS.contains(segment.toString())) {
         return false;
