@@ -9,8 +9,9 @@ public record ModelGatewayConfig(Duration busyRetryDelay) {
 
   /**
    * busyRetryDelay：executor 拒绝提交后 {@link
-   * fun.fengwk.kkstudio.harness.runtime.port.ModelGateway.Busy} 的重试延迟。由数据库 SystemSettings 的 {@code
-   * tool.modelGatewayBusyRetryMillis} 在装配时构造。
+   * fun.fengwk.kkstudio.harness.runtime.port.ModelGateway.Busy} 的重试延迟。测试用冻结载体；生产 {@link
+   * CoreModelGateway} 在每次 start 从 SystemSettingsSnapshot 现读 {@code
+   * tool.modelGatewayBusyRetryMillis}。
    */
   public ModelGatewayConfig {
     busyRetryDelay =

@@ -9,8 +9,6 @@ import fun.fengwk.kkstudio.core.ai.runtime.model.provider.AnthropicProviderAdapt
 import fun.fengwk.kkstudio.core.ai.runtime.model.provider.GoogleProviderAdapter;
 import fun.fengwk.kkstudio.core.ai.runtime.model.provider.OpenAiProviderAdapter;
 import fun.fengwk.kkstudio.core.ai.runtime.model.provider.OpenAiResponsesProviderAdapter;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -19,7 +17,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -48,17 +45,6 @@ public class ModelExecutionConfiguration {
   @ConditionalOnMissingBean
   public Clock modelExecutionClock() {
     return Clock.systemUTC();
-  }
-
-  /**
-   * 模型 Gateway 的 busy 重试延迟：读取共享启动快照 {@link SystemSettingsSnapshot}（装配期一次 DB 读取，DB 变更需重启生效）的 {@code
-   * tool.modelGatewayBusyRetryMillis}，长生命周期 bean 使用该快照。
-   */
-  @Bean
-  @ConditionalOnMissingBean
-  public ModelGatewayConfig modelGatewayConfig(SystemSettingsSnapshot systemSettingsSnapshot) {
-    SystemSettings.Tool tool = systemSettingsSnapshot.get().tool();
-    return new ModelGatewayConfig(Duration.ofMillis(tool.modelGatewayBusyRetryMillis()));
   }
 
   @Bean(name = "openaiProviderFactory")

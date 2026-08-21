@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * 由当前 Thread Agent 选中、用于加载完整 SKILL.md 正文的 PLATFORM tool。
@@ -49,19 +50,23 @@ public final class LoadSkillTool implements Tool {
 
   private final ThreadSelectedSkillLookup skillLookup;
   private final SkillBodyLoader skillBodyLoader;
-  private final Duration loadTimeout;
+  private final Supplier<Duration> loadTimeout;
 
   /** 无默认超时：加载超时必须由生产装配从 SystemSettings 快照显式传入（test 基座同样显式传 fixture 值）。 */
   public LoadSkillTool(
       ThreadSelectedSkillLookup skillLookup,
       SkillBodyLoader skillBodyLoader,
       Duration loadTimeout) {
+    this(skillLookup, skillBodyLoader, constantTimeout(loadTimeout));
+  }
+
+  public LoadSkillTool(
+      ThreadSelectedSkillLookup skillLookup,
+      SkillBodyLoader skillBodyLoader,
+      Supplier<Duration> loadTimeout) {
     this.skillLookup = Objects.requireNonNull(skillLookup, "skillLookup");
     this.skillBodyLoader = Objects.requireNonNull(skillBodyLoader, "skillBodyLoader");
     this.loadTimeout = Objects.requireNonNull(loadTimeout, "loadTimeout");
-    if (loadTimeout.isZero() || loadTimeout.isNegative()) {
-      throw new IllegalArgumentException("loadTimeout must be positive");
-    }
   }
 
   @Override
@@ -93,7 +98,7 @@ public final class LoadSkillTool implements Tool {
         return handle;
       }
       CompletableFuture<SkillBodyLoader.SkillBodyLoadResult> future =
-          skillBodyLoader.load(skill.sourceEnvironment(), skill.name(), loadTimeout);
+          skillBodyLoader.load(skill.sourceEnvironment(), skill.name(), loadTimeout());
       handle.future.set(future);
       future.whenComplete(
           (result, error) -> {
@@ -170,6 +175,22 @@ public final class LoadSkillTool implements Tool {
       return skillName + " is offline; " + skillName + " is unavailable";
     }
     return detail;
+  }
+
+  private Duration loadTimeout() {
+    Duration timeout = loadTimeout.get();
+    if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+      throw new IllegalStateException("loadTimeout must be positive");
+    }
+    return timeout;
+  }
+
+  private static Supplier<Duration> constantTimeout(Duration loadTimeout) {
+    Objects.requireNonNull(loadTimeout, "loadTimeout");
+    if (loadTimeout.isZero() || loadTimeout.isNegative()) {
+      throw new IllegalArgumentException("loadTimeout must be positive");
+    }
+    return () -> loadTimeout;
   }
 
   private static String message(Throwable error) {

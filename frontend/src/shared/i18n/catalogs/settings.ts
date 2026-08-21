@@ -318,8 +318,8 @@ export const settingsCatalog = {
     'zh-CN': '工具网关与技能加载',
   },
   'settings.section.tool.gateway.description': {
-    'en-US': 'Retry and load budgets captured by the process at startup; restart required.',
-    'zh-CN': '进程启动时捕获的重试/加载预算；修改后需要重启生效。',
+    'en-US': 'Retry and skill-load budgets. Applies to the next invocation.',
+    'zh-CN': '重试与技能加载预算；对下一次调用立即生效。',
   },
   'settings.field.tool.defaultYolo': {
     'en-US': 'Default YOLO',
@@ -418,6 +418,22 @@ export const settingsCatalog = {
   'settings.section.environment.description': {
     'en-US': 'Resource/message boundaries and timeouts for the daemon gateway.',
     'zh-CN': '守护网关的资源/消息边界与超时。',
+  },
+  'settings.section.environment.runtime.title': {
+    'en-US': 'Runtime budgets',
+    'zh-CN': '运行预算',
+  },
+  'settings.section.environment.runtime.description': {
+    'en-US': 'Heartbeat, directory listing and resource limits. Applies to the next check or request.',
+    'zh-CN': '心跳、目录列出与资源上限；对下一次判定或请求立即生效。',
+  },
+  'settings.section.environment.transport.title': {
+    'en-US': 'WebSocket buffer',
+    'zh-CN': 'WebSocket 缓冲',
+  },
+  'settings.section.environment.transport.description': {
+    'en-US': 'JSR-356 container buffer size. Restart required.',
+    'zh-CN': 'JSR-356 容器缓冲区大小；修改后需要重启生效。',
   },
   'settings.field.environment.maxResourceBytes': {
     'en-US': 'Max resource bytes',

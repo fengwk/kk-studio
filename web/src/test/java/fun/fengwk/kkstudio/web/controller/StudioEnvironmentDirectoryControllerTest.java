@@ -36,6 +36,7 @@ import java.util.concurrent.CompletableFuture;
 class StudioEnvironmentDirectoryControllerTest {
 
   private EnvironmentDirectoryLister directoryLister;
+  private SystemSettingsSnapshot snapshot;
   private MockMvc mockMvc;
 
   @BeforeEach
@@ -50,9 +51,9 @@ class StudioEnvironmentDirectoryControllerTest {
             SystemSettings.Integrations.DEFAULT,
             SystemSettings.StorageMedia.DEFAULT,
             SystemSettings.Advanced.DEFAULT);
+    snapshot = new SystemSettingsSnapshot(settings);
     StudioEnvironmentDirectoryController controller =
-        new StudioEnvironmentDirectoryController(
-            directoryLister, new SystemSettingsSnapshot(settings));
+        new StudioEnvironmentDirectoryController(directoryLister, snapshot);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new ResultResponseBodyAdvice())
@@ -88,6 +89,35 @@ class StudioEnvironmentDirectoryControllerTest {
 
     verify(directoryLister)
         .listDirectory(new EnvironmentName("env-1"), "src", Duration.ofSeconds(5));
+  }
+
+  /** 目录超时在每次 HTTP 请求现读快照：构造后 replace 必须传到 lister。 */
+  @Test
+  void usesLiveDirectoryListTimeoutAfterSnapshotReplace() throws Exception {
+    when(directoryLister.listDirectory(any(), any(), any()))
+        .thenReturn(
+            CompletableFuture.completedFuture(
+                new EnvironmentDirectoryListResult.Loaded(emptyListing("src"))));
+    SystemSettings.Environment base = snapshot.get().environment();
+    snapshot.replace(
+        new SystemSettings(
+            SystemSettings.Tool.DEFAULT,
+            SystemSettings.AiRuntime.DEFAULT,
+            new SystemSettings.Environment(
+                base.maxResourceBytes(),
+                base.maxMessageBytes(),
+                base.heartbeatTimeoutMillis(),
+                2_000L),
+            SystemSettings.Integrations.DEFAULT,
+            SystemSettings.StorageMedia.DEFAULT,
+            SystemSettings.Advanced.DEFAULT));
+
+    mockMvc
+        .perform(get("/api/ai/environments/env-1/directories").param("path", "src"))
+        .andExpect(status().isOk());
+
+    verify(directoryLister)
+        .listDirectory(new EnvironmentName("env-1"), "src", Duration.ofMillis(2_000));
   }
 
   @Test

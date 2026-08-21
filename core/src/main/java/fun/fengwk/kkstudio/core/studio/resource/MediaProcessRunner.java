@@ -13,16 +13,12 @@ final class MediaProcessRunner {
 
   private static final int MAX_ERROR_TEXT_BYTES = 16 * 1024;
 
-  private final Duration timeout;
+  MediaProcessRunner() {}
 
-  MediaProcessRunner(Duration timeout) {
+  void run(List<String> command, Path stdout, Path stderr, Duration timeout) {
     if (timeout == null || timeout.isZero() || timeout.isNegative()) {
       throw new IllegalArgumentException("processTimeout must be positive");
     }
-    this.timeout = timeout;
-  }
-
-  void run(List<String> command, Path stdout, Path stderr) {
     Process process;
     try {
       ProcessBuilder builder = new ProcessBuilder(command);

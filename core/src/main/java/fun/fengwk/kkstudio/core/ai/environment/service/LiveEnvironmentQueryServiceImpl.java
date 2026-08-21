@@ -4,7 +4,6 @@ import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
@@ -27,13 +26,13 @@ import java.util.Objects;
 public class LiveEnvironmentQueryServiceImpl implements LiveEnvironmentQueryService {
 
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final SystemSettings.Environment environmentSettings;
+  private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
 
   public LiveEnvironmentQueryServiceImpl(
       LiveEnvironmentRegistry environmentRegistry, SystemSettingsSnapshot snapshot, Clock clock) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.environmentSettings = Objects.requireNonNull(snapshot, "snapshot").get().environment();
+    this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -52,7 +51,8 @@ public class LiveEnvironmentQueryServiceImpl implements LiveEnvironmentQueryServ
     dto.setStatus(environment.status().name());
     dto.setReady(
         environment.isReady(
-            clock.instant(), Duration.ofMillis(environmentSettings.heartbeatTimeoutMillis())));
+            clock.instant(),
+            Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
     dto.setLastSeen(environment.lastSeenAt());
     List<LiveEnvironmentToolDTO> tools = new ArrayList<>();
     for (ToolDescriptor tool : environment.tools()) {

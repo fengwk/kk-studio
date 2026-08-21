@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.core.ai.runtime.model;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -15,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -25,6 +28,7 @@ import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy;
 import java.util.concurrent.ThreadPoolExecutor.DiscardPolicy;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * 以 PostgreSQL provider 资源为支撑的生产 {@link ModelGateway} 适配器。
@@ -69,15 +73,34 @@ public final class CoreModelGateway implements ModelGateway {
 
   private final ProviderResolutionService providerResolution;
   private final ExecutorService executor;
-  private final ModelGatewayConfig config;
+  private final Supplier<Duration> busyRetryDelay;
 
+  @Autowired
   public CoreModelGateway(
       ProviderResolutionService providerResolution,
       @Qualifier("modelExecutionExecutor") ExecutorService executor,
+      SystemSettingsSnapshot snapshot) {
+    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
+    this(
+        providerResolution,
+        executor,
+        () -> Duration.ofMillis(settings.get().tool().modelGatewayBusyRetryMillis()));
+  }
+
+  public CoreModelGateway(
+      ProviderResolutionService providerResolution,
+      ExecutorService executor,
       ModelGatewayConfig config) {
+    this(providerResolution, executor, Objects.requireNonNull(config, "config")::busyRetryDelay);
+  }
+
+  private CoreModelGateway(
+      ProviderResolutionService providerResolution,
+      ExecutorService executor,
+      Supplier<Duration> busyRetryDelay) {
     this.providerResolution = Objects.requireNonNull(providerResolution, "providerResolution");
     this.executor = Objects.requireNonNull(executor, "executor");
-    this.config = Objects.requireNonNull(config, "config");
+    this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
     rejectUnsafeExecutorPolicies(executor);
     rejectInlineExecutor(executor);
   }
@@ -106,7 +129,7 @@ public final class CoreModelGateway implements ModelGateway {
       // 任务可证明从未被接受：按配置的延迟返回 Busy。cancel 会唤醒 broken executor 可能已启动的任务，
       // 使其中止且绝不触碰 Provider。
       gate.cancel();
-      return new Busy(config.busyRetryDelay());
+      return new Busy(busyRetryDelay.get());
     } catch (RuntimeException ambiguous) {
       // broken executor 可能在抛异常前已启动任务：结果未知。
       gate.cancel();

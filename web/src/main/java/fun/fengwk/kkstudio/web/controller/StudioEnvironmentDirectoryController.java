@@ -12,7 +12,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryLister;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
@@ -34,12 +33,12 @@ import java.util.concurrent.CompletableFuture;
 public class StudioEnvironmentDirectoryController {
 
   private final EnvironmentDirectoryLister directoryLister;
-  private final SystemSettings.Environment environment;
+  private final SystemSettingsSnapshot snapshot;
 
   public StudioEnvironmentDirectoryController(
       EnvironmentDirectoryLister directoryLister, SystemSettingsSnapshot snapshot) {
     this.directoryLister = Objects.requireNonNull(directoryLister, "directoryLister");
-    this.environment = Objects.requireNonNull(snapshot, "snapshot").get().environment();
+    this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
   }
 
   /**
@@ -58,7 +57,9 @@ public class StudioEnvironmentDirectoryController {
     // gateway 的 orTimeout 保证 future 在配置超时内完成；blocking join 不会悬挂。
     CompletableFuture<EnvironmentDirectoryListResult> future =
         directoryLister.listDirectory(
-            environmentName, path, Duration.ofMillis(environment.directoryListTimeoutMillis()));
+            environmentName,
+            path,
+            Duration.ofMillis(snapshot.get().environment().directoryListTimeoutMillis()));
     EnvironmentDirectoryListResult result = future.join();
     if (result instanceof EnvironmentDirectoryListResult.Loaded loaded) {
       return ResponseEntity.ok(Results.ok(loaded.listing()));

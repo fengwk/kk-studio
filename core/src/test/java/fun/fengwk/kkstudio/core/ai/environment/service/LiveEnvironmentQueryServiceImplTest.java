@@ -138,4 +138,43 @@ class LiveEnvironmentQueryServiceImplTest {
     LiveEnvironmentDTO dto = service.listEnvironments().get(0);
     assertFalse(dto.isReady());
   }
+
+  /** heartbeat 超时在投影时现读快照：构造后 replace 必须改变 READY 判定。 */
+  @Test
+  void usesLiveHeartbeatTimeoutAfterSnapshotReplace() {
+    EnvironmentDaemonConnection connection = mock(EnvironmentDaemonConnection.class);
+    when(connection.isOpen()).thenReturn(true);
+    LiveEnvironment stale =
+        new LiveEnvironment(
+            ENVIRONMENT_NAME,
+            LiveEnvironmentStatus.READY,
+            connection,
+            new DaemonCapabilities(
+                DaemonCapabilities.VERSION, ENVIRONMENT_INFO, List.of(), List.of()),
+            NOW.minus(Duration.ofSeconds(90)));
+    LiveEnvironmentRegistry registry = mock(LiveEnvironmentRegistry.class);
+    when(registry.list()).thenReturn(List.of(stale));
+    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    LiveEnvironmentQueryService service =
+        new LiveEnvironmentQueryServiceImpl(registry, snapshot, CLOCK);
+
+    assertFalse(service.listEnvironments().get(0).isReady());
+    snapshot.replace(withHeartbeatTimeout(180_000L));
+    assertTrue(service.listEnvironments().get(0).isReady());
+  }
+
+  private static SystemSettings withHeartbeatTimeout(long heartbeatTimeoutMillis) {
+    SystemSettings.Environment base = SystemSettings.DEFAULT.environment();
+    return new SystemSettings(
+        SystemSettings.Tool.DEFAULT,
+        SystemSettings.AiRuntime.DEFAULT,
+        new SystemSettings.Environment(
+            base.maxResourceBytes(),
+            base.maxMessageBytes(),
+            heartbeatTimeoutMillis,
+            base.directoryListTimeoutMillis()),
+        SystemSettings.Integrations.DEFAULT,
+        SystemSettings.StorageMedia.DEFAULT,
+        SystemSettings.Advanced.DEFAULT);
+  }
 }

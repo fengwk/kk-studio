@@ -19,7 +19,7 @@ class MediaProcessRunnerTest {
   @Test
   void timesOutLongRunningProcess() throws Exception {
     Path script = writeScript("slow", "sleep 5\n");
-    MediaProcessRunner runner = new MediaProcessRunner(Duration.ofMillis(100));
+    MediaProcessRunner runner = new MediaProcessRunner();
 
     IllegalStateException error =
         assertThrows(
@@ -28,7 +28,8 @@ class MediaProcessRunnerTest {
                 runner.run(
                     List.of(script.toString()),
                     tempDir.resolve("stdout"),
-                    tempDir.resolve("stderr")));
+                    tempDir.resolve("stderr"),
+                    Duration.ofMillis(100)));
     assertTrue(error.getMessage().contains("timed out"));
   }
 
@@ -36,7 +37,7 @@ class MediaProcessRunnerTest {
   @Test
   void rejectsNonZeroExit() throws Exception {
     Path script = writeScript("fail", "echo expected-failure >&2\nexit 9\n");
-    MediaProcessRunner runner = new MediaProcessRunner(Duration.ofSeconds(1));
+    MediaProcessRunner runner = new MediaProcessRunner();
 
     IllegalArgumentException error =
         assertThrows(
@@ -45,7 +46,8 @@ class MediaProcessRunnerTest {
                 runner.run(
                     List.of(script.toString()),
                     tempDir.resolve("stdout"),
-                    tempDir.resolve("stderr")));
+                    tempDir.resolve("stderr"),
+                    Duration.ofSeconds(1)));
     assertTrue(error.getMessage().contains("expected-failure"));
   }
 
