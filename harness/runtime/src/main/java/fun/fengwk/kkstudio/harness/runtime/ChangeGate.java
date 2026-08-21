@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.core.ai.runtime;
+package fun.fengwk.kkstudio.harness.runtime;
 
 /**
  * 观察循环的信号门：按类别计数并支持带超时的等待。
@@ -6,7 +6,7 @@ package fun.fengwk.kkstudio.core.ai.runtime;
  * <p>计数而非布尔位，保证「先 signal 后 wait」的 wake 不丢失；多个信号合并为一次唤醒，由调用方在唤醒后按类别计数差决定重读哪类事实。{@link #awaitChange}
  * 只做限时睡眠，不读取任何 durable 事实；唤醒后是否重读 snapshot 完全由调用方依据计数差决定。
  *
- * <p>core 内部工具类，不对外承诺 API 稳定性。
+ * <p>Runtime 内部工具类，不对外承诺 API 稳定性。
  */
 public final class ChangeGate {
 

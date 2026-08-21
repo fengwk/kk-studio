@@ -54,7 +54,7 @@ Goal 插件只实现上述模型工具的 durable snapshot 协议，不实现 pi
 
 主要契约测试：
 
-- `core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/task/TaskToolTest.java`
+- `harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/subagent/TaskToolTest.java`
 - `harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/skill/LoadSkillToolTest.java`
 - `plugins/goal/src/test/java/fun/fengwk/kkstudio/plugin/goal/GoalPluginTest.java`
 

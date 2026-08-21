@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.core.ai.runtime.task;
+package fun.fengwk.kkstudio.harness.runtime.subagent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,9 +26,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.core.ai.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -74,6 +72,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -147,8 +146,8 @@ class TaskToolTest {
           BigDecimal.ZERO);
 
   private ExecutorService executor;
-  private ObjectProvider<HarnessRuntime> runtimeProvider;
-  private AgentBranchSettingsMaterializer settingsMaterializer;
+  private HarnessRuntime runtime;
+  private SubagentBranchSettingsMaterializer settingsMaterializer;
   private TestThreadChangeSource changeSource;
   private TaskTool tool;
   private int callId;
@@ -156,8 +155,7 @@ class TaskToolTest {
   @BeforeEach
   void setUp() {
     executor = Executors.newVirtualThreadPerTaskExecutor();
-    runtimeProvider = runtimeProvider();
-    settingsMaterializer = mock(AgentBranchSettingsMaterializer.class);
+    settingsMaterializer = mock(SubagentBranchSettingsMaterializer.class);
     changeSource = new TestThreadChangeSource();
     tool = tool(config(2, 10, Duration.ZERO, DEFAULT_MAX_TURNS));
   }
@@ -178,7 +176,7 @@ class TaskToolTest {
 
   private TaskTool tool(SubagentConfig cfg, SubagentRunRegistry registry) {
     return new TaskTool(
-        runtimeProvider,
+        () -> runtime,
         settingsMaterializer,
         () -> cfg,
         registry,
@@ -199,12 +197,16 @@ class TaskToolTest {
     assertEquals(ToolSideEffect.NON_IDEMPOTENT, descriptor.sideEffect());
     assertEquals(Duration.ZERO, descriptor.timeout());
     assertFalse(descriptor.description().isBlank());
-    // task 描述来自真实 classpath 模板，默认 maxTurns 来自 SubagentConfig。
-    assertTrue(
-        descriptor.description().contains("The default is `" + DEFAULT_MAX_TURNS + "`"),
-        descriptor.description());
+    assertFalse(descriptor.description().contains("Parameters:"), descriptor.description());
 
     ToolParamsSchema schema = descriptor.inputSchema();
+    assertTrue(
+        schema
+            .properties()
+            .get("maxTurns")
+            .description()
+            .contains("Defaults to " + DEFAULT_MAX_TURNS),
+        schema.properties().get("maxTurns").description());
     assertFalse(schema.description().isBlank());
     assertEquals(
         Set.of("subagent_type", "prompt", "maxTurns", "session_id"), schema.properties().keySet());
@@ -261,7 +263,7 @@ class TaskToolTest {
   @Test
   void createsDurableChildAndReturnsCompletedReport() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings parentSettings = settings("parent", "parent-model", List.of(TaskTool.NAME));
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
@@ -324,7 +326,7 @@ class TaskToolTest {
   @Test
   void rejectsSubagentOutsideFrozenParentAllowlist() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     ThreadSnapshot parent =
         parentSnapshot(
             settings("parent", "parent-model", List.of(TaskTool.NAME)),
@@ -368,7 +370,7 @@ class TaskToolTest {
   @Test
   void resumesQuiescentChildSessionWithFullSettingsDiff() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings base = settings("alpha", "model-a", List.of("tool-a"));
     BranchSettings target = settings("beta", "model-b", List.of("tool-b"));
     ThreadSnapshot parent =
@@ -427,7 +429,7 @@ class TaskToolTest {
   @Test
   void rejectsResumeOfMissingForeignOrBusySession() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings settings = settings("parent", "parent-model", List.of(TaskTool.NAME));
     ThreadSnapshot parent =
         parentSnapshot(settings, List.of(new SubagentBinding("reviewer", "Review")));
@@ -524,7 +526,7 @@ class TaskToolTest {
   @Test
   void rejectsDelegationBeyondDepthEmptyAllowlistOrDetachedInvocation() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings settings = settings("parent", "parent-model", List.of(TaskTool.NAME));
     ThreadSnapshot deepParent =
         parentSnapshot(
@@ -602,7 +604,7 @@ class TaskToolTest {
   void propagatesRootThreadAndDepthForNestedDelegation() throws Exception {
     TaskTool nestedTool = tool(config(3, 10, Duration.ZERO, DEFAULT_MAX_TURNS));
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings parentSettings = settings("parent", "parent-model", List.of(TaskTool.NAME));
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
@@ -651,7 +653,7 @@ class TaskToolTest {
   @Test
   void cancelsBeforeChildSessionStarts() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings settings = settings("parent", "parent-model", List.of(TaskTool.NAME));
     ThreadSnapshot parent =
         parentSnapshot(settings, List.of(new SubagentBinding("reviewer", "Review")));
@@ -690,7 +692,7 @@ class TaskToolTest {
   @Test
   void stopsChildAndCompletesCancelledOnUserCancel() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -763,7 +765,7 @@ class TaskToolTest {
   @Test
   void retriesCancelOnStaleRevisionAndExhaustsRetries() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -834,7 +836,7 @@ class TaskToolTest {
   @Test
   void concurrentCancelAndObserverExecuteSingleStopSequence() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -922,7 +924,7 @@ class TaskToolTest {
   @Test
   void failsWhenObservationThreadIsInterrupted() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -970,7 +972,7 @@ class TaskToolTest {
   @Test
   void ignoresMissingChildWhileCancelling() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -1018,7 +1020,7 @@ class TaskToolTest {
   @Test
   void cancelsAfterChildAttachBeforeAwait() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -1074,7 +1076,7 @@ class TaskToolTest {
     SubagentRunRegistry registry = new SubagentRunRegistry();
     TaskTool idleTool = tool(idleConfig, registry);
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -1195,7 +1197,7 @@ class TaskToolTest {
     SubagentRunRegistry registry = new SubagentRunRegistry();
     TaskTool idleTool = tool(idleConfig, registry);
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -1247,7 +1249,7 @@ class TaskToolTest {
   @Test
   void sendsMaxTurnsRemindersEveryFiveTurns() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -1304,7 +1306,7 @@ class TaskToolTest {
               instanceof CustomMessageCommandPayload reminder) {
         reminderIds.add(command.commands().getFirst().clientCommandId());
         assertEquals(
-            TaskPrompts.maxTurnsReminder(),
+            SubagentPrompts.maxTurnsReminder(),
             ((TextMessageContent) reminder.message().contents().getFirst()).text());
       }
     }
@@ -1317,7 +1319,7 @@ class TaskToolTest {
   @Test
   void republishesStatusHeartbeatWhileFingerprintIsStable() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -1378,7 +1380,7 @@ class TaskToolTest {
   void mapsFailedStoppedAndCancelledTerminalOutcomes() throws Exception {
     // FAILED：AssistantErrorPayload 的报告与 TURN_FAILED 边界。
     HarnessRuntime failedRuntime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(failedRuntime);
+    this.runtime = failedRuntime;
     stubCreateFlow(failedRuntime, settings("reviewer", "review-model", List.of("read")));
     stubChildSnapshots(
         failedRuntime,
@@ -1398,7 +1400,7 @@ class TaskToolTest {
 
     // STOPPED：AssistantAbortedPayload 文本作为报告。
     HarnessRuntime stoppedRuntime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(stoppedRuntime);
+    this.runtime = stoppedRuntime;
     stubCreateFlow(stoppedRuntime, settings("reviewer", "review-model", List.of("read")));
     stubChildSnapshots(
         stoppedRuntime,
@@ -1418,7 +1420,7 @@ class TaskToolTest {
 
     // CANCELLED 无文本报告：fallback 文案兜底；null maxTurns/session_id 走默认值。
     HarnessRuntime cancelledRuntime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(cancelledRuntime);
+    this.runtime = cancelledRuntime;
     stubCreateFlow(cancelledRuntime, settings("reviewer", "review-model", List.of("read")));
     stubChildSnapshots(
         cancelledRuntime,
@@ -1440,7 +1442,7 @@ class TaskToolTest {
   @Test
   void exposesWaitingApprovalsAndToolCallStatsInStatus() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     stubCreateFlow(runtime, childSettings);
     ToolApproval waiting = ToolApproval.request(NOW, "needs human");
@@ -1476,7 +1478,7 @@ class TaskToolTest {
   @Test
   void relaysNestedTaskStatusesToTheRootListener() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     stubCreateFlow(runtime, childSettings);
     stubChildSnapshots(
@@ -1521,7 +1523,7 @@ class TaskToolTest {
   @Test
   void subscribesBeforeObservationReadAndDoesNotLoseConcurrentSignal() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     stubCreateFlow(runtime, childSettings);
     ThreadSnapshot child = childRootSnapshot(childSettings);
@@ -1563,7 +1565,7 @@ class TaskToolTest {
   @Test
   void wakesOnDescendantRelayWithoutRereadingDurableSnapshot() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     stubCreateFlow(runtime, childSettings);
     ThreadSnapshot child = childRootSnapshot(childSettings);
@@ -1671,7 +1673,7 @@ class TaskToolTest {
   @Test
   void rejectsPromptEnqueueConflictThenRecovers() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -1722,7 +1724,7 @@ class TaskToolTest {
     SubagentRunRegistry registry = new SubagentRunRegistry();
     TaskTool limitedTool = tool(limited, registry);
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     ThreadSnapshot parent =
         parentSnapshot(
             settings("parent", "parent-model", List.of(TaskTool.NAME)),
@@ -1749,7 +1751,7 @@ class TaskToolTest {
   @Test
   void rejectsConcurrentResumeOfSameSession() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
-    when(runtimeProvider.getIfAvailable()).thenReturn(runtime);
+    this.runtime = runtime;
     BranchSettings settings = settings("parent", "parent-model", List.of(TaskTool.NAME));
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
@@ -1869,11 +1871,6 @@ class TaskToolTest {
               NOW));
     }
     return accepted;
-  }
-
-  @SuppressWarnings("unchecked")
-  private static ObjectProvider<HarnessRuntime> runtimeProvider() {
-    return (ObjectProvider<HarnessRuntime>) mock(ObjectProvider.class);
   }
 
   private ToolExecutionRequest request(String callId, String argumentsJson) {

@@ -18,8 +18,6 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentBranchSettingsMaterializer;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
-import fun.fengwk.kkstudio.core.ai.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
@@ -51,6 +49,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;

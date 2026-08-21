@@ -27,6 +27,9 @@ public record ToolCall(String id, String toolName, String argumentsJson) {
     }
     String normalized = ToolArgumentsNormalizer.normalize(argumentsJson, descriptor.inputSchema());
     ToolArgumentsValidator.validate(normalized, descriptor.inputSchema());
+    if (normalized.equals(argumentsJson)) {
+      return this;
+    }
     return new ToolCall(id, toolName, normalized);
   }
 }

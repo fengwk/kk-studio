@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.definition.configuration.AgentDefinit
 import fun.fengwk.kkstudio.core.ai.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
 
 import java.time.Clock;
 import java.util.Objects;

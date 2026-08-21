@@ -11,15 +11,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /** 把当前 branch Goal 更新为 complete 或 blocked 全量快照。 */
 public final class UpdateGoalTool implements PluginTool {
@@ -34,15 +29,7 @@ public final class UpdateGoalTool implements PluginTool {
           ToolType.PLATFORM,
           GoalPrompts.text("update-goal.md"),
           NAME,
-          new ToolParamsSchema(
-              "把当前 branch goal 更新为终态。",
-              Map.of(
-                  "status",
-                  new ToolEnumSchema("终态状态。", List.of("complete", "blocked")),
-                  "reason",
-                  new ToolStringSchema("支持完成或阻塞判断的详细依据和具体证据。")),
-              Set.of("status", "reason"),
-              false),
+          GoalPrompts.schema("update-goal.schema.json"),
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
 

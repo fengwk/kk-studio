@@ -1,6 +1,6 @@
-package fun.fengwk.kkstudio.core.ai.runtime.testing;
+package fun.fengwk.kkstudio.harness.runtime.testing;
 
-import fun.fengwk.kkstudio.core.ai.runtime.HarnessThreadChangeSource;
+import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 
 import java.util.Map;
 import java.util.Objects;

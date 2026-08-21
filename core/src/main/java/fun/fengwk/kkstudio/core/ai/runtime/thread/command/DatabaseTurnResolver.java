@@ -15,8 +15,6 @@ import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.core.ai.runtime.task.CurrentEnvironmentContext;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfigProvider;
-import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.BranchView;
@@ -53,6 +51,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -108,6 +108,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final CompactionConfigProvider compactionConfigProvider;
   private final SubagentConfigProvider subagentConfigProvider;
   private final AgentPromptComposer promptComposer;
+  private final TaskTool taskTool;
   private final Clock clock;
   private final ProviderMessageProjector messageProjector;
   private final ToolDescriptorJsonCodec toolDescriptorCodec;
@@ -127,6 +128,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       CompactionConfigProvider compactionConfigProvider,
       SubagentConfigProvider subagentConfigProvider,
       AgentPromptComposer promptComposer,
+      TaskTool taskTool,
       Clock clock) {
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
@@ -144,6 +146,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.subagentConfigProvider =
         Objects.requireNonNull(subagentConfigProvider, "subagentConfigProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
+    this.taskTool = Objects.requireNonNull(taskTool, "taskTool");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.messageProjector = new ProviderMessageProjector();
     this.toolDescriptorCodec = new ToolDescriptorJsonCodec();
@@ -397,9 +400,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
           throw rejection(
               "task requires a non-empty Agent subagents allowlist below the maximum depth");
         }
-        ToolDescriptor task =
-            require(toolCatalog.findInternal(TaskTool.NAME).orElse(null), "task tool not found");
-        bindings.add(platformBinding(task));
+        // task descriptor 每次现拼（当前 maxTurns 渲染），不使用 ToolCatalog 启动快照。
+        bindings.add(platformBinding(taskTool.descriptor()));
         continue;
       }
       Optional<ToolDescriptor> selectable = toolCatalog.findSelectable(name);

@@ -4,10 +4,13 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.runtime.prompt.PromptTemplate;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentPrompts;
 
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -17,8 +20,6 @@ import java.util.Objects;
 @Component
 public final class AgentPromptComposer {
 
-  private static final String ROOT = "fun/fengwk/kkstudio/core/ai/runtime/task/prompts/";
-  private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
   private static final DateTimeFormatter DATE_FORMAT =
       DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT);
 
@@ -38,7 +39,7 @@ public final class AgentPromptComposer {
     Objects.requireNonNull(subagents, "subagents");
     List<String> sections = new ArrayList<>();
     if (systemPrompt != null && !systemPrompt.isBlank()) {
-      sections.add(systemPrompt);
+      sections.add(renderAgentBody(systemPrompt, currentEnvironment));
     }
     String environment = currentEnvironment(currentEnvironment);
     if (!environment.isBlank()) {
@@ -46,20 +47,44 @@ public final class AgentPromptComposer {
     }
     if (!skills.isEmpty()) {
       sections.add(
-          LOADER.load(ROOT + "agent-skills.md").render(Map.of("skills", skillEntries(skills))));
+          SubagentPrompts.agentSkillsTemplate().render(Map.of("skills", skillEntries(skills))));
     }
     if (!subagents.isEmpty()) {
       sections.add(
-          LOADER
-              .load(ROOT + "agent-subagents.md")
+          SubagentPrompts.agentSubagentsTemplate()
               .render(
                   Map.of(
                       "taskInstructions",
-                      TaskPrompts.systemInstructions(configProvider.subagentConfig().maxTurns()),
+                      SubagentPrompts.systemInstructions(
+                          configProvider.subagentConfig().maxTurns()),
                       "subagents",
                       subagentEntries(subagents))));
     }
     return String.join("\n\n", sections);
+  }
+
+  /**
+   * Agent 正文按模板声明渲染：只提供当前 Environment 可解析的 {@code date}/{@code workspace} 变量，声明之外的变量
+   * 保持原文（调用方负责承诺正文不含其它占位符）。
+   */
+  private static String renderAgentBody(String systemPrompt, CurrentEnvironmentContext context) {
+    PromptTemplate body = new PromptTemplate("agent-body", systemPrompt);
+    List<String> declared = body.variables();
+    if (declared.isEmpty()) {
+      return systemPrompt;
+    }
+    Map<String, String> values = new HashMap<>();
+    if (declared.contains("date")) {
+      values.put("date", DATE_FORMAT.format(context.currentDate()));
+    }
+    if (declared.contains("workspace")) {
+      String workspace = context.binding() == null ? "" : context.binding().workspacePath();
+      if (workspace == null || workspace.isBlank() || "none".equals(workspace)) {
+        workspace = "";
+      }
+      values.put("workspace", workspace);
+    }
+    return body.render(values);
   }
 
   private static String currentEnvironment(CurrentEnvironmentContext context) {
@@ -76,7 +101,9 @@ public final class AgentPromptComposer {
     if (fields.isEmpty()) {
       return "";
     }
-    return "<current_environment>\n" + String.join("\n", fields) + "\n</current_environment>";
+    return SubagentPrompts.currentEnvironmentTemplate()
+        .render(Map.of("fields", String.join("\n", fields)))
+        .stripTrailing();
   }
 
   private static void addEnvironmentField(List<String> fields, String name, String value) {

@@ -11,15 +11,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /** 创建或替换当前 branch Goal 全量快照。 */
 public final class CreateGoalTool implements PluginTool {
@@ -34,15 +29,7 @@ public final class CreateGoalTool implements PluginTool {
           ToolType.PLATFORM,
           GoalPrompts.text("create-goal.md"),
           NAME,
-          new ToolParamsSchema(
-              "创建或替换当前 branch 的 durable goal。",
-              Map.of(
-                  "objective",
-                  new ToolStringSchema("可由证据核验的目标，涵盖结果、验证面、约束、边界、迭代策略和阻塞停止条件。"),
-                  "tokenBudget",
-                  new ToolIntegerSchema("仅在用户明确要求时提供的可选正数 token 预算。")),
-              Set.of("objective"),
-              false),
+          GoalPrompts.schema("create-goal.schema.json"),
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
 

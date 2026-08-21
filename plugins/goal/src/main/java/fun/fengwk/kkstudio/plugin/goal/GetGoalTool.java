@@ -9,12 +9,9 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /** 读取当前 branch 最新 Goal 快照。 */
 public final class GetGoalTool implements PluginTool {
@@ -29,7 +26,7 @@ public final class GetGoalTool implements PluginTool {
           ToolType.PLATFORM,
           GoalPrompts.text("get-goal.md"),
           NAME,
-          new ToolParamsSchema("读取当前 branch 的 durable goal。", Map.of(), Set.of(), false),
+          GoalPrompts.schema("get-goal.schema.json"),
           ToolSideEffect.READ_ONLY,
           Duration.ZERO);
 

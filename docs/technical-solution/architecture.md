@@ -168,7 +168,7 @@ cache 覆盖连续版本时返回 Patch；任何 gap、损坏或 Redis 不可用
 
 ## 8. Subagent 委派（task）
 
-`task` 是内部 `PLATFORM` Tool（`rendererKey=task`、`NON_IDEMPOTENT`）：Model 调用后，Core 的 `TaskTool` 以普通 durable Harness Thread 创建子 Agent Session，复用现有 ToolInvocation/approval/stop/Work 与 Thread 状态机——**没有新表、新状态机或新调度器**。关键事实：
+`task` 是内部 `PLATFORM` Tool（`rendererKey=task`、`NON_IDEMPOTENT`）：Model 调用后，`harness.runtime.subagent.TaskTool` 以普通 durable Harness Thread 创建子 Agent Session，复用现有 ToolInvocation/approval/stop/Work 与 Thread 状态机——**没有新表、新状态机或新调度器**。关键事实：
 
 - 子 Thread ROOT payload 携带可选 `subagentContext {parentThreadId, rootThreadId, taskInvocationId, depth}`；`task` 的 id/session_id 是子 ThreadId（canonical UUID）。
 - 委派权限在父 ModelRequestSpec 冻结为 `subagentBindings`（Agent 名称 + 描述 allowlist）；执行绝不重读父 Agent 配置扩权。子 Agent branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且未达最大深度时 task`）。

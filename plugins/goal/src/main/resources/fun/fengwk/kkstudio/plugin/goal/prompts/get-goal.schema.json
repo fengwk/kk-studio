@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "description": "Read the durable goal of the current branch.",
+  "properties": {},
+  "required": [],
+  "additionalProperties": false
+}
