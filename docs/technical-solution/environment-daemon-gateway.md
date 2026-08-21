@@ -30,9 +30,10 @@ kk-studio:
   harness:
     environment-gateway:
       daemon-token: ${KK_STUDIO_DAEMON_TOKEN}
+      max-message-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES:16777216}
 ```
 
-`daemon-token` 是部署范围的共享连接密钥；Gateway 在 HELLO 中以常量时间比较它；缺失、空白或不匹配的密钥会关闭连接。生产部署使用 TLS 终止后的 `wss://`。
+`daemon-token` 是部署范围的共享连接密钥；Gateway 在 HELLO 中以常量时间比较它；缺失、空白或不匹配的密钥会关闭连接。生产部署使用 TLS 终止后的 `wss://`。`max-message-bytes` 是 Daemon WebSocket 单帧上限（默认 16MiB），属于协议安全边界，不进 SystemSettings。
 
 Daemon 以 CLI 参数启动（`harness-daemon`，只依赖 `harness-tool`）：
 

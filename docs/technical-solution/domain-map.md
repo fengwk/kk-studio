@@ -46,7 +46,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Session | append-only Entry Tree 的边界 |
 | Entry | 语义持久事实：`ROOT`、`TURN_START`、`MESSAGE`、`CUSTOM`、`MODEL_ATTEMPT_FAILURE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`、`COMPACTION`、`TURN_END` |
 | BranchSettings | Entry 分支的完整不可变设置快照（environment binding/agentName/model；历史 activeTools 只作投影，不是新 turn 的能力事实） |
-| HarnessThread | durable 字段为 `sessionId`、`headEntryId`、`materializationHash`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Environment/status 由 head Entry 分支派生 |
+| HarnessThread | durable 字段为 `sessionId`、`headEntryId`、`materializationHash`、`yoloEnabled`、`nextCommandSequence`、`version` 与时间；Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，六类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS`；YOLO 是 Thread 直接控制面 |
 | ModelInvocation | 一次持久化 `basisHeadEntryId + compact ModelRequestSpec`（providerType/model/variant/preamble/tool/skill/subagent bindings/cacheControl）的 Provider 执行；完整 ProviderRequest 每次 attempt 由 Materializer 从 EntryPath + spec 内存重建；`failedAttempts` 保存尚未物化的连续瞬态失败审计 |
 | ToolInvocation | 按 `call` + 可空 `binding` 执行的一次 ToolCall durable 事实（approval/status/result/effects）；插件 binding 冻结 owner、contribution 与 state accesses，unknown tool 槽位 binding 为 null，非空 effects 只允许属于 terminal `SUCCEEDED` |
@@ -75,7 +75,7 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | `/tree` | 按需读取 `GET /api/ai/runtime/sessions/{sessionId}/entries` 的完整 Session Tree，选择历史 Entry 后把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零写入，不创建 Thread） |
 | Footer | 纯只读展示真实 Environment/Workspace、Git branch、Branch usage、context 与 cache hit；未绑定 Environment 时展示 `none env`，Git 缺失整段省略，usage/cache 缺失按 0 展示，不承载设置或通知入口 |
 | Approval | `POST /tool-invocations/{id}/approval`，输入 `ALLOW`/`DENY` |
-| Stop | `POST /stop`，`stopRequestId` + `expectedRevision`，三态结果 |
+| Stop | `POST /stop`，`stopRequestId` + `expectedVersion`，三态结果 |
 
 ## 5. Canvas 词汇
 
@@ -107,9 +107,9 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | `GET /api/ai/runtime/sessions/{sessionId}/entries` | Session 的完整 immutable Entry Tree |
 | `GET /api/ai/runtime/threads/{threadId}/snapshot` | 单一 Thread 一致投影（含 manualCompaction availability sidecar） |
 | `GET /api/ai/runtime/threads/{threadId}/system-prompt` | 按当前 branch 现算的只读 system prompt 预览 |
-| `POST /api/ai/runtime/threads/{threadId}/compact` | 手动压缩：expectedRevision CAS 提交 MANUAL Compaction Turn |
-| `PUT /api/ai/runtime/threads/{threadId}/yolo` | Thread YOLO policy 直接更新（revision CAS；同值 no-op 先于 CAS） |
-| `POST /api/ai/runtime/threads/{threadId}/stop` | stopRequestId + revision CAS |
+| `POST /api/ai/runtime/threads/{threadId}/compact` | 手动压缩：expectedVersion CAS 提交 MANUAL Compaction Turn |
+| `PUT /api/ai/runtime/threads/{threadId}/yolo` | Thread YOLO policy 直接更新（version CAS；同值 no-op 先于 CAS） |
+| `POST /api/ai/runtime/threads/{threadId}/stop` | stopRequestId + version CAS |
 | `POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval` | Tool approval 决定（父/子 Thread 同一端点） |
 | WebSocket `/api/events/v1` | 事件通道：`subscribe/unsubscribe`（thread/canvas），`subscribed/event/resync/error` 帧 |
 | `GET /api/ai/runtime/resources/{sha256}` | 读取仍处于瞬时/Invocation `ResourceRef` 形态的 managed Resource；Entry history 的 Blob Resource 不走该端点 |
@@ -130,6 +130,6 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 ## 7. 一句话实现
 
 Harness 以 Session Entry Tree 记录语义事实（含插件 `CUSTOM` branch state），以 head 非空的 Thread
-记录执行控制面（revision CAS + 命令 mailbox），以 `BranchSettings` 驱动逐轮
+记录执行控制面（version CAS + 命令 mailbox），以 `BranchSettings` 驱动逐轮
 Catalog/Environment/插件上下文解析并冻结 compact spec，以 Model/Tool Invocation + Work 支持恢复；全局 Blob
 Storage 为 Chat、Harness history 与 Canvas 提供统一内容身份，Chat/Canvas 经 `chat_session` / `canvas_session` 持有 0..N 个 Harness Session。

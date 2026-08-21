@@ -506,7 +506,7 @@ final class ModelExecution implements ModelGateway.Listener {
                 return false;
               }
               tx.updateModelInvocation(model.markRunning(now));
-              tx.updateThread(thread.touchRevision(now));
+              tx.updateThread(thread.touchVersion(now));
               return true;
             }));
   }
@@ -545,7 +545,7 @@ final class ModelExecution implements ModelGateway.Listener {
                       failedAt,
                       retryAt);
               tx.updateModelInvocation(model.retryReady(failure, failedAt));
-              tx.updateThread(thread.touchRevision(failedAt));
+              tx.updateThread(thread.touchVersion(failedAt));
               tx.rescheduleWork(claim, leaseNow, retryAt);
               return true;
             }));
@@ -601,7 +601,7 @@ final class ModelExecution implements ModelGateway.Listener {
                   model = checkpointed;
                 }
                 tx.updateModelInvocation(model.succeed(response, now));
-                tx.updateThread(thread.touchRevision(now));
+                tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim, now);
                 return true;
               }));
@@ -648,7 +648,7 @@ final class ModelExecution implements ModelGateway.Listener {
                       case UNKNOWN -> model.unknown(error, now);
                     };
                 tx.updateModelInvocation(next);
-                tx.updateThread(thread.touchRevision(now));
+                tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim, now);
                 return true;
               }));

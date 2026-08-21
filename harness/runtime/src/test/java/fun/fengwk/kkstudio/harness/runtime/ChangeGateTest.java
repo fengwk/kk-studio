@@ -20,7 +20,7 @@ class ChangeGateTest {
     assertTrue(
         Duration.ofNanos(System.nanoTime() - start).toMillis() < 100,
         "non-positive timeout must not wait");
-    gate.revision();
+    gate.version();
     // 已发生的 signal 在非正 timeout 的立即检查中必须可见（不能直接返回 false）。
     assertTrue(gate.awaitChange(since, 0L));
     assertTrue(gate.awaitChange(since, -1L));
@@ -37,7 +37,7 @@ class ChangeGateTest {
                 () -> {
                   try {
                     Thread.sleep(50);
-                    gate.revision();
+                    gate.version();
                   } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                   }

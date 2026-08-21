@@ -120,7 +120,7 @@ function acceptedEnvelope(chat, model) {
       sessionId,
       headEntryId: cid(),
       nextCommandSequence: '2',
-      revision: '1',
+      version: '1',
       yoloEnabled: true,
       branchSettings: branchSettingsOf(fakeAgent(), model, {
         environment: { name: DAEMON_ENV, workspacePath: '.' },

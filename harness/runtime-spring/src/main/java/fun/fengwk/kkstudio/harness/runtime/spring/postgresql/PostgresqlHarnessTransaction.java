@@ -261,7 +261,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         """
         insert into harness_thread (
             id, session_id, head_entry_id, materialization_hash, yolo_enabled,
-            next_command_sequence, revision, created_at, updated_at
+            next_command_sequence, version, created_at, updated_at
         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         thread.id(),
@@ -270,7 +270,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         thread.materializationHash(),
         thread.yoloEnabled(),
         thread.nextCommandSequence(),
-        thread.revision(),
+        thread.version(),
         PostgresqlHarnessRows.timestamp(thread.createdAt()),
         PostgresqlHarnessRows.timestamp(thread.updatedAt()));
     recordThreadLock(thread.id());
@@ -357,14 +357,14 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             set head_entry_id = ?,
                 yolo_enabled = ?,
                 next_command_sequence = ?,
-                revision = ?,
+                version = ?,
                 updated_at = ?
             where id = ?
             """,
             thread.headEntryId(),
             thread.yoloEnabled(),
             thread.nextCommandSequence(),
-            thread.revision(),
+            thread.version(),
             PostgresqlHarnessRows.timestamp(thread.updatedAt()),
             thread.id());
     requireSingleUpdate(updated, "thread", thread.id());

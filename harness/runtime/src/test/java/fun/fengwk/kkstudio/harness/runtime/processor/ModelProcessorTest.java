@@ -163,7 +163,7 @@ class ModelProcessorTest {
   }
 
   /**
-   * READY admission Started：短事务 DISPATCHING + revision+1，随后 markRunning + revision+1 并保留 heartbeat。
+   * READY admission Started：短事务 DISPATCHING + version+1，随后 markRunning + version+1 并保留 heartbeat。
    */
   @Test
   void admissionStartedMarksRunningAndKeepsLocalExecution() {
@@ -179,7 +179,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertEquals(1, model.attempt());
     assertNull(model.streamCheckpoint());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(1, fixture.gateway.startCalls);
     ModelGateway.Execution execution = fixture.gateway.executions.get(0);
     assertEquals(fixture.invocationId, execution.invocationId());
@@ -226,7 +226,7 @@ class ModelProcessorTest {
     assertEquals(
         List.of(new ProviderStreamEvent.TextDelta("ans"), new ProviderStreamEvent.TextDelta("wer")),
         deltas(fixture.sink));
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
     assertEquals(
         2,
@@ -235,7 +235,7 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** Busy：DISPATCHING -&gt; READY + revision+1，按 retryAfter reschedule，attempt 不变。 */
+  /** Busy：DISPATCHING -&gt; READY + version+1，按 retryAfter reschedule，attempt 不变。 */
   @Test
   void busyAdmissionBouncesToReadyWithoutAdvancingAttempt() {
     Fixture fixture = fixture();
@@ -248,7 +248,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
     assertEquals(0, model.attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
@@ -272,10 +272,10 @@ class ModelProcessorTest {
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
-  /** Rejected：rejectDispatch FAILED + revision+1 + THREAD wake + complete MODEL Work，attempt 不变。 */
+  /** Rejected：rejectDispatch FAILED + version+1 + THREAD wake + complete MODEL Work，attempt 不变。 */
   @Test
   void rejectedAdmissionFailsInvocationAndWakesThread() {
     Fixture fixture = fixture();
@@ -291,7 +291,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(0, model.attempt());
     assertEquals(error, model.error());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -316,7 +316,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
     assertEquals(1, model.attempt());
     assertEquals(error, model.error());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -329,7 +329,7 @@ class ModelProcessorTest {
   // ---------------------------------------------------------------------------------------------
 
   /**
-   * 新 claim 遇到旧 lease 过期的 RUNNING：UNKNOWN 保留 attempt + revision+1 + THREAD wake + complete，绝不调用
+   * 新 claim 遇到旧 lease 过期的 RUNNING：UNKNOWN 保留 attempt + version+1 + THREAD wake + complete，绝不调用
    * Gateway。
    */
   @Test
@@ -354,7 +354,7 @@ class ModelProcessorTest {
     assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
     assertEquals(checkpoint, model.streamCheckpoint());
     assertEquals(0, fixture.gateway.startCalls);
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -378,12 +378,12 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
     assertEquals(1, model.attempt());
     assertEquals(0, fixture.gateway.startCalls);
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
-  /** terminal 行且 resultEntryId 仍 null：确保 THREAD wake 后 complete，不重复 bump revision。 */
+  /** terminal 行且 resultEntryId 仍 null：确保 THREAD wake 后 complete，不重复 bump version。 */
   @Test
-  void terminalCleanupWakesThreadWithoutRevisionBump() {
+  void terminalCleanupWakesThreadWithoutVersionBump() {
     Fixture fixture = fixture();
     transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
@@ -399,7 +399,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
     assertEquals(1, model.attempt());
     assertNull(model.resultEntryId());
-    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -447,7 +447,7 @@ class ModelProcessorTest {
 
     assertEquals(ProcessResult.TERMINATED, fixture.processor.process(claimed));
 
-    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         1,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -526,7 +526,7 @@ class ModelProcessorTest {
   }
 
   /**
-   * 成功终态：最终 reconcile 补发布 gap、写 terminal + revision+1 + THREAD wake + complete，并保留完整 safe
+   * 成功终态：最终 reconcile 补发布 gap、写 terminal + version+1 + THREAD wake + complete，并保留完整 safe
    * checkpoint。
    */
   @Test
@@ -552,7 +552,7 @@ class ModelProcessorTest {
     assertEquals(
         List.of(new ProviderStreamEvent.TextDelta("ans"), new ProviderStreamEvent.TextDelta("wer")),
         deltas(fixture.sink));
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -619,8 +619,7 @@ class ModelProcessorTest {
   }
 
   /**
-   * TRANSIENT + 策略允许：RUNNING -&gt; READY（retryReady）+ revision+1 + 按策略延迟 reschedule，不请求 THREAD
-   * wake。
+   * TRANSIENT + 策略允许：RUNNING -&gt; READY（retryReady）+ version+1 + 按策略延迟 reschedule，不请求 THREAD wake。
    */
   @Test
   void transientFailureRetriesWithPolicyDelay() {
@@ -656,7 +655,7 @@ class ModelProcessorTest {
         model.failedAttempts().getFirst().error());
     assertEquals(NOW, model.failedAttempts().getFirst().failedAt());
     assertEquals(NOW.plusSeconds(5), model.failedAttempts().getFirst().retryAt());
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
@@ -709,7 +708,7 @@ class ModelProcessorTest {
     assertEquals(1, model.failedAttempts().size());
     assertEquals("first", model.failedAttempts().getFirst().error().message());
     assertEquals(NOW.plusSeconds(5), model.failedAttempts().getFirst().retryAt());
-    assertEquals(6, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(6, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -943,7 +942,7 @@ class ModelProcessorTest {
         path.entries().get(6).id(),
         thread(store, baseline.threadId()).headEntryId(),
         "TURN_END 必须关闭 turn 并成为新 head");
-    assertEquals(10, thread(store, baseline.threadId()).revision());
+    assertEquals(10, thread(store, baseline.threadId()).version());
     assertNull(
         store.transaction(tx -> tx.findModelInvocation(invocationId).orElse(null)),
         "closed turn 的 ModelInvocation 必须被物理删除");
@@ -1303,7 +1302,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
     assertEquals(1, model.attempt());
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertEquals(NOW.plusSeconds(5), modelWork.availableAt());
@@ -1326,7 +1325,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(1, model.attempt());
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1606,7 +1605,7 @@ class ModelProcessorTest {
     assertEquals(1, model.attempt());
     assertEquals(1, fixture.gateway.startCalls);
     assertTrue(handle.isCancelled());
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1629,7 +1628,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.DISPATCHING, model.status());
     assertEquals(0, model.attempt());
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -1646,7 +1645,7 @@ class ModelProcessorTest {
 
     assertEquals(
         ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** Rejected 且期间 ownership 丢失：LOST_OWNERSHIP。 */
@@ -1706,7 +1705,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.DISPATCHING, model.status());
     assertEquals(0, model.attempt());
-    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
   }
 
@@ -1758,7 +1757,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.DISPATCHING, model.status());
     assertEquals(0, model.attempt());
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -1831,7 +1830,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertEquals(1, model.attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /**
@@ -1897,13 +1896,13 @@ class ModelProcessorTest {
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId, NOW);
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
-    long revision = thread(fixture.store, fixture.baseline.threadId()).revision();
+    long version = thread(fixture.store, fixture.baseline.threadId()).version();
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
     assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(revision, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(version, thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(handle.isCancelled());
     assertEquals(1, fixture.gateway.startCalls);
     assertTrue(fixture.processor.hasActiveExecution());
@@ -1961,7 +1960,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
     assertEquals(1, model.attempt());
     assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -2083,7 +2082,7 @@ class ModelProcessorTest {
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
     assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(1, fixture.gateway.startCalls);
     assertFalse(handle.isCancelled());
     assertTrue(fixture.processor.hasActiveExecution());
@@ -2170,7 +2169,7 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
@@ -2260,7 +2259,7 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
@@ -2314,7 +2313,7 @@ class ModelProcessorTest {
     assertEquals(
         ModelInvocationStatus.UNKNOWN, model(fixture.store, fixture.invocationId).status());
     assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -2381,7 +2380,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixtureA.store, fixtureA.invocationId);
     assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
     assertEquals(1, model.attempt());
-    assertEquals(2, thread(fixtureA.store, fixtureA.baseline.threadId()).revision());
+    assertEquals(2, thread(fixtureA.store, fixtureA.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixtureA.store, new WorkTarget(WorkTargetType.THREAD, fixtureA.baseline.threadId()))
@@ -2455,7 +2454,7 @@ class ModelProcessorTest {
     assertEquals(
         ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(processor.hasActiveExecution());
   }
 
@@ -2686,7 +2685,7 @@ class ModelProcessorTest {
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -2705,7 +2704,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
     assertEquals(0, model.attempt());
-    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
@@ -2722,7 +2721,7 @@ class ModelProcessorTest {
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
-    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
   }
 

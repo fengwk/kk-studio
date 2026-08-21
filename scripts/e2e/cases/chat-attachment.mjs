@@ -428,7 +428,7 @@ registerCase({
         ) {
           await stopThread(ctx, threadId, {
             stopRequestId: cid(),
-            expectedRevision: snapshot.thread.revision,
+            expectedVersion: snapshot.thread.version,
           })
         }
       })

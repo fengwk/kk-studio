@@ -127,7 +127,7 @@ class StudioCanvasControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].id").value(CANVAS.toString()))
             .andExpect(jsonPath("$.data[0].version").value("3"))
-            .andExpect(jsonPath("$.data[0].graphRevision").doesNotExist())
+            .andExpect(jsonPath("$.data[0].graphVersion").doesNotExist())
             .andReturn();
     JsonNode listJson = readTree(list);
     assertEquals(

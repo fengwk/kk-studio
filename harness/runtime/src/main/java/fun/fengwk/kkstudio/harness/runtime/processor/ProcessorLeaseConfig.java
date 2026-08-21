@@ -7,7 +7,7 @@ import java.time.Duration;
 /**
  * 通用 processor lease 参数：claim 的有效期与本地 heartbeat 节奏。
  *
- * <p>heartbeat 只 renew 当前 Work 的 lease，不触碰 Thread / Invocation / revision；interval 必须为正且严格小于
+ * <p>heartbeat 只 renew 当前 Work 的 lease，不触碰 Thread / Invocation / version；interval 必须为正且严格小于
  * leaseDuration，保证两次 heartbeat 之间 lease 不会过期。
  */
 public record ProcessorLeaseConfig(Duration leaseDuration, Duration heartbeatInterval) {

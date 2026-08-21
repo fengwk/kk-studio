@@ -61,7 +61,7 @@ class PostgresqlHarnessSchemaTest {
             "materialization_hash",
             "yolo_enabled",
             "next_command_sequence",
-            "revision",
+            "version",
             "created_at",
             "updated_at"),
         columns);

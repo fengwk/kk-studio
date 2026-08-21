@@ -21,8 +21,8 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.util.UUID;
 
 /**
- * {@link HarnessRuntime#setThreadYolo}：直接 YOLO 控制的同值 no-op 先于 revision CAS、STALE_REVISION 冲突、
- * revision 精确 +1，且绝不创建 Command / Entry / Work（不唤醒 processors）。
+ * {@link HarnessRuntime#setThreadYolo}：直接 YOLO 控制的同值 no-op 先于 version CAS、STALE_VERSION 冲突、 version
+ * 精确 +1，且绝不创建 Command / Entry / Work（不唤醒 processors）。
  */
 class HarnessRuntimeSetYoloTest {
 
@@ -37,9 +37,9 @@ class HarnessRuntimeSetYoloTest {
     runtime = new HarnessRuntime(store, clock);
   }
 
-  /** 同值请求在任何 revision CAS 之前按原样返回当前 Thread：过期 expectedRevision 不冲突，时间/revision 零触碰。 */
+  /** 同值请求在任何 version CAS 之前按原样返回当前 Thread：过期 expectedVersion 不冲突，时间/version 零触碰。 */
   @Test
-  void sameValueIsNoOpBeforeRevisionCasWithoutTouchingTimestamps() {
+  void sameValueIsNoOpBeforeVersionCasWithoutTouchingTimestamps() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     clock.advance(T1);
 
@@ -47,18 +47,18 @@ class HarnessRuntimeSetYoloTest {
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 999, false));
 
     assertFalse(result.yoloEnabled());
-    assertEquals(0L, result.revision());
+    assertEquals(0L, result.version());
     assertEquals(T0, result.updatedAt());
     assertEquals(T0, result.createdAt());
     ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertEquals(0L, stored.revision());
+    assertEquals(0L, stored.version());
     assertEquals(T0, stored.updatedAt());
     assertNoCommandsEntriesOrWork(baseline.threadId());
   }
 
-  /** 值不同且 revision 不匹配：STALE_REVISION 冲突，整事务零 mutation。 */
+  /** 值不同且 version 不匹配：STALE_VERSION 冲突，整事务零 mutation。 */
   @Test
-  void changedValueWithStaleRevisionConflictsWithoutMutation() {
+  void changedValueWithStaleVersionConflictsWithoutMutation() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     clock.advance(T1);
 
@@ -67,24 +67,24 @@ class HarnessRuntimeSetYoloTest {
             HarnessRuntimeConflictException.class,
             () -> runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 1, true)));
 
-    assertEquals(HarnessRuntimeConflictException.Reason.STALE_REVISION, failure.reason());
+    assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, failure.reason());
     ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertFalse(stored.yoloEnabled());
-    assertEquals(0L, stored.revision());
+    assertEquals(0L, stored.version());
     assertEquals(T0, stored.updatedAt());
     assertNoCommandsEntriesOrWork(baseline.threadId());
   }
 
-  /** 值不同且 revision 精确匹配：一次调用更新 yoloEnabled 且 revision 精确 +1，重复调用逐次推进。 */
+  /** 值不同且 version 精确匹配：一次调用更新 yoloEnabled 且 version 精确 +1，重复调用逐次推进。 */
   @Test
-  void changedValueUpdatesYoloAndBumpsRevisionExactlyOncePerCall() {
+  void changedValueUpdatesYoloAndBumpsVersionExactlyOncePerCall() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     clock.advance(T1);
 
     ThreadState enabled =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 0, true));
     assertTrue(enabled.yoloEnabled());
-    assertEquals(1L, enabled.revision());
+    assertEquals(1L, enabled.version());
     assertEquals(T1, enabled.updatedAt());
     assertEquals(T0, enabled.createdAt());
 
@@ -92,13 +92,13 @@ class HarnessRuntimeSetYoloTest {
     ThreadState disabled =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 1, false));
     assertFalse(disabled.yoloEnabled());
-    assertEquals(2L, disabled.revision());
+    assertEquals(2L, disabled.version());
     assertEquals(T3, disabled.updatedAt());
     assertEquals(T0, disabled.createdAt());
 
     ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertFalse(stored.yoloEnabled());
-    assertEquals(2L, stored.revision());
+    assertEquals(2L, stored.version());
     assertNoCommandsEntriesOrWork(baseline.threadId());
   }
 

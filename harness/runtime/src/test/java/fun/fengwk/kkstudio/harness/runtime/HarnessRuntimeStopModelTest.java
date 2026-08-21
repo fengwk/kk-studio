@@ -230,7 +230,7 @@ class HarnessRuntimeStopModelTest {
     assertTrue(model.status().isTerminal());
     assertNull(model.resultEntryId());
     ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    assertEquals(0L, thread.revision());
+    assertEquals(0L, thread.version());
     ThreadCommand command =
         store.transaction(
             tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());

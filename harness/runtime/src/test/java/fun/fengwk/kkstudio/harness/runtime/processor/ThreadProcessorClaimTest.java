@@ -140,7 +140,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     // no-op。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
     assertEquals(3, path(real, baseline.threadId()).entries().size());
-    assertEquals(0L, thread(real, baseline.threadId()).revision());
+    assertEquals(0L, thread(real, baseline.threadId()).version());
     assertNotNull(work(real, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
@@ -175,7 +175,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     // fence 调用序列：claimOwned（1）-> quiescent 完成 fence（2）丢失 -> LOST，零 mutation。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
     assertEquals(1, path(real, baseline.threadId()).entries().size());
-    assertEquals(0L, thread(real, baseline.threadId()).revision());
+    assertEquals(0L, thread(real, baseline.threadId()).version());
   }
 
   @Test
@@ -229,6 +229,6 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     assertEquals(1, path(real, baseline.threadId()).entries().size());
     assertEquals(
         ThreadCommandState.QUEUED, command(real, baseline.threadId(), userCommand).state());
-    assertEquals(1L, thread(real, baseline.threadId()).revision());
+    assertEquals(1L, thread(real, baseline.threadId()).version());
   }
 }

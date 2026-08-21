@@ -404,7 +404,7 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '仅 minimax/MiniMax-M2.7：首个非空文本 delta 后 stop（stopRequestId + revision CAS）=> status STOPPED、revision+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedRevision exact replay => status REPLAYED、同 stoppedTurnEndEntryId、revision 不再变化；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '仅 minimax/MiniMax-M2.7：首个非空文本 delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
@@ -470,10 +470,10 @@ registerCase({
 
     const beforeStop = await getThread(ctx, tid)
     const stopRequestId = cid()
-    const expectedRevision = beforeStop.revision
+    const expectedVersion = beforeStop.version
     const stop = await stopThread(ctx, tid, {
       stopRequestId,
-      expectedRevision,
+      expectedVersion,
     })
     assert(stop.status === 'STOPPED', JSON.stringify(stop))
     assert(
@@ -481,8 +481,8 @@ registerCase({
       JSON.stringify(stop),
     )
     assert(
-      Number(stop.thread.revision) === Number(beforeStop.revision) + 1,
-      `active stop must bump revision by one: ${JSON.stringify({ beforeStop, stop })}`,
+      Number(stop.thread.version) === Number(beforeStop.version) + 1,
+      `active stop must bump version by one: ${JSON.stringify({ beforeStop, stop })}`,
     )
 
     const entriesAfterStop = await snapshotEntries(ctx, tid)
@@ -511,11 +511,11 @@ registerCase({
       `ASSISTANT_ABORTED must follow initial USER: ${JSON.stringify(entriesAfterStop)}`,
     )
 
-    // Exact replay：同 stopRequestId + 原 expectedRevision。StopControl.findReplay 在 revision CAS
+    // Exact replay：同 stopRequestId + 原 expectedVersion。StopControl.findReplay 在 version CAS
     // 之前按 durableKey 命中 TURN_END => REPLAYED，返回同一 stoppedTurnEndEntryId、不再 bump。
     const replay = await stopThread(ctx, tid, {
       stopRequestId,
-      expectedRevision,
+      expectedVersion,
     })
     assert(replay.status === 'REPLAYED', JSON.stringify(replay))
     assert(
@@ -525,7 +525,7 @@ registerCase({
     assert(replay.cancelledCommandCount === 0, JSON.stringify(replay))
     assert(
       String(replay.thread.headEntryId) === String(stop.thread.headEntryId)
-        && String(replay.thread.revision) === String(stop.thread.revision),
+        && String(replay.thread.version) === String(stop.thread.version),
       `replay must not mutate the Thread: ${JSON.stringify({ stop, replay })}`,
     )
     ctx.writeArtifact(
@@ -595,7 +595,7 @@ registerCase({
   level: 'L3',
   title: 'ENTRY 同 Session 分支物化（真实分支 turn）',
   requires: ['real', 'branch'],
-  docs: '在 real.text_turn 的同一 Session 历史 assistant Entry 下用 ENTRY target 开新 Thread（不复制 Entry）：sessionId 不变、新 Thread root-to-head 路径包含 startEntry 与分支 USER、分支 turn 继续产生独立 assistant；原 Thread head/revision/nextCommandSequence 不变',
+  docs: '在 real.text_turn 的同一 Session 历史 assistant Entry 下用 ENTRY target 开新 Thread（不复制 Entry）：sessionId 不变、新 Thread root-to-head 路径包含 startEntry 与分支 USER、分支 turn 继续产生独立 assistant；原 Thread head/version/nextCommandSequence 不变',
   async run(ctx) {
     if (!ctx.vars.realThreadId) await getCase('real.text_turn').run(ctx)
     const mainTid = ctx.vars.realThreadId
@@ -607,7 +607,7 @@ registerCase({
     assert(String(current.sessionId) === String(sessionId), JSON.stringify(current))
     const mainBefore = {
       headEntryId: current.headEntryId,
-      revision: current.revision,
+      version: current.version,
       nextCommandSequence: current.nextCommandSequence,
     }
     const branchThreadId = cid()
@@ -633,11 +633,11 @@ registerCase({
         && branched.replayed === false,
       JSON.stringify(branched),
     )
-    // 原 Thread 不动（head/revision/nextCommandSequence 逐字段不变）。
+    // 原 Thread 不动（head/version/nextCommandSequence 逐字段不变）。
     const mainAfter = await getThread(ctx, mainTid)
     assert(
       String(mainAfter.headEntryId) === String(mainBefore.headEntryId)
-        && String(mainAfter.revision) === String(mainBefore.revision)
+        && String(mainAfter.version) === String(mainBefore.version)
         && String(mainAfter.nextCommandSequence) === String(mainBefore.nextCommandSequence),
       JSON.stringify({ before: mainBefore, after: mainAfter }),
     )

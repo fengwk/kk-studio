@@ -327,27 +327,27 @@ final class StoreTestSupport {
     return threadState(id, sessionId, headEntryId, 1, 0, T0, T0);
   }
 
-  /** 允许显式指定 next sequence / revision 与时间的 ThreadState 构造（契约测试模拟已推进的 Thread）。 */
+  /** 允许显式指定 next sequence / version 与时间的 ThreadState 构造（契约测试模拟已推进的 Thread）。 */
   static ThreadState threadState(
       UUID id,
       UUID sessionId,
       UUID headEntryId,
       long nextCommandSequence,
-      long revision,
+      long version,
       Instant createdAt,
       Instant updatedAt) {
     return threadState(
-        id, sessionId, headEntryId, false, nextCommandSequence, revision, createdAt, updatedAt);
+        id, sessionId, headEntryId, false, nextCommandSequence, version, createdAt, updatedAt);
   }
 
-  /** 允许显式指定 YOLO runtime policy、next sequence / revision 与时间的 ThreadState 构造。 */
+  /** 允许显式指定 YOLO runtime policy、next sequence / version 与时间的 ThreadState 构造。 */
   static ThreadState threadState(
       UUID id,
       UUID sessionId,
       UUID headEntryId,
       boolean yoloEnabled,
       long nextCommandSequence,
-      long revision,
+      long version,
       Instant createdAt,
       Instant updatedAt) {
     return new ThreadState(
@@ -357,7 +357,7 @@ final class StoreTestSupport {
         MATERIALIZATION_HASH,
         yoloEnabled,
         nextCommandSequence,
-        revision,
+        version,
         createdAt,
         updatedAt);
   }

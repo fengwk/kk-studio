@@ -51,20 +51,24 @@ class ApplicationEventHubTest {
   /** Hub 构造注入的缓冲上限：足够小以便测试溢出折叠路径，同时 > 1 覆盖多信号缓冲。 */
   private static final int BUFFER_CAPACITY = 8;
 
-  private ThreadRevisionEventSource revisionSource;
+  private ThreadVersionEventSource threadVersionSource;
   private RealtimeEventSource realtimeSource;
-  private CanvasVersionEventSource versionSource;
+  private CanvasVersionEventSource canvasVersionSource;
   private ApplicationEventHub hub;
 
   @BeforeEach
   void setUp() {
-    revisionSource = mock(ThreadRevisionEventSource.class);
+    threadVersionSource = mock(ThreadVersionEventSource.class);
     realtimeSource = mock(RealtimeEventSource.class);
-    versionSource = mock(CanvasVersionEventSource.class);
-    when(revisionSource.subscribe(any(), any())).thenReturn(new SourceSubscribed(5L, () -> {}));
-    when(versionSource.subscribe(any(), any())).thenReturn(new SourceSubscribed(3L, () -> {}));
+    canvasVersionSource = mock(CanvasVersionEventSource.class);
+    when(threadVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, () -> {}));
+    when(canvasVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(3L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(() -> {});
-    hub = new ApplicationEventHub(revisionSource, realtimeSource, versionSource, BUFFER_CAPACITY);
+    hub =
+        new ApplicationEventHub(
+            threadVersionSource, realtimeSource, canvasVersionSource, BUFFER_CAPACITY);
   }
 
   @Test
@@ -72,36 +76,36 @@ class ApplicationEventHubTest {
     Subscription subscription = hub.subscribe(THREAD_KEY, sink());
 
     assertEquals(5L, subscription.cursor());
-    verify(revisionSource).subscribe(any(UUID.class), any());
+    verify(threadVersionSource).subscribe(any(UUID.class), any());
     verify(realtimeSource).subscribe(any(UUID.class), any(), any());
   }
 
   @Test
   void threadUpstreamsAreReleasedWhenLastSubscriberCloses() throws Exception {
-    AutoCloseable revisionHandle = mock(AutoCloseable.class);
+    AutoCloseable versionHandle = mock(AutoCloseable.class);
     AutoCloseable realtimeHandle = mock(AutoCloseable.class);
-    when(revisionSource.subscribe(any(), any()))
-        .thenReturn(new SourceSubscribed(5L, revisionHandle));
+    when(threadVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, versionHandle));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(realtimeHandle);
 
     Subscription first = hub.subscribe(THREAD_KEY, sink());
     Subscription second = hub.subscribe(THREAD_KEY, sink());
-    verify(revisionSource, times(1)).subscribe(any(), any());
+    verify(threadVersionSource, times(1)).subscribe(any(), any());
     verify(realtimeSource, times(1)).subscribe(any(), any(), any());
 
     first.close();
-    verify(revisionHandle, never()).close();
+    verify(versionHandle, never()).close();
     verify(realtimeHandle, never()).close();
 
     second.close();
-    verify(revisionHandle).close();
+    verify(versionHandle).close();
     verify(realtimeHandle).close();
   }
 
   @Test
   void canvasSubscribeEstablishesVersionUpstreamAndRefcounts() {
     AtomicReference<AutoCloseable> versionHandle = new AtomicReference<>();
-    when(versionSource.subscribe(any(), any()))
+    when(canvasVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
               SourceSubscribed subscribed = new SourceSubscribed(3L, () -> {});
@@ -112,7 +116,7 @@ class ApplicationEventHubTest {
     Subscription first = hub.subscribe(CANVAS_KEY, sink());
     Subscription second = hub.subscribe(CANVAS_KEY, sink());
     assertEquals(3L, first.cursor());
-    verify(versionSource, times(1)).subscribe(any(), any());
+    verify(canvasVersionSource, times(1)).subscribe(any(), any());
 
     first.close();
     second.close();
@@ -120,54 +124,54 @@ class ApplicationEventHubTest {
 
   @Test
   void eventsAreBufferedUntilActivateAndFlushedInOrder() {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> versionConsumer =
         new AtomicReference<>();
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              versionConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             });
     List<Signal> signals = new ArrayList<>();
     Subscription subscription = hub.subscribe(THREAD_KEY, signals::add);
 
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
     assertTrue(signals.isEmpty(), "events must be buffered before activate");
 
     subscription.activate();
-    assertEquals(List.of(new Signal.Revision("6")), signals);
+    assertEquals(List.of(new Signal.Version("6")), signals);
   }
 
   @Test
   void staleDurableSignalsAtOrBelowAckCursorAreFiltered() {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> versionConsumer =
         new AtomicReference<>();
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              versionConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             });
     List<Signal> signals = new ArrayList<>();
     Subscription subscription = hub.subscribe(THREAD_KEY, signals::add);
     subscription.activate();
 
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("5", false));
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("5", false));
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
     assertEquals(
-        List.of(new Signal.Revision("6")), signals, "revision <= ack cursor must be dropped");
+        List.of(new Signal.Version("6")), signals, "version <= ack cursor must be dropped");
   }
 
   @Test
-  void revisionResyncAndRealtimeSignalsFanOutToEverySubscriber() {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+  void versionResyncAndRealtimeSignalsFanOutToEverySubscriber() {
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> versionConsumer =
         new AtomicReference<>();
     AtomicReference<Consumer<RealtimeEvent>> realtimeConsumer = new AtomicReference<>();
     AtomicReference<Runnable> realtimeResync = new AtomicReference<>();
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              versionConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             });
     when(realtimeSource.subscribe(any(), any(), any()))
@@ -185,7 +189,7 @@ class ApplicationEventHubTest {
     firstSub.activate();
     secondSub.activate();
 
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event(null, true));
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event(null, true));
     assertEquals(List.of(new Signal.Resync()), first);
     assertEquals(List.of(new Signal.Resync()), second);
 
@@ -209,20 +213,20 @@ class ApplicationEventHubTest {
 
   @Test
   void multiplexesThreadAndCanvasSubscriptionsIndependently() {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> threadConsumer =
         new AtomicReference<>();
-    AtomicReference<Consumer<CanvasVersionEventSource.Event>> versionConsumer =
+    AtomicReference<Consumer<CanvasVersionEventSource.Event>> canvasConsumer =
         new AtomicReference<>();
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              threadConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             });
-    when(versionSource.subscribe(any(), any()))
+    when(canvasVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              versionConsumer.set(inv.getArgument(1));
+              canvasConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(3L, () -> {});
             });
 
@@ -233,20 +237,20 @@ class ApplicationEventHubTest {
     threadSub.activate();
     canvasSub.activate();
 
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
-    versionConsumer.get().accept(new CanvasVersionEventSource.Event(4L, false));
-    assertEquals(List.of(new Signal.Revision("6")), threadSignals);
-    assertEquals(List.of(new Signal.Version(4L)), canvasSignals);
+    threadConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
+    canvasConsumer.get().accept(new CanvasVersionEventSource.Event(4L, false));
+    assertEquals(List.of(new Signal.Version("6")), threadSignals);
+    assertEquals(List.of(new Signal.Version("4")), canvasSignals);
   }
 
   @Test
   void unknownResourceFailsWithoutLeakingState() {
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenThrow(new IllegalArgumentException("unknown thread: " + THREAD));
     assertThrows(IllegalArgumentException.class, () -> hub.subscribe(THREAD_KEY, sink()));
 
     // 失败后状态干净：修复 source 后同资源可正常订阅。
-    doReturn(new SourceSubscribed(5L, () -> {})).when(revisionSource).subscribe(any(), any());
+    doReturn(new SourceSubscribed(5L, () -> {})).when(threadVersionSource).subscribe(any(), any());
     Subscription subscription = hub.subscribe(THREAD_KEY, sink());
     assertEquals(5L, subscription.cursor());
     subscription.close();
@@ -263,12 +267,12 @@ class ApplicationEventHubTest {
   @Test
   void signalsArrivingDuringEstablishAreBufferedAndDeliveredAfterCursorFilter() {
     // establish 期间（第一个订阅者加入前）上游就回调：durable 事件（含 stale）、realtime resync。
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              Consumer<ThreadRevisionEventSource.Event> consumer = inv.getArgument(1);
-              consumer.accept(new ThreadRevisionEventSource.Event("4", false)); // <= ack cursor，丢弃
-              consumer.accept(new ThreadRevisionEventSource.Event("6", false)); // > ack cursor，保留
+              Consumer<ThreadVersionEventSource.Event> consumer = inv.getArgument(1);
+              consumer.accept(new ThreadVersionEventSource.Event("4", false)); // <= ack cursor，丢弃
+              consumer.accept(new ThreadVersionEventSource.Event("6", false)); // > ack cursor，保留
               return new SourceSubscribed(5L, () -> {});
             });
     when(realtimeSource.subscribe(any(), any(), any()))
@@ -285,18 +289,18 @@ class ApplicationEventHubTest {
     subscription.activate();
 
     // early 信号先按 ack cursor 过滤（4 被丢弃），再缓冲到激活后投递。
-    assertEquals(List.of(new Signal.Revision("6"), new Signal.Resync()), received);
+    assertEquals(List.of(new Signal.Version("6"), new Signal.Resync()), received);
     subscription.close();
   }
 
   @Test
   void concurrentSubscribeReleaseAndFanoutNeverLoseSignalsForLiveSubscribers() throws Exception {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> versionConsumer =
         new AtomicReference<>();
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              versionConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(0L, () -> {});
             });
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});
@@ -329,9 +333,9 @@ class ApplicationEventHubTest {
       }
       start.countDown();
       for (int i = 1; i <= fanouts; i++) {
-        revisionConsumer
+        versionConsumer
             .get()
-            .accept(new ThreadRevisionEventSource.Event(Integer.toString(i), false));
+            .accept(new ThreadVersionEventSource.Event(Integer.toString(i), false));
       }
       done.await(10, TimeUnit.SECONDS);
     } finally {
@@ -342,7 +346,7 @@ class ApplicationEventHubTest {
     assertEquals(fanouts, live.size(), "live subscriber must receive every fanout signal");
     for (int i = 0; i < fanouts; i++) {
       assertTrue(
-          live.get(i) instanceof Signal.Revision,
+          live.get(i) instanceof Signal.Version,
           "signals must arrive in fanout order, got: " + live.get(i));
     }
     keep.close();
@@ -358,12 +362,12 @@ class ApplicationEventHubTest {
     CountDownLatch releaseClosingStarted = new CountDownLatch(1);
     CountDownLatch releaseClosingDone = new CountDownLatch(1);
     CountDownLatch subscribeTaskStarted = new CountDownLatch(1);
-    AtomicReference<AutoCloseable> firstRevisionHandle = new AtomicReference<>();
-    AtomicReference<AutoCloseable> secondRevisionHandle = new AtomicReference<>();
+    AtomicReference<AutoCloseable> firstVersionHandle = new AtomicReference<>();
+    AtomicReference<AutoCloseable> secondVersionHandle = new AtomicReference<>();
     doAnswer(
             inv -> {
               AutoCloseable handle = mock(AutoCloseable.class);
-              if (firstRevisionHandle.compareAndSet(null, handle)) {
+              if (firstVersionHandle.compareAndSet(null, handle)) {
                 doAnswer(
                         blocked -> {
                           releaseClosingStarted.countDown();
@@ -374,10 +378,10 @@ class ApplicationEventHubTest {
                     .close();
                 return new SourceSubscribed(5L, handle);
               }
-              secondRevisionHandle.set(handle);
+              secondVersionHandle.set(handle);
               return new SourceSubscribed(5L, handle);
             })
-        .when(revisionSource)
+        .when(threadVersionSource)
         .subscribe(any(), any());
 
     Subscription first = hub.subscribe(THREAD_KEY, sink());
@@ -404,10 +408,10 @@ class ApplicationEventHubTest {
       release.get(5, TimeUnit.SECONDS);
       Subscription second = subscribe.get(5, TimeUnit.SECONDS);
 
-      verify(revisionSource, times(2)).subscribe(any(), any()); // 同一资源只建立两组上游
-      verify(firstRevisionHandle.get()).close(); // 最后释放关闭了第一组上游
+      verify(threadVersionSource, times(2)).subscribe(any(), any()); // 同一资源只建立两组上游
+      verify(firstVersionHandle.get()).close(); // 最后释放关闭了第一组上游
       second.close();
-      verify(secondRevisionHandle.get()).close(); // 修复前 second 建立在 detached state 上，上游永远关不掉
+      verify(secondVersionHandle.get()).close(); // 修复前 second 建立在 detached state 上，上游永远关不掉
     } finally {
       executor.shutdownNow();
     }
@@ -415,29 +419,29 @@ class ApplicationEventHubTest {
 
   @Test
   void lateCallbackAfterLastReleaseIsDropped() {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> versionConsumer =
         new AtomicReference<>();
     doAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              versionConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             })
-        .when(revisionSource)
+        .when(threadVersionSource)
         .subscribe(any(), any());
     List<Signal> received = new ArrayList<>();
     Subscription subscription = hub.subscribe(THREAD_KEY, received::add);
     subscription.activate();
     subscription.close(); // 最后释放：上游关闭、state 淘汰并移出 map
 
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
     assertTrue(received.isEmpty(), "late callback after last release must be dropped");
   }
 
   @Test
   void failedEstablishRetiresStateAndDropsLateCallbacks() {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> staleConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> staleConsumer =
         new AtomicReference<>();
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> liveConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> liveConsumer =
         new AtomicReference<>();
     doAnswer(
             inv -> {
@@ -449,7 +453,7 @@ class ApplicationEventHubTest {
               liveConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             })
-        .when(revisionSource)
+        .when(threadVersionSource)
         .subscribe(any(), any());
     doThrow(new IllegalArgumentException("realtime unavailable"))
         .doReturn((AutoCloseable) () -> {})
@@ -463,15 +467,15 @@ class ApplicationEventHubTest {
 
     // 建立失败后旧 consumer 的迟到回调必须被丢弃（state 已 retired），不得泄漏到后续订阅。
     List<Signal> received = new ArrayList<>();
-    staleConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
+    staleConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
     Subscription subscription = hub.subscribe(THREAD_KEY, received::add);
     subscription.activate();
     assertTrue(
         received.isEmpty(),
         "late callback from failed establish must not leak into the new subscription");
 
-    liveConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
-    assertEquals(List.of(new Signal.Revision("6")), received);
+    liveConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
+    assertEquals(List.of(new Signal.Version("6")), received);
     subscription.close();
   }
 
@@ -482,7 +486,7 @@ class ApplicationEventHubTest {
     // 并发 subscribe 要么在 close 前完成（随后被 close 淘汰），要么看到 closed 被拒绝。
     AtomicInteger established = new AtomicInteger();
     AtomicInteger closedUpstreams = new AtomicInteger();
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
               established.incrementAndGet();
@@ -555,7 +559,7 @@ class ApplicationEventHubTest {
     // 围栏只设立 closed：排空时外部 close 若回等待，不得再持有围栏，否则并发 subscribe 会死锁。
     CountDownLatch handleCloseStarted = new CountDownLatch(1);
     CountDownLatch allowHandleClose = new CountDownLatch(1);
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenReturn(
             new SourceSubscribed(
                 5L,
@@ -598,23 +602,23 @@ class ApplicationEventHubTest {
 
   @Test
   void hubCloseMarksSubscriptionsClosedAndRejectsFurtherSubscribe() {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> versionConsumer =
         new AtomicReference<>();
     doAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              versionConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             })
-        .when(revisionSource)
+        .when(threadVersionSource)
         .subscribe(any(), any());
     List<Signal> received = new ArrayList<>();
     Subscription subscription = hub.subscribe(THREAD_KEY, received::add);
 
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false)); // 激活前缓冲
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("6", false)); // 激活前缓冲
     hub.close();
 
     // 关闭后：本地订阅被标记关闭，旧回调与迟到 activate 都不能再向 sink 投递。
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("7", false));
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("7", false));
     subscription.activate();
     assertTrue(received.isEmpty(), "no delivery after hub close");
     subscription.close(); // 幂等
@@ -626,41 +630,41 @@ class ApplicationEventHubTest {
   @Test
   void pendingOverflowCollapsesToSingleResyncAndStopsAccumulating() {
     // 激活前缓冲超过容量上限：清空并折叠为单个 Resync，后续信号不再累积（内存有界）；激活后恢复直接投递。
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> versionConsumer =
         new AtomicReference<>();
     doAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              versionConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             })
-        .when(revisionSource)
+        .when(threadVersionSource)
         .subscribe(any(), any());
     List<Signal> received = new ArrayList<>();
     Subscription subscription = hub.subscribe(THREAD_KEY, received::add);
 
     for (int i = 1; i <= BUFFER_CAPACITY; i++) {
-      revisionConsumer
+      versionConsumer
           .get()
-          .accept(new ThreadRevisionEventSource.Event(Integer.toString(i + 5), false));
+          .accept(new ThreadVersionEventSource.Event(Integer.toString(i + 5), false));
     }
     // 第 MAX_BUFFERED_SIGNALS + 1 个信号触发折叠。
-    revisionConsumer
+    versionConsumer
         .get()
-        .accept(new ThreadRevisionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 6), false));
+        .accept(new ThreadVersionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 6), false));
     // 折叠后不再累积。
-    revisionConsumer
+    versionConsumer
         .get()
-        .accept(new ThreadRevisionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 7), false));
+        .accept(new ThreadVersionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 7), false));
 
     subscription.activate();
     assertEquals(List.of(new Signal.Resync()), received, "overflow must collapse to one resync");
 
     // 激活后直接投递，不再折叠。
-    revisionConsumer
+    versionConsumer
         .get()
-        .accept(new ThreadRevisionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 8), false));
+        .accept(new ThreadVersionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 8), false));
     assertEquals(
-        List.of(new Signal.Resync(), new Signal.Revision(Integer.toString(BUFFER_CAPACITY + 8))),
+        List.of(new Signal.Resync(), new Signal.Version(Integer.toString(BUFFER_CAPACITY + 8))),
         received);
     subscription.close();
   }
@@ -669,17 +673,15 @@ class ApplicationEventHubTest {
   void earlyOverflowCollapsesToSingleResyncBeforeFirstSubscriber() {
     // establish 期间（首个订阅者加入前）信号超过容量上限：early 折叠为单个 Resync 且不再累积；
     // 首订阅者回放得到 Resync（可恢复），之后建立期间回调不再缓冲。
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              Consumer<ThreadRevisionEventSource.Event> consumer = inv.getArgument(1);
+              Consumer<ThreadVersionEventSource.Event> consumer = inv.getArgument(1);
               for (int i = 1; i <= BUFFER_CAPACITY + 1; i++) {
-                consumer.accept(
-                    new ThreadRevisionEventSource.Event(Integer.toString(i + 5), false));
+                consumer.accept(new ThreadVersionEventSource.Event(Integer.toString(i + 5), false));
               }
               consumer.accept(
-                  new ThreadRevisionEventSource.Event(
-                      Integer.toString(BUFFER_CAPACITY + 7), false));
+                  new ThreadVersionEventSource.Event(Integer.toString(BUFFER_CAPACITY + 7), false));
               return new SourceSubscribed(5L, () -> {});
             });
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});

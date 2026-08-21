@@ -113,7 +113,7 @@ class HarnessRuntimeStopWorkOrderTest {
 
     ThreadState thread =
         delegate.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    assertEquals(1L, thread.revision());
+    assertEquals(1L, thread.version());
     assertEquals(baseline.assistantEntryId(), thread.headEntryId());
     for (UUID id : baseline.toolIds()) {
       ToolInvocation stored = delegate.transaction(tx -> tx.findToolInvocation(id).orElseThrow());

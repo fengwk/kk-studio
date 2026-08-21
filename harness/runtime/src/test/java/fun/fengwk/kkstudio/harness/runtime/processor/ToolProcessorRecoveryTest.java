@@ -67,7 +67,7 @@ class ToolProcessorRecoveryTest {
   }
 
   /**
-   * 新 claim 遇到旧 lease 过期的 RUNNING：UNKNOWN 保留 attempt + revision+1 + THREAD wake + complete，绝不重放
+   * 新 claim 遇到旧 lease 过期的 RUNNING：UNKNOWN 保留 attempt + version+1 + THREAD wake + complete，绝不重放
    * Tool。
    */
   @Test
@@ -90,7 +90,7 @@ class ToolProcessorRecoveryTest {
     assertEquals("LEASE_EXPIRED", tool.error().kind());
     assertEquals(0, fixture.gateway.startCalls);
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -121,10 +121,10 @@ class ToolProcessorRecoveryTest {
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(0, fixture.gateway.startCalls);
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
-  /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump revision、不 request THREAD。 */
+  /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump version、不 request THREAD。 */
   @Test
   void waitingApprovalCompletesWorkWithoutAnyMutation() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -145,7 +145,7 @@ class ToolProcessorRecoveryTest {
     assertTrue(tool.approval().isUndecided());
     assertEquals(0, tool.attempt());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         1,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -154,7 +154,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(0, fixture.gateway.startCalls);
   }
 
-  /** terminal 行：确保 THREAD wake 后 complete，不重复 bump revision。 */
+  /** terminal 行：确保 THREAD wake 后 complete，不重复 bump version。 */
   @Test
   void terminalCleanupWakesThreadWhenResultNotLinked() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -177,7 +177,7 @@ class ToolProcessorRecoveryTest {
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -205,7 +205,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(
         0, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
   }
 
@@ -270,7 +270,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(1, fixture.gateway.startCalls);
     assertTrue(handle.isCancelled());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
     assertFalse(fixture.processor.hasActiveExecution());
   }
@@ -301,7 +301,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(1, fixture.gateway.startCalls);
     assertFalse(handle.isCancelled());
     assertTrue(fixture.processor.hasActiveExecution());
@@ -325,16 +325,16 @@ class ToolProcessorRecoveryTest {
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
-    long revision =
-        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision();
+    long version =
+        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version();
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
     assertEquals(
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        revision,
-        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        version,
+        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(handle.isCancelled());
     assertEquals(1, fixture.gateway.startCalls);
     assertTrue(fixture.processor.hasActiveExecution());
@@ -437,7 +437,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
     assertFalse(fixture.processor.hasActiveExecution());
   }
@@ -457,7 +457,7 @@ class ToolProcessorRecoveryTest {
         ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
   }
 
@@ -476,7 +476,7 @@ class ToolProcessorRecoveryTest {
         ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.startCalls);
   }
 
@@ -592,7 +592,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(
         0, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertNotNull(toolWork);
     assertEquals(
@@ -642,7 +642,7 @@ class ToolProcessorRecoveryTest {
         ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertEquals(
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
@@ -698,7 +698,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(
         0, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(processor.hasActiveExecution());
   }
 
@@ -878,7 +878,7 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** WAITING_APPROVAL 的 ownership 已丢失：LOST_OWNERSHIP，无 mutation。 */
@@ -901,7 +901,7 @@ class ToolProcessorRecoveryTest {
         ToolInvocationStatus.WAITING_APPROVAL,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** WAITING_APPROVAL 被 Stop 为 CANCELLED 后：terminal cleanup 只确保 THREAD wake 后 complete。 */
@@ -930,7 +930,7 @@ class ToolProcessorRecoveryTest {
         ToolInvocationStatus.CANCELLED,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -1056,7 +1056,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /**
@@ -1171,7 +1171,7 @@ class ToolProcessorRecoveryTest {
         ToolInvocationStatus.DISPATCHING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
   }
 

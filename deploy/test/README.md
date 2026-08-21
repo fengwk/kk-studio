@@ -45,7 +45,7 @@ original 字节不变、URL DTO 不暴露 bucket/key，以及 Redis Patch Cache 
 `kk-studio.canvas.function.fake-enabled`，执行
 `create fake-image Function node -> start -> poll -> snapshot Resource 替换 -> preview signed GET`，
 并验证 `document.version` 按 resource command、Function start 与 terminal success 前进到 4
-（checkpoint 不前进；HTTP wire 为非负十进制字符串，不存在 `graphRevision`）且公开 DTO
+（checkpoint 不前进；HTTP wire 为非负十进制字符串，不存在 `graphVersion`）且公开 DTO
 不包含 `stateJson`。最后启用仅指向
 容器内 HTTP mock 的 OpenCLI Hub/GPT Image/Seedance 开关，执行
 `gpt-image-2 -> fake Hub PNG -> materialize` 与

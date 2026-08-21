@@ -76,7 +76,7 @@ final class PostgresqlHarnessRows {
               resultSet.getString("materialization_hash"),
               resultSet.getBoolean("yolo_enabled"),
               resultSet.getLong("next_command_sequence"),
-              resultSet.getLong("revision"),
+              resultSet.getLong("version"),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"));
 

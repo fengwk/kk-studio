@@ -179,12 +179,12 @@ class HarnessRuntimeSnapshotTest {
   }
 
   @Test
-  void snapshotDoesNotBumpRevision() {
+  void snapshotDoesNotBumpVersion() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     runtime.getThreadSnapshot(baseline.threadId());
     runtime.getThreadSnapshot(baseline.threadId());
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertEquals(0L, thread.revision());
+    assertEquals(0L, thread.version());
   }
 
   @Test

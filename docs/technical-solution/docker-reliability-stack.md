@@ -165,7 +165,7 @@ NEW_SESSION command batch 物化 Session + ROOT + Thread 并提交首条 USER me
 1. `case-reset` 创建独立 disposable clone；repair case 额外执行 `case-deps`；
 2. repair 通过容器内 Node stdin 做 exact-one defect replacement，并要求目标测试在模型调用
    前确定失败；
-3. 入队任务并等待完整 quiescent，默认单 case 最长 10 分钟；超时或异常时按最新 revision
+3. 入队任务并等待完整 quiescent，默认单 case 最长 10 分钟；超时或异常时按最新 version
    尽力 stop；
 4. 从最终 durable snapshot 的 MESSAGE payload 提取 tool call/result、最终文本与每条
    assistant metadata 的 usage/cost；只有每条 Assistant 行都携带 USD total metadata 时才把

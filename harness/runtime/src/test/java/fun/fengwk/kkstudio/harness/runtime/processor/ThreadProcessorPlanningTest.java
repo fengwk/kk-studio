@@ -338,8 +338,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
 
   /**
    * Resolver 两阶段提交的 YOLO 以第二事务锁到的 Thread 当前值为准：plan 在 yolo=false 时构造，resolve 期间并发 {@code
-   * setThreadYolo(true)}（revision 0-&gt;1）成功，commit 重锁 Thread 后仍用最新的 {@code yoloEnabled=true} 推进
-   * head（revision 再 +1），绝不回写 plan 冻结值。
+   * setThreadYolo(true)}（version 0-&gt;1）成功，commit 重锁 Thread 后仍用最新的 {@code yoloEnabled=true} 推进
+   * head（version 再 +1），绝不回写 plan 冻结值。
    */
   @Test
   void resolvedCommitAdvancesYoloFromSecondTransactionLockedValue() throws Exception {
@@ -366,12 +366,12 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     Thread processing = new Thread(() -> fixture.processor.process(claim));
     processing.start();
     assertTrue(resolverEntered.await(5, TimeUnit.SECONDS));
-    // 并发直接控制面：与 plan 无关的独立短事务，成功（seedCommand 已把 revision 推进到 1，CAS 精确匹配）。
+    // 并发直接控制面：与 plan 无关的独立短事务，成功（seedCommand 已把 version 推进到 1，CAS 精确匹配）。
     HarnessRuntime runtime = new HarnessRuntime(fixture.store, Clock.fixed(NOW, ZoneOffset.UTC));
     ThreadState yoloUpdate =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 1, true));
     assertTrue(yoloUpdate.yoloEnabled());
-    assertEquals(2L, yoloUpdate.revision());
+    assertEquals(2L, yoloUpdate.version());
     releaseResolver.countDown();
     processing.join(5000);
     assertFalse(processing.isAlive());
@@ -379,7 +379,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     ThreadState finalThread = thread(fixture.store, baseline.threadId());
     assertTrue(finalThread.yoloEnabled());
     // seedCommand +1，setThreadYolo +1，commit advanceHead 再 +1。
-    assertEquals(3L, finalThread.revision());
+    assertEquals(3L, finalThread.version());
     assertEquals(
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
@@ -617,8 +617,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(
         ThreadCommandState.QUEUED,
         command(fixture.store, baseline.threadId(), userCommand).state());
-    // seedCommand 的 reserveCommandSequences 已 +1；失败的提交没有再次改变 revision。
-    assertEquals(1L, thread(fixture.store, baseline.threadId()).revision());
+    // seedCommand 的 reserveCommandSequences 已 +1；失败的提交没有再次改变 version。
+    assertEquals(1L, thread(fixture.store, baseline.threadId()).version());
   }
 
   @Test

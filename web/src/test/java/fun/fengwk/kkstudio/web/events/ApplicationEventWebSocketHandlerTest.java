@@ -51,9 +51,9 @@ class ApplicationEventWebSocketHandlerTest {
       new ResourceKey(ResourceKind.CANVAS, new UUID(0L, 2L));
   private static final int DEFAULT_SENDER_CAPACITY = 512;
 
-  private ThreadRevisionEventSource revisionSource;
+  private ThreadVersionEventSource threadVersionSource;
   private RealtimeEventSource realtimeSource;
-  private CanvasVersionEventSource versionSource;
+  private CanvasVersionEventSource canvasVersionSource;
   private ApplicationEventHub hub;
   private ApplicationEventWebSocketHandler handler;
   private WebSocketSession springSession;
@@ -62,13 +62,15 @@ class ApplicationEventWebSocketHandlerTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    revisionSource = mock(ThreadRevisionEventSource.class);
+    threadVersionSource = mock(ThreadVersionEventSource.class);
     realtimeSource = mock(RealtimeEventSource.class);
-    versionSource = mock(CanvasVersionEventSource.class);
-    when(revisionSource.subscribe(any(), any())).thenReturn(new SourceSubscribed(5L, () -> {}));
+    canvasVersionSource = mock(CanvasVersionEventSource.class);
+    when(threadVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});
-    when(versionSource.subscribe(any(), any())).thenReturn(new SourceSubscribed(3L, () -> {}));
-    hub = new ApplicationEventHub(revisionSource, realtimeSource, versionSource, 512);
+    when(canvasVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(3L, () -> {}));
+    hub = new ApplicationEventHub(threadVersionSource, realtimeSource, canvasVersionSource, 512);
     rebuildHandler(DEFAULT_SENDER_CAPACITY);
   }
 
@@ -97,19 +99,19 @@ class ApplicationEventWebSocketHandlerTest {
 
   @Test
   void subscribeEmitsAckThenBufferedEvents() {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> versionConsumer =
         new AtomicReference<>();
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              versionConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             });
     handler.afterConnectionEstablished(springSession);
 
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
     // ack 帧已入队在途（sendText 被 recorder 捕获、尚未完成），此时到达的事件必须排队在 ack 之后。
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
     assertEquals(1, recorder.sent.size(), "event must wait for the ack frame to be sent");
 
     recorder.handlers.get(0).onResult(new SendResult()); // 完成 ack 发送，事件帧随后串行发出
@@ -122,7 +124,7 @@ class ApplicationEventWebSocketHandlerTest {
     assertEquals(
         "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
-            + "\"},\"name\":\"revision\",\"cursor\":\"6\",\"data\":{\"revision\":\"6\"}}",
+            + "\"},\"name\":\"version\",\"cursor\":\"6\",\"data\":{\"version\":\"6\"}}",
         recorder.sent.get(1));
   }
 
@@ -132,23 +134,23 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
 
-    verify(revisionSource, times(1)).subscribe(any(), any());
+    verify(threadVersionSource, times(1)).subscribe(any(), any());
     verify(realtimeSource, times(1)).subscribe(any(), any(), any());
   }
 
   @Test
   void unsubscribeReleasesTheSubscription() throws Exception {
-    AutoCloseable revisionHandle = mock(AutoCloseable.class);
+    AutoCloseable versionHandle = mock(AutoCloseable.class);
     AutoCloseable realtimeHandle = mock(AutoCloseable.class);
-    when(revisionSource.subscribe(any(), any()))
-        .thenReturn(new SourceSubscribed(5L, revisionHandle));
+    when(threadVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, versionHandle));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(realtimeHandle);
     handler.afterConnectionEstablished(springSession);
 
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
     handler.handleTextMessage(springSession, textMessage(unsubscribeFrame(THREAD)));
 
-    verify(revisionHandle).close();
+    verify(versionHandle).close();
     verify(realtimeHandle).close();
   }
 
@@ -171,7 +173,7 @@ class ApplicationEventWebSocketHandlerTest {
 
   @Test
   void unknownResourceSendsResourceErrorAndKeepsConnectionOpen() throws Exception {
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenThrow(new IllegalArgumentException("unknown thread: " + THREAD));
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
@@ -189,7 +191,7 @@ class ApplicationEventWebSocketHandlerTest {
         .close(any());
 
     // 连接保持：后续合法帧仍被处理。
-    doReturn(new SourceSubscribed(5L, () -> {})).when(revisionSource).subscribe(any(), any());
+    doReturn(new SourceSubscribed(5L, () -> {})).when(threadVersionSource).subscribe(any(), any());
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
     assertEquals(2, recorder.sent.size());
     assertEquals(
@@ -257,11 +259,12 @@ class ApplicationEventWebSocketHandlerTest {
 
   @Test
   void ackEnqueueFailureClosesFreshSubscriptionWithoutKeepingIt() throws Exception {
-    AutoCloseable revisionHandle = mock(AutoCloseable.class);
-    AutoCloseable versionHandle = mock(AutoCloseable.class);
-    when(revisionSource.subscribe(any(), any()))
-        .thenReturn(new SourceSubscribed(5L, revisionHandle));
-    when(versionSource.subscribe(any(), any())).thenReturn(new SourceSubscribed(3L, versionHandle));
+    AutoCloseable versionHandle1 = mock(AutoCloseable.class);
+    AutoCloseable versionHandle2 = mock(AutoCloseable.class);
+    when(threadVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, versionHandle1));
+    when(canvasVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(3L, versionHandle2));
     // 容量 1：第一个订阅的 ack 在途后，第二个订阅的 ack 必然入队失败。
     rebuildHandler(1);
     handler.afterConnectionEstablished(springSession);
@@ -275,7 +278,7 @@ class ApplicationEventWebSocketHandlerTest {
                 + "\"}}"));
 
     // 第二个订阅的 ack 入队失败：刚建订阅必须释放（不 activate、不留在订阅表），并回 BACKPRESSURE 后关闭。
-    verify(versionHandle).close();
+    verify(versionHandle2).close();
     assertEquals(1, recorder.sent.size(), "error frame must wait behind the in-flight ack");
     recorder.handlers.get(0).onResult(new SendResult());
     assertEquals(2, recorder.sent.size());
@@ -295,17 +298,17 @@ class ApplicationEventWebSocketHandlerTest {
             "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
                 + CANVAS_KEY.id()
                 + "\"}}"));
-    verify(versionSource, times(2)).subscribe(any(), any());
+    verify(canvasVersionSource, times(2)).subscribe(any(), any());
   }
 
   @Test
   void eventEnqueueFailureTriggersBackpressure() throws Exception {
-    AtomicReference<Consumer<ThreadRevisionEventSource.Event>> revisionConsumer =
+    AtomicReference<Consumer<ThreadVersionEventSource.Event>> versionConsumer =
         new AtomicReference<>();
-    when(revisionSource.subscribe(any(), any()))
+    when(threadVersionSource.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              revisionConsumer.set(inv.getArgument(1));
+              versionConsumer.set(inv.getArgument(1));
               return new SourceSubscribed(5L, () -> {});
             });
     // 容量 2：ack 完成后，事件 6 在途、7 排队、8 入队成功、9 入队失败 → BACKPRESSURE。
@@ -313,11 +316,11 @@ class ApplicationEventWebSocketHandlerTest {
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
     recorder.handlers.get(0).onResult(new SendResult()); // ack 完成
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("6", false));
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
     recorder.handlers.get(1).onResult(new SendResult()); // 事件 6 完成
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("7", false)); // 在途
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("8", false)); // 排队
-    revisionConsumer.get().accept(new ThreadRevisionEventSource.Event("9", false)); // 溢出
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("7", false)); // 在途
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("8", false)); // 排队
+    versionConsumer.get().accept(new ThreadVersionEventSource.Event("9", false)); // 溢出
 
     assertEquals(3, recorder.sent.size(), "error frame must wait behind the in-flight event");
     recorder.handlers.get(2).onResult(new SendResult()); // 事件 7 完成
@@ -334,26 +337,26 @@ class ApplicationEventWebSocketHandlerTest {
 
   @Test
   void disconnectReleasesAllSubscriptions() throws Exception {
-    AutoCloseable revisionHandle = mock(AutoCloseable.class);
+    AutoCloseable versionHandle = mock(AutoCloseable.class);
     AutoCloseable realtimeHandle = mock(AutoCloseable.class);
-    when(revisionSource.subscribe(any(), any()))
-        .thenReturn(new SourceSubscribed(5L, revisionHandle));
+    when(threadVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, versionHandle));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(realtimeHandle);
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
 
     handler.afterConnectionClosed(springSession, CloseStatus.NORMAL);
 
-    verify(revisionHandle).close();
+    verify(versionHandle).close();
     verify(realtimeHandle).close();
   }
 
   @Test
   void shutdownClosesLiveConnectionsWithServiceRestartAndReleasesSubscriptions() throws Exception {
-    AutoCloseable revisionHandle = mock(AutoCloseable.class);
+    AutoCloseable versionHandle = mock(AutoCloseable.class);
     AutoCloseable realtimeHandle = mock(AutoCloseable.class);
-    when(revisionSource.subscribe(any(), any()))
-        .thenReturn(new SourceSubscribed(5L, revisionHandle));
+    when(threadVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, versionHandle));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(realtimeHandle);
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
@@ -361,7 +364,7 @@ class ApplicationEventWebSocketHandlerTest {
     handler.shutdown();
 
     // 订阅立即释放；error 帧排在在途 ack 之后作为最后一帧，出队后以 1012 关闭会话。
-    verify(revisionHandle).close();
+    verify(versionHandle).close();
     verify(realtimeHandle).close();
     assertEquals(1, recorder.sent.size(), "error frame must wait behind the in-flight ack");
     recorder.handlers.get(0).onResult(new SendResult());
@@ -378,7 +381,7 @@ class ApplicationEventWebSocketHandlerTest {
     // 幂等：再次 shutdown 与后续帧均安全。
     handler.shutdown();
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
-    verify(revisionSource, times(1)).subscribe(any(), any());
+    verify(threadVersionSource, times(1)).subscribe(any(), any());
   }
 
   @Test
@@ -389,7 +392,7 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
 
     // 关闭后不得再登记订阅/建立上游（修复前该帧会建立 hub 上游并泄漏）。
-    verify(revisionSource, never()).subscribe(any(), any());
+    verify(threadVersionSource, never()).subscribe(any(), any());
   }
 
   @Test
@@ -397,7 +400,7 @@ class ApplicationEventWebSocketHandlerTest {
     // 确定性复现「建立中 connection close」竞态：subscribe 卡在 hub 建立上游时连接关闭。
     // 修复后 close 在 closeLock 上等待 in-flight subscribe 完成再关闭新登记订阅（建立、登记、关闭互斥），
     // 因此 closeDone 在 establish 放行前不可能触发；修复前 close 立即完成，随后 subscribe 登记后无人关闭（泄漏）。
-    AutoCloseable revisionHandle = mock(AutoCloseable.class);
+    AutoCloseable versionHandle = mock(AutoCloseable.class);
     CountDownLatch establishing = new CountDownLatch(1);
     CountDownLatch establishDone = new CountDownLatch(1);
     CountDownLatch closeTaskStarted = new CountDownLatch(1);
@@ -406,9 +409,9 @@ class ApplicationEventWebSocketHandlerTest {
             inv -> {
               establishing.countDown();
               establishDone.await();
-              return new SourceSubscribed(5L, revisionHandle);
+              return new SourceSubscribed(5L, versionHandle);
             })
-        .when(revisionSource)
+        .when(threadVersionSource)
         .subscribe(any(), any());
     handler.afterConnectionEstablished(springSession);
 
@@ -437,7 +440,7 @@ class ApplicationEventWebSocketHandlerTest {
     } finally {
       executor.shutdownNow();
     }
-    verify(revisionHandle).close(); // close 后不得遗留 hub 订阅（修复前该订阅泄漏、上游永不释放）
+    verify(versionHandle).close(); // close 后不得遗留 hub 订阅（修复前该订阅泄漏、上游永不释放）
   }
 
   @Test
@@ -446,9 +449,9 @@ class ApplicationEventWebSocketHandlerTest {
     // 第一个帧，第二个帧的幂等检查必然看到未登记状态并进入 hub.subscribe）。修复后两帧经 closeLock 串行：
     // 第二个帧在第一个登记完成后看到已登记订阅幂等返回，只登记一个订阅；修复前两个帧各登记一个 hub 订阅，
     // 后 put 覆盖先 put，先登记的那个永不关闭，unsubscribe 后上游仍存活（泄漏）。
-    AutoCloseable revisionHandle = mock(AutoCloseable.class);
-    when(revisionSource.subscribe(any(), any()))
-        .thenReturn(new SourceSubscribed(5L, revisionHandle));
+    AutoCloseable versionHandle = mock(AutoCloseable.class);
+    when(threadVersionSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(5L, versionHandle));
     CountDownLatch ackEnqueued = new CountDownLatch(1);
     CountDownLatch ackRelease = new CountDownLatch(1);
     CountDownLatch secondTaskStarted = new CountDownLatch(1);
@@ -486,9 +489,9 @@ class ApplicationEventWebSocketHandlerTest {
       executor.shutdownNow();
     }
 
-    verify(revisionSource, times(1)).subscribe(any(), any()); // 重复帧只建立一次上游
+    verify(threadVersionSource, times(1)).subscribe(any(), any()); // 重复帧只建立一次上游
     handler.handleTextMessage(springSession, textMessage(unsubscribeFrame(THREAD)));
-    verify(revisionHandle).close(); // 只登记了一个订阅：unsubscribe 后上游必须释放
+    verify(versionHandle).close(); // 只登记了一个订阅：unsubscribe 后上游必须释放
   }
 
   private static String subscribeFrame(UUID threadId) {

@@ -90,7 +90,7 @@ public class StudioHarnessThreadController {
             }));
   }
 
-  /** 直接调用 ThreadProcessor 执行受 expectedRevision 守护的手动压缩。 */
+  /** 直接调用 ThreadProcessor 执行受 expectedVersion 守护的手动压缩。 */
   @PostMapping("/{threadId}/compact")
   public Result<HarnessThreadCompactResultDTO> compact(
       @PathVariable String threadId, @RequestBody HarnessThreadCompactDTO request) {
@@ -106,7 +106,7 @@ public class StudioHarnessThreadController {
   }
 
   /**
-   * 直接更新 Thread YOLO policy（revision CAS）：相同值在任何 CAS 之前 no-op 成功，值变化时 revision 精确 +1；不创建
+   * 直接更新 Thread YOLO policy（version CAS）：相同值在任何 CAS 之前 no-op 成功，值变化时 version 精确 +1；不创建
    * Command/Entry/Work、不唤醒 processors。返回权威当前 Thread（与 stop 一致）。
    */
   @PutMapping("/{threadId}/yolo")
@@ -122,7 +122,7 @@ public class StudioHarnessThreadController {
             }));
   }
 
-  /** 原子停止当前 Turn 并取消 queued Commands（stopRequestId + revision CAS 幂等）。 */
+  /** 原子停止当前 Turn 并取消 queued Commands（stopRequestId + version CAS 幂等）。 */
   @PostMapping("/{threadId}/stop")
   public Result<HarnessThreadStopResultDTO> stop(
       @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {

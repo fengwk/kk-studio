@@ -88,7 +88,7 @@ class ToolProcessorCallbackTest {
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** partial toolCallId 不匹配 request：协议破坏，确定性 FAILED(INVALID_PARTIAL)。 */
@@ -103,7 +103,7 @@ class ToolProcessorCallbackTest {
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
     assertEquals("INVALID_PARTIAL", tool.error().kind());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -172,7 +172,7 @@ class ToolProcessorCallbackTest {
         ToolInvocationStatus.SUCCEEDED,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertTrue(fixture.sink.events.isEmpty());
   }
 
@@ -190,7 +190,7 @@ class ToolProcessorCallbackTest {
     assertEquals(1, tool.attempt());
     assertEquals("done", ((TextToolContent) tool.result().contents().get(0)).text());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -411,7 +411,7 @@ class ToolProcessorCallbackTest {
   }
 
   /**
-   * retryable 失败 + READ_ONLY：RUNNING -&gt; READY + revision+1 + policy delay reschedule，不 request
+   * retryable 失败 + READ_ONLY：RUNNING -&gt; READY + version+1 + policy delay reschedule，不 request
    * THREAD。
    */
   @Test
@@ -427,7 +427,7 @@ class ToolProcessorCallbackTest {
     assertEquals(ToolInvocationStatus.READY, tool.status());
     assertEquals(1, tool.attempt());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         ToolProcessorTestSupport.NOW.plusSeconds(5),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
@@ -526,7 +526,7 @@ class ToolProcessorCallbackTest {
     assertEquals(ToolInvocationStatus.FAILED, tool.status());
     assertEquals(2, tool.attempt());
     assertEquals(
-        6, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        6, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -593,7 +593,7 @@ class ToolProcessorCallbackTest {
     assertEquals("first", ((TextToolContent) tool.result().contents().get(0)).text());
     assertEquals(1, tool.attempt());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
   }
 
@@ -732,7 +732,7 @@ class ToolProcessorCallbackTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         ToolProcessorTestSupport.NOW.plusSeconds(5),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
@@ -761,7 +761,7 @@ class ToolProcessorCallbackTest {
         ToolInvocationStatus.CANCELLED,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
@@ -871,7 +871,7 @@ class ToolProcessorCallbackTest {
     assertEquals(
         2, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        5, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        5, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** Stop deleteWork 后到达的 late partial：ownership 校验失败，不发布、不写 durable，并关闭本地执行。 */
@@ -946,7 +946,7 @@ class ToolProcessorCallbackTest {
     assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** Stop 的 durable 终止（RUNNING -&gt; UNKNOWN）后到达的 late retryable 失败：retry 事务校验失败，仅本地关闭。 */
@@ -982,7 +982,7 @@ class ToolProcessorCallbackTest {
     assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** Stop 的 durable 终止后到达的 late success：commitSuccess 校验失败，仅本地关闭，绝不写 SUCCEEDED。 */

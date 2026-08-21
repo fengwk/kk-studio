@@ -68,7 +68,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void chatAgentNameContractIsCanonicalAndThreadRevisionStaysAppOwned() throws SQLException {
+  void chatAgentNameContractIsCanonicalAndThreadVersionStaysAppOwned() throws SQLException {
     try (Connection conn = newConnection()) {
       insertChat(conn, uuid());
       insertChat(conn, uuid());
@@ -91,7 +91,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       insertThread(conn, threadId, sessionId, entryId);
       assertEquals(
-          0L, queryLong(conn, "select revision from harness_thread where id = ?", threadId));
+          0L, queryLong(conn, "select version from harness_thread where id = ?", threadId));
       try (PreparedStatement ps =
           conn.prepareStatement("update harness_thread set yolo_enabled = true where id = ?")) {
         ps.setObject(1, threadId);
@@ -99,8 +99,8 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       }
       assertEquals(
           0L,
-          queryLong(conn, "select revision from harness_thread where id = ?", threadId),
-          "revision is owned by HarnessRuntime; an application UPDATE must never bump it");
+          queryLong(conn, "select version from harness_thread where id = ?", threadId),
+          "version is owned by HarnessRuntime; an application UPDATE must never bump it");
     }
   }
 
@@ -321,7 +321,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
         PreparedStatement thread =
             conn.prepareStatement(
                 "insert into harness_thread (id, session_id, head_entry_id, materialization_hash,"
-                    + " yolo_enabled, next_command_sequence, revision, created_at, updated_at)"
+                    + " yolo_enabled, next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
                     + "', false, 1, 0, current_timestamp, current_timestamp)")) {

@@ -26,7 +26,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-class ThreadRevisionHubTest {
+class ThreadVersionHubTest {
 
   @Test
   void subscribeRegistersFirstThenReturnsCurrentCursorAsAckCursor() throws Exception {
@@ -35,18 +35,18 @@ class ThreadRevisionHubTest {
     PreparedStatement statement = mock(PreparedStatement.class);
     ResultSet result = mock(ResultSet.class);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select revision from harness_thread where id = ?"))
+    when(connection.prepareStatement("select version from harness_thread where id = ?"))
         .thenReturn(statement);
     when(statement.executeQuery()).thenReturn(result);
     when(result.next()).thenReturn(true);
     when(result.getLong(1)).thenReturn(5L);
 
-    ThreadRevisionHub hub = new ThreadRevisionHub(dataSource);
+    ThreadVersionHub hub = new ThreadVersionHub(dataSource);
     UUID threadId = new UUID(0L, 7L);
-    List<ThreadRevisionEventSource.Event> received = new ArrayList<>();
+    List<ThreadVersionEventSource.Event> received = new ArrayList<>();
     SourceSubscribed subscribed = hub.subscribe(threadId, received::add);
 
-    assertEquals(5L, subscribed.cursor(), "ack cursor must be the current durable revision");
+    assertEquals(5L, subscribed.cursor(), "ack cursor must be the current durable version");
     verify(statement).setObject(1, threadId);
     assertTrue(received.isEmpty(), "subscribe must not deliver the current value");
     subscribed.handle().close();
@@ -59,22 +59,22 @@ class ThreadRevisionHubTest {
     PreparedStatement statement = mock(PreparedStatement.class);
     ResultSet result = mock(ResultSet.class);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select revision from harness_thread where id = ?"))
+    when(connection.prepareStatement("select version from harness_thread where id = ?"))
         .thenReturn(statement);
     when(statement.executeQuery()).thenReturn(result);
     when(result.next()).thenReturn(true);
     when(result.getLong(1)).thenReturn(5L);
 
-    ThreadRevisionHub hub = new ThreadRevisionHub(dataSource);
+    ThreadVersionHub hub = new ThreadVersionHub(dataSource);
     UUID threadId = new UUID(0L, 7L);
-    List<ThreadRevisionEventSource.Event> staleSubscriber = new ArrayList<>();
-    List<ThreadRevisionEventSource.Event> currentSubscriber = new ArrayList<>();
+    List<ThreadVersionEventSource.Event> staleSubscriber = new ArrayList<>();
+    List<ThreadVersionEventSource.Event> currentSubscriber = new ArrayList<>();
     SourceSubscribed stale = hub.subscribe(threadId, staleSubscriber::add);
     hub.subscribe(threadId, currentSubscriber::add);
 
     hub.broadcastResync();
-    assertEquals(List.of(new ThreadRevisionEventSource.Event(null, true)), staleSubscriber);
-    assertEquals(List.of(new ThreadRevisionEventSource.Event(null, true)), currentSubscriber);
+    assertEquals(List.of(new ThreadVersionEventSource.Event(null, true)), staleSubscriber);
+    assertEquals(List.of(new ThreadVersionEventSource.Event(null, true)), currentSubscriber);
 
     stale.handle().close();
     hub.broadcastResync();
@@ -89,12 +89,12 @@ class ThreadRevisionHubTest {
     PreparedStatement statement = mock(PreparedStatement.class);
     ResultSet result = mock(ResultSet.class);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select revision from harness_thread where id = ?"))
+    when(connection.prepareStatement("select version from harness_thread where id = ?"))
         .thenReturn(statement);
     when(statement.executeQuery()).thenReturn(result);
     when(result.next()).thenReturn(false);
 
-    ThreadRevisionHub hub = new ThreadRevisionHub(dataSource);
+    ThreadVersionHub hub = new ThreadVersionHub(dataSource);
     UUID threadId = new UUID(0L, 8L);
     assertThrows(IllegalArgumentException.class, () -> hub.subscribe(threadId, ignored -> {}));
 
@@ -110,25 +110,25 @@ class ThreadRevisionHubTest {
     PreparedStatement statement = mock(PreparedStatement.class);
     ResultSet result = mock(ResultSet.class);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select revision from harness_thread where id = ?"))
+    when(connection.prepareStatement("select version from harness_thread where id = ?"))
         .thenReturn(statement);
     when(statement.executeQuery()).thenReturn(result);
     when(result.next()).thenReturn(true);
     when(result.getLong(1)).thenReturn(5L);
 
-    ThreadRevisionHub hub = new ThreadRevisionHub(dataSource);
+    ThreadVersionHub hub = new ThreadVersionHub(dataSource);
     UUID threadId = new UUID(0L, 7L);
     hub.subscribe(
         threadId,
         ignored -> {
           throw new IllegalStateException("boom");
         });
-    List<ThreadRevisionEventSource.Event> normal = new ArrayList<>();
+    List<ThreadVersionEventSource.Event> normal = new ArrayList<>();
     hub.subscribe(threadId, normal::add);
 
     // 第一个消费者抛异常只被隔离：同资源其他消费者照常收到，全局广播循环不被杀死。
     hub.broadcastResync();
-    assertEquals(List.of(new ThreadRevisionEventSource.Event(null, true)), normal);
+    assertEquals(List.of(new ThreadVersionEventSource.Event(null, true)), normal);
     hub.broadcastResync();
     assertEquals(2, normal.size());
   }
@@ -158,10 +158,10 @@ class ThreadRevisionHubTest {
     when(result.next()).thenReturn(true);
     when(result.getLong(1)).thenReturn(5L);
 
-    ThreadRevisionHub hub = new ThreadRevisionHub(dataSource);
+    ThreadVersionHub hub = new ThreadVersionHub(dataSource);
     UUID threadId = new UUID(0L, 7L);
     SourceSubscribed first = hub.subscribe(threadId, ignored -> {});
-    List<ThreadRevisionEventSource.Event> secondReceived = new ArrayList<>();
+    List<ThreadVersionEventSource.Event> secondReceived = new ArrayList<>();
 
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
@@ -174,7 +174,7 @@ class ThreadRevisionHubTest {
 
       hub.broadcastResync();
       assertEquals(
-          List.of(new ThreadRevisionEventSource.Event(null, true)),
+          List.of(new ThreadVersionEventSource.Event(null, true)),
           secondReceived,
           "new subscriber must stay in the map's subscriber set");
     } finally {

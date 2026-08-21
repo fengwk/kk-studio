@@ -8,7 +8,7 @@ bounded realtime cache/overlay，S3 保存全局 Blob 与 ComfyUI 临时对象�
 ## 1. 身份规则
 
 - kk-studio 生成并持久化的实体、commandId、requestId 使用 PostgreSQL `uuid`。
-- `version`、`revision`、`sequence`、`attempt`、`ordinal`、`resource_index`、`ref_count`、
+- `version`、`version`、`sequence`、`attempt`、`ordinal`、`resource_index`、`ref_count`、
   `size_bytes`、宽高和时长保持整数。
 - Catalog 的稳定自然键保持不变：Provider/Agent 使用 `name`，Model 使用
   `(provider_name, name)`，ComfyUI Workflow 使用唯一 `api_name`。
@@ -44,7 +44,7 @@ Chat 设置不复制到 Thread。Thread 的完整 BranchSettings 来自 ROOT/TUR
 | --- | --- |
 | `harness_session` | `id uuid`、`created_at`；Entry Tree 边界 |
 | `harness_entry` | `id uuid`、session/parent、entry_type、payload、时间；每 Session 唯一 ROOT |
-| `harness_thread` | `id uuid`、`session_id`、非空 `head_entry_id`（同 Session FK）、`materialization_hash char(64)`、YOLO、next sequence、revision、时间 |
+| `harness_thread` | `id uuid`、`session_id`、非空 `head_entry_id`（同 Session FK）、`materialization_hash char(64)`、YOLO、next sequence、version、时间 |
 | `harness_thread_command` | PK `(thread_id, sequence)`；`client_command_id uuid`、`request_hash`、payload 与消费/取消事实 |
 | `harness_model_invocation` | `id uuid`、`basis_head_entry_id` + compact `ModelRequestSpec`、status、attempt、checkpoint、append-only `failed_attempts`、terminal result/error（`result_entry_id` 只属于 open Tool phase） |
 | `harness_tool_invocation` | `id uuid`、ordinal、`call` + 可空 `binding`、approval、result/effects/error（无 `result_entry_id`） |

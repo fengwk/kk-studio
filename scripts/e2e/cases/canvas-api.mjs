@@ -18,7 +18,7 @@ registerCase({
     assertDecimalVersion(canvas.version, 'canvas.version')
     assert(canvas.version === '0', JSON.stringify(canvas))
     assert(!('threadId' in canvas), `Canvas must not expose threadId: ${JSON.stringify(canvas)}`)
-    assert(!('graphRevision' in canvas), JSON.stringify(canvas))
+    assert(!('graphVersion' in canvas), JSON.stringify(canvas))
 
     const nodeId = cid()
     const remainingNodeId = cid()

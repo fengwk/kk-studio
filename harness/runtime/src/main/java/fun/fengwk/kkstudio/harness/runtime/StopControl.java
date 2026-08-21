@@ -56,7 +56,7 @@ import java.util.UUID;
  * 特性本地的同步 Stop transaction。
  *
  * <p>这并非 Store use-case 方法，也不是通用 workflow。它承担 Stop 所需的唯一一次原子分支收尾： 按被停止 Turn 的 ownerThreadId 做
- * Session 级精确 replay、Command 取消、Model/Tool 收敛、Entry append、Thread revision 一次递增 以及最终的 Work fencing。
+ * Session 级精确 replay、Command 取消、Model/Tool 收敛、Entry append、Thread version 一次递增 以及最终的 Work fencing。
  */
 final class StopControl {
 
@@ -119,15 +119,15 @@ final class StopControl {
     if (replay != null) {
       return new Commit(replay, null, List.of());
     }
-    if (thread.revision() != command.expectedRevision()) {
+    if (thread.version() != command.expectedVersion()) {
       throw conflict(
-          HarnessRuntimeConflictException.Reason.STALE_REVISION,
+          HarnessRuntimeConflictException.Reason.STALE_VERSION,
           "thread "
               + thread.id()
-              + " revision "
-              + thread.revision()
+              + " version "
+              + thread.version()
               + " does not match expected "
-              + command.expectedRevision());
+              + command.expectedVersion());
     }
 
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
@@ -209,7 +209,7 @@ final class StopControl {
   }
 
   /**
-   * 在 Thread 锁内做 Stop 的 durable receipt 查找，replay 先于 revision CAS：
+   * 在 Thread 锁内做 Stop 的 durable receipt 查找，replay 先于 version CAS：
    *
    * <ol>
    *   <li>live receipt：Session 级查找 closeRequestId 被引用 TURN_START 的 ownerThreadId == 本 Thread 的
@@ -370,7 +370,7 @@ final class StopControl {
       Instant now) {
     ThreadState current = thread;
     if (cancelledCommandCount > 0) {
-      current = thread.touchRevision(now);
+      current = thread.touchVersion(now);
       tx.updateThread(current);
     }
     return new StopResult(false, current, null, cancelledCommandCount, cancelledUserMessages);

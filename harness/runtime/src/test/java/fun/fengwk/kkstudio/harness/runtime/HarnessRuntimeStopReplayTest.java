@@ -58,8 +58,8 @@ import java.util.UUID;
 
 /**
  * Stop 幂等性：durable key 是「由被关闭 TURN_START 的 ownerThreadId 界定的 closeRequestId」，在 Thread 锁内做 Session 级
- * 查找并先于 revision 检查严格决定 replay；另一 Thread 的相同 raw id 被忽略而非冲突；同 owner 的非 Stop 关闭或重复 key 必须失败； 未创建
- * Turn 的 queued 取消以 (threadId, cancelRequestId) 作幂等键。
+ * 查找并先于 version 检查严格决定 replay；另一 Thread 的相同 raw id 被忽略而非冲突；同 owner 的非 Stop 关闭或重复 key 必须失败； 未创建 Turn
+ * 的 queued 取消以 (threadId, cancelRequestId) 作幂等键。
  */
 class HarnessRuntimeStopReplayTest {
 
@@ -82,12 +82,12 @@ class HarnessRuntimeStopReplayTest {
     assertStopped(first);
     UUID turnEndId = first.stoppedTurnEndEntryId();
 
-    // 重放先于 revision 检查：即使 expectedRevision 已过期也返回 replayed，且不取消任何 Command。
+    // 重放先于 version 检查：即使 expectedVersion 已过期也返回 replayed，且不取消任何 Command。
     StopResult replay = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertReplayed(replay);
     assertEquals(turnEndId, replay.stoppedTurnEndEntryId());
     assertEquals(0, replay.cancelledCommandCount());
-    assertEquals(first.thread().revision(), replay.thread().revision());
+    assertEquals(first.thread().version(), replay.thread().version());
     assertEquals(first.thread().headEntryId(), replay.thread().headEntryId());
   }
 
@@ -133,13 +133,13 @@ class HarnessRuntimeStopReplayTest {
     seedThreadWork(store, threadId);
     seedModelWork(store, modelId);
 
-    // replay 先于 revision CAS：即使 expectedRevision 已过期，也返回原 STOPPED TURN_END 且零 mutation。
+    // replay 先于 version CAS：即使 expectedVersion 已过期，也返回原 STOPPED TURN_END 且零 mutation。
     StopResult replay = runtime.stop(new StopCommand(threadId, key, 9));
     assertReplayed(replay);
     assertEquals(turnEnd1, replay.stoppedTurnEndEntryId());
     ThreadState thread = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
     assertEquals(user2, thread.headEntryId());
-    assertEquals(0L, thread.revision());
+    assertEquals(0L, thread.version());
     ModelInvocation model = store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertTrue(
@@ -165,9 +165,9 @@ class HarnessRuntimeStopReplayTest {
     StopResult siblingResult = runtime.stop(new StopCommand(sibling, TestIds.id(1), 0));
     assertIdle(siblingResult);
     assertEquals(0, siblingResult.cancelledCommandCount());
-    assertEquals(0L, siblingResult.thread().revision());
+    assertEquals(0L, siblingResult.thread().version());
 
-    // owner 自己的 key 仍是精确重放（revision 已过期也返回 REPLAYED）。
+    // owner 自己的 key 仍是精确重放（version 已过期也返回 REPLAYED）。
     StopResult ownerReplay = runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 0));
     assertReplayed(ownerReplay);
     assertEquals(owner.stoppedTurnEndEntryId(), ownerReplay.stoppedTurnEndEntryId());
@@ -192,15 +192,15 @@ class HarnessRuntimeStopReplayTest {
     assertEquals(1, first.cancelledCommandCount());
     assertEquals(1, first.cancelledUserMessages().size());
 
-    // transport 丢失：同一 stopRequestId 重试（replay 先于 revision CAS，expectedRevision 过期也无碍）。
+    // transport 丢失：同一 stopRequestId 重试（replay 先于 version CAS，expectedVersion 过期也无碍）。
     StopResult replay = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(9), 0));
     assertReplayed(replay);
     assertEquals(first.stoppedTurnEndEntryId(), replay.stoppedTurnEndEntryId());
     assertEquals(first.cancelledCommandCount(), replay.cancelledCommandCount());
     assertEquals(first.cancelledUserMessages(), replay.cancelledUserMessages());
-    // replay 不写任何新 marker：revision 与 head 保持首次 Stop 后的终态。
+    // replay 不写任何新 marker：version 与 head 保持首次 Stop 后的终态。
     ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    assertEquals(replay.thread().revision(), thread.revision());
+    assertEquals(replay.thread().version(), thread.version());
     assertEquals(replay.stoppedTurnEndEntryId(), thread.headEntryId());
     // 取消行仍以该 stopRequestId 持久化（queued-only 维度与 live receipt 一致）。
     assertEquals(
@@ -301,10 +301,10 @@ class HarnessRuntimeStopReplayTest {
   }
 
   @Test
-  void staleRevisionInToolContextFailsWithoutMutatingSiblings() {
+  void staleVersionInToolContextFailsWithoutMutatingSiblings() {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
-    // Approval 已把 revision 推进到 2；带旧 revision 的 Stop 重试必须整体拒绝。
+    // Approval 已把 version 推进到 2；带旧 version 的 Stop 重试必须整体拒绝。
     runtime.decideToolApproval(
         new ToolApprovalCommand(
             baseline.threadId(),
@@ -317,12 +317,12 @@ class HarnessRuntimeStopReplayTest {
         assertThrows(
             HarnessRuntimeConflictException.class,
             () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
-    assertEquals(Reason.STALE_REVISION, error.reason());
+    assertEquals(Reason.STALE_VERSION, error.reason());
     ToolInvocation tool =
         store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.READY, tool.status());
     assertEquals(
-        2L, store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow()).revision());
+        2L, store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow()).version());
     assertTrue(
         store
             .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())))
@@ -337,7 +337,7 @@ class HarnessRuntimeStopReplayTest {
     // idle Stop 不写 Entry 且没有可取消的 Command，因此同 key 再次请求仍是 IDLE（没有可重放的 receipt）。
     StopResult second = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertIdle(second);
-    assertEquals(0L, second.thread().revision());
+    assertEquals(0L, second.thread().version());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(baseline.rootEntryId()));
     assertEquals(1, path.entries().size());
   }
@@ -354,7 +354,7 @@ class HarnessRuntimeStopReplayTest {
     assertEquals(
         List.of(new CancelledUserMessage(1L, TestIds.id(1), List.of(new TextMessageContent("hi")))),
         first.cancelledUserMessages());
-    assertEquals(1L, first.thread().revision());
+    assertEquals(1L, first.thread().version());
 
     // 同一网络重试命中 queued-only receipt：返回 replayed，不再做第二次取消。
     StopResult replay = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
@@ -362,7 +362,7 @@ class HarnessRuntimeStopReplayTest {
     assertNull(replay.stoppedTurnEndEntryId());
     assertEquals(1, replay.cancelledCommandCount());
     assertEquals(first.cancelledUserMessages(), replay.cancelledUserMessages());
-    assertEquals(1L, replay.thread().revision());
+    assertEquals(1L, replay.thread().version());
   }
 
   @Test

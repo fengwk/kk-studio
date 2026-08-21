@@ -31,7 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-/** 手动压缩 control：availability、revision fence 与无 mailbox 的 durable plan 提交。 */
+/** 手动压缩 control：availability、version fence 与无 mailbox 的 durable plan 提交。 */
 class ThreadProcessorManualCompactionTest extends ThreadProcessorTestBase {
 
   private static final ModelUsage USAGE = new ModelUsage(50_000L, 2L, 0L, 0L, 0L, 0L, 50_002L);
@@ -68,7 +68,7 @@ class ThreadProcessorManualCompactionTest extends ThreadProcessorTestBase {
     CompactThreadResult result =
         fixture.processor.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
 
-    assertEquals(1L, result.thread().revision());
+    assertEquals(1L, result.thread().version());
     assertNotNull(result.modelInvocationId());
     EntryPath path = path(fixture.store, baseline.threadId());
     TurnStartPayload start = (TurnStartPayload) path.head().payload();
@@ -83,7 +83,7 @@ class ThreadProcessorManualCompactionTest extends ThreadProcessorTestBase {
   }
 
   @Test
-  void compactThreadUsesTypedRevisionAndAvailabilityConflicts() {
+  void compactThreadUsesTypedVersionAndAvailabilityConflicts() {
     Fixture staleFixture = fixture();
     var stale = seedCompactionReadyClosedTurn(staleFixture.store, USAGE);
     HarnessRuntimeConflictException staleError =
@@ -92,7 +92,7 @@ class ThreadProcessorManualCompactionTest extends ThreadProcessorTestBase {
             () ->
                 staleFixture.processor.compactThread(
                     new CompactThreadCommand(stale.threadId(), 1)));
-    assertEquals(HarnessRuntimeConflictException.Reason.STALE_REVISION, staleError.reason());
+    assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, staleError.reason());
     assertEquals(9, path(staleFixture.store, stale.threadId()).entries().size());
 
     Fixture busyFixture = fixture();
@@ -118,7 +118,7 @@ class ThreadProcessorManualCompactionTest extends ThreadProcessorTestBase {
         fixture.processor.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
 
     assertNull(result.modelInvocationId());
-    assertEquals(1L, result.thread().revision());
+    assertEquals(1L, result.thread().version());
     EntryPath path = path(fixture.store, baseline.threadId());
     assertEquals(12, path.entries().size());
     TurnStartPayload start = (TurnStartPayload) path.entries().get(9).payload();

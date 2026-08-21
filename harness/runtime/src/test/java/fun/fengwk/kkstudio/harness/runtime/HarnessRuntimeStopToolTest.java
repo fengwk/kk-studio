@@ -100,7 +100,7 @@ class HarnessRuntimeStopToolTest {
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
     assertStopped(result);
     assertEquals(0, result.cancelledCommandCount());
-    assertEquals(2L, result.thread().revision());
+    assertEquals(2L, result.thread().version());
 
     ThreadState stored = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
@@ -190,7 +190,7 @@ class HarnessRuntimeStopToolTest {
         store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
     ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    assertEquals(1L, thread.revision());
+    assertEquals(1L, thread.version());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
     assertEquals(4, path.entries().size());
     assertTrue(

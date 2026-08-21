@@ -88,7 +88,7 @@ import java.util.regex.Pattern;
  * Harness Runtime HTTP 边界的严格 DTO&lt;-&gt;domain mapper。
  *
  * <p>实体 id（Thread / Session / Entry / Invocation / clientCommandId / stopRequestId / decisionId）均为
- * canonical UUID string；revision 与 command sequence 仍是十进制字符串。domain JSON payload 只通过规范 runtime
+ * canonical UUID string；version 与 command sequence 仍是十进制字符串。domain JSON payload 只通过规范 runtime
  * codecs 编解码。Thread 状态与 processing 标志通过共享的 {@link ThreadContextClassifier} 从 {@link ThreadSnapshot}
  * 确定性推导：IDLE / CONTINUATION_DUE / MODEL_&lt;status&gt; / TOOL_&lt;status&gt; / APPLYING；只有 IDLE 时
  * processing 为 false。
@@ -150,7 +150,7 @@ public final class HarnessRuntimeWebMapper {
     }
   }
 
-  /** 解析严格非负十进制 revision 游标（{@code 0|[1-9][0-9]*}）。 */
+  /** 解析严格非负十进制 version 游标（{@code 0|[1-9][0-9]*}）。 */
   public static long parseNonNegativeDecimal(String value, String field) {
     Objects.requireNonNull(field, "field");
     if (value == null || !NON_NEGATIVE_DECIMAL.matcher(value).matches()) {
@@ -175,7 +175,7 @@ public final class HarnessRuntimeWebMapper {
     dto.setHeadEntryId(snapshot.thread().headEntryId().toString());
     dto.setYoloEnabled(snapshot.thread().yoloEnabled());
     dto.setNextCommandSequence(Long.toString(snapshot.thread().nextCommandSequence()));
-    dto.setRevision(Long.toString(snapshot.thread().revision()));
+    dto.setVersion(Long.toString(snapshot.thread().version()));
     String status = deriveStatus(snapshot);
     dto.setStatus(status);
     dto.setProcessing(!"IDLE".equals(status));
@@ -296,7 +296,7 @@ public final class HarnessRuntimeWebMapper {
     Objects.requireNonNull(snapshot, "snapshot");
     Objects.requireNonNull(manualCompaction, "manualCompaction");
     HarnessThreadSnapshotDTO dto = new HarnessThreadSnapshotDTO();
-    dto.setRevision(Long.toString(snapshot.thread().revision()));
+    dto.setVersion(Long.toString(snapshot.thread().version()));
     dto.setThread(toThreadDto(snapshot));
     List<HarnessSessionEntryDTO> entries = new ArrayList<>(snapshot.entryPath().entries().size());
     for (Entry entry : snapshot.entryPath().entries()) {
@@ -387,7 +387,7 @@ public final class HarnessRuntimeWebMapper {
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(postStopSnapshot, "postStopSnapshot");
     if (!result.thread().id().equals(postStopSnapshot.thread().id())
-        || result.thread().revision() != postStopSnapshot.thread().revision()) {
+        || result.thread().version() != postStopSnapshot.thread().version()) {
       throw new IllegalArgumentException("post-stop snapshot does not match Stop result");
     }
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
@@ -465,7 +465,7 @@ public final class HarnessRuntimeWebMapper {
     requireNonNull(dto, "compactDTO");
     return new CompactThreadCommand(
         parseUuid(threadId, "threadId"),
-        parseNonNegativeDecimal(dto.getExpectedRevision(), "expectedRevision"));
+        parseNonNegativeDecimal(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   public static StopCommand toStopCommand(String threadId, HarnessThreadStopDTO dto) {
@@ -473,7 +473,7 @@ public final class HarnessRuntimeWebMapper {
     return new StopCommand(
         parseUuid(threadId, "threadId"),
         parseUuid(dto.getStopRequestId(), "stopRequestId"),
-        parseNonNegativeDecimal(dto.getExpectedRevision(), "expectedRevision"));
+        parseNonNegativeDecimal(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   public static SetThreadYoloCommand toSetThreadYoloCommand(
@@ -481,7 +481,7 @@ public final class HarnessRuntimeWebMapper {
     requireNonNull(dto, "yoloUpdateDTO");
     return new SetThreadYoloCommand(
         parseUuid(threadId, "threadId"),
-        parseNonNegativeDecimal(dto.getExpectedRevision(), "expectedRevision"),
+        parseNonNegativeDecimal(dto.getExpectedVersion(), "expectedVersion"),
         requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
   }
 

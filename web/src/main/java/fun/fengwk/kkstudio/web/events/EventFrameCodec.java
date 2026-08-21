@@ -102,8 +102,8 @@ final class EventFrameCodec {
   }
 
   /**
-   * 编码 {@code event} 帧：统一 {@code {version,type,resource,name,data}}；revision/version 事件额外携带
-   * canonical {@code cursor}（本次前进到的值），realtime 事件的 {@code data} 为 realtime codec JSON 对象。
+   * 编码 {@code event} 帧：统一 {@code {version,type,resource,name,data}}；version 事件额外携带 canonical {@code
+   * cursor}（本次前进到的值），realtime 事件的 {@code data} 为 realtime codec JSON 对象。
    */
   String event(ResourceKey resource, Signal signal) {
     Objects.requireNonNull(signal, "signal");
@@ -111,15 +111,10 @@ final class EventFrameCodec {
     node.put("version", 1);
     node.put("type", "event");
     node.set("resource", resourceNode(resource));
-    if (signal instanceof Signal.Revision revision) {
-      node.put("name", "revision");
-      node.put("cursor", revision.revision());
-      node.set("data", dataNode("revision", revision.revision()));
-    } else if (signal instanceof Signal.Version version) {
-      String cursor = Long.toString(version.version());
+    if (signal instanceof Signal.Version version) {
       node.put("name", "version");
-      node.put("cursor", cursor);
-      node.set("data", dataNode("version", cursor));
+      node.put("cursor", version.version());
+      node.set("data", dataNode("version", version.version()));
     } else if (signal instanceof Signal.Realtime realtime) {
       node.put("name", "realtime");
       node.set("data", realtimeCodec.encodeNode(realtime.event()));

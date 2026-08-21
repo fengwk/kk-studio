@@ -19,7 +19,7 @@ public class HarnessThreadStopResultDTO {
    */
   private String status;
 
-  /** 停止操作后的权威 Thread 投影（与结果 revision 一致）。 */
+  /** 停止操作后的权威 Thread 投影（与结果 version 一致）。 */
   private HarnessThreadDTO thread;
 
   /**

@@ -150,10 +150,10 @@ public final class HarnessRuntime {
    * 单个写原语原子接受一批 Commands 及其 Work：sealed {@link AcceptCommandsTarget} 定位 + ordered Commands。
    *
    * <p><b>NEW_SESSION</b>：调用方预分配 {@code sessionId}/{@code threadId}，在同一事务内插入 Session + ROOT +
-   * Thread（revision 0 / nextCommandSequence 1）+ preflight + Commands（sequence 从 1 起）+ THREAD
-   * Work，最后 revision/next sequence 原子推进；任一步失败整个回滚。以 client threadId 做 materialization replay：命中现有
-   * Thread 后先按 immutable sessionId KEY SHARE Session、再锁 Thread 复核（禁止混合 unlocked snapshot）；同 hash +
-   * 同 Session 精确重放（返回现有接受事实，不写任何行），不同 hash 冲突为 {@link
+   * Thread（version 0 / nextCommandSequence 1）+ preflight + Commands（sequence 从 1 起）+ THREAD Work，最后
+   * version/next sequence 原子推进；任一步失败整个回滚。以 client threadId 做 materialization replay：命中现有 Thread 后先按
+   * immutable sessionId KEY SHARE Session、再锁 Thread 复核（禁止混合 unlocked snapshot）；同 hash + 同 Session
+   * 精确重放（返回现有接受事实，不写任何行），不同 hash 冲突为 {@link
    * HarnessRuntimeConflictException.Reason#MATERIALIZATION_ID_REUSED}。
    *
    * <p><b>ENTRY</b>：<b>KEY SHARE</b> 锁既有 Session（不串行化同 Session 的 sibling materialization）、验证 start
@@ -340,7 +340,7 @@ public final class HarnessRuntime {
         });
   }
 
-  /** 全新 batch 的共性写入：preflight、插入 Commands、推进 revision/next sequence、请求 THREAD Work。 */
+  /** 全新 batch 的共性写入：preflight、插入 Commands、推进 version/next sequence、请求 THREAD Work。 */
   private static AcceptedCommands acceptNewCommandsOnThread(
       HarnessStore.Transaction tx,
       ThreadState thread,
@@ -650,9 +650,9 @@ public final class HarnessRuntime {
   /**
    * 在一个短 transaction 内直接更新 Thread 的 YOLO runtime policy。
    *
-   * <p>锁 Thread 后先比较当前值：与请求值相同即按原样返回当前 Thread（网络重试 no-op，不触碰 revision、不创建 Command/Entry/Work、不请求
-   * Work），否则必须匹配 {@code expectedRevision}（否则 STALE_REVISION），随后在一个原子步骤中更新 {@code yoloEnabled} 且
-   * revision 精确 +1。本操作绝不唤醒 processors。
+   * <p>锁 Thread 后先比较当前值：与请求值相同即按原样返回当前 Thread（网络重试 no-op，不触碰 version、不创建 Command/Entry/Work、不请求
+   * Work），否则必须匹配 {@code expectedVersion}（否则 STALE_VERSION），随后在一个原子步骤中更新 {@code yoloEnabled} 且
+   * version 精确 +1。本操作绝不唤醒 processors。
    */
   public ThreadState setThreadYolo(SetThreadYoloCommand command) {
     Objects.requireNonNull(command, "command");
@@ -667,15 +667,15 @@ public final class HarnessRuntime {
           if (thread.yoloEnabled() == command.enabled()) {
             return thread;
           }
-          if (thread.revision() != command.expectedRevision()) {
+          if (thread.version() != command.expectedVersion()) {
             throw conflict(
-                HarnessRuntimeConflictException.Reason.STALE_REVISION,
+                HarnessRuntimeConflictException.Reason.STALE_VERSION,
                 "thread "
                     + thread.id()
-                    + " revision "
-                    + thread.revision()
+                    + " version "
+                    + thread.version()
                     + " does not match expected "
-                    + command.expectedRevision());
+                    + command.expectedVersion());
           }
           ThreadState updated = thread.setYoloEnabled(command.enabled(), clock.instant());
           tx.updateThread(updated);
@@ -706,7 +706,7 @@ public final class HarnessRuntime {
    * <p>锁序：Session -&gt; Thread -&gt; Model -&gt; Tool siblings -&gt; Work。未加锁的读仅用于发现不可变的
    * id/ownership 并选择 稳定分支——approval 决策由 Thread 锁串行化，决策后即不可变。已决策 approval 在按规范顺序锁定 owning Model 与
    * target Tool 之后，通过 {@link ToolApproval#decide} 以新的 {@code now} 验证其作为精确 replay，并返回已锁定的当前
-   * ToolInvocation（保留原始 {@code decidedAt}，不要求当前 branch/status，不递增 revision，不请求 Work）；任何不匹配均为
+   * ToolInvocation（保留原始 {@code decidedAt}，不要求当前 branch/status，不递增 version，不请求 Work）；任何不匹配均为
    * APPROVAL_DECISION_MISMATCH。
    */
   public ToolInvocation decideToolApproval(ToolApprovalCommand command) {
@@ -892,7 +892,7 @@ public final class HarnessRuntime {
 
   /**
    * 未决策 approval：target 必须是已锁定当前 TOOL_ACTIVE context 内、状态为 WAITING_APPROVAL 的 invocation；transition
-   * basis 为已锁定 siblings 中的 ToolInvocation。Thread revision 恰好被触碰一次，并请求匹配的 Work target。
+   * basis 为已锁定 siblings 中的 ToolInvocation。Thread version 恰好被触碰一次，并请求匹配的 Work target。
    */
   private ToolInvocation decideUndecidedApproval(
       HarnessStore.Transaction tx,
@@ -940,7 +940,7 @@ public final class HarnessRuntime {
             mutationNow,
             mutationNow);
     tx.updateToolInvocations(List.of(updated));
-    tx.updateThread(thread.touchRevision(mutationNow));
+    tx.updateThread(thread.touchVersion(mutationNow));
     WorkTarget wake =
         command.decision() == ToolApprovalDecision.ALLOWED
             ? new WorkTarget(WorkTargetType.TOOL, tool.id())

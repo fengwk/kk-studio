@@ -65,7 +65,7 @@ class StopRecordsTest {
     StopCommand command = new StopCommand(id(7L), id(8L), 42);
     assertEquals(id(7L), command.threadId());
     assertEquals(id(8L), command.stopRequestId());
-    assertEquals(42L, command.expectedRevision());
+    assertEquals(42L, command.expectedVersion());
   }
 
   @Test

@@ -27,7 +27,7 @@ class ThreadStateTest {
     assertEquals(id(42), state.headEntryId());
     assertTrue(state.yoloEnabled());
     assertEquals(3L, state.nextCommandSequence());
-    assertEquals(5L, state.revision());
+    assertEquals(5L, state.version());
     assertEquals(CREATED, state.createdAt());
     assertEquals(CREATED, state.updatedAt());
 
@@ -55,18 +55,18 @@ class ThreadStateTest {
   }
 
   @Test
-  void reserveCommandSequencesAdvancesBatchAndRevisionByOne() {
+  void reserveCommandSequencesAdvancesBatchAndVersionByOne() {
     ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
     ThreadState next = stored.reserveCommandSequences(3, CREATED.plusSeconds(1));
     assertEquals(6L, next.nextCommandSequence());
-    assertEquals(6L, next.revision());
+    assertEquals(6L, next.version());
     assertEquals(CREATED.plusSeconds(1), next.updatedAt());
     assertEquals(stored.headEntryId(), next.headEntryId());
     assertEquals(stored.yoloEnabled(), next.yoloEnabled());
     // 单个 sequence 等价于 count=1
     ThreadState single = stored.reserveCommandSequences(1, CREATED.plusSeconds(1));
     assertEquals(4L, single.nextCommandSequence());
-    assertEquals(6L, single.revision());
+    assertEquals(6L, single.version());
   }
 
   @Test
@@ -82,40 +82,40 @@ class ThreadStateTest {
   }
 
   @Test
-  void advanceHeadPreservesYoloPolicyAndBumpsRevisionByOne() {
+  void advanceHeadPreservesYoloPolicyAndBumpsVersionByOne() {
     ThreadState stored = state(id(7), id(42), true, 3L, 5L, CREATED);
-    // head 推进恒保留当前 yolo policy（不再接受外部传入值，杜绝 terminal / resolver 路径写回过期策略），仅 bump 一次 revision。
+    // head 推进恒保留当前 yolo policy（不再接受外部传入值，杜绝 terminal / resolver 路径写回过期策略），仅 bump 一次 version。
     ThreadState head = stored.advanceHead(id(99), CREATED.plusSeconds(2));
     assertEquals(id(99), head.headEntryId());
     assertTrue(head.yoloEnabled());
-    assertEquals(6L, head.revision());
+    assertEquals(6L, head.version());
     assertEquals(3L, head.nextCommandSequence());
     // 再次推进同样保留 policy，不因显式传入而改写。
     ThreadState advanced = head.advanceHead(id(99), CREATED.plusSeconds(3));
     assertTrue(advanced.yoloEnabled());
-    assertEquals(7L, advanced.revision());
+    assertEquals(7L, advanced.version());
     assertEquals(id(99), advanced.headEntryId());
     assertEquals(3L, advanced.nextCommandSequence());
     // false 值同样被保留。
     ThreadState storedDisabled = state(id(7), id(42), false, 3L, 5L, CREATED);
     ThreadState advancedDisabled = storedDisabled.advanceHead(id(99), CREATED.plusSeconds(2));
     assertFalse(advancedDisabled.yoloEnabled());
-    assertEquals(6L, advancedDisabled.revision());
+    assertEquals(6L, advancedDisabled.version());
     assertEquals(id(99), advancedDisabled.headEntryId());
   }
 
   @Test
-  void setYoloEnabledBumpsRevisionExactlyOnceAndPreservesCursor() {
+  void setYoloEnabledBumpsVersionExactlyOnceAndPreservesCursor() {
     ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
     ThreadState enabled = stored.setYoloEnabled(true, CREATED.plusSeconds(2));
     assertEquals(true, enabled.yoloEnabled());
-    assertEquals(6L, enabled.revision());
+    assertEquals(6L, enabled.version());
     assertEquals(id(42), enabled.headEntryId());
     assertEquals(3L, enabled.nextCommandSequence());
     // 再次切换同样精确 +1；时间钳制与其它转换一致。
     ThreadState disabled = enabled.setYoloEnabled(false, CREATED.plusSeconds(2));
     assertEquals(false, disabled.yoloEnabled());
-    assertEquals(7L, disabled.revision());
+    assertEquals(7L, disabled.version());
     assertEquals(CREATED.plusSeconds(2), enabled.updatedAt());
     assertEquals(CREATED.plusSeconds(2), disabled.updatedAt());
   }
@@ -125,10 +125,10 @@ class ThreadStateTest {
     Instant durableNow = CREATED.plusSeconds(2);
     ThreadState stored = state(id(7), id(42), false, 3L, 5L, durableNow);
 
-    // Caller wall-clock 回拨时，纯转换保留 durable 时间下界；revision/sequence/head 语义照常推进。
+    // Caller wall-clock 回拨时，纯转换保留 durable 时间下界；version/sequence/head 语义照常推进。
     assertEquals(durableNow, stored.reserveCommandSequences(1, CREATED).updatedAt());
     assertEquals(durableNow, stored.advanceHead(id(99), CREATED).updatedAt());
-    assertEquals(durableNow, stored.touchRevision(CREATED).updatedAt());
+    assertEquals(durableNow, stored.touchVersion(CREATED).updatedAt());
     assertEquals(durableNow, stored.setYoloEnabled(true, CREATED).updatedAt());
   }
 
@@ -157,7 +157,7 @@ class ThreadStateTest {
   }
 
   @Test
-  void validateTransitionRejectsSequenceRevisionAndUpdatedAtRegression() {
+  void validateTransitionRejectsSequenceVersionAndUpdatedAtRegression() {
     ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED.plusSeconds(2));
     // nextCommandSequence 倒退
     assertThrows(
@@ -165,7 +165,7 @@ class ThreadStateTest {
         () ->
             ThreadState.validateTransition(
                 stored, state(id(7), id(42), false, 2L, 6L, CREATED.plusSeconds(3))));
-    // revision 倒退
+    // version 倒退
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -180,9 +180,9 @@ class ThreadStateTest {
   }
 
   @Test
-  void validateTransitionRequiresExactRevisionIncrementOnAnyChange() {
+  void validateTransitionRequiresExactVersionIncrementOnAnyChange() {
     ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
-    // 任何对外可见的变更都必须将 revision 恰好 bump 一次
+    // 任何对外可见的变更都必须将 version 恰好 bump 一次
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -203,7 +203,7 @@ class ThreadStateTest {
         () ->
             ThreadState.validateTransition(
                 stored, state(id(7), id(42), false, 3L, 7L, CREATED.plusSeconds(1))));
-    // 即便仅修改 updatedAt，仍必须 bump revision
+    // 即便仅修改 updatedAt，仍必须 bump version
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -218,7 +218,7 @@ class ThreadStateTest {
       UUID headEntryId,
       boolean yoloEnabled,
       long nextCommandSequence,
-      long revision,
+      long version,
       Instant updatedAt) {
     return new ThreadState(
         id,
@@ -227,7 +227,7 @@ class ThreadStateTest {
         MATERIALIZATION_HASH,
         yoloEnabled,
         nextCommandSequence,
-        revision,
+        version,
         CREATED,
         updatedAt);
   }

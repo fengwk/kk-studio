@@ -453,7 +453,7 @@ final class ToolExecution implements ToolGateway.Listener {
 
   /**
    * 已确认失败：仅当 retryable=true、binding 的 sideEffect 为 READ_ONLY / IDEMPOTENT 且 retryPolicy 允许时 RUNNING
-   * -&gt; READY + revision+1 + policy delay reschedule（不 request THREAD）；NON_IDEMPOTENT 绝不自动
+   * -&gt; READY + version+1 + policy delay reschedule（不 request THREAD）；NON_IDEMPOTENT 绝不自动
    * retry。否则 FAILED + THREAD wake + complete。
    */
   private Applied finishFailureLocked(ToolGateway.Failure failure, List<Publish> publishes) {
@@ -551,12 +551,12 @@ final class ToolExecution implements ToolGateway.Listener {
                 return false;
               }
               tx.updateToolInvocations(List.of(tool.markRunning(now)));
-              tx.updateThread(thread.touchRevision(now));
+              tx.updateThread(thread.touchVersion(now));
               return true;
             }));
   }
 
-  /** RUNNING -&gt; READY + revision+1 + reschedule；不 request THREAD。 */
+  /** RUNNING -&gt; READY + version+1 + reschedule；不 request THREAD。 */
   private boolean commitRetry(Duration delay) {
     Instant now = clock.instant();
     return Boolean.TRUE.equals(
@@ -574,7 +574,7 @@ final class ToolExecution implements ToolGateway.Listener {
                 return false;
               }
               tx.updateToolInvocations(List.of(tool.retryReady(now)));
-              tx.updateThread(thread.touchRevision(now));
+              tx.updateThread(thread.touchVersion(now));
               tx.rescheduleWork(claim, now, now.plus(delay));
               return true;
             }));
@@ -602,7 +602,7 @@ final class ToolExecution implements ToolGateway.Listener {
                   throw new ClaimLostSignal();
                 }
                 tx.updateToolInvocations(List.of(tool.succeed(result, effects, now)));
-                tx.updateThread(thread.touchRevision(now));
+                tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim, now);
                 return true;
               }));
@@ -639,7 +639,7 @@ final class ToolExecution implements ToolGateway.Listener {
                       case UNKNOWN -> tool.unknown(error, now);
                     };
                 tx.updateToolInvocations(List.of(next));
-                tx.updateThread(thread.touchRevision(now));
+                tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim, now);
                 return true;
               }));

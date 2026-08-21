@@ -574,15 +574,15 @@ export function assertThreadSettings(accepted, testCase, daemonEnv, agentName) {
     firstAccepted && String(thread.threadId) === String(firstAccepted.threadId),
     'Thread identity mismatch',
   )
-  // 首条 USER command 已接受：nextCommandSequence 精确为 2，revision 至少 1。
+  // 首条 USER command 已接受：nextCommandSequence 精确为 2，version 至少 1。
   // 不锁定瞬时 status/head（processor 可能已异步消费）。
   assert(
     String(thread.nextCommandSequence) === '2',
     `Thread nextCommandSequence must be 2: ${JSON.stringify(thread)}`,
   )
   assert(
-    Number(thread.revision) >= 1,
-    `Thread revision must be at least 1: ${JSON.stringify(thread)}`,
+    Number(thread.version) >= 1,
+    `Thread version must be at least 1: ${JSON.stringify(thread)}`,
   )
   assert(thread.yoloEnabled === true, 'Thread yoloEnabled must be true')
   assert(
@@ -624,11 +624,11 @@ async function bestEffortStop(ctx, threadId) {
       const snapshot = await getThreadSnapshot(ctx, threadId)
       await stopThread(ctx, threadId, {
         stopRequestId: cid(),
-        expectedRevision: snapshot.thread.revision,
+        expectedVersion: snapshot.thread.version,
       })
       return
     } catch {
-      // Retry once with the newest durable revision.
+      // Retry once with the newest durable version.
     }
   }
 }

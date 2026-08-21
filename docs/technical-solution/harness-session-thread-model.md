@@ -114,7 +114,7 @@ Thread {
   materializationHash
   yoloEnabled
   nextCommandSequence
-  revision
+  version
   createdAt
   updatedAt
 }
@@ -127,7 +127,7 @@ Thread {
 3. 多个 Thread 可以指向同一个 Entry。
 4. head 只能由 Runtime 推进到当前 head 的新 descendant。
 5. 不提供任意 head relocation API。
-6. Command、Invocation、Work、revision 和 YOLO policy 都是 Thread-scoped。
+6. Command、Invocation、Work、version 和 YOLO policy 都是 Thread-scoped。
 7. BranchSettings、Environment 和对话状态从 root-to-head path 派生，不复制到 Thread 行。
 8. Thread 必须与第一批 Command 在同一事务创建，不存在 durable empty Thread。
 
@@ -412,7 +412,7 @@ UUID 只是不可预测的实体身份；服务端仍执行 owner、Session、En
 5. allocate continuous command sequences
 6. insert Command rows
 7. upsert Thread Work
-8. revision + 1
+8. version + 1
 9. commit
 ```
 
@@ -440,10 +440,10 @@ lock Chat/Canvas owner
      materializationHash,
      yoloEnabled,
      nextCommandSequence=1,
-     revision=0)
+     version=0)
 -> consume uploads into SessionBlobRef/RESOURCE
 -> insert first Commands
--> reserve sequences and revision
+-> reserve sequences and version
 -> upsert Thread Work
 ```
 
@@ -484,7 +484,7 @@ read immutable thread.sessionId
 -> consume uploads
 -> insert Commands
 -> upsert Work
--> revision + 1
+-> version + 1
 ```
 
 queued SET_ENVIRONMENT 只在后续 INPUT 边界消费，因此 enqueue 不再要求当前 Thread quiescent。当前 live Turn 始终使用自己 TURN_START 已冻结的 settings。
@@ -561,7 +561,7 @@ accept Commands
 `/yolo` 不属于 BranchSettings：
 
 - Draft target：修改本地初始值；
-- Bound Thread：立即 revision CAS 更新 durable policy；
+- Bound Thread：立即 version CAS 更新 durable policy；
 - Tool permission preflight 读取当前 Thread policy。
 
 共享历史 correctness 继续依赖：
@@ -588,7 +588,7 @@ owned closed normal Turn
 
 它复用已有：
 
-- Thread revision/head；
+- Thread version/head；
 - ModelInvocation 与 MODEL Work；
 - lease、retry 和 crash recovery；
 - Stop 与迟到结果 fence；
@@ -635,7 +635,7 @@ MANUAL
   用户在 Bound Thread 发起 /compact
   -> availability 门控（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT /
      MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT）
-  -> expectedRevision CAS 提交 MANUAL plan
+  -> expectedVersion CAS 提交 MANUAL plan
   -> 与自动触发共用 MODEL Work、一次 fallback 与 crash recovery
 ```
 
@@ -829,7 +829,7 @@ kk-studio 与可运行 Pi 实现保持算法对齐：
 | Stop | AbortController | Thread-scoped durable Stop + late-result fence |
 | 输入并发 | 普通 prompt 在 compaction 中被拒绝；部分队列等待 | Command 可 durable 排队，Compaction 消费零 Command |
 | usage ownership | 当前 active branch 的最近 assistant usage | 只借用当前 Thread owned usage，shared history 有 barrier |
-| manual | `/compact [instructions]` | `/compact` 手动压缩：availability 门控 + expectedRevision CAS，固定 deterministic prompt，不支持 per-Agent instructions |
+| manual | `/compact [instructions]` | `/compact` 手动压缩：availability 门控 + expectedVersion CAS，固定 deterministic prompt，不支持 per-Agent instructions |
 | hook | extension 可取消或替换 summary | 固定 deterministic prompt，无 summary hook |
 | `/tree` | 可把离开分支摘要注入目标分支 | 选择 EntryDraft/Thread，不隐式合并 sibling 分支 |
 | recent budget | 直接使用 `keepRecentTokens` | 额外限制为 context window 的一半 |
@@ -903,7 +903,7 @@ otherwise
 - 最小 `cutEntryId / turnPrefixStartEntryId` anchor；
 - fixed prompts、file sections、one-shot cache policy；
 - threshold/overflow 自动触发；
-- MANUAL 手动压缩（`/compact` 命令 + `POST /{threadId}/compact`，availability 门控 + expectedRevision CAS）；
+- MANUAL 手动压缩（`/compact` 命令 + `POST /{threadId}/compact`，availability 门控 + expectedVersion CAS）；
 - current Thread ownership barrier；
 - complete summary 的 Session Entry 共享。
 
@@ -981,8 +981,8 @@ wire 无独立 `replayed` 字段；queued-only replay 的 `stoppedTurnEndEntryId
 read immutable thread.sessionId
 -> lock Session FOR KEY SHARE
 -> lock Thread
--> find replay receipt before revision CAS
--> require expectedRevision
+-> find replay receipt before version CAS
+-> require expectedVersion
 -> classify current Thread context
 -> reject terminal-apply-pending
 -> lock/delete owned Work
@@ -991,7 +991,7 @@ read immutable thread.sessionId
      cancelRequestId = stopRequestId
 -> stop only current Thread owned Model/Tool Invocation
 -> append TURN_END(USER_STOP) when a live owned Turn exists
--> update Thread head/revision
+-> update Thread head/version
 -> commit
 -> best-effort cancel external Model/Tool execution
 ```
@@ -1002,13 +1002,13 @@ Replay receipt：
 - queued Commands：`threadId + cancelRequestId`；
 - 相同 raw stopRequestId 在不同 Thread 上互不冲突。
 
-无 live Turn 且没有 queued Command 时不写 marker、不增加 revision。此 no-op 没有 durable replay receipt；如果其后 Thread revision 已变化，旧请求重试返回 stale revision。
+无 live Turn 且没有 queued Command 时不写 marker、不增加 version。此 no-op 没有 durable replay receipt；如果其后 Thread version 已变化，旧请求重试返回 stale version。
 
-Stop identity 是 `(threadId, stopRequestId)`；`expectedRevision` 只作为首次执行 fence，不属于 receipt identity：
+Stop identity 是 `(threadId, stopRequestId)`；`expectedVersion` 只作为首次执行 fence，不属于 receipt identity：
 
 - transport outcome unknown：逐字节重放原请求；
-- 确定收到 `STALE_REVISION`：清理该 pending operation，刷新 snapshot；下一次 Stop 使用新 stopRequestId 与当前 revision；
-- 通过 revision fence 的 Stop 取消其获得 Thread lock 时存在的全部 queued Commands。
+- 确定收到 `STALE_VERSION`：清理该 pending operation，刷新 snapshot；下一次 Stop 使用新 stopRequestId 与当前 version；
+- 通过 version fence 的 Stop 取消其获得 Thread lock 时存在的全部 queued Commands。
 
 ### 7.3 前端恢复
 
@@ -1017,9 +1017,9 @@ Stop 发起时：
 ```text
 PendingStopOperation {
   stopRequestId
-  expectedRevision
+  expectedVersion
   basisHeadEntryId
-  basisRevision
+  basisVersion
 }
 ```
 
@@ -1249,7 +1249,7 @@ useAgentThreadController
   Bound Thread snapshot、realtime、enqueue、stop、approval、yolo
 
 ThreadProjectionCache
-  复用现有 TanStack Query cache，按 threadId 保存后台 projection，按 revision 丢弃过期更新
+  复用现有 TanStack Query cache，按 threadId 保存后台 projection，按 version 丢弃过期更新
 
 ThreadComposer
   ComposerPart 编辑、上传、history、selection bookmark、Stop prepend transaction
@@ -1273,7 +1273,7 @@ SelectionPanel / HistoryBranchPanel / ThreadInteractionPanel
 | `/models` | 修改本地 BranchDraft；随下一条输入提交 `SET_MODEL` |
 | `/tree` | 选择当前 Session 的 Entry，并切换到 `ENTRY_DRAFT` |
 | `/stop` | 停止当前 Thread 并恢复被取消的用户消息 |
-| `/compact` | 在 Bound Thread 发起手动压缩：先经 availability 门控（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT），再以 expectedRevision CAS 提交 MANUAL Compaction Turn |
+| `/compact` | 在 Bound Thread 发起手动压缩：先经 availability 门控（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT），再以 expectedVersion CAS 提交 MANUAL Compaction Turn |
 | `/new` | 切换到 `NEW_SESSION_DRAFT` |
 | `/upload` | 插入 ordered upload part |
 | `/debug` | Conversation 与当前 Thread Debug View 间切换 |
@@ -1417,7 +1417,7 @@ POST /api/ai/runtime/threads/{threadId}/stop
 POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval
 ```
 
-`system-prompt` 返回按当前 root-to-head branch 最新 Agent / Environment / skills / subagents 现算的只读预览（不冻结 ModelInvocation、不校验 Tool catalog）；`compact` 请求体携带 `expectedRevision`（exact 十进制 revision cursor），提交成功后返回权威 Thread 投影、`turnStartEntryId` 与可选 `modelInvocationId`。snapshot 同时携带 `manualCompaction.available / disabledReason` 瞬时 availability sidecar；提交仍以 expectedRevision CAS 守护。
+`system-prompt` 返回按当前 root-to-head branch 最新 Agent / Environment / skills / subagents 现算的只读预览（不冻结 ModelInvocation、不校验 Tool catalog）；`compact` 请求体携带 `expectedVersion`（exact 十进制 version cursor），提交成功后返回权威 Thread 投影、`turnStartEntryId` 与可选 `modelInvocationId`。snapshot 同时携带 `manualCompaction.available / disabledReason` 瞬时 availability sidecar；提交仍以 expectedVersion CAS 守护。
 
 ## 12. 持久化模型
 
@@ -1478,7 +1478,7 @@ create table harness_thread (
     materialization_hash char(64) not null,
     yolo_enabled boolean not null,
     next_command_sequence bigint not null check (next_command_sequence >= 1),
-    revision bigint not null check (revision >= 0),
+    version bigint not null check (version >= 0),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     constraint fk_harness_thread_session foreign key (session_id)
@@ -1695,14 +1695,14 @@ or FOR UPDATE（归属/删除）
 关键并发语义：
 
 1. Command enqueue 与 Stop 都锁 Thread，因此形成确定全序。
-2. 通过 revision fence 的 Stop 取消其获得 Thread lock 时存在的全部 queued Command；确定性 stale Stop 不产生任何取消。
+2. 通过 version fence 的 Stop 取消其获得 Thread lock 时存在的全部 queued Command；确定性 stale Stop 不产生任何取消。
 3. 外部 Model/Tool 调用不持有数据库锁。
 4. 每次应用迟到结果前重新锁 Thread，并验证 Invocation/Turn 仍由当前 Thread live ownership 持有。
 5. 两个 Thread 可从同一个 parent Entry 并行 append 不同 child。
 6. 新 Thread 不读取或继承 sibling Invocation。
 7. compaction 不能跨越 foreign open-turn ownership barrier。
 8. Work producer 与 drain completion 都在 Thread 锁内判断 runnable state，防止 lost wakeup。
-9. revision 是对外 projection/CAS fence；每次对外可见 Thread 变化恰好 `+1`。
+9. version 是对外 projection/CAS fence；每次对外可见 Thread 变化恰好 `+1`。
 
 ## 14. 生命周期
 
@@ -1769,7 +1769,7 @@ historical normalization
 compaction ownership barrier
 complete Compaction checkpoint 可共享、incomplete continuation owner-only
 durable Compaction Turn + ModelInvocation + Work
-revision CAS
+version CAS
 SessionBlobRef + Blob refcount
 精简 canvas_command_dedup
 canvas_function_resource_pin
@@ -1856,20 +1856,20 @@ PostgreSQL schema structure tests
 - [ ] Stop Compaction 后迟到 Model 结果不能 append。
 - [ ] file sections 由 Runtime 重算，malformed reserved tags fail closed。
 - [ ] complete file sections 每次从 ROOT 到 cut 累计重算。
-- [ ] MANUAL `/compact`：availability 门控与 expectedRevision CAS 缺一不可，THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT disabledReason 确定性返回。
+- [ ] MANUAL `/compact`：availability 门控与 expectedVersion CAS 缺一不可，THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT disabledReason 确定性返回。
 - [ ] 不存在 summary replacement hook、branch summary 或 copied retainedTail。
 
 ### 18.5 Stop
 
-- [ ] 通过 revision fence 的 Stop 处理当前 live Turn 和加锁时全部 queued Commands。
-- [ ] deterministic stale 后沿用 stopRequestId、刷新 revision 重试。
+- [ ] 通过 version fence 的 Stop 处理当前 live Turn 和加锁时全部 queued Commands。
+- [ ] deterministic stale 后沿用 stopRequestId、刷新 version 重试。
 - [ ] cancelled user messages 严格按 sequence 返回。
 - [ ] 返回 durable Resource，不返回已消费 upload handle。
 - [ ] queued-only Stop 可通过 command cancelRequestId 精确 replay。
 - [ ] live Stop 可通过 TURN_END 与 command receipt 精确 replay。
 - [ ] replay receipt 字段稳定，Thread 返回当前 projection。
 - [ ] 相同 raw stopRequestId 在两个 Thread 独立工作。
-- [ ] no-op Stop 不写 marker、不增加 revision。
+- [ ] no-op Stop 不写 marker、不增加 version。
 - [ ] Stop 后到达的 Model/Tool 结果不能 append 或 revive Turn。
 - [ ] 前端恢复保留当前草稿、caret、selection、resource order 和可见滚动位置。
 - [ ] 多条消息合并后使用当前 BranchDraft，不伪造逐消息 settings 恢复。

@@ -1508,7 +1508,7 @@ async function cleanupFixture(state) {
     ) {
       await stopThread(state.apiCtx, state.threadId, {
         stopRequestId: cid(),
-        expectedRevision: snapshot.thread.revision,
+        expectedVersion: snapshot.thread.version,
       })
     }
   })

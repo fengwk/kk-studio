@@ -83,14 +83,14 @@ class StudioHarnessThreadControllerTest {
     mockMvc
         .perform(get("/api/ai/runtime/threads/" + idText(1) + "/snapshot"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.revision").value("3"))
+        .andExpect(jsonPath("$.data.version").value("3"))
         .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
         .andExpect(jsonPath("$.data.manualCompaction.available").value(false))
         .andExpect(jsonPath("$.data.manualCompaction.disabledReason").value("BELOW_MINIMUM"));
   }
 
   @Test
-  void compactCallsInjectedThreadProcessorWithRevisionFenceAndMapsCommitResult() throws Exception {
+  void compactCallsInjectedThreadProcessorWithVersionFenceAndMapsCommitResult() throws Exception {
     when(threadProcessor.compactThread(any(CompactThreadCommand.class)))
         .thenReturn(new CompactThreadResult(HarnessRuntimeTestFixtures.thread(id(1)), id(2), null));
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
@@ -99,7 +99,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             post("/api/ai/runtime/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedRevision\":\"3\"}"))
+                .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
         .andExpect(jsonPath("$.data.turnStartEntryId").value(idText(2)))
@@ -109,7 +109,7 @@ class StudioHarnessThreadControllerTest {
         ArgumentCaptor.forClass(CompactThreadCommand.class);
     verify(threadProcessor).compactThread(captor.capture());
     assertEquals(id(1), captor.getValue().threadId());
-    assertEquals(3L, captor.getValue().expectedRevision());
+    assertEquals(3L, captor.getValue().expectedVersion());
   }
 
   @Test
@@ -124,24 +124,24 @@ class StudioHarnessThreadControllerTest {
         .perform(
             post("/api/ai/runtime/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedRevision\":\"3\"}"))
+                .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.errors.reason").value("MANUAL_COMPACTION_UNAVAILABLE"));
   }
 
   @Test
-  void compactRejectsNonStringRevisionAtTheHttpBoundary() throws Exception {
+  void compactRejectsNonStringVersionAtTheHttpBoundary() throws Exception {
     mockMvc
         .perform(
             post("/api/ai/runtime/threads/" + idText(1) + "/compact")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedRevision\":3}"))
+                .content("{\"expectedVersion\":3}"))
         .andExpect(status().isBadRequest());
     verify(threadProcessor, never()).compactThread(any(CompactThreadCommand.class));
   }
 
   @Test
-  void yoloCarriesRevisionCasAndReturnsCurrentThread() throws Exception {
+  void yoloCarriesVersionCasAndReturnsCurrentThread() throws Exception {
     when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.thread(id(1)));
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
@@ -150,7 +150,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             put("/api/ai/runtime/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedRevision\":\"3\",\"yoloEnabled\":true}"))
+                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.threadId").value(idText(1)))
         .andExpect(jsonPath("$.data.status").value("IDLE"));
@@ -158,7 +158,7 @@ class StudioHarnessThreadControllerTest {
     ArgumentCaptor<SetThreadYoloCommand> captor =
         ArgumentCaptor.forClass(SetThreadYoloCommand.class);
     verify(runtime).setThreadYolo(captor.capture());
-    assertEquals(3L, captor.getValue().expectedRevision());
+    assertEquals(3L, captor.getValue().expectedVersion());
   }
 
   @Test
@@ -178,7 +178,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             post("/api/ai/runtime/threads/" + idText(1) + "/stop")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedRevision\":\"3\"}"))
+                .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("STOPPED"))
         .andExpect(jsonPath("$.data.cancelledCommandCount").value(2))
