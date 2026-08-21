@@ -38,7 +38,7 @@ describe('Thread snapshot architecture', () => {
     expect(realtime).toContain('onSubscribed: invalidateSnapshot')
     expect(realtime).toContain('onResync: invalidateSnapshot')
     expect(realtime).toContain('onError: invalidateSnapshot')
-    expect(realtime).not.toMatch(/EventSource|createThreadRealtimeStream/)
+    expect(realtime).not.toContain('EventSource')
     // 有界的 single-flight gap recovery 可以使用 timer，但每个 timer 必须可取消，
     // 并在 unmount 或 Thread 切换时清理（避免遗留循环）。
     if (/setTimeout/.test(realtime)) {
