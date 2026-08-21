@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.tool;
 
+import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsNormalizer;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolArgumentsValidator;
 
 /** 已完成的模型工具调用；参数保持原始 JSON 以供 Provider 和 Daemon 传递。 */
@@ -15,11 +16,17 @@ public record ToolCall(String id, String toolName, String argumentsJson) {
     argumentsJson = ToolArgumentsValidator.requireJsonObject(argumentsJson);
   }
 
-  /** 验证参数符合该工具的 schema，同时校验工具名称一致。 */
-  public void validateFor(ToolDescriptor descriptor) {
+  /**
+   * 静默归一化参数（如 {@code filePath}→{@code path}、整数字符串→integer），再用 schema 校验，同时校验工具名称一致。
+   *
+   * @return 持有归一化后参数的新 {@code ToolCall}；执行路径必须使用该返回值，不得再读取原始 JSON。
+   */
+  public ToolCall validateFor(ToolDescriptor descriptor) {
     if (!toolName.equals(descriptor.name())) {
       throw new IllegalArgumentException("toolName does not match descriptor");
     }
-    ToolArgumentsValidator.validate(argumentsJson, descriptor.inputSchema());
+    String normalized = ToolArgumentsNormalizer.normalize(argumentsJson, descriptor.inputSchema());
+    ToolArgumentsValidator.validate(normalized, descriptor.inputSchema());
+    return new ToolCall(id, toolName, normalized);
   }
 }
