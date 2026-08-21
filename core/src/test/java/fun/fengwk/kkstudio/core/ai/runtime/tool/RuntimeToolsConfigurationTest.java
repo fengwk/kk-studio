@@ -19,9 +19,7 @@ class RuntimeToolsConfigurationTest {
 
   @Test
   void subagentConfigMapsAllFiveAiRuntimeFields() {
-    // 五个字段全部取与默认不同的 distinct 非默认值（depth=4 / per-parent=7 / total=13 /
-    // idle=1234ms / turns=89），逐项精确断言，防止 per-parent 与 total 在
-    // SystemSettings -> runtime bean mapping 中丢失或互换。
+    // 使用互不相同的非默认值，确保 per-parent 与 total 上限不会在装配时丢失或互换。
     SystemSettings.AiRuntime aiRuntime =
         new SystemSettings.AiRuntime(
             SystemSettings.AiRuntime.DEFAULT.retryMaxRetries(),

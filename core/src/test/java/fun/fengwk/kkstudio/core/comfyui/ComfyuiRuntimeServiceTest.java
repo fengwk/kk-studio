@@ -284,12 +284,14 @@ public class ComfyuiRuntimeServiceTest {
     verifyNoInteractions(client);
   }
 
+  @SuppressWarnings("unchecked")
   private ObjectProvider<ComfyUIClient> clientProvider() {
     ObjectProvider<ComfyUIClient> provider = mock(ObjectProvider.class);
     when(provider.getIfAvailable()).thenReturn(client);
     return provider;
   }
 
+  @SuppressWarnings("unchecked")
   private ObjectProvider<S3StorageService> s3Provider() {
     ObjectProvider<S3StorageService> provider = mock(ObjectProvider.class);
     when(provider.getIfAvailable()).thenReturn(s3StorageService);

@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -338,9 +339,8 @@ final class ProviderUsageNormalizer {
       if (usage != null && (usage.isObject() || usage.isArray())) {
         sink.add(usage);
       }
-      var fields = node.fields();
-      while (fields.hasNext()) {
-        collectUsageNodesInto(fields.next().getValue(), sink);
+      for (Map.Entry<String, JsonNode> field : node.properties()) {
+        collectUsageNodesInto(field.getValue(), sink);
       }
     } else if (node.isArray()) {
       for (JsonNode element : node) {

@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.cfg.CoercionAction;
 import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
@@ -32,7 +33,6 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,33 +63,41 @@ public class SystemSettingsCodec {
     // 字符串（为前端友好），而 config 的 canonical JSON 明确要求时长/字节为数值。因此 codec 使用独立的 plain mapper，
     // 避免该定制泄漏进持久化格式或让解码把字符串数值当合法输入。
     // codec 无外部依赖，使用无参构造函数，不注入任何 ObjectMapper。
-    ObjectMapper plainMapper = new ObjectMapper();
-    ObjectMapper strictMapper = plainMapper.copy();
-    strictMapper.disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT);
-    strictMapper.enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-    strictMapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    // 显式 null 的 required primitive 必须拒绝，而不是回退到 0/false。
-    strictMapper.enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES);
-    strictMapper.enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS);
-    strictMapper
-        .coercionConfigFor(LogicalType.Integer)
-        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
-    // 布尔只接受 JSON true/false：string/整数/浮点标量一律拒绝（jackson 2.19.0 默认允许 string->boolean 与 0/1->boolean）。
-    strictMapper
-        .coercionConfigFor(LogicalType.Boolean)
-        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
-    strictMapper
-        .coercionConfigFor(LogicalType.Textual)
-        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
-        .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail);
+    JsonMapper strictMapper =
+        JsonMapper.builder()
+            .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            // 显式 null 的 required primitive 必须拒绝，而不是回退到 0/false。
+            .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+            .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS)
+            .withCoercionConfig(
+                LogicalType.Integer,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
+            // 布尔只接受 JSON true/false：string/整数/浮点标量一律拒绝（jackson 2.19.0 默认允许 string->boolean 与
+            // 0/1->boolean）。
+            .withCoercionConfig(
+                LogicalType.Boolean,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
+            .withCoercionConfig(
+                LogicalType.Textual,
+                config ->
+                    config
+                        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                        .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
+            .build();
     this.settingsReader = strictMapper.readerFor(SystemSettings.class);
 
-    this.canonicalMapper = plainMapper.copy();
-    this.canonicalMapper.enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY);
+    this.canonicalMapper =
+        JsonMapper.builder().enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY).build();
     this.canonicalMapper.enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
     this.canonicalMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
     // PermissionAction 的 wire 值是小写 allow/ask/deny（与 ToolSettingsCodec 一致），而非枚举名。
@@ -146,9 +154,7 @@ public class SystemSettingsCodec {
       if (!actual.isObject()) {
         return null;
       }
-      Iterator<Map.Entry<String, JsonNode>> fields = required.fields();
-      while (fields.hasNext()) {
-        Map.Entry<String, JsonNode> field = fields.next();
+      for (Map.Entry<String, JsonNode> field : required.properties()) {
         JsonNode actualValue = actual.get(field.getKey());
         if (actualValue == null || actualValue.isNull()) {
           return field.getKey();

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { cid } from '../../e2e/lib/http.mjs'
@@ -14,23 +13,7 @@ import { assertThreadSettings, buildNewSessionRequest } from '../run-agent-matri
 const DAEMON_ENV = 'docker-reliability'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-// 迁移契约离线回归：模块可加载（旧 helper 已删除，若仍导入则加载即失败）且 NEW_SESSION
-// 请求形状/断言可独立于真实后端构造并验证。后端 wire 形状由 e2e L1 矩阵回归
-// （seed-and-harness.mjs），这里不伪造兼容层。
-test('run-agent-matrix migration contract: module imports only current primitives', () => {
-  const source = readFileSync(new URL('../run-agent-matrix.mjs', import.meta.url), 'utf8')
-  assert.doesNotMatch(source, /createChatThread|enqueueCommands/, 'legacy helpers must be gone')
-  assert.match(source, /\bchatOwner\b/)
-  assert.match(source, /\bmaterializeNewSession\b/)
-  assert.match(
-    source,
-    /environment:\s*\{\s*name:\s*daemonEnv,\s*workspacePath:\s*'\.'\s*\}/,
-    'Chat/rootSettings must use the environment binding, not environmentName',
-  )
-  assert.doesNotMatch(source, /environmentName/, 'legacy environmentName field must be gone')
-})
-
-test('run-agent-matrix migration contract: NEW_SESSION request is atomic and settings-bound', () => {
+test('run-agent-matrix contract: NEW_SESSION request is atomic', () => {
   const chat = fakeChat()
   const agent = fakeAgent()
   const model = fakeModel()
@@ -46,14 +29,6 @@ test('run-agent-matrix migration contract: NEW_SESSION request is atomic and set
   assert.match(request.sessionId, UUID_RE)
   assert.match(request.threadId, UUID_RE)
   assert.equal(request.yoloEnabled, true)
-  assert.deepEqual(
-    request.rootSettings,
-    branchSettingsOf(agent, model, {
-      environment: { name: DAEMON_ENV, workspacePath: '.' },
-      activeTools: [...ACTIVE_TOOLS],
-    }),
-  )
-  // 单批原子提交：恰一条首 USER command，且与 harness 严格 builder 的 wire 形状逐字一致。
   assert.equal(request.commands.length, 1)
   assert.deepEqual(request.commands[0], userMessageCommand(prompt, request.commands[0].clientCommandId))
   assert.equal(request.commands[0].type, 'USER_MESSAGE')
@@ -61,19 +36,44 @@ test('run-agent-matrix migration contract: NEW_SESSION request is atomic and set
   assert.deepEqual(request.commands[0].contents, [{ type: 'TEXT', text: prompt }])
 })
 
-test('run-agent-matrix migration contract: accepted snapshot assertions fit the real envelope', () => {
+test('run-agent-matrix contract: NEW_SESSION root settings freeze the environment binding', () => {
+  const chat = fakeChat()
+  const agent = fakeAgent()
+  const model = fakeModel()
+  const request = buildNewSessionRequest({
+    chat,
+    agent,
+    testCase: fakeCase(model),
+    daemonEnv: DAEMON_ENV,
+    prompt: 'investigate this case',
+  })
+  assert.deepEqual(
+    request.rootSettings,
+    branchSettingsOf(agent, model, {
+      environment: { name: DAEMON_ENV, workspacePath: '.' },
+      activeTools: [...ACTIVE_TOOLS],
+    }),
+  )
+})
+
+test('run-agent-matrix contract: accepted snapshot assertions enforce the canonical envelope', () => {
   const chat = fakeChat()
   const model = fakeModel()
   const accepted = acceptedEnvelope(chat, model)
   assert.doesNotThrow(() =>
     assertThreadSettings(accepted, fakeCase(model), DAEMON_ENV, chat.agentName),
   )
-  // 断言必须拒绝旧 wire 形状：environmentName 不再存在。
-  const legacy = structuredClone(accepted)
-  legacy.thread.branchSettings.environment = undefined
-  legacy.thread.branchSettings.environmentName = DAEMON_ENV
+  // name-only Environment 不是完整 binding，必须拒绝。
+  const nameOnlyEnvironment = structuredClone(accepted)
+  nameOnlyEnvironment.thread.branchSettings.environment = undefined
+  nameOnlyEnvironment.thread.branchSettings.environmentName = DAEMON_ENV
   assert.throws(
-    () => assertThreadSettings(legacy, fakeCase(model), DAEMON_ENV, chat.agentName),
+    () => assertThreadSettings(
+      nameOnlyEnvironment,
+      fakeCase(model),
+      DAEMON_ENV,
+      chat.agentName,
+    ),
     /Thread Environment mismatch/,
   )
   // 断言必须拒绝非原子形状：无首条 accepted command 时不可能通过身份/游标校验。

@@ -132,24 +132,20 @@ public record H3AdapterState(
       throw new IllegalArgumentException("uploads must be an object");
     }
     Map<UUID, H3UploadedFile> uploads = new LinkedHashMap<>();
-    object
-        .fields()
-        .forEachRemaining(
-            entry -> {
-              UUID resourceId;
-              try {
-                resourceId = UUID.fromString(entry.getKey());
-              } catch (IllegalArgumentException error) {
-                throw new IllegalArgumentException(
-                    "uploads key must be a canonical UUID Resource id", error);
-              }
-              ObjectNode file = object(entry.getValue(), "uploads." + entry.getKey());
-              requireExact(file, Set.of("name", "subfolder", "type"), "uploads." + entry.getKey());
-              uploads.put(
-                  resourceId,
-                  new H3UploadedFile(
-                      text(file, "name"), text(file, "subfolder"), text(file, "type")));
-            });
+    for (Map.Entry<String, JsonNode> entry : object.properties()) {
+      UUID resourceId;
+      try {
+        resourceId = UUID.fromString(entry.getKey());
+      } catch (IllegalArgumentException error) {
+        throw new IllegalArgumentException(
+            "uploads key must be a canonical UUID Resource id", error);
+      }
+      ObjectNode file = object(entry.getValue(), "uploads." + entry.getKey());
+      requireExact(file, Set.of("name", "subfolder", "type"), "uploads." + entry.getKey());
+      uploads.put(
+          resourceId,
+          new H3UploadedFile(text(file, "name"), text(file, "subfolder"), text(file, "type")));
+    }
     return uploads;
   }
 

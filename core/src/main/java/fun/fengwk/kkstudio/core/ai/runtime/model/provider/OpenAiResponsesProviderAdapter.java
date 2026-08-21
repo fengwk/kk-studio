@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime.model.provider;
 
 import com.openai.client.OpenAIClient;
+import com.openai.models.ReasoningEffort;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openaiofficial.OpenAiOfficialResponsesStreamingChatModel;
 import dev.langchain4j.model.openaiofficial.setup.OpenAiOfficialSetup;
@@ -59,7 +60,7 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
         String reasoningEffort =
             request.model().reasoning() ? request.variant().reasoningEffort() : null;
         if (reasoningEffort != null) {
-          builder.reasoningEffort(reasoningEffort);
+          builder.reasoningEffort(ReasoningEffort.of(reasoningEffort));
         }
         // SDK builder 不接受 null promptCacheKey，因此仅在非 NONE 时显式设置。
         if (key != null) {

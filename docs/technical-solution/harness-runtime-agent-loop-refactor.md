@@ -731,7 +731,7 @@ public enum ThreadProcessResult {
 - `RESCHEDULED`：Resolver 等确定未产生外部副作用的临时失败。
 - `LOST_OWNERSHIP`：claim、lease 或 CAS 已失效，零 durable mutation。
 
-Processor 是 single-action reducer：一次 claim 恰好消费一个分类动作，下一动作由同事务 `requestWork` 驱动；不存在内部 run loop 或 step/continue 状态机。
+Processor 是 single-action reducer：一次 claim 恰好消费一个分类动作，下一动作由同事务 `requestWork` 驱动；Processor 不在提交后重新读取自身刚写入的状态。
 
 ## 15. Work、lease 与 crash recovery
 
@@ -905,7 +905,7 @@ Provider fatal error / retry exhausted
 
 - 协议不变。
 
-schema 是 clean-slate V1 基线，只有 V1 schema + profile seeds；不保留旧 request codec、旧 enum、旧配置字段或双读兼容。
+schema 以 clean-slate V1 与 profile seeds 为唯一基线；request codec、enum 与配置字段都按当前单一形状严格解析。
 
 ## 22. 稳态与写放大
 

@@ -237,9 +237,9 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(blankElement));
   }
 
-  /** 旧五字段 durable 形态（缺 inputModalities）不做 dual-read，必须拒绝。 */
+  /** inputModalities 是 descriptor 的必填 durable 字段。 */
   @Test
-  void rejectsLegacyDescriptorShapeWithoutInputModalities() {
+  void rejectsDescriptorWithoutInputModalities() {
     ObjectNode node = canonicalDescriptorNode();
     node.remove("inputModalities");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));

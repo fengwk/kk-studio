@@ -117,7 +117,7 @@ TURN_START/CONTINUATION 消费但不产生 Message Entry。
 
 | 事实 | durable 字段（要点） |
 | --- | --- |
-| `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、compact `ModelRequestSpec` JSON（providerType/model/variant/preamble/**toolBindings**/skillBindings/subagentBindings/cacheControl/可空 compaction metadata；无 history messages/tools/YOLO/contextWindow）、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`failed_attempts`（append-only TRANSIENT 失败前缀）、`result`/`error`/`result_entry_id`、时间 |
+| `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、compact `ModelRequestSpec` JSON（providerType/model/variant/preamble/**toolBindings**/skillBindings/subagentBindings/cacheControl；无 history messages/tools/YOLO/contextWindow/compaction metadata；压缩身份由 basis path 末尾的 `TURN_START.compaction` 表达）、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`failed_attempts`（append-only TRANSIENT 失败前缀）、`result`/`error`/`result_entry_id`、时间 |
 | `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`（(assistant_entry_id, ordinal) 唯一）、`call`（ToolCall JSON）+ 可空 `binding`（descriptor/type/environment/plugin provenance/access；unknown tool 为 null）、status、attempt、`approval` JSON、`result`/`effects`/`error`、时间 |
 
 冻结 spec 中的 `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。完整 ProviderRequest 永不持久化：每次 MODEL attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存请求。
@@ -174,7 +174,7 @@ IDLE_OR_HISTORICAL / CONTINUATION_DUE 快照不暴露 Model、tools 或失败 at
 
 ## 5. Agent Loop（ThreadProcessor）
 
-ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，**每次 claim 恰好执行一个分类动作**（one claim one action）：下一动作一律由同一事务内 `requestWork(THREAD) + completeWork(currentClaim)` 驱动，不维护内部 run loop，不提交后重新读取自身刚写入的状态。返回值固定为 `COMPLETED` / `RESCHEDULED` / `LOST_OWNERSHIP`。
+ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，**每次 claim 恰好执行一个分类动作**（one claim one action）：下一动作一律由同一事务内 `requestWork(THREAD) + completeWork(currentClaim)` 驱动，Processor 不在提交后重新读取自身刚写入的状态。返回值固定为 `COMPLETED` / `RESCHEDULED` / `LOST_OWNERSHIP`。
 
 按分类执行：
 

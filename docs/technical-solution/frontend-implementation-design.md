@@ -43,10 +43,10 @@ interface BranchDraft {
 }
 ```
 
-- **Blank pane**：`frozenDraft` 是 Chat defaults 经 Catalog 首次可解析值物化的不可变副本（`initialFrozenDraft` 基线）；agent/environment/model/variant/yolo 编辑标记 dirty，后续 Chat/Catalog refetch 不静默改写。**activeTools 由 Agent 能力配置派生**（`activeToolsFromAgent`）：`config.tools` + skills 非空时的内部 `load_skill` + subagents 非空时的内部 `task`——内部工具不可直接选择，但作为派生值进入 branch settings。
+- **Draft pane**：`frozenDraft` 是 Chat defaults 经 Catalog 首次可解析值物化的不可变副本（`initialFrozenDraft` 基线）；agent/environment/model/variant/yolo 编辑标记 dirty，后续 Chat/Catalog refetch 不静默改写。**activeTools 由 Agent 能力配置派生**（`activeToolsFromAgent`）：`config.tools` + skills 非空时的内部 `load_skill` + subagents 非空时的内部 `task`——内部工具不可直接选择，但作为派生值进入 branch settings。
 - **Bound pane**：`branchState` 从 Thread snapshot 的 `branchSettings` 初始化（base）；queued SET_* 命令投影出 `effectiveBase`，首次挂载时 draft 采用该 pending target，避免刷新后反向发送设置；后续 dirty = `effectiveBase` 与用户 `draft` 不等，durable base 跟随 snapshot，用户 draft 不被覆盖。Chat 与 Canvas Bound 共用该语义。
 
-## 3. Blank first send
+## 3. Draft first send
 
 draft target（`NEW_SESSION_DRAFT` / `ENTRY_DRAFT`）的提交路径：
 
@@ -85,7 +85,7 @@ YOLO 是直接控制面（`PUT /yolo`，基于 snapshot revision 的 CAS）：Bo
 
 ### 共享 Attachment Pill Composer
 
-Blank Chat、Bound Thread 与 Canvas Chat 共用唯一 `ThreadComposer`：
+Chat/Canvas 的 Draft 与 Bound target 共用唯一 `ThreadComposer`：
 
 - DOM 固定分为上层输入/附件行与下层控制栏：`[+] [Default|YOLO] ... [provider/model · variant] [发送]`；空草稿输入行默认单行且文字垂直居中，内容增长后在上限内滚动；Permission 与 Model/Variant 常驻可见，Footer 不承担设置入口；
 - Permission 是 anchored listbox，仅有 `Default` / `YOLO`；Model 使用 anchored 两级 listbox（provider/model → Variant），不创建 modal/backdrop；Model/Variant 选择只修改 pane-local draft，随下一条消息进入同一 SET_* batch；Permission（YOLO）选择经直接控制面立即 `PUT /yolo`（见 §4），绝不进入命令 batch；
@@ -130,13 +130,12 @@ Composer(active, focus + caret restored)
 
 ### Conversation/Debug 互斥主视图与只读面板
 
-Bound 场景提供 `/debug` toggle（再执行一次切回 conversation）；全部 4 个 Composer 场景（`chat-blank` /
-`chat-bound` / `canvas-blank` / `canvas-bound`）提供 `/shortcuts`；不再提供始终禁用的
-`/session`，也不再提供独立 `/conversation` 命令。命令表由单一 `threadCommandsForTarget(target, manualCompaction?)` 投影
+所有 owner/target 组合都由单一 `threadCommandsForTarget(target, manualCompaction?)` 投影命令表
 （`THREAD_COMMANDS` + `TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]>`，
-`ThreadCommandId` 为字面量联合类型，含 `debug` 与 `compact`），Chat Bound / Canvas Bound / Blank / Canvas Blank
-不再各自维护命令表副本；Canvas Bound 额外支持 pane-local `agent/environment/yolo`
-编辑。`/debug` 与 `/yolo` 一样始终保持可用，作为当前主视图 toggle。`/compact` 仅 `BOUND_THREAD` 可用，
+`ThreadCommandId` 为字面量联合类型，含 `debug` 与 `compact`）。`/shortcuts` 对三种 target 可用；
+`BOUND_THREAD` 额外提供 `/debug` toggle（再次执行切回 conversation）、`/stop` 与 `/compact`。
+Canvas 与 Chat 复用相同矩阵，pane-local `agent/environment/yolo` 编辑走同一 controller。
+`/compact` 仅 `BOUND_THREAD` 可用，
 且以 snapshot `manualCompaction.available` 前置门控（不可用时以 `disabledReason` 展示原因）。`/models` 与点击
 Composer 模型按钮相同，打开后自动聚焦搜索框。
 
@@ -220,16 +219,16 @@ mainView?.debug ?? ThreadConversationView   # 互斥：任一时刻只有一个�
 
 | 状态 | 定义 |
 | --- | --- |
-| Blank `paneDirty` | composer 文本非空 / pendingContent 存在 / frozenDraft 相对 initialFrozenDraft 不等 |
-| Blank `panePending` | first-send HTTP in-flight（阻塞 `/thread`） |
+| Draft `paneDirty` | composer 文本非空 / pendingContent 存在 / frozenDraft 相对 initialFrozenDraft 不等 |
+| Draft `panePending` | first-send HTTP in-flight（阻塞 `/thread`） |
 | Bound `paneDirty` | branch draft dirty 或 composer 文本非空 |
 | Bound `panePending` | queued commands 非空 / controller.pending / rebind pending / stop pending / stop replay pending / approval pending / replay pending |
 
-`/thread`、`/new`、`/tree` 切换在 `panePending` 时拒绝，在 `paneDirty` 时要求确认丢弃草稿；replay/stop-replay pending 时切换会静默丢弃 exact retry，因此同样被 `panePending` 阻止。200 清空 composer 是既定语义（accepted 消息不再留在输入框）。
+`/thread`、`/new`、`/tree` 切换在 `panePending` 时拒绝，在 `paneDirty` 时要求确认丢弃草稿；replay/stop-replay pending 时切换会静默丢弃 exact retry，因此同样被 `panePending` 阻止。202 accepted 后清空 composer（已接受消息不再留在输入框）。
 
 ## 7. 同 Session EntryDraft（/tree）
 
-`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）。`agent-pane/pane-target.ts` 只持久化 `PaneTarget` 与 `PendingAcceptance` sidecar；本地 `BranchDraft` 由 `useAgentPaneController` 持有，ENTRY base 从该 Entry 的 root-to-entry path 派生。发送时以 ENTRY target 原子 materialize 新 Thread（head 指向 startEntryId，不复制 Entry、不修改任何已有 Thread）；旧 Thread 永不 relocation。成功后切换到 `BOUND_THREAD` 并重新初始化 branch draft 与 composer 文本（USER/CUSTOM 来源 Entry 恢复可编辑文本）。
+`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）。`agent-pane/pane-target.ts` 只持久化 `PaneTarget` 与 `PendingAcceptance` sidecar；本地 `BranchDraft` 由 `useAgentPaneController` 持有，ENTRY base 从该 Entry 的 root-to-entry path 派生。发送时以 ENTRY target 原子 materialize 新 Thread（head 指向 startEntryId，不复制 Entry、不修改任何已有 Thread）；原 Thread 保持不变。成功后切换到 `BOUND_THREAD` 并重新初始化 branch draft 与 composer 文本（USER/CUSTOM 来源 Entry 恢复可编辑文本）。
 
 ## 8. Approval / Stop 身份
 

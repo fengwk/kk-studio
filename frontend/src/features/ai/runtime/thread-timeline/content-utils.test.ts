@@ -92,7 +92,7 @@ describe('toResourceAttachment', () => {
     ).toBeUndefined()
   })
 
-  it('rejects malformed durable and legacy resource shapes', () => {
+  it('rejects malformed durable and transient resource shapes', () => {
     expect(
       toResourceAttachment({
         type: 'resource',
@@ -105,7 +105,7 @@ describe('toResourceAttachment', () => {
     expect(toResourceAttachment({ type: 'resource', uri: '' })).toEqual([])
   })
 
-  it('omits the managed-resource name query when the legacy resource has no name', () => {
+  it('omits the managed-resource name query when a transient resource has no name', () => {
     expect(
       toResourceAttachment({
         type: 'resource',
@@ -120,7 +120,7 @@ describe('toResourceAttachment', () => {
     )
   })
 
-  it('requires canonical hash and media type for managed legacy resources', () => {
+  it('requires canonical hash and media type for managed transient resources', () => {
     expect(
       toResourceAttachment({
         type: 'resource',

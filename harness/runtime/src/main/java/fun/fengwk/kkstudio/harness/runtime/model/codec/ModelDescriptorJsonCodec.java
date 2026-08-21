@@ -44,7 +44,7 @@ import java.util.Set;
  *       {@code null} 而非省略，便于 schema 对照。
  * </ul>
  *
- * <p>durable 形态为直接 V1：descriptor 固定六个字段（含 {@code inputModalities}），旧五字段形态由严格字段校验拒绝，不做 dual-read 兼容。
+ * <p>durable descriptor 固定六个字段（含 {@code inputModalities}），codec 严格要求完整且精确的字段集合。
  */
 public final class ModelDescriptorJsonCodec {
 

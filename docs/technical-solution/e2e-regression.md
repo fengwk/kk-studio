@@ -317,7 +317,7 @@ canonical UUID 形式 `/canvas/:canvasId`：编辑器无全局顶栏且挂 `canv
 composer，点击 header「Chat / 对话」toggle 展开/收起；默认面板宽于 360px，左边缘拖拽调宽后 zoom
 保持不变；add launcher（左侧中部功能轨）仍可打开菜单，V/H 按钮不展示，缩放控制位于左下；首屏 fit
 产生的动态缩放值位于合法区间，Chat 面板展开/收起不改变该缩放值，点击缩放值可重置为 `100%`
-且刷新后恢复该持久化视口；展开的 Canvas Blank Thread 使用共享双层 Composer，常驻 Permission 与
+且刷新后恢复该持久化视口；展开的 Canvas Draft target 使用共享双层 Composer，常驻 Permission 与
 Model/Variant 控件且不制造 Footer fallback；浏览器 back 返回 library、forward 再进入编辑器；
 Function 生成的付费路径不进入默认 UI E2E，前端组件测试使用 fake Function runtime
 隔离。
@@ -406,7 +406,7 @@ POST /api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/appr
 
 WebSocket /api/events/v1        -> 事件通道（thread/canvas 订阅，见下）
 
-GET  /api/ai/runtime/resources/{sha256}?mediaType=&size=&name=  -> 仅瞬时/Invocation ResourceRef 兼容下载
+GET  /api/ai/runtime/resources/{sha256}?mediaType=&size=&name=  -> 瞬时/Invocation ResourceRef 下载
 
 POST /api/storage/uploads                       -> 通用存储 reserve（PENDING + presigned PUT）
 POST /api/storage/uploads/{uploadId}/complete   -> READY（blobId；供 ATTACHMENT 消费）
@@ -457,7 +457,7 @@ ENTRY 分支与 stop 均通过既有写面表达：
 { "stopRequestId": "00000000-0000-0000-0000-000000000201", "expectedRevision": "0" }
 ```
 
-- 历史回退/分支不再有 `PUT /head`：ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（head 直接指向目标 Entry，不复制 Entry），原 Thread 不动；`startEntryId` 不存在 404、跨 Session 400；
+- ENTRY target 在既有 Session 的既有 Entry 下开新 Thread（head 直接指向目标 Entry，不复制 Entry），原 Thread 保持不变；`startEntryId` 不存在时返回 404，跨 Session 时返回 400；
 - `POST /stop` 响应 `{status, thread, stoppedTurnEndEntryId, cancelledCommandCount, cancelledUserMessages[]}`；取消消息按 sequence 升序，元素为 `{sequence,clientCommandId,messageJson}`，用于前端恢复 TEXT/RESOURCE Composer parts；status 三态：
   - `STOPPED`：真实停止一个 Turn（revision+1，`stoppedTurnEndEntryId` 非空，TURN_END closeRequestId = raw `stopRequestId`，按被关闭 TURN_START 的 `ownerThreadId` 界定 Thread 作用域）；
   - `REPLAYED`：同 `stopRequestId` 再次调用，在 Thread 锁内做 Session 级查找命中同 owner 的持久 STOPPED TURN_END（在 revision CAS 之前，revision 不再变化，返回同一 `stoppedTurnEndEntryId`）；另一 Thread 相同 raw id 被忽略而非冲突；

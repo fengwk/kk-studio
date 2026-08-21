@@ -690,9 +690,8 @@ class ProviderAdapterContractTest {
       return expected.equals(node.asText());
     }
     if (node.isObject()) {
-      var fields = node.fields();
-      while (fields.hasNext()) {
-        if (hasStringValue(fields.next().getValue(), expected)) {
+      for (Map.Entry<String, JsonNode> field : node.properties()) {
+        if (hasStringValue(field.getValue(), expected)) {
           return true;
         }
       }
@@ -711,9 +710,8 @@ class ProviderAdapterContractTest {
       if (node.has(fieldName)) {
         return true;
       }
-      var fields = node.fields();
-      while (fields.hasNext()) {
-        if (hasField(fields.next().getValue(), fieldName)) {
+      for (Map.Entry<String, JsonNode> field : node.properties()) {
+        if (hasField(field.getValue(), fieldName)) {
           return true;
         }
       }

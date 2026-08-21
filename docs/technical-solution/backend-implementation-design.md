@@ -92,7 +92,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedRevision}`；STOPPED/IDLE/REPLAYED |
 | POST | `/api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval` | `{decision: ALLOW|DENY, decisionId, actor, reason}` |
 | WebSocket | `/api/events/v1` | 浏览器事件通道（thread/canvas 订阅；协议见 [application-event-channel.md](application-event-channel.md)） |
-| GET | `/api/ai/runtime/resources/{sha256}` | 瞬时/Invocation `ResourceRef` 兼容下载：Core `ManagedResourceDownloadService` 按 `mediaType`/`size`/可选 `name` 重建引用，Web 只负责 attachment + `X-Content-Type-Options: nosniff`；Entry history 的 Blob Resource 不走该端点 |
+| GET | `/api/ai/runtime/resources/{sha256}` | 瞬时/Invocation `ResourceRef` 下载：Core `ManagedResourceDownloadService` 按 `mediaType`/`size`/可选 `name` 重建引用，Web 只负责 attachment + `X-Content-Type-Options: nosniff`；Entry history 的 Blob Resource 不走该端点 |
 | POST/DELETE | `/api/storage/uploads[/{uploadId}]` | 全局 Upload reserve、complete 与释放；READY Handle 供 `ATTACHMENT(uploadId)` 原子消费 |
 | GET | `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` | durable Blob Resource 的渲染期短期 URL；原件响应额外携带权威 `mediaType/sizeBytes` |
 
