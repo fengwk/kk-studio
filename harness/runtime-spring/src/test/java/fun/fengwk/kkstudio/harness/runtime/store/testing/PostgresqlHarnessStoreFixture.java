@@ -20,7 +20,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
-/** 整个进程共用一个 PostgreSQL 容器，并为每个 contract 测试准备一份干净的七表 schema。 */
+/** 整个进程共用一个 PostgreSQL 容器，并为每个 contract 测试应用唯一 V1 baseline（database 模块）。 */
 final class PostgresqlHarnessStoreFixture {
 
   @SuppressWarnings("resource")
