@@ -142,8 +142,8 @@ class SystemPromptPreviewServiceTest {
             agents,
             codec,
             environmentRegistry,
-            subagentConfig,
-            new AgentPromptComposer(subagentConfig),
+            () -> subagentConfig,
+            new AgentPromptComposer(() -> subagentConfig),
             Clock.fixed(NOW, ZoneOffset.UTC))
         .create(runtime);
   }

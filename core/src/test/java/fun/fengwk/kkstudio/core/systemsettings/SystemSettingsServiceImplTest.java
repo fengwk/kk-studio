@@ -6,23 +6,56 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
 import java.time.Instant;
 
-/** System settings service 的条件更新竞争与单行缺失语义。 */
+/** System settings service 的条件更新竞争、单行缺失语义与 live 快照 afterCommit/rollback 契约。 */
 class SystemSettingsServiceImplTest {
 
   private static final Instant CREATED_AT = Instant.parse("2026-08-01T00:00:00Z");
   private static final Instant UPDATED_AT = Instant.parse("2026-08-01T00:00:01Z");
 
+  /** 与默认聚合可区分的非默认权威聚合（version=1 行的内容）。 */
+  private static final SystemSettings UPDATED_SETTINGS =
+      new SystemSettings(
+          SystemSettings.Tool.DEFAULT,
+          new SystemSettings.AiRuntime(
+              9,
+              SystemSettings.AiRuntime.DEFAULT.retryBackoffStrategy(),
+              SystemSettings.AiRuntime.DEFAULT.retryBaseDelayMillis(),
+              SystemSettings.AiRuntime.DEFAULT.retryMaxDelayMillis(),
+              SystemSettings.AiRuntime.DEFAULT.compactionKeepRecentTokens(),
+              SystemSettings.AiRuntime.DEFAULT.compactionFallbackModel(),
+              SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
+              SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
+              SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
+              SystemSettings.AiRuntime.DEFAULT.subagentIdleTimeoutMillis(),
+              SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns()),
+          SystemSettings.Environment.DEFAULT,
+          SystemSettings.Integrations.DEFAULT,
+          SystemSettings.StorageMedia.DEFAULT,
+          SystemSettings.Advanced.DEFAULT);
+
   private final SystemSettingsCodec codec = new SystemSettingsCodec();
   private final SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
+  private final SystemSettingsSnapshot snapshot =
+      new SystemSettingsSnapshot(SystemSettings.DEFAULT);
   private final SystemSettingsServiceImpl service =
-      new SystemSettingsServiceImpl(repository, codec);
+      new SystemSettingsServiceImpl(repository, codec, snapshot);
+
+  @AfterEach
+  void clearSynchronization() {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.clearSynchronization();
+    }
+  }
 
   /** 预检查后 CAS 败给并发写入时，409 必须携带重新读取到的当前版本。 */
   @Test
@@ -56,6 +89,49 @@ class SystemSettingsServiceImplTest {
     assertThrows(SystemSettingsResourceNotFoundException.class, service::get);
   }
 
+  /** afterCommit 后才替换 live 快照：事务提交前内存仍为旧值，提交后为回读的权威新值。 */
+  @Test
+  void replacesLiveSnapshotOnlyAfterCommit() {
+    when(repository.get()).thenReturn(record(0), record(0), record(1));
+    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+
+    TransactionSynchronizationManager.initSynchronization();
+    service.update(update("0"));
+    // 事务尚未提交：内存快照不得提前更新。
+    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+    TransactionSynchronizationManager.getSynchronizations()
+        .forEach(TransactionSynchronization::afterCommit);
+    // afterCommit 回读权威行并替换。
+    assertEquals(UPDATED_SETTINGS, snapshot.get());
+  }
+
+  /** 事务回滚（只走 afterCompletion 且未提交）绝不更新内存快照。 */
+  @Test
+  void rollbackNeverUpdatesLiveSnapshot() {
+    when(repository.get()).thenReturn(record(0), record(0));
+    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+
+    TransactionSynchronizationManager.initSynchronization();
+    service.update(update("0"));
+    // 模拟回滚：只触发 afterCompletion(STATUS_ROLLED_BACK)，不触发 afterCommit。
+    TransactionSynchronizationManager.getSynchronizations()
+        .forEach(
+            synchronization ->
+                synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+  }
+
+  /** 无活跃事务同步的调用路径（纯单元测试）直接回读替换，保证快照与数据库一致。 */
+  @Test
+  void replacesSnapshotDirectlyWithoutActiveSynchronization() {
+    when(repository.get()).thenReturn(record(0), record(0), record(1));
+    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+
+    service.update(update("0"));
+
+    assertEquals(UPDATED_SETTINGS, snapshot.get());
+  }
+
   private SystemSettingsUpdateDTO update(String expectedVersion) {
     SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
     SystemSettingsUpdateDTO update = new SystemSettingsUpdateDTO();
@@ -71,6 +147,6 @@ class SystemSettingsServiceImplTest {
 
   private static SystemSettingsRepository.SystemSettingsRecord record(long version) {
     return new SystemSettingsRepository.SystemSettingsRecord(
-        SystemSettings.DEFAULT, version, CREATED_AT, UPDATED_AT);
+        version == 1 ? UPDATED_SETTINGS : SystemSettings.DEFAULT, version, CREATED_AT, UPDATED_AT);
   }
 }

@@ -682,7 +682,7 @@ class ToolProcessorRecoveryTest {
             fixture.sink,
             new ToolProcessorConfig(
                 ToolProcessorTestSupport.LEASE_CONFIG,
-                ToolProcessorTestSupport.NO_RETRY,
+                () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
@@ -787,7 +787,7 @@ class ToolProcessorRecoveryTest {
         () ->
             new ToolProcessorConfig(
                 ToolProcessorTestSupport.LEASE_CONFIG,
-                ToolProcessorTestSupport.NO_RETRY,
+                () -> ToolProcessorTestSupport.NO_RETRY,
                 Duration.ZERO,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY));
     assertThrows(
@@ -795,7 +795,7 @@ class ToolProcessorRecoveryTest {
         () ->
             new ToolProcessorConfig(
                 ToolProcessorTestSupport.LEASE_CONFIG,
-                ToolProcessorTestSupport.NO_RETRY,
+                () -> ToolProcessorTestSupport.NO_RETRY,
                 Duration.ofNanos(500),
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY));
     assertThrows(
@@ -803,7 +803,7 @@ class ToolProcessorRecoveryTest {
         () ->
             new ToolProcessorConfig(
                 ToolProcessorTestSupport.LEASE_CONFIG,
-                ToolProcessorTestSupport.NO_RETRY,
+                () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 Duration.ZERO));
     assertThrows(
@@ -811,7 +811,7 @@ class ToolProcessorRecoveryTest {
         () ->
             new ToolProcessorConfig(
                 ToolProcessorTestSupport.LEASE_CONFIG,
-                ToolProcessorTestSupport.NO_RETRY,
+                () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 Duration.ofNanos(500)));
     assertThrows(
@@ -819,7 +819,7 @@ class ToolProcessorRecoveryTest {
         () ->
             new ToolProcessorConfig(
                 null,
-                ToolProcessorTestSupport.NO_RETRY,
+                () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY));
     assertThrows(
@@ -834,7 +834,7 @@ class ToolProcessorRecoveryTest {
                 fixture.scheduler));
     new ToolProcessorConfig(
         ToolProcessorTestSupport.LEASE_CONFIG,
-        ToolProcessorTestSupport.NO_RETRY,
+        () -> ToolProcessorTestSupport.NO_RETRY,
         ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
         ToolProcessorTestSupport.BUSY_FALLBACK_DELAY);
   }
@@ -857,7 +857,7 @@ class ToolProcessorRecoveryTest {
             fixture.sink,
             new ToolProcessorConfig(
                 ToolProcessorTestSupport.LEASE_CONFIG,
-                ToolProcessorTestSupport.NO_RETRY,
+                () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
@@ -1196,7 +1196,7 @@ class ToolProcessorRecoveryTest {
             fixture.request,
             new ToolProcessorConfig(
                 ToolProcessorTestSupport.LEASE_CONFIG,
-                ToolProcessorTestSupport.NO_RETRY,
+                () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,

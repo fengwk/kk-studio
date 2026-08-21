@@ -36,7 +36,8 @@ class RuntimeToolsConfigurationTest {
 
     SubagentConfig config =
         new RuntimeToolsConfiguration()
-            .subagentConfig(new SystemSettingsSnapshot(customSettings(aiRuntime)));
+            .subagentConfigProvider(new SystemSettingsSnapshot(customSettings(aiRuntime)))
+            .subagentConfig();
 
     assertEquals(4, config.maxDepth());
     assertEquals(7, config.maxConcurrency());

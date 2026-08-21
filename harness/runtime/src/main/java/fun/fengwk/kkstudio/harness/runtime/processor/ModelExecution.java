@@ -453,8 +453,8 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private Applied finishFailureLocked(ModelInvocationError error, List<Publish> publishes) {
-    if (isRetryable(error) && config.retryPolicy().allowsRetry(attempt)) {
-      Duration delay = config.retryPolicy().delayBeforeRetry(attempt);
+    if (isRetryable(error) && config.retryPolicyProvider().retryPolicy().allowsRetry(attempt)) {
+      Duration delay = config.retryPolicyProvider().retryPolicy().delayBeforeRetry(attempt);
       boolean committed = safeTerminal(() -> commitRetry(delay, error));
       if (committed) {
         log.info(

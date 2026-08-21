@@ -140,7 +140,6 @@ public final class ThreadProcessor {
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ThreadContextClassifier contextClassifier = new ThreadContextClassifier();
   private final ModelResponsePlanner responsePlanner = new ModelResponsePlanner();
-  private final CompactionPlanner compactionPlanner;
 
   public ThreadProcessor(
       HarnessStore store,
@@ -165,7 +164,6 @@ public final class ThreadProcessor {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
-    this.compactionPlanner = new CompactionPlanner(config.compaction());
   }
 
   /**
@@ -392,13 +390,14 @@ public final class ThreadProcessor {
                 : start.compaction().executionModel();
         if (executionModel.equals(path.baseSettings().model())) {
           long projectedTokens = CompactionPlanner.estimateProjectionTokens(path);
-          long minimum = config.compaction().manualMinimum(start.contextWindow());
+          long minimum =
+              config.compactionProvider().compactionConfig().manualMinimum(start.contextWindow());
           if (projectedTokens < minimum) {
             return ManualDecision.disabled(
                 ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM);
           }
           CompactionPreparation preparation =
-              compactionPlanner
+              compactionPlanner()
                   .prepare(path, CompactionTrigger.MANUAL, start.contextWindow())
                   .orElse(null);
           return preparation == null
@@ -440,10 +439,15 @@ public final class ThreadProcessor {
     tx.completeWork(claim, now);
   }
 
+  /** 按决策点现读的 {@link CompactionConfig} 构造 planner；每次决策独立，aiRuntime 变更无需重启。 */
+  private CompactionPlanner compactionPlanner() {
+    return new CompactionPlanner(config.compactionProvider().compactionConfig());
+  }
+
   /** 按 owned HISTORY -> fallback -> hard overflow -> eligible threshold 的顺序计算下一次压缩。 */
   private CompactionPreparation compactionPreparation(
       ThreadState thread, EntryPath path, boolean thresholdEligible) {
-    CompactionConfig compaction = config.compaction();
+    CompactionConfig compaction = config.compactionProvider().compactionConfig();
     ClosedTurn latestTurn = latestClosedTurn(path, path.entries().size());
     if (latestTurn == null) {
       return null;
@@ -466,7 +470,7 @@ public final class ThreadProcessor {
               .executionModel()
               .equals(latestStartPayload.settings().model())
           && !compaction.fallbackModel().equals(latestStartPayload.compaction().executionModel())) {
-        return compactionPlanner.prepareFallback(path, compactionTurn);
+        return compactionPlanner().prepareFallback(path, compactionTurn);
       }
       return null;
     }
@@ -481,7 +485,7 @@ public final class ThreadProcessor {
       if (isOverflowRecoveryRetry(path, latestTurn)) {
         return null;
       }
-      return compactionPlanner
+      return compactionPlanner()
           .prepare(path, CompactionTrigger.OVERFLOW, latestStartPayload.contextWindow())
           .orElse(null);
     }
@@ -506,7 +510,7 @@ public final class ThreadProcessor {
     if (compactionTurn.phase() != CompactionPhase.HISTORY || compactionTurn.result() == null) {
       return null;
     }
-    return compactionPlanner.prepareTurnPrefix(path, compactionTurn);
+    return compactionPlanner().prepareTurnPrefix(path, compactionTurn);
   }
 
   private static CompactionTurns.CompactionTurn compactionTurnAtStart(
@@ -587,7 +591,7 @@ public final class ThreadProcessor {
         if (contextTokens <= threshold) {
           return null;
         }
-        return compactionPlanner
+        return compactionPlanner()
             .prepare(path, CompactionTrigger.THRESHOLD, start.contextWindow())
             .orElse(null);
       }

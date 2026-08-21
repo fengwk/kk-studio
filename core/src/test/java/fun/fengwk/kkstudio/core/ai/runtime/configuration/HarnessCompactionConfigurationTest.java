@@ -10,11 +10,12 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 
 /**
- * Core 唯一 CompactionConfig bean 定义：由共享启动快照 SystemSettings.AiRuntime 的保留上下文配置驱动，可被 core resolver 与
- * web 组合根共享。
+ * Core 唯一 CompactionConfigProvider bean 定义：由共享快照 SystemSettings.AiRuntime 的保留上下文配置驱动，可被 core
+ * resolver 与 web 组合根共享；每次决策点现读。
  */
 class HarnessCompactionConfigurationTest {
 
@@ -26,7 +27,8 @@ class HarnessCompactionConfigurationTest {
             SystemSettingsSnapshot.class, () -> new SystemSettingsSnapshot(SystemSettings.DEFAULT))
         .run(
             context -> {
-              CompactionConfig config = context.getBean(CompactionConfig.class);
+              CompactionConfigProvider provider = context.getBean(CompactionConfigProvider.class);
+              CompactionConfig config = provider.compactionConfig();
               assertEquals(20_000, config.keepRecentTokens());
               assertNull(config.fallbackModel());
             });
@@ -41,7 +43,8 @@ class HarnessCompactionConfigurationTest {
             () -> new SystemSettingsSnapshot(settingsWithCompaction(8_192)))
         .run(
             context -> {
-              CompactionConfig config = context.getBean(CompactionConfig.class);
+              CompactionConfig config =
+                  context.getBean(CompactionConfigProvider.class).compactionConfig();
               assertEquals(8_192, config.keepRecentTokens());
               assertNull(config.fallbackModel());
             });
@@ -79,7 +82,8 @@ class HarnessCompactionConfigurationTest {
                         SystemSettings.Advanced.DEFAULT)))
         .run(
             context -> {
-              CompactionConfig config = context.getBean(CompactionConfig.class);
+              CompactionConfig config =
+                  context.getBean(CompactionConfigProvider.class).compactionConfig();
               assertEquals(4_096, config.keepRecentTokens());
               assertNotNull(config.fallbackModel());
               assertEquals("minimax", config.fallbackModel().providerName());
