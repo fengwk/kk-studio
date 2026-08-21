@@ -73,7 +73,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
 
   @Test
   void inputConsumesExactlyOnePreexistingUserMessage() {
-    // 旧实现会把整个 queued snapshot 写进同一 INPUT；现在只消费到首条 user-like，后续消息保持 QUEUED。
+    // INPUT 只消费到首条 user-like，后续消息保持 QUEUED（不把整个 queued snapshot 写进同一 INPUT）。
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
     UUID first =

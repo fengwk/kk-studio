@@ -83,12 +83,11 @@ class ModelRequestSpecJsonCodecTest {
   }
 
   @Test
-  void rejectsLegacyCompactionField() {
-    // Compaction metadata belongs exclusively to TURN_START; old request fields must not
-    // round-trip.
-    ObjectNode legacy = encodedNode();
-    legacy.putNull("compaction");
-    assertInvalid(legacy);
+  void rejectsCompactionMetadataField() {
+    // Compaction metadata belongs exclusively to TURN_START; spec JSON 中出现该字段即拒绝。
+    ObjectNode withCompaction = encodedNode();
+    withCompaction.putNull("compaction");
+    assertInvalid(withCompaction);
   }
 
   @Test

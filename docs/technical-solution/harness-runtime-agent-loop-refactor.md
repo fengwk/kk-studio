@@ -38,7 +38,7 @@ ThreadProcessor 不在一次 claim 中提交后重新读取自身刚写入的状
 - Provider/Tool retry 有界，业务 Agent turn 数不设硬上限。
 - 用户 Stop 是 durable 控制操作。
 - Tool permission、YOLO、非幂等 Tool 不重放规则保持 fail-closed。
-- Context compaction 控制模型上下文大小，但不删除 Entry 历史。
+- Context compaction 控制模型上下文大小，不删除 Entry 历史。
 
 ## 2. 总体结构
 
@@ -152,7 +152,7 @@ public record ThreadState(
 
 ### 5.1 直接更新
 
-YOLO 不再通过 ThreadCommand 排队。Runtime 提供直接控制操作：
+YOLO 是直接控制操作，不经过 ThreadCommand 排队。Runtime 提供：
 
 ```text
 setThreadYolo(threadId, expectedRevision, enabled)
@@ -168,17 +168,7 @@ lock Thread
   -> commit
 ```
 
-删除：
-
-- `ThreadCommandType.SET_YOLO`
-- `SetYoloCommandPayload`
-- Command codec/DTO 中的 SET_YOLO
-- TurnPlan 的 source/final YOLO
-- TurnResolver 的 YOLO 参数
-- ResolvedRequestValidator 的 YOLO 校验
-- ModelRequestSpec / ModelInvocation / ToolInvocation 中的 YOLO 副本
-
-Resolver 两阶段 commit 必须使用第二事务中锁到的 `ThreadState.yoloEnabled` 更新 Thread，不能把 speculative plan 创建时的旧值写回。YOLO 变化不影响 ModelRequestSpec，因此不使进行中的 Resolver plan 失效。
+`ThreadCommand` 六类中不含 YOLO 命令；Command codec/DTO、TurnPlan、TurnResolver 与 ResolvedRequestValidator 都不携带 YOLO，`ModelRequestSpec` / `ModelInvocation` / `ToolInvocation` 无 YOLO 副本。Resolver 两阶段 commit 使用第二事务中锁到的 `ThreadState.yoloEnabled` 更新 Thread；YOLO 变化不影响 ModelRequestSpec，因此不使进行中的 Resolver plan 失效。
 
 ### 5.2 Tool permission 检查
 
@@ -204,7 +194,7 @@ YOLO 的控制语义：
 
 ### 6.1 持久化形状
 
-ModelInvocation 不再持久化完整 ProviderRequest：
+ModelInvocation 持久化紧凑 `ModelRequestSpec`，不持久化完整 ProviderRequest：
 
 ```java
 public record ModelRequestSpec(
@@ -218,7 +208,7 @@ public record ModelRequestSpec(
     ProviderCacheControl cacheControl) {}
 ```
 
-不持久化：
+Spec 之外不持久化：
 
 - 历史 `ProviderRequest.messages`
 - 可由 `toolBindings` 派生的 `ProviderRequest.tools`
@@ -227,6 +217,7 @@ public record ModelRequestSpec(
 - contextWindow
 - Provider credential、base URL、timeout
 - attempt-only Resource URL
+- compaction metadata（压缩调用由 basis EntryPath 末尾 owned `TURN_START.compaction` / `CompactionStart` 识别）
 
 ### 6.2 字段语义
 
@@ -341,7 +332,7 @@ Compaction materialization 只使用：
 
 ```text
 EntryPath
-+ CompactionRequest
++ transient CompactionPreparation（candidate path 已冻结的 TURN_START.compaction / CompactionStart）
 + compaction prompt templates
 ```
 
@@ -490,7 +481,7 @@ CONTENT_FILTERED
 
 ## 10. ToolInvocation
 
-ToolInvocation 改为直接持有 observed call 与可空 binding：
+ToolInvocation 直接持有 observed call 与可空 binding：
 
 ```java
 public record ToolInvocation(
@@ -510,7 +501,7 @@ public record ToolInvocation(
     Instant updatedAt) {}
 ```
 
-删除持久化 `ToolInvocationRequest` 包装。只有 READY Tool 在 ToolProcessor/Gateway 边界临时构造 executable request。
+只有 READY Tool 在 ToolProcessor/Gateway 边界临时构造 executable request；不持久化 request 包装。
 
 Binding 约束：
 
@@ -534,7 +525,7 @@ FAILED + attempt=0
 
 Unknown tool 的 durable renderer fallback 固定为 `tool`。
 
-ToolInvocation 删除 `resultEntryId`。Terminal Tool 行始终表示 outcome 尚未进入 ToolResult Entry；batch apply 后物理删除。
+ToolInvocation 不持久化 `resultEntryId`。Terminal Tool 行始终表示 outcome 尚未进入 ToolResult Entry；batch apply 后物理删除。
 
 ## 11. ModelInvocation 生命周期
 
@@ -608,7 +599,7 @@ ToolTerminalPending
    - 全部 terminal -> `ToolTerminalPending`
 5. 其他关系为 historical 或持久化不变量错误。
 
-Tool siblings 不再存在“terminal 且已 attach”的历史状态。
+Tool sibling 只有三种关系：non-terminal（active）、terminal 未 attach（pending batch apply）与已 apply；不存在“terminal 且已 attach”的持久化状态。
 
 ## 13. Single-action ThreadProcessor
 
@@ -740,11 +731,7 @@ public enum ThreadProcessResult {
 - `RESCHEDULED`：Resolver 等确定未产生外部副作用的临时失败。
 - `LOST_OWNERSHIP`：claim、lease 或 CAS 已失效，零 durable mutation。
 
-删除：
-
-- ThreadProcessor 内部 run loop
-- LoopStep
-- Continue
+Processor 是 single-action reducer：一次 claim 恰好消费一个分类动作，下一动作由同事务 `requestWork` 驱动；不存在内部 run loop 或 step/continue 状态机。
 
 ## 15. Work、lease 与 crash recovery
 
@@ -802,13 +789,13 @@ Approval decisionId replay 与 ALLOW/DENY 语义保持不变。
 
 YOLO 不重写已创建的 WAITING_APPROVAL；审批事实只能由 approval API 决定。
 
-### 16.3 Head relocation 不存在
+### 16.3 Head 推进
 
-**不存在 MOVE_HEAD / PUT head / standalone Thread create**：`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）；第一次 durable batch 以 ENTRY target 提交时原子 materialize 新 Thread（`headEntryId = startEntryId`，不复制 Entry、不修改任何已有 Thread），旧 Thread 永不 relocation。现有 Thread 的 head 只能由 Runtime 在 turn/compaction/stop 执行中推进到当前 head 的新 descendant；Active Invocation 不允许任何形式的 head 变更。
+`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）；第一次 durable batch 以 ENTRY target 提交时原子 materialize 一个新 Thread（`headEntryId = startEntryId`，不复制 Entry、不修改任何已有 Thread）。现有 Thread 的 head 只能由 Runtime 在 turn/compaction/stop 执行中推进到当前 head 的新 descendant；active invocation 期间不允许任何形式的 head 变更（relocation）。
 
 ## 17. Command 与长程输入
 
-删除 SET_YOLO 后，ThreadCommand 固定为六类：
+`ThreadCommand` 固定为六类：
 
 ```text
 USER_MESSAGE
@@ -891,36 +878,34 @@ Provider fatal error / retry exhausted
 
 ## 21. Persistence shape
 
-表数量保持七张。
+表数量固定为七张。
 
 ### harness_thread
 
 - 含 `session_id`、`materialization_hash char(64)` 与 `head_entry_id`（同 Session FK `(session_id, head_entry_id)`）。
-- 保留 `yolo_enabled`。
-- 直接控制 API 更新。
+- 保留 `yolo_enabled`，由直接控制 API 更新。
 
 ### harness_thread_command
 
-- command type check 删除 SET_YOLO。
+- command type 枚举固定为六类（不含 YOLO 命令）。
 
 ### harness_model_invocation
 
-- `request` JSON 改为严格 `ModelRequestSpec`。
-- 不再包含完整 history messages。
+- `request` JSON 为严格 `ModelRequestSpec`（不含完整 history messages、YOLO 与 compaction metadata）。
 - `result_entry_id` 只用于当前 open Tool phase。
 - closed turn 后行必须不存在。
 
 ### harness_tool_invocation
 
-- `request` 拆为 `call` 与可空 `binding`，或以等价严格 JSON 形状保存。
-- 删除 `result_entry_id` 列与 partial unique index。
+- `call` 与可空 `binding` 直接保存（或等价严格 JSON 形状）。
+- 不持久化 `result_entry_id`。
 - batch apply 后行必须不存在。
 
 ### harness_work
 
 - 协议不变。
 
-项目采用 clean-slate schema；不保留旧 request codec、旧 enum、旧配置字段或双读兼容。
+schema 是 clean-slate V1 基线，只有 V1 schema + profile seeds；不保留旧 request codec、旧 enum、旧配置字段或双读兼容。
 
 ## 22. 稳态与写放大
 
@@ -943,7 +928,6 @@ preamble
 tool bindings
 skill/subagent bindings
 cache control
-compaction metadata
 attempt state
 ```
 
@@ -996,7 +980,7 @@ attempt state
 - 最后一轮没有下一 TurnStart 仍完成清理。
 - Stop 与 terminal callback 并发。
 - approval replay。
-- ENTRY target materialization 从 startEntry 创建新 Thread，不复制 Entry、不修改 sibling；不存在 head relocation（moveHead 无此能力）。
+- ENTRY target materialization 从 startEntry 创建新 Thread，不复制 Entry、不修改 sibling；head 只沿 descendant 推进。
 - lease expired MODEL/TOOL certainty 语义。
 
 ### 23.5 YOLO

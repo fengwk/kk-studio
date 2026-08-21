@@ -48,21 +48,22 @@ interface BranchDraft {
 
 ## 3. Blank first send
 
-空 Pane 首发的唯一顺序（`performBlankPaneFirstSend`）：
+draft target（`NEW_SESSION_DRAFT` / `ENTRY_DRAFT`）的提交路径：
 
 ```text
-POST /api/ai/runtime/command-batches
+submit -> buildAcceptanceRequest（构造 FrozenCommandBatchRequest，含完整 target/request/
+         branchDraft/composerParts，网络调用前冻结）
+-> useAgentPaneController 写入 pane-scoped PendingAcceptance sidecar
+-> agentPaneService.acceptCommandBatch（POST /api/ai/runtime/command-batches）
   -> NEW_SESSION target 原子创建 Session + ROOT（完整 BranchSettings）+ Thread
      + owner relation + Commands + Work，返回权威投影
-把 PaneTarget 切换为 BOUND_THREAD（写入 threadId）
+-> 成功才把 PaneTarget 切换为 BOUND_THREAD（写入 threadId）
 ```
 
-失败恢复（`FirstSendMessageError` 携带 snapshot/plan/cause）：
+失败恢复：
 
-- **非 409（网络/不确定）**：保留 frozen `PendingAcceptance`（请求 + composerSnapshot），恢复 composer 文本，并把 exact plan 交给 controller `replayRef`（byte-for-byte 重放，同 command id + 原始 cursors）；只收到权威成功响应才切换 `BOUND_THREAD`。
-- **known 409**：服务端明确未接受 stale batch（如 `MATERIALIZATION_ID_REUSED`/`STALE_COMMAND_CURSOR`）。不绑定 Thread、清 `PendingAcceptance`、恢复 composer 文本、invalidate/refetch 新 snapshot；**不**设置 replay——下一次 submit 基于新 snapshot 构造 fresh cursors + fresh command IDs。
-
-`PendingAcceptance` 是 pane-scoped 的 frozen first-send 状态（frozen request + composerParts + branchDraft），由 `useAgentPaneController` sidecar 持有；unknown outcome 以 frozen request exact replay；definite failure 恢复 frozen composer/branch draft；success 才切 `BOUND_THREAD`。
+- **unknown（非明确 4xx）**：保留 frozen `PendingAcceptance`（frozen request + composerParts + branchDraft）与当前编辑内容，`retryAcceptance` 以同一 frozen request exact retry（同 command id + 原始 cursors）；只收到权威成功响应才切换 `BOUND_THREAD`。
+- **definite 4xx**：服务端明确未接受 batch。清 `PendingAcceptance` sidecar、prepend frozen `composerParts` 到当前草稿、保留当前 `BranchDraft`；409/404 时 invalidate/refetch 新 snapshot，下一次 submit 基于新 snapshot 构造 fresh cursors + fresh command IDs。
 
 Create Chat 的默认 Environment 使用 `EnvironmentWorkspacePanel` 两阶段选择：先选 READY Environment，再浏览并明确确认当前 Workspace；只有确认后才保存完整 `{name, workspacePath}`，不把选择 Environment 静默折叠为 `workspacePath:'.'`。
 
@@ -228,7 +229,7 @@ mainView?.debug ?? ThreadConversationView   # 互斥：任一时刻只有一个�
 
 ## 7. 同 Session EntryDraft（/tree）
 
-`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）：PaneTargetStore 保存 `sessionId + startEntryId` 与本地 BranchDraft（base 由该 Entry 的 root-to-entry path 派生）。发送时以 ENTRY target 原子 materialize 新 Thread（head 指向 startEntryId，不复制 Entry、不修改任何已有 Thread）；旧 Thread 永不 relocation。成功后切换到 `BOUND_THREAD` 并重新初始化 branch draft 与 composer 文本（USER/CUSTOM 来源 Entry 恢复可编辑文本）。
+`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）。`agent-pane/pane-target.ts` 只持久化 `PaneTarget` 与 `PendingAcceptance` sidecar；本地 `BranchDraft` 由 `useAgentPaneController` 持有，ENTRY base 从该 Entry 的 root-to-entry path 派生。发送时以 ENTRY target 原子 materialize 新 Thread（head 指向 startEntryId，不复制 Entry、不修改任何已有 Thread）；旧 Thread 永不 relocation。成功后切换到 `BOUND_THREAD` 并重新初始化 branch draft 与 composer 文本（USER/CUSTOM 来源 Entry 恢复可编辑文本）。
 
 ## 8. Approval / Stop 身份
 

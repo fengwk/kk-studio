@@ -174,8 +174,7 @@ public final class ThreadProcessor {
    * <p>先用 Work-only 短事务验证 claim 当前真实 owned，再进 per-thread admission guard（同一 claim 重复 / 并发投递一律 LOST
    * no-op；不同新 token 抢占 guard）。随后恰执行一次 durable action：单短事务分类并执行；若该 action 是 speculative plan 则事务外
    * resolve + 第二事务 CAS 提交。action 在事务内完成当前 claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
-   * complete。事务内 final fence / CAS 丢失抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为 LOST_OWNERSHIP；
-   * 不存在内部 run loop / step 循环 / Continue 分支。
+   * complete。事务内 final fence / CAS 丢失抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为 LOST_OWNERSHIP。
    */
   public ThreadProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");

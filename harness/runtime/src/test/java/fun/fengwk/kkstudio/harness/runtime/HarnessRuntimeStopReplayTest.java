@@ -175,7 +175,7 @@ class HarnessRuntimeStopReplayTest {
 
   /**
    * live Stop 首次同时取消 queued commands 后，transport 丢失时同一 stopRequestId 的重试必须以同一 cancelledCommandCount
-   * 与同一 sequence-ordered cancelledUserMessages 返回（旧实现 live receipt 固定返回 0 / 空，会让幂等重试丢失取消事实）。
+   * 与同一 sequence-ordered cancelledUserMessages 返回（幂等重试不丢失取消事实）。
    */
   @Test
   void liveStopReplayReturnsSameCancellationFactsWhenTransportLost() {

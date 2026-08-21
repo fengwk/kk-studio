@@ -107,7 +107,8 @@ class CompactionSummaryAssemblerTest {
 
   @Test
   void directTurnPrefixUsesFixedNoPriorHistorySegment() {
-    // 旧实现只保存 prefix 文本，丢失 Pi 两段式形状；direct split 也必须有固定 history 段。
+    // direct split 必须保留固定 history 段（HISTORY.summaryText 或固定 "No prior history."），
+    // 不能只保存 prefix 文本而丢失两段式形状。
     CompactionStart prefix =
         new CompactionStart(
             CompactionPhase.TURN_PREFIX,

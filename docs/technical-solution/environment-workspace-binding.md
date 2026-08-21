@@ -2,7 +2,7 @@
 
 Environment 的选择在持久化与 wire 上都是**原子**的完整绑定 `{name, workspacePath}` 或 `null`（未绑定）：name 是 canonical 路由身份，workspacePath 是 Environment Root 下的 canonical 相对 wire 路径。不存在只传 name 或只传 path 的中间形态，也不存在独立展示名。
 
-事实源：`harness/tool` 的 `EnvironmentBinding` / `EnvironmentWorkspacePath` / `EnvironmentName`，`share` 的 `EnvironmentBindingDTO` / `HarnessBranchSettingsDTO` / `ToolInvocationDTO` / `HarnessThreadCommandCreateDTO`，`core` 的 `CoreToolGateway`（preflight）与 `EnvironmentDaemonGateway`，`harness/daemon` 的 `DaemonRuntime` / `EnvironmentDirectoryBrowser`，前端 `EnvironmentWorkspacePanel`。
+事实源：`harness/tool` 的 `EnvironmentBinding` / `EnvironmentWorkspacePath` / `EnvironmentName`，`share` 的 `EnvironmentBindingDTO` / `HarnessBranchSettingsDTO` / `ToolInvocationDTO` / `HarnessCommandCreateDTO`，`core` 的 `CoreToolGateway`（preflight）与 `EnvironmentDaemonGateway`，`harness/daemon` 的 `DaemonRuntime` / `EnvironmentDirectoryBrowser`，前端 `EnvironmentWorkspacePanel`。
 
 ## 1. 原子语义与 canonical 规则
 

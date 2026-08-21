@@ -97,8 +97,8 @@ export function ThreadComposer({
    * 提交载荷（payload, localDraft）：
    * - payload：attachment parts 的 uploadId 已解析为服务端 upload 句柄，
    *   用于构建 command batch / HTTP 发送；
-   * - localDraft：客户端 localId 的草稿快照（trim 后），用于失败恢复、
-   *   replay 与 FirstSendRecovery——恢复比对只命中本地 id 草稿。
+   * - localDraft：客户端 localId 的草稿快照（trim 后），用于失败恢复与
+   *   PendingAcceptance——恢复比对只命中本地 id 草稿。
    */
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void

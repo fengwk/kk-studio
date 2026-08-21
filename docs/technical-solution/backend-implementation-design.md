@@ -96,7 +96,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | POST/DELETE | `/api/storage/uploads[/{uploadId}]` | 全局 Upload reserve、complete 与释放；READY Handle 供 `ATTACHMENT(uploadId)` 原子消费 |
 | GET | `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` | durable Blob Resource 的渲染期短期 URL；原件响应额外携带权威 `mediaType/sizeBytes` |
 
-**不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 查询、无 `/messages` 或 `/messages/custom` 端点（消息由 `command-batches` 的 `USER_MESSAGE` 命令表达）、无 `expectedExecutionEpoch` 字段、无 `POST /{chatId}/threads`、无 `PUT /{threadId}/head`、无 `POST /{threadId}/commands`、无 standalone Thread create。
+公开 API 仅限表中列出的 current endpoints；消息写入统一 `command-batches`（`USER_MESSAGE` 命令表达，无独立 `/messages` 端点）；Thread head 由 Runtime 推进（ENTRY target materialization 创建新 Thread，现有 Thread 不 relocation）。
 
 ### Environment
 
