@@ -50,12 +50,11 @@ class SystemSettingsTest {
     assertEquals(null, defaults.aiRuntime().compactionFallbackModel());
     assertEquals(2, defaults.aiRuntime().subagentMaxDepth());
     assertEquals(10, defaults.aiRuntime().subagentMaxConcurrency());
-    assertEquals(null, defaults.aiRuntime().subagentMaxTotalConcurrency());
+    assertEquals(0, defaults.aiRuntime().subagentMaxTotalConcurrency());
     assertEquals(0L, defaults.aiRuntime().subagentIdleTimeoutMillis());
     assertEquals(50, defaults.aiRuntime().subagentMaxTurns());
 
     assertEquals(8L * 1024 * 1024, defaults.environment().maxResourceBytes());
-    assertEquals(16L * 1024 * 1024, defaults.environment().maxMessageBytes());
     assertEquals(60_000L, defaults.environment().heartbeatTimeoutMillis());
     assertEquals(10_000L, defaults.environment().directoryListTimeoutMillis());
 
@@ -211,7 +210,7 @@ class SystemSettingsTest {
                 base.compactionFallbackModel(),
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
-                0,
+                -1,
                 base.subagentIdleTimeoutMillis(),
                 base.subagentMaxTurns()));
     assertThrows(
@@ -398,8 +397,7 @@ class SystemSettingsTest {
   @Test
   void rejectsInvalidEnvironmentAndSeedanceBudgets() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new SystemSettings.Environment(0L, 16L * 1024 * 1024, 60_000L, 10_000L));
+        IllegalArgumentException.class, () -> new SystemSettings.Environment(0L, 60_000L, 10_000L));
     assertThrows(
         IllegalArgumentException.class,
         () -> new SystemSettings.Seedance(false, null, 6, 600_000L, 30_000L, 1_800_000L));

@@ -57,7 +57,6 @@ class SystemSettingsCodecTest {
     // 规则对象键与 tool 名也排序。
     assertTrue(canonical.indexOf("\"action\":\"ask\",\"pattern\":\"*\"") >= 0, canonical);
     // null 可空字段省略。
-    assertTrue(!canonical.contains("subagentMaxTotalConcurrency"), canonical);
     assertTrue(!canonical.contains("workspaceId"), canonical);
     assertTrue(!canonical.contains("comfyui\":{\"baseUrl"), canonical);
     // null compactionFallbackModel 也在 canonical JSON 中省略。
@@ -222,7 +221,7 @@ class SystemSettingsCodecTest {
 
   @Test
   void omittedNullableReferencesStillRoundTrip() {
-    // 构造全部 nullable 引用（subagentMaxTotalConcurrency、baseUrl、workspaceId、minimaxH3 身份字段）为 null 的配置：
+    // 构造全部 nullable 引用（baseUrl、workspaceId、minimaxH3 身份字段）为 null 的配置：
     // canonical 编码必须省略这些字段，严格解码不得误报缺失，且重编码保持幂等。
     SystemSettings settings =
         new SystemSettings(
@@ -241,7 +240,6 @@ class SystemSettingsCodecTest {
             SystemSettings.DEFAULT.storageMedia(),
             SystemSettings.DEFAULT.advanced());
     String canonical = codec.encode(settings);
-    assertTrue(!canonical.contains("subagentMaxTotalConcurrency"), canonical);
     assertTrue(!canonical.contains("\"baseUrl\""), canonical);
     assertTrue(!canonical.contains("\"workspaceId\""), canonical);
     assertEquals(settings, codec.decode(canonical));
@@ -252,8 +250,6 @@ class SystemSettingsCodecTest {
   void explicitNullNullableReferencesStillDecode() throws Exception {
     // 显式 null 的 nullable 引用（语义等于 canonical 省略）必须仍可解码为同一聚合。
     ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
-    ((ObjectNode) root.get("aiRuntime")).set("subagentMaxTotalConcurrency", mapper.nullNode());
-    assertEquals(SystemSettings.DEFAULT, codec.decode(mapper.writeValueAsString(root)));
     ((ObjectNode) ((ObjectNode) root.get("integrations")).get("comfyui"))
         .set("baseUrl", mapper.nullNode());
     assertEquals(SystemSettings.DEFAULT, codec.decode(mapper.writeValueAsString(root)));

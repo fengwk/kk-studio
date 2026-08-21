@@ -292,8 +292,8 @@ public final class TaskTool implements Tool {
       ThreadSnapshot snapshot = null;
       boolean first = true;
       ChangeGate.State since = gate.snapshot();
-      try (HarnessThreadChangeSource.Subscription revisionSubscription =
-              changeSource.subscribe(threadId, gate::revision);
+      try (HarnessThreadChangeSource.Subscription versionSubscription =
+              changeSource.subscribe(threadId, gate::version);
           SubagentRunRegistry.ChangeSubscription descendantSubscription =
               runRegistry.subscribeDescendants(threadId, gate::descendants)) {
         while (true) {
@@ -321,10 +321,10 @@ public final class TaskTool implements Tool {
             throw new IllegalStateException("task observation thread was interrupted", interrupted);
           }
           since = gate.snapshot();
-          boolean revisionWake = first || since.revision() != before.revision();
+          boolean versionWake = first || since.version() != before.version();
           first = false;
-          if (revisionWake) {
-            // 权威 durable snapshot 只在首读或 revision/resync 唤醒后读取；heartbeat/descendant 唤醒复用上一份缓存。
+          if (versionWake) {
+            // 权威 durable snapshot 只在首读或 version/resync 唤醒后读取；heartbeat/descendant 唤醒复用上一份缓存。
             snapshot = runtime.getThreadSnapshot(threadId);
             String fingerprint = fingerprint(snapshot);
             if (!fingerprint.equals(previousFingerprint)) {
@@ -339,14 +339,14 @@ public final class TaskTool implements Tool {
           if (relayChanged) {
             previousDescendants = descendants;
           }
-          if (revisionWake
+          if (versionWake
               || relayChanged
               || System.nanoTime() - lastStatusNanos >= STATUS_HEARTBEAT_NANOS) {
             publishStatus(call, subagentType, snapshot, sourceHeadEntryId, descendants);
             lastStatusNanos = System.nanoTime();
           }
-          if (revisionWake) {
-            // reminder/terminal 只在初始或 revision wake 后按权威 snapshot 判断。
+          if (versionWake) {
+            // reminder/terminal 只在初始或 version wake 后按权威 snapshot 判断。
             RunResult terminal = terminalResult(snapshot, sourceHeadEntryId);
             if (terminal != null) {
               return terminal;
@@ -748,7 +748,7 @@ public final class TaskTool implements Tool {
   private static String fingerprint(ThreadSnapshot snapshot) {
     StringBuilder value =
         new StringBuilder()
-            .append(snapshot.thread().revision())
+            .append(snapshot.thread().version())
             .append('|')
             .append(snapshot.thread().headEntryId())
             .append('|');
@@ -782,10 +782,10 @@ public final class TaskTool implements Tool {
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-        runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().revision()));
+        runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
         return;
       } catch (HarnessRuntimeConflictException stale) {
-        // revision 前进时重读后重试。
+        // version 前进时重读后重试。
       } catch (HarnessRuntimeNotFoundException notFound) {
         return;
       }

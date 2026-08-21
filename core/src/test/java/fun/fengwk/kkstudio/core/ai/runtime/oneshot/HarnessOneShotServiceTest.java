@@ -107,7 +107,7 @@ class HarnessOneShotServiceTest {
         new HarnessOneShotService(
             runtimes,
             materializer,
-            () -> new SubagentConfig(2, 2, null, Duration.ZERO, 10),
+            () -> new SubagentConfig(2, 2, 0, Duration.ZERO, 10),
             changeSource);
   }
 
@@ -218,9 +218,9 @@ class HarnessOneShotServiceTest {
     assertEquals(0, changeSource.activeSubscriptions(id(3)), "success path must release");
   }
 
-  /** 订阅必须先于首次权威读取；首读期间到达的 revision 信号不得丢失，唤醒后重读并返回终态。 */
+  /** 订阅必须先于首次权威读取；首读期间到达的 version 信号不得丢失，唤醒后重读并返回终态。 */
   @Test
-  void subscribesBeforeFirstReadAndRereadsOnRevisionSignal() throws Exception {
+  void subscribesBeforeFirstReadAndRereadsOnVersionSignal() throws Exception {
     AtomicInteger reads = new AtomicInteger();
     CountDownLatch firstRead = new CountDownLatch(1);
     when(runtime.getThreadSnapshot(id(3)))
@@ -243,7 +243,7 @@ class HarnessOneShotServiceTest {
     changeSource.signal(id(3));
 
     assertEquals("final prompt", await.get(5, TimeUnit.SECONDS));
-    assertEquals(2, reads.get(), "initial read plus one revision-wake re-read");
+    assertEquals(2, reads.get(), "initial read plus one version-wake re-read");
     assertEquals(0, changeSource.activeSubscriptions(id(3)), "success path must release");
   }
 
@@ -272,7 +272,7 @@ class HarnessOneShotServiceTest {
         assertThrows(ExecutionException.class, () -> await.get(5, TimeUnit.SECONDS));
     assertInstanceOf(IllegalStateException.class, error.getCause());
     assertEquals("one-shot caller is no longer active", error.getCause().getMessage());
-    assertEquals(1, reads.get(), "no durable snapshot read without a revision signal");
+    assertEquals(1, reads.get(), "no durable snapshot read without a version signal");
     assertEquals(0, changeSource.activeSubscriptions(id(3)), "caller-inactive must release");
   }
 
@@ -386,7 +386,7 @@ class HarnessOneShotServiceTest {
         .thenThrow(new HarnessRuntimeNotFoundException("gone"));
     doThrow(
             new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.STALE_REVISION, "stale"))
+                HarnessRuntimeConflictException.Reason.STALE_VERSION, "stale"))
         .when(runtime)
         .stop(any(StopCommand.class));
     service.stop(id(9));
@@ -405,9 +405,9 @@ class HarnessOneShotServiceTest {
 
   /** 构造与 Session id(1)、materializationHash 为 64 个 0 的合法持久化 Thread 状态。 */
   private static ThreadState thread(
-      UUID threadId, UUID sessionId, UUID head, long nextCommandSequence, long revision) {
+      UUID threadId, UUID sessionId, UUID head, long nextCommandSequence, long version) {
     return new ThreadState(
-        threadId, sessionId, head, "0".repeat(64), false, nextCommandSequence, revision, NOW, NOW);
+        threadId, sessionId, head, "0".repeat(64), false, nextCommandSequence, version, NOW, NOW);
   }
 
   private static ThreadSnapshot completed(String text) {

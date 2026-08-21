@@ -122,7 +122,7 @@ public record SystemSettings(
       ModelSelection compactionFallbackModel,
       int subagentMaxDepth,
       int subagentMaxConcurrency,
-      Integer subagentMaxTotalConcurrency,
+      int subagentMaxTotalConcurrency,
       long subagentIdleTimeoutMillis,
       int subagentMaxTurns) {
 
@@ -136,7 +136,7 @@ public record SystemSettings(
             null,
             2,
             10,
-            null,
+            0,
             0L,
             50);
 
@@ -157,31 +157,23 @@ public record SystemSettings(
       SystemSettingsValidation.requireAtLeast(subagentMaxDepth, 1, "aiRuntime.subagentMaxDepth");
       SystemSettingsValidation.requireAtLeast(
           subagentMaxConcurrency, 1, "aiRuntime.subagentMaxConcurrency");
-      if (subagentMaxTotalConcurrency != null) {
-        SystemSettingsValidation.requireAtLeast(
-            subagentMaxTotalConcurrency, 1, "aiRuntime.subagentMaxTotalConcurrency");
-      }
+      SystemSettingsValidation.requireAtLeast(
+          subagentMaxTotalConcurrency, 0, "aiRuntime.subagentMaxTotalConcurrency");
       SystemSettingsValidation.requireNonNegativeMillis(
           subagentIdleTimeoutMillis, "aiRuntime.subagentIdleTimeoutMillis");
       SystemSettingsValidation.requireAtLeast(subagentMaxTurns, 1, "aiRuntime.subagentMaxTurns");
     }
   }
 
-  /** environment section：daemon gateway 的资源/消息边界与超时。 */
+  /** environment section：daemon gateway 的资源边界与超时。 */
   public record Environment(
-      long maxResourceBytes,
-      long maxMessageBytes,
-      long heartbeatTimeoutMillis,
-      long directoryListTimeoutMillis) {
+      long maxResourceBytes, long heartbeatTimeoutMillis, long directoryListTimeoutMillis) {
 
-    public static final Environment DEFAULT =
-        new Environment(8L * 1024 * 1024, 16L * 1024 * 1024, 60_000L, 10_000L);
+    public static final Environment DEFAULT = new Environment(8L * 1024 * 1024, 60_000L, 10_000L);
 
     public Environment {
       SystemSettingsValidation.requirePositiveMillis(
           maxResourceBytes, "environment.maxResourceBytes");
-      SystemSettingsValidation.requirePositiveMillis(
-          maxMessageBytes, "environment.maxMessageBytes");
       SystemSettingsValidation.requirePositiveMillis(
           heartbeatTimeoutMillis, "environment.heartbeatTimeoutMillis");
       SystemSettingsValidation.requirePositiveMillis(

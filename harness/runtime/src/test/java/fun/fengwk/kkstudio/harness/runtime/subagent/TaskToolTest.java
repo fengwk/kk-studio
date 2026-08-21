@@ -167,7 +167,7 @@ class TaskToolTest {
 
   private static SubagentConfig config(
       int maxDepth, int maxConcurrency, Duration idleTimeout, int maxTurns) {
-    return new SubagentConfig(maxDepth, maxConcurrency, null, idleTimeout, maxTurns);
+    return new SubagentConfig(maxDepth, maxConcurrency, 0, idleTimeout, maxTurns);
   }
 
   private TaskTool tool(SubagentConfig cfg) {
@@ -753,7 +753,7 @@ class TaskToolTest {
     verify(runtime, times(1)).stop(stopCaptor.capture());
     assertEquals(CHILD_THREAD_ID, stopCaptor.getValue().threadId());
     assertNotNull(stopCaptor.getValue().stopRequestId());
-    assertEquals(1L, stopCaptor.getValue().expectedRevision());
+    assertEquals(1L, stopCaptor.getValue().expectedVersion());
     assertEquals(1, listener.completedCalls.get());
     // cancel 主动 signal 唤醒观察循环，完成路径释放全部订阅。
     assertEquals(
@@ -763,7 +763,7 @@ class TaskToolTest {
 
   /** single-owner：cancel() 与观察循环竞争时只执行一条 3-attempt stop 重试序列；连续冲突耗尽后仍以 cancelled 完成。 */
   @Test
-  void retriesCancelOnStaleRevisionAndExhaustsRetries() throws Exception {
+  void retriesCancelOnStaleVersionAndExhaustsRetries() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
@@ -797,13 +797,13 @@ class TaskToolTest {
               }
               return runningRev2;
             });
-    // 唯一 stop 序列（3 attempts）每次 stop 都遇 stale revision，重读后重试直至耗尽。
+    // 唯一 stop 序列（3 attempts）每次 stop 都遇 stale version，重读后重试直至耗尽。
     AtomicInteger stops = new AtomicInteger();
     doAnswer(
             inv -> {
               stops.incrementAndGet();
               throw new HarnessRuntimeConflictException(
-                  HarnessRuntimeConflictException.Reason.STALE_REVISION, "stale revision");
+                  HarnessRuntimeConflictException.Reason.STALE_VERSION, "stale version");
             })
         .when(runtime)
         .stop(any(StopCommand.class));
@@ -826,9 +826,9 @@ class TaskToolTest {
     // 无论 cancel() 还是观察循环赢得执行权，都只有一条 3-attempt 序列：3 次 stop、reads 3/4/5 连续。
     ArgumentCaptor<StopCommand> stopCaptor = ArgumentCaptor.forClass(StopCommand.class);
     verify(runtime, times(3)).stop(stopCaptor.capture());
-    assertEquals(1L, stopCaptor.getAllValues().get(0).expectedRevision());
+    assertEquals(1L, stopCaptor.getAllValues().get(0).expectedVersion());
     for (int i = 1; i < 3; i++) {
-      assertEquals(2L, stopCaptor.getAllValues().get(i).expectedRevision());
+      assertEquals(2L, stopCaptor.getAllValues().get(i).expectedVersion());
     }
   }
 
@@ -883,7 +883,7 @@ class TaskToolTest {
                 }
               }
               throw new HarnessRuntimeConflictException(
-                  HarnessRuntimeConflictException.Reason.STALE_REVISION, "stale revision");
+                  HarnessRuntimeConflictException.Reason.STALE_VERSION, "stale version");
             })
         .when(runtime)
         .stop(any(StopCommand.class));
@@ -913,9 +913,9 @@ class TaskToolTest {
 
     ArgumentCaptor<StopCommand> stopCaptor = ArgumentCaptor.forClass(StopCommand.class);
     verify(runtime, times(3)).stop(stopCaptor.capture());
-    assertEquals(1L, stopCaptor.getAllValues().get(0).expectedRevision());
+    assertEquals(1L, stopCaptor.getAllValues().get(0).expectedVersion());
     for (int i = 1; i < 3; i++) {
-      assertEquals(2L, stopCaptor.getAllValues().get(i).expectedRevision());
+      assertEquals(2L, stopCaptor.getAllValues().get(i).expectedVersion());
     }
     assertEquals(1, listener.completedCalls.get(), "must complete exactly once");
   }
@@ -1065,7 +1065,7 @@ class TaskToolTest {
     verify(runtime, times(1)).stop(stopCaptor.capture());
     assertEquals(CHILD_THREAD_ID, stopCaptor.getValue().threadId());
     assertNotNull(stopCaptor.getValue().stopRequestId());
-    assertEquals(1L, stopCaptor.getValue().expectedRevision());
+    assertEquals(1L, stopCaptor.getValue().expectedVersion());
     assertEquals(1, listener.completedCalls.get());
   }
 
@@ -1149,7 +1149,7 @@ class TaskToolTest {
         // 推进到 quiescent：idle 时钟从该次权威读取开始。
         changeSource.signal(CHILD_THREAD_ID);
         assertTrue(idleRead.await(5, TimeUnit.SECONDS), "await must observe the idle state");
-        // descendant relay 每 10ms 持续发布也不能重置 durable idle 时钟；超过 150ms 后由 revision wake 按权威 snapshot
+        // descendant relay 每 10ms 持续发布也不能重置 durable idle 时钟；超过 150ms 后由 version wake 按权威 snapshot
         // 判超时。
         Thread.sleep(200);
         changeSource.signal(CHILD_THREAD_ID);
@@ -1166,7 +1166,7 @@ class TaskToolTest {
         verify(runtime).stop(idleStop.capture());
         assertEquals(CHILD_THREAD_ID, idleStop.getValue().threadId());
         assertNotNull(idleStop.getValue().stopRequestId());
-        assertEquals(2L, idleStop.getValue().expectedRevision());
+        assertEquals(2L, idleStop.getValue().expectedVersion());
 
         // 观察到的状态序列：active tool 先于 quiescent，因此 idle 计时只在 tool 结束后生效。
         assertEquals(
@@ -1190,9 +1190,9 @@ class TaskToolTest {
     }
   }
 
-  /** 无后续 revision 信号时 idle 到期由限时等待本身唤醒：不重读 durable snapshot，按缓存 active-tools 语义触发取消。 */
+  /** 无后续 version 信号时 idle 到期由限时等待本身唤醒：不重读 durable snapshot，按缓存 active-tools 语义触发取消。 */
   @Test
-  void timesOutIdleWithoutRevisionSignalsAndReadsSnapshotOnce() throws Exception {
+  void timesOutIdleWithoutVersionSignalsAndReadsSnapshotOnce() throws Exception {
     SubagentConfig idleConfig = config(3, 10, Duration.ofMillis(150), DEFAULT_MAX_TURNS);
     SubagentRunRegistry registry = new SubagentRunRegistry();
     TaskTool idleTool = tool(idleConfig, registry);
@@ -1217,7 +1217,7 @@ class TaskToolTest {
               if (n == 1) {
                 return child; // createChild
               }
-              return idle; // await 首读即 quiescent：idle 时钟从此刻开始，之后无任何 revision 信号
+              return idle; // await 首读即 quiescent：idle 时钟从此刻开始，之后无任何 version 信号
             });
     RecordingListener listener = new RecordingListener();
 
@@ -1234,7 +1234,7 @@ class TaskToolTest {
     verify(runtime).stop(idleStop.capture());
     assertEquals(CHILD_THREAD_ID, idleStop.getValue().threadId());
     assertNotNull(idleStop.getValue().stopRequestId());
-    assertEquals(2L, idleStop.getValue().expectedRevision());
+    assertEquals(2L, idleStop.getValue().expectedVersion());
     // 观察循环的权威 snapshot 读取只发生一次（await 首读）；第 3 次读取来自 idle cancel 的 stop 预读（stop 协议必需）。
     // idle 到期本身由限时等待唤醒，不重读 durable snapshot。
     assertEquals(3, reads.get(), "idle timeout must not re-read the durable snapshot");
@@ -1315,7 +1315,7 @@ class TaskToolTest {
     assertTrue(reminderIds.stream().distinct().count() >= 2, reminderIds.toString());
   }
 
-  /** fingerprint 稳定、无任何 revision 信号时仍按 1s 心跳基于缓存 snapshot 重发 task.status——绝不重读 durable snapshot。 */
+  /** fingerprint 稳定、无任何 version 信号时仍按 1s 心跳基于缓存 snapshot 重发 task.status——绝不重读 durable snapshot。 */
   @Test
   void republishesStatusHeartbeatWhileFingerprintIsStable() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
@@ -1350,7 +1350,7 @@ class TaskToolTest {
         request(
             "call-heartbeat", "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"maxTurns\":1}"),
         listener);
-    // terminal 边界没有 revision 事件；由测试在 1.1s 主动发一次 wake 触发权威重读，否则观察循环只发心跳。
+    // terminal 边界没有 version 事件；由测试在 1.1s 主动发一次 wake 触发权威重读，否则观察循环只发心跳。
     Thread signaler =
         Thread.ofVirtual()
             .start(
@@ -1519,7 +1519,7 @@ class TaskToolTest {
     }
   }
 
-  /** 订阅必须先于观察循环的首次权威读取；首读期间到达的 revision 信号不得丢失，唤醒后重读终态。 */
+  /** 订阅必须先于观察循环的首次权威读取；首读期间到达的 version 信号不得丢失，唤醒后重读终态。 */
   @Test
   void subscribesBeforeObservationReadAndDoesNotLoseConcurrentSignal() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
@@ -1541,7 +1541,7 @@ class TaskToolTest {
                 assertTrue(
                     changeSource.isSubscribed(CHILD_THREAD_ID),
                     "observation read must follow subscribe");
-                // 首读进行期间到达的 revision 信号不得丢失：计数在等待前已建立，唤醒后必然重读。
+                // 首读进行期间到达的 version 信号不得丢失：计数在等待前已建立，唤醒后必然重读。
                 changeSource.signal(CHILD_THREAD_ID);
                 return child;
               }
@@ -1559,9 +1559,7 @@ class TaskToolTest {
     assertEquals(1, changeSource.totalClosed());
   }
 
-  /**
-   * descendant relay 经 registry 订阅唤醒观察循环并发布新 relay，但绝不重读 durable snapshot；随后 revision wake 正常收尾。
-   */
+  /** descendant relay 经 registry 订阅唤醒观察循环并发布新 relay，但绝不重读 durable snapshot；随后 version wake 正常收尾。 */
   @Test
   void wakesOnDescendantRelayWithoutRereadingDurableSnapshot() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
@@ -1614,11 +1612,11 @@ class TaskToolTest {
       assertEquals(id(44).toString(), latest.get("descendants").get(0).get("threadId").asText());
     }
 
-    // revision 信号触发权威重读 → 终态。
+    // version 信号触发权威重读 → 终态。
     changeSource.signal(CHILD_THREAD_ID);
     ToolResult result = listener.completed.get(5, TimeUnit.SECONDS);
     assertFalse(result.error(), result.toString());
-    assertEquals(3, reads.get(), "initial read plus revision-wake terminal read only");
+    assertEquals(3, reads.get(), "initial read plus version-wake terminal read only");
     assertEquals(0, changeSource.activeSubscriptions(CHILD_THREAD_ID));
   }
 
@@ -1882,7 +1880,7 @@ class TaskToolTest {
   }
 
   /**
-   * 绑定 thread 的 snapshot 序列：每次读取按序返回，并在「返回非末位状态」时预置一次 revision wake——模拟 durable 每步推进都会先产生 revision
+   * 绑定 thread 的 snapshot 序列：每次读取按序返回，并在「返回非末位状态」时预置一次 version wake——模拟 durable 每步推进都会先产生 version
    * 通知再被观察循环读取。返回末位后不再自动唤醒（避免额外重读污染计数）；返回序列外索引时稳定返回末位。
    */
   private void stubSnapshots(HarnessRuntime runtime, UUID threadId, ThreadSnapshot... sequence) {
@@ -1903,7 +1901,7 @@ class TaskToolTest {
     stubSnapshots(runtime, CHILD_THREAD_ID, sequence);
   }
 
-  /** 触发一次 child revision wake；配合 {@link #stubChildSnapshots} 的末位不自动唤醒语义手动推进到末位。 */
+  /** 触发一次 child version wake；配合 {@link #stubChildSnapshots} 的末位不自动唤醒语义手动推进到末位。 */
   private void signalChild() {
     changeSource.signal(CHILD_THREAD_ID);
   }
@@ -1924,7 +1922,7 @@ class TaskToolTest {
       UUID headEntryId,
       boolean yoloEnabled,
       long nextCommandSequence,
-      long revision) {
+      long version) {
     return new ThreadState(
         threadId,
         sessionId,
@@ -1932,7 +1930,7 @@ class TaskToolTest {
         "0".repeat(64),
         yoloEnabled,
         nextCommandSequence,
-        revision,
+        version,
         NOW,
         NOW);
   }
@@ -2017,7 +2015,7 @@ class TaskToolTest {
       SubagentContext context,
       boolean continueModel,
       UUID headEntryId,
-      long revision) {
+      long version) {
     Entry root =
         new Entry(CHILD_ROOT_ENTRY_ID, SESSION_ID, null, new RootPayload(settings, context), NOW);
     Entry turn =
@@ -2047,7 +2045,7 @@ class TaskToolTest {
             assistant.id(),
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, continueModel, null, null),
             NOW);
-    ThreadState thread = threadState(RESUME_THREAD_ID, SESSION_ID, headEntryId, true, 2L, revision);
+    ThreadState thread = threadState(RESUME_THREAD_ID, SESSION_ID, headEntryId, true, 2L, version);
     return new ThreadSnapshot(
         thread,
         new EntryPath(List.of(root, turn, assistant, end)),
@@ -2097,7 +2095,7 @@ class TaskToolTest {
             end.id(),
             resumed.thread().yoloEnabled(),
             resumed.thread().nextCommandSequence(),
-            resumed.thread().revision() + 1);
+            resumed.thread().version() + 1);
     return new ThreadSnapshot(
         thread, new EntryPath(entries), List.of(), null, List.of(), List.of());
   }
@@ -2105,7 +2103,7 @@ class TaskToolTest {
   private static ThreadSnapshot runningRootSnapshot(
       UUID threadId,
       UUID headEntryId,
-      long revision,
+      long version,
       List<ToolInvocation> tools,
       List<ThreadCommand> queued) {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
@@ -2116,11 +2114,11 @@ class TaskToolTest {
             null,
             new RootPayload(settings, SUBAGENT_CONTEXT),
             NOW);
-    ThreadState thread = threadState(threadId, SESSION_ID, headEntryId, true, 1L, revision);
+    ThreadState thread = threadState(threadId, SESSION_ID, headEntryId, true, 1L, version);
     return new ThreadSnapshot(thread, new EntryPath(List.of(root)), queued, null, tools, List.of());
   }
 
-  private static ThreadSnapshot toolCallSnapshot(long revision, List<ToolInvocation> tools) {
+  private static ThreadSnapshot toolCallSnapshot(long version, List<ToolInvocation> tools) {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     Entry root =
         new Entry(
@@ -2149,7 +2147,7 @@ class TaskToolTest {
                 null),
             NOW);
     ThreadState thread =
-        threadState(CHILD_THREAD_ID, SESSION_ID, assistant.id(), true, 1L, revision);
+        threadState(CHILD_THREAD_ID, SESSION_ID, assistant.id(), true, 1L, version);
     return new ThreadSnapshot(
         thread, new EntryPath(List.of(root, turn, assistant)), List.of(), null, tools, List.of());
   }
@@ -2157,7 +2155,7 @@ class TaskToolTest {
   /**
    * 构造运行中快照：首个 COMPACTION turn（以 CANCELLED 关闭，countTurns 不计数），后跟 N 个 CONTINUATION turn（最后一个 open）。
    */
-  private static ThreadSnapshot turnCountSnapshot(int turns, ModelInvocation model, long revision) {
+  private static ThreadSnapshot turnCountSnapshot(int turns, ModelInvocation model, long version) {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     List<Entry> entries = new ArrayList<>();
     Entry root =
@@ -2229,12 +2227,12 @@ class TaskToolTest {
         parent = end.id();
       }
     }
-    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, parent, true, 1L, revision);
+    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, parent, true, 1L, version);
     return new ThreadSnapshot(
         thread, new EntryPath(entries), List.of(), model, List.of(), List.of());
   }
 
-  private static ThreadSnapshot continueModelHeadSnapshot(boolean continueModel, long revision) {
+  private static ThreadSnapshot continueModelHeadSnapshot(boolean continueModel, long version) {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     Entry root =
         new Entry(
@@ -2259,7 +2257,7 @@ class TaskToolTest {
             assistant.id(),
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, continueModel, null, null),
             NOW);
-    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, end.id(), true, 1L, revision);
+    ThreadState thread = threadState(CHILD_THREAD_ID, SESSION_ID, end.id(), true, 1L, version);
     return new ThreadSnapshot(
         thread,
         new EntryPath(List.of(root, turn, assistant, end)),

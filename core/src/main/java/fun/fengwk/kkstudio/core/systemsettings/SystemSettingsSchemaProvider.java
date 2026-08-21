@@ -90,7 +90,7 @@ public class SystemSettingsSchemaProvider {
                     field(
                         "aiRuntime.compactionFallbackModel",
                         "settings.field.aiRuntime.compactionFallbackModel",
-                        "settings.field.aiRuntime.compactionFallbackModel.hint",
+                        null,
                         FieldType.MODEL_SELECTION,
                         true,
                         null,
@@ -120,10 +120,10 @@ public class SystemSettingsSchemaProvider {
                     field(
                         "aiRuntime.subagentMaxTotalConcurrency",
                         "settings.field.aiRuntime.subagentMaxTotalConcurrency",
-                        "settings.field.aiRuntime.subagentMaxTotalConcurrency.hint",
+                        null,
                         FieldType.INTEGER,
-                        true,
-                        1,
+                        false,
+                        0,
                         null),
                     field(
                         "aiRuntime.subagentIdleTimeoutMillis",
@@ -155,7 +155,7 @@ public class SystemSettingsSchemaProvider {
                     field(
                         "tool.permission",
                         "settings.section.tool.permission.title",
-                        "settings.section.tool.permission.description",
+                        "settings.field.tool.permission.hint",
                         FieldType.PERMISSION,
                         false,
                         null,
@@ -219,7 +219,7 @@ public class SystemSettingsSchemaProvider {
                 "environment",
                 "settings.tabs.environment",
                 "settings.section.environment.description",
-                true,
+                false,
                 group(
                     "environment.runtime",
                     "settings.section.environment.runtime.title",
@@ -245,20 +245,6 @@ public class SystemSettingsSchemaProvider {
                     field(
                         "environment.directoryListTimeoutMillis",
                         "settings.field.environment.directoryListTimeoutMillis",
-                        null,
-                        FieldType.LONG,
-                        false,
-                        1,
-                        null)),
-                group(
-                    "environment.transport",
-                    "settings.section.environment.transport.title",
-                    "settings.section.environment.transport.description",
-                    true,
-                    ApplyTiming.RESTART,
-                    field(
-                        "environment.maxMessageBytes",
-                        "settings.field.environment.maxMessageBytes",
                         null,
                         FieldType.LONG,
                         false,
@@ -924,7 +910,7 @@ public class SystemSettingsSchemaProvider {
     SystemSettingsSchemaDTO.FieldDTO field = new SystemSettingsSchemaDTO.FieldDTO();
     field.setPath(path);
     field.setLabelKey(labelKey);
-    field.setHintKey(hintKey);
+    field.setHintKey(hintKey != null ? hintKey : labelKey + ".hint");
     field.setType(type);
     field.setNullable(nullable);
     field.setMin(min);

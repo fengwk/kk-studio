@@ -50,7 +50,7 @@ class AgentBranchSettingsMaterializerTest {
             new AgentDefinitionConfigCodec(new ObjectMapper()),
             new AgentModelRuntimeConfigParser(new ObjectMapper()),
             () -> config);
-    config = new SubagentConfig(MAX_DEPTH, 10, null, Duration.ZERO, 50);
+    config = new SubagentConfig(MAX_DEPTH, 10, 0, Duration.ZERO, 50);
   }
 
   private void stub(

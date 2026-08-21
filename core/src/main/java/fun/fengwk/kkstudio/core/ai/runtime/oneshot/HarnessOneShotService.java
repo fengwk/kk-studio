@@ -123,7 +123,7 @@ public final class HarnessOneShotService {
     ChangeGate gate = new ChangeGate();
     // 订阅必须在 success/error/timeout/cancel/interruption 全路径释放。
     try (HarnessThreadChangeSource.Subscription subscription =
-        changeSource.subscribe(threadId, gate::revision)) {
+        changeSource.subscribe(threadId, gate::version)) {
       ChangeGate.State since = gate.snapshot();
       boolean first = true;
       while (true) {
@@ -132,11 +132,11 @@ public final class HarnessOneShotService {
           throw new IllegalStateException("one-shot caller is no longer active");
         }
         ChangeGate.State current = gate.snapshot();
-        boolean revisionWake = first || current.revision() != since.revision();
+        boolean versionWake = first || current.version() != since.version();
         since = current;
         first = false;
-        if (revisionWake) {
-          // 终态优先：订阅后的首次权威读取与 revision/resync 唤醒后都先检查 terminal，再判 timeout。
+        if (versionWake) {
+          // 终态优先：订阅后的首次权威读取与 version/resync 唤醒后都先检查 terminal，再判 timeout。
           ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
           String result = terminalText(snapshot);
           if (result != null) {
@@ -230,10 +230,10 @@ public final class HarnessOneShotService {
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-        runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().revision()));
+        runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
         return;
       } catch (HarnessRuntimeConflictException stale) {
-        // revision 前进时重读后重试。
+        // version 前进时重读后重试。
       } catch (HarnessRuntimeNotFoundException notFound) {
         return;
       }

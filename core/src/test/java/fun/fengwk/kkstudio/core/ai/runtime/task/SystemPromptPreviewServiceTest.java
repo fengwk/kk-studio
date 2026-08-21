@@ -138,7 +138,7 @@ class SystemPromptPreviewServiceTest {
       AgentDefinitionRepository agents,
       AgentDefinitionConfigCodec codec,
       LiveEnvironmentRegistry environmentRegistry) {
-    SubagentConfig subagentConfig = new SubagentConfig(2, 10, null, Duration.ZERO, 7);
+    SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 7);
     return new SystemPromptPreviewServiceFactory(
             agents,
             codec,
