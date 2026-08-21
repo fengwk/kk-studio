@@ -47,7 +47,7 @@ class StudioEnvironmentDirectoryControllerTest {
         new SystemSettings(
             SystemSettings.Tool.DEFAULT,
             SystemSettings.AiRuntime.DEFAULT,
-            new SystemSettings.Environment(8L * 1024 * 1024, 16L * 1024 * 1024, 60_000L, 5_000L),
+            new SystemSettings.Environment(8L * 1024 * 1024, 60_000L, 5_000L),
             SystemSettings.Integrations.DEFAULT,
             SystemSettings.StorageMedia.DEFAULT,
             SystemSettings.Advanced.DEFAULT);
@@ -104,10 +104,7 @@ class StudioEnvironmentDirectoryControllerTest {
             SystemSettings.Tool.DEFAULT,
             SystemSettings.AiRuntime.DEFAULT,
             new SystemSettings.Environment(
-                base.maxResourceBytes(),
-                base.maxMessageBytes(),
-                base.heartbeatTimeoutMillis(),
-                2_000L),
+                base.maxResourceBytes(), base.heartbeatTimeoutMillis(), 2_000L),
             SystemSettings.Integrations.DEFAULT,
             SystemSettings.StorageMedia.DEFAULT,
             SystemSettings.Advanced.DEFAULT));
