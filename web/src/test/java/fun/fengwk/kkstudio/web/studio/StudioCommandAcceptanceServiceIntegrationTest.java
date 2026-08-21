@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
@@ -111,6 +112,51 @@ class StudioCommandAcceptanceServiceIntegrationTest extends S3WebPostgresTestSup
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("canvas")))));
     assertEquals(1, count("canvas_session", "session_id", canvasSessionId));
     assertEquals(1, count("harness_thread", "id", canvasThreadId));
+  }
+
+  /** 既有 Thread 必须经所属 Session 授权，并保持产品合法的 SET_* 前缀与末尾用户消息。 */
+  @Test
+  void threadTargetAcceptsOwnedSessionAndPreservesCommandPrefix() {
+    UUID chatId = createChat("thread-target");
+    StudioOwner owner = new StudioOwner(StudioOwnerType.CHAT, chatId);
+    UUID sessionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    AcceptedCommands initial =
+        acceptanceService.accept(
+            owner,
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+                List.of(
+                    new NewThreadCommand(
+                        new UserMessageCommandPayload(
+                            new AgentMessage(
+                                AgentMessageRole.USER, List.of(new TextMessageContent("first")))),
+                        UUID.randomUUID()))));
+
+    AcceptedCommands continued =
+        acceptanceService.accept(
+            owner,
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(
+                    threadId,
+                    initial.thread().headEntryId(),
+                    initial.thread().nextCommandSequence()),
+                List.of(
+                    new NewThreadCommand(
+                        new SetAgentCommandPayload("default-assistant"), UUID.randomUUID()),
+                    new NewThreadCommand(
+                        new UserMessageCommandPayload(
+                            new AgentMessage(
+                                AgentMessageRole.USER, List.of(new TextMessageContent("second")))),
+                        UUID.randomUUID()))));
+
+    assertEquals(sessionId, continued.thread().sessionId());
+    assertEquals(2, continued.acceptedCommands().size());
+    assertInstanceOf(
+        SetAgentCommandPayload.class, continued.acceptedCommands().getFirst().payload());
+    assertInstanceOf(
+        UserMessageCommandPayload.class, continued.acceptedCommands().getLast().payload());
+    assertEquals(3, count("harness_thread_command", "thread_id", threadId));
   }
 
   @Test

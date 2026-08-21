@@ -120,7 +120,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             body -> {
               body.put("expectedVersion", "0");
-              body.with("tool").put("defaultYolo", true);
+              body.withObject("tool").put("defaultYolo", true);
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(first))
@@ -133,7 +133,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             body -> {
               body.put("expectedVersion", "1");
-              body.with("tool").put("defaultYolo", false);
+              body.withObject("tool").put("defaultYolo", false);
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(second))
@@ -148,7 +148,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             update -> {
               update.put("expectedVersion", "99");
-              update.with("tool").put("defaultYolo", true);
+              update.withObject("tool").put("defaultYolo", true);
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
@@ -178,7 +178,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         bodyFromGet(
             update -> {
               update.put("expectedVersion", "0");
-              update.with("advanced").put("processorHeartbeatIntervalMillis", 60_000L);
+              update.withObject("advanced").put("processorHeartbeatIntervalMillis", 60_000L);
             });
     mockMvc
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
