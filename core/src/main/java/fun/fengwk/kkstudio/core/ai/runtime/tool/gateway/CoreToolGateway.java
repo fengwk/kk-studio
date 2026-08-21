@@ -150,7 +150,6 @@ public final class CoreToolGateway implements ToolGateway {
       @Qualifier("toolGatewayExecutor") ExecutorService executor,
       SystemSettingsSnapshot snapshot,
       Clock clock) {
-    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
     this(
         toolFactories,
         pluginCatalog,
@@ -163,8 +162,8 @@ public final class CoreToolGateway implements ToolGateway {
         runtimeProperties.resolvedEnvironmentRoot(),
         resourceMaxBytes,
         executor,
-        () -> Duration.ofMillis(settings.get().tool().toolGatewayBusyRetryMillis()),
-        () -> Duration.ofMillis(settings.get().tool().toolGatewayOverloadRetryMillis()),
+        liveBusyRetry(snapshot),
+        liveOverloadRetry(snapshot),
         clock);
   }
 
@@ -291,6 +290,16 @@ public final class CoreToolGateway implements ToolGateway {
     this.clock = Objects.requireNonNull(clock, "clock");
     rejectUnsafeExecutorPolicies(executor);
     rejectInlineExecutor(executor);
+  }
+
+  private static Supplier<Duration> liveBusyRetry(SystemSettingsSnapshot snapshot) {
+    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
+    return () -> Duration.ofMillis(settings.get().tool().toolGatewayBusyRetryMillis());
+  }
+
+  private static Supplier<Duration> liveOverloadRetry(SystemSettingsSnapshot snapshot) {
+    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
+    return () -> Duration.ofMillis(settings.get().tool().toolGatewayOverloadRetryMillis());
   }
 
   @Override

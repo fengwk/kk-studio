@@ -53,9 +53,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     ModelRef modelRef = parseModelRef(createDTO == null ? null : createDTO.getModel());
     referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
     String name = createDTO == null ? null : createDTO.getName();
-    AgentDefinition definition =
-        definitionMutationFactory.newAgent(
-            name, modelRef.providerName(), modelRef.modelName(), createDTO);
+    AgentDefinition definition = definitionMutationFactory.newAgent(name, createDTO);
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
@@ -88,8 +86,8 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     AgentDefinition definition = referenceResolver.requireAgent(name);
     ensureExpectedVersion(definition, name, rawExpected, expected);
-    ModelRef modelRef = new ModelRef(definition.getModelProviderName(), definition.getModelName());
-    referenceResolver.requireModel(modelRef.providerName(), modelRef.modelName());
+    ModelRef modelRef = parseModelRef(updateDTO.getModel());
+    referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
     definitionMutationFactory.update(definition, updateDTO);
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
@@ -97,13 +95,21 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     AgentDefinition locked =
         referenceResolver.requireAgentAndSubagentsForUpdate(name, config.getSubagents());
     ensureExpectedVersion(locked, name, rawExpected, expected);
-    if (!agentDefinitionRepository.updateByName(definition, expected)) {
-      AgentDefinition reread = agentDefinitionRepository.getByName(name);
-      if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
+    try {
+      if (!agentDefinitionRepository.updateByName(definition, expected)) {
+        AgentDefinition reread = agentDefinitionRepository.getByName(name);
+        if (reread == null) {
+          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
+        }
+        throw new AiVersionConflictException(
+            RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
       }
-      throw new AiVersionConflictException(
-          RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
+    } catch (DataIntegrityViolationException error) {
+      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
+        throw new AiResourceNotFoundException(
+            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelRef, error);
+      }
+      throw error;
     }
     AgentDefinition reloaded = agentDefinitionRepository.getByName(name);
     return agentDefinitionConverter.convert(reloaded);

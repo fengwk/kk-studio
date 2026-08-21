@@ -88,7 +88,7 @@ harness-daemon -> harness-tool
 | --- | --- | --- |
 | Provider | immutable `name` | Agent 通过 Model 的 `providerName` 引用 |
 | Model | `(providerName, name)` | Agent 通过 Model ref 引用 |
-| Agent | immutable `name` | Chat defaults 与 Entry branch settings 通过 `agentName` 引用 |
+| Agent | immutable `name` | Chat defaults 与 Entry branch settings 通过 `agentName` 引用；default `model` 可编辑，只影响之后用该 Agent 新建的对话 |
 | Variant | Model config 中的 `id` | Agent 的可选 `variant` 覆盖 Model 的 `defaultVariant` |
 | Tool | 只有 `PLATFORM` / `ENVIRONMENT` 两类 | Agent config 保存可选择 Tool 名称集合；`load_skill`/`task` 是内部 `PLATFORM` Tool，不在可选择目录 |
 

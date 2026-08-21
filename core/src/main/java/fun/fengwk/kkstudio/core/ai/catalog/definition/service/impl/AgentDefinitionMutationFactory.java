@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
 /**
  * 规范化可编辑的 Agent 字段，并序列化严格的结构化执行配置。
@@ -31,15 +32,9 @@ final class AgentDefinitionMutationFactory {
     this.configCodec = configCodec;
   }
 
-  AgentDefinition newAgent(
-      String name,
-      String modelProviderName,
-      String modelName,
-      AgentDefinitionEditablePropertiesDTO properties) {
+  AgentDefinition newAgent(String name, AgentDefinitionEditablePropertiesDTO properties) {
     Mutation mutation = newMutation(name, properties);
     AgentDefinition definition = new AgentDefinition();
-    definition.setModelProviderName(modelProviderName);
-    definition.setModelName(modelName);
     apply(definition, mutation);
     return definition;
   }
@@ -52,6 +47,8 @@ final class AgentDefinitionMutationFactory {
     definition.setName(mutation.name());
     definition.setDescription(mutation.description());
     definition.setSystemPrompt(mutation.systemPrompt());
+    definition.setModelProviderName(mutation.modelProviderName());
+    definition.setModelName(mutation.modelName());
     definition.setVariant(mutation.variant());
     definition.setConfigJson(mutation.configJson());
   }
@@ -74,6 +71,7 @@ final class AgentDefinitionMutationFactory {
     if (normalizedName.indexOf('/') >= 0) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");
     }
+    ModelRef modelRef = parseModelRef(properties.getModel());
     String description = editableSupport.trimToNull(properties.getDescription());
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
     // null/blank = 不覆盖；runtime/thread 应用时解析 model.defaultVariant。
@@ -91,9 +89,31 @@ final class AgentDefinitionMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
-    return new Mutation(normalizedName, description, systemPrompt, variant, configJson);
+    return new Mutation(
+        normalizedName,
+        description,
+        systemPrompt,
+        modelRef.providerName(),
+        modelRef.modelName(),
+        variant,
+        configJson);
+  }
+
+  private static ModelRef parseModelRef(String raw) {
+    try {
+      return ModelRef.parse(raw);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(
+          RESOURCE, "model must identify providerName/modelName", error);
+    }
   }
 
   record Mutation(
-      String name, String description, String systemPrompt, String variant, String configJson) {}
+      String name,
+      String description,
+      String systemPrompt,
+      String modelProviderName,
+      String modelName,
+      String variant,
+      String configJson) {}
 }

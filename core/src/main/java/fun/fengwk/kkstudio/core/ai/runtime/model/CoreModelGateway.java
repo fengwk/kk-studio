@@ -80,11 +80,7 @@ public final class CoreModelGateway implements ModelGateway {
       ProviderResolutionService providerResolution,
       @Qualifier("modelExecutionExecutor") ExecutorService executor,
       SystemSettingsSnapshot snapshot) {
-    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
-    this(
-        providerResolution,
-        executor,
-        () -> Duration.ofMillis(settings.get().tool().modelGatewayBusyRetryMillis()));
+    this(providerResolution, executor, liveBusyRetry(snapshot));
   }
 
   public CoreModelGateway(
@@ -103,6 +99,11 @@ public final class CoreModelGateway implements ModelGateway {
     this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
     rejectUnsafeExecutorPolicies(executor);
     rejectInlineExecutor(executor);
+  }
+
+  private static Supplier<Duration> liveBusyRetry(SystemSettingsSnapshot snapshot) {
+    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
+    return () -> Duration.ofMillis(settings.get().tool().modelGatewayBusyRetryMillis());
   }
 
   @Override

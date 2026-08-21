@@ -6,7 +6,6 @@ import {
   normalizeCreateAgentDraftSelection,
   normalizeCreateModelDraftProvider,
   normalizeAgentDraftDefaultVariant,
-  normalizeEditAgentDraftSelection,
   normalizeEditModelDraftProvider,
   normalizeModelDraftDefaultVariant,
   variantOptionsFromDraft,
@@ -237,7 +236,7 @@ describe('ai-draft-normalizers', () => {
     expect(empty.model).toBe('gone')
   })
 
-  it('keeps an edit Agent model identity and its variant when the model is off-page', () => {
+  it('keeps the current Agent model and variant when the model is off-page', () => {
     const draft: AgentDraft = {
       ...emptyAgentDraft(),
       model: 'loaded/old-model',
@@ -252,17 +251,13 @@ describe('ai-draft-normalizers', () => {
       }),
     })
 
-    const result = normalizeEditAgentDraftSelection(
-      draft,
-      'deleted/original-model',
-      [unrelatedModel],
-    )
+    const result = normalizeAgentDraftDefaultVariant(draft, [unrelatedModel])
 
-    expect(result.model).toBe('deleted/original-model')
+    expect(result.model).toBe('loaded/old-model')
     expect(result.variant).toBe('persisted-override')
   })
 
-  it('derives edit variants only from the persisted loaded model', () => {
+  it('clears an invalid variant override when the selected model is loaded', () => {
     const draft: AgentDraft = {
       ...emptyAgentDraft(),
       model: 'original/original-model',
@@ -285,11 +280,7 @@ describe('ai-draft-normalizers', () => {
       }),
     })
 
-    const result = normalizeEditAgentDraftSelection(
-      draft,
-      'original/original-model',
-      [unrelatedModel, originalModel],
-    )
+    const result = normalizeAgentDraftDefaultVariant(draft, [unrelatedModel, originalModel])
 
     expect(result.model).toBe('original/original-model')
     expect(result.variant).toBe('')

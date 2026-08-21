@@ -269,12 +269,12 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     AgentDefinitionUpdateDTO agentUpdate = new AgentDefinitionUpdateDTO();
     agentUpdate.setDescription("updated agent");
     agentUpdate.setSystemPrompt("updated prompt");
+    agentUpdate.setModel(providerName + "/" + modelName);
     agentUpdate.setVariant("default");
     agentUpdate.setConfig(agentConfig);
     agentUpdate.setExpectedVersion("0");
     ObjectNode agentUpdateBody = objectMapper.valueToTree(agentUpdate);
     agentUpdateBody.put("name", "renamed-" + agentName);
-    agentUpdateBody.put("model", "other-provider/other-model");
     mockMvc
         .perform(
             put("/api/ai/catalog/agents/{name}", agentName)

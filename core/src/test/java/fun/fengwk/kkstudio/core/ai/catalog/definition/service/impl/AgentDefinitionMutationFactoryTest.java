@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 
 import java.util.List;
 
-/** 结构化的定义配置在持久化前必须规范化。 */
+/** 结构化的定义配置在持久化前必须规范化；create/update 共用可编辑 model 引用。 */
 public class AgentDefinitionMutationFactoryTest {
 
   @Test
@@ -27,7 +27,7 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionConfigDTO config = config(List.of("browser"), List.of("java", "dev"));
     AgentDefinitionCreateDTO create = create("agent", "provider/model", config, "default");
 
-    AgentDefinition definition = factory.newAgent("agent", "provider", "model", create);
+    AgentDefinition definition = factory.newAgent("agent", create);
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
     assertEquals(List.of("browser"), stored.getTools());
@@ -37,12 +37,14 @@ public class AgentDefinitionMutationFactoryTest {
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription("updated");
+    update.setModel("other-provider/other-model");
     update.setVariant("quality");
     update.setConfig(config(List.of(), List.of()));
     factory.update(definition, update);
     assertEquals("agent", definition.getName());
-    assertEquals("provider", definition.getModelProviderName());
-    assertEquals("model", definition.getModelName());
+    assertEquals("other-provider", definition.getModelProviderName());
+    assertEquals("other-model", definition.getModelName());
+    assertEquals("quality", definition.getVariant());
   }
 
   @Test
@@ -51,17 +53,12 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionCreateDTO create =
         create("agent", "provider/model", config(List.of(), List.of("java", "java")), "default");
     AiValidationException error =
-        assertThrows(
-            AiValidationException.class,
-            () -> factory.newAgent("agent", "provider", "model", create));
+        assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
     assertEquals(
         "agent definition config skills must not contain duplicates: java", error.getMessage());
 
     create.setConfig(config(List.of(" read "), List.of()));
-    error =
-        assertThrows(
-            AiValidationException.class,
-            () -> factory.newAgent("agent", "provider", "model", create));
+    error = assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
     assertEquals(
         "agent definition config tools must not contain surrounding whitespace",
         error.getMessage());
@@ -71,39 +68,33 @@ public class AgentDefinitionMutationFactoryTest {
   public void shouldRequireCompleteConfigurationAndEnforceLimits() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     assertThrows(
-        AiValidationException.class,
-        () -> factory.newAgent(" ", "provider", "model", new AgentDefinitionCreateDTO()));
+        AiValidationException.class, () -> factory.newAgent(" ", new AgentDefinitionCreateDTO()));
     assertThrows(
         AiValidationException.class,
         () ->
             factory.newAgent(
                 "\u2003agent\u2003",
-                "provider",
-                "model",
                 create("\u2003agent\u2003", "provider/model", config(List.of(), List.of()), null)));
-    assertThrows(
-        AiValidationException.class,
-        () -> factory.newAgent("agent", " ", "model", new AgentDefinitionCreateDTO()));
+    AgentDefinitionCreateDTO missingModel =
+        create("agent", null, config(List.of(), List.of()), null);
+    assertThrows(AiValidationException.class, () -> factory.newAgent("agent", missingModel));
+    missingModel.setModel("no-slash");
+    assertThrows(AiValidationException.class, () -> factory.newAgent("agent", missingModel));
 
     AgentDefinitionCreateDTO incomplete = create("agent", "provider/model", null, null);
-    assertThrows(
-        AiValidationException.class,
-        () -> factory.newAgent("agent", "provider", "model", incomplete));
+    assertThrows(AiValidationException.class, () -> factory.newAgent("agent", incomplete));
     incomplete.setConfig(config(List.of(), List.of()));
-    AgentDefinition allowedBlankVariant =
-        factory.newAgent("agent", "provider", "model", incomplete);
+    AgentDefinition allowedBlankVariant = factory.newAgent("agent", incomplete);
     assertNull(allowedBlankVariant.getVariant());
 
     AgentDefinitionCreateDTO oversized =
         create("n".repeat(65), "provider/model", config(List.of(), List.of()), null);
     assertThrows(
-        AiValidationException.class,
-        () -> factory.newAgent(oversized.getName(), "provider", "model", oversized));
+        AiValidationException.class, () -> factory.newAgent(oversized.getName(), oversized));
     AgentDefinitionCreateDTO pathBreaking =
         create("agent/name", "provider/model", config(List.of(), List.of()), null);
     assertThrows(
-        AiValidationException.class,
-        () -> factory.newAgent(pathBreaking.getName(), "provider", "model", pathBreaking));
+        AiValidationException.class, () -> factory.newAgent(pathBreaking.getName(), pathBreaking));
   }
 
   private static AgentDefinitionCreateDTO create(
