@@ -13,8 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -23,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
@@ -149,7 +148,7 @@ public class StudioHarnessQueryService {
     dto.setThreadId(thread.id().toString());
     dto.setCreatedAt(thread.createdAt());
     dto.setUpdatedAt(thread.updatedAt());
-    dto.setStatus(status(context));
+    dto.setStatus(ThreadRuntimeStatus.from(context).name());
     var selection = snapshot.entryPath().baseSettings().model();
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
     model.setProviderName(selection.providerName());
@@ -158,41 +157,6 @@ public class StudioHarnessQueryService {
     dto.setModel(model);
     dto.setHeadMessagePreview(headMessagePreview(snapshot));
     return dto;
-  }
-
-  private static String status(ThreadContext context) {
-    return switch (context) {
-      case ThreadContext.IdleOrHistorical ignored -> "IDLE";
-      case ThreadContext.ContinuationDue ignored -> "CONTINUATION_DUE";
-      case ThreadContext.ModelActive active -> "MODEL_" + active.model().status().name();
-      case ThreadContext.ModelTerminalPending ignored -> "APPLYING";
-      case ThreadContext.ToolActive active -> "TOOL_" + toolStatus(active.siblings());
-      case ThreadContext.ToolTerminalPending ignored -> "APPLYING";
-    };
-  }
-
-  private static String toolStatus(List<ToolInvocation> siblings) {
-    for (var sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.WAITING_APPROVAL) {
-        return ToolInvocationStatus.WAITING_APPROVAL.name();
-      }
-    }
-    for (var sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.RUNNING) {
-        return ToolInvocationStatus.RUNNING.name();
-      }
-    }
-    for (var sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.DISPATCHING) {
-        return ToolInvocationStatus.DISPATCHING.name();
-      }
-    }
-    for (var sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.READY) {
-        return ToolInvocationStatus.READY.name();
-      }
-    }
-    throw new IllegalStateException("TOOL_ACTIVE context must contain a non-terminal tool");
   }
 
   private static String firstMessagePreview(List<Entry> entries, UUID sessionId) {

@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -36,8 +35,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -89,9 +88,8 @@ import java.util.regex.Pattern;
  *
  * <p>实体 id（Thread / Session / Entry / Invocation / clientCommandId / stopRequestId / decisionId）均为
  * canonical UUID string；version 与 command sequence 仍是十进制字符串。domain JSON payload 只通过规范 runtime
- * codecs 编解码。Thread 状态与 processing 标志通过共享的 {@link ThreadContextClassifier} 从 {@link ThreadSnapshot}
- * 确定性推导：IDLE / CONTINUATION_DUE / MODEL_&lt;status&gt; / TOOL_&lt;status&gt; / APPLYING；只有 IDLE 时
- * processing 为 false。
+ * codecs 编解码。Thread 状态与 processing 标志通过共享的 {@link ThreadContextClassifier} 与 {@link
+ * ThreadRuntimeStatus} 从 {@link ThreadSnapshot} 确定性推导。
  *
  * <p>所有返回的 DTO 列表都是不可变副本。
  */
@@ -176,9 +174,15 @@ public final class HarnessRuntimeWebMapper {
     dto.setYoloEnabled(snapshot.thread().yoloEnabled());
     dto.setNextCommandSequence(Long.toString(snapshot.thread().nextCommandSequence()));
     dto.setVersion(Long.toString(snapshot.thread().version()));
-    String status = deriveStatus(snapshot);
-    dto.setStatus(status);
-    dto.setProcessing(!"IDLE".equals(status));
+    ThreadRuntimeStatus status =
+        ThreadRuntimeStatus.from(
+            CLASSIFIER.classify(
+                snapshot.thread(),
+                snapshot.entryPath(),
+                snapshot.model(),
+                snapshot.toolSiblings()));
+    dto.setStatus(status.name());
+    dto.setProcessing(status.isProcessing());
     dto.setBranchSettings(toBranchSettingsDto(snapshot.entryPath().baseSettings()));
     dto.setCreateTime(snapshot.thread().createdAt());
     dto.setUpdateTime(snapshot.thread().updatedAt());
@@ -740,46 +744,6 @@ public final class HarnessRuntimeWebMapper {
             "field " + field + " is forbidden for command type " + dto.getType());
       }
     }
-  }
-
-  private static String deriveStatus(ThreadSnapshot snapshot) {
-    ThreadContext context =
-        CLASSIFIER.classify(
-            snapshot.thread(), snapshot.entryPath(), snapshot.model(), snapshot.toolSiblings());
-    return switch (context) {
-      case ThreadContext.IdleOrHistorical ignored -> "IDLE";
-      case ThreadContext.ContinuationDue ignored -> "CONTINUATION_DUE";
-      case ThreadContext.ModelActive active -> "MODEL_" + active.model().status().name();
-      case ThreadContext.ModelTerminalPending ignored -> "APPLYING";
-      case ThreadContext.ToolActive active -> "TOOL_" + toolStatus(active.siblings());
-      case ThreadContext.ToolTerminalPending ignored -> "APPLYING";
-    };
-  }
-
-  /** TOOL_ACTIVE 上下文下 Tool siblings 的交互/在途阻塞状态优先级。 */
-  private static String toolStatus(List<ToolInvocation> siblings) {
-    for (ToolInvocation sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.WAITING_APPROVAL) {
-        return ToolInvocationStatus.WAITING_APPROVAL.name();
-      }
-    }
-    for (ToolInvocation sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.RUNNING) {
-        return ToolInvocationStatus.RUNNING.name();
-      }
-    }
-    for (ToolInvocation sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.DISPATCHING) {
-        return ToolInvocationStatus.DISPATCHING.name();
-      }
-    }
-    for (ToolInvocation sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.READY) {
-        return ToolInvocationStatus.READY.name();
-      }
-    }
-    throw new IllegalStateException(
-        "TOOL_ACTIVE context must contain at least one non-terminal tool invocation");
   }
 
   private static EnvironmentBinding toEnvironmentBinding(EnvironmentBindingDTO dto) {
