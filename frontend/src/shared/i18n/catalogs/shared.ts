@@ -9,6 +9,14 @@ export const sharedCatalog = {
     'en-US': 'Select an option',
     'zh-CN': '请选择',
   },
+  'shared.numberInput.increment': {
+    'en-US': 'Increase',
+    'zh-CN': '增加',
+  },
+  'shared.numberInput.decrement': {
+    'en-US': 'Decrease',
+    'zh-CN': '减少',
+  },
   'shared.cancel': {
     'en-US': 'Cancel',
     'zh-CN': '取消',

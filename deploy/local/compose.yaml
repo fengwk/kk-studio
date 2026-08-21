@@ -16,6 +16,7 @@ name: kk-studio-local
 #   KK_STUDIO_REDIS_HOST   (default 127.0.0.1) -- host bind address for Redis
 #   KK_STUDIO_PG_DATABASE / KK_STUDIO_PG_USER / KK_STUDIO_PG_PASSWORD
 #   KK_STUDIO_SPRING_PROFILES_ACTIVE (default dev)
+#   KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES (default 16777216) -- Daemon WebSocket frame cap
 
 services:
   postgres:

@@ -16,6 +16,13 @@ vi.mock('@/shared/api/system-settings-service', () => ({
   createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))
 
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listTools: vi.fn(async () => []),
+    listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })),
+  },
+}))
+
 const STORAGE_KEY = 'kkstudio.browser-preferences.v1'
 
 interface NotificationState {
@@ -237,7 +244,9 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
     const user = userEvent.setup()
     renderSettings()
 
-    ;(await tabByName('常规')).focus()
+    const generalTab = await tabByName('常规')
+    await tabByName('高级')
+    generalTab.focus()
     await user.keyboard('{ArrowRight}')
     expect(selectedTab()).toBe(await tabByName('AI 运行时'))
     expect(document.activeElement?.id).toBe('settings-tab-aiRuntime')

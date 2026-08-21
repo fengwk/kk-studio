@@ -11,12 +11,24 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { makeSettingsDto, makeSettingsSchema } from '@/features/settings/settings-test-fixtures'
 import { SettingsPage } from '@/features/settings/SettingsPage'
+import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }))
 
 vi.mock('@/shared/api/system-settings-service', () => ({
   systemSettingsService: { get: mocks.get, getSchema: mocks.getSchema, update: mocks.update },
   createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
+}))
+
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listTools: vi.fn(async () => [
+      { name: 'bash', version: '1', description: null, type: 'PLATFORM' },
+      { name: 'write', version: '1', description: null, type: 'PLATFORM' },
+      { name: 'edit', version: '1', description: null, type: 'PLATFORM' },
+    ]),
+    listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })),
+  },
 }))
 
 /** 测试级「真实后端」：GET 返回当前状态，PUT 按 expectedVersion CAS 推进版本。 */
@@ -79,9 +91,9 @@ describe('system settings server editor', () => {
     renderSettings()
 
     await userEvent.click(await serverTab('AI 运行时'))
-    expect(await screen.findByLabelText('最大重试次数')).toHaveValue(3)
-    expect(screen.getByLabelText('基础延迟（毫秒）')).toHaveValue(2000)
-    expect(screen.getByLabelText('保留最近 token')).toHaveValue(20000)
+    expect(await screen.findByLabelText('最大重试次数')).toHaveValue('3')
+    expect(screen.getByLabelText('基础延迟（毫秒）')).toHaveValue('2000')
+    expect(screen.getByLabelText('保留最近 token')).toHaveValue('20000')
   })
 
   it('labels permission as next-invocation and default YOLO as new-chat timing', async () => {
@@ -89,9 +101,9 @@ describe('system settings server editor', () => {
     renderSettings()
 
     await userEvent.click(await serverTab('工具与权限'))
-    expect(await screen.findByText('下次调用生效')).toBeInTheDocument()
+    expect(await screen.findAllByText('下次调用生效')).toHaveLength(2)
     expect(screen.getByText('新建对话生效')).toBeInTheDocument()
-    expect(screen.getByText('重启后生效')).toBeInTheDocument()
+    expect(screen.queryByText('重启后生效')).not.toBeInTheDocument()
   })
 
   it('does not expose unvalidated server tabs while the aggregate is pending', async () => {
@@ -108,7 +120,7 @@ describe('system settings server editor', () => {
 
     resolveGet!(makeSettingsDto())
     await userEvent.click(await serverTab('AI 运行时'))
-    expect(await screen.findByLabelText('最大重试次数')).toHaveValue(3)
+    expect(await screen.findByLabelText('最大重试次数')).toHaveValue('3')
   })
 
   it('shows a load error with retry and recovers on retry', async () => {
@@ -120,7 +132,7 @@ describe('system settings server editor', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '重试' }))
     await userEvent.click(await serverTab('AI 运行时'))
-    expect(await screen.findByLabelText('最大重试次数')).toHaveValue(3)
+    expect(await screen.findByLabelText('最大重试次数')).toHaveValue('3')
   })
 
   it('does not build any server tab when the schema fails validation', async () => {
@@ -249,8 +261,8 @@ describe('system settings server editor', () => {
     await queryClient.refetchQueries({ queryKey: queryKeys.systemSettings.all })
     await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2))
     expect((await backend.get()).version).toBe('1')
-    expect(screen.getByLabelText('最大重试次数')).toHaveValue(3)
-    expect(delay).toHaveValue(3000)
+    expect(screen.getByLabelText('最大重试次数')).toHaveValue('3')
+    expect(delay).toHaveValue('3000')
 
     // 保存必须携带 draft 快照的 baseVersion=0，而不是权威的 v1，否则会静默覆盖并发修改。
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -280,7 +292,7 @@ describe('system settings server editor', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '重置' }))
     expect(screen.getByText('已是最新')).toBeInTheDocument()
-    expect(field).toHaveValue(8388608)
+    expect(field).toHaveValue('8388608')
     expect(mocks.update).not.toHaveBeenCalled()
   })
 
@@ -299,22 +311,18 @@ describe('system settings server editor', () => {
     expect(mocks.update).not.toHaveBeenCalled()
   })
 
-  it('blocks saving when two permission groups collide to the same canonical tool name after trim', async () => {
+  it('merges a newly added tool group onto an existing catalog tool instead of duplicating it', async () => {
     const backend = createBackend()
     mocks.get.mockImplementation(backend.get)
-    mocks.update.mockImplementation(backend.update)
     renderSettings()
 
     await userEvent.click(await serverTab('工具与权限'))
+    expect(await screen.findAllByLabelText(/^权限分组/)).toHaveLength(3)
     await userEvent.click(screen.getByRole('button', { name: '添加工具' }))
-    const toolInputs = screen.getAllByLabelText('工具')
-    // 新分组输入一个与既有 write 在 trim 后相同的名称：保存必须拒绝而非静默覆盖前一个分组的规则。
-    await userEvent.type(toolInputs[toolInputs.length - 1]!, '  write  ')
-
-    await userEvent.click(screen.getByRole('button', { name: '保存' }))
-
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('两个权限分组在去空格后使用了相同的工具名')
-    expect(mocks.update).not.toHaveBeenCalled()
+    const groups = screen.getAllByLabelText(/^权限分组/)
+    expect(groups).toHaveLength(4)
+    await chooseSelectOption(userEvent.setup(), '工具', 'write', within(groups[3]!))
+    expect(screen.getAllByLabelText(/^权限分组/)).toHaveLength(3)
+    expect(screen.getByLabelText('权限分组 write')).toBeInTheDocument()
   })
 })

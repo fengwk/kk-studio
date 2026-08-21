@@ -19,7 +19,7 @@ describe('system settings draft codec', () => {
     ])
     expect(draft.environment.maxResourceBytes).toBe('8388608')
     expect(draft.aiRuntime.retryMaxRetries).toBe('3')
-    expect(draft.aiRuntime.subagentMaxTotalConcurrency).toBe('')
+    expect(draft.aiRuntime.subagentMaxTotalConcurrency).toBe('0')
     expect(draft.storageMedia.thumbnailQuality).toBe('80')
     expect(draft.integrations.comfyui.baseUrl).toBe('')
     expect(draft.integrations.openCliHub.baseUrl).toBe('http://vps-opencli-hub:8080')
@@ -45,14 +45,13 @@ describe('system settings draft codec', () => {
     )
   })
 
-  it('normalizes blank optional text to null and nullable int empty to null', () => {
+  it('normalizes blank optional text to null', () => {
     const draft = settingsSectionsToDraft(makeSettingsDto())
     draft.integrations.minimaxH3.comfyBaseUrl = '   '
     draft.integrations.comfyui.baseUrl = 'https://comfy.example.com'
     const update = assembleSettingsUpdate(draft, '0')
     expect(update.integrations.minimaxH3.comfyBaseUrl).toBeNull()
     expect(update.integrations.comfyui.baseUrl).toBe('https://comfy.example.com')
-    expect(update.aiRuntime.subagentMaxTotalConcurrency).toBeNull()
   })
 
   it('rejects blank tool names, blank patterns and empty numeric fields with typed reasons', () => {

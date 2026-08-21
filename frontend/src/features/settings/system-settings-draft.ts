@@ -52,7 +52,6 @@ export interface ModelSelectionDraft {
 
 export interface SystemSettingsEnvironmentDraft {
   maxResourceBytes: DraftNumericField
-  maxMessageBytes: DraftNumericField
   heartbeatTimeoutMillis: DraftNumericField
   directoryListTimeoutMillis: DraftNumericField
 }
@@ -197,7 +196,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
     aiRuntime: aiRuntimeToDraft(dto.aiRuntime),
     environment: {
       maxResourceBytes: dto.environment.maxResourceBytes,
-      maxMessageBytes: dto.environment.maxMessageBytes,
       heartbeatTimeoutMillis: dto.environment.heartbeatTimeoutMillis,
       directoryListTimeoutMillis: dto.environment.directoryListTimeoutMillis,
     },
@@ -260,8 +258,7 @@ function aiRuntimeToDraft(
           },
     subagentMaxDepth: String(dto.subagentMaxDepth),
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
-    subagentMaxTotalConcurrency:
-      dto.subagentMaxTotalConcurrency == null ? '' : String(dto.subagentMaxTotalConcurrency),
+    subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency ?? 0),
     subagentIdleTimeoutMillis: dto.subagentIdleTimeoutMillis,
     subagentMaxTurns: String(dto.subagentMaxTurns),
   }
@@ -375,7 +372,7 @@ export function assembleSettingsUpdate(
       ),
       subagentMaxDepth: requiredInt(draft.aiRuntime.subagentMaxDepth),
       subagentMaxConcurrency: requiredInt(draft.aiRuntime.subagentMaxConcurrency),
-      subagentMaxTotalConcurrency: nullableInt(
+      subagentMaxTotalConcurrency: requiredInt(
         draft.aiRuntime.subagentMaxTotalConcurrency,
       ),
       subagentIdleTimeoutMillis: requiredLong(draft.aiRuntime.subagentIdleTimeoutMillis),
@@ -383,7 +380,6 @@ export function assembleSettingsUpdate(
     },
     environment: {
       maxResourceBytes: requiredLong(draft.environment.maxResourceBytes),
-      maxMessageBytes: requiredLong(draft.environment.maxMessageBytes),
       heartbeatTimeoutMillis: requiredLong(draft.environment.heartbeatTimeoutMillis),
       directoryListTimeoutMillis: requiredLong(draft.environment.directoryListTimeoutMillis),
     },
@@ -554,17 +550,6 @@ function requiredInt(value: string): number {
     throw new DraftValidationError('emptyNumericField')
   }
   return parseInt(value.trim(), 10)
-}
-
-function nullableInt(value: string): number | null {
-  const trimmed = value.trim()
-  if (trimmed === '') {
-    return null
-  }
-  if (!/^\d+$/u.test(trimmed)) {
-    throw new DraftValidationError('emptyNumericField')
-  }
-  return parseInt(trimmed, 10)
 }
 
 function nullableText(value: string): string | null {

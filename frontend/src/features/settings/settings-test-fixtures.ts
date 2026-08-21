@@ -32,13 +32,12 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       compactionFallbackModel: null,
       subagentMaxDepth: 2,
       subagentMaxConcurrency: 10,
-      subagentMaxTotalConcurrency: null,
+      subagentMaxTotalConcurrency: 0,
       subagentIdleTimeoutMillis: '0',
       subagentMaxTurns: 50,
     },
     environment: {
       maxResourceBytes: '8388608',
-      maxMessageBytes: '16777216',
       heartbeatTimeoutMillis: '60000',
       directoryListTimeoutMillis: '10000',
     },
@@ -153,7 +152,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'aiRuntime.retryMaxRetries',
                 labelKey: 'settings.field.aiRuntime.retryMaxRetries',
-                hintKey: null,
+                hintKey: 'settings.field.aiRuntime.retryMaxRetries.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 0,
@@ -163,7 +162,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'aiRuntime.retryBackoffStrategy',
                 labelKey: 'settings.field.aiRuntime.retryBackoffStrategy',
-                hintKey: null,
+                hintKey: 'settings.field.aiRuntime.retryBackoffStrategy.hint',
                 type: 'ENUM',
                 nullable: false,
                 min: null,
@@ -176,7 +175,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'aiRuntime.retryBaseDelayMillis',
                 labelKey: 'settings.field.aiRuntime.retryBaseDelayMillis',
-                hintKey: null,
+                hintKey: 'settings.field.aiRuntime.retryBaseDelayMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -186,7 +185,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'aiRuntime.retryMaxDelayMillis',
                 labelKey: 'settings.field.aiRuntime.retryMaxDelayMillis',
-                hintKey: null,
+                hintKey: 'settings.field.aiRuntime.retryMaxDelayMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -205,7 +204,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'aiRuntime.compactionKeepRecentTokens',
                 labelKey: 'settings.field.aiRuntime.compactionKeepRecentTokens',
-                hintKey: null,
+                hintKey: 'settings.field.aiRuntime.compactionKeepRecentTokens.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -234,7 +233,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'aiRuntime.subagentMaxDepth',
                 labelKey: 'settings.field.aiRuntime.subagentMaxDepth',
-                hintKey: null,
+                hintKey: 'settings.field.aiRuntime.subagentMaxDepth.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -244,7 +243,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'aiRuntime.subagentMaxConcurrency',
                 labelKey: 'settings.field.aiRuntime.subagentMaxConcurrency',
-                hintKey: null,
+                hintKey: 'settings.field.aiRuntime.subagentMaxConcurrency.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -256,8 +255,8 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 labelKey: 'settings.field.aiRuntime.subagentMaxTotalConcurrency',
                 hintKey: 'settings.field.aiRuntime.subagentMaxTotalConcurrency.hint',
                 type: 'INTEGER',
-                nullable: true,
-                min: 1,
+                nullable: false,
+                min: 0,
                 max: null,
                 options: null,
               },
@@ -274,7 +273,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'aiRuntime.subagentMaxTurns',
                 labelKey: 'settings.field.aiRuntime.subagentMaxTurns',
-                hintKey: null,
+                hintKey: 'settings.field.aiRuntime.subagentMaxTurns.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -301,7 +300,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'tool.permission',
                 labelKey: 'settings.section.tool.permission.title',
-                hintKey: null,
+                hintKey: 'settings.field.tool.permission.hint',
                 type: 'PERMISSION',
                 nullable: false,
                 min: null,
@@ -324,7 +323,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'tool.defaultYolo',
                 labelKey: 'settings.field.tool.defaultYolo',
-                hintKey: null,
+                hintKey: 'settings.field.tool.defaultYolo.hint',
                 type: 'BOOLEAN',
                 nullable: false,
                 min: null,
@@ -343,7 +342,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'tool.modelGatewayBusyRetryMillis',
                 labelKey: 'settings.field.tool.modelGatewayBusyRetryMillis',
-                hintKey: null,
+                hintKey: 'settings.field.tool.modelGatewayBusyRetryMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -353,7 +352,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'tool.toolGatewayBusyRetryMillis',
                 labelKey: 'settings.field.tool.toolGatewayBusyRetryMillis',
-                hintKey: null,
+                hintKey: 'settings.field.tool.toolGatewayBusyRetryMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -363,7 +362,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'tool.toolGatewayOverloadRetryMillis',
                 labelKey: 'settings.field.tool.toolGatewayOverloadRetryMillis',
-                hintKey: null,
+                hintKey: 'settings.field.tool.toolGatewayOverloadRetryMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -373,7 +372,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'tool.skillLoadTimeoutMillis',
                 labelKey: 'settings.field.tool.skillLoadTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.tool.skillLoadTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -388,7 +387,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         key: 'environment',
         labelKey: 'settings.tabs.environment',
         descriptionKey: 'settings.section.environment.description',
-        restartRequired: true,
+        restartRequired: false,
         groups: [
           {
             key: 'environment.runtime',
@@ -400,7 +399,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'environment.maxResourceBytes',
                 labelKey: 'settings.field.environment.maxResourceBytes',
-                hintKey: null,
+                hintKey: 'settings.field.environment.maxResourceBytes.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -410,7 +409,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'environment.heartbeatTimeoutMillis',
                 labelKey: 'settings.field.environment.heartbeatTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.environment.heartbeatTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -420,26 +419,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'environment.directoryListTimeoutMillis',
                 labelKey: 'settings.field.environment.directoryListTimeoutMillis',
-                hintKey: null,
-                type: 'LONG',
-                nullable: false,
-                min: 1,
-                max: null,
-                options: null,
-              },
-            ],
-          },
-          {
-            key: 'environment.transport',
-            labelKey: 'settings.section.environment.transport.title',
-            descriptionKey: 'settings.section.environment.transport.description',
-            restartRequired: true,
-            applyTiming: 'RESTART',
-            fields: [
-              {
-                path: 'environment.maxMessageBytes',
-                labelKey: 'settings.field.environment.maxMessageBytes',
-                hintKey: null,
+                hintKey: 'settings.field.environment.directoryListTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -466,7 +446,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.comfyui.enabled',
                 labelKey: 'settings.field.integrations.comfyui.enabled',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.comfyui.enabled.hint',
                 type: 'BOOLEAN',
                 nullable: false,
                 min: null,
@@ -476,7 +456,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.comfyui.baseUrl',
                 labelKey: 'settings.field.integrations.comfyui.baseUrl',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.comfyui.baseUrl.hint',
                 type: 'TEXT',
                 nullable: true,
                 min: null,
@@ -486,7 +466,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.comfyui.connectTimeoutMillis',
                 labelKey: 'settings.field.integrations.comfyui.connectTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.comfyui.connectTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -496,7 +476,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.comfyui.readTimeoutMillis',
                 labelKey: 'settings.field.integrations.comfyui.readTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.comfyui.readTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -506,7 +486,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.comfyui.websocketTimeoutMillis',
                 labelKey: 'settings.field.integrations.comfyui.websocketTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.comfyui.websocketTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -516,7 +496,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.comfyui.maxInputFileBytes',
                 labelKey: 'settings.field.integrations.comfyui.maxInputFileBytes',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.comfyui.maxInputFileBytes.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -535,7 +515,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.openCliHub.enabled',
                 labelKey: 'settings.field.integrations.openCliHub.enabled',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.openCliHub.enabled.hint',
                 type: 'BOOLEAN',
                 nullable: false,
                 min: null,
@@ -545,7 +525,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.openCliHub.baseUrl',
                 labelKey: 'settings.field.integrations.openCliHub.baseUrl',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.openCliHub.baseUrl.hint',
                 type: 'TEXT',
                 nullable: true,
                 min: null,
@@ -555,7 +535,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.openCliHub.connectTimeoutMillis',
                 labelKey: 'settings.field.integrations.openCliHub.connectTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.openCliHub.connectTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -565,7 +545,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.openCliHub.requestTimeoutMillis',
                 labelKey: 'settings.field.integrations.openCliHub.requestTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.openCliHub.requestTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1000,
@@ -575,7 +555,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.openCliHub.longPollTimeoutMillis',
                 labelKey: 'settings.field.integrations.openCliHub.longPollTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.openCliHub.longPollTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 121000,
@@ -585,7 +565,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.openCliHub.streamBufferBytes',
                 labelKey: 'settings.field.integrations.openCliHub.streamBufferBytes',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.openCliHub.streamBufferBytes.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1024,
@@ -595,7 +575,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.openCliHub.maxJsonResponseBytes',
                 labelKey: 'settings.field.integrations.openCliHub.maxJsonResponseBytes',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.openCliHub.maxJsonResponseBytes.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1024,
@@ -605,7 +585,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.openCliHub.maxErrorResponseBytes',
                 labelKey: 'settings.field.integrations.openCliHub.maxErrorResponseBytes',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.openCliHub.maxErrorResponseBytes.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 256,
@@ -615,7 +595,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.openCliHub.maxOutputChars',
                 labelKey: 'settings.field.integrations.openCliHub.maxOutputChars',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.openCliHub.maxOutputChars.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1024,
@@ -634,7 +614,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.seedance.enabled',
                 labelKey: 'settings.field.integrations.seedance.enabled',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.seedance.enabled.hint',
                 type: 'BOOLEAN',
                 nullable: false,
                 min: null,
@@ -644,7 +624,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.seedance.workspaceId',
                 labelKey: 'settings.field.integrations.seedance.workspaceId',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.seedance.workspaceId.hint',
                 type: 'TEXT',
                 nullable: true,
                 min: null,
@@ -654,7 +634,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.seedance.retry',
                 labelKey: 'settings.field.integrations.seedance.retry',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.seedance.retry.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 0,
@@ -664,7 +644,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.seedance.hubExecutionTimeoutMillis',
                 labelKey: 'settings.field.integrations.seedance.hubExecutionTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.seedance.hubExecutionTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1000,
@@ -674,7 +654,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.seedance.statusPollIntervalMillis',
                 labelKey: 'settings.field.integrations.seedance.statusPollIntervalMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.seedance.statusPollIntervalMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -684,7 +664,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.seedance.maxWaitMillis',
                 labelKey: 'settings.field.integrations.seedance.maxWaitMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.seedance.maxWaitMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1000,
@@ -703,7 +683,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.gptImage2.paidEnabled',
                 labelKey: 'settings.field.integrations.gptImage2.paidEnabled',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.gptImage2.paidEnabled.hint',
                 type: 'BOOLEAN',
                 nullable: false,
                 min: null,
@@ -713,7 +693,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.gptImage2.askTimeoutSeconds',
                 labelKey: 'settings.field.integrations.gptImage2.askTimeoutSeconds',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.gptImage2.askTimeoutSeconds.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -723,7 +703,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.gptImage2.hubExecutionTimeoutMillis',
                 labelKey: 'settings.field.integrations.gptImage2.hubExecutionTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.gptImage2.hubExecutionTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 31000,
@@ -733,7 +713,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.gptImage2.maxWaitMillis',
                 labelKey: 'settings.field.integrations.gptImage2.maxWaitMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.gptImage2.maxWaitMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1000,
@@ -752,7 +732,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.minimaxH3.enabled',
                 labelKey: 'settings.field.integrations.minimaxH3.enabled',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.minimaxH3.enabled.hint',
                 type: 'BOOLEAN',
                 nullable: false,
                 min: null,
@@ -762,7 +742,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.minimaxH3.promptAgentName',
                 labelKey: 'settings.field.integrations.minimaxH3.promptAgentName',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.minimaxH3.promptAgentName.hint',
                 type: 'TEXT',
                 nullable: true,
                 min: null,
@@ -772,7 +752,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.minimaxH3.promptEnvironmentName',
                 labelKey: 'settings.field.integrations.minimaxH3.promptEnvironmentName',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.minimaxH3.promptEnvironmentName.hint',
                 type: 'TEXT',
                 nullable: true,
                 min: null,
@@ -782,7 +762,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.minimaxH3.promptMaxWaitMillis',
                 labelKey: 'settings.field.integrations.minimaxH3.promptMaxWaitMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.minimaxH3.promptMaxWaitMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -792,7 +772,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.minimaxH3.comfyBaseUrl',
                 labelKey: 'settings.field.integrations.minimaxH3.comfyBaseUrl',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.minimaxH3.comfyBaseUrl.hint',
                 type: 'TEXT',
                 nullable: true,
                 min: null,
@@ -802,7 +782,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.minimaxH3.comfyConnectTimeoutMillis',
                 labelKey: 'settings.field.integrations.minimaxH3.comfyConnectTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.minimaxH3.comfyConnectTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -812,7 +792,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.minimaxH3.comfyRequestTimeoutMillis',
                 labelKey: 'settings.field.integrations.minimaxH3.comfyRequestTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.minimaxH3.comfyRequestTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -822,7 +802,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.minimaxH3.comfyPollIntervalMillis',
                 labelKey: 'settings.field.integrations.minimaxH3.comfyPollIntervalMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.minimaxH3.comfyPollIntervalMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -832,7 +812,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'integrations.minimaxH3.comfyMaxWaitMillis',
                 labelKey: 'settings.field.integrations.minimaxH3.comfyMaxWaitMillis',
-                hintKey: null,
+                hintKey: 'settings.field.integrations.minimaxH3.comfyMaxWaitMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -859,7 +839,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'storageMedia.uploadExpiresSeconds',
                 labelKey: 'settings.field.storageMedia.uploadExpiresSeconds',
-                hintKey: null,
+                hintKey: 'settings.field.storageMedia.uploadExpiresSeconds.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -869,7 +849,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'storageMedia.s3Enabled',
                 labelKey: 'settings.field.storageMedia.s3Enabled',
-                hintKey: null,
+                hintKey: 'settings.field.storageMedia.s3Enabled.hint',
                 type: 'BOOLEAN',
                 nullable: false,
                 min: null,
@@ -879,7 +859,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'storageMedia.s3PresignDefaultExpiresSeconds',
                 labelKey: 'settings.field.storageMedia.s3PresignDefaultExpiresSeconds',
-                hintKey: null,
+                hintKey: 'settings.field.storageMedia.s3PresignDefaultExpiresSeconds.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -889,7 +869,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'storageMedia.s3PresignMaxExpiresSeconds',
                 labelKey: 'settings.field.storageMedia.s3PresignMaxExpiresSeconds',
-                hintKey: null,
+                hintKey: 'settings.field.storageMedia.s3PresignMaxExpiresSeconds.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -908,7 +888,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'storageMedia.canvasMediaProcessTimeoutMillis',
                 labelKey: 'settings.field.storageMedia.canvasMediaProcessTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.storageMedia.canvasMediaProcessTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -918,7 +898,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'storageMedia.thumbnailMaxDimension',
                 labelKey: 'settings.field.storageMedia.thumbnailMaxDimension',
-                hintKey: null,
+                hintKey: 'settings.field.storageMedia.thumbnailMaxDimension.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -928,7 +908,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'storageMedia.thumbnailQuality',
                 labelKey: 'settings.field.storageMedia.thumbnailQuality',
-                hintKey: null,
+                hintKey: 'settings.field.storageMedia.thumbnailQuality.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -955,7 +935,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.resourceMaxBytes',
                 labelKey: 'settings.field.advanced.resourceMaxBytes',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.resourceMaxBytes.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -974,7 +954,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.processorLeaseDurationMillis',
                 labelKey: 'settings.field.advanced.processorLeaseDurationMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.processorLeaseDurationMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -984,7 +964,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.processorHeartbeatIntervalMillis',
                 labelKey: 'settings.field.advanced.processorHeartbeatIntervalMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.processorHeartbeatIntervalMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -994,7 +974,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.threadResolveFailureDelayMillis',
                 labelKey: 'settings.field.advanced.threadResolveFailureDelayMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.threadResolveFailureDelayMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1013,7 +993,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.modelDispatchBusyFallbackDelayMillis',
                 labelKey: 'settings.field.advanced.modelDispatchBusyFallbackDelayMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.modelDispatchBusyFallbackDelayMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1023,7 +1003,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.toolPreflightFailureDelayMillis',
                 labelKey: 'settings.field.advanced.toolPreflightFailureDelayMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.toolPreflightFailureDelayMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1033,7 +1013,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.toolDispatchBusyFallbackDelayMillis',
                 labelKey: 'settings.field.advanced.toolDispatchBusyFallbackDelayMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.toolDispatchBusyFallbackDelayMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1043,7 +1023,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.dispatcherLeaseDurationMillis',
                 labelKey: 'settings.field.advanced.dispatcherLeaseDurationMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.dispatcherLeaseDurationMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1053,7 +1033,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.dispatcherPollIntervalMillis',
                 labelKey: 'settings.field.advanced.dispatcherPollIntervalMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.dispatcherPollIntervalMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1063,7 +1043,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.dispatcherRejectionDelayMillis',
                 labelKey: 'settings.field.advanced.dispatcherRejectionDelayMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.dispatcherRejectionDelayMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1073,7 +1053,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.dispatcherMaxDispatchTasks',
                 labelKey: 'settings.field.advanced.dispatcherMaxDispatchTasks',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.dispatcherMaxDispatchTasks.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -1083,7 +1063,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.dispatcherWorkerConcurrency',
                 labelKey: 'settings.field.advanced.dispatcherWorkerConcurrency',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.dispatcherWorkerConcurrency.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -1093,7 +1073,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.dispatcherWorkerQueueCapacity',
                 labelKey: 'settings.field.advanced.dispatcherWorkerQueueCapacity',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.dispatcherWorkerQueueCapacity.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -1112,7 +1092,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.canvasRealtimeMaxLength',
                 labelKey: 'settings.field.advanced.canvasRealtimeMaxLength',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.canvasRealtimeMaxLength.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1122,7 +1102,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.canvasFunctionExecutorCoreSize',
                 labelKey: 'settings.field.advanced.canvasFunctionExecutorCoreSize',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.canvasFunctionExecutorCoreSize.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -1132,7 +1112,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.canvasFunctionExecutorMaxSize',
                 labelKey: 'settings.field.advanced.canvasFunctionExecutorMaxSize',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.canvasFunctionExecutorMaxSize.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -1142,7 +1122,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.canvasFunctionExecutorQueueCapacity',
                 labelKey: 'settings.field.advanced.canvasFunctionExecutorQueueCapacity',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.canvasFunctionExecutorQueueCapacity.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -1161,7 +1141,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.applicationEventQueueCapacity',
                 labelKey: 'settings.field.advanced.applicationEventQueueCapacity',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.applicationEventQueueCapacity.hint',
                 type: 'INTEGER',
                 nullable: false,
                 min: 1,
@@ -1171,7 +1151,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.applicationEventMaxBytes',
                 labelKey: 'settings.field.advanced.applicationEventMaxBytes',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.applicationEventMaxBytes.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1181,7 +1161,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.applicationEventSendTimeoutMillis',
                 labelKey: 'settings.field.advanced.applicationEventSendTimeoutMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.applicationEventSendTimeoutMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1191,7 +1171,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.applicationEventHeartbeatIntervalMillis',
                 labelKey: 'settings.field.advanced.applicationEventHeartbeatIntervalMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.applicationEventHeartbeatIntervalMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1210,7 +1190,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.postgresqlWorkNotificationPollMillis',
                 labelKey: 'settings.field.advanced.postgresqlWorkNotificationPollMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.postgresqlWorkNotificationPollMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1220,7 +1200,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.postgresqlWorkReconnectBackoffMillis',
                 labelKey: 'settings.field.advanced.postgresqlWorkReconnectBackoffMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.postgresqlWorkReconnectBackoffMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
@@ -1230,7 +1210,7 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
               {
                 path: 'advanced.redisRealtimeRetryDelayMillis',
                 labelKey: 'settings.field.advanced.redisRealtimeRetryDelayMillis',
-                hintKey: null,
+                hintKey: 'settings.field.advanced.redisRealtimeRetryDelayMillis.hint',
                 type: 'LONG',
                 nullable: false,
                 min: 1,
