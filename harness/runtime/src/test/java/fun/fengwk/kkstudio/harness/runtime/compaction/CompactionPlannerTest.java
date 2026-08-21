@@ -33,7 +33,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
@@ -94,6 +99,75 @@ class CompactionPlannerTest {
 
     assertEquals(1_200L, CompactionPlanner.estimateTokens(video));
     assertEquals(1_200L, CompactionPlanner.estimateTokens(nestedVideo));
+  }
+
+  /** 所有可持久化内容类型都必须进入同一个确定性 token 估算公式。 */
+  @Test
+  void estimatesStructuredAndMediaContentsDeterministically() {
+    AgentMessageContent image = new ImageMessageContent("image/png", "image-source");
+    AgentMessageContent audio = new AudioMessageContent("audio/mpeg", "audio-source");
+    AgentMessageContent video = new VideoMessageContent("video/mp4", "video-source");
+    AgentMessageContent resource = new ResourceMessageContent(id(200L), "resource.bin", "preview");
+    Entry assistant =
+        new Entry(
+            id(2L),
+            id(100L),
+            id(1L),
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        new TextMessageContent("abcd"),
+                        new ThinkingMessageContent("efgh"),
+                        new JsonMessageContent("{\"x\":1}"),
+                        new ToolCallMessageContent("call-1", "tool", "tool", "{}"),
+                        image,
+                        audio,
+                        video,
+                        resource)),
+                new AssistantMessageMetadata(
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+                    new ModelCost(
+                        "USD",
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO)),
+                null),
+            BASE);
+    Entry tool =
+        new Entry(
+            id(3L),
+            id(100L),
+            id(2L),
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.TOOL,
+                    List.of(
+                        new ToolResultMessageContent(
+                            "call-1",
+                            "tool",
+                            "tool",
+                            List.of(
+                                new TextMessageContent("ijkl"),
+                                new JsonMessageContent("{\"y\":2}"),
+                                image,
+                                audio,
+                                video,
+                                resource),
+                            false,
+                            "{}"))),
+                null,
+                new ToolResultMetadata(
+                    id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null)),
+            BASE);
+
+    assertEquals(4_806L, CompactionPlanner.estimateTokens(assistant));
+    assertEquals(4_803L, CompactionPlanner.estimateTokens(tool));
   }
 
   @Test
