@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 
 /** 守护生产与集成测试共用的唯一 Flyway 引导路径。 */
 class FlywayBootstrapArchitectureTest {
@@ -21,9 +23,12 @@ class FlywayBootstrapArchitectureTest {
           "core/src/main/resources/data-e2e-postgresql.sql");
   private static final List<String> FLYWAY_RESOURCES =
       List.of(
-          "core/src/main/resources/db/migration/V1__schema.sql",
-          "core/src/main/resources/db/seed/dev/V2__dev_seed.sql",
-          "core/src/main/resources/db/seed/e2e/V2__e2e_seed.sql");
+          "database/src/main/resources/db/migration/V1__schema.sql",
+          "database/src/main/resources/db/seed/dev/V2__dev_seed.sql",
+          "database/src/main/resources/db/seed/e2e/V2__e2e_seed.sql");
+  private static final String OLD_HARNESS_SCHEMA =
+      "harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/"
+          + "postgresql/harness-runtime-schema.sql";
   private static final List<String> BOOTSTRAP_CONFIGS =
       List.of(
           "web/src/main/resources/application-dev.yml",
@@ -45,6 +50,38 @@ class FlywayBootstrapArchitectureTest {
       assertTrue(
           Files.isRegularFile(root.resolve(resource)), "Flyway resource must exist: " + resource);
     }
+    assertFalse(
+        Files.exists(root.resolve(OLD_HARNESS_SCHEMA)),
+        "the old runtime-spring schema mirror must be gone: " + OLD_HARNESS_SCHEMA);
+  }
+
+  @Test
+  void exactlyOneBaselineMigrationExistsAndCoreKeepsNoSeedOrMirror() throws IOException {
+    Path root = repositoryRoot();
+    List<String> migrations =
+        Stream.of("database", "core", "harness")
+            .map(root::resolve)
+            .filter(Files::isDirectory)
+            .flatMap(
+                module ->
+                    walkModuleResources(module)
+                        .filter(path -> path.getFileName().toString().equals("V1__schema.sql")))
+            .map(root::relativize)
+            .map(Path::toString)
+            .toList();
+    assertEquals(
+        List.of("database/src/main/resources/db/migration/V1__schema.sql"),
+        migrations,
+        "V1 baseline must exist exactly once, owned by the database module");
+
+    assertFalse(
+        walkModuleResources(root.resolve("core"))
+            .anyMatch(path -> path.startsWith(root.resolve("core/src/main/resources/db"))),
+        "core must not keep any db/migration or db/seed resources");
+    assertFalse(
+        walkModuleResources(root.resolve("harness"))
+            .anyMatch(path -> path.toString().contains("harness-runtime-schema.sql")),
+        "no harness module may keep the old schema mirror");
   }
 
   @Test
@@ -64,6 +101,9 @@ class FlywayBootstrapArchitectureTest {
     String webPom = Files.readString(root.resolve("web/pom.xml"), StandardCharsets.UTF_8);
     assertTrue(webPom.contains("<artifactId>flyway-core</artifactId>"));
     assertTrue(webPom.contains("<artifactId>flyway-database-postgresql</artifactId>"));
+    assertTrue(
+        webPom.contains("<artifactId>kk-studio-database</artifactId>"),
+        "web must compile against the database module");
 
     String corePom = Files.readString(root.resolve("core/pom.xml"), StandardCharsets.UTF_8);
     assertTrue(
@@ -71,6 +111,18 @@ class FlywayBootstrapArchitectureTest {
     assertTrue(
         corePom.contains(
             "<artifactId>flyway-database-postgresql</artifactId>\n            <scope>test</scope>"));
+  }
+
+  private static Stream<Path> walkModuleResources(Path module) {
+    Path resources = module.resolve("src/main/resources");
+    if (!Files.isDirectory(resources)) {
+      return Stream.empty();
+    }
+    try (Stream<Path> paths = Files.walk(resources)) {
+      return paths.filter(Files::isRegularFile).toList().stream();
+    } catch (IOException error) {
+      throw new IllegalStateException("cannot walk " + resources, error);
+    }
   }
 
   private static Path repositoryRoot() {

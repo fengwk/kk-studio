@@ -17,6 +17,7 @@
     <modules>
         <module>share</module>
         <module>studio</module>
+        <module>database</module>
         <module>core</module>
         <module>web</module>
         <module>harness</module>
@@ -71,6 +72,11 @@
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-harness-runtime-spring</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-database</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

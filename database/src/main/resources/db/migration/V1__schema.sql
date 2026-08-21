@@ -9,14 +9,13 @@
 -- ON UPDATE CURRENT_TIMESTAMP.
 --
 -- Harness execution state is the exact runtime-spring protocol: section 2 below
--- (the seven tables + their indexes) is a single contiguous block copied
--- verbatim from
--- `harness/runtime-spring/.../postgresql/harness-runtime-schema.sql` and must
--- stay byte-identical to that file (guarded by an architecture test).
--- HarnessRuntime owns every execution id via the injected Supplier<UUID>
--- (production: UUID::randomUUID) and owns `version`; the database never
--- mutates them. The only V1 additions around it are the application business
--- tables and the thread version NOTIFY hint trigger (section 4).
+-- (the seven tables + their indexes) is the single authoritative definition of
+-- the durable Harness protocol schema. There is no separate runtime-spring
+-- schema file; this block is the only copy. HarnessRuntime owns every execution
+-- id via the injected Supplier<UUID> (production: UUID::randomUUID) and owns
+-- `version`; the database never mutates them. The only V1 additions around it
+-- are the application business tables and the thread version NOTIFY hint
+-- trigger (section 4).
 --
 -- Canvas is fully UUID: every Canvas-generated id is allocated by the
 -- application (client for node/group/request/command ids, server for
@@ -392,14 +391,12 @@ insert into system_setting (id, config) values (
 ------------------------------------------------------------------------------
 -- 2. Harness runtime execution protocol
 --
--- The block below (the seven tables + their indexes, including comments) is
--- copied verbatim from
--- harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/
--- spring/postgresql/harness-runtime-schema.sql and must stay byte-identical to
--- that file. Columns, checks, FKs and indexes must never drift; HarnessRuntime
--- allocates ids via the injected Supplier<UUID> (production: UUID::randomUUID)
--- and inserts them explicitly (no column defaults). ThreadCommand has no
--- surrogate primary key: identity is (thread_id, sequence).
+-- The block below (the seven tables + their indexes, including comments) is the
+-- single authoritative definition of the durable Harness protocol schema.
+-- Columns, checks, FKs and indexes must never drift; HarnessRuntime allocates
+-- ids via the injected Supplier<UUID> (production: UUID::randomUUID) and
+-- inserts them explicitly (no column defaults). ThreadCommand has no surrogate
+-- primary key: identity is (thread_id, sequence).
 ------------------------------------------------------------------------------
 
 -- Harness Runtime durable schema.
