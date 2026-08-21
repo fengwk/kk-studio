@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
 import { FormSelect } from '@/shared/ui/console/FormSelect'
 
 const OPTIONS = [
@@ -10,44 +11,30 @@ const OPTIONS = [
 ]
 
 describe('FormSelect', () => {
-  it('renders a single labelable control with the matching label', () => {
+  it('renders a labelled listbox trigger rather than a native select', () => {
     render(
-      <label>
-        <span>Choose</span>
-        <FormSelect
-          aria-label="Choose"
-          value="a"
-          options={OPTIONS}
-          onChange={() => undefined}
-        />
-      </label>,
+      <FormSelect
+        aria-label="Choose"
+        value="a"
+        options={OPTIONS}
+        onChange={() => undefined}
+      />,
     )
-    // 通过 aria-label 找到唯一的 select；外部 <label> 不会再额外绑出第二个控件。
-    expect(screen.getByLabelText('Choose')).toBeInstanceOf(HTMLSelectElement)
-    expect(screen.queryByRole('button', { name: 'Choose' })).not.toBeInTheDocument()
+    const trigger = screen.getByLabelText('Choose')
+    expect(trigger).toBeInstanceOf(HTMLButtonElement)
+    expect(trigger).toHaveAttribute('data-value', 'a')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
-  it('exposes option labels in document order', () => {
-    render(
-      <FormSelect aria-label="Choose" value="a" options={OPTIONS} onChange={() => undefined} />,
-    )
-    const select = screen.getByLabelText('Choose')
-    expect(Array.from(select.querySelectorAll('option')).map((option) => option.textContent)).toEqual([
-      'Alpha',
-      'Bravo',
-      'Charlie',
-    ])
-  })
-
-  it('marks the currently selected option as selected and disables the disabled option', () => {
+  it('opens options in document order and marks the selected value', async () => {
+    const user = userEvent.setup()
     render(
       <FormSelect aria-label="Choose" value="b" options={OPTIONS} onChange={() => undefined} />,
     )
-    const select = screen.getByLabelText('Choose') as HTMLSelectElement
-    expect(select.value).toBe('b')
-    const options = Array.from(select.querySelectorAll('option'))
-    expect(options[1]).toBe(select.selectedOptions[0] as HTMLOptionElement)
+    await user.click(screen.getByLabelText('Choose'))
+    const options = screen.getAllByRole('option')
+    expect(options.map((option) => option.textContent)).toEqual(['Alpha', 'Bravo', 'Charlie'])
+    expect(options[1]).toHaveAttribute('aria-selected', 'true')
     expect(options[2]).toBeDisabled()
   })
 
@@ -57,7 +44,7 @@ describe('FormSelect', () => {
     render(
       <FormSelect aria-label="Choose" value="a" options={OPTIONS} onChange={onChange} />,
     )
-    await user.selectOptions(screen.getByLabelText('Choose'), 'b')
+    await chooseSelectOption(user, 'Choose', 'Bravo')
     expect(onChange).toHaveBeenCalledWith('b')
   })
 
@@ -84,11 +71,11 @@ describe('FormSelect', () => {
         onChange={() => undefined}
       />,
     )
-    expect(screen.getByLabelText('Choose')).toBeRequired()
+    expect(screen.getByLabelText('Choose')).toHaveAttribute('aria-required', 'true')
   })
 
-  it('renders the placeholder only when no option matches', () => {
-    const { rerender } = render(
+  it('shows the placeholder on the trigger when no option matches', () => {
+    render(
       <FormSelect
         aria-label="Choose"
         value=""
@@ -97,23 +84,6 @@ describe('FormSelect', () => {
         onChange={() => undefined}
       />,
     )
-    const select = screen.getByLabelText('Choose') as HTMLSelectElement
-    const placeholderOption = select.querySelector('option[value=""]')
-    expect(placeholderOption).not.toBeNull()
-    expect(placeholderOption?.textContent).toBe('请选择')
-    expect(placeholderOption).toBeDisabled()
-    expect(placeholderOption).toHaveAttribute('hidden')
-
-    rerender(
-      <FormSelect
-        aria-label="Choose"
-        value="a"
-        options={OPTIONS}
-        placeholder="请选择"
-        onChange={() => undefined}
-      />,
-    )
-    const rerenderedSelect = screen.getByLabelText('Choose') as HTMLSelectElement
-    expect(rerenderedSelect.querySelector('option[value=""]')).toBeNull()
+    expect(screen.getByLabelText('Choose')).toHaveTextContent('请选择')
   })
 })

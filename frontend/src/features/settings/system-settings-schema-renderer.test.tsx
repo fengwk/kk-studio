@@ -1,6 +1,7 @@
-import { render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SystemSettingsSchemaRenderer } from '@/features/settings/SystemSettingsSchemaRenderer'
 import { validateSystemSettingsSchema } from '@/features/settings/system-settings-schema-validation'
@@ -9,12 +10,57 @@ import {
   makeSettingsSchema,
 } from '@/features/settings/settings-test-fixtures'
 import { settingsSectionsToDraft } from '@/features/settings/system-settings-draft'
+import { agentService } from '@/shared/api/agent-service'
+import type { AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import type { SystemSettingsSchemaDTO } from '@/shared/api/contracts/system-settings'
+import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
+
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listTools: vi.fn(),
+    listModels: vi.fn(),
+  },
+}))
 
 /** 渲染单个 section 的 schema（tab 页一次只渲染当前 section）。 */
 function renderSection(schema: SystemSettingsSchemaDTO, sectionKey: string) {
   const section = schema.sections.find((candidate) => candidate.key === sectionKey)!
   return section
+}
+
+function renderRenderer(ui: ReactNode) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+}
+
+function catalogModel(): AgentModelDTO {
+  return {
+    providerName: 'minimax',
+    name: 'MiniMax',
+    description: null,
+    config: {
+      limit: { context: 128000, output: 8192 },
+      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      pricing: {
+        currency: 'USD',
+        pricingTier: 'default',
+        serviceTier: 'default',
+        serviceTierMultiplier: 1,
+        version: 'v1',
+        inputPerMillionTokens: 0,
+        outputPerMillionTokens: 0,
+        cacheReadPerMillionTokens: 0,
+        cacheWritePerMillionTokens: 0,
+        cacheWriteLongPerMillionTokens: 0,
+        reasoningPerMillionTokens: 0,
+      },
+      defaultVariant: 'default',
+      variants: [{ id: 'default' }, { id: 'fast' }],
+    },
+    version: '1',
+    createTime: null,
+    updateTime: null,
+  }
 }
 
 /**
@@ -25,13 +71,19 @@ function renderSection(schema: SystemSettingsSchemaDTO, sectionKey: string) {
  */
 describe('system settings schema renderer', () => {
   beforeEach(() => {
-    vi.restoreAllMocks()
+    vi.mocked(agentService.listTools).mockResolvedValue([])
+    vi.mocked(agentService.listModels).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 50,
+      totalCount: 1,
+      results: [catalogModel()],
+    })
   })
 
   it('renders every schema field exactly once for every section', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
-    const { container } = render(
+    const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={schema} draft={draft} onChange={() => {}} />,
     )
     const paths = new Set<string>()
@@ -53,7 +105,7 @@ describe('system settings schema renderer', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
     const section = renderSection(schema, 'aiRuntime')
-    const { container } = render(
+    const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     const paths = [
@@ -76,27 +128,25 @@ describe('system settings schema renderer', () => {
     expect(paths![0]).toBe('aiRuntime.retryMaxRetries')
   })
 
-  it('renders the active section description text', () => {
+  it('does not render the section description on the pane', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
     const section = renderSection(schema, 'aiRuntime')
-    const { container } = render(
+    const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     const sectionElement = container.querySelector('[data-settings-section="aiRuntime"]')!
-    expect(
-      within(sectionElement).getByText('共享调用重试、压缩回退与子代理预算。'),
-    ).toBeInTheDocument()
+    expect(within(sectionElement).queryByText('共享调用重试、压缩回退与子代理预算。')).toBeNull()
   })
 
-  it('falls back to a restart badge when a group is restart-required without explicit applyTiming and the section is not wholly restart', () => {
+  it('falls back to a restart badge when a group is restart-required without explicit applyTiming', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
     const section = renderSection(schema, 'tool')
-    // 抹掉 gateway 的显式 timing 并标 restart，模拟「section 不整体重启但该 group 重启生效」的元数据。
+    // 抹掉 gateway 的显式 timing 并标 restart，模拟「只在卡片上回退重启徽标」。
     section.groups[2]!.applyTiming = null
     section.groups[2]!.restartRequired = true
-    const { container } = render(
+    const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     const cards = container.querySelectorAll('.settings-card')
@@ -105,7 +155,6 @@ describe('system settings schema renderer', () => {
     expect(within(cards[0] as HTMLElement).queryByText('重启后生效')).toBeNull()
     expect(within(cards[1] as HTMLElement).queryByText('重启后生效')).toBeNull()
     expect(within(cards[2] as HTMLElement).getByText('重启后生效')).toBeInTheDocument()
-    // tool section 自身不重启，section 级 RestartNotice 不出现。
     expect(screen.queryByRole('note')).toBeNull()
   })
 
@@ -115,7 +164,7 @@ describe('system settings schema renderer', () => {
     const section = renderSection(schema, 'tool')
     // permission 组虽然 restartRequired=true，但显式 NEXT_INVOCATION 必须优先于 restart 徽标。
     section.groups[0]!.restartRequired = true
-    const { container } = render(
+    const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     const cards = container.querySelectorAll('.settings-card')
@@ -123,33 +172,33 @@ describe('system settings schema renderer', () => {
     expect(within(cards[0] as HTMLElement).queryByText('重启后生效')).toBeNull()
   })
 
-  it('does not repeat restart badges per card when the whole section is restart', () => {
+  it('puts a restart badge on every restart-required card and never on the section header', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
     const section = renderSection(schema, 'integrations')
-    const { container } = render(
+    const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
-    // integrations 整 section 仍是重启生效：section 级 RestartNotice 恰好一个；card 内不得再重复徽标。
-    expect(screen.getByRole('note')).toBeInTheDocument()
-    expect(screen.getAllByText('重启后生效')).toHaveLength(1)
+    expect(screen.queryByRole('note')).toBeNull()
     const cards = container.querySelectorAll('.settings-card')
+    expect(cards.length).toBeGreaterThan(0)
     for (const card of cards) {
-      expect(within(card as HTMLElement).queryByText('重启后生效')).toBeNull()
+      expect(within(card as HTMLElement).getByText('重启后生效')).toBeInTheDocument()
     }
+    expect(screen.getAllByText('重启后生效')).toHaveLength(cards.length)
   })
 
   it('renders hints as already-translated text without double translation', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
     const section = renderSection(schema, 'aiRuntime')
-    const { container } = render(
+    const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     // 曾经出现过 t(field.hintKey) 之后 primitives 又 t(hint) 的双重翻译，导致
     // ⟦missing:已翻译文本⟧；现在 hint 必须是渲染后的文本且无 missing 标记。
-    expect(screen.getByText('留空表示不额外限制。')).toBeInTheDocument()
-    expect(screen.getByText('0 表示关闭超时。')).toBeInTheDocument()
+    expect(screen.getByText('全系统所有会话中同时运行的子代理任务总数上限。设为 0 表示不设全局上限。')).toBeInTheDocument()
+    expect(screen.getByText('子代理无输出或处于等待状态的超时毫秒数。设为 0 表示不启用空闲超时检测。')).toBeInTheDocument()
     expect(container.textContent).not.toContain('⟦missing:')
   })
 
@@ -159,7 +208,7 @@ describe('system settings schema renderer', () => {
     const section = renderSection(schema, 'integrations')
     // fixture 的 BOOLEAN 字段都没有 hintKey；补一个以覆盖 switch description 消费路径。
     section.groups[0]!.fields[0]!.hintKey = 'settings.section.integrations.comfyui.description'
-    render(
+    renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     const switchRow = screen
@@ -239,7 +288,7 @@ describe('system settings schema renderer', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
     const section = renderSection(schema, 'integrations')
-    const { container } = render(
+    const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     const retry = container.querySelector('[data-settings-field-path="integrations.openCliHub.requestTimeoutMillis"]')!
@@ -273,12 +322,12 @@ describe('system settings schema renderer', () => {
         />
       )
     }
-    render(<StatefulHarness />)
+    renderRenderer(<StatefulHarness />)
     const user = userEvent.setup()
     const field = screen.getByLabelText('基础延迟（毫秒）')
     await user.clear(field)
     await user.type(field, '3000')
-    expect(field).toHaveValue(3000)
+    expect(field).toHaveValue('3000')
     const next = savedDrafts.at(-1)!
     expect(next.aiRuntime.retryBaseDelayMillis).toBe('3000')
     // 未触碰字段保持原值。
@@ -303,19 +352,26 @@ describe('system settings schema renderer', () => {
         />
       )
     }
-    render(<StatefulHarness />)
+    renderRenderer(<StatefulHarness />)
     const user = userEvent.setup()
-    // 子字段标签来自 schema 的 labelKey 派生，而不是硬编码的 compaction 路径。
-    const provider = screen.getByLabelText('Provider')
-    await user.type(provider, 'minimax')
-    const next = savedDrafts.at(-1)!
-    expect(next.aiRuntime.compactionFallbackModel).toEqual({
-      providerName: 'minimax',
-      modelName: '',
-      variant: '',
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText('模型').closest('[data-settings-options]')?.getAttribute('data-settings-options'),
+      ).toContain('minimax/MiniMax')
     })
-    // 清空所有三个字段后回落到 null。
-    await user.clear(provider)
+    await chooseSelectOption(user, '模型', 'minimax/MiniMax')
+    expect(savedDrafts.at(-1)!.aiRuntime.compactionFallbackModel).toEqual({
+      providerName: 'minimax',
+      modelName: 'MiniMax',
+      variant: 'default',
+    })
+    await chooseSelectOption(user, '变体', 'fast')
+    expect(savedDrafts.at(-1)!.aiRuntime.compactionFallbackModel).toEqual({
+      providerName: 'minimax',
+      modelName: 'MiniMax',
+      variant: 'fast',
+    })
+    await chooseSelectOption(user, '模型', '不使用回退')
     expect(savedDrafts.at(-1)!.aiRuntime.compactionFallbackModel).toBeNull()
   })
 })

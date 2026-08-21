@@ -4198,6 +4198,7 @@ div.is-error {
 }
 
 .settings-card {
+  position: relative;
   background:
     radial-gradient(120% 80% at 0% 0%, rgba(113, 231, 154, 0.05), transparent 55%),
     linear-gradient(180deg, var(--white-02) 0%, transparent 100%),
@@ -4208,6 +4209,10 @@ div.is-error {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.settings-card:has(.ui-select.is-open) {
+  z-index: 3;
 }
 
 .settings-card-header {
@@ -4392,7 +4397,8 @@ div.is-error {
   white-space: nowrap;
 }
 
-.settings-apply-timing[data-timing='nextInvocation'] {
+.settings-apply-timing[data-timing='nextInvocation'],
+.settings-apply-timing[data-timing='nextChat'] {
   color: var(--green-primary);
   background: var(--green-soft);
   border: 1px solid var(--green-border);
@@ -4402,23 +4408,6 @@ div.is-error {
   color: var(--orange);
   background: var(--warning-soft);
   border: 1px solid var(--warning-border);
-}
-
-.settings-restart-notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--warning-border);
-  border-radius: var(--radius-sm);
-  background: var(--warning-soft);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--fg-muted);
-}
-
-.settings-restart-notice .settings-apply-timing {
-  flex: 0 0 auto;
 }
 
 .settings-toolbar {
@@ -4503,6 +4492,15 @@ div.is-error {
   cursor: not-allowed;
 }
 
+.settings-button.danger {
+  color: var(--danger);
+}
+
+.settings-button.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
 .settings-icon-button {
   display: inline-flex;
   align-items: center;
@@ -4548,7 +4546,7 @@ div.is-error {
 .settings-field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -4556,6 +4554,13 @@ div.is-error {
   font-size: 12px;
   font-weight: 600;
   color: var(--fg);
+}
+
+.settings-field-description,
+.settings-field-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-muted);
 }
 
 .settings-input {
@@ -4601,10 +4606,14 @@ select.settings-input option {
   border-color: var(--danger-border);
 }
 
-.settings-field-hint {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--fg-muted);
+.settings-model-selection {
+  gap: 10px;
+}
+
+.settings-model-selection-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* --- Permission ordered editor --- */
@@ -4616,6 +4625,7 @@ select.settings-input option {
 }
 
 .permission-group {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -4623,6 +4633,10 @@ select.settings-input option {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--white-02);
+}
+
+.permission-group:has(.ui-select.is-open) {
+  z-index: 3;
 }
 
 .permission-group-header {
@@ -4660,6 +4674,11 @@ select.settings-input option {
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: start;
+  overflow: visible;
+}
+
+.permission-rule:has(.ui-select.is-open) {
+  z-index: 3;
 }
 
 .permission-rule-pattern {
@@ -4674,8 +4693,18 @@ select.settings-input option {
 }
 
 .permission-action-select {
-  width: auto;
-  min-width: 96px;
+  width: max-content;
+  min-width: 7.25rem;
+}
+
+.permission-action-select .ui-select-value {
+  overflow: visible;
+}
+
+.permission-remove-tool {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  white-space: nowrap;
 }
 
 .permission-rule-actions {
@@ -6592,63 +6621,110 @@ select.settings-input option {
   }
 }
 
-.locale-selector {
+.ui-select {
   position: relative;
+  width: 100%;
+}
+
+.ui-select.is-open {
+  z-index: 80;
+}
+
+.ui-select.is-compact {
   display: inline-block;
+  width: auto;
   max-width: 100%;
 }
 
-.locale-selector .locale-selector-trigger {
-  display: inline-flex;
+.ui-select-trigger {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 30px;
+  width: 100%;
+  min-height: 36px;
   max-width: 100%;
-  padding: 0 9px;
+  padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg);
-  background: var(--surface);
+  background: var(--bg);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1;
+  text-align: left;
+}
+
+.ui-select.is-compact .ui-select-trigger {
+  display: inline-flex;
+  width: auto;
+  min-height: 30px;
+  padding: 0 9px;
+  background: var(--surface);
+  font-size: 12px;
   white-space: nowrap;
 }
 
-.locale-selector .locale-selector-trigger:hover,
-.locale-selector .locale-selector-trigger[aria-expanded='true'] {
+.ui-select-trigger:hover,
+.ui-select-trigger[aria-expanded='true'] {
   border-color: var(--border-hover);
   background: var(--surface-hover);
 }
 
-.locale-selector .locale-selector-trigger:focus-visible {
+.ui-select-trigger:focus-visible {
   outline: none;
   border-color: var(--green-primary);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.locale-selector-chevron {
+.ui-select-trigger[data-invalid='true'],
+.ui-select-trigger[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.ui-select.is-placeholder .ui-select-value {
+  color: var(--fg-muted);
+}
+
+.ui-select.is-disabled .ui-select-trigger {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
+.ui-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-select-chevron {
   width: 14px;
   height: 14px;
+  flex: 0 0 14px;
   color: var(--fg-dim);
   transition: transform 0.16s ease;
 }
 
-.locale-selector-chevron.is-open {
+.ui-select-chevron.is-open {
   transform: rotate(180deg);
 }
 
-.locale-selector-menu {
+.ui-select-menu {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  left: 0;
   z-index: 70;
   display: grid;
   gap: 2px;
-  min-width: 132px;
-  max-width: calc(100vw - 24px);
+  width: max-content;
+  min-width: 100%;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(280px, calc(100dvh - 48px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 5px;
   border: 1px solid var(--border-hover);
   border-radius: var(--radius-md);
@@ -6656,7 +6732,13 @@ select.settings-input option {
   box-shadow: var(--shadow-md);
 }
 
-.locale-selector .locale-selector-option {
+.ui-select.is-compact .ui-select-menu {
+  left: auto;
+  right: 0;
+  min-width: max(100%, 148px);
+}
+
+.ui-select-option {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -6670,23 +6752,38 @@ select.settings-input option {
   background: transparent;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1;
   text-align: left;
+  white-space: nowrap;
 }
 
-.locale-selector .locale-selector-option:hover,
-.locale-selector .locale-selector-option.is-active {
+.ui-select-option-label {
+  white-space: nowrap;
+}
+
+.ui-select.is-compact .ui-select-option {
+  font-size: 12px;
+}
+
+.ui-select-option:hover,
+.ui-select-option.is-active {
   color: var(--fg);
   background: var(--surface-hover);
 }
 
-.locale-selector .locale-selector-option[aria-selected='true'] {
+.ui-select-option[aria-selected='true'] {
   color: var(--green-primary);
   font-weight: 600;
 }
 
-.locale-option-indicator {
+.ui-select-option:disabled,
+.ui-select-option[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-select-option-indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6695,9 +6792,85 @@ select.settings-input option {
   flex: 0 0 14px;
 }
 
-.locale-option-indicator svg {
+.ui-select-option-indicator svg {
   width: 14px;
   height: 14px;
+}
+
+.number-input {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
+
+.number-input-field {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 32px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: 0;
+}
+
+.number-input-field:focus {
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.number-input-steppers {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  flex-direction: column;
+  width: 26px;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.number-input-step {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--surface);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.number-input-step + .number-input-step {
+  border-top: 1px solid var(--border);
+}
+
+.number-input-step:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.number-input-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.number-input-step svg {
+  width: 12px;
+  height: 12px;
+}
+
+.number-input.is-disabled .number-input-field {
+  color: var(--fg-dim);
+  cursor: not-allowed;
 }
 
 .topnav .locale-selector {
@@ -6717,7 +6890,7 @@ select.settings-input option {
     border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
 
-  .topnav .locale-selector .locale-selector-trigger {
+  .topnav .locale-selector .ui-select-trigger {
     display: flex;
     width: 100%;
     min-height: 42px;
@@ -6728,13 +6901,13 @@ select.settings-input option {
     font-size: 14px;
   }
 
-  .topnav .locale-selector .locale-selector-menu {
+  .topnav .locale-selector .ui-select-menu {
     right: 0;
     left: 0;
     max-width: none;
   }
 
-  .topnav .locale-selector .locale-selector-option {
+  .topnav .locale-selector .ui-select-option {
     min-height: 38px;
     padding: 0 12px;
     font-size: 14px;

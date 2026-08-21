@@ -1,6 +1,5 @@
 import { useI18n } from '@/shared/i18n'
 import {
-  RestartNotice,
   SettingsCard,
   SettingsNumberField,
   SettingsSelectField,
@@ -37,15 +36,12 @@ export function SystemSettingsSchemaRenderer({
     <div className="settings-section-stack" data-settings-schema-renderer>
       {schema.sections.map((section) => (
         <section key={section.key} data-settings-section={section.key}>
-          {section.restartRequired ? <RestartNotice /> : null}
-          <p className="settings-section-description">{t(section.descriptionKey)}</p>
           <div className="settings-section-stack">
             {section.groups.map((group) => (
               <SettingsCard
                 key={group.key}
                 title={t(group.labelKey)}
-                description={t(group.descriptionKey)}
-                timing={groupTiming(section, group)}
+                timing={groupTiming(group)}
               >
                 {group.fields.map((field) => (
                   <SchemaField
@@ -65,18 +61,16 @@ export function SystemSettingsSchemaRenderer({
 }
 
 /**
- * 生效时机徽标：显式 applyTiming 优先；未声明时若整个 section 都是重启生效（restartRequired），
- * 则由 section 级 RestartNotice 统一表达，避免每个 card 重复「重启后生效」徽标。
+ * 生效时机徽标只出现在卡片上：显式 applyTiming 优先；未声明且 group.restartRequired 时回退为重启。
  */
 function groupTiming(
-  section: SystemSettingsSchemaDTO['sections'][number],
   group: SystemSettingsSchemaDTO['sections'][number]['groups'][number],
 ): ApplyTiming | undefined {
   const explicit = toApplyTiming(group.applyTiming)
   if (explicit != null) {
     return explicit
   }
-  if (!section.restartRequired && group.restartRequired) {
+  if (group.restartRequired) {
     return 'restart'
   }
   return undefined
@@ -157,6 +151,7 @@ function SchemaField({
           data-settings-field-path={field.path}
           data-settings-nullable={field.nullable}
         >
+          {hint ? <span className="settings-field-description">{hint}</span> : null}
           <PermissionEditor
             groups={value as PermissionGroupDraft[]}
             options={field.options ?? []}

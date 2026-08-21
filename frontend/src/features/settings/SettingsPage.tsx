@@ -65,10 +65,11 @@ export function SettingsPage({
 
   return (
     <section className="screen active">
-      <div className="screen-body settings-body">
-        <h1 className="settings-title">{t('settings.title')}</h1>
+      <div className="screen-body">
+        <div className="settings-body">
+          <h1 className="settings-title">{t('settings.title')}</h1>
 
-        <div className="settings-tabs" role="tablist" aria-label={t('settings.tabs.ariaLabel')}>
+          <div className="settings-tabs" role="tablist" aria-label={t('settings.tabs.ariaLabel')}>
           {tabs.map((tab) => {
             const selected = effectiveActiveTab === tab.id
             return (
@@ -107,6 +108,7 @@ export function SettingsPage({
               section={activeSection}
             />
           )}
+        </div>
         </div>
       </div>
       <ConflictPresenter
@@ -153,14 +155,14 @@ function ServerTabPane({
   }
 
   return (
-    <>
+    <div className="settings-section-stack">
       <SettingsToolbar editor={editor} />
       <SystemSettingsSchemaRenderer
         schema={{ sections: [section] }}
         draft={editor.draft}
         onChange={editor.updateDraft}
       />
-    </>
+    </div>
   )
 }
 

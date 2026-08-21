@@ -15,6 +15,13 @@ vi.mock('@/shared/api/system-settings-service', () => ({
   createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))
 
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listTools: vi.fn(async () => []),
+    listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })),
+  },
+}))
+
 describe('settings extension architecture', () => {
   beforeEach(() => {
     vi.mocked(systemSettingsService.get).mockResolvedValue(makeSettingsDto())

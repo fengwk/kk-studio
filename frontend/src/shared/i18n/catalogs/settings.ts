@@ -81,10 +81,6 @@ export const settingsCatalog = {
     'en-US': 'Restart required',
     'zh-CN': '重启后生效',
   },
-  'settings.applyTiming.restartDescription': {
-    'en-US': 'These settings are captured by the process at startup and apply after a restart.',
-    'zh-CN': '这些设置由进程在启动时持有，修改后需要重启应用才能生效。',
-  },
   'settings.error.load': {
     'en-US': 'Failed to load settings.',
     'zh-CN': '设置加载失败。',
@@ -218,30 +214,49 @@ export const settingsCatalog = {
     'en-US': 'Max retries',
     'zh-CN': '最大重试次数',
   },
+  'settings.field.aiRuntime.retryMaxRetries.hint': {
+    'en-US': 'Maximum number of automatic retries when a model or tool invocation fails. Set to 0 to disable automatic retries.',
+    'zh-CN': '模型或工具调用失败后的最大自动重试次数。设为 0 表示失败后不自动重试。',
+  },
   'settings.field.aiRuntime.retryBackoffStrategy': {
     'en-US': 'Backoff strategy',
     'zh-CN': '退避策略',
+  },
+  'settings.field.aiRuntime.retryBackoffStrategy.hint': {
+    'en-US': 'Strategy used to calculate delay between retry attempts. Fixed uses constant delay, while exponential doubles delay with each attempt.',
+    'zh-CN': '重试等待时间的计算策略。固定策略在各轮次使用相同延迟，指数策略随重试轮次按指数增长。',
   },
   'settings.field.aiRuntime.retryBaseDelayMillis': {
     'en-US': 'Base delay (ms)',
     'zh-CN': '基础延迟（毫秒）',
   },
+  'settings.field.aiRuntime.retryBaseDelayMillis.hint': {
+    'en-US': 'Base delay in milliseconds before retrying. Serves as the constant delay for fixed backoff or the initial delay for exponential backoff.',
+    'zh-CN': '重试等待的基础延迟毫秒数。固定策略下为每次等待时长，指数策略下为首次重试的等待时长。',
+  },
   'settings.field.aiRuntime.retryMaxDelayMillis': {
     'en-US': 'Max delay (ms)',
     'zh-CN': '最大延迟（毫秒）',
   },
+  'settings.field.aiRuntime.retryMaxDelayMillis.hint': {
+    'en-US': 'Upper limit in milliseconds for exponential backoff delay. Calculated delays exceeding this value will be clamped.',
+    'zh-CN': '指数退避策略下的最大重试等待毫秒数。计算出的重试延迟超过此值时会被截断。',
+  },
   'settings.field.aiRuntime.compactionKeepRecentTokens': {
     'en-US': 'Recent tokens to keep',
     'zh-CN': '保留最近 token',
+  },
+  'settings.field.aiRuntime.compactionKeepRecentTokens.hint': {
+    'en-US': 'Token budget for recent context to preserve during automatic conversation compaction. Messages within this budget remain uncompressed.',
+    'zh-CN': '对话自动压缩时保留的最近上下文 Token 预算。低于此预算的最新消息将被完整保留而不被压缩。',
   },
   'settings.field.aiRuntime.compactionFallbackModel': {
     'en-US': 'Compaction fallback model',
     'zh-CN': '压缩回退模型',
   },
   'settings.field.aiRuntime.compactionFallbackModel.hint': {
-    'en-US':
-      'Optional model used when the configured model cannot satisfy a compaction turn. Leave all three fields empty to disable the fallback.',
-    'zh-CN': '可选：配置的模型无法完成压缩轮次时使用的回退模型。三个字段全部留空表示禁用回退。',
+    'en-US': 'Fallback model and variant used when the active conversation model cannot complete a compaction turn. Leave empty to disable fallback.',
+    'zh-CN': '当前会话模型无法完成压缩轮次时使用的备选模型与变体。留空表示不使用回退模型。',
   },
   'settings.field.aiRuntime.compactionFallbackModel.providerName': {
     'en-US': 'Provider',
@@ -259,29 +274,41 @@ export const settingsCatalog = {
     'en-US': 'Max depth',
     'zh-CN': '最大嵌套深度',
   },
+  'settings.field.aiRuntime.subagentMaxDepth.hint': {
+    'en-US': 'Maximum nesting depth for recursive subagent delegation. Further delegations are blocked once this limit is reached.',
+    'zh-CN': '允许子代理继续递归委派子代理的最大嵌套层级。达到上限后将禁止进一步向下委派。',
+  },
   'settings.field.aiRuntime.subagentMaxConcurrency': {
     'en-US': 'Max concurrency',
     'zh-CN': '最大并发',
+  },
+  'settings.field.aiRuntime.subagentMaxConcurrency.hint': {
+    'en-US': 'Maximum number of subagent tasks that can execute concurrently within a single conversation session.',
+    'zh-CN': '单个会话内允许同时并行运行的子代理任务最大数量。',
   },
   'settings.field.aiRuntime.subagentMaxTotalConcurrency': {
     'en-US': 'Max total concurrency',
     'zh-CN': '全局最大并发',
   },
   'settings.field.aiRuntime.subagentMaxTotalConcurrency.hint': {
-    'en-US': 'Empty means no extra cap.',
-    'zh-CN': '留空表示不额外限制。',
+    'en-US': 'Global limit on concurrent subagents across all conversation sessions. Set to 0 for no global cap.',
+    'zh-CN': '全系统所有会话中同时运行的子代理任务总数上限。设为 0 表示不设全局上限。',
   },
   'settings.field.aiRuntime.subagentIdleTimeoutMillis': {
     'en-US': 'Idle timeout (ms)',
     'zh-CN': '空闲超时（毫秒）',
   },
   'settings.field.aiRuntime.subagentIdleTimeoutMillis.hint': {
-    'en-US': '0 disables the timeout.',
-    'zh-CN': '0 表示关闭超时。',
+    'en-US': 'Idle timeout in milliseconds for inactive subagents. Set to 0 to disable idle timeout detection.',
+    'zh-CN': '子代理无输出或处于等待状态的超时毫秒数。设为 0 表示不启用空闲超时检测。',
   },
   'settings.field.aiRuntime.subagentMaxTurns': {
     'en-US': 'Max turns',
     'zh-CN': '最大轮数',
+  },
+  'settings.field.aiRuntime.subagentMaxTurns.hint': {
+    'en-US': 'Maximum interaction turns allowed for a single subagent task. Upon reaching the limit, the subagent returns a phase report.',
+    'zh-CN': '单个子代理任务允许执行的最大交互轮数。达到上限后子代理将强制返回阶段性结果。',
   },
   'settings.option.retryBackoff.fixed': {
     'en-US': 'Fixed',
@@ -305,6 +332,10 @@ export const settingsCatalog = {
     'en-US': 'Per-tool ordered rules; the first matching rule wins. Changes apply to the next invocation.',
     'zh-CN': '按工具的保序规则，首个匹配项生效；修改对下一次调用立即生效。',
   },
+  'settings.field.tool.permission.hint': {
+    'en-US': 'Access control rules for tool execution. Rules are evaluated top-to-bottom in order; the first matching rule determines whether to allow, ask, or deny.',
+    'zh-CN': '工具执行的访问控制规则列表。按顺序自上而下匹配，首条匹配的规则决定该工具是直接允许、弹出审批还是直接拒绝。',
+  },
   'settings.section.tool.yolo.title': {
     'en-US': 'Default YOLO',
     'zh-CN': '默认 YOLO',
@@ -325,21 +356,45 @@ export const settingsCatalog = {
     'en-US': 'Default YOLO',
     'zh-CN': '默认 YOLO',
   },
+  'settings.field.tool.defaultYolo.hint': {
+    'en-US': 'Whether YOLO mode is enabled by default for new conversations. When enabled, tool executions bypass manual approval.',
+    'zh-CN': '新建对话时是否默认开启 YOLO 模式。开启后执行工具将跳过人工审批直接运行。',
+  },
   'settings.field.tool.modelGatewayBusyRetryMillis': {
     'en-US': 'Model gateway busy retry (ms)',
     'zh-CN': '模型网关繁忙重试（毫秒）',
+  },
+  'settings.field.tool.modelGatewayBusyRetryMillis.hint': {
+    'en-US': 'Delay in milliseconds before retrying when the model gateway encounters provider busy or rate limit errors.',
+    'zh-CN': '模型网关遇到提供商繁忙或限流时的重试等待毫秒数。',
   },
   'settings.field.tool.toolGatewayBusyRetryMillis': {
     'en-US': 'Tool gateway busy retry (ms)',
     'zh-CN': '工具网关繁忙重试（毫秒）',
   },
+  'settings.field.tool.toolGatewayBusyRetryMillis.hint': {
+    'en-US': 'Delay in milliseconds before retrying when the tool gateway encounters a busy host or tool service.',
+    'zh-CN': '工具网关在外部工具或宿主繁忙时的重试等待毫秒数。',
+  },
   'settings.field.tool.toolGatewayOverloadRetryMillis': {
     'en-US': 'Tool gateway overload retry (ms)',
     'zh-CN': '工具网关过载重试（毫秒）',
   },
+  'settings.field.tool.toolGatewayOverloadRetryMillis.hint': {
+    'en-US': 'Delay in milliseconds before retrying when the tool gateway encounters system overload.',
+    'zh-CN': '工具网关在系统过载时的重试等待毫秒数。',
+  },
   'settings.field.tool.skillLoadTimeoutMillis': {
     'en-US': 'Skill load timeout (ms)',
     'zh-CN': '技能加载超时（毫秒）',
+  },
+  'settings.field.tool.skillLoadTimeoutMillis.hint': {
+    'en-US': 'Timeout in milliseconds when loading external skill definitions and scripts. Times out if loading takes longer.',
+    'zh-CN': '加载外部 Skill 技能定义与脚本时的超时毫秒数。超时后本次技能加载将判定为失败。',
+  },
+  'settings.modelSelection.none': {
+    'en-US': 'None',
+    'zh-CN': '不使用回退',
   },
   'settings.permission.empty': {
     'en-US': 'No permission rules configured.',
@@ -416,8 +471,8 @@ export const settingsCatalog = {
     'zh-CN': '守护网关',
   },
   'settings.section.environment.description': {
-    'en-US': 'Resource/message boundaries and timeouts for the daemon gateway.',
-    'zh-CN': '守护网关的资源/消息边界与超时。',
+    'en-US': 'Resource limits and timeouts for the daemon gateway.',
+    'zh-CN': '守护网关的资源上限与超时。',
   },
   'settings.section.environment.runtime.title': {
     'en-US': 'Runtime budgets',
@@ -427,29 +482,29 @@ export const settingsCatalog = {
     'en-US': 'Heartbeat, directory listing and resource limits. Applies to the next check or request.',
     'zh-CN': '心跳、目录列出与资源上限；对下一次判定或请求立即生效。',
   },
-  'settings.section.environment.transport.title': {
-    'en-US': 'WebSocket buffer',
-    'zh-CN': 'WebSocket 缓冲',
-  },
-  'settings.section.environment.transport.description': {
-    'en-US': 'JSR-356 container buffer size. Restart required.',
-    'zh-CN': 'JSR-356 容器缓冲区大小；修改后需要重启生效。',
-  },
   'settings.field.environment.maxResourceBytes': {
     'en-US': 'Max resource bytes',
     'zh-CN': '最大资源字节数',
   },
-  'settings.field.environment.maxMessageBytes': {
-    'en-US': 'Max message bytes',
-    'zh-CN': '最大消息字节数',
+  'settings.field.environment.maxResourceBytes.hint': {
+    'en-US': 'Maximum storage in bytes allowed for a single environment workspace. New resource writes are rejected beyond this limit.',
+    'zh-CN': '单个 Environment 环境工作区允许占用的最大资源字节数。超出限制时将拒绝写入新资源。',
   },
   'settings.field.environment.heartbeatTimeoutMillis': {
     'en-US': 'Heartbeat timeout (ms)',
     'zh-CN': '心跳超时（毫秒）',
   },
+  'settings.field.environment.heartbeatTimeoutMillis.hint': {
+    'en-US': 'Heartbeat timeout in milliseconds for runtime environments. Environments without heartbeats past this duration are marked disconnected.',
+    'zh-CN': 'Environment 运行时的心跳超时毫秒数。超过该时间未收到心跳将被标记为失联。',
+  },
   'settings.field.environment.directoryListTimeoutMillis': {
     'en-US': 'Directory list timeout (ms)',
     'zh-CN': '目录列出超时（毫秒）',
+  },
+  'settings.field.environment.directoryListTimeoutMillis.hint': {
+    'en-US': 'Timeout in milliseconds for directory listing operations within an environment.',
+    'zh-CN': '在 Environment 环境中遍历或列出目录文件时的超时毫秒数。',
   },
 
   // --- Integrations ---
@@ -469,25 +524,49 @@ export const settingsCatalog = {
     'en-US': 'Enable ComfyUI',
     'zh-CN': '启用 ComfyUI',
   },
+  'settings.field.integrations.comfyui.enabled.hint': {
+    'en-US': 'Whether to enable ComfyUI workflow image generation and rendering integration.',
+    'zh-CN': '是否启用 ComfyUI 工作流绘图与图像生成集成。',
+  },
   'settings.field.integrations.comfyui.baseUrl': {
     'en-US': 'Base URL',
     'zh-CN': '基础地址',
+  },
+  'settings.field.integrations.comfyui.baseUrl.hint': {
+    'en-US': 'Base URL for the ComfyUI service API (e.g. http://localhost:8188).',
+    'zh-CN': 'ComfyUI 服务的 API 基础地址（如 http://localhost:8188）。',
   },
   'settings.field.integrations.comfyui.connectTimeoutMillis': {
     'en-US': 'Connect timeout (ms)',
     'zh-CN': '连接超时（毫秒）',
   },
+  'settings.field.integrations.comfyui.connectTimeoutMillis.hint': {
+    'en-US': 'TCP connection timeout in milliseconds when connecting to the ComfyUI service.',
+    'zh-CN': '连接 ComfyUI 服务时的 TCP 连接超时毫秒数。',
+  },
   'settings.field.integrations.comfyui.readTimeoutMillis': {
     'en-US': 'Read timeout (ms)',
     'zh-CN': '读取超时（毫秒）',
+  },
+  'settings.field.integrations.comfyui.readTimeoutMillis.hint': {
+    'en-US': 'HTTP read timeout in milliseconds when waiting for ComfyUI responses.',
+    'zh-CN': '等待 ComfyUI HTTP 响应的读取超时毫秒数。',
   },
   'settings.field.integrations.comfyui.websocketTimeoutMillis': {
     'en-US': 'WebSocket timeout (ms)',
     'zh-CN': 'WebSocket 超时（毫秒）',
   },
+  'settings.field.integrations.comfyui.websocketTimeoutMillis.hint': {
+    'en-US': 'WebSocket connection timeout in milliseconds for ComfyUI real-time progress events.',
+    'zh-CN': '与 ComfyUI 建立 WebSocket 实时事件连接时的超时毫秒数。',
+  },
   'settings.field.integrations.comfyui.maxInputFileBytes': {
     'en-US': 'Max input file bytes',
     'zh-CN': '最大输入文件字节数',
+  },
+  'settings.field.integrations.comfyui.maxInputFileBytes.hint': {
+    'en-US': 'Maximum allowed file size in bytes when uploading input images or assets to ComfyUI.',
+    'zh-CN': '向 ComfyUI 上传输入图片或素材时的单文件最大字节数限制。',
   },
   'settings.section.integrations.openCliHub.title': {
     'en-US': 'OpenCLI Hub',
@@ -501,37 +580,73 @@ export const settingsCatalog = {
     'en-US': 'Enable OpenCLI Hub',
     'zh-CN': '启用 OpenCLI Hub',
   },
+  'settings.field.integrations.openCliHub.enabled.hint': {
+    'en-US': 'Whether to enable the OpenCLI Hub browser automation and orchestration integration.',
+    'zh-CN': '是否启用 OpenCLI Hub 浏览器与自动化集成服务。',
+  },
   'settings.field.integrations.openCliHub.baseUrl': {
     'en-US': 'Base URL',
     'zh-CN': '基础地址',
+  },
+  'settings.field.integrations.openCliHub.baseUrl.hint': {
+    'en-US': 'Base URL for the OpenCLI Hub service API.',
+    'zh-CN': 'OpenCLI Hub 服务的 API 基础地址。',
   },
   'settings.field.integrations.openCliHub.connectTimeoutMillis': {
     'en-US': 'Connect timeout (ms)',
     'zh-CN': '连接超时（毫秒）',
   },
+  'settings.field.integrations.openCliHub.connectTimeoutMillis.hint': {
+    'en-US': 'TCP connection timeout in milliseconds when connecting to OpenCLI Hub.',
+    'zh-CN': '连接 OpenCLI Hub 服务时的 TCP 连接超时毫秒数。',
+  },
   'settings.field.integrations.openCliHub.requestTimeoutMillis': {
     'en-US': 'Request timeout (ms)',
     'zh-CN': '请求超时（毫秒）',
+  },
+  'settings.field.integrations.openCliHub.requestTimeoutMillis.hint': {
+    'en-US': 'Request timeout in milliseconds for standard OpenCLI Hub API calls.',
+    'zh-CN': '发送常规请求至 OpenCLI Hub 时的等待响应超时毫秒数。',
   },
   'settings.field.integrations.openCliHub.longPollTimeoutMillis': {
     'en-US': 'Long-poll timeout (ms)',
     'zh-CN': '长轮询超时（毫秒）',
   },
+  'settings.field.integrations.openCliHub.longPollTimeoutMillis.hint': {
+    'en-US': 'Maximum duration in milliseconds for long-polling connection with OpenCLI Hub.',
+    'zh-CN': '与 OpenCLI Hub 保持长轮询连接等待事件的最大毫秒数。',
+  },
   'settings.field.integrations.openCliHub.streamBufferBytes': {
     'en-US': 'Stream buffer bytes',
     'zh-CN': '流缓冲字节数',
+  },
+  'settings.field.integrations.openCliHub.streamBufferBytes.hint': {
+    'en-US': 'Buffer size in bytes for streaming responses from OpenCLI Hub.',
+    'zh-CN': '接收 OpenCLI Hub 流式输出时的缓冲区字节数大小。',
   },
   'settings.field.integrations.openCliHub.maxJsonResponseBytes': {
     'en-US': 'Max JSON response bytes',
     'zh-CN': '最大 JSON 响应字节数',
   },
+  'settings.field.integrations.openCliHub.maxJsonResponseBytes.hint': {
+    'en-US': 'Maximum allowed JSON response payload size in bytes from OpenCLI Hub.',
+    'zh-CN': '解析 OpenCLI Hub JSON 响应允许的最大响应体积字节数。',
+  },
   'settings.field.integrations.openCliHub.maxErrorResponseBytes': {
     'en-US': 'Max error response bytes',
     'zh-CN': '最大错误响应字节数',
   },
+  'settings.field.integrations.openCliHub.maxErrorResponseBytes.hint': {
+    'en-US': 'Maximum bytes to capture and retain from an OpenCLI Hub error response.',
+    'zh-CN': '读取 OpenCLI Hub 错误响应内容时截取保存的最大字节数。',
+  },
   'settings.field.integrations.openCliHub.maxOutputChars': {
     'en-US': 'Max output chars',
     'zh-CN': '最大输出字符数',
+  },
+  'settings.field.integrations.openCliHub.maxOutputChars.hint': {
+    'en-US': 'Maximum character limit retained from OpenCLI Hub terminal and command output.',
+    'zh-CN': '接收 OpenCLI Hub 终端或脚本输出时保留的最大字符数。',
   },
   'settings.section.integrations.seedance.title': {
     'en-US': 'Seedance',
@@ -545,25 +660,49 @@ export const settingsCatalog = {
     'en-US': 'Enable Seedance',
     'zh-CN': '启用 Seedance',
   },
+  'settings.field.integrations.seedance.enabled.hint': {
+    'en-US': 'Whether to enable the Seedance multimodal video production integration.',
+    'zh-CN': '是否启用 Seedance 短剧与多模态视频生产集成服务。',
+  },
   'settings.field.integrations.seedance.workspaceId': {
     'en-US': 'Workspace ID',
     'zh-CN': '工作区 ID',
+  },
+  'settings.field.integrations.seedance.workspaceId.hint': {
+    'en-US': 'Default workspace identifier for Seedance. Leave empty to use the service default.',
+    'zh-CN': 'Seedance 绑定的默认工作空间标识符。留空表示使用服务默认工作空间。',
   },
   'settings.field.integrations.seedance.retry': {
     'en-US': 'Retries',
     'zh-CN': '重试次数',
   },
+  'settings.field.integrations.seedance.retry.hint': {
+    'en-US': 'Number of automatic retry attempts when submitting Seedance generation tasks.',
+    'zh-CN': '请求 Seedance 生成任务失败时的自动重试次数。',
+  },
   'settings.field.integrations.seedance.hubExecutionTimeoutMillis': {
     'en-US': 'Hub execution timeout (ms)',
     'zh-CN': 'Hub 执行超时（毫秒）',
+  },
+  'settings.field.integrations.seedance.hubExecutionTimeoutMillis.hint': {
+    'en-US': 'Execution timeout in milliseconds for single operations dispatched to Seedance Hub.',
+    'zh-CN': 'Seedance 任务在 Hub 中执行单次操作的最大超时毫秒数。',
   },
   'settings.field.integrations.seedance.statusPollIntervalMillis': {
     'en-US': 'Status poll interval (ms)',
     'zh-CN': '状态轮询间隔（毫秒）',
   },
+  'settings.field.integrations.seedance.statusPollIntervalMillis.hint': {
+    'en-US': 'Interval in milliseconds between status polling requests for Seedance generation tasks.',
+    'zh-CN': '轮询查询 Seedance 视频生成进度与状态的时间间隔毫秒数。',
+  },
   'settings.field.integrations.seedance.maxWaitMillis': {
     'en-US': 'Max wait (ms)',
     'zh-CN': '最大等待（毫秒）',
+  },
+  'settings.field.integrations.seedance.maxWaitMillis.hint': {
+    'en-US': 'Maximum total wait duration in milliseconds for a Seedance task before timing out.',
+    'zh-CN': '等待 Seedance 任务完成的最大总等待毫秒数。超时后将放弃等待并判定为超时失败。',
   },
   'settings.section.integrations.gptImage2.title': {
     'en-US': 'GPT Image 2',
@@ -577,17 +716,33 @@ export const settingsCatalog = {
     'en-US': 'Paid submissions enabled',
     'zh-CN': '启用付费提交',
   },
+  'settings.field.integrations.gptImage2.paidEnabled.hint': {
+    'en-US': 'Whether to enable the GPT-Image-2 paid image generation and editing capability.',
+    'zh-CN': '是否启用 GPT-Image-2 高级付费图像生成与编辑功能。',
+  },
   'settings.field.integrations.gptImage2.askTimeoutSeconds': {
     'en-US': 'Ask timeout (s)',
     'zh-CN': '请求超时（秒）',
+  },
+  'settings.field.integrations.gptImage2.askTimeoutSeconds.hint': {
+    'en-US': 'Timeout in seconds when waiting for user prompt confirmation or interaction in GPT-Image-2.',
+    'zh-CN': '等待 GPT-Image-2 生成提示词确认或交互应答时的超时秒数。',
   },
   'settings.field.integrations.gptImage2.hubExecutionTimeoutMillis': {
     'en-US': 'Hub execution timeout (ms)',
     'zh-CN': 'Hub 执行超时（毫秒）',
   },
+  'settings.field.integrations.gptImage2.hubExecutionTimeoutMillis.hint': {
+    'en-US': 'Hub execution timeout in milliseconds for single GPT-Image-2 operations.',
+    'zh-CN': 'GPT-Image-2 图像生成任务在 Hub 中的单次执行超时毫秒数。',
+  },
   'settings.field.integrations.gptImage2.maxWaitMillis': {
     'en-US': 'Max wait (ms)',
     'zh-CN': '最大等待（毫秒）',
+  },
+  'settings.field.integrations.gptImage2.maxWaitMillis.hint': {
+    'en-US': 'Maximum total duration in milliseconds to wait for GPT-Image-2 generation completion.',
+    'zh-CN': '等待 GPT-Image-2 完整产出图像的最大总等待毫秒数。',
   },
   'settings.section.integrations.minimaxH3.title': {
     'en-US': 'MiniMax H3',
@@ -601,37 +756,73 @@ export const settingsCatalog = {
     'en-US': 'Enable MiniMax H3',
     'zh-CN': '启用 MiniMax H3',
   },
+  'settings.field.integrations.minimaxH3.enabled.hint': {
+    'en-US': 'Whether to enable the MiniMax-H3 multimodal storyboard and video integration.',
+    'zh-CN': '是否启用 MiniMax-H3 多模态视频与分镜生成集成。',
+  },
   'settings.field.integrations.minimaxH3.promptAgentName': {
     'en-US': 'Prompt agent name',
     'zh-CN': '提示词代理名',
+  },
+  'settings.field.integrations.minimaxH3.promptAgentName.hint': {
+    'en-US': 'Agent name delegated for MiniMax-H3 prompt generation. Leave empty to use the default agent.',
+    'zh-CN': 'MiniMax-H3 生成提示词所委派的 Agent 名称。留空表示使用当前默认 Agent。',
   },
   'settings.field.integrations.minimaxH3.promptEnvironmentName': {
     'en-US': 'Prompt environment name',
     'zh-CN': '提示词环境名',
   },
+  'settings.field.integrations.minimaxH3.promptEnvironmentName.hint': {
+    'en-US': 'Environment name for MiniMax-H3 prompt execution. Leave empty to use the default environment.',
+    'zh-CN': 'MiniMax-H3 提示词生成所运行的环境名称。留空表示使用默认运行环境。',
+  },
   'settings.field.integrations.minimaxH3.promptMaxWaitMillis': {
     'en-US': 'Prompt max wait (ms)',
     'zh-CN': '提示词最大等待（毫秒）',
+  },
+  'settings.field.integrations.minimaxH3.promptMaxWaitMillis.hint': {
+    'en-US': 'Maximum wait duration in milliseconds for MiniMax-H3 prompt generation.',
+    'zh-CN': '等待 MiniMax-H3 提示词生成完成的最大毫秒数。',
   },
   'settings.field.integrations.minimaxH3.comfyBaseUrl': {
     'en-US': 'Comfy base URL',
     'zh-CN': 'Comfy 基础地址',
   },
+  'settings.field.integrations.minimaxH3.comfyBaseUrl.hint': {
+    'en-US': 'ComfyUI backend service URL for MiniMax-H3. Leave empty to inherit from ComfyUI integration.',
+    'zh-CN': 'MiniMax-H3 依赖的 ComfyUI 后端服务地址。留空表示沿用 ComfyUI 集成中的基础地址。',
+  },
   'settings.field.integrations.minimaxH3.comfyConnectTimeoutMillis': {
     'en-US': 'Comfy connect timeout (ms)',
     'zh-CN': 'Comfy 连接超时（毫秒）',
+  },
+  'settings.field.integrations.minimaxH3.comfyConnectTimeoutMillis.hint': {
+    'en-US': 'Connection timeout in milliseconds for MiniMax-H3 connecting to ComfyUI.',
+    'zh-CN': 'MiniMax-H3 连接后端 ComfyUI 时的连接超时毫秒数。',
   },
   'settings.field.integrations.minimaxH3.comfyRequestTimeoutMillis': {
     'en-US': 'Comfy request timeout (ms)',
     'zh-CN': 'Comfy 请求超时（毫秒）',
   },
+  'settings.field.integrations.minimaxH3.comfyRequestTimeoutMillis.hint': {
+    'en-US': 'Request timeout in milliseconds for MiniMax-H3 calls to ComfyUI.',
+    'zh-CN': 'MiniMax-H3 向 ComfyUI 发送请求时的响应读取超时毫秒数。',
+  },
   'settings.field.integrations.minimaxH3.comfyPollIntervalMillis': {
     'en-US': 'Comfy poll interval (ms)',
     'zh-CN': 'Comfy 轮询间隔（毫秒）',
   },
+  'settings.field.integrations.minimaxH3.comfyPollIntervalMillis.hint': {
+    'en-US': 'Polling interval in milliseconds for MiniMax-H3 checking ComfyUI progress.',
+    'zh-CN': 'MiniMax-H3 轮询 ComfyUI 渲染状态与产物的时间间隔毫秒数。',
+  },
   'settings.field.integrations.minimaxH3.comfyMaxWaitMillis': {
     'en-US': 'Comfy max wait (ms)',
     'zh-CN': 'Comfy 最大等待（毫秒）',
+  },
+  'settings.field.integrations.minimaxH3.comfyMaxWaitMillis.hint': {
+    'en-US': 'Maximum total wait duration in milliseconds for MiniMax-H3 ComfyUI rendering.',
+    'zh-CN': 'MiniMax-H3 等待 ComfyUI 渲染完成的最大总毫秒数。',
   },
 
   // --- Storage & Media ---
@@ -659,29 +850,57 @@ export const settingsCatalog = {
     'en-US': 'Upload expiry (s)',
     'zh-CN': '上传有效期（秒）',
   },
+  'settings.field.storageMedia.uploadExpiresSeconds.hint': {
+    'en-US': 'Expiration period in seconds for temporary upload credentials and upload URLs.',
+    'zh-CN': '本地或直传上传凭证及临时上传链接的有效秒数。',
+  },
   'settings.field.storageMedia.s3Enabled': {
     'en-US': 'S3 enabled',
     'zh-CN': '启用 S3',
+  },
+  'settings.field.storageMedia.s3Enabled.hint': {
+    'en-US': 'Whether to enable S3-compatible object storage as the persistent media backend.',
+    'zh-CN': '是否启用 S3 兼容对象存储作为媒体与素材的持久化后端。',
   },
   'settings.field.storageMedia.s3PresignDefaultExpiresSeconds': {
     'en-US': 'S3 presign default expiry (s)',
     'zh-CN': 'S3 预签名默认有效期（秒）',
   },
+  'settings.field.storageMedia.s3PresignDefaultExpiresSeconds.hint': {
+    'en-US': 'Default expiration duration in seconds for S3 presigned access and download URLs.',
+    'zh-CN': '生成 S3 预签名下载与访问链接时的默认过期秒数。',
+  },
   'settings.field.storageMedia.s3PresignMaxExpiresSeconds': {
     'en-US': 'S3 presign max expiry (s)',
     'zh-CN': 'S3 预签名最大有效期（秒）',
+  },
+  'settings.field.storageMedia.s3PresignMaxExpiresSeconds.hint': {
+    'en-US': 'Maximum allowable expiration duration in seconds for S3 presigned URLs.',
+    'zh-CN': '允许请求 S3 预签名链接的最大过期秒数上限。',
   },
   'settings.field.storageMedia.canvasMediaProcessTimeoutMillis': {
     'en-US': 'Media process timeout (ms)',
     'zh-CN': '媒体处理超时（毫秒）',
   },
+  'settings.field.storageMedia.canvasMediaProcessTimeoutMillis.hint': {
+    'en-US': 'Timeout in milliseconds for processing and transcoding canvas audio, video, and image media.',
+    'zh-CN': '画布中对音视频、图片等多媒体素材进行转码与处理的超时毫秒数。',
+  },
   'settings.field.storageMedia.thumbnailMaxDimension': {
     'en-US': 'Thumbnail max dimension',
     'zh-CN': '缩略图最大边长',
   },
+  'settings.field.storageMedia.thumbnailMaxDimension.hint': {
+    'en-US': 'Maximum pixel dimension for the longer edge when generating image and video thumbnails.',
+    'zh-CN': '系统生成图片与视频缩略图时的长边最大像素尺寸。',
+  },
   'settings.field.storageMedia.thumbnailQuality': {
     'en-US': 'Thumbnail quality',
     'zh-CN': '缩略图质量',
+  },
+  'settings.field.storageMedia.thumbnailQuality.hint': {
+    'en-US': 'JPEG compression quality (1-100) for generated thumbnails. Higher values improve quality with larger file sizes.',
+    'zh-CN': '缩略图生成的 JPEG 压缩质量（1-100）。数值越高画质越好但体积越大。',
   },
   // --- Advanced ---
   'settings.section.advanced.description': {
@@ -740,96 +959,192 @@ export const settingsCatalog = {
     'en-US': 'Max resource bytes',
     'zh-CN': '最大资源字节数',
   },
+  'settings.field.advanced.resourceMaxBytes.hint': {
+    'en-US': 'Maximum byte size limit for individual resource objects loaded and cached in memory.',
+    'zh-CN': '系统允许加载与缓存的单个资源对象的最大字节数上限。',
+  },
   'settings.field.advanced.processorLeaseDurationMillis': {
     'en-US': 'Processor lease duration (ms)',
     'zh-CN': '处理器租约时长（毫秒）',
+  },
+  'settings.field.advanced.processorLeaseDurationMillis.hint': {
+    'en-US': 'Distributed lease duration in milliseconds for background task processor nodes.',
+    'zh-CN': '异步任务处理节点的分布式租约有效期毫秒数。持有租约的节点需在此周期内定期续约。',
   },
   'settings.field.advanced.processorHeartbeatIntervalMillis': {
     'en-US': 'Processor heartbeat (ms)',
     'zh-CN': '处理器心跳间隔（毫秒）',
   },
+  'settings.field.advanced.processorHeartbeatIntervalMillis.hint': {
+    'en-US': 'Heartbeat interval in milliseconds for task processor nodes to renew their distributed leases.',
+    'zh-CN': '任务处理节点向分布式协调器发送心跳续约的时间间隔毫秒数。',
+  },
   'settings.field.advanced.threadResolveFailureDelayMillis': {
     'en-US': 'Resolve failure delay (ms)',
     'zh-CN': '解析失败延迟（毫秒）',
+  },
+  'settings.field.advanced.threadResolveFailureDelayMillis.hint': {
+    'en-US': 'Backoff delay in milliseconds before retrying after a conversation thread resolution failure.',
+    'zh-CN': '解析会话上下文或分支失败时的重试退避延迟毫秒数。',
   },
   'settings.field.advanced.modelDispatchBusyFallbackDelayMillis': {
     'en-US': 'Model busy fallback (ms)',
     'zh-CN': '模型繁忙回退（毫秒）',
   },
+  'settings.field.advanced.modelDispatchBusyFallbackDelayMillis.hint': {
+    'en-US': 'Delay in milliseconds before falling back when the model dispatch queue is busy.',
+    'zh-CN': '模型分发调度遇到通道繁忙触发降级回退前的等待毫秒数。',
+  },
   'settings.field.advanced.toolPreflightFailureDelayMillis': {
     'en-US': 'Tool preflight failure delay (ms)',
     'zh-CN': '工具预检失败延迟（毫秒）',
+  },
+  'settings.field.advanced.toolPreflightFailureDelayMillis.hint': {
+    'en-US': 'Backoff delay in milliseconds after a tool execution preflight check failure.',
+    'zh-CN': '工具执行前置预检失败后的重试退避等待毫秒数。',
   },
   'settings.field.advanced.toolDispatchBusyFallbackDelayMillis': {
     'en-US': 'Tool busy fallback (ms)',
     'zh-CN': '工具繁忙回退（毫秒）',
   },
+  'settings.field.advanced.toolDispatchBusyFallbackDelayMillis.hint': {
+    'en-US': 'Delay in milliseconds before fallback when the tool dispatch queue is busy.',
+    'zh-CN': '工具调度队列繁忙时触发降级处理前的等待毫秒数。',
+  },
   'settings.field.advanced.dispatcherLeaseDurationMillis': {
     'en-US': 'Dispatcher lease duration (ms)',
     'zh-CN': '分发器租约时长（毫秒）',
+  },
+  'settings.field.advanced.dispatcherLeaseDurationMillis.hint': {
+    'en-US': 'Distributed lock lease duration in milliseconds for the primary task dispatcher.',
+    'zh-CN': '调度器主节点分布式锁与租约的有效时长毫秒数。',
   },
   'settings.field.advanced.dispatcherPollIntervalMillis': {
     'en-US': 'Dispatcher poll interval (ms)',
     'zh-CN': '分发器轮询间隔（毫秒）',
   },
+  'settings.field.advanced.dispatcherPollIntervalMillis.hint': {
+    'en-US': 'Polling interval in milliseconds for the dispatcher checking queued tasks.',
+    'zh-CN': '调度器轮询待分发任务队列的时间间隔毫秒数。',
+  },
   'settings.field.advanced.dispatcherRejectionDelayMillis': {
     'en-US': 'Rejection delay (ms)',
     'zh-CN': '拒绝延迟（毫秒）',
+  },
+  'settings.field.advanced.dispatcherRejectionDelayMillis.hint': {
+    'en-US': 'Delay in milliseconds before re-enqueueing a task rejected due to resource limits.',
+    'zh-CN': '任务因资源不足被调度器拒绝后的重新入队等待延迟毫秒数。',
   },
   'settings.field.advanced.dispatcherMaxDispatchTasks': {
     'en-US': 'Max dispatch tasks',
     'zh-CN': '最大分发任务数',
   },
+  'settings.field.advanced.dispatcherMaxDispatchTasks.hint': {
+    'en-US': 'Maximum number of tasks the dispatcher can batch and dispatch in a single polling cycle.',
+    'zh-CN': '调度器单次轮询批处理中允许分发派发的最大任务数。',
+  },
   'settings.field.advanced.dispatcherWorkerConcurrency': {
     'en-US': 'Worker concurrency',
     'zh-CN': '工作线程并发',
+  },
+  'settings.field.advanced.dispatcherWorkerConcurrency.hint': {
+    'en-US': 'Number of concurrent worker threads used internally by the task dispatcher.',
+    'zh-CN': '调度器内部并发工作线程数。',
   },
   'settings.field.advanced.dispatcherWorkerQueueCapacity': {
     'en-US': 'Worker queue capacity',
     'zh-CN': '工作队列容量',
   },
+  'settings.field.advanced.dispatcherWorkerQueueCapacity.hint': {
+    'en-US': 'Maximum task queue capacity for dispatcher worker threads.',
+    'zh-CN': '调度器工作线程池任务等待队列的容量上限。',
+  },
   'settings.field.advanced.canvasRealtimeMaxLength': {
     'en-US': 'Realtime max length',
     'zh-CN': 'Realtime 最大长度',
+  },
+  'settings.field.advanced.canvasRealtimeMaxLength.hint': {
+    'en-US': 'Maximum character length allowed for a single message in the canvas real-time channel.',
+    'zh-CN': '画布实时流式协同通道允许传输的单条消息最大字符长度。',
   },
   'settings.field.advanced.canvasFunctionExecutorCoreSize': {
     'en-US': 'Function executor core size',
     'zh-CN': '函数执行器核心线程数',
   },
+  'settings.field.advanced.canvasFunctionExecutorCoreSize.hint': {
+    'en-US': 'Core pool size for the canvas custom function execution thread pool.',
+    'zh-CN': '画布自定义函数执行器线程池的核心线程数。',
+  },
   'settings.field.advanced.canvasFunctionExecutorMaxSize': {
     'en-US': 'Function executor max size',
     'zh-CN': '函数执行器最大线程数',
+  },
+  'settings.field.advanced.canvasFunctionExecutorMaxSize.hint': {
+    'en-US': 'Maximum pool size for the canvas custom function execution thread pool.',
+    'zh-CN': '画布自定义函数执行器线程池的最大线程数。',
   },
   'settings.field.advanced.canvasFunctionExecutorQueueCapacity': {
     'en-US': 'Function executor queue capacity',
     'zh-CN': '函数执行器队列容量',
   },
+  'settings.field.advanced.canvasFunctionExecutorQueueCapacity.hint': {
+    'en-US': 'Queue capacity for pending tasks in the canvas function executor thread pool.',
+    'zh-CN': '画布自定义函数执行器任务等待队列的容量上限。',
+  },
   'settings.field.advanced.applicationEventQueueCapacity': {
     'en-US': 'Event queue capacity',
     'zh-CN': '事件队列容量',
+  },
+  'settings.field.advanced.applicationEventQueueCapacity.hint': {
+    'en-US': 'Capacity limit for the internal application domain event queue.',
+    'zh-CN': '应用内部领域事件发布与消费队列的容量上限。',
   },
   'settings.field.advanced.applicationEventMaxBytes': {
     'en-US': 'Max event bytes',
     'zh-CN': '单条事件最大字节数',
   },
+  'settings.field.advanced.applicationEventMaxBytes.hint': {
+    'en-US': 'Maximum allowed byte size for a single internal application event payload.',
+    'zh-CN': '应用内部单条事件 Payload 允许的最大字节数。',
+  },
   'settings.field.advanced.applicationEventSendTimeoutMillis': {
     'en-US': 'Event send timeout (ms)',
     'zh-CN': '事件发送超时（毫秒）',
+  },
+  'settings.field.advanced.applicationEventSendTimeoutMillis.hint': {
+    'en-US': 'Timeout in milliseconds when dispatching an event to the application event bus.',
+    'zh-CN': '向应用事件总线投递事件时的超时毫秒数。',
   },
   'settings.field.advanced.applicationEventHeartbeatIntervalMillis': {
     'en-US': 'Event heartbeat (ms)',
     'zh-CN': '事件心跳间隔（毫秒）',
   },
+  'settings.field.advanced.applicationEventHeartbeatIntervalMillis.hint': {
+    'en-US': 'Heartbeat interval in milliseconds for application event bus health checks.',
+    'zh-CN': '应用事件总线健康巡检心跳的时间间隔毫秒数。',
+  },
   'settings.field.advanced.postgresqlWorkNotificationPollMillis': {
     'en-US': 'PostgreSQL poll (ms)',
     'zh-CN': 'PostgreSQL 轮询（毫秒）',
+  },
+  'settings.field.advanced.postgresqlWorkNotificationPollMillis.hint': {
+    'en-US': 'Polling interval in milliseconds for PostgreSQL work notification events.',
+    'zh-CN': 'PostgreSQL 任务状态通知长轮询的时间间隔毫秒数。',
   },
   'settings.field.advanced.postgresqlWorkReconnectBackoffMillis': {
     'en-US': 'PostgreSQL reconnect backoff (ms)',
     'zh-CN': 'PostgreSQL 重连退避（毫秒）',
   },
+  'settings.field.advanced.postgresqlWorkReconnectBackoffMillis.hint': {
+    'en-US': 'Backoff delay in milliseconds before attempting to reconnect to PostgreSQL notifications.',
+    'zh-CN': 'PostgreSQL 通知通道断开重连时的退避延迟毫秒数。',
+  },
   'settings.field.advanced.redisRealtimeRetryDelayMillis': {
     'en-US': 'Redis realtime retry delay (ms)',
     'zh-CN': 'Redis Realtime 重试延迟（毫秒）',
+  },
+  'settings.field.advanced.redisRealtimeRetryDelayMillis.hint': {
+    'en-US': 'Retry delay in milliseconds for reconnecting the Redis real-time subscription channel.',
+    'zh-CN': 'Redis 实时订阅与广播通道异常中断后的重试重连延迟毫秒数。',
   },
 } satisfies LocaleCatalog

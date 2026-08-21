@@ -1,4 +1,5 @@
-import { useI18n } from '@/shared/i18n'
+import { useQuery } from '@tanstack/react-query'
+import { buildToolCandidates } from '@/features/ai/catalog/agent-capability-candidates'
 import {
   addRule,
   addTool,
@@ -9,7 +10,11 @@ import {
   updateRule,
 } from '@/features/settings/permission-utils'
 import type { PermissionGroupDraft } from '@/features/settings/system-settings-draft'
+import { agentService } from '@/shared/api/agent-service'
 import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
+import { useI18n } from '@/shared/i18n'
+import { queryKeys } from '@/shared/lib/query-keys'
+import { Select } from '@/shared/ui/console/Select'
 
 /**
  * 保序 permission 规则编辑器（tool 名 + 该 tool 下有序规则数组）。
@@ -17,7 +22,7 @@ import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-s
  * - 规则数组顺序即求值顺序，只能在同 tool 内上移/下移，禁止跨 tool 重排；
  * - 重命名 tool 时目标名冲突会确定性合并（源规则追加到目标之后）而不是丢规则；
  * - 空 tool 名 / 空 pattern 呈现可修复的内联错误态，保存会被 codec 阻止；
- * - 无原始 JSON 编辑器。
+ * - tool 名从运行时 catalog 选择；catalog 缺失的已保存名称保留为可改选项。
  */
 export function PermissionEditor({
   groups,
@@ -29,6 +34,11 @@ export function PermissionEditor({
   options: SystemSettingsSchemaOption[]
 }) {
   const { t } = useI18n()
+  const toolsQuery = useQuery({
+    queryKey: queryKeys.tools.list,
+    queryFn: () => agentService.listTools(),
+  })
+  const catalogNames = buildToolCandidates(toolsQuery.data ?? []).map((tool) => tool.name)
 
   return (
     <div className="permission-editor" data-permission-editor>
@@ -38,6 +48,18 @@ export function PermissionEditor({
 
       {groups.map((group, groupIndex) => {
         const toolNameBlank = group.tool.trim() === ''
+        const toolUnavailable = !toolNameBlank && !catalogNames.includes(group.tool)
+        const toolOptions = [
+          ...(toolUnavailable
+            ? [
+                {
+                  value: group.tool,
+                  label: `${group.tool} (${t('ai.catalog.form.unavailable')})`,
+                },
+              ]
+            : []),
+          ...catalogNames.map((name) => ({ value: name, label: name })),
+        ]
         return (
           <section
             key={groupIndex}
@@ -50,13 +72,13 @@ export function PermissionEditor({
                 <label className="permission-tool-label" htmlFor={`perm-tool-${groupIndex}`}>
                   {t('settings.permission.toolName')}
                 </label>
-                <input
+                <Select
                   id={`perm-tool-${groupIndex}`}
-                  className="settings-input permission-tool-input"
                   value={group.tool}
-                  data-invalid={toolNameBlank || undefined}
+                  placeholder={t('shared.selectPlaceholder')}
                   aria-invalid={toolNameBlank}
-                  onChange={(event) => onChange(renameTool(groups, groupIndex, event.target.value))}
+                  options={toolOptions}
+                  onChange={(tool) => onChange(renameTool(groups, groupIndex, tool))}
                 />
                 {toolNameBlank ? (
                   <span className="permission-error" role="alert">
@@ -66,7 +88,7 @@ export function PermissionEditor({
               </div>
               <button
                 type="button"
-                className="settings-icon-button danger"
+                className="settings-button danger permission-remove-tool"
                 aria-label={t('settings.permission.removeTool', { tool: group.tool || '…' })}
                 onClick={() => onChange(removeTool(groups, groupIndex))}
               >
@@ -106,24 +128,23 @@ export function PermissionEditor({
                         </span>
                       ) : null}
                     </div>
-                    <select
-                      className="settings-input permission-action-select"
+                    <Select
+                      compact
+                      className="permission-action-select"
                       value={rule.action}
                       aria-label={t('settings.permission.actionAriaLabel', { index: ruleIndex + 1 })}
-                      onChange={(event) =>
+                      options={options.map((option) => ({
+                        value: option.value,
+                        label: t(option.labelKey),
+                      }))}
+                      onChange={(action) =>
                         onChange(
                           updateRule(groups, groupIndex, ruleIndex, {
-                            action: event.target.value as PermissionGroupDraft['rules'][number]['action'],
+                            action: action as PermissionGroupDraft['rules'][number]['action'],
                           }),
                         )
                       }
-                    >
-                      {options.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {t(option.labelKey)}
-                        </option>
-                      ))}
-                    </select>
+                    />
                     <div className="permission-rule-actions">
                       <button
                         type="button"

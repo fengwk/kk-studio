@@ -1,6 +1,12 @@
-import { useI18n } from '@/shared/i18n'
-import { SettingsTextField } from '@/features/settings/settings-primitives'
+import { useQuery } from '@tanstack/react-query'
+import { formatModelRef, modelRef, toAgentModelViews } from '@/features/ai/catalog/AgentModelView'
+import { variantOptionsFromModel } from '@/features/ai/catalog/ai-draft-variant-options'
+import { extractDefaultVariantFromModel } from '@/features/ai/catalog/ai-model-draft-codec'
+import { SettingsSelectField } from '@/features/settings/settings-primitives'
 import type { ModelSelectionDraft } from '@/features/settings/system-settings-draft'
+import { agentService } from '@/shared/api/agent-service'
+import { useI18n } from '@/shared/i18n'
+import { queryKeys } from '@/shared/lib/query-keys'
 
 const EMPTY_SELECTION: ModelSelectionDraft = {
   providerName: '',
@@ -9,10 +15,8 @@ const EMPTY_SELECTION: ModelSelectionDraft = {
 }
 
 /**
- * 可空 model selection 的三个字段编辑器；null 始终表示三个输入都为空。
- *
- * 子字段标签由 schema 传入的 labelKey 派生（`<labelKey>.providerName` / `.modelName` / `.variant`），
- * 组件不硬编码任何具体设置路径；子字段 128 cap 与 ModelSelection 的 canonical 约束一致。
+ * 可空 model selection：与 Agent 表单相同，从 catalog 选择 model + variant。
+ * 空选择始终写成 null；选中 model 时写入其 defaultVariant，避免部分填写。
  */
 export function ModelSelectionEditor({
   value,
@@ -30,13 +34,61 @@ export function ModelSelectionEditor({
   onChange: (next: ModelSelectionDraft | null) => void
 }) {
   const { t } = useI18n()
+  const modelsQuery = useQuery({
+    queryKey: queryKeys.models.list,
+    queryFn: () => agentService.listModels(),
+  })
+  const models = toAgentModelViews(modelsQuery.data?.results ?? [])
   const selection = value ?? EMPTY_SELECTION
+  const currentRef =
+    selection.providerName.trim() && selection.modelName.trim()
+      ? formatModelRef(selection.providerName, selection.modelName)
+      : ''
+  const selectedModel = models.find((model) => modelRef(model) === currentRef)
+  const modelUnavailable = currentRef !== '' && selectedModel === undefined
+  const variantIds = variantOptionsFromModel(selectedModel)
+  const variantUnavailable =
+    selection.variant.trim() !== '' && !variantIds.includes(selection.variant.trim())
 
-  const update = (key: keyof ModelSelectionDraft, nextValue: string) => {
-    const next = { ...selection, [key]: nextValue }
-    onChange(
-      next.providerName === '' && next.modelName === '' && next.variant === '' ? null : next,
-    )
+  const modelOptions = [
+    { value: '', label: t('settings.modelSelection.none') },
+    ...(modelUnavailable
+      ? [
+          {
+            value: currentRef,
+            label: `${currentRef} (${t('ai.catalog.form.unavailable')})`,
+          },
+        ]
+      : []),
+    ...models.map((model) => ({ value: modelRef(model), label: modelRef(model) })),
+  ]
+  const variantOptions = [
+    ...(variantUnavailable
+      ? [
+          {
+            value: selection.variant,
+            label: `${selection.variant} (${t('ai.catalog.form.unavailable')})`,
+          },
+        ]
+      : []),
+    ...variantIds.map((variantName) => ({ value: variantName, label: variantName })),
+  ]
+
+  const selectModel = (nextRef: string) => {
+    if (nextRef === '') {
+      onChange(null)
+      return
+    }
+    const model = models.find((item) => modelRef(item) === nextRef)
+    if (model == null) {
+      return
+    }
+    const variants = variantOptionsFromModel(model)
+    onChange({
+      providerName: model.providerName,
+      modelName: model.name,
+      variant: extractDefaultVariantFromModel(model) || variants[0] || '',
+    })
   }
 
   return (
@@ -46,27 +98,23 @@ export function ModelSelectionEditor({
       data-settings-nullable={nullable}
     >
       <div className="settings-field-label">{t(labelKey)}</div>
+      {hint ? <span className="settings-field-description">{hint}</span> : null}
       <div className="settings-model-selection-fields">
-        <SettingsTextField
-          label={t(`${labelKey}.providerName`)}
-          value={selection.providerName}
-          maxLength={128}
-          onChange={(next) => update('providerName', next)}
-        />
-        <SettingsTextField
+        <SettingsSelectField
           label={t(`${labelKey}.modelName`)}
-          value={selection.modelName}
-          maxLength={128}
-          onChange={(next) => update('modelName', next)}
+          value={currentRef}
+          options={modelOptions}
+          onChange={selectModel}
         />
-        <SettingsTextField
+        <SettingsSelectField
           label={t(`${labelKey}.variant`)}
           value={selection.variant}
-          maxLength={128}
-          onChange={(next) => update('variant', next)}
+          options={variantOptions}
+          disabled={currentRef === '' || (selectedModel === undefined && !variantUnavailable)}
+          placeholder={t('shared.selectPlaceholder')}
+          onChange={(variant) => onChange({ ...selection, variant })}
         />
       </div>
-      {hint ? <span className="settings-field-hint">{hint}</span> : null}
     </div>
   )
 }

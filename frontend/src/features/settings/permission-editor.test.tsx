@@ -1,10 +1,21 @@
-import { render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PermissionEditor } from '@/features/settings/permission/PermissionEditor'
 import type { PermissionGroupDraft } from '@/features/settings/system-settings-draft'
+import { agentService } from '@/shared/api/agent-service'
+import type { ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
 import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
+import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
+
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listTools: vi.fn(),
+    listModels: vi.fn(),
+  },
+}))
 
 const PERMISSION_OPTIONS: SystemSettingsSchemaOption[] = [
   { value: 'allow', labelKey: 'settings.permission.action.allow' },
@@ -12,9 +23,22 @@ const PERMISSION_OPTIONS: SystemSettingsSchemaOption[] = [
   { value: 'deny', labelKey: 'settings.permission.action.deny' },
 ]
 
+function tool(name: string): ToolCatalogEntryDTO {
+  return { name, version: '1', description: null, type: 'PLATFORM' }
+}
+
 function Harness({ initial }: { initial: PermissionGroupDraft[] }) {
   const [groups, setGroups] = useState(initial)
   return <PermissionEditor groups={groups} onChange={setGroups} options={PERMISSION_OPTIONS} />
+}
+
+function renderEditor(initial: PermissionGroupDraft[]) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <Harness initial={initial} />
+    </QueryClientProvider>,
+  )
 }
 
 function patternInputs(scope: HTMLElement = document.body) {
@@ -23,44 +47,45 @@ function patternInputs(scope: HTMLElement = document.body) {
 
 describe('PermissionEditor UI', () => {
   beforeEach(() => {
-    // test-setup 已把语言切到 zh-CN；这里只做显式断言前的环境快照。
+    vi.mocked(agentService.listTools).mockResolvedValue([
+      tool('bash'),
+      tool('write'),
+      tool('edit'),
+    ])
   })
 
-  it('renders tool groups with their ordered rules', () => {
-    render(
-      <Harness
-        initial={[
-          { tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] },
-          { tool: 'write', rules: [{ pattern: 'node_modules/**', action: 'deny' }] },
-        ]}
-      />,
-    )
+  it('renders tool groups with their ordered rules', async () => {
+    renderEditor([
+      { tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] },
+      { tool: 'write', rules: [{ pattern: 'node_modules/**', action: 'deny' }] },
+    ])
     const bashGroup = screen.getByLabelText('权限分组 bash')
     const writeGroup = screen.getByLabelText('权限分组 write')
-    expect(within(bashGroup).getByDisplayValue('bash')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(within(bashGroup).getByLabelText('工具')).toHaveAttribute('data-value', 'bash')
+    })
     expect(within(bashGroup).getByDisplayValue('*')).toBeInTheDocument()
     expect(within(writeGroup).getByDisplayValue('node_modules/**')).toBeInTheDocument()
   })
 
   it('edits the action of a rule via the select', async () => {
     const user = userEvent.setup()
-    render(<Harness initial={[{ tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] }]} />)
+    renderEditor([{ tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] }])
     const select = screen.getByLabelText('第 1 条规则的动作')
-    expect(select).toHaveValue('ask')
-    await user.selectOptions(select, 'deny')
-    expect(select).toHaveValue('deny')
+    expect(select).toHaveAttribute('data-value', 'ask')
+    await chooseSelectOption(user, '第 1 条规则的动作', '拒绝')
+    expect(screen.getByLabelText('第 1 条规则的动作')).toHaveAttribute('data-value', 'deny')
   })
 
   it('adds and removes rules for a tool', async () => {
     const user = userEvent.setup()
-    render(<Harness initial={[{ tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] }]} />)
+    renderEditor([{ tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] }])
     const group = screen.getByLabelText('权限分组 bash')
     expect(patternInputs(group)).toHaveLength(1)
 
     await user.click(within(group).getByRole('button', { name: '添加规则' }))
     expect(patternInputs(group)).toHaveLength(2)
 
-    // 移除第 2 条规则。
     const removeButtons = within(group).getAllByRole('button', { name: '移除第 2 条规则' })
     expect(removeButtons.length).toBe(1)
     await user.click(removeButtons[0]!)
@@ -69,24 +94,19 @@ describe('PermissionEditor UI', () => {
 
   it('moves a rule up/down within the same tool preserving order', async () => {
     const user = userEvent.setup()
-    render(
-      <Harness
-        initial={[
-          {
-            tool: 'bash',
-            rules: [
-              { pattern: 'first', action: 'ask' },
-              { pattern: 'second', action: 'allow' },
-            ],
-          },
-        ]}
-      />,
-    )
+    renderEditor([
+      {
+        tool: 'bash',
+        rules: [
+          { pattern: 'first', action: 'ask' },
+          { pattern: 'second', action: 'allow' },
+        ],
+      },
+    ])
     const group = screen.getByLabelText('权限分组 bash')
     const inputs = patternInputs(group)
     expect(inputs[0]).toHaveValue('first')
 
-    // 「下移」只对第一条生效；禁用按钮也带同名 aria-label，取可点击的那个。
     const downButtons = within(group).getAllByRole('button', { name: '下移' })
     const enabledDown = downButtons.find((button) => !(button instanceof HTMLButtonElement && button.disabled))
     await user.click(enabledDown!)
@@ -104,20 +124,16 @@ describe('PermissionEditor UI', () => {
 
   it('merges rules deterministically when renaming a tool onto an existing tool', async () => {
     const user = userEvent.setup()
-    render(
-      <Harness
-        initial={[
-          { tool: 'bash', rules: [{ pattern: 'scripts/*', action: 'deny' }] },
-          { tool: 'write', rules: [{ pattern: '*', action: 'ask' }] },
-        ]}
-      />,
-    )
-    const bashGroup = screen.getByLabelText('权限分组 bash')
-    const nameInput = within(bashGroup).getByLabelText('工具')
-    await user.clear(nameInput)
-    await user.type(nameInput, 'write')
+    renderEditor([
+      { tool: 'bash', rules: [{ pattern: 'scripts/*', action: 'deny' }] },
+      { tool: 'write', rules: [{ pattern: '*', action: 'ask' }] },
+    ])
+    const bashGroup = await screen.findByLabelText('权限分组 bash')
+    await waitFor(() => {
+      expect(within(bashGroup).getByLabelText('工具')).toHaveAttribute('data-value', 'bash')
+    })
+    await chooseSelectOption(user, '工具', 'write', within(bashGroup))
 
-    // bash 分组被合并进 write：现在只有一个 write 分组且规则追加其后，无规则丢失。
     expect(screen.queryByLabelText('权限分组 bash')).not.toBeInTheDocument()
     const writeGroup = screen.getByLabelText('权限分组 write')
     const patterns = patternInputs(writeGroup).map((input) => input.getAttribute('value'))
@@ -125,25 +141,24 @@ describe('PermissionEditor UI', () => {
   })
 
   it('exposes validation-friendly empty states for blank tool names and patterns', () => {
-    render(<Harness initial={[{ tool: '', rules: [{ pattern: '', action: 'ask' }] }]} />)
+    renderEditor([{ tool: '', rules: [{ pattern: '', action: 'ask' }] }])
     expect(screen.getByText('工具名不能为空。')).toBeInTheDocument()
     expect(screen.getByText('规则模式不能为空。')).toBeInTheDocument()
   })
 
   it('adds a new empty tool group', async () => {
     const user = userEvent.setup()
-    render(<Harness initial={[{ tool: 'bash', rules: [] }]} />)
+    renderEditor([{ tool: 'bash', rules: [] }])
     expect(screen.getAllByLabelText(/^权限分组/)).toHaveLength(1)
     await user.click(screen.getByRole('button', { name: '添加工具' }))
     const groups = screen.getAllByLabelText(/^权限分组/)
     expect(groups).toHaveLength(2)
-    // 新增分组为空：展示「暂无规则」提示。
     expect(within(groups[1]!).getByText('该工具暂无规则。')).toBeInTheDocument()
   })
 
   it('removes an entire tool group', async () => {
     const user = userEvent.setup()
-    render(<Harness initial={[{ tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] }]} />)
+    renderEditor([{ tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] }])
     await user.click(screen.getByRole('button', { name: '移除工具 bash' }))
     expect(screen.queryByLabelText('权限分组 bash')).not.toBeInTheDocument()
     expect(screen.getByText('尚未配置权限规则。')).toBeInTheDocument()

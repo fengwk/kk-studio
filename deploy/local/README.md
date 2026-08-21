@@ -78,6 +78,7 @@ docker compose -f deploy/local/compose.yaml down -v
 | `KK_STUDIO_PG_USER` | `kk_studio` | 初始用户名 |
 | `KK_STUDIO_PG_PASSWORD` | `kk_studio` | 初始密码 |
 | `KK_STUDIO_SPRING_PROFILES_ACTIVE` | `dev` | 传递给 `SPRING_PROFILES_ACTIVE` |
+| `KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES` | `16777216` | Daemon WebSocket 单帧上限（字节），默认 16MiB |
 
 ## 真实 E2E MiniMax 凭证
 

@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from 'react'
 import { useI18n } from '@/shared/i18n'
-import { sanitizeIntegerInput } from '@/features/ai/catalog/ai-number-input'
+import { NumberInput } from '@/shared/ui/console/NumberInput'
+import { Select } from '@/shared/ui/console/Select'
 
 /** 配置生效时机：下次调用、新建对话或进程重启。 */
 export type ApplyTiming = 'nextInvocation' | 'nextChat' | 'restart'
@@ -41,17 +42,6 @@ export function SettingsCard({
       </header>
       {children}
     </section>
-  )
-}
-
-/** 整个 section 都由进程长期持有时的统一「重启后生效」提示条。 */
-export function RestartNotice() {
-  const { t } = useI18n()
-  return (
-    <div className="settings-restart-notice" role="note">
-      <ApplyTimingBadge timing="restart" />
-      <span>{t('settings.applyTiming.restartDescription')}</span>
-    </div>
   )
 }
 
@@ -106,6 +96,7 @@ export function SettingsTextField({
   placeholder,
   disabled = false,
   type = 'text',
+  description,
   hint,
   maxLength,
   fieldPath,
@@ -117,12 +108,14 @@ export function SettingsTextField({
   placeholder?: string
   disabled?: boolean
   type?: 'text' | 'password'
+  description?: string
   hint?: string
   maxLength?: number
   fieldPath?: string
   nullable?: boolean
 }) {
   const fieldId = useId()
+  const text = description ?? hint
   return (
     <div
       className="settings-field"
@@ -132,6 +125,7 @@ export function SettingsTextField({
       <label className="settings-field-label" htmlFor={fieldId}>
         {label}
       </label>
+      {text ? <span className="settings-field-description">{text}</span> : null}
       <input
         id={fieldId}
         className="settings-input"
@@ -142,7 +136,6 @@ export function SettingsTextField({
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       />
-      {hint ? <span className="settings-field-hint">{hint}</span> : null}
     </div>
   )
 }
@@ -159,6 +152,7 @@ export function SettingsNumberField({
   max,
   step = 1,
   disabled = false,
+  description,
   hint,
   fieldPath,
   nullable = false,
@@ -170,11 +164,13 @@ export function SettingsNumberField({
   max?: number
   step?: number
   disabled?: boolean
+  description?: string
   hint?: string
   fieldPath?: string
   nullable?: boolean
 }) {
   const fieldId = useId()
+  const text = description ?? hint
   return (
     <div
       className="settings-field"
@@ -186,19 +182,16 @@ export function SettingsNumberField({
       <label className="settings-field-label" htmlFor={fieldId}>
         {label}
       </label>
-      <input
+      {text ? <span className="settings-field-description">{text}</span> : null}
+      <NumberInput
         id={fieldId}
-        className="settings-input"
-        type="number"
-        inputMode="numeric"
+        value={value}
         min={min}
         max={max}
         step={step}
-        value={value}
         disabled={disabled}
-        onChange={(event) => onChange(sanitizeIntegerInput(event.target.value))}
+        onChange={onChange}
       />
-      {hint ? <span className="settings-field-hint">{hint}</span> : null}
     </div>
   )
 }
@@ -214,6 +207,8 @@ export function SettingsSelectField({
   options,
   onChange,
   disabled = false,
+  placeholder,
+  description,
   hint,
   fieldPath,
   nullable = false,
@@ -223,11 +218,14 @@ export function SettingsSelectField({
   options: SettingsSelectOption[]
   onChange: (next: string) => void
   disabled?: boolean
+  placeholder?: string
+  description?: string
   hint?: string
   fieldPath?: string
   nullable?: boolean
 }) {
   const fieldId = useId()
+  const text = description ?? hint
   return (
     <div
       className="settings-field"
@@ -238,20 +236,15 @@ export function SettingsSelectField({
       <label className="settings-field-label" htmlFor={fieldId}>
         {label}
       </label>
-      <select
+      {text ? <span className="settings-field-description">{text}</span> : null}
+      <Select
         id={fieldId}
-        className="settings-input"
         value={value}
+        options={options}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      {hint ? <span className="settings-field-hint">{hint}</span> : null}
+        placeholder={placeholder}
+        onChange={onChange}
+      />
     </div>
   )
 }
