@@ -1,11 +1,8 @@
 package fun.fengwk.kkstudio.core.ai.runtime.tool.gateway;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
 
-import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.plugin.PluginBranchViewLoader;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.plugin.ContributionId;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
@@ -137,39 +134,10 @@ public final class CoreToolGateway implements ToolGateway {
   private final Supplier<Duration> overloadRetryDelay;
   private final Clock clock;
 
-  public CoreToolGateway(
-      ToolFactories toolFactories,
-      PluginCatalog pluginCatalog,
-      PluginBranchViewLoader pluginBranchViewLoader,
-      RemoteToolTransport remoteTransport,
-      PermissionEvaluator permissionEvaluator,
-      ToolSettingsProvider toolSettingsProvider,
-      ResourceStore resourceStore,
-      HarnessRuntimeProperties runtimeProperties,
-      int resourceMaxBytes,
-      @Qualifier("toolGatewayExecutor") ExecutorService executor,
-      SystemSettingsSnapshot snapshot,
-      Clock clock) {
-    this(
-        toolFactories,
-        pluginCatalog,
-        pluginBranchViewLoader,
-        remoteTransport,
-        permissionEvaluator,
-        toolSettingsProvider,
-        resourceStore,
-        Objects.requireNonNull(runtimeProperties, "runtimeProperties").resolvedWorkdir(),
-        runtimeProperties.resolvedEnvironmentRoot(),
-        resourceMaxBytes,
-        executor,
-        liveBusyRetry(snapshot),
-        liveOverloadRetry(snapshot),
-        clock);
-  }
-
   /**
-   * package-private 测试 seam：语义与生产一致——每次 Busy / Overloaded 判定现读 {@code busyRetryDelay} / {@code
-   * overloadRetryDelay}（生产每次 start 从 SystemSettingsSnapshot 现读）。
+   * 生产与测试共用的唯一构造器。{@code busyRetryDelay} / {@code overloadRetryDelay} 在每次 Busy / Overloaded 判定时现读，
+   * 由装配方决定来源——生产装配传入 SystemSettingsSnapshot 的 live suppliers（每次 start 从 {@code
+   * tool.toolGatewayBusyRetryMillis} / {@code tool.toolGatewayOverloadRetryMillis} 现读）。
    */
   CoreToolGateway(
       ToolFactories toolFactories,
@@ -206,16 +174,6 @@ public final class CoreToolGateway implements ToolGateway {
     this.clock = Objects.requireNonNull(clock, "clock");
     rejectUnsafeExecutorPolicies(executor);
     rejectInlineExecutor(executor);
-  }
-
-  private static Supplier<Duration> liveBusyRetry(SystemSettingsSnapshot snapshot) {
-    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
-    return () -> Duration.ofMillis(settings.get().tool().toolGatewayBusyRetryMillis());
-  }
-
-  private static Supplier<Duration> liveOverloadRetry(SystemSettingsSnapshot snapshot) {
-    SystemSettingsSnapshot settings = Objects.requireNonNull(snapshot, "snapshot");
-    return () -> Duration.ofMillis(settings.get().tool().toolGatewayOverloadRetryMillis());
   }
 
   @Override
