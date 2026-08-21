@@ -13,11 +13,12 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
-/** System settings 服务契约：GET 默认聚合、PUT 完整替换 CAS、陈旧版本 409、非法聚合 400。 */
+/** System settings 服务契约：GET 默认聚合、PUT 完整替换 CAS、陈旧版本 409、非法聚合 400、live 快照 afterCommit 替换。 */
 public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private SystemSettingsService systemSettingsService;
   @Autowired private SystemSettingsCodec systemSettingsCodec;
+  @Autowired private SystemSettingsSnapshot systemSettingsSnapshot;
 
   @Test
   public void getReturnsDefaultsWithVersionAndTimestamps() {
@@ -52,6 +53,21 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     // 再次读取与最新版本一致。
     SystemSettingsDTO reread = systemSettingsService.get();
     assertEquals("1", reread.getVersion());
+  }
+
+  /** PUT 成功后 live 快照必须在事务提交后替换为最新权威聚合；提交前仍是旧值。 */
+  @Test
+  public void updateReplacesLiveSnapshotAfterCommit() {
+    SystemSettingsDTO current = systemSettingsService.get();
+    SystemSettingsUpdateDTO update = updateFrom(current, "0");
+    update.getAiRuntime().setRetryMaxRetries(9);
+
+    // 事务尚未提交：内存快照保持旧值。
+    assertEquals(3, systemSettingsSnapshot.get().aiRuntime().retryMaxRetries());
+    SystemSettingsDTO updated = systemSettingsService.update(update);
+    // Spring 事务在 service 返回时已提交：快照已替换为最新权威聚合。
+    assertEquals("1", updated.getVersion());
+    assertEquals(9, systemSettingsSnapshot.get().aiRuntime().retryMaxRetries());
   }
 
   @Test

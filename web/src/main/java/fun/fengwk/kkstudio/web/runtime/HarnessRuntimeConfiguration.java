@@ -21,7 +21,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewServiceFactor
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
@@ -157,16 +158,18 @@ public class HarnessRuntimeConfiguration {
         connectionFactory, config, new RealtimeEventJsonCodec(), retryDelay);
   }
 
-  /** Model / Tool 调用的全局重试策略：读取共享启动快照的 SystemSettings.AiRuntime（DB 变更需重启生效）。 */
+  /** Model / Tool 调用的全局重试策略现读通道：每次 retry 判定点从 SystemSettings.AiRuntime 映射。 */
   @Bean
-  public InvocationRetryPolicy invocationRetryPolicy(
+  public InvocationRetryPolicyProvider invocationRetryPolicyProvider(
       SystemSettingsSnapshot systemSettingsSnapshot) {
-    SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
-    return new InvocationRetryPolicy(
-        aiRuntime.retryMaxRetries(),
-        aiRuntime.retryBackoffStrategy(),
-        Duration.ofMillis(aiRuntime.retryBaseDelayMillis()),
-        Duration.ofMillis(aiRuntime.retryMaxDelayMillis()));
+    return () -> {
+      SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
+      return new InvocationRetryPolicy(
+          aiRuntime.retryMaxRetries(),
+          aiRuntime.retryBackoffStrategy(),
+          Duration.ofMillis(aiRuntime.retryBaseDelayMillis()),
+          Duration.ofMillis(aiRuntime.retryMaxDelayMillis()));
+    };
   }
 
   /** processor 共用的 claim/lease 与 heartbeat 节奏：读取共享启动快照的 SystemSettings.Advanced。 */
@@ -181,23 +184,23 @@ public class HarnessRuntimeConfiguration {
   @Bean
   public ThreadProcessorConfig threadProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
-      CompactionConfig compactionConfig,
+      CompactionConfigProvider compactionConfigProvider,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ThreadProcessorConfig(
         leaseConfig,
         Duration.ofMillis(advanced.threadResolveFailureDelayMillis()),
-        compactionConfig);
+        compactionConfigProvider);
   }
 
   @Bean
   public ModelProcessorConfig modelProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicy retryPolicy,
+      InvocationRetryPolicyProvider retryPolicyProvider,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     return new ModelProcessorConfig(
         leaseConfig,
-        retryPolicy,
+        retryPolicyProvider,
         Duration.ofMillis(
             systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()));
   }
@@ -205,12 +208,12 @@ public class HarnessRuntimeConfiguration {
   @Bean
   public ToolProcessorConfig toolProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicy retryPolicy,
+      InvocationRetryPolicyProvider retryPolicyProvider,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ToolProcessorConfig(
         leaseConfig,
-        retryPolicy,
+        retryPolicyProvider,
         Duration.ofMillis(advanced.toolPreflightFailureDelayMillis()),
         Duration.ofMillis(advanced.toolDispatchBusyFallbackDelayMillis()));
   }

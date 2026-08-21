@@ -141,14 +141,14 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
         key: 'aiRuntime',
         labelKey: 'settings.tabs.aiRuntime',
         descriptionKey: 'settings.section.aiRuntime.description',
-        restartRequired: true,
+        restartRequired: false,
         groups: [
           {
             key: 'aiRuntime.retry',
             labelKey: 'settings.section.aiRuntime.retry.title',
             descriptionKey: 'settings.section.aiRuntime.retry.description',
-            restartRequired: true,
-            applyTiming: null,
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'aiRuntime.retryMaxRetries',
@@ -199,8 +199,8 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'aiRuntime.compaction',
             labelKey: 'settings.section.aiRuntime.compaction.title',
             descriptionKey: 'settings.section.aiRuntime.compaction.description',
-            restartRequired: true,
-            applyTiming: null,
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'aiRuntime.compactionKeepRecentTokens',
@@ -228,8 +228,8 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
             key: 'aiRuntime.subagent',
             labelKey: 'settings.section.aiRuntime.subagent.title',
             descriptionKey: 'settings.section.aiRuntime.subagent.description',
-            restartRequired: true,
-            applyTiming: null,
+            restartRequired: false,
+            applyTiming: 'NEXT_INVOCATION',
             fields: [
               {
                 path: 'aiRuntime.subagentMaxDepth',

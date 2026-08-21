@@ -105,12 +105,19 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
             jsonPath("$.data.sections[1].groups[0].fields[0].options[2].value").value("deny"))
         // nullable fallback model 输出为 true。
         .andExpect(jsonPath("$.data.sections[0].groups[1].fields[1].nullable").value(true))
-        // group 最小结构：key/labelKey/restartRequired。
+        // group 最小结构：key/labelKey/restartRequired/applyTiming。
         .andExpect(jsonPath("$.data.sections[1].groups[0].key").value("tool.permission"))
         .andExpect(jsonPath("$.data.sections[1].groups[0].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[0].groups[1].restartRequired").value(true))
-        // restartRequired section 标记：aiRuntime 整体重启，tool 不需要。
-        .andExpect(jsonPath("$.data.sections[0].restartRequired").value(true))
+        .andExpect(jsonPath("$.data.sections[1].groups[0].applyTiming").value("NEXT_INVOCATION"))
+        // aiRuntime 三组 live 生效：restartRequired=false 且 applyTiming=NEXT_INVOCATION。
+        .andExpect(jsonPath("$.data.sections[0].groups[0].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[0].groups[0].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.data.sections[0].groups[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[0].groups[1].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.data.sections[0].groups[2].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[0].groups[2].applyTiming").value("NEXT_INVOCATION"))
+        // restartRequired section 标记：aiRuntime live，tool 不需要重启。
+        .andExpect(jsonPath("$.data.sections[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[1].restartRequired").value(false));
   }
 

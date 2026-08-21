@@ -848,7 +848,7 @@ class ModelProcessorTest {
             store,
             gateway,
             sink,
-            new ModelProcessorConfig(LEASE_CONFIG, retryPolicy, FALLBACK_DELAY),
+            new ModelProcessorConfig(LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY),
             clock,
             newScheduler());
     // 与生产一致的最小链：ROOT + TURN_START(INPUT) + USER，Thread head 与 invocation basis 指向 USER。
@@ -905,7 +905,7 @@ class ModelProcessorTest {
             store,
             (threadId, path, preparation) -> null,
             new ThreadProcessorConfig(
-                LEASE_CONFIG, FALLBACK_DELAY, new CompactionConfig(20_000, null)),
+                LEASE_CONFIG, FALLBACK_DELAY, () -> new CompactionConfig(20_000, null)),
             clock,
             newScheduler());
     assertEquals(
@@ -2366,7 +2366,7 @@ class ModelProcessorTest {
             fixtureA.store,
             new FakeGateway(),
             fixtureA.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixtureA.clock,
             newScheduler());
     assertEquals(ProcessResult.TERMINATED, processorB.process(claimedB));
@@ -2402,7 +2402,7 @@ class ModelProcessorTest {
             hooked,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
             newScheduler());
 
@@ -2444,7 +2444,7 @@ class ModelProcessorTest {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
             hooked);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
@@ -2518,13 +2518,13 @@ class ModelProcessorTest {
     Fixture fixture = fixture();
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, Duration.ZERO));
+        () -> new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, Duration.ofNanos(500)));
+        () -> new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, Duration.ofNanos(500)));
     assertEquals(
         FALLBACK_DELAY,
-        new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY)
+        new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY)
             .dispatchBusyFallbackDelay());
     assertThrows(
         NullPointerException.class,
@@ -2628,7 +2628,7 @@ class ModelProcessorTest {
             sink,
             new ModelProcessorConfig(
                 new ProcessorLeaseConfig(Duration.ofMillis(400), Duration.ofMillis(100)),
-                NO_RETRY,
+                () -> NO_RETRY,
                 FALLBACK_DELAY),
             Clock.systemUTC(),
             newScheduler());
@@ -2672,7 +2672,7 @@ class ModelProcessorTest {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
             dead);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
@@ -2879,7 +2879,7 @@ class ModelProcessorTest {
               store,
               gateway,
               sink,
-              new ModelProcessorConfig(LEASE_CONFIG, retryPolicy, FALLBACK_DELAY),
+              new ModelProcessorConfig(LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY),
               clock,
               scheduler);
     }

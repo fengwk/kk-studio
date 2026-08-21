@@ -32,13 +32,13 @@ public class SystemSettingsSchemaProvider {
                 "aiRuntime",
                 "settings.tabs.aiRuntime",
                 "settings.section.aiRuntime.description",
-                true,
+                false,
                 group(
                     "aiRuntime.retry",
                     "settings.section.aiRuntime.retry.title",
                     "settings.section.aiRuntime.retry.description",
-                    true,
-                    null,
+                    false,
+                    ApplyTiming.NEXT_INVOCATION,
                     field(
                         "aiRuntime.retryMaxRetries",
                         "settings.field.aiRuntime.retryMaxRetries",
@@ -77,8 +77,8 @@ public class SystemSettingsSchemaProvider {
                     "aiRuntime.compaction",
                     "settings.section.aiRuntime.compaction.title",
                     "settings.section.aiRuntime.compaction.description",
-                    true,
-                    null,
+                    false,
+                    ApplyTiming.NEXT_INVOCATION,
                     field(
                         "aiRuntime.compactionKeepRecentTokens",
                         "settings.field.aiRuntime.compactionKeepRecentTokens",
@@ -99,8 +99,8 @@ public class SystemSettingsSchemaProvider {
                     "aiRuntime.subagent",
                     "settings.section.aiRuntime.subagent.title",
                     "settings.section.aiRuntime.subagent.description",
-                    true,
-                    null,
+                    false,
+                    ApplyTiming.NEXT_INVOCATION,
                     field(
                         "aiRuntime.subagentMaxDepth",
                         "settings.field.aiRuntime.subagentMaxDepth",

@@ -82,7 +82,7 @@ public final class TaskTool implements Tool {
 
   private final ObjectProvider<HarnessRuntime> runtimeProvider;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
-  private final SubagentConfig config;
+  private final SubagentConfigProvider configProvider;
   private final SubagentRunRegistry runRegistry;
   private final HarnessThreadChangeSource changeSource;
   private final ExecutorService executor;
@@ -92,7 +92,7 @@ public final class TaskTool implements Tool {
   public TaskTool(
       ObjectProvider<HarnessRuntime> runtimeProvider,
       AgentBranchSettingsMaterializer settingsMaterializer,
-      SubagentConfig config,
+      SubagentConfigProvider configProvider,
       SubagentRunRegistry runRegistry,
       HarnessThreadChangeSource changeSource,
       ExecutorService executor,
@@ -100,7 +100,7 @@ public final class TaskTool implements Tool {
     this.runtimeProvider = Objects.requireNonNull(runtimeProvider, "runtimeProvider");
     this.settingsMaterializer =
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
-    this.config = Objects.requireNonNull(config, "config");
+    this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
     this.runRegistry = Objects.requireNonNull(runRegistry, "runRegistry");
     this.changeSource = Objects.requireNonNull(changeSource, "changeSource");
     this.executor = Objects.requireNonNull(executor, "executor");
@@ -110,7 +110,7 @@ public final class TaskTool implements Tool {
             NAME,
             VERSION,
             ToolType.PLATFORM,
-            TaskPrompts.toolDescription(config.maxTurns()),
+            TaskPrompts.toolDescription(configProvider.subagentConfig().maxTurns()),
             RENDERER_KEY,
             new ToolParamsSchema(
                 "委派一个隔离、可恢复的子 Agent Session。",
@@ -204,10 +204,7 @@ public final class TaskTool implements Tool {
             // 恢复子 Session：目标 Agent 可切换，完整 settings diff + prompt 在一次 THREAD 接受中提交。
             BranchSettings target =
                 settingsMaterializer.materialize(
-                    selected.name(),
-                    child.entryPath().baseSettings().environment(),
-                    depth(child),
-                    config);
+                    selected.name(), child.entryPath().baseSettings().environment(), depth(child));
             List<NewThreadCommand> commands =
                 taskCommands(child.entryPath().baseSettings(), target, arguments.prompt());
             sourceHeadEntryId = child.thread().headEntryId();
@@ -384,7 +381,7 @@ public final class TaskTool implements Tool {
             return new RunResult(
                 RunState.ERROR,
                 "Subagent idle timeout after "
-                    + config.idleTimeout()
+                    + configProvider.subagentConfig().idleTimeout()
                     + ". Session preserved as `"
                     + threadId
                     + "`.");
@@ -394,6 +391,7 @@ public final class TaskTool implements Tool {
     }
 
     private long idleDeadline(ThreadSnapshot snapshot, long lastActivityNanos) {
+      SubagentConfig config = configProvider.subagentConfig();
       if (config.idleTimeout().isZero() || !snapshot.toolSiblings().isEmpty()) {
         return Long.MAX_VALUE;
       }
@@ -416,8 +414,12 @@ public final class TaskTool implements Tool {
     }
     RootPayload root = (RootPayload) snapshot.entryPath().root().payload();
     int depth = root.subagentContext() == null ? 1 : root.subagentContext().depth();
-    if (depth >= config.maxDepth()) {
-      throw reject("subagent max depth reached: " + depth + "/" + config.maxDepth());
+    if (depth >= configProvider.subagentConfig().maxDepth()) {
+      throw reject(
+          "subagent max depth reached: "
+              + depth
+              + "/"
+              + configProvider.subagentConfig().maxDepth());
     }
     List<SubagentBinding> allowed = snapshot.model().request().subagentBindings();
     if (allowed.isEmpty()) {
@@ -431,7 +433,10 @@ public final class TaskTool implements Tool {
   private SubagentRunRegistry.Reservation reserve(ParentContext parent, UUID resumeThreadId) {
     try {
       return runRegistry.reserve(
-          parent.snapshot().thread().id(), parent.rootThreadId(), resumeThreadId, config);
+          parent.snapshot().thread().id(),
+          parent.rootThreadId(),
+          resumeThreadId,
+          configProvider.subagentConfig());
     } catch (IllegalArgumentException error) {
       throw reject(error.getMessage());
     }
@@ -446,10 +451,7 @@ public final class TaskTool implements Tool {
     int childDepth = parent.depth() + 1;
     BranchSettings settings =
         settingsMaterializer.materialize(
-            subagentType,
-            parent.snapshot().entryPath().baseSettings().environment(),
-            childDepth,
-            config);
+            subagentType, parent.snapshot().entryPath().baseSettings().environment(), childDepth);
     // NEW_SESSION 一次原子物化 Session/ROOT/Thread/初始 prompt Command 与 THREAD Work。
     try {
       AcceptedCommands accepted =
@@ -497,7 +499,7 @@ public final class TaskTool implements Tool {
     }
     // 目标 Agent 可在恢复时切换；完整 settings diff 与 prompt 在同一 command batch 中提交。
     settingsMaterializer.materialize(
-        subagentType, snapshot.entryPath().baseSettings().environment(), context.depth(), config);
+        subagentType, snapshot.entryPath().baseSettings().environment(), context.depth());
     return snapshot;
   }
 
@@ -863,7 +865,7 @@ public final class TaskTool implements Tool {
     }
     String subagentType = requiredText(node, "subagent_type");
     String prompt = requiredText(node, "prompt");
-    int maxTurns = config.maxTurns();
+    int maxTurns = configProvider.subagentConfig().maxTurns();
     JsonNode maxTurnsNode = node.get("maxTurns");
     if (maxTurnsNode != null && !maxTurnsNode.isNull()) {
       if (!maxTurnsNode.canConvertToInt() || !maxTurnsNode.isIntegralNumber()) {
