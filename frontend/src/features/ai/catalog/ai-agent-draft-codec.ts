@@ -99,9 +99,14 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
 }
 
 export function toEditableAgentUpdate(draft: AgentDraft): AgentDefinitionEditablePropertiesDTO {
+  const model = draft.model.trim()
+  if (!model) {
+    throw new Error('model must not be blank')
+  }
   return {
     description: trimToNull(draft.description),
     systemPrompt: trimToNull(draft.systemPrompt),
+    model,
     variant: trimToNull(draft.variant),
     config: toConfig(draft),
   }

@@ -44,7 +44,7 @@ describe('ai-resource-editor-submit-plans', () => {
     expect(plan.data).not.toHaveProperty('name')
   })
 
-  it('does not put an edited Agent model identity in the update body', () => {
+  it('puts the edited Agent model in the update body', () => {
     const plan = buildResourceSubmitPlan(
       {
         kind: 'agent',
@@ -67,9 +67,11 @@ describe('ai-resource-editor-submit-plans', () => {
       kind: 'agent',
       mode: 'edit',
       name: 'assistant',
-      data: { expectedVersion: '8', description: 'updated description' },
+      data: {
+        expectedVersion: '8',
+        description: 'updated description',
+        model: 'unrelated/model',
+      },
     })
-    if (plan.kind !== 'agent' || plan.mode !== 'edit') return
-    expect(plan.data).not.toHaveProperty('model')
   })
 })

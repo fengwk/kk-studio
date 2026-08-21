@@ -44,7 +44,7 @@ Runtime 实体 durable ID 是 `UUID`，在 HTTP 中编码为 canonical UUID stri
 - API Model ref 是 `providerName/modelName`，只在第一个 `/` 处切分，因此 Model 名称可以包含 `/`。
 - Catalog version 是独立的并发 token，以十进制字符串传输。
 
-Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `name` 两个字段。Provider、Model、Agent 的 PUT/DELETE 都用名称定位并携带 `expectedVersion`。
+Agent DTO 的 `model` 使用 Model ref，create 与 PUT 都必填；Model DTO 使用 `providerName` 与 `name` 两个字段。Provider、Model、Agent 的 PUT/DELETE 都用名称定位并携带 `expectedVersion`。Agent name 在记录存续期间不可改；Agent 的 default model 可以改，已有 Thread 的 `BranchSettings.model` 不受影响。
 
 ## 3. Composition root
 

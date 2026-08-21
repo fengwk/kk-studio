@@ -239,6 +239,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription(current.getDescription());
     update.setSystemPrompt(current.getSystemPrompt());
+    update.setModel(current.getModel());
     update.setVariant(current.getVariant());
     update.setConfig(config);
     update.setExpectedVersion(current.getVersion());
