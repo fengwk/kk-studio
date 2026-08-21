@@ -174,7 +174,7 @@ IDLE_OR_HISTORICAL / CONTINUATION_DUE 快照不暴露 Model、tools 或失败 at
 
 ## 5. Agent Loop（ThreadProcessor）
 
-ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，**每次 claim 恰好执行一个分类动作**（one claim one action）：下一动作一律由同一事务内 `requestWork(THREAD) + completeWork(currentClaim)` 驱动，不维护内部 run loop，不提交后重新读取自身刚写入的状态。返回值固定为 `COMPLETED` / `RESCHEDULED` / `LOST_OWNERSHIP`（无旧的 IDLE/CONTINUE/SUSPENDED/QUIESCENT 等结果；已删除 runLoop/LoopStep/Continue/stepLimit）。
+ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，**每次 claim 恰好执行一个分类动作**（one claim one action）：下一动作一律由同一事务内 `requestWork(THREAD) + completeWork(currentClaim)` 驱动，不维护内部 run loop，不提交后重新读取自身刚写入的状态。返回值固定为 `COMPLETED` / `RESCHEDULED` / `LOST_OWNERSHIP`。
 
 按分类执行：
 

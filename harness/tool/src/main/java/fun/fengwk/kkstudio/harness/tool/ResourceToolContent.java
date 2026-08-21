@@ -9,7 +9,7 @@ import java.util.Objects;
  */
 public record ResourceToolContent(ResourceRef resource, String preview) implements ToolContent {
 
-  /** 兼容既有无 preview 的 Resource 内容构造方式。 */
+  /** 构造无 preview 的 Resource 内容。 */
   public ResourceToolContent(ResourceRef resource) {
     this(resource, null);
   }

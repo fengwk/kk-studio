@@ -178,7 +178,7 @@ class ContextPressureDetectorTest {
   /** 意图：compound pattern 需要全部 markers 同时命中，任一宽泛单一子串单独出现不触发；ProviderType 分族隔离且共享权威 code。 */
   @Test
   void compoundPatternsRequireAllMarkersAndFamiliesSeparate() {
-    // Google compound 需要 input token count + exceeds + maximum 同时出现（旧实现只拆单独子串会误判）。
+    // Google compound 需要 input token count + exceeds + maximum 同时出现；单独子串拆解会误判。
     assertFalse(
         detect(
             errorFacts(ProviderType.GOOGLE, null, null, "the input token count was 90000 tokens")));

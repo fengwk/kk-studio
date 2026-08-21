@@ -125,7 +125,7 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | `GET /api/storage/blobs/{blobId}/presigned-original` | durable Blob Resource 的渲染期原件 URL，并返回权威 `mediaType/sizeBytes` |
 | `GET /api/storage/blobs/{blobId}/presigned-preview` | durable Blob Resource 的渲染期预览 URL |
 
-**不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 端点、无 `/messages` 或 `/messages/custom`（消息由 `command-batches` 命令表达）、无 `expectedExecutionEpoch`、无 `POST /{chatId}/threads`、无 `PUT /{threadId}/head`、无 `POST /{threadId}/commands`、无 `POST /{canvasId}/thread/messages`、无 standalone Thread create。
+公开 API 仅限表中列出的 current endpoints；消息写入统一 `command-batches`（`USER_MESSAGE` 命令表达，无独立 `/messages` 端点）；Thread head 由 Runtime 推进（ENTRY target materialization 创建新 Thread，现有 Thread 不 relocation）。
 
 ## 7. 一句话实现
 

@@ -712,7 +712,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   @Test
   void overThresholdContinuationCompactsBeforeResumingModel() {
     Fixture fixture = fixture();
-    // continueModel=true 的关闭 turn + 超阈值 usage：旧实现直接 CONTINUATION；新边界必须先压缩。
+    // continueModel=true 的关闭 turn + 超阈值 usage：先压缩，再恢复模型 continuation。
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE, true);
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;

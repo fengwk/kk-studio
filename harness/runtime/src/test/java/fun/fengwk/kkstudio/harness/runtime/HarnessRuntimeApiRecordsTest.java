@@ -250,7 +250,7 @@ class HarnessRuntimeApiRecordsTest {
     assertEquals(TestIds.id(9), queuedReplay.cancelledUserMessages().getFirst().clientCommandId());
     assertThrows(
         IllegalArgumentException.class, () -> new StopResult(false, thread, null, -1, List.of()));
-    // cancelledUserMessages 必须 sequence 严格递增（旧实现允许乱序/非单调，新不变量拒绝）。
+    // cancelledUserMessages 必须 sequence 严格递增（不变量拒绝乱序/非单调）。
     assertThrows(
         IllegalArgumentException.class,
         () ->

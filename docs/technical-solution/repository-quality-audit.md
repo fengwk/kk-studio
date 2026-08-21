@@ -83,7 +83,7 @@ Goal 插件只实现上述模型工具的 durable snapshot 协议，不实现 pi
 | 模块 | 职责 |
 | --- | --- |
 | `useBoundBranchPanel` | Bound Thread controller、branch base/draft、queued SET_* projection、原子 message batch、Thread rebind fail-closed |
-| `useBoundThreadPanelViews` | Conversation/Events 互斥视图、system prompt preview、Event detail 与公共 Footer/transcript 投影 |
+| `useBoundThreadPanelViews` | Conversation/Debug 互斥视图、system prompt preview、Event detail 与公共 Footer/transcript 投影 |
 | `useComposerFocus` | focus retry、Escape、interaction takeover、pending settle 后恢复与 timer cleanup |
 | `useComposerSubmissionSettle` | submitted draft、失败恢复、detached upload 挂起与释放 |
 | `useFunctionConfigSync` | Function config debounce、并发 flush 去重与失败保留 |

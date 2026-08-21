@@ -92,8 +92,9 @@ toolBindings      # (descriptor, type, environment binding, plugin provenance/ac
 skillBindings     # 最新 Agent skills（非空时自动派生内部 load_skill）
 subagentBindings  # 最新 Agent subagents 的名称 + 描述 allowlist（未达最大深度时）
 cacheControl      # Resolver 生成的 compact ProviderCacheControl
-compaction        # null 或冻结的 CompactionRequest
 ```
+
+`ModelRequestSpec` 不携带 compaction metadata：压缩调用由 basis EntryPath 末尾 owned `TURN_START.compaction` / `CompactionStart` 识别，candidate path 冻结在该 TURN_START。
 
 system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合，固定顺序为：Agent 正文（非空时）→ `<current_environment>`（至少有一个有值字段时）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。Debug 视图顶部只读预览通过 `GET /api/ai/runtime/threads/{threadId}/system-prompt` 按当前 branch 最新状态现算同一组合；进入 `/debug` 拉一次，turn 开始与结束时各 refetch 一次，使同批设置变更在模型工作期间即可可见。current_environment 只输出有值字段：
 

@@ -184,11 +184,11 @@ queued `SET_ENVIRONMENT` 只在后续 INPUT 边界消费，因此 enqueue 不再
 
 typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAND_ID_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`MATERIALIZATION_ID_REUSED`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`。409 的统一错误信封在 `errors.reason` 暴露该稳定枚举，并在 `errors.detail` 保留诊断文本；客户端只能按稳定 reason 做恢复决策。持久化不变量破坏（错误 ownership、mixed sibling、非连续 ordinal、count mismatch）保持 `IllegalStateException`，绝不降级为业务冲突。注意 approval 路径的 Thread/target 缺失同样映射 409（`APPROVAL_NOT_APPLICABLE`），不是 404。
 
-## 6. Head relocation 不存在
+## 6. Head 推进
 
-**不存在 `MOVE_HEAD` / `PUT head` / standalone Thread create**。`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）；第一次 durable batch 以 ENTRY target 提交时，服务端原子 materialize 一个新 Thread（`headEntryId = startEntryId`，不复制 Entry、不修改任何已有 Thread），旧 Thread 永不 relocation。现有 Thread 的 head 只能由 Runtime 在 turn/compaction/stop 执行中推进到当前 head 的新 descendant。
+`/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）；第一次 durable batch 以 ENTRY target 提交时，服务端原子 materialize 一个新 Thread（`headEntryId = startEntryId`，不复制 Entry、不修改任何已有 Thread）。现有 Thread 的 head 只能由 Runtime 在 turn/compaction/stop 执行中推进到当前 head 的新 descendant。
 
-冲突 reason 中不存在 `MOVE_TARGET_CROSS_SESSION` / `MOVE_TARGET_HAS_CONTINUATION_OBLIGATION` / `THREAD_NOT_QUIESCENT`：materialization 冲突统一表达为 `MATERIALIZATION_ID_REUSED`（同 threadId 不同 session/hash）与 `STALE_COMMAND_CURSOR`（THREAD 全新 batch head/sequence 不匹配）。
+冲突 reason 是 `MATERIALIZATION_ID_REUSED`（同 threadId 不同 session/hash）与 `STALE_COMMAND_CURSOR`（THREAD 全新 batch head/sequence 不匹配）；不存在其它 materialization 冲突表达。
 
 ## 7. Stop
 
@@ -325,7 +325,7 @@ public record ProviderResponse(
 
 ### Durable compaction
 
-- `TurnStartReason.COMPACTION` 消费零 Command，candidate path 只追加 TURN_START；`CompactionPreparation` 作为 transient plan 事实传给 Resolver，并与 frozen `CompactionRequest` 逐字段机械比对。
+- `TurnStartReason.COMPACTION` 消费零 Command，candidate path 只追加 TURN_START；`CompactionPreparation` 作为 transient plan 事实传给 Resolver，candidate path 已冻结在 `TURN_START.compaction` / `CompactionStart`，与 `ModelRequestSpec` 机械比对。
 - 成功结果只能是 `CompactionPayload`（`summaryText`）；正常 invocation 不能挂 COMPACTION，compaction invocation 不能挂普通 Assistant MESSAGE。Store 要求 invocation 已 SUCCEEDED、payload metadata 与 request 精确相等，且 cut/prefix anchor 在 result 前满足 `cutEntryId` 为历史 retained 边界、`turnPrefixStartEntryId` 指向 split turn 首个 user-like message。
 - phase/complete 固定：HISTORY 为 incomplete；FULL/TURN_PREFIX 为 complete。completed HISTORY 用 `continueModel=true` 机械启动 TURN_PREFIX；complete OVERFLOW 用 true 启动一次 immediate retry；成功 THRESHOLD FULL/TURN_PREFIX/fallback 仅在压缩前存在 same-owner normal continuation 时以 true 恢复该 obligation，foreign owner 不可借用。
 - HISTORY 之后只读取紧邻、已完成且 metadata 匹配的 partial；TURN_PREFIX 不扫描更早 stale partial。direct TURN_PREFIX 的 history 文本固定为 `No prior history.`。

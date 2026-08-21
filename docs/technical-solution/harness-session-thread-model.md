@@ -262,21 +262,26 @@ BOUND_THREAD
 
 ```ts
 type PendingAcceptance = {
-  request: FrozenCommandBatchRequest
-  composerSnapshot: ComposerPart[]
+  owner: AgentRuntimeOwnerDTO
+  target: PaneTarget
+  request: AgentCommandBatchRequestDTO
+  branchDraft: BranchDraft
+  composerParts: ComposerPart[]
+  generation: number
+  unknownOutcome: boolean
 }
 ```
 
 要求：
 
 - `sessionId`、`threadId`、`clientCommandId` 在首次请求前生成。
-- 超时后逐字节重放原请求，不生成新 ID。
+- unknown outcome 逐字节重放原请求（frozen `request`），不生成新 ID。
 - PendingAcceptance 持久化到 Pane local storage，刷新后仍可恢复。
 - 同一 Pane 同时至多存在一个 PendingAcceptance；未决期间 Composer 可继续编辑，但禁止第二次 durable send。
 - 只有收到权威成功响应后才切换到 `BOUND_THREAD`。
 - 用户在请求发出后继续输入的新草稿不得被旧请求的成功或失败覆盖。
 - completion 只有在 pending identity/generation 仍匹配时才可修改 PaneTarget；被放弃请求的迟到成功只更新后台 Thread projection。
-- 确定失败时把冻结的 `composerSnapshot` 前置合并到当前草稿，不覆盖请求后继续输入的内容。
+- 确定失败时把冻结的 `composerParts` 前置合并到当前草稿，不覆盖请求后继续输入的内容。
 
 ### 3.4 导航门控
 
@@ -713,7 +718,7 @@ Compaction 请求只使用：
 
 ```text
 当前 path 派生的 Model provider/name/variant
-frozen CompactionRequest
+transient CompactionPreparation（candidate path 已冻结在 TURN_START.compaction / CompactionStart）
 fixed compaction prompt resources
 ```
 
@@ -1210,11 +1215,11 @@ Chat 与 Canvas 只保留薄 owner wrapper：
 
 ```text
 ChatWorkspacePane(owner={CHAT, chatId})
-CanvasAgentPane(owner={CANVAS, canvasId})
+CanvasAgentThread(owner={CANVAS, canvasId})
                     │
                     ▼
                AgentPane
-               ├── PaneTargetStore（pane-scoped PendingAcceptance sidecar）
+               ├── agent-pane/pane-target.ts（PaneTarget / PendingAcceptance sidecar 持久化）
                ├── useAgentPaneController（三态 FSM）
                ├── InteractionPanels（SelectionPanel / HistoryBranchPanel / ThreadInteractionPanel）
                ├── draft target ──────────────► ThreadPanel（ThreadComposer + WidgetStack + Footer）
@@ -1227,11 +1232,11 @@ CanvasAgentPane(owner={CANVAS, canvasId})
 模块职责：
 
 ```text
-PaneTargetStore
-  PaneTarget、BranchDraft、PendingAcceptance、本地持久化
+agent-pane/pane-target.ts
+  PaneTarget 与 PendingAcceptance sidecar 的本地持久化；不持久化普通 BranchDraft
 
 useAgentPaneController
-  三态 FSM、命令可用性、导航门控、first-send materialization
+  三态 FSM、命令可用性、导航门控、first-send materialization、本地 BranchDraft 持有
 
 AgentPane
   owner wrapper 之下的共享 pane：draft 与 bound 都渲染 ThreadPanel，BOUND_THREAD 经 ChatPanel
@@ -1332,6 +1337,8 @@ Harness Runtime 不依赖 Chat、Canvas、Storage 或 Spring 类型。应用层�
 
 ### 11.2 Runtime facade
 
+`HarnessRuntime` facade 提供固定操作集合：
+
 ```text
 acceptCommands
 listThreadsBySession
@@ -1343,17 +1350,7 @@ setThreadYolo
 findThreadCommand
 ```
 
-不提供：
-
-```text
-createSession
-createThread
-createThreadAtEntry
-moveHead
-putHead
-```
-
-Session/Thread 只允许在第一批 Command 被接受时创建。
+Session/Thread 只由 `acceptCommands` materialization 创建（第一批 Command 被原子接受时）；head 仅由 Runtime 沿 descendant 推进（turn/compaction/stop 执行中）。
 
 手动压缩与 system-prompt 预览不在 `HarnessRuntime` facade：`compactThread` / `manualCompactionAvailability` 由 `ThreadProcessor` 提供，`getSystemPromptPreview` 由 Core 的 `SystemPromptPreviewService` 提供；Thread 删除走 `HarnessStore.Transaction`（由 Core `HarnessSessionDeletionService` 编排），Runtime facade 不暴露 delete。
 
@@ -1766,25 +1763,6 @@ Task Session：
 
 ## 16. 目标代码形态
 
-最终代码中禁止存在：
-
-```text
-CreateThreadCommand
-HarnessThreadCreateDTO
-standalone createSession/createThread/createThreadAtEntry API
-MOVE_HEAD / PUT head
-chat_thread
-canvas_document.thread_id
-canvas_function_resource_ref
-Pane.threadId|null 二态模型
-selectedSessionId durable/local Pane field
-Chat/Canvas 各自的 command switch 与 first-send pipeline
-/events command、alias、文案和快捷键 scope
-上传 API 路径中的机会式 GC
-```
-
-最终统一为：
-
 ```text
 AcceptCommandsTarget 三态
 ThreadCommand 六类型
@@ -1802,9 +1780,7 @@ canvas_function_resource_pin
 一个周期 Storage recovery
 ```
 
-## 17. 数据库重建
-
-最终结构直接写入：
+## 17. 数据库引导
 
 ```text
 core/src/main/resources/db/migration/V1__schema.sql
@@ -1813,17 +1789,7 @@ dev/e2e/test seed
 PostgreSQL schema structure tests
 ```
 
-部署时删除旧数据库并重新执行 V1。禁止：
-
-```text
-ALTER/backfill migration
-V2/V3 兼容补丁
-旧表视图
-双写
-旧 DTO alias
-旧命令 alias
-sentinel UUID / 空串代替 NULL
-```
+clean-slate V1 是唯一 schema 基线：只有 `V1__schema.sql` + profile seeds，NULL 表示缺失，无增量 schema chain（无 V2/V3、无 ALTER/backfill migration、无双写与旧 DTO/命令 alias）。
 
 ## 18. 自动化验收
 
@@ -1934,17 +1900,16 @@ sentinel UUID / 空串代替 NULL
 - [ ] 零 Thread Session 可通过 Tree 进入 EntryDraft。
 - [ ] `/tree` 选择不创建 Thread。
 - [ ] Canvas `/new` 不修改 Canvas Graph。
-- [ ] `/debug` 完整可用，生产代码和文档中 `/events` 为零。
+- [ ] `/debug` 完整可用（Conversation/Debug 互斥主视图）。
 - [ ] 切换 Pane 不停止后台 Thread，旧 realtime 不抢回 active target。
 
 ### 18.8 结构与覆盖率
 
-- [ ] schema 不存在 active Session/Thread、Session title、Thread settings/status 等冗余字段。
-- [ ] 不存在 chat_thread、canvas_document.thread_id、standalone Thread create API。
-- [ ] canvas_command_dedup 只包含 canvasId、commandId 和 requestHash。
-- [ ] canvas_function_resource_ref 完全删除并统一为 canvas_function_resource_pin。
-- [ ] nullable terminal marker 使用 NULL 和 partial index，不使用 sentinel。
+- [ ] schema 只承载当前 Entity 必需字段：Session/Thread 无 title/status 冗余列，settings 只存在于 BranchSettings。
 - [ ] owner relation 只建立 `session_id` 主键和 owner listing index。
+- [ ] canvas_command_dedup 只包含 canvasId、commandId 和 requestHash。
+- [ ] 资源引用统一使用 canvas_function_resource_pin。
+- [ ] nullable terminal marker 使用 NULL 和 partial index，不使用 sentinel。
 - [ ] Store 拒绝把 Command 标记为由错误类型、错误 Session 或错误 ownerThreadId 的 Entry 消费。
 - [ ] Session delete 与 acceptance/Entry append 并发测试无锁环。
 - [ ] Chat/Canvas runtime command implementation 只有一份。

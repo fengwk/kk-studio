@@ -62,8 +62,7 @@ flowchart TD
 - 所有 Runtime 实体 id（Thread/Session/Entry/Invocation/Command）在 HTTP wire 上是 canonical UUID strings；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal strings，前端以 `DecimalLong=string` 接收并按字段领域约束严格校验。
 - Thread `nextCommandSequence` 从 1 开始；每次可见状态变化 `revision` 恰好 +1。
 - Agent Loop 固定 6 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS`；产品输入 batch 恰有一个末尾 user-like message，设置只在下一次 INPUT 边界生效；YOLO 由 Thread 控制 API 修改。
-- 产品唯一写入口是 `POST /api/ai/runtime/command-batches`（owner + NEW_SESSION/ENTRY/THREAD target + commands）：任何 user Session/Thread materialization 只发生在第一批 Command 被原子接受时，无 standalone Thread create、无 MOVE_HEAD/PUT head；`/tree` 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`，现有 Thread 永不 relocation。
-- Thread 不提供 MOVE_HEAD：`/tree` 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`；第一批 Command 被原子接受时才 materialize Thread，现有 Thread 永不 relocation。
+- 产品唯一写入口是 `POST /api/ai/runtime/command-batches`（owner + NEW_SESSION/ENTRY/THREAD target + commands）：任何 user Session/Thread materialization 只发生在第一批 Command 被原子接受时；`/tree` 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入），现有 Thread 的 head 只能由 Runtime 沿 descendant 推进，永不 relocation。
 - Stop 先按 owning Thread 的 `TURN_END.closeRequestId` 或 Command `cancelRequestId` 精确 replay，再做 revision CAS；结果正交返回 stopped TURN_END、cancelled Commands/messages 和当前 Thread projection，no-op 不写 marker。
 - Tool approval 输入 `ALLOW` / `DENY`，durable 值为 `ALLOWED` / `DENIED`；`ALLOWED` 恢复执行，`DENIED` 终结失败；ToolProcessor 在 permission preflight 前读取当前 Thread YOLO，true 时直接 Allow。
 - AgentDefinitionConfigDTO 的 `tools`/`skills`/`subagents` 三个列表必填：`tools`/`skills` 是短名集合，`subagents` 是 Agent 名称 allowlist（引用锁定，被引用 Agent 不可删除）；branch `activeTools` 由 config.tools + skills 非空时的内部 `load_skill` + subagents 非空时的内部 `task` 派生（子 Agent 在最大深度处省略 `task`）。

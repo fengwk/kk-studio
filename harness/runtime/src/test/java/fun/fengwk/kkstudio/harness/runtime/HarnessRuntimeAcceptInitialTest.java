@@ -160,8 +160,8 @@ class HarnessRuntimeAcceptInitialTest {
   }
 
   /**
-   * 初始 replay 真实缺陷回归：materialize 第二批后，重放初始请求只按 clientCommandId 返回原始初始命令（sequence 从 1 连续）， 顺序与
-   * terminal 状态为当前值，且不产生 revision mutation（旧实现 loadCommandsByThread 会把第二批也返回）。
+   * 初始 replay：materialize 第二批后，重放初始请求只按 clientCommandId 返回原始初始命令（sequence 从 1 连续），顺序与 terminal
+   * 状态为当前值，且不产生 revision mutation（replay 只命中初始批次，不返回第二批）。
    */
   @Test
   void newSessionReplayAfterSecondBatchReturnsOnlyTheInitialCommands() {
@@ -274,12 +274,12 @@ class HarnessRuntimeAcceptInitialTest {
   }
 
   /**
-   * SET_* 前缀固定顺序必须是 SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL -&gt; SET_ACTIVE_TOOLS：旧实 现把
-   * SET_ENVIRONMENT 排在最后，这里用正反两个请求证明新顺序（正向通过 / 反向 IAE）。
+   * SET_* 前缀固定顺序必须是 SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL -&gt; SET_ACTIVE_TOOLS：
+   * 用正反两个请求证明该顺序（正向通过 / 反向 IAE）。
    */
   @Test
   void setPrefixOrderRequiresEnvironmentFirst() {
-    // 合法：新顺序全前缀 + 单条 user message。
+    // 合法：全前缀 + 单条 user message。
     AcceptedCommands result =
         runtime.acceptCommands(
             newSession(
@@ -296,7 +296,7 @@ class HarnessRuntimeAcceptInitialTest {
                     userMessageCommand(TestIds.id(5), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(result.replayed());
-    // 非法：SET_ENVIRONMENT 出现在 SET_AGENT 之后（旧实现会错误接受）。
+    // 非法：SET_ENVIRONMENT 出现在 SET_AGENT 之后（顺序不变量拒绝）。
     assertThrows(
         IllegalArgumentException.class,
         () ->

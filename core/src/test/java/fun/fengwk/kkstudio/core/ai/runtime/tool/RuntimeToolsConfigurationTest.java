@@ -12,16 +12,16 @@ import java.time.Duration;
 
 /**
  * 验证 {@link RuntimeToolsConfiguration#subagentConfig} 把 {@code SystemSettings.AiRuntime} 的五个
- * subagent 字段 完整映射为 {@link SubagentConfig}。
- *
- * <p>五个字段全部取与默认不同的非默认值（depth=4 / per-parent=7 / total=13 / idle=1234ms / turns=89），逐项精确断言， 防止 total
- * 与 per-parent 在 SystemSettings -&gt; runtime bean mapping 中丢失或互换。纯 JUnit 单元测试：不启动
- * Spring/Postgres，直接构造 {@code new RuntimeToolsConfiguration().subagentConfig(...)}。
+ * subagent 字段完整映射为 {@link SubagentConfig}。纯 JUnit 单元测试：不启动 Spring/Postgres，直接构造 {@code new
+ * RuntimeToolsConfiguration().subagentConfig(...)}。
  */
 class RuntimeToolsConfigurationTest {
 
   @Test
   void subagentConfigMapsAllFiveAiRuntimeFields() {
+    // 五个字段全部取与默认不同的 distinct 非默认值（depth=4 / per-parent=7 / total=13 /
+    // idle=1234ms / turns=89），逐项精确断言，防止 per-parent 与 total 在
+    // SystemSettings -> runtime bean mapping 中丢失或互换。
     SystemSettings.AiRuntime aiRuntime =
         new SystemSettings.AiRuntime(
             SystemSettings.AiRuntime.DEFAULT.retryMaxRetries(),

@@ -253,12 +253,12 @@ class HarnessRuntimeAcceptThreadTest {
   }
 
   /**
-   * SET_ENVIRONMENT 不再有 quiescent admission：live Model / THREAD Work 期间接受 {@code SET_ENVIRONMENT +
+   * SET_ENVIRONMENT 无 quiescent admission：live Model / THREAD Work 期间接受 {@code SET_ENVIRONMENT +
    * 恰一条 user message}，只入队 / 推进 cursor，不改当前 open Turn（SET_* 由 Reducer 于下一个 INPUT 边界收割）。
    */
   @Test
   void setEnvironmentDuringLiveOrWorkIsAcceptedAndOnlyAdvancesCursor() {
-    // 场景一：live MODEL_ACTIVE（当前 open Turn 在跑）+ THREAD Work 行 —— 旧实现因上下文非 Idle 拒绝。
+    // 场景一：live MODEL_ACTIVE（当前 open Turn 在跑）+ THREAD Work 行 —— 接受且只推进 cursor。
     HarnessRuntimeTestSupport.ModelBaseline live = seedModel(store, ModelInvocationStatus.RUNNING);
     seedThreadWork(store, live.threadId());
     UUID liveHead =
@@ -281,7 +281,7 @@ class HarnessRuntimeAcceptThreadTest {
         store.transaction(tx -> tx.findModelInvocation(live.modelId()).orElseThrow());
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
 
-    // 场景二：IDLE 但有 THREAD Work 行 —— 旧实现因 Work 行存在拒绝。
+    // 场景二：IDLE 但有 THREAD Work 行 —— 接受且只推进 cursor。
     HarnessRuntimeTestSupport.Baseline idle = seedBaseline(store);
     seedThreadWork(store, idle.threadId());
     AcceptedCommands idleResult =
@@ -350,7 +350,7 @@ class HarnessRuntimeAcceptThreadTest {
                 AcceptancePreflight.IDENTITY));
   }
 
-  /** THREAD user batch 必须恰有一条末尾 user-like，不是至少一条：多条 user message 同类合并被拒（旧实现会错误接受）。 */
+  /** THREAD user batch 必须恰有一条末尾 user-like：多条 user message 同类合并被拒。 */
   @Test
   void threadUserBatchRejectsMultipleUserMessages() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
