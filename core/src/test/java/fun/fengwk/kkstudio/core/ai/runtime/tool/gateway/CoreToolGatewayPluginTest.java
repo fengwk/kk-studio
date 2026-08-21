@@ -203,7 +203,8 @@ class CoreToolGatewayPluginTest {
             ToolGatewayTestSupport.ENVIRONMENT_ROOT,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
-            ToolGatewayTestSupport.CONFIG,
+            ToolGatewayTestSupport.BUSY_RETRY_DELAY,
+            ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             Clock.fixed(NOW, ZoneOffset.UTC));
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();

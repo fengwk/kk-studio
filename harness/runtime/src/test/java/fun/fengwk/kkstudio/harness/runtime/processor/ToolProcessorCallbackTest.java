@@ -810,6 +810,9 @@ class ToolProcessorCallbackTest {
           public void cancel() {
             throw new IllegalStateException("transport gone");
           }
+
+          @Override
+          public void activate() {}
         };
     fixture.gateway.queueStart(new ToolGateway.Started(throwingHandle));
     assertEquals(
