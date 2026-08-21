@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /** 守护生产与集成测试共用的唯一 Flyway 引导路径。 */
@@ -25,7 +26,8 @@ class FlywayBootstrapArchitectureTest {
       List.of(
           "database/src/main/resources/db/migration/V1__schema.sql",
           "database/src/main/resources/db/seed/dev/V2__dev_seed.sql",
-          "database/src/main/resources/db/seed/e2e/V2__e2e_seed.sql");
+          "database/src/main/resources/db/seed/e2e/V2__e2e_seed.sql",
+          "database/src/main/resources/db/seed/canvas-test/V3__canvas_test_system_settings.sql");
   private static final String OLD_HARNESS_SCHEMA =
       "harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/"
           + "postgresql/harness-runtime-schema.sql";
@@ -38,6 +40,8 @@ class FlywayBootstrapArchitectureTest {
           "deploy/local/compose.yaml");
   private static final List<String> FORBIDDEN_BOOTSTRAPS =
       List.of("spring.sql.init", "schema-locations", "docker-entrypoint-initdb.d");
+  private static final Set<String> GENERATED_DIRS =
+      Set.of(".git", ".workspace", "target", "node_modules", "dist", "coverage", "reports");
 
   @Test
   void onlyFlywayMigrationResourcesExist() {
@@ -56,32 +60,23 @@ class FlywayBootstrapArchitectureTest {
   }
 
   @Test
-  void exactlyOneBaselineMigrationExistsAndCoreKeepsNoSeedOrMirror() throws IOException {
+  void exactlyOneBaselineMigrationExistsAcrossTheWholeRepository() throws IOException {
     Path root = repositoryRoot();
     List<String> migrations =
-        Stream.of("database", "core", "harness")
-            .map(root::resolve)
-            .filter(Files::isDirectory)
-            .flatMap(
-                module ->
-                    walkModuleResources(module)
-                        .filter(path -> path.getFileName().toString().equals("V1__schema.sql")))
+        walkRepository(root)
+            .filter(path -> path.getFileName().toString().equals("V1__schema.sql"))
             .map(root::relativize)
             .map(Path::toString)
+            .sorted()
             .toList();
     assertEquals(
         List.of("database/src/main/resources/db/migration/V1__schema.sql"),
         migrations,
-        "V1 baseline must exist exactly once, owned by the database module");
-
+        "V1 baseline must exist exactly once across the whole repository, owned by the database module");
     assertFalse(
-        walkModuleResources(root.resolve("core"))
-            .anyMatch(path -> path.startsWith(root.resolve("core/src/main/resources/db"))),
-        "core must not keep any db/migration or db/seed resources");
-    assertFalse(
-        walkModuleResources(root.resolve("harness"))
-            .anyMatch(path -> path.toString().contains("harness-runtime-schema.sql")),
-        "no harness module may keep the old schema mirror");
+        walkRepository(root)
+            .anyMatch(path -> path.getFileName().toString().equals("harness-runtime-schema.sql")),
+        "no file in the repository may keep the old schema mirror");
   }
 
   @Test
@@ -103,7 +98,7 @@ class FlywayBootstrapArchitectureTest {
     assertTrue(webPom.contains("<artifactId>flyway-database-postgresql</artifactId>"));
     assertTrue(
         webPom.contains("<artifactId>kk-studio-database</artifactId>"),
-        "web must compile against the database module");
+        "web must depend on the database module");
 
     String corePom = Files.readString(root.resolve("core/pom.xml"), StandardCharsets.UTF_8);
     assertTrue(
@@ -113,16 +108,19 @@ class FlywayBootstrapArchitectureTest {
             "<artifactId>flyway-database-postgresql</artifactId>\n            <scope>test</scope>"));
   }
 
-  private static Stream<Path> walkModuleResources(Path module) {
-    Path resources = module.resolve("src/main/resources");
-    if (!Files.isDirectory(resources)) {
-      return Stream.empty();
+  /** 遍历整个仓库的常规文件，跳过生成/依赖目录（.git/.workspace/target/node_modules/dist/coverage/reports 等）。 */
+  private static Stream<Path> walkRepository(Path root) throws IOException {
+    return Files.walk(root).filter(Files::isRegularFile).filter(path -> isGenerated(root, path));
+  }
+
+  /** 路径任一段命中生成/依赖目录名时跳过。 */
+  private static boolean isGenerated(Path root, Path path) {
+    for (Path segment : root.relativize(path)) {
+      if (GENERATED_DIRS.contains(segment.toString())) {
+        return false;
+      }
     }
-    try (Stream<Path> paths = Files.walk(resources)) {
-      return paths.filter(Files::isRegularFile).toList().stream();
-    } catch (IOException error) {
-      throw new IllegalStateException("cannot walk " + resources, error);
-    }
+    return true;
   }
 
   private static Path repositoryRoot() {

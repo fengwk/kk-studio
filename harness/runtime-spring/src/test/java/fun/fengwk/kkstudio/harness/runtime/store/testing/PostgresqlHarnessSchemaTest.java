@@ -11,6 +11,17 @@ import java.util.List;
 
 class PostgresqlHarnessSchemaTest {
 
+  /** Harness runtime 协议七表：V1 中其余 {@code harness_%} 表（如 harness_session_blob_ref）属于业务，不在此契约内。 */
+  private static final List<String> RUNTIME_TABLES =
+      List.of(
+          "harness_entry",
+          "harness_model_invocation",
+          "harness_session",
+          "harness_thread",
+          "harness_thread_command",
+          "harness_tool_invocation",
+          "harness_work");
+
   private JdbcTemplate jdbc;
 
   @BeforeEach
@@ -28,21 +39,13 @@ class PostgresqlHarnessSchemaTest {
             from information_schema.tables
             where table_schema = 'public'
               and table_type = 'BASE TABLE'
-              and table_name like 'harness_%'
-              and table_name <> 'harness_session_blob_ref'
+              and table_name in ('harness_entry', 'harness_model_invocation', 'harness_session',
+                                 'harness_thread', 'harness_thread_command', 'harness_tool_invocation',
+                                 'harness_work')
             order by table_name
             """,
             String.class);
-    assertEquals(
-        List.of(
-            "harness_entry",
-            "harness_model_invocation",
-            "harness_session",
-            "harness_thread",
-            "harness_thread_command",
-            "harness_tool_invocation",
-            "harness_work"),
-        tables);
+    assertEquals(RUNTIME_TABLES, tables);
   }
 
   @Test
@@ -79,7 +82,9 @@ class PostgresqlHarnessSchemaTest {
             from information_schema.columns
             where table_schema = 'public'
               and data_type = 'jsonb'
-              and table_name like 'harness_%'
+              and table_name in ('harness_entry', 'harness_model_invocation', 'harness_session',
+                                 'harness_thread', 'harness_thread_command', 'harness_tool_invocation',
+                                 'harness_work')
             order by table_name, column_name
             """,
             String.class);
@@ -109,8 +114,10 @@ class PostgresqlHarnessSchemaTest {
             select indexname
             from pg_indexes
             where schemaname = 'public'
-              and (indexname like 'idx_harness_%' or indexname like 'uk_harness_%')
-              and indexname not like '%session_blob_ref%'
+              and tablename in ('harness_entry', 'harness_model_invocation', 'harness_session',
+                                'harness_thread', 'harness_thread_command', 'harness_tool_invocation',
+                                'harness_work')
+              and indexname not like '%_pkey'
             order by indexname
             """,
             String.class);
