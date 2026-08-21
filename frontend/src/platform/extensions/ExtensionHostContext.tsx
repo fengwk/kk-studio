@@ -3,7 +3,7 @@ import { createContext, useContext, useSyncExternalStore, type PropsWithChildren
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 
 const ExtensionHostContext = createContext<ExtensionHost | null>(null)
-const EMPTY_HOST_SNAPSHOT = Object.freeze({ revision: 0 })
+const EMPTY_HOST_SNAPSHOT = Object.freeze({ version: 0 })
 const emptySubscribe = () => () => undefined
 const getEmptySnapshot = () => EMPTY_HOST_SNAPSHOT
 

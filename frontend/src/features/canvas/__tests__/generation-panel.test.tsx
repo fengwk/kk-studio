@@ -277,7 +277,7 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('keeps a newer focused draft when an earlier debounced config is acknowledged', async () => {
-    // The first server echo is a source revision acknowledgement, not permission to overwrite later typing.
+    // The first server echo is a source version acknowledgement, not permission to overwrite later typing.
     const user = userEvent.setup()
     const view = renderPanel()
     const input = screen.getByRole('textbox', { name: '提示词片段 1' })

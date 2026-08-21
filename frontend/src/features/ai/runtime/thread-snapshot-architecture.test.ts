@@ -28,13 +28,13 @@ describe('Thread snapshot architecture', () => {
     const realtime = source('features/ai/runtime/useHarnessThreadRealtime.ts')
 
     expect(realtime).toContain('subscription.threadId')
-    expect(realtime).toContain("name === 'revision'")
+    expect(realtime).toContain("name === 'version'")
     expect(realtime).toContain('invalidateSnapshot()')
     // realtime 事件只走 overlay reducer，绝不触发 snapshot invalidate。
     expect(realtime).toContain('handleRealtime(data)')
     expect(realtime.match(/applicationEvents\.subscribe\(/g)).toHaveLength(1)
     expect(realtime).toContain("{ kind: 'thread', id: subscription.threadId }")
-    // subscribed/resync/error 与 revision 一样触发 snapshot 对账。
+    // subscribed/resync/error 与 version 一样触发 snapshot 对账。
     expect(realtime).toContain('onSubscribed: invalidateSnapshot')
     expect(realtime).toContain('onResync: invalidateSnapshot')
     expect(realtime).toContain('onError: invalidateSnapshot')

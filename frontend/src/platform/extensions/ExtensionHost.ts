@@ -127,14 +127,14 @@ export class ExtensionHost {
   private readonly listeners = new Set<RegistryListener>()
   private readonly extensionRegistrations = new Map<string, ExtensionRegistration>()
   private registrationOrder = 0
-  private snapshot = { revision: 0 }
+  private snapshot = { version: 0 }
 
   subscribe = (listener: RegistryListener): Disposable => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
-  getSnapshot = (): Readonly<{ revision: number }> => this.snapshot
+  getSnapshot = (): Readonly<{ version: number }> => this.snapshot
 
   register(extension: TrustedReactExtension): Disposable {
     this.validateExtension(extension)
@@ -207,7 +207,7 @@ export class ExtensionHost {
 
   private publish(changedRegistries: Set<ContributionRegistry<never>>) {
     changedRegistries.forEach((registry) => registry.publish())
-    this.snapshot = { revision: this.snapshot.revision + 1 }
+    this.snapshot = { version: this.snapshot.version + 1 }
     this.listeners.forEach((listener) => listener())
   }
 

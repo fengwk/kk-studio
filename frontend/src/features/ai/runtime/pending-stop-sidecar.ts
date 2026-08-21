@@ -5,9 +5,9 @@ const STORAGE_PREFIX = 'kkstudio.ai.pending-stop.v1:'
  */
 export interface PendingStopOperation {
   stopRequestId: string
-  expectedRevision: string
+  expectedVersion: string
   basisHeadEntryId: string
-  basisRevision: string
+  basisVersion: string
 }
 
 export function pendingStopStorageKey(threadId: string): string {
@@ -81,9 +81,9 @@ function validOperation(value: unknown): value is PendingStopOperation {
   }
   return (
     nonBlank(value.stopRequestId)
-    && nonBlank(value.expectedRevision)
+    && nonBlank(value.expectedVersion)
     && nonBlank(value.basisHeadEntryId)
-    && nonBlank(value.basisRevision)
+    && nonBlank(value.basisVersion)
   )
 }
 

@@ -5,13 +5,14 @@ import { describe, expect, it } from 'vitest'
 import type { AgentDraft, ModelDraft, ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
 import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/catalog/AiResourceForms'
+import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
 
 async function selectFormOption(
   user: ReturnType<typeof userEvent.setup>,
   label: string,
   option: string,
 ) {
-  await user.selectOptions(screen.getByLabelText(label), option)
+  await chooseSelectOption(user, label, option)
 }
 
 describe('AiResourceForms', () => {
@@ -36,7 +37,7 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByDisplayValue('provider-a')).toBeInTheDocument()
     expect(screen.getByDisplayValue('provider desc')).toBeInTheDocument()
-    expect(screen.getByLabelText('Provider Type')).toHaveValue('anthropic')
+    expect(screen.getByLabelText('Provider Type')).toHaveAttribute('data-value', 'anthropic')
     expect(screen.getByDisplayValue('https://proxy.example/v1')).toBeInTheDocument()
     expect(screen.getByDisplayValue('secret')).toBeInTheDocument()
     expect(screen.getByDisplayValue('240000')).toBeInTheDocument()
@@ -89,7 +90,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByDisplayValue('creative')).toBeInTheDocument()
 
     await selectFormOption(user, 'Default Variant', 'creative')
-    expect(screen.getByLabelText('Default Variant')).toHaveValue('creative')
+    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'creative')
   })
 
   it.each(['deleted-provider', 'off-page-provider'])(
@@ -123,10 +124,10 @@ describe('AiResourceForms', () => {
       )
 
       const providerSelect = screen.getByLabelText('Provider')
-      expect(providerSelect).toHaveValue(providerName)
+      expect(providerSelect).toHaveAttribute('data-value', providerName)
       expect(providerSelect).toBeDisabled()
       expect(providerSelect).toHaveAttribute('aria-describedby', 'model-provider-identity-status')
-      expect(screen.getByRole('option', { name: `${providerName} (不可用)` })).toBeDisabled()
+      expect(providerSelect).toHaveTextContent(`${providerName} (不可用)`)
       expect(screen.getByRole('status')).toHaveTextContent('不可用；保存其他字段时仍保留原始身份。')
     },
   )
@@ -142,10 +143,10 @@ describe('AiResourceForms', () => {
     await selectFormOption(user, 'Default Variant', 'creative')
 
     fireEvent.change(secondNameInput, { target: { value: 'creative-2' } })
-    expect(screen.getByLabelText('Default Variant')).toHaveValue('creative-2')
+    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'creative-2')
 
     await user.click(screen.getAllByRole('button', { name: '删除 Variant' })[1])
-    expect(screen.getByLabelText('Default Variant')).toHaveValue('medium')
+    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
 
     await user.click(screen.getByLabelText('Reasoning'))
     expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()
@@ -158,12 +159,11 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' }))
-    expect(screen.getByLabelText('Default Model')).toHaveValue('minimax/MiniMax-M2.7')
-    // 空覆盖 = 运行时使用 model.defaultVariant
-    expect(screen.getByLabelText('Default Variant Override')).toHaveValue('')
+    expect(screen.getByLabelText('Default Model')).toHaveAttribute('data-value', 'minimax/MiniMax-M2.7')
+    expect(screen.getByLabelText('Default Variant Override')).toHaveAttribute('data-value', '')
 
     await selectFormOption(user, 'Default Model', 'anthropic/Claude-Sonnet-4.5')
-    expect(screen.getByLabelText('Default Variant Override')).toHaveValue('')
+    expect(screen.getByLabelText('Default Variant Override')).toHaveAttribute('data-value', '')
     expect(screen.getByText('暂无候选 Tools')).toBeInTheDocument()
   })
 

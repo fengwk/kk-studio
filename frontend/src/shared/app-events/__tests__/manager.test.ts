@@ -71,7 +71,7 @@ describe('ApplicationEventManager', () => {
     // 第一个 unsubscribe 不能错误拆 wire：同一 listener 仍有真实 refcount。
     release1()
     expect(socket.sentMessages()).toHaveLength(1)
-    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'revision', data: { revision: '1' }, cursor: '1' })
+    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'version', data: { version: '1' }, cursor: '1' })
     expect(listener.onEvent).toHaveBeenCalledTimes(1)
 
     // 末 ref 才 unsubscribe，之后不再派发。
@@ -139,10 +139,10 @@ describe('ApplicationEventManager', () => {
     expect(onSubscribed).toHaveBeenCalledWith('5')
     expect(otherOnEvent).not.toHaveBeenCalled()
 
-    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'revision', data: { revision: '6' }, cursor: '6' })
+    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'version', data: { version: '6' }, cursor: '6' })
     socket.emitServer({ type: 'event', resource: THREAD_A, name: 'realtime', data: { type: 'MODEL_DELTA' } })
     expect(onEvent.mock.calls).toEqual([
-      ['revision', { revision: '6' }, '6'],
+      ['version', { version: '6' }, '6'],
       ['realtime', { type: 'MODEL_DELTA' }, undefined],
     ])
 
@@ -197,15 +197,15 @@ describe('ApplicationEventManager', () => {
     socket.emitServer({
       type: 'event',
       resource: THREAD_A,
-      name: 'revision',
-      data: { revision: '2' },
+      name: 'version',
+      data: { version: '2' },
       cursor: '2',
     })
     socket.emitServer({ type: 'resync', resource: THREAD_A })
     socket.emitServer({ type: 'error', resource: THREAD_A, code: 'SUBSCRIBE_FAILED', message: 'boom' })
 
     expect(healthy.onSubscribed).toHaveBeenCalledWith('1')
-    expect(healthy.onEvent).toHaveBeenCalledWith('revision', { revision: '2' }, '2')
+    expect(healthy.onEvent).toHaveBeenCalledWith('version', { version: '2' }, '2')
     expect(healthy.onResync).toHaveBeenCalledTimes(1)
     expect(healthy.onError).toHaveBeenCalledWith('SUBSCRIBE_FAILED', 'boom')
     expect(failing.onSubscribed).toHaveBeenCalledTimes(1)
@@ -226,7 +226,7 @@ describe('ApplicationEventManager', () => {
     const release2 = manager.subscribe(THREAD_A, { onEvent: onEvent2 })
 
     release()
-    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'revision', data: { revision: '1' }, cursor: '1' })
+    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'version', data: { version: '1' }, cursor: '1' })
     expect(onEvent).not.toHaveBeenCalled()
     expect(onEvent2).toHaveBeenCalledTimes(1)
 

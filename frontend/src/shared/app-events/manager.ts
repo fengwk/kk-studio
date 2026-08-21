@@ -11,7 +11,7 @@ import type {
 export interface ApplicationEventListener {
   /** wire 订阅建立（首次与每次重连后都会触发）；cursor 是资源当前游标。 */
   onSubscribed?: (cursor: string) => void
-  /** 资源事件：thread 为 revision/realtime，canvas 为 version；durable（revision/version）必带 cursor，realtime 不带。 */
+  /** 资源事件：thread 为 version/realtime，canvas 为 version；durable version 必带 cursor，realtime 不带。 */
   onEvent?: (name: ApplicationEventName, data: unknown, cursor: string | undefined) => void
   /** 服务端要求整体替换为全量快照。 */
   onResync?: () => void

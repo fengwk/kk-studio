@@ -50,7 +50,7 @@ describe('agent-pane wire service', () => {
     await service.listSessionThreads('session /1')
     await service.listSessionEntries('session /1')
     await service.getThreadSnapshot('thread /1')
-    await service.compactThread('thread /1', { expectedRevision: '4' })
+    await service.compactThread('thread /1', { expectedVersion: '4' })
     expect(http.get.mock.calls.map(([path]) => path)).toEqual([
       '/ai/chat/chat%20%2F1/sessions',
       '/canvases/canvas%20%2F1/sessions',
@@ -60,7 +60,7 @@ describe('agent-pane wire service', () => {
     ])
     expect(http.post).toHaveBeenLastCalledWith(
       '/ai/runtime/threads/thread%20%2F1/compact',
-      { expectedRevision: '4' },
+      { expectedVersion: '4' },
     )
   })
 })

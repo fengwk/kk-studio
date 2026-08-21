@@ -26,7 +26,7 @@ export class ApiError extends Error {
   }
 }
 
-/** revision 过期或 Thread 未处于静默状态；调用方必须先刷新再重试。 */
+/** version 过期或 Thread 未处于静默状态；调用方必须先刷新再重试。 */
 export function isConflictError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409
 }

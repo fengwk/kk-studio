@@ -68,12 +68,12 @@ export function CanvasGenerationPanel({
   const inputRefs = useRef(new Map<number, HTMLInputElement>())
   const cursorRef = useRef<PromptCursor>({ segmentIndex: 0, offset: 0 })
   const pendingFocusRef = useRef<PromptCursor | null>(null)
-  // Every local edit gets a monotonic revision and semantic source identity.
-  // Matching snapshots acknowledge that revision; only genuinely external sources may replace a newer draft.
-  const draftRevisionRef = useRef(0)
+  // Every local edit gets a monotonic version and semantic source identity.
+  // Matching snapshots acknowledge that version; only genuinely external sources may replace a newer draft.
+  const draftVersionRef = useRef(0)
   const dirtyRef = useRef(false)
   const sourceRef = useRef<{ identity: string; modelSignature: string } | null>(null)
-  const localSourceRevisionsRef = useRef(new Map<string, number>())
+  const localSourceVersionsRef = useRef(new Map<string, number>())
   const candidates = useMemo(
     () => model ? referenceCandidates(snapshot, node.id, model) : [],
     [model, node.id, snapshot],
@@ -179,18 +179,18 @@ export function CanvasGenerationPanel({
       identity: sourceIdentity,
       modelSignature: sourceModelSignature,
     }
-    const acknowledgedRevision = localSourceRevisionsRef.current.get(sourceIdentity)
-    if (acknowledgedRevision !== undefined) {
-      for (const [identity, revision] of localSourceRevisionsRef.current) {
-        if (revision <= acknowledgedRevision) {
-          localSourceRevisionsRef.current.delete(identity)
+    const acknowledgedVersion = localSourceVersionsRef.current.get(sourceIdentity)
+    if (acknowledgedVersion !== undefined) {
+      for (const [identity, version] of localSourceVersionsRef.current) {
+        if (version <= acknowledgedVersion) {
+          localSourceVersionsRef.current.delete(identity)
         }
       }
-      if (dirtyRef.current && draftRevisionRef.current > acknowledgedRevision) {
+      if (dirtyRef.current && draftVersionRef.current > acknowledgedVersion) {
         return
       }
     } else {
-      localSourceRevisionsRef.current.clear()
+      localSourceVersionsRef.current.clear()
     }
     setModelKey(node.function.modelKey)
     setConfig(sourceConfig)
@@ -227,12 +227,12 @@ export function CanvasGenerationPanel({
 
   function updateConfig(next: CanvasFunctionConfigDTO, nextModelKey = modelKey) {
     setConfig(next)
-    const revision = draftRevisionRef.current + 1
-    draftRevisionRef.current = revision
+    const version = draftVersionRef.current + 1
+    draftVersionRef.current = version
     dirtyRef.current = true
-    localSourceRevisionsRef.current.set(
+    localSourceVersionsRef.current.set(
       functionSourceIdentity(nextModelKey, next),
-      revision,
+      version,
     )
     runtime.scheduleFunctionConfig(node.id, nextModelKey, next)
   }

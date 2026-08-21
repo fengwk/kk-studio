@@ -31,7 +31,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     headEntryId: 'root',
     yoloEnabled: false,
     nextCommandSequence: '1',
-    revision: '0',
+    version: '0',
     status: 'IDLE',
     processing: false,
     branchSettings: settings(),

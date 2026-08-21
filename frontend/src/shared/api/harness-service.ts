@@ -13,7 +13,7 @@ import type {
  * Harness runtime 线程控制/查询面：
  * - GET snapshot（一致的 PostgreSQL 投影）
  * - GET system-prompt（按当前 branch 最新状态现算的系统提示词预览）
- * - PUT yolo / POST stop / POST approval（yolo/stop 均基于 revision CAS）
+ * - PUT yolo / POST stop / POST approval（yolo/stop 均基于 version CAS）
  * - 实时事件经应用级 WebSocket（/api/events/v1，见 shared/app-events）
  */
 export function createHarnessService(client: HttpClient = apiClient) {

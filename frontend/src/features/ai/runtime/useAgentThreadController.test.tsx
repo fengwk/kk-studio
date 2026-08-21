@@ -91,7 +91,7 @@ function threadFixture(overrides: Partial<HarnessThreadDTO> = {}): HarnessThread
     headEntryId: 'h1',
     yoloEnabled: false,
     nextCommandSequence: '1',
-    revision: '0',
+    version: '0',
     status: 'IDLE',
     processing: false,
     branchSettings: branchSettings(),
@@ -106,7 +106,7 @@ function snapshotOf(
   extras: Partial<HarnessThreadSnapshotDTO> = {},
 ): HarnessThreadSnapshotDTO {
   return {
-    revision: currentThread.revision,
+    version: currentThread.version,
     thread: currentThread,
     entries: [],
     queuedCommands: [],
@@ -296,7 +296,7 @@ describe('useAgentThreadController', () => {
 
   it('reports a 409 from send as threadStateChanged and invalidates the snapshot', async () => {
     vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(
-      new ApiError('expected revision mismatch', 409),
+      new ApiError('expected version mismatch', 409),
     )
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
@@ -324,8 +324,8 @@ describe('useAgentThreadController', () => {
     await waitFor(() =>
       expect(result.current.conflict?.reason).toBe('CONFLICT'),
     )
-    expect(result.current.conflict?.detail).toContain('expected revision mismatch')
-    // 失效 snapshot 查询，以重新拉取当前 revision。
+    expect(result.current.conflict?.detail).toContain('expected version mismatch')
+    // 失效 snapshot 查询，以重新拉取当前 version。
     await waitFor(() =>
       expect(agentPaneService.getThreadSnapshot.mock.calls.length).toBeGreaterThan(
         snapshotCallsBefore,
@@ -340,7 +340,7 @@ describe('useAgentThreadController', () => {
     const advancedThread = threadFixture({
       headEntryId: 'h2',
       nextCommandSequence: '2',
-      revision: '2',
+      version: '2',
       status: 'MODEL_STREAMING',
       processing: true,
     })
@@ -424,7 +424,7 @@ describe('useAgentThreadController', () => {
     const switchedThread = threadFixture({
       headEntryId: 'other-head',
       nextCommandSequence: '2',
-      revision: '2',
+      version: '2',
     })
     vi.mocked(agentPaneService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(currentThread))
@@ -790,7 +790,7 @@ describe('useAgentThreadController', () => {
     expect(harnessService.stopThread).toHaveBeenCalledTimes(1)
     const firstStopArg = vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]
     expect(firstStopArg).toBeDefined()
-    expect(firstStopArg?.expectedRevision).toBe('0')
+    expect(firstStopArg?.expectedVersion).toBe('0')
 
     await act(async () => {
       await result.current.stopThread()
@@ -799,7 +799,7 @@ describe('useAgentThreadController', () => {
     const secondStopArg = vi.mocked(harnessService.stopThread).mock.calls[1]?.[1]
     // 稳定的幂等键在瞬态失败后仍然保留。
     expect(secondStopArg?.stopRequestId).toBe(firstStopArg?.stopRequestId)
-    expect(secondStopArg?.expectedRevision).toBe('0')
+    expect(secondStopArg?.expectedVersion).toBe('0')
   })
 
   it('restores cancelled text and resources once after an ambiguous Stop retry', async () => {
@@ -917,7 +917,7 @@ describe('useAgentThreadController', () => {
     // 第一次 Stop 实际上已经在服务端生效，只是响应丢失了。
     vi.mocked(harnessService.stopThread).mockRejectedValue(new Error('response lost'))
     const turn1 = threadFixture()
-    const turn2 = threadFixture({ headEntryId: 'e-turn1-end', revision: '2' })
+    const turn2 = threadFixture({ headEntryId: 'e-turn1-end', version: '2' })
     // 挂载时的拉取读取的是 Turn 1；由失败 Stop 触发的失效拉取会读取
     // 已前进的 Turn 2 snapshot（说明那次含糊的 Stop 实际上已经在服务端落地）。
     vi.mocked(agentPaneService.getThreadSnapshot)
@@ -932,25 +932,25 @@ describe('useAgentThreadController', () => {
     expect(result.current.stopReplayPending).toBe(true)
     expect(harnessService.stopThread).toHaveBeenCalledTimes(1)
     const firstStopArg = vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]
-    expect(firstStopArg?.expectedRevision).toBe('0')
+    expect(firstStopArg?.expectedVersion).toBe('0')
 
-    // 权威 snapshot 推进到 Turn 2（head + revision 均已变化）：含糊的
-    // 操作自动失效；realtime revision 信号触发一次 refetch。
+    // 权威 snapshot 推进到 Turn 2（head + version 均已变化）：含糊的
+    // 操作自动失效；realtime version 信号触发一次 refetch。
     act(() => realtimeSockets.latest?.emitServer({
       type: 'event',
       resource: { kind: 'thread', id: THREAD_ID },
-      name: 'revision',
-      data: { revision: '2' },
+      name: 'version',
+      data: { version: '2' },
       cursor: '2',
     }))
-    await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
+    await waitFor(() => expect(result.current.thread?.version).toBe('2'))
     await waitFor(() => expect(result.current.stopReplayPending).toBe(false))
 
-    // 在新 Turn 上发起的 Stop 必须使用全新的 id + 当前 revision，绝不能把
-    // 旧 id 拼接到更新的 revision 上。
+    // 在新 Turn 上发起的 Stop 必须使用全新的 id + 当前 version，绝不能把
+    // 旧 id 拼接到更新的 version 上。
     vi.mocked(harnessService.stopThread).mockResolvedValue({
       status: 'IDLE',
-      thread: threadFixture({ headEntryId: 'e-turn1-end', revision: '2' }),
+      thread: threadFixture({ headEntryId: 'e-turn1-end', version: '2' }),
       stoppedTurnEndEntryId: null,
       cancelledCommandCount: 0,
       cancelledUserMessages: [],
@@ -960,7 +960,7 @@ describe('useAgentThreadController', () => {
     })
     const secondStopArg = vi.mocked(harnessService.stopThread).mock.calls[1]?.[1]
     expect(secondStopArg?.stopRequestId).not.toBe(firstStopArg?.stopRequestId)
-    expect(secondStopArg?.expectedRevision).toBe('2')
+    expect(secondStopArg?.expectedVersion).toBe('2')
   })
 
   it('keeps the exact stop body for the retry while the snapshot basis is unchanged', async () => {
@@ -982,20 +982,20 @@ describe('useAgentThreadController', () => {
     const firstStopArg = vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]
     expect(result.current.stopReplayPending).toBe(true)
 
-    // snapshot refetch 返回完全相同的 basis（head/revision 未变）：重试必须
+    // snapshot refetch 返回完全相同的 basis（head/version 未变）：重试必须
     // 发送与原始完全一致的请求体，而不是基于更新后的 snapshot 重新推导请求体。
     await act(async () => {
       await result.current.stopThread()
     })
     const secondStopArg = vi.mocked(harnessService.stopThread).mock.calls[1]?.[1]
     expect(secondStopArg?.stopRequestId).toBe(firstStopArg?.stopRequestId)
-    expect(secondStopArg?.expectedRevision).toBe(firstStopArg?.expectedRevision)
+    expect(secondStopArg?.expectedVersion).toBe(firstStopArg?.expectedVersion)
     expect(result.current.stopReplayPending).toBe(false)
   })
 
   it('clears the ambiguous stop after a known 409 and mints a new operation on the next stop', async () => {
     vi.mocked(harnessService.stopThread)
-      .mockRejectedValueOnce(new ApiError('stale revision', 409))
+      .mockRejectedValueOnce(new ApiError('stale version', 409))
       .mockResolvedValueOnce({
         status: 'IDLE',
         thread: threadFixture(),
@@ -1017,30 +1017,30 @@ describe('useAgentThreadController', () => {
     const firstStopArg = vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]
     const secondStopArg = vi.mocked(harnessService.stopThread).mock.calls[1]?.[1]
     expect(secondStopArg?.stopRequestId).not.toBe(firstStopArg?.stopRequestId)
-    expect(secondStopArg?.expectedRevision).toBe('0')
+    expect(secondStopArg?.expectedVersion).toBe('0')
   })
 
   it('retireStaleStopPending retires exactly when the authoritative basis moved', () => {
     const pending = {
       stopRequestId: 's-1',
-      expectedRevision: '0',
+      expectedVersion: '0',
       basisHeadEntryId: 'h1',
-      basisRevision: '0',
+      basisVersion: '0',
     }
     // basis 匹配时：精确重试继续生效。
     expect(
-      retireStaleStopPending(pending, { headEntryId: 'h1', revision: '0' }),
+      retireStaleStopPending(pending, { headEntryId: 'h1', version: '0' }),
     ).toBe(pending)
     // head 已移动（旧 Turn 已结束）：操作被失效。
     expect(
-      retireStaleStopPending(pending, { headEntryId: 'h2', revision: '0' }),
+      retireStaleStopPending(pending, { headEntryId: 'h2', version: '0' }),
     ).toBeNull()
-    // revision 已移动（Thread 已前进）：操作被失效。
+    // version 已移动（Thread 已前进）：操作被失效。
     expect(
-      retireStaleStopPending(pending, { headEntryId: 'h1', revision: '1' }),
+      retireStaleStopPending(pending, { headEntryId: 'h1', version: '1' }),
     ).toBeNull()
     // 无 pending 操作或无已加载的 Thread：no-op。
-    expect(retireStaleStopPending(null, { headEntryId: 'h1', revision: '0' })).toBeNull()
+    expect(retireStaleStopPending(null, { headEntryId: 'h1', version: '0' })).toBeNull()
     expect(retireStaleStopPending(pending, null)).toBe(pending)
   })
 
@@ -1049,7 +1049,7 @@ describe('useAgentThreadController', () => {
     // Turn-1 basis 保持 pending。
     vi.mocked(harnessService.stopThread).mockRejectedValue(new Error('response lost'))
     const turn1 = threadFixture()
-    const turn2 = threadFixture({ headEntryId: 'e-turn1-end', revision: '2' })
+    const turn2 = threadFixture({ headEntryId: 'e-turn1-end', version: '2' })
     vi.mocked(agentPaneService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
@@ -1061,20 +1061,20 @@ describe('useAgentThreadController', () => {
     })
     expect(result.current.stopReplayPending).toBe(true)
     const firstStopArg = vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]
-    expect(firstStopArg?.expectedRevision).toBe('0')
+    expect(firstStopArg?.expectedVersion).toBe('0')
 
-    // Query snapshot 推进到 Turn 2（head + revision 均已变化）并完成渲染。stopThread
+    // Query snapshot 推进到 Turn 2（head + version 均已变化）并完成渲染。stopThread
     // 不得依赖被动清理 effect 的 flush：它自身的同步栅栏会失效陈旧 basis，
-    // 并基于当前 revision 派生一个新的 id。（在 RTL 下 effect 会随 commit 一同 flush，
+    // 并基于当前 version 派生一个新的 id。（在 RTL 下 effect 会随 commit 一同 flush，
     // 因此上述栅栏契约由前面的 retireStaleStopPending 单元测试固化。）
     act(() => realtimeSockets.latest?.emitServer({
       type: 'event',
       resource: { kind: 'thread', id: THREAD_ID },
-      name: 'revision',
-      data: { revision: '2' },
+      name: 'version',
+      data: { version: '2' },
       cursor: '2',
     }))
-    await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
+    await waitFor(() => expect(result.current.thread?.version).toBe('2'))
     vi.mocked(harnessService.stopThread).mockResolvedValue({
       status: 'IDLE',
       thread: turn2,
@@ -1087,7 +1087,7 @@ describe('useAgentThreadController', () => {
     })
     const secondStopArg = vi.mocked(harnessService.stopThread).mock.calls[1]?.[1]
     expect(secondStopArg?.stopRequestId).not.toBe(firstStopArg?.stopRequestId)
-    expect(secondStopArg?.expectedRevision).toBe('2')
+    expect(secondStopArg?.expectedVersion).toBe('2')
     expect(result.current.stopReplayPending).toBe(false)
   })
 
@@ -1238,7 +1238,7 @@ describe('useAgentThreadController', () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
     vi.mocked(harnessService.decideApproval).mockRejectedValueOnce(
-      new ApiError('stale child revision', 409),
+      new ApiError('stale child version', 409),
     )
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
       wrapper: clientWrapper(client),
@@ -1345,7 +1345,7 @@ describe('useAgentThreadController', () => {
 
   it('clears the exact replay on 409 so the retry mints fresh command ids and cursors', async () => {
     const currentThread = threadFixture({
-      revision: '1',
+      version: '1',
       nextCommandSequence: '3',
       headEntryId: 'h1',
     })

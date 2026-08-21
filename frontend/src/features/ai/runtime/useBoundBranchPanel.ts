@@ -53,11 +53,11 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * 精确比较非负十进制 revision 字符串（后端经 Long.toString 生成，可能远超
+ * 精确比较非负十进制 version 字符串（后端经 Long.toString 生成，可能远超
  * Number.MAX_SAFE_INTEGER）。用 BigInt 避免 double 精度丢失导致回退误判。
  * 返回 -1 / 0 / 1。
  */
-function compareDecimalRevisions(a: string, b: string): number {
+function compareDecimalVersions(a: string, b: string): number {
   const bigA = BigInt(a)
   const bigB = BigInt(b)
   if (bigA < bigB) {
@@ -79,7 +79,7 @@ function compareDecimalRevisions(a: string, b: string): number {
  * - 通过 `buildMessageBatchPlan` 构建原子 message batch；
  * - agent/environment/yolo/model 的 draft-local 编辑（agent 选择采用其
  *   activeTools，冻结其余选中值）；
- * - YOLO 走直接控制面：写请求串行并合并快速连点（每次基于最新权威 revision，
+ * - YOLO 走直接控制面：写请求串行并合并快速连点（每次基于最新权威 version，
  *   latest wins），重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
  *
  * 重绑是 render-time fail-closed：只有 branch state 与 controller snapshot 都
@@ -114,12 +114,12 @@ export function useBoundBranchPanel({
   const [yoloError, setYoloError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   const boundThreadIdRef = useRef<string | null>(null)
-  // YOLO 直接控制面的权威 Thread 状态（revision + yolo policy）：来自 /yolo 成功
+  // YOLO 直接控制面的权威 Thread 状态（version + yolo policy）：来自 /yolo 成功
   // 响应，或非回退的 snapshot。后续每次 CAS 都基于它，而不是可能滞后的
-  // controller snapshot —— 连续切换不会因 revision 过期而互相踩踏。
+  // controller snapshot —— 连续切换不会因 version 过期而互相踩踏。
   const authoritativeThreadRef = useRef<HarnessThreadDTO | null>(null)
   // 串行并合并快速连点：yoloPendingRef 只保留最新用户意图；每个写请求开始时读取
-  // 最新权威 revision，上一次响应返回后再发下一次，latest wins。
+  // 最新权威 version，上一次响应返回后再发下一次，latest wins。
   const yoloPendingRef = useRef<boolean | null>(null)
   const yoloDrainingRef = useRef(false)
   // YOLO 更新 generation：每次重新绑定到另一个 Thread 时递增，使旧 Thread 的迟到
@@ -135,7 +135,7 @@ export function useBoundBranchPanel({
       return
     }
     boundThreadIdRef.current = threadId
-    // 使旧 Thread 的在途 YOLO 请求全部失效，并丢弃陈旧权威 revision / 未发意图。
+    // 使旧 Thread 的在途 YOLO 请求全部失效，并丢弃陈旧权威 version / 未发意图。
     yoloGenerationRef.current += 1
     authoritativeThreadRef.current = null
     yoloPendingRef.current = null
@@ -146,7 +146,7 @@ export function useBoundBranchPanel({
 
   // 从持久化 Thread snapshot 初始化或跟随 base；用户 draft 绝不会被静默覆盖。
   // 只接受属于当前 threadId 的快照：重绑后新 snapshot 未到达前不初始化；
-  // revision 回退的迟到 snapshot 被整体忽略（不改 base、不降权威 revision）。
+  // version 回退的迟到 snapshot 被整体忽略（不改 base、不降权威 version）。
   useEffect(() => {
     const thread = controller.thread
     if (!thread || thread.threadId !== threadId) {
@@ -232,8 +232,8 @@ export function useBoundBranchPanel({
   }
 
   /**
-   * 尝试接受一个新的权威 Thread 快照：只接受同线程且不使 revision 回退的值
-   * （精确十进制比较），避免迟到的 /yolo 前 snapshot 覆盖已确认的新 revision。
+   * 尝试接受一个新的权威 Thread 快照：只接受同线程且不使 version 回退的值
+   * （精确十进制比较），避免迟到的 /yolo 前 snapshot 覆盖已确认的新 version。
    * 返回是否被采纳；调用方在拒绝时应整体忽略该 snapshot，避免用回退值改写 base。
    */
   function adoptAuthoritative(thread: HarnessThreadDTO): boolean {
@@ -241,7 +241,7 @@ export function useBoundBranchPanel({
     if (
       current != null
       && current.threadId === thread.threadId
-      && compareDecimalRevisions(thread.revision, current.revision) < 0
+      && compareDecimalVersions(thread.version, current.version) < 0
     ) {
       return false
     }
@@ -251,9 +251,9 @@ export function useBoundBranchPanel({
 
   /**
    * 切换 Thread YOLO runtime policy：乐观更新 draft 后入队直接控制面写（PUT
-   * /yolo）。写请求串行执行并合并快速连点 —— 每次发送都基于最新权威 revision
+   * /yolo）。写请求串行执行并合并快速连点 —— 每次发送都基于最新权威 version
    * （上次 /yolo 成功返回或非回退 snapshot），latest wins。成功后把 base 与 draft
-   * 的 yolo 对齐服务器权威值（其它未发送 settings 原样保留）并采纳新 revision；
+   * 的 yolo 对齐服务器权威值（其它未发送 settings 原样保留）并采纳新 version；
    * 失败则把 draft 回滚到 base 值并暴露 yoloError。绝不生成 SET_YOLO command。
    */
   function setYoloEnabled(enabled: boolean) {
@@ -280,7 +280,7 @@ export function useBoundBranchPanel({
         yoloPendingRef.current = null
         const authoritative = authoritativeThreadRef.current
         if (authoritative == null || authoritative.threadId !== boundThreadIdRef.current) {
-          // 重绑后缺乏新 Thread 的权威 revision：丢弃这次尝试；新绑定后的
+          // 重绑后缺乏新 Thread 的权威 version：丢弃这次尝试；新绑定后的
           // setYoloEnabled 会以新 generation 重新入队。
           continue
         }
@@ -299,7 +299,7 @@ export function useBoundBranchPanel({
   ) {
     try {
       const updated = await harnessService.setThreadYolo(authoritative.threadId, {
-        expectedRevision: authoritative.revision,
+        expectedVersion: authoritative.version,
         yoloEnabled: enabled,
       })
       if (

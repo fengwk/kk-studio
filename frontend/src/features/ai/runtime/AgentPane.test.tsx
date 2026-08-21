@@ -107,7 +107,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     headEntryId: 'head-1',
     yoloEnabled: false,
     nextCommandSequence: '1',
-    revision: '0',
+    version: '0',
     status: 'IDLE',
     processing: false,
     branchSettings: {
@@ -127,7 +127,7 @@ function snapshot(
   overrides: Partial<HarnessThreadSnapshotDTO> = {},
 ): HarnessThreadSnapshotDTO {
   return {
-    revision: currentThread.revision,
+    version: currentThread.version,
     thread: currentThread,
     entries: [],
     queuedCommands: [],
@@ -178,7 +178,7 @@ beforeEach(() => {
   vi.mocked(agentPaneService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({ text: '' })
   vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
-    Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled, revision: '1' })),
+    Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled, version: '1' })),
   )
 })
 
@@ -359,7 +359,7 @@ describe('AgentPane orchestration', () => {
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
-      new ApiError('yolo state changed', 409, 'CONFLICT', { reason: 'STALE_REVISION' }),
+      new ApiError('yolo state changed', 409, 'CONFLICT', { reason: 'STALE_VERSION' }),
     )
     renderPane({ type: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -367,7 +367,7 @@ describe('AgentPane orchestration', () => {
     await user.keyboard('/yolo{Enter}')
 
     const dialog = await screen.findByRole('alertdialog')
-    expect(dialog).toHaveTextContent('STALE_REVISION')
+    expect(dialog).toHaveTextContent('STALE_VERSION')
     expect(screen.queryByText('yolo state changed')).toBeInTheDocument()
     expect(screen.getAllByRole('alertdialog')).toHaveLength(1)
   })
@@ -392,7 +392,7 @@ describe('AgentPane orchestration', () => {
   it('disables and enables compact from the advisory snapshot sidecar', async () => {
     const user = userEvent.setup()
     vi.mocked(agentPaneService.compactThread).mockResolvedValueOnce({
-      thread: thread({ revision: '1' }),
+      thread: thread({ version: '1' }),
       turnStartEntryId: 'turn-start-1',
       modelInvocationId: 'model-1',
     })
@@ -432,7 +432,7 @@ describe('AgentPane orchestration', () => {
     await waitFor(() =>
       expect(agentPaneService.compactThread).toHaveBeenCalledWith(
         THREAD_ID,
-        { expectedRevision: '0' },
+        { expectedVersion: '0' },
       ),
     )
   })
@@ -614,9 +614,9 @@ describe('AgentPane orchestration', () => {
       `kkstudio.ai.pending-stop.v1:${THREAD_ID}`,
       JSON.stringify({
         stopRequestId: 'stop-1',
-        expectedRevision: '0',
+        expectedVersion: '0',
         basisHeadEntryId: 'head-1',
-        basisRevision: '0',
+        basisVersion: '0',
       }),
     )
     const hook = renderController()
@@ -635,7 +635,7 @@ describe('AgentPane orchestration', () => {
     expect(hook.result.current.interaction).toBeNull()
   })
 
-  it('keeps a background realtime revision from changing the persisted target', async () => {
+  it('keeps a background realtime version from changing the persisted target', async () => {
     const user = userEvent.setup()
     vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
       snapshot(thread({ status: 'MODEL_STREAMING', processing: true })),
@@ -661,7 +661,7 @@ describe('AgentPane orchestration', () => {
       queryKeys.threads.snapshot(THREAD_ID),
       snapshot(thread({ status: 'IDLE', processing: false })),
     )
-    handlers?.onEvent?.('revision', {})
+    handlers?.onEvent?.('version', {})
     await waitFor(() => expect(
       fakeApplicationEvents.useApplicationEvents().subscribe.mock.results.at(-1)?.value,
     ).toHaveBeenCalled())

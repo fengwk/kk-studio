@@ -22,7 +22,7 @@ function resource(threadId: string) {
 
 interface RealtimeProps {
   threadId?: string
-  revision?: string
+  version?: string
   enabled?: boolean
   invocation?: ModelInvocationDTO | null
   invocations?: ToolInvocationDTO[]
@@ -35,7 +35,7 @@ function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
       useHarnessThreadRealtime(
         props.threadId ?? THREAD_ID,
         props.enabled ?? true,
-        props.revision ?? '42',
+        props.version ?? '42',
         props.invocation ?? modelInvocation(),
         props.invocations ?? [],
       ),
@@ -75,7 +75,7 @@ describe('useHarnessThreadRealtime', () => {
   it('uses one wire subscription, invalidates durable signals, and overlays the next delta', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const { result, rerender, sockets } = renderRealtime(client, { revision: '42' })
+    const { result, rerender, sockets } = renderRealtime(client, { version: '42' })
     const socket = sockets.openLatest()
 
     // 订阅建立（subscribed ack）与 durable 信号都触发 snapshot 对账；
@@ -87,15 +87,15 @@ describe('useHarnessThreadRealtime', () => {
       socket.emitServer({
         type: 'event',
         resource: threadResource,
-        name: 'revision',
-        data: { revision: '43' },
+        name: 'version',
+        data: { version: '43' },
         cursor: '43',
       })
       socket.emitServer({ type: 'resync', resource: threadResource })
       socket.emitServer({ type: 'error', resource: threadResource, code: 'SUBSCRIBE_FAILED', message: 'boom' })
     })
-    // revision 前进不重建订阅：wire 上始终只有一条 subscribe。
-    rerender({ revision: '43' })
+    // version 前进不重建订阅：wire 上始终只有一条 subscribe。
+    rerender({ version: '43' })
     expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: threadResource }])
     expect(invalidate).toHaveBeenCalledTimes(4)
   })

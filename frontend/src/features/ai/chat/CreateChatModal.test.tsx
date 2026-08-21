@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/ai/chat/CreateChatModal'
 import { environmentService } from '@/shared/api/environment-service'
+import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -73,7 +74,7 @@ describe('CreateChatModal', () => {
 
     await user.type(screen.getByPlaceholderText('Chat 名称（可重名）'), 'My Chat')
     expect(onTitleChange).toHaveBeenCalled()
-    await user.selectOptions(screen.getByLabelText('Agent'), 'assistant')
+    await chooseSelectOption(user, 'Agent', 'assistant')
     expect(onSelectAgent).toHaveBeenCalledWith('assistant')
     // 可选的默认 Environment（可空）由完整 Environment/Workspace picker 选择。
     expect(screen.getByRole('button', { name: 'Environment' })).toHaveTextContent('（无）')
