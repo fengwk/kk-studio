@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -52,10 +53,11 @@ public class ModelExecutionConfiguration {
 
   /**
    * 生产 {@link CoreModelGateway}：与测试共用唯一构造器。Busy 重试延迟是 live supplier——每次 {@code Busy} 判定从
-   * SystemSettingsSnapshot 现读 {@code tool.modelGatewayBusyRetryMillis}。
+   * SystemSettingsSnapshot 现读 {@code tool.modelGatewayBusyRetryMillis}。任何自定义 {@link ModelGateway}
+   * bean 都会抑制该默认实现。
    */
   @Bean
-  @ConditionalOnMissingBean(CoreModelGateway.class)
+  @ConditionalOnMissingBean(ModelGateway.class)
   public CoreModelGateway coreModelGateway(
       ProviderResolutionService providerResolution,
       @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor,
