@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
@@ -40,11 +41,11 @@ public class HarnessToolGatewayConfiguration {
    * 生产 {@link CoreToolGateway}：与测试共用唯一构造器，本方法解析 {@link HarnessRuntimeProperties} 的
    * workdir/environmentRoot 与 SystemSettings 的 resourceMaxBytes，并直接传两个 live suppliers——每次 Busy /
    * Overloaded 判定从 SystemSettingsSnapshot 现读 {@code tool.toolGatewayBusyRetryMillis} / {@code
-   * tool.toolGatewayOverloadRetryMillis}。
+   * tool.toolGatewayOverloadRetryMillis}。任何自定义 {@link ToolGateway} bean 都会抑制该默认实现。
    */
   @Bean
   @ConditionalOnBean(ResourceStore.class)
-  @ConditionalOnMissingBean(CoreToolGateway.class)
+  @ConditionalOnMissingBean(ToolGateway.class)
   public CoreToolGateway coreToolGateway(
       ToolFactories toolFactories,
       PluginCatalog pluginCatalog,
