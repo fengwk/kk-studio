@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HttpClient } from '@/shared/api/client'
 import { createSystemSettingsService } from '@/shared/api/system-settings-service'
-import { makeSettingsDto } from '@/features/settings/settings-test-fixtures'
+import { makeSettingsDto } from '@/test-support/settings-test-fixtures'
 
 function createClient(): HttpClient {
   return {

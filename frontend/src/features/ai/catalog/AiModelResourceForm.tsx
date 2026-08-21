@@ -3,11 +3,11 @@ import type {
 } from '@/shared/api/contracts/ai-catalog'
 import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/ai/catalog/ai-draft-normalizers'
-import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/catalog/ai-number-input'
+import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/shared/lib/numeric-input'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/ai/catalog/AiVariantListEditor'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
-import { FormSelect } from '@/shared/ui/console/FormSelect'
+import { Select } from '@/shared/ui/console/Select'
 import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
 
@@ -118,7 +118,7 @@ export function ModelForm({
     <>
       <label className={`form-group${fieldErrors.providerName ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.provider')}</FieldLabel>
-        <FormSelect
+        <Select
           aria-label={t('ai.catalog.form.provider')}
           aria-describedby={providerUnavailable ? 'model-provider-identity-status' : undefined}
           value={draft.providerName}
@@ -293,7 +293,7 @@ export function ModelForm({
 
       <label className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.defaultVariant')}</FieldLabel>
-        <FormSelect
+        <Select
           aria-label={t('ai.catalog.form.defaultVariant')}
           value={selectedDefaultVariant}
           options={variantOptions.map((name) => ({ value: name, label: name }))}

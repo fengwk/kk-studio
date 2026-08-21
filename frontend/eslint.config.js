@@ -26,6 +26,23 @@ export default tseslint.config(
     },
   },
   {
+    files: ['src/shared/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/features', '@/features/*'],
+              message:
+                'Shared layers must not depend on feature code; move reusable logic into shared/lib or test-support.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: [
       'src/features/ai/runtime/thread-panel/**/*.{ts,tsx}',
       'src/features/ai/runtime/thread-timeline-types.ts',

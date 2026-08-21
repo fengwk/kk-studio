@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentForm } from '@/features/ai/catalog/AiAgentResourceForm'
-import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
+import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
 import type {
