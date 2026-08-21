@@ -129,6 +129,7 @@ describe('ai-agent-draft-codec', () => {
     expect(toEditableAgentUpdate(draft())).toEqual({
       description: 'description',
       systemPrompt: 'prompt',
+      model: 'minimax/model',
       variant: 'quality',
       config: {
         tools: ['read', 'bash'],
@@ -159,6 +160,9 @@ describe('ai-agent-draft-codec', () => {
     'rejects invalid complete bodies %#',
     (patch, message) => {
       expect(() => toEditableAgent(draft(patch))).toThrow(message)
+      if ('model' in patch) {
+        expect(() => toEditableAgentUpdate(draft(patch))).toThrow(message)
+      }
     },
   )
 

@@ -153,6 +153,8 @@ export interface AgentDefinitionDTO {
 export interface AgentDefinitionEditablePropertiesDTO {
   description: string | null
   systemPrompt: string | null
+  /** 必填模型引用，序列化形式为 {@code providerName/modelName}。 */
+  model: string
   /** 可选覆盖；为 null 表示使用所选 Model 的 defaultVariant。 */
   variant: string | null
   config: AgentDefinitionConfigDTO
@@ -160,7 +162,6 @@ export interface AgentDefinitionEditablePropertiesDTO {
 
 export interface AgentDefinitionCreateDTO extends AgentDefinitionEditablePropertiesDTO {
   name: string
-  model: string
 }
 
 export interface AgentDefinitionUpdateDTO extends AgentDefinitionEditablePropertiesDTO {

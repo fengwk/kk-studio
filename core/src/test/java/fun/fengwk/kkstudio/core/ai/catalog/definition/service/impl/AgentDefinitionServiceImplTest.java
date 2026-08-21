@@ -51,7 +51,7 @@ public class AgentDefinitionServiceImplTest {
 
     AgentDefinition definition = definition();
     AgentDefinitionCreateDTO create = create();
-    when(factory.newAgent("agent", "provider", "model", create)).thenReturn(definition);
+    when(factory.newAgent("agent", create)).thenReturn(definition);
     when(repository.create(definition)).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createAgent(create));
 
@@ -91,7 +91,7 @@ public class AgentDefinitionServiceImplTest {
 
     AgentDefinitionUpdateDTO update = update("0");
     assertThrows(AiVersionConflictException.class, () -> service.updateAgent("agent", update));
-    verify(resolver, never()).requireModel("provider", "model");
+    verify(resolver, never()).requireModelForUpdate("provider", "model");
     verify(factory, never()).update(definition, update);
   }
 
@@ -153,7 +153,7 @@ public class AgentDefinitionServiceImplTest {
     AgentDefinition badVariant = definition();
     badVariant.setVariant("bad-variant");
     AgentDefinitionCreateDTO create = create();
-    when(factory.newAgent("agent", "provider", "model", create)).thenReturn(badVariant);
+    when(factory.newAgent("agent", create)).thenReturn(badVariant);
     when(variants.resolve("provider", "model", "bad-variant"))
         .thenThrow(new IllegalArgumentException("unknown variant: bad-variant"));
     assertThrows(AiValidationException.class, () -> service.createAgent(create));
@@ -161,7 +161,7 @@ public class AgentDefinitionServiceImplTest {
     // 非法 config：Agent 选择不存在的工具，configValidator 拒绝时包装为 AiValidationException。
     AgentDefinition badConfig = definition();
     badConfig.setConfigJson("{\"tools\":[\"no-such-tool\"],\"skills\":[],\"subagents\":[]}");
-    when(factory.newAgent("agent", "provider", "model", create)).thenReturn(badConfig);
+    when(factory.newAgent("agent", create)).thenReturn(badConfig);
     assertThrows(AiValidationException.class, () -> service.createAgent(create));
   }
 
@@ -177,7 +177,7 @@ public class AgentDefinitionServiceImplTest {
 
     AgentDefinition definition = definition();
     AgentDefinitionCreateDTO create = create();
-    when(factory.newAgent("agent", "provider", "model", create)).thenReturn(definition);
+    when(factory.newAgent("agent", create)).thenReturn(definition);
 
     // PostgreSQL FK 完整性失败：模型不存在 → 确定性 not found。
     doThrow(integrityFailure("23503")).when(repository).create(definition);
@@ -227,6 +227,7 @@ public class AgentDefinitionServiceImplTest {
 
   private AgentDefinitionUpdateDTO update(String version) {
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    update.setModel("provider/model");
     update.setConfig(config());
     update.setExpectedVersion(version);
     return update;

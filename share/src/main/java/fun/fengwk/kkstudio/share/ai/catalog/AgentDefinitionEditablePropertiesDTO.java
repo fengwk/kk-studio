@@ -13,6 +13,9 @@ public class AgentDefinitionEditablePropertiesDTO {
   /** 可空系统提示词；null/空白视为清除。 */
   private String systemPrompt;
 
+  /** 必填模型引用，序列化形式为 {@code providerName/modelName}；provider 与 model 必须已存在。 */
+  private String model;
+
   /** 可空模型变体 id（≤64 字符）；null/空白表示不覆盖，运行时回退解析 model config 的 defaultVariant。 */
   private String variant;
 

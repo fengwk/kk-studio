@@ -10,9 +10,9 @@ import {
 import type { ResourceEditorPlan } from '@/features/ai/catalog/ai-resource-editor-plan-types'
 import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/catalog/ai-console-types'
 import {
+  normalizeAgentDraftDefaultVariant,
   normalizeCreateAgentDraftSelection,
   normalizeCreateModelDraftProvider,
-  normalizeEditAgentDraftSelection,
   normalizeEditModelDraftProvider,
   normalizeModelDraftDefaultVariant,
 } from '@/features/ai/catalog/ai-draft-normalizers'
@@ -55,7 +55,7 @@ export function useAiConsoleResourceEditorState({
     if (resourceModal.kind === 'agent') {
       setAgentDraft((currentDraft) =>
         resourceModal.mode === 'edit'
-          ? normalizeEditAgentDraftSelection(currentDraft, resourceModal.model, models)
+          ? normalizeAgentDraftDefaultVariant(currentDraft, models)
           : normalizeCreateAgentDraftSelection(currentDraft, models),
       )
     }

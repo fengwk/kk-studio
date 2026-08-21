@@ -462,7 +462,7 @@ describe('AgentForm current contracts', () => {
 
       const modelSelect = screen.getByLabelText('Default Model')
       expect(modelSelect).toHaveAttribute('data-value', modelName)
-      expect(modelSelect).toBeDisabled()
+      expect(modelSelect).toBeEnabled()
       expect(modelSelect).toHaveAttribute('aria-describedby', 'agent-model-identity-status')
       expect(modelSelect).toHaveTextContent(`${modelName} (不可用)`)
 
