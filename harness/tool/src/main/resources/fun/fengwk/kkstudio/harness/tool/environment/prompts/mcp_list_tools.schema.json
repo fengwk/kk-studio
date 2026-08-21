@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "string",
+      "description": "Optional MCP server name; without it, lists the status and tools of all servers."
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}

@@ -1,10 +1,10 @@
-列出本地配置的 MCP server 及其工具（只读，不调用任何远程工具）。
+List locally configured MCP servers and their tools (read-only; never invokes any remote tool).
 
-用法：
-- 不传 `server` 时，返回全部配置 server 的状态与工具；
-- 传入 `server` 时，只返回该 server 的状态与工具；未知名称是确定性错误。
-- READY server 的每个工具携带 name、description 与完整输入 schema；
-  FAILED server 只携带有界的错误摘要，绝不包含 headers、environment、命令、URL 或本地路径。
+Usage:
+- Without `server`, returns the status and tools of all configured servers;
+- With `server`, returns only that server's status and tools; an unknown name is a deterministic error.
+- Each tool of a READY server carries name, description, and its full input schema;
+  a FAILED server carries only a bounded error summary, never headers, environment, commands, URLs, or local paths.
 
-参数：
-- `server`（可选）：MCP server 名称。
+Arguments:
+- `server` (optional): MCP server name.
