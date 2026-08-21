@@ -83,14 +83,11 @@ public final class CoreModelGateway implements ModelGateway {
     this(providerResolution, executor, liveBusyRetry(snapshot));
   }
 
-  public CoreModelGateway(
-      ProviderResolutionService providerResolution,
-      ExecutorService executor,
-      ModelGatewayConfig config) {
-    this(providerResolution, executor, Objects.requireNonNull(config, "config")::busyRetryDelay);
-  }
-
-  private CoreModelGateway(
+  /**
+   * package-private 测试 seam：语义与生产一致——每次 {@code Busy} 判定现读 {@code busyRetryDelay}（生产每次 start 从
+   * SystemSettingsSnapshot 现读）。
+   */
+  CoreModelGateway(
       ProviderResolutionService providerResolution,
       ExecutorService executor,
       Supplier<Duration> busyRetryDelay) {

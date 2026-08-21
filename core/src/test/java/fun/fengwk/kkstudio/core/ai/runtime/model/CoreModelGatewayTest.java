@@ -52,6 +52,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * 验证生产 {@link CoreModelGateway} admission 契约：在 {@code start} 返回之前不应有回调（两阶段激活：admission gate 仅通过
@@ -61,9 +62,9 @@ import java.util.function.Function;
 class CoreModelGatewayTest {
 
   private static final Duration BUSY_DELAY = Duration.ofSeconds(7);
+  private static final Supplier<Duration> BUSY_RETRY_DELAY = () -> BUSY_DELAY;
   private static final ModelCallTimeoutPolicy TIMEOUT_POLICY =
       new ModelCallTimeoutPolicy(Duration.ofSeconds(45), Duration.ofSeconds(3));
-  private static final ModelGatewayConfig CONFIG = new ModelGatewayConfig(BUSY_DELAY);
   private static final ProviderRequest PROVIDER_REQUEST = providerRequest();
   private static final UUID INVOCATION_ID = new UUID(0L, 42L);
   private static final ModelGateway.Execution EXECUTION =
@@ -898,7 +899,9 @@ class CoreModelGatewayTest {
   void rejectsInlineExecutorsAtConstruction() {
     assertThrows(
         IllegalStateException.class,
-        () -> new CoreModelGateway(new Resolution(ignored -> null), new InlineExecutor(), CONFIG));
+        () ->
+            new CoreModelGateway(
+                new Resolution(ignored -> null), new InlineExecutor(), BUSY_RETRY_DELAY));
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -911,7 +914,7 @@ class CoreModelGatewayTest {
                     TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>(1),
                     new ThreadPoolExecutor.CallerRunsPolicy()),
-                CONFIG));
+                BUSY_RETRY_DELAY));
   }
 
   @Test
@@ -928,7 +931,7 @@ class CoreModelGatewayTest {
                     TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>(1),
                     new ThreadPoolExecutor.DiscardPolicy()),
-                CONFIG));
+                BUSY_RETRY_DELAY));
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -941,7 +944,7 @@ class CoreModelGatewayTest {
                     TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>(1),
                     new ThreadPoolExecutor.DiscardOldestPolicy()),
-                CONFIG));
+                BUSY_RETRY_DELAY));
   }
 
   @Test
@@ -1031,7 +1034,7 @@ class CoreModelGatewayTest {
       this.resolution = resolution;
       this.provider = provider == null ? new ControlledProvider() : provider;
       this.executor = executor;
-      this.subject = new CoreModelGateway(resolution, executor, CONFIG);
+      this.subject = new CoreModelGateway(resolution, executor, BUSY_RETRY_DELAY);
     }
 
     private ModelGateway.StartResult start() {

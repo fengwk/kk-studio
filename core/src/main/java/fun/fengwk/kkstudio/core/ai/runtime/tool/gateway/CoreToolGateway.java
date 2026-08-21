@@ -167,95 +167,11 @@ public final class CoreToolGateway implements ToolGateway {
         clock);
   }
 
+  /**
+   * package-private 测试 seam：语义与生产一致——每次 Busy / Overloaded 判定现读 {@code busyRetryDelay} / {@code
+   * overloadRetryDelay}（生产每次 start 从 SystemSettingsSnapshot 现读）。
+   */
   CoreToolGateway(
-      ToolFactories toolFactories,
-      RemoteToolTransport remoteTransport,
-      PermissionEvaluator permissionEvaluator,
-      ToolSettingsProvider toolSettingsProvider,
-      ResourceStore resourceStore,
-      HarnessRuntimeProperties runtimeProperties,
-      int resourceMaxBytes,
-      ExecutorService executor,
-      ToolGatewayConfig config) {
-    this(
-        toolFactories,
-        PluginCatalog.from(List.of()),
-        assistantEntryId -> {
-          throw new IllegalStateException("no plugin branch loader is configured");
-        },
-        remoteTransport,
-        permissionEvaluator,
-        toolSettingsProvider,
-        resourceStore,
-        runtimeProperties.resolvedWorkdir(),
-        runtimeProperties.resolvedEnvironmentRoot(),
-        resourceMaxBytes,
-        executor,
-        config,
-        Clock.systemUTC());
-  }
-
-  CoreToolGateway(
-      ToolFactories toolFactories,
-      RemoteToolTransport remoteTransport,
-      PermissionEvaluator permissionEvaluator,
-      ToolSettingsProvider toolSettingsProvider,
-      ResourceStore resourceStore,
-      Path workdir,
-      Path environmentRoot,
-      int resourceMaxBytes,
-      ExecutorService executor,
-      ToolGatewayConfig config) {
-    this(
-        toolFactories,
-        PluginCatalog.from(List.of()),
-        assistantEntryId -> {
-          throw new IllegalStateException("no plugin branch loader is configured");
-        },
-        remoteTransport,
-        permissionEvaluator,
-        toolSettingsProvider,
-        resourceStore,
-        workdir,
-        environmentRoot,
-        resourceMaxBytes,
-        executor,
-        config,
-        Clock.systemUTC());
-  }
-
-  CoreToolGateway(
-      ToolFactories toolFactories,
-      PluginCatalog pluginCatalog,
-      PluginBranchViewLoader pluginBranchViewLoader,
-      RemoteToolTransport remoteTransport,
-      PermissionEvaluator permissionEvaluator,
-      ToolSettingsProvider toolSettingsProvider,
-      ResourceStore resourceStore,
-      Path workdir,
-      Path environmentRoot,
-      int resourceMaxBytes,
-      ExecutorService executor,
-      ToolGatewayConfig config,
-      Clock clock) {
-    this(
-        toolFactories,
-        pluginCatalog,
-        pluginBranchViewLoader,
-        remoteTransport,
-        permissionEvaluator,
-        toolSettingsProvider,
-        resourceStore,
-        workdir,
-        environmentRoot,
-        resourceMaxBytes,
-        executor,
-        Objects.requireNonNull(config, "config")::busyRetryDelay,
-        config::overloadRetryDelay,
-        clock);
-  }
-
-  private CoreToolGateway(
       ToolFactories toolFactories,
       PluginCatalog pluginCatalog,
       PluginBranchViewLoader pluginBranchViewLoader,

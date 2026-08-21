@@ -1075,6 +1075,9 @@ class ModelProcessorTest {
           public void cancel() {
             throw new IllegalStateException("transport gone");
           }
+
+          @Override
+          public void activate() {}
         };
     fixture.gateway.queue(new ModelGateway.Started(throwingHandle));
     assertEquals(
