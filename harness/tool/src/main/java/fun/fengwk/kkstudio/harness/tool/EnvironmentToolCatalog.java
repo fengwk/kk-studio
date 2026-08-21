@@ -1,10 +1,7 @@
 package fun.fengwk.kkstudio.harness.tool;
 
-import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,20 +13,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 /**
- * 每个 Environment Daemon 提供的固定工具的唯一事实来源。
+ * The single source of truth for the fixed tools provided by every Environment Daemon.
  *
- * <p>Descriptor、schema 与 prompt 文本刻意定义在无依赖的 {@code harness/tool} 模块中。Core 使用该 catalog 做校验与
- * 规划，Daemon 实现则用同一组 descriptor 做注册与 wire 校验。
+ * <p>Descriptor, schema and prompt text are deliberately defined in the dependency-free {@code
+ * harness/tool} module. Core uses the catalog for validation and planning, while Daemon
+ * implementations use the same descriptors for registration and wire checks.
  */
 public final class EnvironmentToolCatalog {
 
   public static final String VERSION = "2";
 
-  private static final String PROMPT_RESOURCE_PREFIX =
+  private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/tool/environment/prompts/";
+  private static final ToolDescriptorJsonCodec CODEC = new ToolDescriptorJsonCodec();
   private static final List<ToolDescriptor> DESCRIPTORS = createDescriptors();
   private static final Map<String, ToolDescriptor> BY_NAME = indexByName(DESCRIPTORS);
 
@@ -72,170 +70,30 @@ public final class EnvironmentToolCatalog {
 
   private static List<ToolDescriptor> createDescriptors() {
     return List.of(
-        descriptor(
-            "read",
-            new ToolParamsSchema(
-                "read 工具参数。",
-                Map.of(
-                    "path", new ToolStringSchema("文件或目录路径"),
-                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录"),
-                    "offset", new ToolIntegerSchema("从 1 开始的行偏移量"),
-                    "limit", new ToolIntegerSchema("最多读取的行数")),
-                Set.of("path"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(1)),
-        descriptor(
-            "write",
-            new ToolParamsSchema(
-                "write 工具参数。",
-                Map.of(
-                    "path", new ToolStringSchema("文件路径"),
-                    "content", new ToolStringSchema("完整的替换内容"),
-                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录")),
-                Set.of("path", "content"),
-                false),
-            ToolSideEffect.IDEMPOTENT,
-            Duration.ofMinutes(1)),
-        descriptor(
-            "edit",
-            new ToolParamsSchema(
-                "edit 工具参数。",
-                Map.of(
-                    "path", new ToolStringSchema("文件路径"),
-                    "old_string", new ToolStringSchema("要替换的精确文本"),
-                    "new_string", new ToolStringSchema("替换文本"),
-                    "replace_all", new ToolBooleanSchema("替换所有精确匹配"),
-                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录")),
-                Set.of("path", "old_string", "new_string"),
-                false),
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMinutes(1)),
-        descriptor(
-            "bash",
-            new ToolParamsSchema(
-                "bash 工具参数。",
-                Map.of(
-                    "command", new ToolStringSchema("已获得 Platform 授权的 shell 命令"),
-                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录"),
-                    "timeout_seconds", new ToolIntegerSchema("可选超时时间（秒）；默认 120，且不得超过 3600")),
-                Set.of("command"),
-                false),
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofHours(1)),
-        descriptor(
-            "grep",
-            new ToolParamsSchema(
-                "grep 工具参数。",
-                Map.of(
-                    "pattern", new ToolStringSchema("正则表达式或字面量"),
-                    "path", new ToolStringSchema("要搜索的文件或目录"),
-                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录"),
-                    "include", new ToolStringSchema("可选的 glob pattern"),
-                    "ignore_case", new ToolBooleanSchema("忽略大小写"),
-                    "literal", new ToolBooleanSchema("按字面量处理 pattern"),
-                    "multiline", new ToolBooleanSchema("启用跨行 pattern"),
-                    "limit", new ToolIntegerSchema("最多返回的匹配数"),
-                    "timeout_seconds", new ToolIntegerSchema("搜索超时时间（秒）")),
-                Set.of("pattern", "path"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofHours(1)),
-        descriptor(
-            "find",
-            new ToolParamsSchema(
-                "find 工具参数。",
-                Map.of(
-                    "pattern", new ToolStringSchema("glob pattern"),
-                    "path", new ToolStringSchema("要搜索的目录"),
-                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录"),
-                    "limit", new ToolIntegerSchema("最多返回的结果数"),
-                    "timeout_seconds", new ToolIntegerSchema("搜索超时时间（秒）")),
-                Set.of("pattern", "path"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofHours(1)),
-        descriptor(
-            "lsp_goto_definition",
-            new ToolParamsSchema(
-                "lsp_goto_definition 工具参数。",
-                Map.of(
-                    "path",
-                    new ToolStringSchema("由 LSP server 支持的已有源文件路径；同时根据此路径推断 workspace root。"),
-                    "workdir",
-                    new ToolStringSchema("用于解析相对路径的工作目录。默认是 Agent 当前工作目录；提供后从该目录解析相对路径。"),
-                    "line",
-                    new ToolIntegerSchema("目标位置的行号，从 1 开始计数。"),
-                    "character",
-                    new ToolIntegerSchema("目标位置的字符偏移，从 0 开始计数；默认值为 0。")),
-                Set.of("path", "line"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(2)),
-        descriptor(
-            "lsp_workspace_symbols",
-            new ToolParamsSchema(
-                "lsp_workspace_symbols 工具参数。",
-                Map.of(
-                    "path",
-                    new ToolStringSchema("用于推断 workspace root 的已有源文件路径。"),
-                    "workdir",
-                    new ToolStringSchema("用于解析相对路径的工作目录。默认是 Agent 当前工作目录；提供后从该目录解析相对路径。"),
-                    "query",
-                    new ToolStringSchema("符号搜索 query。"),
-                    "limit",
-                    new ToolIntegerSchema("本地最多展示的结果数；默认值为 50。")),
-                Set.of("path", "query"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(2)),
-        descriptor(
-            "lsp_java_decompile",
-            new ToolParamsSchema(
-                "lsp_java_decompile 工具参数。",
-                Map.of(
-                    "path",
-                    new ToolStringSchema(
-                        "目标 workspace 中的任意本地 `.java` 文件。根据此路径推断 workspace root 并定位 JDTLS。"),
-                    "workdir",
-                    new ToolStringSchema("用于解析相对路径的工作目录。默认是 Agent 当前工作目录；提供后从该目录解析相对路径。"),
-                    "target",
-                    new ToolStringSchema(
-                        "原始 `jdt://` URI、workspace symbol 输出行，或 `file://` / `.class` 路径。")),
-                Set.of("path", "target"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(2)),
-        descriptor(
-            "mcp_list_tools",
-            new ToolParamsSchema(
-                "mcp_list_tools 工具参数。",
-                Map.of("server", new ToolStringSchema("可选的 MCP server 名称；缺省列出全部 server 的状态与工具")),
-                Set.of(),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(30)),
-        descriptor(
-            "mcp_call_tool",
-            new ToolParamsSchema(
-                "mcp_call_tool 工具参数。",
-                Map.of(
-                    "server",
-                    new ToolStringSchema("MCP server 名称"),
-                    "tool",
-                    new ToolStringSchema("MCP 工具名称"),
-                    "arguments",
-                    new ToolObjectSchema("任意 JSON 对象参数，原样传递给 MCP 工具", Map.of(), Set.of(), true)),
-                Set.of("server", "tool", "arguments"),
-                false),
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMinutes(5)));
+        descriptor("read", ToolSideEffect.READ_ONLY, Duration.ofMinutes(1)),
+        descriptor("write", ToolSideEffect.IDEMPOTENT, Duration.ofMinutes(1)),
+        descriptor("edit", ToolSideEffect.NON_IDEMPOTENT, Duration.ofMinutes(1)),
+        descriptor("bash", ToolSideEffect.NON_IDEMPOTENT, Duration.ofHours(1)),
+        descriptor("grep", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
+        descriptor("find", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
+        descriptor("lsp_goto_definition", ToolSideEffect.READ_ONLY, Duration.ofMinutes(2)),
+        descriptor("lsp_workspace_symbols", ToolSideEffect.READ_ONLY, Duration.ofMinutes(2)),
+        descriptor("lsp_java_decompile", ToolSideEffect.READ_ONLY, Duration.ofMinutes(2)),
+        descriptor("mcp_list_tools", ToolSideEffect.READ_ONLY, Duration.ofSeconds(30)),
+        descriptor("mcp_call_tool", ToolSideEffect.NON_IDEMPOTENT, Duration.ofMinutes(5)));
   }
 
   private static ToolDescriptor descriptor(
-      String name, ToolParamsSchema inputSchema, ToolSideEffect sideEffect, Duration timeout) {
+      String name, ToolSideEffect sideEffect, Duration timeout) {
     return new ToolDescriptor(
-        name, "1", ToolType.ENVIRONMENT, loadPrompt(name), name, inputSchema, sideEffect, timeout);
+        name,
+        "1",
+        ToolType.ENVIRONMENT,
+        loadPrompt(name),
+        name,
+        loadSchema(name),
+        sideEffect,
+        timeout);
   }
 
   private static Map<String, ToolDescriptor> indexByName(List<ToolDescriptor> descriptors) {
@@ -250,15 +108,25 @@ public final class EnvironmentToolCatalog {
   }
 
   private static String loadPrompt(String name) {
-    Objects.requireNonNull(name, "name");
-    String resource = PROMPT_RESOURCE_PREFIX + name + ".md";
+    return loadText(name + ".md", "prompt").trim();
+  }
+
+  private static ToolParamsSchema loadSchema(String name) {
+    return CODEC.decodeInputSchema(loadText(name + ".schema.json", "schema"));
+  }
+
+  private static String loadText(String fileName, String kind) {
+    Objects.requireNonNull(fileName, "fileName");
+    String resource = RESOURCE_PREFIX + fileName;
     try (InputStream input = EnvironmentToolCatalog.class.getResourceAsStream(resource)) {
       if (input == null) {
-        throw new IllegalStateException("missing Environment tool prompt resource: " + resource);
+        throw new IllegalStateException(
+            "missing Environment tool " + kind + " resource: " + resource);
       }
-      return new String(input.readAllBytes(), StandardCharsets.UTF_8).trim();
+      return new String(input.readAllBytes(), StandardCharsets.UTF_8);
     } catch (IOException error) {
-      throw new UncheckedIOException("failed to load Environment tool prompt: " + resource, error);
+      throw new UncheckedIOException(
+          "failed to load Environment tool " + kind + ": " + resource, error);
     }
   }
 }

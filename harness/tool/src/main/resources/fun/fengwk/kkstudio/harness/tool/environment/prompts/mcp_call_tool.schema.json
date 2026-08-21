@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "string",
+      "description": "MCP server name."
+    },
+    "tool": {
+      "type": "string",
+      "description": "MCP tool name."
+    },
+    "arguments": {
+      "type": "object",
+      "description": "Arbitrary JSON object arguments, passed through to the MCP tool as-is.",
+      "properties": {},
+      "required": [],
+      "additionalProperties": true
+    }
+  },
+  "required": ["server", "tool", "arguments"],
+  "additionalProperties": false
+}
