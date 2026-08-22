@@ -29,7 +29,7 @@ import {
 } from '../lib/harness.mjs'
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
-const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v1:'
+const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v2:'
 const TINY_IMAGE = readFileSync(
   new URL('../../../core/src/main/resources/fun/fengwk/kkstudio/core/studio/function/fake/tiny.png', import.meta.url),
 )
@@ -1262,16 +1262,36 @@ async function createBranchedHistoryFixture(
 
     // 原分支：originalMessages 逐条 THREAD batch。
     for (const message of originalMessages) {
-      const current = await getThreadSnapshot(apiCtx, state.threadId)
-      await acceptCommandBatch(apiCtx, {
-        owner,
-        target: threadTarget({
-          threadId: state.threadId,
-          expectedHeadEntryId: current.thread.headEntryId,
-          expectedNextCommandSequence: current.thread.nextCommandSequence,
-        }),
-        commands: [userMessageCommand(message, cid())],
-      })
+      // 每条 batch 前等待上一 turn 收敛（missing agent 的 turn 确定性快速失败），
+      // 再读最新 cursor；STALE 409 时短暂等待后重读重试（最多 5 次兜底）。
+      let accepted
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        if (attempt > 0) await sleep(80)
+        await waitForQuiescentThread(apiCtx, state.threadId, {
+          timeoutMs: 30_000,
+          intervalMs: 50,
+        }).catch(() => {})
+        const current = await getThreadSnapshot(apiCtx, state.threadId)
+        try {
+          accepted = await acceptCommandBatch(apiCtx, {
+            owner,
+            target: threadTarget({
+              threadId: state.threadId,
+              expectedHeadEntryId: current.thread.headEntryId,
+              expectedNextCommandSequence: current.thread.nextCommandSequence,
+            }),
+            commands: [userMessageCommand(message, cid())],
+          })
+          break
+        } catch (error) {
+          if (!(error instanceof HttpError) || error.status !== 409) throw error
+        }
+      }
+      if (!accepted) {
+        throw new Error(
+          `THREAD batch did not stabilize after 5 attempts for original message: ${message}`,
+        )
+      }
     }
     await waitForDurableMessages(
       apiCtx,

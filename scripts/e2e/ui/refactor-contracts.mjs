@@ -580,7 +580,9 @@ export async function runRefactorContractMatrix(ui) {
         assert(externalRes.status === 200, `external settings update failed: ${externalRes.status}`)
         await base.fill(staleDraft)
         await page.getByRole('button', { name: '保存', exact: true }).click()
-        const conflictDialog = page.getByRole('alertdialog', { name: '设置已在其他位置修改' })
+        const conflictDialog = page.getByRole('alertdialog', {
+          name: '持久状态已变化',
+        })
         await conflictDialog.waitFor({ state: 'visible', timeout: 15_000 })
         assert(
           (await base.inputValue()) === staleDraft,

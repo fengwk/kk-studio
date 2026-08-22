@@ -189,6 +189,22 @@ async function expectVisibleText(page, text) {
   await page.getByText(text).first().waitFor({ state: 'visible', timeout: 30_000 })
 }
 
+/**
+ * 当前自定义 Select 通用选择 helper：trigger 是 .ui-select-trigger button，
+ * aria-controls 指向 role=listbox。点击 trigger 展开，解析 aria-controls 找到对应
+ * listbox，再按 accessible name 精确点击 option。禁止调用 native selectOption。
+ */
+async function selectCustomOption(page, trigger, optionName) {
+  await trigger.click()
+  const listboxId = await trigger.getAttribute('aria-controls')
+  assert(listboxId, `Select trigger ${await trigger.getAttribute('aria-label')} lacks aria-controls`)
+  const listbox = page.locator(`#${CSS.escape(listboxId)}`)
+  await listbox.waitFor({ state: 'visible', timeout: 10_000 })
+  const option = listbox.getByRole('option', { name: optionName, exact: true })
+  await option.waitFor({ state: 'visible', timeout: 10_000 })
+  await option.click()
+}
+
 async function resourceCardTitle(page, name) {
   const title = page.locator('.info-card h3').filter({ hasText: name }).first()
   await title.waitFor({ state: 'visible', timeout: 20_000 })
@@ -365,13 +381,10 @@ async function main(argv) {
   await run('ui.i18n.language_switch', '右上角切换 English/中文并持久化', async (caseArt) => {
     await goto('/chats')
     await expectVisibleText(page, '新建 Chat')
-    const localeTrigger = page.locator('.topbar-right .locale-selector-trigger')
-    await localeTrigger.click()
-    await page.getByRole('listbox', { name: '语言' }).waitFor({ state: 'visible' })
-    await page.getByRole('option', { name: 'English', exact: true }).waitFor({ state: 'visible' })
-    await page.getByRole('option', { name: '中文', exact: true }).waitFor({ state: 'visible' })
-    await shot(caseArt, 'language-selector-open')
-    await page.getByRole('option', { name: 'English', exact: true }).click()
+    const localeTrigger = page.locator('.topbar-right').getByRole('button', {
+      name: '语言: 中文',
+    })
+    await selectCustomOption(page, localeTrigger, 'English')
     await expectVisibleText(page, 'Create Chat')
     assert(
       await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'en-US'),
@@ -380,8 +393,13 @@ async function main(argv) {
 
     await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
     await expectVisibleText(page, 'Create Chat')
-    await page.locator('.topbar-right .locale-selector-trigger').click()
-    await page.getByRole('option', { name: '中文', exact: true }).click()
+    await selectCustomOption(
+      page,
+      page.locator('.topbar-right').getByRole('button', {
+        name: 'Language: English',
+      }),
+      '中文',
+    )
     await expectVisibleText(page, '新建 Chat')
     assert(
       await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'zh-CN'),
@@ -791,11 +809,11 @@ async function main(argv) {
     await page.getByText('新建 Chat', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
     // 选 default-assistant
-    const agentSelect = page.getByLabel('Agent')
-    await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
-      // FormSelect 可能是 native select
-      await agentSelect.selectOption({ index: 1 })
-    })
+    await selectCustomOption(
+      page,
+      page.getByRole('button', { name: 'Agent' }),
+      'default-assistant',
+    )
     await page.getByRole('button', { name: '确认创建' }).click()
     // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
     await page.getByText('新对话').first().waitFor({ state: 'visible', timeout: 15_000 })
@@ -836,10 +854,11 @@ async function main(argv) {
         await goto('/chats')
         await page.getByText('新建 Chat', { exact: true }).click()
         await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
-        const agentSelect = page.getByLabel('Agent')
-        await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
-          await agentSelect.selectOption({ index: 1 })
-        })
+        await selectCustomOption(
+          page,
+          page.getByRole('button', { name: 'Agent' }),
+          'default-assistant',
+        )
 
         const environmentTrigger = page.getByRole('button', { name: 'Environment', exact: true })
         await environmentTrigger.click()
@@ -894,10 +913,11 @@ async function main(argv) {
       await goto('/chats')
       await page.getByText('新建 Chat', { exact: true }).click()
       await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
-      const agentSelect = page.getByLabel('Agent')
-      await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
-        await agentSelect.selectOption({ index: 1 })
-      })
+      await selectCustomOption(
+        page,
+        page.getByRole('button', { name: 'Agent' }),
+        'default-assistant',
+      )
       await page.getByRole('button', { name: '确认创建' }).click()
       await page.getByText('新对话').first().waitFor({ state: 'visible', timeout: 15_000 })
       const composer = page.getByLabel('给 AI 发送消息')
