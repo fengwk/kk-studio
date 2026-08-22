@@ -1,5 +1,12 @@
 import { Check, Copy } from 'lucide-react'
-import { memo, useCallback, useState, type ReactNode } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useI18n } from '@/shared/i18n'
 
 async function copyText(text: string): Promise<boolean> {
@@ -42,8 +49,15 @@ export const CopyButton = memo(function CopyButton({
 }: CopyButtonProps) {
   const { t } = useI18n()
   const [copied, setCopied] = useState(false)
+  const resetTimerRef = useRef<number | null>(null)
   const effectiveLabel = label ?? t('shared.copy')
   const copiedLabel = t('shared.copied')
+
+  useEffect(() => () => {
+    if (resetTimerRef.current !== null) {
+      window.clearTimeout(resetTimerRef.current)
+    }
+  }, [])
 
   const onCopy = useCallback(async () => {
     const ok = await copyText(source)
@@ -51,7 +65,13 @@ export const CopyButton = memo(function CopyButton({
       return
     }
     setCopied(true)
-    window.setTimeout(() => setCopied(false), 1500)
+    if (resetTimerRef.current !== null) {
+      window.clearTimeout(resetTimerRef.current)
+    }
+    resetTimerRef.current = window.setTimeout(() => {
+      resetTimerRef.current = null
+      setCopied(false)
+    }, 1500)
   }, [source])
 
   return (
