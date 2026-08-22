@@ -187,7 +187,7 @@ canvas_command_dedup
 ```text
 storage_blob
 storage_upload
-harness_session_blob_ref
+session_blob_ref
 harness_session / harness_entry / harness_thread / ...
 ```
 
@@ -339,7 +339,7 @@ ATTACHMENT(uploadId)
 RESOURCE(blobId, name, preview?)
 ```
 
-并通过 `harness_session_blob_ref(sessionId, blobId)` 持有 Session 级引用。`harness_thread_command.request_hash` 对 raw 请求（含 uploadId 与顺序）计算，所以 Upload 已消费后相同 commandId + raw hash 仍可精确重放，不会二次消费。
+并通过 `session_blob_ref(sessionId, blobId)` 持有 Session 级引用。`harness_thread_command.request_hash` 对 raw 请求（含 uploadId 与顺序）计算，所以 Upload 已消费后相同 commandId + raw hash 仍可精确重放，不会二次消费。
 
 Canvas 首次发送：
 
@@ -387,7 +387,7 @@ lock document
 -> delete canvas_document
 -> deep delete owned Harness Sessions（HarnessSessionDeletionService）
    -> per Session：delete work/invocations/commands/thread/entries
-   -> release all harness_session_blob_ref
+   -> release all session_blob_ref
    -> delete session
 ```
 

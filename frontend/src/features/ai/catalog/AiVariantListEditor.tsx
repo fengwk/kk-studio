@@ -1,7 +1,7 @@
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
-import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/catalog/ai-number-input'
+import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/shared/lib/numeric-input'
 import { blankVariant } from '@/features/ai/catalog/ai-resource-form-drafts'
 import { useI18n } from '@/shared/i18n'
 

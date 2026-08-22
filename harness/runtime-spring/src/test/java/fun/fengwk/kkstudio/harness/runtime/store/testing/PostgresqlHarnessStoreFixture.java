@@ -1,10 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import org.flywaydb.core.Flyway;
 import org.postgresql.Driver;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -21,11 +20,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
-/** 整个进程共用一个 PostgreSQL 容器，并为每个 contract 测试准备一份干净的七表 schema。 */
+/** 整个进程共用一个 PostgreSQL 容器，并为每个 contract 测试应用唯一 V1 baseline（database 模块）。 */
 final class PostgresqlHarnessStoreFixture {
-
-  private static final String SCHEMA_RESOURCE =
-      "fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql";
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =
@@ -74,7 +70,13 @@ final class PostgresqlHarnessStoreFixture {
         Statement statement = connection.createStatement()) {
       statement.execute("drop schema if exists public cascade");
       statement.execute("create schema public");
-      ScriptUtils.executeSqlScript(connection, new ClassPathResource(SCHEMA_RESOURCE));
+      // 唯一 V1 baseline（database 模块）：与生产 bootstrap 同一 Flyway 机制应用。
+      Flyway.configure()
+          .dataSource(DATA_SOURCE)
+          .locations("classpath:db/migration")
+          .validateMigrationNaming(true)
+          .load()
+          .migrate();
     } catch (SQLException error) {
       throw new IllegalStateException("cannot reset PostgreSQL Harness Store schema", error);
     }

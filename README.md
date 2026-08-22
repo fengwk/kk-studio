@@ -12,9 +12,9 @@
 - [docs/technical-solution/architecture.md](docs/technical-solution/architecture.md)
 - [docs/technical-solution/domain-map.md](docs/technical-solution/domain-map.md)
 - [docs/technical-solution/harness-runtime-architecture.md](docs/technical-solution/harness-runtime-architecture.md)
+- [docs/technical-solution/harness-agent-loop.md](docs/technical-solution/harness-agent-loop.md)
 - [docs/technical-solution/prompt-to-resource.md](docs/technical-solution/prompt-to-resource.md)
 - [docs/technical-solution/canvas-resource-function-v1.md](docs/technical-solution/canvas-resource-function-v1.md)
-- [docs/technical-solution/repository-quality-audit.md](docs/technical-solution/repository-quality-audit.md)
 
 ## 能力摘要
 
@@ -87,8 +87,8 @@ docker compose -f deploy/local/compose.yaml down -v
 数据库首次初始化的约束：
 
 - 应用通过 Flyway 执行
-  [`V1__schema.sql`](core/src/main/resources/db/migration/V1__schema.sql) 与
-  [`V2__dev_seed.sql`](core/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
+  [`V1__schema.sql`](database/src/main/resources/db/migration/V1__schema.sql) 与
+  [`V2__dev_seed.sql`](database/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
   `flyway_schema_history` 确保重启不会重复迁移。
 - `V2__dev_seed.sql` 只写入 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。

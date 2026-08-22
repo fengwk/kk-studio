@@ -26,8 +26,8 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 /**
- * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 runtime-spring 的七张表 + 应用层的 Session blob
- * 引用表，被禁止的遗留 harness 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
+ * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 runtime-spring 的七张表（业务表 不得使用 harness_
+ * 前缀），被禁止的遗留 harness 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
  *
  * <p>public schema 的相等性校验是严格的：{@code public} 中 {@code BASE TABLE} 的集合必须与期望列表完全一致，因此任何残留或桩表都会立即被发现。
  */
@@ -52,22 +52,21 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "chat",
           "chat_session",
           "harness_session",
-          "harness_session_blob_ref",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
           "harness_model_invocation",
           "harness_tool_invocation",
           "harness_work",
+          "session_blob_ref",
           "storage_blob",
           "storage_upload",
           "system_setting");
 
-  /** 精确的 runtime-spring 执行协议 + 应用层 Session blob 引用表；只有这些表能使用 harness_ 前缀。 */
+  /** 精确的 runtime-spring 执行协议七表；业务表（如 session_blob_ref）不得使用 harness_ 前缀。 */
   private static final Set<String> HARNESS_TABLES =
       Set.of(
           "harness_session",
-          "harness_session_blob_ref",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
@@ -121,7 +120,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertEquals(
         new TreeSet<>(HARNESS_TABLES),
         harnessTables,
-        "only the runtime-spring execution tables and the session blob ref table may use the harness_ prefix");
+        "only the runtime-spring execution tables may use the harness_ prefix");
   }
 
   @Test
@@ -767,15 +766,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "canvas_link", "target_node_id");
     assertColumnType("uuid", "canvas_function_resource_pin", "resource_id");
     for (String table : HARNESS_TABLES) {
-      if (table.equals("harness_work")
-          || table.equals("harness_thread_command")
-          || table.equals("harness_session_blob_ref")) {
-        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 身份为 (thread_id, sequence)；
-        // Session blob 引用是复合主键 (session_id, blob_id) 的纯关联表。
+      if (table.equals("harness_work") || table.equals("harness_thread_command")) {
+        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 身份为 (thread_id, sequence)。
         continue;
       }
       assertColumnType("uuid", table, "id");
     }
+    // Session blob 引用是复合主键 (session_id, blob_id) 的纯关联表，无代理 id。
+    assertColumnType("uuid", "session_blob_ref", "session_id");
+    assertColumnType("uuid", "session_blob_ref", "blob_id");
     assertColumnType("uuid", "chat", "id");
     assertColumnType("uuid", "comfyui_workflow_api", "id");
     assertColumnType("uuid", "chat_session", "session_id");
@@ -837,11 +836,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     // Canvas / Harness / Chat / Comfy 实体 id 均由应用侧 UUID 生成并显式插入；
     // 任何表都不得携带序列默认值。ThreadCommand 无代理主键（身份为 (thread_id, sequence)）。
     for (String table : HARNESS_TABLES) {
-      if (table.equals("harness_work")
-          || table.equals("harness_thread_command")
-          || table.equals("harness_session_blob_ref")) {
-        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 无代理主键；
-        // Session blob 引用是复合主键 (session_id, blob_id) 的纯关联表。
+      if (table.equals("harness_work") || table.equals("harness_thread_command")) {
+        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 无代理主键。
         continue;
       }
       try (Connection conn = newConnection();
@@ -1006,6 +1002,45 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_canvas_session_session"),
         foreignKeys,
         "all non-Harness ownership relations must be enforced by PostgreSQL");
+  }
+
+  @Test
+  void sessionBlobRefExposesCompositeKeyAndRestrictForeignKeys() throws SQLException {
+    // Session blob 引用是纯关联表：复合主键 (session_id, blob_id) 精确存在，两个 FK 都是 RESTRICT。
+    Set<String> primaryKeys = new TreeSet<>();
+    try (Connection conn = newConnection();
+        Statement st = conn.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "select a.attname from pg_index i"
+                    + " join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)"
+                    + " where i.indrelid = 'session_blob_ref'::regclass and i.indisprimary")) {
+      while (rs.next()) {
+        primaryKeys.add(rs.getString(1));
+      }
+    }
+    assertEquals(Set.of("blob_id", "session_id"), primaryKeys);
+    assertEquals(
+        "RESTRICT",
+        singleString(
+            "select case confdeltype when 'r' then 'RESTRICT' when 'a' then 'NO ACTION'"
+                + " when 'c' then 'CASCADE' when 'n' then 'SET NULL' else 'SET DEFAULT' end"
+                + " from pg_constraint where conname = 'fk_session_blob_ref_session'"));
+    assertEquals(
+        "RESTRICT",
+        singleString(
+            "select case confdeltype when 'r' then 'RESTRICT' when 'a' then 'NO ACTION'"
+                + " when 'c' then 'CASCADE' when 'n' then 'SET NULL' else 'SET DEFAULT' end"
+                + " from pg_constraint where conname = 'fk_session_blob_ref_blob'"));
+
+    // 反向枚举索引 (blob_id, session_id) 精确存在，深删除与对账可以按 blob 反查 Session。
+    String blobIndex =
+        singleString(
+            "select indexdef from pg_indexes"
+                + " where schemaname = 'public' and indexname = 'idx_session_blob_ref_blob'");
+    assertTrue(
+        blobIndex.contains("(blob_id, session_id)"),
+        () -> "blob reverse-lookup index must cover (blob_id, session_id): " + blobIndex);
   }
 
   @Test

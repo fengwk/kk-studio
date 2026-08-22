@@ -12,7 +12,7 @@ import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai
 import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-resource-draft-codecs'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
-import { FormSelect } from '@/shared/ui/console/FormSelect'
+import { Select } from '@/shared/ui/console/Select'
 import type {
   AgentDefinitionDTO,
   ToolCatalogEntryDTO,
@@ -145,7 +145,7 @@ export function AgentForm({
       </label>
       <label className={`form-group${fieldErrors.model ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.defaultModel')}</FieldLabel>
-        <FormSelect
+        <Select
           aria-label={t('ai.catalog.form.defaultModel')}
           aria-describedby={modelUnavailable ? 'agent-model-identity-status' : undefined}
           value={draft.model}
@@ -162,7 +162,7 @@ export function AgentForm({
       </label>
       <label className={`form-group${fieldErrors.variant ? ' is-error' : ''}`}>
         <FieldLabel>{t('ai.catalog.form.defaultVariantOverride')}</FieldLabel>
-        <FormSelect
+        <Select
           aria-label={t('ai.catalog.form.defaultVariantOverride')}
           value={selectedVariant}
           disabled={selectedModel === undefined}
@@ -201,7 +201,7 @@ export function AgentForm({
 
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.skillCatalogSource')}</FieldLabel>
-        <FormSelect
+        <Select
           aria-label={t('ai.catalog.form.skillCatalogSource')}
           value={skillCatalogEnvironmentName}
           options={skillSourceOptions}

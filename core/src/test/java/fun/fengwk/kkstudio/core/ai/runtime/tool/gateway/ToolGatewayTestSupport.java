@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.core.ai.runtime.plugin.PluginBranchViewLoader;
 import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
+import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -43,6 +45,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -62,6 +65,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 /**
  * {@link CoreToolGateway} 测试共享基座：可编程 Tool / Transport / ResourceStore / Listener 与请求 fixture。
@@ -80,11 +84,24 @@ final class ToolGatewayTestSupport {
   static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
   static final int PROPOSED_ATTEMPT = 3;
 
-  static final ToolGatewayConfig CONFIG =
-      new ToolGatewayConfig(Duration.ofSeconds(2), Duration.ofSeconds(7));
-
   /** 测试默认的 ResourceStore 单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
+
+  /** 测试默认空 PluginCatalog：非插件路径的 gateway 测试不装配插件。 */
+  static final PluginCatalog EMPTY_PLUGIN_CATALOG = PluginCatalog.from(List.of());
+
+  /** 测试默认明确失败的 PluginBranchViewLoader：任何插件路径都会暴露未装配。 */
+  static final PluginBranchViewLoader FAILING_PLUGIN_BRANCH_LOADER =
+      assistantEntryId -> {
+        throw new IllegalStateException("no plugin branch loader is configured");
+      };
+
+  /** 固定 busy/overload 延迟 supplier：语义与生产一致——每次 Busy/Overloaded 判定现读。 */
+  static final Supplier<Duration> BUSY_RETRY_DELAY = () -> Duration.ofSeconds(2);
+
+  static final Supplier<Duration> OVERLOAD_RETRY_DELAY = () -> Duration.ofSeconds(7);
+
+  static final Clock TEST_CLOCK = Clock.systemUTC();
 
   private ToolGatewayTestSupport() {}
 
@@ -174,6 +191,8 @@ final class ToolGatewayTestSupport {
       ToolSettings settings) {
     return new CoreToolGateway(
         toolFactories,
+        EMPTY_PLUGIN_CATALOG,
+        FAILING_PLUGIN_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
@@ -182,7 +201,9 @@ final class ToolGatewayTestSupport {
         ENVIRONMENT_ROOT,
         resourceMaxBytes,
         executor,
-        CONFIG);
+        BUSY_RETRY_DELAY,
+        OVERLOAD_RETRY_DELAY,
+        TEST_CLOCK);
   }
 
   static CoreToolGateway gateway(
@@ -195,6 +216,8 @@ final class ToolGatewayTestSupport {
       Path environmentRoot) {
     return new CoreToolGateway(
         toolFactories,
+        EMPTY_PLUGIN_CATALOG,
+        FAILING_PLUGIN_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
@@ -203,7 +226,9 @@ final class ToolGatewayTestSupport {
         environmentRoot,
         RESOURCE_MAX_BYTES,
         executor,
-        CONFIG);
+        BUSY_RETRY_DELAY,
+        OVERLOAD_RETRY_DELAY,
+        TEST_CLOCK);
   }
 
   static CoreToolGateway gateway(
@@ -215,14 +240,19 @@ final class ToolGatewayTestSupport {
       ToolSettings settings) {
     return new CoreToolGateway(
         toolFactories,
+        EMPTY_PLUGIN_CATALOG,
+        FAILING_PLUGIN_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
         store,
-        properties,
+        properties.resolvedWorkdir(),
+        properties.resolvedEnvironmentRoot(),
         RESOURCE_MAX_BYTES,
         executor,
-        CONFIG);
+        BUSY_RETRY_DELAY,
+        OVERLOAD_RETRY_DELAY,
+        TEST_CLOCK);
   }
 
   static ToolSettings settings(PermissionAction action) {

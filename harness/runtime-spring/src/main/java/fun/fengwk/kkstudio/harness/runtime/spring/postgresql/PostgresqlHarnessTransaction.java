@@ -935,42 +935,106 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   // ---------- 应用侧深删除原语 ----------
 
   @Override
-  public int deleteCommands(UUID threadId) {
+  public int deleteThreads(List<UUID> threadIds) {
     checkOpen();
-    Objects.requireNonNull(threadId, "threadId");
-    requireLocked(LockKey.thread(threadId));
-    return update("delete from harness_thread_command where thread_id = ?", threadId);
-  }
+    Objects.requireNonNull(threadIds, "threadIds");
+    List<UUID> copied = List.copyOf(threadIds).stream().sorted(UuidOrder.COMPARATOR).toList();
+    for (int i = 1; i < copied.size(); i++) {
+      if (copied.get(i).equals(copied.get(i - 1))) {
+        throw new IllegalArgumentException(
+            "duplicate thread id " + copied.get(i) + " must not be deleted twice");
+      }
+    }
+    for (UUID threadId : copied) {
+      requireLocked(LockKey.thread(threadId));
+    }
+    if (copied.isEmpty()) {
+      return 0;
+    }
 
-  @Override
-  public int deleteToolInvocations(UUID threadId) {
-    checkOpen();
-    Objects.requireNonNull(threadId, "threadId");
-    requireLocked(LockKey.thread(threadId));
-    return update(
-        """
-        delete from harness_tool_invocation
-        where model_invocation_id in (
-            select id from harness_model_invocation where thread_id = ?
-        )
-        """,
-        threadId);
-  }
+    for (UUID threadId : copied) {
+      List<ThreadCommand> commands =
+          queryList(
+              """
+              select *
+              from harness_thread_command
+              where thread_id = ?
+              order by sequence
+              for update
+              """,
+              PostgresqlHarnessRows.COMMAND,
+              threadId);
+      for (ThreadCommand command : commands) {
+        lock(LockKey.command(command.threadId(), command.sequence()));
+      }
+    }
 
-  @Override
-  public int deleteModelInvocations(UUID threadId) {
-    checkOpen();
-    Objects.requireNonNull(threadId, "threadId");
-    requireLocked(LockKey.thread(threadId));
-    return update("delete from harness_model_invocation where thread_id = ?", threadId);
-  }
+    List<ModelInvocation> models = new ArrayList<>();
+    for (UUID threadId : copied) {
+      models.addAll(
+          queryList(
+              "select * from harness_model_invocation where thread_id = ?",
+              PostgresqlHarnessRows.MODEL_INVOCATION,
+              threadId));
+    }
+    models.sort(Comparator.comparing(ModelInvocation::id, UuidOrder.COMPARATOR));
+    List<ModelInvocation> lockedModels = new ArrayList<>(models.size());
+    for (ModelInvocation model : models) {
+      lockModelInvocation(model.id()).ifPresent(lockedModels::add);
+    }
 
-  @Override
-  public boolean deleteThread(UUID threadId) {
-    checkOpen();
-    Objects.requireNonNull(threadId, "threadId");
-    requireLocked(LockKey.thread(threadId));
-    return update("delete from harness_thread where id = ?", threadId) == 1;
+    List<ToolInvocation> tools = new ArrayList<>();
+    for (ModelInvocation model : lockedModels) {
+      tools.addAll(
+          queryList(
+              "select * from harness_tool_invocation where model_invocation_id = ?",
+              PostgresqlHarnessRows.TOOL_INVOCATION,
+              model.id()));
+    }
+    tools.sort(TOOL_LOCK_ORDER);
+    List<ToolInvocation> lockedTools = new ArrayList<>(tools.size());
+    for (ToolInvocation tool : tools) {
+      lockToolInvocation(tool.id()).ifPresent(lockedTools::add);
+    }
+
+    List<WorkTarget> workTargets = new ArrayList<>();
+    for (UUID threadId : copied) {
+      workTargets.add(new WorkTarget(WorkTargetType.THREAD, threadId));
+    }
+    for (ModelInvocation model : lockedModels) {
+      workTargets.add(new WorkTarget(WorkTargetType.MODEL, model.id()));
+    }
+    for (ToolInvocation tool : lockedTools) {
+      workTargets.add(new WorkTarget(WorkTargetType.TOOL, tool.id()));
+    }
+    workTargets.sort(WORK_LOCK_ORDER);
+    List<WorkTarget> lockedWorkTargets = new ArrayList<>();
+    for (WorkTarget target : workTargets) {
+      if (lockWork(target).isPresent()) {
+        lockedWorkTargets.add(target);
+      }
+    }
+
+    for (WorkTarget target : lockedWorkTargets) {
+      if (!deleteWork(target)) {
+        throw new IllegalStateException(
+            "locked work disappeared while deleting threads: " + target);
+      }
+    }
+    for (UUID threadId : copied) {
+      update("delete from harness_thread_command where thread_id = ?", threadId);
+    }
+    if (!lockedTools.isEmpty()) {
+      deleteToolInvocationsByIds(lockedTools.stream().map(ToolInvocation::id).toList());
+    }
+    for (ModelInvocation model : lockedModels) {
+      deleteModelInvocation(model.id());
+    }
+    for (UUID threadId : copied) {
+      int deleted = update("delete from harness_thread where id = ?", threadId);
+      requireSingleUpdate(deleted, "thread", threadId);
+    }
+    return copied.size();
   }
 
   @Override
@@ -1005,30 +1069,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");
     return update("delete from harness_session where id = ?", sessionId) == 1;
-  }
-
-  @Override
-  public int deleteWorkByThread(UUID threadId) {
-    checkOpen();
-    Objects.requireNonNull(threadId, "threadId");
-    requireLocked(LockKey.thread(threadId));
-    return update(
-        """
-        delete from harness_work
-        where (target_type = 'THREAD' and target_id = ?)
-           or target_id in (
-               select id from harness_model_invocation where thread_id = ?
-           )
-           or target_id in (
-               select tool.id
-               from harness_tool_invocation tool
-               join harness_model_invocation model on model.id = tool.model_invocation_id
-               where model.thread_id = ?
-           )
-        """,
-        threadId,
-        threadId,
-        threadId);
   }
 
   @Override

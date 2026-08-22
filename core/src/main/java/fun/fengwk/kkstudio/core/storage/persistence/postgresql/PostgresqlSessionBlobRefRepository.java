@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.storage.persistence.postgresql.mapper.SessionBlo
 import java.util.List;
 import java.util.UUID;
 
-/** 基于 PostgreSQL 的 {@code harness_session_blob_ref} 仓库。 */
+/** 基于 PostgreSQL 的 {@code session_blob_ref} 仓库。 */
 @AllArgsConstructor
 @Repository
 public class PostgresqlSessionBlobRefRepository implements SessionBlobRefRepository {

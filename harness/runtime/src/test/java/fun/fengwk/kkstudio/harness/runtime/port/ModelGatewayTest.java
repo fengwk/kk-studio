@@ -58,7 +58,7 @@ class ModelGatewayTest {
 
   @Test
   void startedRequiresANonNullHandle() {
-    ModelGateway.Handle handle = () -> {};
+    ModelGateway.Handle handle = noopHandle();
     ModelGateway.Started started = new ModelGateway.Started(handle);
     assertNotNull(started.handle());
     assertThrows(NullPointerException.class, () -> new ModelGateway.Started(null));
@@ -104,18 +104,27 @@ class ModelGatewayTest {
 
   @Test
   void startAcceptsAValidExecutionAndListener() {
-    ModelGateway gateway =
-        (execution, listener) ->
-            new ModelGateway.Started(
-                () -> {
-                  // 尽力而为、幂等的取消
-                });
+    ModelGateway gateway = (execution, listener) -> new ModelGateway.Started(noopHandle());
     ModelGateway.StartResult result =
         gateway.start(
             new ModelGateway.Execution(
                 id(7L), 1, ProviderType.OPENAI, PortTestData.providerRequest()),
             events());
     assertTrue(result instanceof ModelGateway.Started);
+  }
+
+  private static ModelGateway.Handle noopHandle() {
+    return new ModelGateway.Handle() {
+      @Override
+      public void cancel() {
+        // 尽力而为、幂等的取消
+      }
+
+      @Override
+      public void activate() {
+        // 打开 Gateway 回调 gate
+      }
+    };
   }
 
   private static ModelGateway.Listener events() {

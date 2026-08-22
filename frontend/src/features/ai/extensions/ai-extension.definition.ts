@@ -9,7 +9,7 @@ import {
   ResourceDeleteDialog,
   ResourceEditorDialog,
 } from '@/features/ai/extensions/ai-extension'
-import { TaskToolRenderer } from '@/features/ai/runtime/thread-panel/messages/TaskToolRenderer'
+import { TaskToolRendererLazy } from '@/features/ai/extensions/TaskToolRendererLazy'
 import { isTaskToolRendererExpandable } from '@/features/ai/runtime/thread-panel/messages/task-tool-display'
 import type { TrustedReactExtension } from '@/platform/extensions/types'
 
@@ -46,7 +46,7 @@ export const aiExtension: TrustedReactExtension = {
   // 不做 name switch，一律通过 extension host 按 rendererKey 分发。
   toolRenderers: [{
     id: 'task',
-    component: TaskToolRenderer,
+    component: TaskToolRendererLazy,
     isExpandable: isTaskToolRendererExpandable,
   }],
 }

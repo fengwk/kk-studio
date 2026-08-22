@@ -17,7 +17,6 @@ import { ApiError } from '@/shared/api/client'
 const ID = '11111111-1111-4111-8111-111111111111'
 const CANVAS_ID = '22222222-2222-4222-8222-222222222222'
 const NODE_ID = '33333333-3333-4333-8333-333333333333'
-const GROUP_ID = '44444444-4444-4444-8444-444444444444'
 const REQUEST_ID = '55555555-5555-4555-8555-555555555555'
 
 const fetchMock = vi.fn()
@@ -59,60 +58,12 @@ function documentPayload() {
   }
 }
 
-function resourcePayload() {
-  return {
-    id: ID,
-    canvasId: CANVAS_ID,
-    ownerNodeId: NODE_ID,
-    resourceIndex: 0,
-    blobId: null,
-    name: 'note',
-    textContent: 'hello',
-    kind: 'TEXT',
-    mediaType: null,
-    sizeBytes: '12',
-    width: null,
-    height: null,
-    durationMs: null,
-    createdAt: '2026-01-01T00:00:00Z',
-  }
-}
-
-function nodePayload() {
-  return {
-    id: NODE_ID,
-    canvasId: CANVAS_ID,
-    name: 'Node',
-    transform: { x: 1, y: 2, width: 100, height: 80 },
-    groupId: GROUP_ID,
-    resources: [resourcePayload()],
-    function: { modelKey: 'image', configJson: '{}' },
-    run: {
-      nodeId: NODE_ID,
-      requestId: REQUEST_ID,
-      status: 'SUCCEEDED',
-      stage: 'done',
-      error: null,
-      updatedAt: '2026-01-02T00:00:00Z',
-    },
-  }
-}
-
 function snapshotPayload() {
   return {
     document: documentPayload(),
-    nodes: [nodePayload()],
-    groups: [{
-      id: GROUP_ID,
-      canvasId: CANVAS_ID,
-      title: 'Group',
-      transform: { x: 0, y: 0, width: 200, height: 160 },
-    }],
-    links: [{
-      canvasId: CANVAS_ID,
-      sourceNodeId: NODE_ID,
-      targetNodeId: ID,
-    }],
+    nodes: [],
+    groups: [],
+    links: [],
   }
 }
 
@@ -120,23 +71,14 @@ function patchPayload() {
   return {
     baseVersion: '3',
     version: '4',
-    groups: [
-      { op: 'UPSERT', group: snapshotPayload().groups[0] },
-      { op: 'REMOVE', groupId: GROUP_ID },
-    ],
-    nodes: [
-      { op: 'UPSERT', node: nodePayload() },
-      { op: 'REMOVE', nodeId: NODE_ID },
-    ],
-    links: [
-      { op: 'UPSERT', link: snapshotPayload().links[0] },
-      { op: 'REMOVE', sourceNodeId: NODE_ID, targetNodeId: ID },
-    ],
+    groups: [],
+    nodes: [],
+    links: [],
   }
 }
 
-describe('studio service wire adapter', () => {
-  it('decodes graph payloads and exercises every exported canvas request', async () => {
+describe('studio service transport adapter', () => {
+  it('exercises every exported canvas request through fetch', async () => {
     fetchMock
       .mockResolvedValueOnce(response(envelope([documentPayload()])))
       .mockResolvedValueOnce(response(envelope(documentPayload())))
@@ -157,7 +99,7 @@ describe('studio service wire adapter', () => {
     expect(await listCanvases()).toHaveLength(1)
     expect((await createCanvas()).title).toBe('Canvas')
     expect((await createCanvas('Named')).title).toBe('Canvas')
-    expect((await getCanvas(CANVAS_ID)).nodes[0]?.resources[0]?.sizeBytes).toBe(12)
+    expect((await getCanvas(CANVAS_ID)).document.id).toBe(CANVAS_ID)
     expect((await postCanvasCommands(CANVAS_ID, {
       expectedVersion: '3',
       commandId: ID,
@@ -173,6 +115,58 @@ describe('studio service wire adapter', () => {
       .toBe('CANCELLED')
     expect((await getCanvasFunctionRun(CANVAS_ID, NODE_ID)).status).toBe('SUCCEEDED')
     expect(fetchMock).toHaveBeenCalledTimes(12)
+  })
+
+  it('issues the expected endpoints, methods, bodies, and signals', async () => {
+    fetchMock
+      .mockResolvedValueOnce(response(envelope(documentPayload())))
+      .mockResolvedValueOnce(response(envelope(snapshotPayload())))
+      .mockResolvedValueOnce(response(envelope(patchPayload())))
+      .mockResolvedValueOnce(response(envelope({ patches: [], snapshot: null })))
+
+    const controller = new AbortController()
+    await createCanvas('Named', { signal: controller.signal })
+    await getCanvas(CANVAS_ID, { signal: controller.signal })
+    await postCanvasCommands(CANVAS_ID, { expectedVersion: '3', commandId: ID, commands: [] }, { signal: controller.signal })
+    await getCanvasChanges(CANVAS_ID, '7', { signal: controller.signal })
+
+    const calls = fetchMock.mock.calls.map(([url, init]: [string, RequestInit]) => ({
+      url,
+      method: init.method ?? 'GET',
+      body: init.body,
+      signal: init.signal,
+    }))
+    expect(calls[0]).toMatchObject({ url: '/api/canvases', method: 'POST', body: JSON.stringify({ title: 'Named' }) })
+    expect(calls[1]).toMatchObject({ url: `/api/canvases/${CANVAS_ID}`, method: 'GET' })
+    expect(calls[2]).toMatchObject({
+      url: `/api/canvases/${CANVAS_ID}/commands`,
+      method: 'POST',
+      body: JSON.stringify({ expectedVersion: '3', commandId: ID, commands: [] }),
+    })
+    expect(calls[3]).toMatchObject({ url: `/api/canvases/${CANVAS_ID}/changes?afterVersion=7`, method: 'GET' })
+    for (const call of calls) {
+      expect(call.signal).toBe(controller.signal)
+    }
+  })
+
+  it('sends Accept/Accept-Language headers and Content-Type only when a body exists', async () => {
+    fetchMock
+      .mockResolvedValueOnce(response(envelope([documentPayload()])))
+      .mockResolvedValueOnce(response(envelope(documentPayload())))
+
+    await listCanvases()
+    await createCanvas('Named')
+
+    const getInit = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(getInit.headers).toEqual({ Accept: 'application/json', 'Accept-Language': 'zh-CN' })
+    expect(getInit.body).toBeUndefined()
+
+    const postInit = fetchMock.mock.calls[1]?.[1] as RequestInit
+    expect(postInit.headers).toEqual({
+      Accept: 'application/json',
+      'Accept-Language': 'zh-CN',
+      'Content-Type': 'application/json',
+    })
   })
 
   it('handles transport, response envelope, and HTTP failures without weakening errors', async () => {
@@ -202,63 +196,11 @@ describe('studio service wire adapter', () => {
     await expect(listCanvases()).rejects.toThrow('请求失败')
   })
 
-  it('fails closed for malformed graph payloads and unsafe long values', async () => {
-    const malformed = [
-      { document: null, nodes: [], groups: [], links: [] },
-      { ...snapshotPayload(), document: { ...documentPayload(), id: 'bad' } },
-      { ...snapshotPayload(), document: { ...documentPayload(), version: '01' } },
-      { ...snapshotPayload(), nodes: [{}] },
-      { ...snapshotPayload(), groups: [{}] },
-      { ...snapshotPayload(), links: [{}] },
-      {
-        ...snapshotPayload(),
-        nodes: [{
-          ...nodePayload(),
-          transform: { ...nodePayload().transform, width: 0 },
-        }],
-      },
-      {
-        ...snapshotPayload(),
-        nodes: [{
-          ...nodePayload(),
-          resources: [{ ...resourcePayload(), sizeBytes: '9007199254740992' }],
-        }],
-      },
-    ]
-    for (const value of malformed) {
-      fetchMock.mockResolvedValueOnce(response(envelope(value)))
-      await expect(getCanvas(CANVAS_ID)).rejects.toBeInstanceOf(ApiError)
-    }
-  })
+  it('fails closed when the envelope is malformed or missing its data field', async () => {
+    fetchMock.mockResolvedValueOnce(response({ status: 200, code: 'OK', message: '' }))
+    await expect(listCanvases()).rejects.toBeInstanceOf(ApiError)
 
-  it('accepts nullable graph fields and both patch operation forms', async () => {
-    const value = {
-      document: documentPayload(),
-      nodes: [{
-        ...nodePayload(),
-        groupId: null,
-        resources: [{
-          ...resourcePayload(),
-          blobId: null,
-          textContent: null,
-          mediaType: null,
-          sizeBytes: null,
-          durationMs: null,
-          width: 10,
-          height: 20,
-        }],
-        function: null,
-        run: null,
-      }],
-      groups: [],
-      links: [],
-    }
-    fetchMock.mockResolvedValueOnce(response(envelope(value)))
-    const snapshot = await getCanvas(CANVAS_ID)
-    expect(snapshot.nodes[0]?.function).toBeNull()
-    expect(snapshot.nodes[0]?.resources[0]?.width).toBe(10)
-
-    fetchMock.mockResolvedValueOnce(response(envelope({ patches: [], snapshot: null })))
-    expect((await getCanvasChanges(CANVAS_ID, '0')).snapshot).toBeNull()
+    fetchMock.mockResolvedValueOnce(response(envelope(null)))
+    await expect(listCanvases()).rejects.toBeInstanceOf(ApiError)
   })
 })

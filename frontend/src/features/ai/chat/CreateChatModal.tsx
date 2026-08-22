@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEventHandler } from 'react'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
-import { FormSelect } from '@/shared/ui/console/FormSelect'
+import { Select } from '@/shared/ui/console/Select'
 import { EnvironmentWorkspacePanel } from '@/features/ai/chat/EnvironmentWorkspacePanel'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type {
@@ -79,7 +79,7 @@ export function CreateChatModal({
           </label>
           <label className="form-group">
             <FieldLabel required>{t('ai.chat.agent')}</FieldLabel>
-            <FormSelect
+            <Select
               aria-label={t('ai.chat.agent')}
               value={selectedAgentName}
               placeholder={t('ai.chat.selectAgent')}
