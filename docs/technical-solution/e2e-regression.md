@@ -24,7 +24,7 @@ model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或
 ./scripts/e2e.sh --with-tools            # L4 Environment projection
 ./scripts/e2e.sh --with-canvas-storage   # Canvas Resource 直读预签名 / 全局 Blob 存储边界（需 S3 配置）
 ./scripts/e2e.sh --with-canvas-function  # 免费 fake Function（隐含 storage + rebuild）
-./scripts/e2e.sh --real --with-tools     # L4 真实 Tool turn
+./scripts/e2e.sh --real --with-tools --with-canvas-storage  # L4 真实 Tool turn（durable Resource 外部化需 S3）
 ./scripts/e2e.sh --ui                    # Playwright UI E2E
 ./scripts/e2e.sh --list
 ./scripts/e2e.sh --docs
@@ -97,9 +97,9 @@ rebuild；不得为这条回归追加 `--real`。
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
 | L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、SystemSettings 完整聚合/CAS、内部工具目录、owner-aware command-batches（NEW_SESSION/ENTRY/THREAD）、Session/Thread 查询、命令 batch 严格 wire、CAS/幂等、IDLE stop no-op、模型 transient attempt retry 可见性、i18n 与 proxy |
-| L2 | `--real` | MiniMax | 文本轮次 durable 边界、真实 task 委派 durable 子 Thread、运行中原子 batch 合并收割、stop partial + REPLAYED + continue |
+| L2 | `--real` | MiniMax | 文本轮次 durable 边界、真实 task 委派 durable 子 Thread、运行中原子 batch 合并收割、stop partial + REPLAYED + continue（初始 NEW_SESSION 直接使用 seed Agent，真实启动） |
 | L3 | `--real --with-branch` | MiniMax | ENTRY target 在同 Session 历史 assistant Entry 下开新 Thread 并继续分支 turn |
-| L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流、Resource 外部化与同源下载验证 |
+| L4 | `--with-tools`（daemon 投影）或 `--real --with-tools --with-canvas-storage`（真实 Tool turn） | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流；Resource 外部化与同源下载验证依赖 backend S3 enabled（`GlobalStorageToolResultHistoryMaterializer` bean，否则 Resource 引用 fail-closed 无法进入 durable history） |
 
 默认 L1 不启动真实 Provider，也不执行 Tool 外部副作用。
 
@@ -261,12 +261,12 @@ tool.read_turn
 | --- | --- | --- |
 | `real.text_turn` | `--real` | 真实 Provider 文本轮次；durable `TURN_START -> USER -> assistant MESSAGE -> TURN_END(COMPLETED)` 边界（TurnPlanBuilder 先追加 TURN_START 再追加 USER/CUSTOM）；IDLE 后 `modelInvocation=null`（快照无 `modelInvocations[]` 历史列表） |
 | `real.task_delegation` | `--real` | 父 Agent config 携带 `subagents=[child]` 且 branch `activeTools` 含 `task`：真实 Model 调用内部 `task`，创建 durable 子 Thread（ROOT 携带 `subagentContext{parentThreadId,rootThreadId,taskInvocationId,depth=2}`）；最终 TOOL MESSAGE 冻结 `rendererKey=task` 与 `<task id state>` envelope，`id` 即子 ThreadId |
-| `real.queued_command_batch` | `--real` | 运行中用最新 cursor 连续两个 THREAD batch 各入队一条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
-| `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/version+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 version exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
+| `real.queued_command_batch` | `--real` | 初始 NEW_SESSION 的 rootSettings 直接使用 seed Agent（真实启动，不触发 fabricated PLANNING_FAILED）；运行中用最新 cursor 连续两个 THREAD batch 各入队一条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
+| `real.stop_partial_continue` | `--real` | 初始 NEW_SESSION 的 rootSettings 直接使用 seed Agent（真实启动，不触发 fabricated PLANNING_FAILED）；流式 stop => `STOPPED`/version+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 version exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
 | `branch.same_session_entry_thread` | `--real --with-branch` | ENTRY target 在 real.text_turn 的同 Session 历史 assistant Entry 下开新 Thread（不复制 Entry）；sessionId 不变、accepted command sequence=1、分支 turn 在 startEntry 之后继续产生独立 assistant；原 Thread projection 不变 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；`rootPath` 存在；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `daemon.directories` | `--with-tools` | `GET /api/ai/environments/{name}/directories` 缺省 `path="."` 浏览 root（canonical 相对 wire path；`displayPath` 等于请求 `path` 的最后一段，root 为 `'.'`，只作展示、绝不暴露 daemon 本地绝对路径；root `parentPath="."`；`truncated` 布尔；`gitBranch` 可空；entries 只含直属子目录 `{name,path}`：`name` 等于 `path` 最后一段、`path` 是请求目录的直接子路径）；显式 `path="."` 与缺省一致；`..` 段 400 `INVALID_PATH`、不存在目录 404 `NOT_FOUND`、非法环境名 400 `INVALID_ENVIRONMENT_NAME` |
-| `tool.read_turn` | `--real --with-tools` | e2e seed 覆盖 `system_setting` 使 `read/write/edit/bash: ask`（`db/seed/e2e/V2__e2e_seed.sql`），本 case 验证 read；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
+| `tool.read_turn` | `--real --with-tools --with-canvas-storage` | 前置：backend S3 enabled（`GlobalStorageToolResultHistoryMaterializer` bean 注入，否则 Resource 引用 fail-closed，无法进入 durable history）；e2e seed 覆盖 `system_setting` 使 `read/write/edit/bash: ask`（`db/seed/e2e/V2__e2e_seed.sql`），本 case 验证 read；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
 
 ### L5 UI（默认 37，`--with-tools` / `--real` 各追加 1）
 
