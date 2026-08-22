@@ -72,13 +72,15 @@ export async function runComposerMatrix(ui) {
             `queued 2 ${stamp}`,
             `queued 1 ${stamp}`,
             `durable history ${stamp}`,
-            `durable history ${stamp}`,
+            fixture.bootstrapMessage,
+            fixture.bootstrapMessage,
           ]) {
             await composer.press('ArrowUp')
             await expectComposerText(page, expected)
             await expectStorage(page, draftKey, draft)
           }
           for (const expected of [
+            `durable history ${stamp}`,
             `queued 1 ${stamp}`,
             `queued 2 ${stamp}`,
             draft,
@@ -269,7 +271,7 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           let composer = await bindBlankComposer(page, goto, fixture)
           const draftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane:pane-1`,
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
           )
           const exactDraft = '  first line\nsecond line  '
 
@@ -359,7 +361,7 @@ export async function runComposerMatrix(ui) {
 
   await run(
     'ui.chat.selection_panel.keyboard_mode',
-    '轻量交互面板与 Composer 互斥，并支持搜索、排序、方向键和 Esc 返回',
+    '轻量交互面板与 Composer 互斥，并支持 Session 内搜索、方向键和 Esc 返回',
     async (caseArt) => {
       const draft = `selection panel draft ${stamp}`
       await withUiFixture(
@@ -372,7 +374,6 @@ export async function runComposerMatrix(ui) {
             `selection original descendant ${stamp}`,
           ],
           alternateMessage: `selection alternate branch ${stamp}`,
-          extraThreadCount: 1,
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
@@ -381,8 +382,7 @@ export async function runComposerMatrix(ui) {
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^thread/ }).click()
 
-          const panel = page.getByRole('region', { name: '选择 Thread' })
-          await panel.waitFor({ state: 'visible', timeout: 10_000 })
+          const panel = await openFixtureThreadPanel(page, fixture)
           assert(
             await page.locator('.modal-backdrop').count() === 0,
             'selection panel unexpectedly rendered a modal backdrop',
@@ -400,21 +400,11 @@ export async function runComposerMatrix(ui) {
             { timeout: 10_000 },
           )
 
-          const createdSort = panel.getByRole('button', { name: '创建时间' })
-          assert(
-            await createdSort.getAttribute('aria-pressed') === 'false',
-            'Thread picker did not start from recent sort',
+          const siblingThreadId = fixture.sessionThreadIds.find(
+            (threadId) => threadId !== fixture.threadId,
           )
-          await search.press('Tab')
-          await page.waitForFunction(
-            (element) => element?.getAttribute('aria-pressed') === 'true',
-            await createdSort.elementHandle(),
-            { timeout: 10_000 },
-          )
-
-          const extraThreadId = fixture.extraThreadIds[0]
-          assert(extraThreadId, 'selection fixture did not create an extra Thread')
-          await search.fill(extraThreadId)
+          assert(siblingThreadId, 'selection fixture did not create a sibling Thread')
+          await search.fill(siblingThreadId)
           const filteredOptions = panel.getByRole('option')
           await page.waitForFunction(
             ({ panelLabel, expectedId }) => {
@@ -423,7 +413,7 @@ export async function runComposerMatrix(ui) {
               const options = region?.querySelectorAll('[role="option"]') ?? []
               return options.length === 1 && options[0]?.textContent?.includes(expectedId)
             },
-            { panelLabel: '选择 Thread', expectedId: extraThreadId },
+            { panelLabel: '选择 Thread', expectedId: siblingThreadId },
             { timeout: 10_000 },
           )
           assert(await filteredOptions.count() === 1, 'Thread search did not narrow to one option')
@@ -457,48 +447,42 @@ export async function runComposerMatrix(ui) {
           )
           await shot(caseArt, 'selection-panel-keyboard-mode')
 
-          await search.fill(extraThreadId)
-          await search.press('Enter')
-          const discardDialog = page.getByRole('alertdialog', {
-            name: '丢弃未发送的修改？',
-          })
-          await discardDialog.waitFor({ state: 'visible', timeout: 10_000 })
-          assert(
-            (await discardDialog.innerText()).includes(
-              '切换到所选 Thread 后会丢弃输入框中未发送的消息，是否继续？',
-            ),
-            `discard confirmation does not explain the unsent content: ${await discardDialog.innerText()}`,
-          )
-          const modalClose = discardDialog.getByRole('button', { name: '关闭' })
-          assert(
-            (await modalClose.textContent())?.trim() === ''
-            && (await modalClose.getAttribute('class'))?.includes('modal-close-button'),
-            'discard confirmation did not use the compact icon-only close control',
-          )
-          await shot(caseArt, 'discard-unsent-message-confirmation')
-          const cancelDiscard = discardDialog.getByRole('button', { name: '取消' })
-          await page.waitForFunction(
-            (element) => document.activeElement === element,
-            await cancelDiscard.elementHandle(),
-            { timeout: 10_000 },
-          )
-          await cancelDiscard.press('Escape')
-          await discardDialog.waitFor({ state: 'hidden', timeout: 10_000 })
-          await panel.waitFor({ state: 'visible', timeout: 10_000 })
-          await page.waitForFunction(
-            (element) => document.activeElement === element,
-            await search.elementHandle(),
-            { timeout: 10_000 },
-          )
-
+          // 两级 picker 按层退栈：Thread -> Session -> Composer；草稿与持久值保持。
           await search.press('Escape')
           await panel.waitFor({ state: 'hidden', timeout: 10_000 })
+          const sessionPanel = page.getByRole('region', { name: '选择 Session' })
+          await sessionPanel.waitFor({ state: 'visible', timeout: 10_000 })
+          const sessionSearch = sessionPanel.getByRole('searchbox')
+          await page.waitForFunction(
+            (element) => document.activeElement === element,
+            await sessionSearch.elementHandle(),
+            { timeout: 10_000 },
+          )
+          await sessionSearch.press('Escape')
+          await sessionPanel.waitFor({ state: 'hidden', timeout: 10_000 })
           await page.waitForFunction(
             () => document.activeElement?.classList.contains('composer-editor') === true,
             undefined,
             { timeout: 10_000 },
           )
           await expectComposerText(page, draft)
+          await expectStorage(page, draftKey, draft)
+
+          // 再次打开 Thread picker，Enter 直接切换到同 Session sibling；旧 Thread
+          // 草稿按 per-thread scope 保留，不再使用已删除的 discard modal。
+          await page.getByRole('button', { name: '打开命令表' }).click()
+          await page.getByRole('option', { name: /^thread/ }).click()
+          const switchPanel = await openFixtureThreadPanel(page, fixture)
+          const switchSearch = switchPanel.getByRole('searchbox')
+          await switchSearch.fill(siblingThreadId)
+          await switchSearch.press('Enter')
+          await switchPanel.waitFor({ state: 'hidden', timeout: 10_000 })
+          await page.getByText(`selection original descendant ${stamp}`, { exact: true })
+            .waitFor({ state: 'visible', timeout: 10_000 })
+          assert(
+            await page.getByRole('alertdialog').count() === 0,
+            'Thread selection unexpectedly opened a discard dialog',
+          )
           await expectStorage(page, draftKey, draft)
 
           await page.getByRole('button', { name: '打开命令表' }).click()
@@ -574,7 +558,7 @@ export async function runComposerMatrix(ui) {
             { timeout: 10_000 },
           )
           assert(
-            await originalDescendantRow.getAttribute('aria-pressed') === 'true',
+            await originalBranchRow.getAttribute('aria-pressed') === 'true',
             'ArrowUp did not move the tree selection to the previous visible row',
           )
           await shot(caseArt, 'history-panel-keyboard-mode')
@@ -590,7 +574,7 @@ export async function runComposerMatrix(ui) {
             undefined,
             { timeout: 10_000 },
           )
-          await expectComposerText(page, draft)
+          await expectComposerText(page, '')
           await expectStorage(page, draftKey, draft)
           expectNoFatal(pageErrors, consoleErrors)
         },
@@ -916,7 +900,7 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindBlankComposer(page, goto, fixture)
           const blankDraftKey = composerDraftStorageKey(
-            `agent-pane:CHAT:${fixture.chat.id}:pane:pane-1`,
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
           )
           await composer.fill(draft)
           await expectStorage(page, blankDraftKey, draft)
@@ -1109,21 +1093,16 @@ async function createBlankChatFixture(apiCtx, { title }) {
 
 async function createDurableHistoryFixture(
   apiCtx,
-  { title, messages, extraThreadCount = 0 },
+  { title, messages },
 ) {
   assert(
     Array.isArray(messages) && messages.length > 0,
     'durable history messages required',
   )
-  assert(
-    Number.isSafeInteger(extraThreadCount) && extraThreadCount >= 0,
-    'extraThreadCount must be a non-negative integer',
-  )
   const target = await resolveCatalogTarget(apiCtx)
   const state = {
     apiCtx,
     chat: null,
-    extraThreadIds: [],
     sessionId: null,
     threadId: null,
   }
@@ -1179,17 +1158,6 @@ async function createDurableHistoryFixture(
         throw new Error(`THREAD batch did not stabilize after 5 attempts for message: ${message}`)
       }
     }
-    for (let index = 0; index < extraThreadCount; index += 1) {
-      const extra = await materializeNewSession(apiCtx, {
-        owner,
-        sessionId: cid(),
-        threadId: cid(),
-        rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
-        yoloEnabled: false,
-        commands: [userMessageCommand(`extra ${index} ${cid().slice(0, 8)}`, cid())],
-      })
-      state.extraThreadIds.push(String(extra.thread.threadId))
-    }
     await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 60_000,
       intervalMs: 100,
@@ -1208,7 +1176,6 @@ async function createBranchedHistoryFixture(
     trunkMessage,
     originalMessages,
     alternateMessage,
-    extraThreadCount = 0,
   },
 ) {
   assert(typeof trunkMessage === 'string' && trunkMessage, 'tree trunk message required')
@@ -1221,8 +1188,8 @@ async function createBranchedHistoryFixture(
   const state = {
     apiCtx,
     chat: null,
-    extraThreadIds: [],
     sessionId: null,
+    sessionThreadIds: [],
     threadId: null,
   }
   try {
@@ -1245,17 +1212,7 @@ async function createBranchedHistoryFixture(
     })
     state.threadId = String(threadId)
     state.sessionId = String(sessionId)
-    for (let index = 0; index < extraThreadCount; index += 1) {
-      const extra = await materializeNewSession(apiCtx, {
-        owner,
-        sessionId: cid(),
-        threadId: cid(),
-        rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
-        yoloEnabled: false,
-        commands: [userMessageCommand(`extra ${index} ${cid().slice(0, 8)}`, cid())],
-      })
-      state.extraThreadIds.push(String(extra.thread.threadId))
-    }
+    state.sessionThreadIds.push(String(threadId))
 
     const { snapshot: trunk } = await waitForDurableMessages(
       apiCtx,
@@ -1314,6 +1271,7 @@ async function createBranchedHistoryFixture(
       commands: [userMessageCommand(alternateMessage, cid())],
     })
     state.threadId = String(branched.thread.threadId)
+    state.sessionThreadIds.push(String(branched.thread.threadId))
     await waitForDurableMessages(
       apiCtx,
       state.threadId,
@@ -1339,6 +1297,7 @@ async function createHoldingQueueFixture(
   const state = {
     apiCtx,
     agent: null,
+    bootstrapMessage: `hold materialize ${suffix}`,
     chat: null,
     mock,
     model: null,
@@ -1434,7 +1393,7 @@ async function createHoldingQueueFixture(
         },
       ),
       yoloEnabled: false,
-      commands: [userMessageCommand(`hold materialize ${suffix}`, cid())],
+      commands: [userMessageCommand(state.bootstrapMessage, cid())],
     })
     state.threadId = String(threadId)
     state.sessionId = String(sessionId)
@@ -1625,7 +1584,7 @@ async function clearBrowserFixtureState(page, fixture) {
     {
       paneKey: `${CHAT_PANE_STORAGE_PREFIX}${fixture.chat.id}`,
       blankDraftKey: composerDraftStorageKey(
-        `agent-pane:CHAT:${fixture.chat.id}:pane:pane-1`,
+        `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
       ),
       threadDraftKey: fixture.threadId
         ? composerDraftStorageKey(`thread:${fixture.threadId}`)
@@ -1692,6 +1651,42 @@ async function bindThreadComposer(page, goto, fixture) {
   await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
   await page.getByRole('option', { name: /^thread/ }).first().click()
 
+  const threadPanel = await openFixtureThreadPanel(page, fixture)
+  const threadSearch = threadPanel.getByRole('searchbox')
+  await threadSearch.fill(String(fixture.threadId))
+  const threadOptions = threadPanel.getByRole('option')
+  await page.waitForFunction(
+    ({ panelLabel, expectedId }) => {
+      const region = [...document.querySelectorAll('[role="region"]')]
+        .find((element) => element.getAttribute('aria-label') === panelLabel)
+      const options = region?.querySelectorAll('[role="option"]') ?? []
+      return options.length === 1 && options[0]?.textContent?.includes(expectedId)
+    },
+    { panelLabel: '选择 Thread', expectedId: String(fixture.threadId) },
+    { timeout: 10_000 },
+  )
+  assert(
+    await threadOptions.count() === 1,
+    `Thread search did not narrow to one option for ${fixture.threadId}`,
+  )
+  await page.waitForFunction(
+    ({ panelLabel, expectedId }) => {
+      const region = [...document.querySelectorAll('[role="region"]')]
+        .find((element) => element.getAttribute('aria-label') === panelLabel)
+      const active = region?.querySelector('[role="option"][aria-selected="true"]')
+      return active?.textContent?.includes(expectedId)
+    },
+    { panelLabel: '选择 Thread', expectedId: String(fixture.threadId) },
+    { timeout: 10_000 },
+  )
+  await threadSearch.press('Enter')
+
+  await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
+  return waitForComposer(page)
+}
+
+async function openFixtureThreadPanel(page, fixture) {
+  assert(fixture.sessionId, `fixture lacks sessionId for ${fixture.chat?.id}`)
   const sessionPanel = page.getByRole('region', { name: '选择 Session' })
   await sessionPanel.waitFor({ state: 'visible', timeout: 10_000 })
   const sessionSearch = sessionPanel.getByRole('searchbox')
@@ -1712,32 +1707,21 @@ async function bindThreadComposer(page, goto, fixture) {
     await sessionOptions.count() === 1,
     `Session search did not narrow to one option for ${fixture.sessionId}`,
   )
-  await sessionOptions.first().click()
-
-  const threadPanel = page.getByRole('region', { name: '选择 Thread' })
-  await threadPanel.waitFor({ state: 'visible', timeout: 10_000 })
-  const threadSearch = threadPanel.getByRole('searchbox')
-  await threadSearch.waitFor({ state: 'visible', timeout: 10_000 })
-  await threadSearch.fill(String(fixture.threadId))
-  const threadOptions = threadPanel.getByRole('option')
   await page.waitForFunction(
     ({ panelLabel, expectedId }) => {
       const region = [...document.querySelectorAll('[role="region"]')]
         .find((element) => element.getAttribute('aria-label') === panelLabel)
-      const options = region?.querySelectorAll('[role="option"]') ?? []
-      return options.length === 1 && options[0]?.textContent?.includes(expectedId)
+      const active = region?.querySelector('[role="option"][aria-selected="true"]')
+      return active?.textContent?.includes(expectedId)
     },
-    { panelLabel: '选择 Thread', expectedId: String(fixture.threadId) },
+    { panelLabel: '选择 Session', expectedId: String(fixture.sessionId) },
     { timeout: 10_000 },
   )
-  assert(
-    await threadOptions.count() === 1,
-    `Thread search did not narrow to one option for ${fixture.threadId}`,
-  )
-  await threadOptions.first().click()
+  await sessionSearch.press('Enter')
 
-  await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
-  return waitForComposer(page)
+  const threadPanel = page.getByRole('region', { name: '选择 Thread' })
+  await threadPanel.waitFor({ state: 'visible', timeout: 10_000 })
+  return threadPanel
 }
 
 async function bindBlankComposer(page, goto, fixture) {

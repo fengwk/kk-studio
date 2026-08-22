@@ -340,7 +340,7 @@ Composer 矩阵的维度与边界如下：
 | `ui.chat.composer.edit_recalled` | durable 历史 + 当前草稿 | 编辑召回内容后提升为新草稿，二次导航与刷新恢复一致 |
 | `ui.chat.composer.draft_persistence_boundaries` | 空 Pane | 精确空白/换行持久化、刷新恢复、纯空白清理、无历史时上键 no-op |
 | `ui.chat.composer.palette_precedence` | durable 历史 + plus/slash palette | palette 打开时方向键只移动命令，不召回消息；菜单模式保留草稿，slash Escape 清理；命令表不重复渲染 Composer 查询行 |
-| `ui.chat.selection_panel.keyboard_mode` | Chat-scoped Thread picker + head 回退后形成的真实分叉 Session + 两条真实 Thread | 无 modal backdrop；Composer 与 interaction panel 互斥；搜索自动聚焦；Tab 切换排序；方向键移动；Tree 面板横向铺满，并在完整 Session Tree 上验证 pi 风格 `›` 选择光标、`•` 当前路径、`├─ / │ / └─` 分叉连续性；丢弃确认明确指出未发送内容且使用 icon-only 关闭按钮，取消后恢复搜索；Esc 返回 Composer 并保留草稿 |
+| `ui.chat.selection_panel.keyboard_mode` | Chat-scoped Session→Thread picker + head 回退后形成的同 Session 两条真实 Thread | 无 modal backdrop；Composer 与 interaction panel 互斥；搜索自动聚焦并只在所选 Session 内过滤 Thread；方向键移动；Esc 按 Thread→Session→Composer 两级退栈并保留当前草稿；Enter 直接切换 sibling Thread，旧 Thread 草稿继续按 per-thread scope 持久化；Tree 面板横向铺满，并在完整 Session Tree 上验证 pi 风格 `›` 选择光标、`•` 当前路径、`├─ / │ / └─` 分叉连续性 |
 | `ui.chat.composer.escape_refocus` | transcript 文字选区 + 当前 Pane 草稿 | 全局 Escape 恢复当前 Pane Composer 的焦点与末尾 caret，草稿/localStorage 不变 |
 | `ui.chat.composer.submit_clears_draft` | durable Thread + 新提交 | 提交后 composer/localStorage 立即清空，用户消息进入 timeline |
 | `ui.chat.composer.attachment_previews` | 浏览器路由内的免费 READY upload stub + 本地 PNG/MP4/PDF | editor pill 完整显示 `[文件名]` 且不做省略；上方注册表固定 200px，长文件名单行 `…`；图片展示可点击缩略图并打开 Lightbox，视频展示首帧 preview，PDF 展示 text 类型图标；只验证草稿 UI，不发送模型请求 |
