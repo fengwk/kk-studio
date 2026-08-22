@@ -129,4 +129,148 @@ describe('tool display', () => {
     expect(shouldSuppressTransientToolResult('task', '{"kind":"other"}')).toBe(false)
     expect(shouldSuppressTransientToolResult('bash', '{"kind":"task.status"}')).toBe(false)
   })
+
+  it('formats write/edit summaries with option flags and workdir suffixes', () => {
+    expect(formatToolCallSummary('write', JSON.stringify({
+      path: 'App.java',
+      workdir: 'src',
+      content: 'class App {}',
+    })).text).toBe('write App.java in src')
+    // replace_all=true 渲染为旗标；false/缺省不出现。
+    expect(formatToolCallSummary('edit', JSON.stringify({
+      path: 'App.java',
+      replace_all: true,
+      old_string: 'a',
+      new_string: 'b',
+    })).text).toBe('edit App.java [replace_all]')
+    expect(formatToolCallSummary('edit', JSON.stringify({
+      path: 'App.java',
+      replace_all: false,
+    })).text).toBe('edit App.java')
+    // 缺少 path 时返回空详情（coversArguments 仍为 true，避免回退到原始 JSON）。
+    expect(formatToolCallSummary('write', JSON.stringify({ content: 'x' }))).toEqual({
+      name: 'write',
+      detail: '',
+      text: 'write',
+      coversArguments: true,
+    })
+  })
+
+  it('formats bash/grep/find summaries and falls back when required fields are absent', () => {
+    expect(formatToolCallSummary('bash', JSON.stringify({ command: 'npm test' })).text)
+      .toBe('bash npm test')
+    // command 缺失时回退为原始 JSON 文本（{} 是合法解析结果）。
+    expect(formatToolCallSummary('bash', JSON.stringify({})).text).toBe('bash {}')
+    expect(formatToolCallSummary('grep', JSON.stringify({
+      pattern: 'needle',
+      path: 'src',
+      include: '**/*.ts',
+      ignore_case: true,
+      literal: false,
+      multiline: true,
+      limit: 5,
+      timeout_seconds: 9,
+    })).text).toBe(
+      'grep "needle" in src [include=**/*.ts ignore_case multiline limit=5 timeout_seconds=9]',
+    )
+    // pattern/path 均缺失时回退为原始 JSON 文本。
+    expect(formatToolCallSummary('grep', JSON.stringify({ include: 'x' })).text).toBe(
+      'grep {"include":"x"}',
+    )
+    expect(formatToolCallSummary('find', JSON.stringify({
+      pattern: '*.ts',
+      path: 'src',
+      limit: 3,
+      timeout_seconds: 2,
+    })).text).toBe('find *.ts in src [limit=3 timeout_seconds=2]')
+    // pattern/path 均缺失时回退为原始 JSON 文本。
+    expect(formatToolCallSummary('find', JSON.stringify({})).text).toBe('find {}')
+  })
+
+  it('formats lsp summaries with query/target and mcp summaries with server/tool', () => {
+    expect(formatToolCallSummary('lsp_workspace_symbols', JSON.stringify({
+      path: 'src/App.java',
+      query: 'UserService',
+      limit: 20,
+    })).text).toBe('lsp_workspace_symbols src/App.java "UserService" [limit=20]')
+    expect(formatToolCallSummary('lsp_workspace_symbols', JSON.stringify({
+      path: 'src',
+    })).text).toBe('lsp_workspace_symbols src')
+    expect(formatToolCallSummary('lsp_java_decompile', JSON.stringify({
+      path: 'src/App.java',
+      target: 'String (Class) - jdt://contents',
+    })).text).toBe('lsp_java_decompile src/App.java "String (Class) - jdt://contents"')
+    expect(formatToolCallSummary('lsp_java_decompile', JSON.stringify({
+      path: 'src/App.java',
+    })).text).toBe('lsp_java_decompile src/App.java')
+    expect(formatToolCallSummary('load_skill', JSON.stringify({ name: 'dev' })).text)
+      .toBe('load_skill dev')
+    // name 缺失时回退为原始 JSON 文本（{} 是合法解析结果）。
+    expect(formatToolCallSummary('load_skill', JSON.stringify({})).text).toBe('load_skill {}')
+    expect(formatToolCallSummary('mcp_list_tools', JSON.stringify({ server: 'fs' })).text)
+      .toBe('mcp_list_tools fs')
+    expect(formatToolCallSummary('mcp_call_tool', JSON.stringify({
+      server: 'fs',
+      tool: 'read',
+      arguments: { path: '/a' },
+    })).text).toBe('mcp_call_tool fs/read {"path":"/a"}')
+    // server 缺失时仍展示 tool；两者都缺失时回退到原始 JSON。
+    expect(formatToolCallSummary('mcp_call_tool', JSON.stringify({ tool: 'read' })).text)
+      .toBe('mcp_call_tool read')
+    expect(formatToolCallSummary('mcp_call_tool', JSON.stringify({})).text)
+      .toBe('mcp_call_tool {}')
+  })
+
+  it('normalizes tool names and falls back to a placeholder when blank', () => {
+    expect(formatToolCallSummary(' READ ', '{"path":"/a"}').name).toBe('READ')
+    expect(formatToolCallSummary('  ', '').name).toBe('Tool')
+    expect(formatToolCallSummary('custom', '').text).toBe('custom')
+    expect(formatToolCallSummary('custom', 'not-json {').text).toBe('custom not-json {')
+  })
+
+  it('uses singular/plural truncation hints and keeps fully visible collapsed output stable', () => {
+    const oneHidden = formatToolCallLinePreview(
+      ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
+      { expanded: false },
+    )
+    // 只有一行被隐藏时提示使用单数 line。
+    expect(oneHidden.lines.at(-1)).toBe('... (1 more line, 8 total)')
+    expect(oneHidden.truncated).toBe(true)
+    expect(formatToolCallLinePreview(['only'], { expanded: false })).toEqual({
+      lines: ['only'],
+      truncated: false,
+    })
+    // 流式预览只有 1-4 行时没有 earlier 提示，也不截断。
+    expect(formatToolCallLinePreview(['a', 'b'], { expanded: false, streaming: true })).toEqual({
+      lines: ['a', 'b'],
+      truncated: false,
+    })
+    // 5 行恰好等于流式窗口，不产生 earlier 提示。
+    expect(formatToolCallLinePreview(
+      ['a', 'b', 'c', 'd', 'e'],
+      { expanded: false, streaming: true },
+    )).toEqual({
+      lines: ['a', 'b', 'c', 'd', 'e'],
+      truncated: false,
+    })
+  })
+
+  it('returns an empty quiet preview when the result text is already empty', () => {
+    expect(formatToolResultPreview('read', '', { expanded: false, error: false })).toEqual({
+      text: '',
+      maxLines: 0,
+      truncated: false,
+    })
+    expect(formatToolResultPreview('read', '  ', { expanded: false, error: false })).toEqual({
+      text: '',
+      maxLines: 0,
+      truncated: false,
+    })
+  })
+
+  it('suppresses task arrays and malformed JSON instead of treating them as heartbeats', () => {
+    expect(shouldSuppressTransientToolResult('task', '[{"kind":"task.status"}]')).toBe(false)
+    expect(shouldSuppressTransientToolResult('task', 'not-json')).toBe(false)
+    expect(shouldSuppressTransientToolResult('task', 'null')).toBe(false)
+  })
 })
