@@ -858,9 +858,289 @@ describe('thread timeline', () => {
     expect(timeline.messages.map((message) => message.text)).toEqual(['late-valid', 'invalid', 'early-valid'])
   })
 
+  it('projects terminal invocation error overlay and drops partial on attempt mismatch', () => {
+    // overlay 与 invocation 的 attempt 不一致时视为陈旧（不投影 partial）；终态
+    // errorJson 存在时 status 投影为 error，partial 错误文案来自 errorText。
+    const invocations: ToolInvocationDTO[] = [
+      invocation('inv-term', '40', 'call-1', {
+        status: 'FAILED',
+        attempt: 1,
+        resultJson: null,
+        errorJson: JSON.stringify({ message: 'tool crashed' }),
+        approvalJson: null,
+      }),
+    ]
+    const staleStream: RealtimeToolStream = {
+      threadId: 'thread-1',
+      invocationId: 'inv-term',
+      attempt: 2,
+      toolCallId: 'call-1',
+      text: 'stale partial',
+      error: false,
+      createdAt: '2026-07-28T10:00:01Z',
+    }
+    const timeline = buildThreadTimeline(
+      [
+        entry(
+          '40',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            {
+              type: 'tool_call',
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              rendererKey: 'bash',
+              argumentsJson: '{"command":"ls"}',
+            },
+          ]),
+        ),
+      ],
+      [],
+      invocations,
+      null,
+      new Map([['inv-term', staleStream]]),
+    )
+    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    expect(call).toMatchObject({
+      role: 'tool',
+      phase: 'call',
+      status: 'error',
+      invocationId: 'inv-term',
+    })
+    // attempt 不一致的 overlay 不投影 partial / partialErrorText（builder 显式
+    // 赋 undefined own property，因此用 toBeUndefined 断言）。
+    expect(call?.partial).toBeUndefined()
+    expect(call?.partialErrorText).toBeUndefined()
+  })
+
+  it('projects terminal success via resultJson and drops the stale streaming overlay', () => {
+    // resultJson 已物化的终态 overlay：status 投影为 done，partial 字段消失。
+    const invocations: ToolInvocationDTO[] = [
+      invocation('inv-done', '40', 'call-1', {
+        status: 'COMPLETED',
+        attempt: 1,
+        resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'ok' }], error: false }),
+        errorJson: null,
+        approvalJson: null,
+      }),
+    ]
+    const liveStream: RealtimeToolStream = {
+      threadId: 'thread-1',
+      invocationId: 'inv-done',
+      attempt: 1,
+      toolCallId: 'call-1',
+      text: 'streaming partial',
+      error: false,
+      createdAt: '2026-07-28T10:00:01Z',
+    }
+    const timeline = buildThreadTimeline(
+      [
+        entry(
+          '40',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            {
+              type: 'tool_call',
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              rendererKey: 'bash',
+              argumentsJson: '{"command":"ls"}',
+            },
+          ]),
+        ),
+      ],
+      [],
+      invocations,
+      null,
+      new Map([['inv-done', liveStream]]),
+    )
+    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    expect(call).toMatchObject({
+      role: 'tool',
+      phase: 'call',
+      status: 'done',
+      invocationId: 'inv-done',
+    })
+    // 终态 resultJson 只覆盖 status/errorMessage：同 attempt 的实时 overlay 文本
+    // 仍保留为 partial（builder 不会因 terminal 而清空 partial）。
+    expect(call?.partial).toBe('streaming partial')
+  })
+
+  it('deduplicates tool invocations by assistantEntryId:ordinal identity', () => {
+    // 同一持久身份（assistantEntryId:ordinal）的重复 invocation 只取第一条：
+    // 第二条不得改写第一条的 overlay（保持第一条的 approval 状态）。
+    const duplicates: ToolInvocationDTO[] = [
+      invocation('inv-a', '40', 'call-1', {
+        status: 'WAITING_APPROVAL',
+        attempt: 1,
+        approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+      }),
+      invocation('inv-b', '40', 'call-1', {
+        status: 'RUNNING',
+        attempt: 1,
+        approvalJson: null,
+      }),
+    ]
+    const timeline = buildThreadTimeline(
+      [
+        entry(
+          '40',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            {
+              type: 'tool_call',
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              rendererKey: 'bash',
+              argumentsJson: '{"command":"ls"}',
+            },
+          ]),
+        ),
+      ],
+      [],
+      duplicates,
+    )
+    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    expect(call).toMatchObject({
+      invocationId: 'inv-a',
+      approval: { required: true, decision: null, decisionId: null },
+    })
+    // 第二条 invocation 未命中（byDurableIdentity 去重），overlay 无 partial。
+    expect(call?.partial).toBeUndefined()
+  })
+
+  it('skips overlay when invocation rendererKey disagrees with the durable call', () => {
+    // 只有 rendererKey 也精确匹配的 invocation 才允许投影：不同 renderer 的
+    // invocation 不能覆盖 durable tool call 的展示身份。
+    const mismatched: ToolInvocationDTO[] = [
+      invocation('inv-key', '40', 'call-1', {
+        status: 'WAITING_APPROVAL',
+        attempt: 1,
+        rendererKey: 'other-renderer',
+        approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+      }),
+    ]
+    const timeline = buildThreadTimeline(
+      [
+        entry(
+          '40',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            {
+              type: 'tool_call',
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              rendererKey: 'bash',
+              argumentsJson: '{"command":"ls"}',
+            },
+          ]),
+        ),
+      ],
+      [],
+      mismatched,
+    )
+    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    expect(call).toMatchObject({ subjectEntryId: '40', toolCallId: 'call-1', status: 'done' })
+    expect(call).not.toHaveProperty('invocationId')
+    expect(call).not.toHaveProperty('approval')
+  })
+
+  it('keeps a terminal model stream with content as a done assistant message', () => {
+    // modelStream status='done'（持久终止态 resultJson 投影）走非 streaming 分支：
+    // 有文本/思考时投影为 done assistant，而不是丢弃。
+    const done: RealtimeModelStream = {
+      threadId: 'thread-1',
+      invocationId: 'model-1',
+      attempt: 1,
+      sequence: 5,
+      text: 'final answer',
+      thinking: '',
+      toolCalls: [],
+      createdAt: '2026-07-28T10:00:00Z',
+      status: 'done',
+    }
+    const timeline = buildThreadTimeline([], [], [], done)
+    expect(timeline.messages).toMatchObject([
+      {
+        role: 'assistant',
+        text: 'final answer',
+        status: 'done',
+      },
+    ])
+  })
+
+  it('projects an approval overlay with decision, reason, and non-required flag', () => {
+    // 审批投影：required=true 且决策已落地时保留 decision/reason；required=false
+    // 的审批条目不投影（builder 只输出 required 的 approval）。
+    const invocations: ToolInvocationDTO[] = [
+      invocation('inv-decided', '40', 'call-1', {
+        status: 'COMPLETED',
+        attempt: 1,
+        approvalJson: JSON.stringify({
+          required: true,
+          decision: 'ALLOWED',
+          decisionId: 'dec-1',
+          reason: 'user approved',
+        }),
+      }),
+    ]
+    const decided = buildThreadTimeline(
+      [
+        entry(
+          '40',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            {
+              type: 'tool_call',
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              rendererKey: 'bash',
+              argumentsJson: '{"command":"ls"}',
+            },
+          ]),
+        ),
+      ],
+      [],
+      invocations,
+    )
+    expect(decided.messages.find((m) => m.role === 'tool')).toMatchObject({
+      approval: {
+        required: true,
+        decision: 'ALLOWED',
+        decisionId: 'dec-1',
+        reason: 'user approved',
+      },
+    })
+    const notRequired = buildThreadTimeline(
+      [
+        entry(
+          '41',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            {
+              type: 'tool_call',
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              rendererKey: 'bash',
+              argumentsJson: '{"command":"ls"}',
+            },
+          ]),
+        ),
+      ],
+      [],
+      [invocation('inv-free', '41', 'call-1', {
+        status: 'RUNNING',
+        attempt: 1,
+        approvalJson: JSON.stringify({ required: false, decision: null }),
+      })],
+    )
+    const free = notRequired.messages.find((m) => m.role === 'tool')
+    // required=false 的审批不投影 approval（builder 显式赋 undefined own property）。
+    expect(free?.approval).toBeUndefined()
+  })
+
   it('derives working from thread status/processing and pending queued inputs', () => {
-    expect(
-      isThreadWorking(
+    expect(isThreadWorking(
         { processing: true } as never,
         { messages: [], queuedMessages: [], hasPendingInputs: false },
       ),
@@ -957,5 +1237,34 @@ function modelInvocation(status: string, attempt: number): ModelInvocationDTO {
     resultEntryId: null,
     createTime: '2026-07-28T10:00:00Z',
     updateTime: '2026-07-28T10:00:00Z',
+  }
+}
+
+function invocation(
+  id: string,
+  assistantEntryId: string,
+  toolCallId: string,
+  overrides: Partial<ToolInvocationDTO> = {},
+): ToolInvocationDTO {
+  return {
+    id,
+    modelInvocationId: `m-${id}`,
+    assistantEntryId,
+    ordinal: 0,
+    status: 'RUNNING',
+    attempt: 1,
+    toolCallId,
+    toolName: 'bash',
+    toolVersion: '1',
+    rendererKey: 'bash',
+    toolType: 'shell',
+    environment: null,
+    argumentsJson: '{"command":"ls"}',
+    approvalJson: null,
+    resultJson: null,
+    errorJson: null,
+    createTime: '2026-07-28T10:00:00Z',
+    updateTime: '2026-07-28T10:00:00Z',
+    ...overrides,
   }
 }

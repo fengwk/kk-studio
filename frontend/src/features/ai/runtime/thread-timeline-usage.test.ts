@@ -267,6 +267,80 @@ describe('Turn usage after TURN_END', () => {
     expect(timeline.messages.some((message) => message.role === 'meta')).toBe(false)
   })
 
+  it('projects usage from cost aliases, string numbers, and cache aliases', () => {
+    // parseAssistantUsage 的多形态防御：cost 可以是对象/字符串，token 字段支持
+    // camelCase/snake_case 别名与字符串数字；cacheWriteLong 归并进 cacheWrite。
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('a'),
+        assistant('assistant-1', '回答', {
+          usage: {
+            input_tokens: '10',
+            completionTokens: 20,
+            cachedTokens: 3,
+            cache_write_tokens: '4',
+            cacheWriteLongTokens: 5,
+            reasoning_tokens: '6',
+            totalTokens: 44,
+          },
+          cost: { usd: '0.002' },
+        }),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+    const usage = timeline.messages.find(
+      (message) => message.role === 'meta' && message.kind === 'turn_usage',
+    )
+    expect(usage).toMatchObject({
+      subjectEntryId: 'assistant-1',
+      turnUsage: {
+        input: 10,
+        output: 20,
+        cacheRead: 3,
+        cacheWrite: 9,
+        reasoning: 6,
+        providerTotal: 44,
+        cost: 0.002,
+      },
+    })
+  })
+
+  it('still projects a summary when only reasoning/cache are nonzero', () => {
+    // 全零才抑制 summary：reasoning 或 cache 任一非零都必须投影。
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('a'),
+        assistant('assistant-1', '回答', usageMetadata(0, 0, 0, {
+          reasoningTokens: 2,
+          cacheReadTokens: 1,
+        })),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+    const usage = timeline.messages.find(
+      (message) => message.role === 'meta' && message.kind === 'turn_usage',
+    )
+    expect(usage).toMatchObject({
+      turnUsage: { input: 0, output: 0, cacheRead: 1, cacheWrite: 0, reasoning: 2, cost: 0 },
+    })
+  })
+
+  it('returns null from aggregateBranchUsage when no TURN_END summary exists', () => {
+    const timeline = buildThreadTimeline(
+      [turnStart(), userMessage('a'), assistant('assistant-1', '回答', usageMetadata(10, 20))],
+      [],
+      [],
+    )
+    // 未关闭 turn：usage 未发射，聚合必须返回 null（不输出全零占位）。
+    expect(aggregateBranchUsage(timeline.messages)).toBeNull()
+  })
+
   it('aggregates only TURN_END summaries, excluding compaction and an incomplete turn', () => {
     const timeline = buildThreadTimeline(
       [
