@@ -122,6 +122,185 @@ describe('useAiConsoleResourceController', () => {
     })
     expect(screen.getByTestId('agent-description')).toHaveValue('edited description')
   })
+
+  it('closes the editor and invalidates dependent queries after successful create mutations', async () => {
+    const user = userEvent.setup()
+    const { queryClient } = renderHarness()
+    await ready()
+
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await user.click(screen.getByRole('button', { name: 'create-provider' }))
+    await user.type(screen.getByTestId('provider-name'), 'new-provider')
+    await user.click(screen.getByRole('button', { name: 'submit' }))
+    await waitFor(() => {
+      expect(agentService.createProvider).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'new-provider' }),
+      )
+      expect(screen.getByTestId('modal-open')).toHaveTextContent('closed')
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: queryKeys.providers.list }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'create-model' }))
+    await user.type(screen.getByTestId('model-name'), 'new-model')
+    await user.click(screen.getByRole('button', { name: 'submit' }))
+    await waitFor(() => {
+      expect(agentService.createModel).toHaveBeenCalledWith(
+        expect.objectContaining({ providerName: 'stub', name: 'new-model' }),
+      )
+      expect(screen.getByTestId('modal-open')).toHaveTextContent('closed')
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: queryKeys.models.list }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'create-agent' }))
+    await user.type(screen.getByTestId('agent-name'), 'new-agent')
+    await user.click(screen.getByRole('button', { name: 'submit' }))
+    await waitFor(() => {
+      expect(agentService.createAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'new-agent', model: 'stub/acceptance-stub' }),
+      )
+      expect(screen.getByTestId('modal-open')).toHaveTextContent('closed')
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: queryKeys.agents.list }),
+    )
+  })
+
+  it('closes the editor and invalidates dependent queries after a successful agent update', async () => {
+    const user = userEvent.setup()
+    const { queryClient } = renderHarness()
+    await ready()
+
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await user.click(screen.getByRole('button', { name: 'open-agent' }))
+    await user.clear(screen.getByTestId('agent-description'))
+    await user.type(screen.getByTestId('agent-description'), 'updated agent')
+    await user.click(screen.getByRole('button', { name: 'submit' }))
+    await waitFor(() => {
+      expect(agentService.updateAgent).toHaveBeenCalledWith(
+        'default-assistant',
+        expect.objectContaining({ description: 'updated agent', expectedVersion: '0' }),
+      )
+      expect(screen.getByTestId('modal-open')).toHaveTextContent('closed')
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: queryKeys.agents.list }),
+    )
+  })
+
+  it('keeps existing field errors when a later API failure maps to the general field', async () => {
+    const user = userEvent.setup()
+    renderHarness()
+    await ready()
+
+    let rejectUpdate!: (reason?: unknown) => void
+    vi.mocked(agentService.updateProvider).mockImplementation(
+      () => new Promise((_resolve, reject) => {
+        rejectUpdate = reject
+      }),
+    )
+    await user.click(screen.getByRole('button', { name: 'open-provider' }))
+    await user.click(screen.getByRole('button', { name: 'submit' }))
+    await waitFor(() => {
+      expect(agentService.updateProvider).toHaveBeenCalled()
+    })
+
+    // API 请求尚未结束时，本地再次提交无效草稿，先形成字段错误。
+    await user.clear(screen.getByTestId('provider-name'))
+    await user.click(screen.getByRole('button', { name: 'submit' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('form-error')).toHaveTextContent('请填写 Provider 名称')
+    })
+    expect(screen.getByTestId('field-error')).toHaveTextContent('请填写名称')
+
+    act(() => {
+      rejectUpdate(new Error('agent provider name already exists'))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('form-error')).toHaveTextContent('Provider 名称已存在')
+    })
+    // 在途 API 失败只更新总错误，不覆盖刚产生的 name 字段错误。
+    expect(screen.getByTestId('field-error')).toHaveTextContent('请填写名称')
+  })
+
+  it('maps a rejected Error and restores it when the resource modal reopens', async () => {
+    const user = userEvent.setup()
+    renderHarness()
+    await ready()
+
+    vi.mocked(agentService.updateProvider).mockRejectedValue(new Error('Network Error'))
+    await user.click(screen.getByRole('button', { name: 'open-provider' }))
+    await user.click(screen.getByRole('button', { name: 'submit' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('form-error')).toHaveTextContent('网络异常')
+    })
+
+    await user.click(screen.getByRole('button', { name: 'close-resource' }))
+    expect(screen.getByTestId('modal-open')).toHaveTextContent('closed')
+    await user.click(screen.getByRole('button', { name: 'open-provider' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('form-error')).toHaveTextContent('网络异常')
+    })
+  })
+
+  it('maps a rejected string to the generic required-fields error', async () => {
+    const user = userEvent.setup()
+    renderHarness()
+    await ready()
+
+    vi.mocked(agentService.updateModel).mockRejectedValue('backend rejected')
+    await user.click(screen.getByRole('button', { name: 'open-model' }))
+    await user.click(screen.getByRole('button', { name: 'submit' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('form-error')).toHaveTextContent('保存失败，请检查必填项后重试')
+    })
+  })
+
+  it('confirms provider, model, and agent deletes with identity and version and closes the confirm modal', async () => {
+    const user = userEvent.setup()
+    renderHarness()
+    await ready()
+
+    await user.click(screen.getByRole('button', { name: 'delete-provider' }))
+    await user.click(screen.getByRole('button', { name: 'confirm-delete' }))
+    await waitFor(() => {
+      expect(agentService.deleteProvider).toHaveBeenCalledWith('stub', '0')
+      expect(screen.queryByTestId('delete-confirm-open')).not.toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'delete-model' }))
+    await user.click(screen.getByRole('button', { name: 'confirm-delete' }))
+    await waitFor(() => {
+      expect(agentService.deleteModel).toHaveBeenCalledWith('stub', 'acceptance-stub', '0')
+      expect(screen.queryByTestId('delete-confirm-open')).not.toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'delete-agent' }))
+    await user.click(screen.getByRole('button', { name: 'confirm-delete' }))
+    await waitFor(() => {
+      expect(agentService.deleteAgent).toHaveBeenCalledWith('default-assistant', '0')
+      expect(screen.queryByTestId('delete-confirm-open')).not.toBeInTheDocument()
+    })
+  })
+
+  it('closes the delete confirm modal without invoking any mutation', async () => {
+    const user = userEvent.setup()
+    renderHarness()
+    await ready()
+
+    await user.click(screen.getByRole('button', { name: 'delete-provider' }))
+    expect(screen.getByTestId('delete-confirm-open')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'close-delete' }))
+    expect(screen.queryByTestId('delete-confirm-open')).not.toBeInTheDocument()
+    expect(agentService.deleteProvider).not.toHaveBeenCalled()
+    expect(agentService.deleteModel).not.toHaveBeenCalled()
+    expect(agentService.deleteAgent).not.toHaveBeenCalled()
+  })
 })
 
 function ResourceControllerHarness() {
@@ -133,30 +312,52 @@ function ResourceControllerHarness() {
   })
   const modal = controller.resourceEditorModal.modal
   const ready = !controller.providersQuery.isLoading && !controller.modelsQuery.isLoading && !controller.agentsQuery.isLoading
+  const editor = controller.resourceEditorModal
+  const errorField = Object.entries(editor.fieldErrors)[0]?.[1] ?? ''
+  const formError = editor.formError
+    ? editor.formError
+    : errorField
+      ? `⟦${errorField}⟧`
+      : ''
 
   return (
     <div>
       <div data-testid="ready">{ready ? 'ready' : 'loading'}</div>
+      <div data-testid="modal-open">{modal ? 'open' : 'closed'}</div>
+      <div data-testid="form-error">{formError}</div>
+      <div data-testid="field-error">{errorField}</div>
+      <button type="button" onClick={() => editor.onClose()}>
+        close-resource
+      </button>
+      <button type="button" onClick={() => controller.openCreateProvider()}>
+        create-provider
+      </button>
       <button type="button" onClick={() => controller.openEditProvider('stub')}>
         open-provider
+      </button>
+      <button type="button" onClick={() => controller.openCreateModel()}>
+        create-model
       </button>
       <button type="button" onClick={() => controller.openEditModel('stub', 'acceptance-stub')}>
         open-model
       </button>
+      <button type="button" onClick={() => controller.openCreateAgent()}>
+        create-agent
+      </button>
       <button type="button" onClick={() => controller.openEditAgent('default-assistant')}>
         open-agent
       </button>
-      <form onSubmit={controller.resourceEditorModal.onSubmit}>
+      <form onSubmit={editor.onSubmit}>
         <button type="submit">submit</button>
       </form>
 
       {modal?.kind === 'provider' && (
         <input
           data-testid="provider-name"
-          value={controller.resourceEditorModal.providerDraft.name}
+          value={editor.providerDraft.name}
           onChange={(event) =>
-            controller.resourceEditorModal.onProviderDraftChange({
-              ...controller.resourceEditorModal.providerDraft,
+            editor.onProviderDraftChange({
+              ...editor.providerDraft,
               name: event.target.value,
             })
           }
@@ -165,13 +366,13 @@ function ResourceControllerHarness() {
 
       {modal?.kind === 'model' && (
         <>
-          <input data-testid="model-provider" value={controller.resourceEditorModal.modelDraft.providerName} readOnly />
+          <input data-testid="model-provider" value={editor.modelDraft.providerName} readOnly />
           <input
             data-testid="model-name"
-            value={controller.resourceEditorModal.modelDraft.name}
+            value={editor.modelDraft.name}
             onChange={(event) =>
-              controller.resourceEditorModal.onModelDraftChange({
-                ...controller.resourceEditorModal.modelDraft,
+              editor.onModelDraftChange({
+                ...editor.modelDraft,
                 name: event.target.value,
               })
             }
@@ -181,21 +382,56 @@ function ResourceControllerHarness() {
 
       {modal?.kind === 'agent' && (
         <>
-          <input data-testid="agent-model" value={controller.resourceEditorModal.agentDraft.model} readOnly />
+          <input data-testid="agent-model" value={editor.agentDraft.model} readOnly />
+          <input
+            data-testid="agent-name"
+            value={editor.agentDraft.name}
+            onChange={(event) =>
+              editor.onAgentDraftChange({
+                ...editor.agentDraft,
+                name: event.target.value,
+              })
+            }
+          />
           <input
             data-testid="agent-description"
-            value={controller.resourceEditorModal.agentDraft.description}
+            value={editor.agentDraft.description}
             onChange={(event) =>
-              controller.resourceEditorModal.onAgentDraftChange({
-                ...controller.resourceEditorModal.agentDraft,
+              editor.onAgentDraftChange({
+                ...editor.agentDraft,
                 description: event.target.value,
               })
             }
           />
         </>
       )}
+
+      {controller.deleteConfirmModal.modal && (
+        <div data-testid="delete-confirm-open">open</div>
+      )}
+      <button type="button" onClick={() => controller.deleteProvider('stub', '0')}>
+        delete-provider
+      </button>
+      <button type="button" onClick={() => controller.deleteModel('stub', 'acceptance-stub', '0')}>
+        delete-model
+      </button>
+      <button type="button" onClick={() => controller.deleteAgent('default-assistant', '0')}>
+        delete-agent
+      </button>
+      <button type="button" onClick={() => controller.deleteConfirmModal.modal?.onConfirm()}>
+        confirm-delete
+      </button>
+      <button type="button" onClick={() => controller.deleteConfirmModal.onClose()}>
+        close-delete
+      </button>
     </div>
   )
+}
+
+async function ready() {
+  await waitFor(() => {
+    expect(screen.getByTestId('ready')).toHaveTextContent('ready')
+  })
 }
 
 function renderHarness() {
@@ -205,13 +441,14 @@ function renderHarness() {
       mutations: { retry: false },
     },
   })
+  const rendered = render(
+    <QueryClientProvider client={queryClient}>
+      <ResourceControllerHarness />
+    </QueryClientProvider>,
+  )
   return {
     queryClient,
-    ...render(
-      <QueryClientProvider client={queryClient}>
-        <ResourceControllerHarness />
-      </QueryClientProvider>,
-    ),
+    ...rendered,
   }
 }
 
