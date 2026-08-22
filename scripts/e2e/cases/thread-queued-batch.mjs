@@ -1,12 +1,11 @@
 /**
- * thread.queued_command_batch：免费确定性 case（sequential harvest）。
+ * thread.queued_command_batch：免费确定性 L1（sequential harvest）。
  *
- * 用本地受控 OpenAI chat-completions SSE hold mock 验证运行中连续两批 USER 按 sequence 逐 Turn 收割：
- * 首个请求保持 open 期间连续接受两条 THREAD batch（各一条 USER_MESSAGE），轮询确认两条命令同时 QUEUED
- * 且 sequence 连续；完成首个响应后 request#2 必须只新增 firstMarker（不得有 secondMarker）；
- * 完成 request#2 后 request#3 必须新增 secondMarker 且历史顺序 first -> second；完成 request#3 后
- * 最终严格断言 entry 顺序 initial USER -> assistant -> first USER -> assistant -> second USER -> assistant，
- * queuedCommands 清空。每次严格断言前写诊断 artifact。不调用真实 Provider；finally 完整清理。
+ * 本地受控 OpenAI chat-completions SSE hold mock 验证运行中连续两批 USER 按 sequence 逐 Turn 收割：
+ * 首请求保持 open 期间连续接受两条 THREAD batch 并验证同时 QUEUED、sequence 连续；releaseFirst 后
+ * 等 request count=3 + quiescent，统一断言 request#2 只新增 firstMarker、request#3 新增
+ * firstMarker+secondMarker（顺序正确）；最终三个 assistant 文本分别精确等于 initialReply /
+ * firstQueuedReply / secondQueuedReply，queuedCommands 清空。不调用真实 Provider；finally 完整清理。
  */
 import { createServer } from 'node:http'
 
@@ -31,19 +30,26 @@ registerCase({
   level: 'L1',
   title: '运行中连续两批 USER 按 sequence 逐 Turn 收割',
   requires: [],
-  docs: '本地受控 OpenAI chat-completions SSE hold mock（免费确定性，不调用真实 Provider）：首个 USER 启动后 mock 保持响应 open；确认 model active 后连续接受两条 THREAD batch，轮询确认两条命令同时 QUEUED 且 sequence 连续；完成首个响应后 request#2 只新增 firstMarker（不得有 secondMarker）；完成 request#2 后 request#3 新增 secondMarker 且历史顺序 first->second；完成 request#3 后严格断言 entry 顺序 initial USER->assistant->first USER->assistant->second USER->assistant、queuedCommands 清空',
+  docs: '本地受控 OpenAI chat-completions SSE hold mock（免费确定性，不调用真实 Provider）：首个 USER 启动后 mock 保持响应 open；确认 model active 后连续接受两条 THREAD batch，轮询确认两条命令同时 QUEUED 且 sequence 连续；release 首响应后 request#2 只新增 firstMarker（不得有 secondMarker），request#3 新增 secondMarker 且历史顺序 first->second；最终 entry 顺序 initial USER->assistant->first USER->assistant->second USER->assistant、queuedCommands 清空',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const initialMarker = `QUEUE-INITIAL-${suffix}`
     const firstMarker = `QUEUE-FIRST-${suffix}`
     const secondMarker = `QUEUE-SECOND-${suffix}`
-    const initialPrompt =
-      `${initialMarker}\n不要调用工具。请持续输出，直到收到我的下一条消息前不要结束。`
+    const initialPrompt = `${initialMarker}\n请持续输出，直到收到我的下一条消息前不要结束。`
     const firstPrompt = `${firstMarker}\n这是排队批次的第一条消息。`
     const secondPrompt = `${secondMarker}\n结合前一条消息，只回复单词 BATCHED，不要解释。`
-    const firstReply = `E2E_QUEUE_FIRST_REPLY ${suffix}`
-    const secondReply = `E2E_QUEUE_SECOND_REPLY ${suffix}`
-    const mock = new ControlledCompletionsMock({ initialMarker, firstMarker, secondMarker })
+    const initialReply = `E2E_QUEUE_INITIAL_REPLY ${suffix}`
+    const firstQueuedReply = `E2E_QUEUE_FIRST_REPLY ${suffix}`
+    const secondQueuedReply = `E2E_QUEUE_SECOND_REPLY ${suffix}`
+    const mock = new ControlledCompletionsMock({
+      initialMarker,
+      firstMarker,
+      secondMarker,
+      initialReply,
+      firstQueuedReply,
+      secondQueuedReply,
+    })
     let provider = null
     let model = null
     let agent = null
@@ -52,13 +58,12 @@ registerCase({
     let finalSnapshot = null
     let primaryError = null
     const cleanupErrors = []
-    const writeDebug = (label) => {
+    const writeFailureArtifact = () => {
       try {
         ctx.writeArtifact(
-          'queued-command-batch-debug.json',
+          'queued-command-batch-failure.json',
           JSON.stringify(
             {
-              label,
               error: primaryError ? String(primaryError.message || primaryError) : null,
               markers: { initialMarker, firstMarker, secondMarker },
               threadId,
@@ -141,13 +146,9 @@ registerCase({
         `initial materialization batch: ${JSON.stringify(materialized)}`,
       )
 
-      // 首个 Provider request 到达后保持 open：等待 mock 报告 request#1 received + response held。
+      // 首个 Provider request 到达后保持 open；确认 model active 后再入队，确保运行中 cursor 有效。
       await mock.waitForRequests(1, { timeoutMs: 30_000 })
-      assert(
-        mock.requests[0].state === 'open',
-        `first request must be held open: ${JSON.stringify(mock.requests[0])}`,
-      )
-      // 确认 model active（快照 modelInvocation 非空）后再入队，确保运行中 cursor 有效。
+      assert(mock.requests[0].state === 'held', JSON.stringify(mock.requests[0]))
       const activeSnapshot = await waitForActiveModel(ctx, threadId, { timeoutMs: 30_000 })
       assert(activeSnapshot.modelInvocation !== null, JSON.stringify(activeSnapshot))
 
@@ -195,59 +196,44 @@ registerCase({
         !queuedSnapshot.entries.some((entry) => entryType(entry) === 'TURN_END'),
         `no turn may end while commands are queued: ${JSON.stringify(queuedSnapshot.entries)}`,
       )
-      writeDebug('after-both-queued')
 
-      // 完成首个响应：request#1 流式返回 firstReply + finish。INPUT turn 每轮只消费第一条 user-like，
-      // 因此 request#2 必须只新增 firstMarker（secondMarker 保持 QUEUED）。
-      mock.completeFirst(200, firstReply)
-      await mock.waitForRequests(2, { timeoutMs: 30_000 })
-      const secondRequest = mock.requests[1]
-      assert(
-        secondRequest.body?.messages?.length > 0,
-        `second provider request missing messages: ${JSON.stringify(secondRequest)}`,
-      )
-      const secondMessagesText = JSON.stringify(secondRequest.body.messages)
-      assert(
-        secondMessagesText.includes(firstMarker),
-        `request#2 must include firstMarker: ${JSON.stringify(secondRequest.body.messages)}`,
-      )
-      assert(
-        !secondMessagesText.includes(secondMarker),
-        `request#2 must not include secondMarker (sequential harvest): ${JSON.stringify(
-          secondRequest.body.messages,
-        )}`,
-      )
-      writeDebug('after-request2')
-
-      // 完成 request#2：request#3 必须新增 secondMarker，且历史顺序 first -> second。
-      mock.completeSecond(200, secondReply)
+      // release 首响应：request#2/#3 由 mock 自动 SSE success（逐 Turn 收割）。等全部三个请求到达并 quiescent。
+      mock.releaseFirst()
       await mock.waitForRequests(3, { timeoutMs: 30_000 })
-      const thirdRequest = mock.requests[2]
-      assert(
-        thirdRequest.body?.messages?.length > 0,
-        `third provider request missing messages: ${JSON.stringify(thirdRequest)}`,
-      )
-      const thirdMessagesText = JSON.stringify(thirdRequest.body.messages)
-      assert(
-        thirdMessagesText.includes(secondMarker),
-        `request#3 must include secondMarker: ${JSON.stringify(thirdRequest.body.messages)}`,
-      )
-      const firstIndex = thirdMessagesText.indexOf(firstMarker)
-      const secondIndex = thirdMessagesText.indexOf(secondMarker)
-      assert(
-        firstIndex !== -1 && secondIndex !== -1 && firstIndex < secondIndex,
-        `history order must be first -> second: ${JSON.stringify(thirdRequest.body.messages)}`,
-      )
-      writeDebug('after-request3')
-
-      // 完成 request#3，等待 quiescent 后做最终严格断言。
-      mock.completeThird(200, secondReply)
       const finalThread = await waitForQuiescentThread(ctx, threadId, {
         timeoutMs: 60_000,
         intervalMs: 100,
       })
       assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
       finalSnapshot = await getThreadSnapshot(ctx, threadId)
+
+      // 统一检查 request#2 只新增 firstMarker、request#3 新增 firstMarker+secondMarker（顺序正确）。
+      const secondMessagesText = JSON.stringify(mock.requests[1].body.messages)
+      assert(
+        secondMessagesText.includes(firstMarker),
+        `request#2 must include firstMarker: ${JSON.stringify(mock.requests[1].body.messages)}`,
+      )
+      assert(
+        !secondMessagesText.includes(secondMarker),
+        `request#2 must not include secondMarker (sequential harvest): ${JSON.stringify(
+          mock.requests[1].body.messages,
+        )}`,
+      )
+      const thirdMessagesText = JSON.stringify(mock.requests[2].body.messages)
+      assert(
+        thirdMessagesText.includes(firstMarker) && thirdMessagesText.includes(secondMarker),
+        `request#3 must include firstMarker and secondMarker: ${JSON.stringify(
+          mock.requests[2].body.messages,
+        )}`,
+      )
+      const firstIndex = thirdMessagesText.indexOf(firstMarker)
+      const secondIndex = thirdMessagesText.indexOf(secondMarker)
+      assert(
+        firstIndex !== -1 && secondIndex !== -1 && firstIndex < secondIndex,
+        `history order must be first -> second: ${JSON.stringify(mock.requests[2].body.messages)}`,
+      )
+
+      // 最终严格断言 entry 顺序与逐 Turn assistant 文本。
       const entries = finalSnapshot.entries || []
       assert(
         (finalSnapshot.queuedCommands || []).length === 0,
@@ -282,9 +268,12 @@ registerCase({
           entries,
         )}`,
       )
+      const assistantTexts = assistants.map((entry) => messageText(entry))
       assert(
-        messageText(assistants[0]) === firstReply && messageText(assistants[1]) === secondReply,
-        `assistant replies must match per-turn mock replies: ${JSON.stringify(entries)}`,
+        assistantTexts[0] === initialReply
+          && assistantTexts[1] === firstQueuedReply
+          && assistantTexts[2] === secondQueuedReply,
+        `assistant replies must match per-turn mock replies: ${JSON.stringify(assistantTexts)}`,
       )
       ctx.writeArtifact(
         'queued-command-batch.json',
@@ -301,7 +290,7 @@ registerCase({
       )
     } catch (error) {
       primaryError = error
-      writeDebug('after-failure')
+      writeFailureArtifact()
     } finally {
       await cleanup('stop active thread', cleanupErrors, async () => {
         if (!threadId) return
@@ -453,24 +442,27 @@ function sendCompletionsSuccess(response, body, text, requestIndex) {
 
 /**
  * 本地受控 OpenAI chat-completions SSE hold mock（sequential harvest）：
- * - request#1（含 initialMarker）到达后保持 open，completeFirst 后返回 firstReply；
- * - request#2（含 firstMarker、不含 secondMarker）到达后保持 open，completeSecond 后返回 secondReply；
- * - request#3（含 firstMarker+secondMarker，历史顺序 first->second）到达后保持 open，completeThird 后返回 secondReply；
- * - 其余请求确定性 400，绝不返回意外成功。
+ * - request#1（含 initialMarker）到达后保存 response 并保持 open，releaseFirst 后返回 initialReply；
+ * - request#2（含 firstMarker、不含 secondMarker）到达后自动返回 firstQueuedReply；
+ * - request#3（含 firstMarker+secondMarker）到达后自动返回 secondQueuedReply；
+ * - 第 4 个及后续请求确定性 400。
  */
 class ControlledCompletionsMock {
-  constructor({ initialMarker, firstMarker, secondMarker }) {
+  constructor({ initialMarker, firstMarker, secondMarker, initialReply, firstQueuedReply, secondQueuedReply }) {
     this.initialMarker = initialMarker
     this.firstMarker = firstMarker
     this.secondMarker = secondMarker
+    this.initialReply = initialReply
+    this.firstQueuedReply = firstQueuedReply
+    this.secondQueuedReply = secondQueuedReply
     this.requests = []
+    this.firstHeld = null
     this.server = createServer((request, response) => {
       void this.handle(request, response)
     })
     this.sockets = new Set()
     this.listening = false
     this.base = null
-    this.heldResponses = new Map()
     this.server.on('connection', (socket) => {
       this.sockets.add(socket)
       socket.once('close', () => this.sockets.delete(socket))
@@ -510,63 +502,40 @@ class ControlledCompletionsMock {
       response.end(JSON.stringify({ error: { message: `invalid mock JSON: ${error.message}` } }))
       return
     }
-    const requestRecord = {
-      index: this.requests.length + 1,
-      receivedAt: new Date().toISOString(),
-      body,
-      state: 'open',
-    }
-    this.requests.push(requestRecord)
+    const record = { index: this.requests.length + 1, body, state: 'held' }
+    this.requests.push(record)
     const messagesText = JSON.stringify(body.messages || [])
-    const requestNumber = this.requests.length
-    if (
-      requestNumber === 2
-      && messagesText.includes(this.firstMarker)
-      && !messagesText.includes(this.secondMarker)
-    ) {
-      // request#2：只含 firstMarker（sequential harvest），保持 open 等 completeSecond。
-      this.heldResponses.set(2, response)
+    if (this.requests.length === 1 && messagesText.includes(this.initialMarker)) {
+      // request#1：初始 turn，保持 open 等 releaseFirst。
+      this.firstHeld = response
       return
     }
-    if (
-      requestNumber === 3
-      && messagesText.includes(this.firstMarker)
-      && messagesText.includes(this.secondMarker)
-    ) {
-      // request#3：历史顺序 first -> second，保持 open 等 completeThird。
-      this.heldResponses.set(3, response)
+    if (this.requests.length === 2 && messagesText.includes(this.firstMarker) && !messagesText.includes(this.secondMarker)) {
+      // request#2：只含 firstMarker（sequential harvest），自动成功。
+      record.state = 'completed'
+      sendCompletionsSuccess(response, body, this.firstQueuedReply, record.index)
       return
     }
-    if (requestNumber === 1 && messagesText.includes(this.initialMarker)) {
-      // request#1：初始 turn，保持 open 等 completeFirst。
-      this.heldResponses.set(1, response)
+    if (this.requests.length === 3 && messagesText.includes(this.firstMarker) && messagesText.includes(this.secondMarker)) {
+      // request#3：历史顺序 first -> second，自动成功。
+      record.state = 'completed'
+      sendCompletionsSuccess(response, body, this.secondQueuedReply, record.index)
       return
     }
-    requestRecord.state = 'rejected'
+    record.state = 'rejected'
     response.writeHead(400, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify({ error: { message: 'unexpected mock request' } }))
   }
 
-  completeFirst(status, text) {
-    this.completeHeld(1, status, text)
-  }
-
-  completeSecond(status, text) {
-    this.completeHeld(2, status, text)
-  }
-
-  completeThird(status, text) {
-    this.completeHeld(3, status, text)
-  }
-
-  completeHeld(number, status, text) {
-    const response = this.heldResponses.get(number)
-    assert(response, `completeHeld(${number}) called before request #${number} was held`)
-    this.heldResponses.delete(number)
-    const record = this.requests[number - 1]
-    assert(record, `request #${number} record missing`)
+  /** 返回 request#1 的 SSE success（initialReply），触发后续逐 Turn 收割。 */
+  releaseFirst() {
+    const response = this.firstHeld
+    assert(response, 'releaseFirst called before the first request was held')
+    this.firstHeld = null
+    const record = this.requests[0]
+    assert(record, 'first request record missing')
     record.state = 'completed'
-    sendCompletionsSuccess(response, record.body, text, record.index)
+    sendCompletionsSuccess(response, record.body, this.initialReply, record.index)
   }
 
   async waitForRequests(count, { timeoutMs = 30_000 }) {
