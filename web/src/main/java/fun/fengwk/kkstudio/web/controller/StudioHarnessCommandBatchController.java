@@ -15,7 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeWebMapper;
+import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
+import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.Objects;
 
@@ -43,12 +44,12 @@ public class StudioHarnessCommandBatchController {
     return Results.accepted(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
-              StudioOwner owner = HarnessRuntimeWebMapper.toOwner(request.getOwner());
+              StudioOwner owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());
               AcceptCommandsCommand command =
-                  HarnessRuntimeWebMapper.toAcceptCommandsCommand(request);
+                  HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
               AcceptedCommands accepted = acceptanceService.accept(owner, command);
               ThreadSnapshot currentSnapshot = runtime.getThreadSnapshot(accepted.thread().id());
-              return HarnessRuntimeWebMapper.toAcceptedCommandsDto(accepted, currentSnapshot);
+              return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(accepted, currentSnapshot);
             }));
   }
 }

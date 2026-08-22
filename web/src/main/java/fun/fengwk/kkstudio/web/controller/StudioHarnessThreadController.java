@@ -32,7 +32,8 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeWebMapper;
+import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
+import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -69,11 +70,11 @@ public class StudioHarnessThreadController {
     return Results.ok(
         withRuntimeTranslation(
             () -> {
-              UUID id = HarnessRuntimeWebMapper.parseUuid(threadId, "threadId");
+              UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");
               ThreadSnapshot snapshot = runtime.getThreadSnapshot(id);
               ManualCompactionAvailability availability =
                   threadProcessor.manualCompactionAvailability(id);
-              return HarnessRuntimeWebMapper.toSnapshotDto(snapshot, availability);
+              return HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability);
             }));
   }
 
@@ -83,7 +84,7 @@ public class StudioHarnessThreadController {
     return Results.ok(
         withRuntimeTranslation(
             () -> {
-              UUID id = HarnessRuntimeWebMapper.parseUuid(threadId, "threadId");
+              UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");
               HarnessSystemPromptPreviewDTO dto = new HarnessSystemPromptPreviewDTO();
               dto.setText(systemPromptPreviewService.preview(id));
               return dto;
@@ -99,8 +100,8 @@ public class StudioHarnessThreadController {
             () -> {
               CompactThreadResult result =
                   threadProcessor.compactThread(
-                      HarnessRuntimeWebMapper.toCompactThreadCommand(threadId, request));
-              return HarnessRuntimeWebMapper.toCompactResultDto(
+                      HarnessRuntimeRequestMapper.toCompactThreadCommand(threadId, request));
+              return HarnessRuntimeResponseMapper.toCompactResultDto(
                   result, runtime.getThreadSnapshot(result.thread().id()));
             }));
   }
@@ -117,8 +118,9 @@ public class StudioHarnessThreadController {
             () -> {
               ThreadState updated =
                   runtime.setThreadYolo(
-                      HarnessRuntimeWebMapper.toSetThreadYoloCommand(threadId, request));
-              return HarnessRuntimeWebMapper.toThreadDto(runtime.getThreadSnapshot(updated.id()));
+                      HarnessRuntimeRequestMapper.toSetThreadYoloCommand(threadId, request));
+              return HarnessRuntimeResponseMapper.toThreadDto(
+                  runtime.getThreadSnapshot(updated.id()));
             }));
   }
 
@@ -130,8 +132,8 @@ public class StudioHarnessThreadController {
         withRuntimeTranslation(
             () -> {
               StopResult result =
-                  runtime.stop(HarnessRuntimeWebMapper.toStopCommand(threadId, request));
-              return HarnessRuntimeWebMapper.toStopResultDto(
+                  runtime.stop(HarnessRuntimeRequestMapper.toStopCommand(threadId, request));
+              return HarnessRuntimeResponseMapper.toStopResultDto(
                   result, runtime.getThreadSnapshot(result.thread().id()));
             }));
   }
@@ -145,9 +147,9 @@ public class StudioHarnessThreadController {
     return Results.ok(
         withRuntimeTranslation(
             () ->
-                HarnessRuntimeWebMapper.toToolInvocationDto(
+                HarnessRuntimeResponseMapper.toToolInvocationDto(
                     runtime.decideToolApproval(
-                        HarnessRuntimeWebMapper.toToolApprovalCommand(
+                        HarnessRuntimeRequestMapper.toToolApprovalCommand(
                             threadId, toolInvocationId, request)))));
   }
 
