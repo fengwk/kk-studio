@@ -153,6 +153,134 @@ describe('AiResourceForms', () => {
     expect(screen.getByText(/请先勾选上方 Reasoning/)).toBeInTheDocument()
   })
 
+  it('keeps at least one input modality and toggles IMAGE alongside TEXT', async () => {
+    const user = userEvent.setup()
+    render(<ModelFormHarness />)
+
+    expect(screen.getByLabelText('IMAGE')).not.toBeChecked()
+    await user.click(screen.getByLabelText('IMAGE'))
+    expect(screen.getByLabelText('IMAGE')).toBeChecked()
+    expect(screen.getByLabelText('TEXT')).toBeChecked()
+
+    // 取消 TEXT 后 IMAGE 仍保留，允许非 TEXT 的模态组合
+    await user.click(screen.getByLabelText('TEXT'))
+    expect(screen.getByLabelText('TEXT')).not.toBeChecked()
+    expect(screen.getByLabelText('IMAGE')).toBeChecked()
+
+    // 全部取消时回退到 TEXT，保证至少保留一种模态
+    await user.click(screen.getByLabelText('IMAGE'))
+    expect(screen.getByLabelText('TEXT')).toBeChecked()
+    expect(screen.getByLabelText('IMAGE')).not.toBeChecked()
+  })
+
+  it('prefills reasoning effort with the variant id and restores effort inputs on re-enable', async () => {
+    const user = userEvent.setup()
+    render(<ModelFormHarness />)
+
+    // 开启 Reasoning 时新增的 variant 预填 medium 思考强度
+    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
+    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('medium')
+    expect(screen.getByText(/思考强度为自由字符串/)).toBeInTheDocument()
+
+    await user.click(screen.getByLabelText('Reasoning'))
+    expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()
+    expect(screen.getByText(/请先勾选上方 Reasoning/)).toBeInTheDocument()
+
+    // 重新开启后，空思考强度用 variant id 预填
+    await user.click(screen.getByLabelText('Reasoning'))
+    expect(screen.getByLabelText('Reasoning Effort 1')).toHaveValue('medium')
+    expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('medium')
+  })
+
+  it('sanitizes integer limits and decimal pricing while editing', async () => {
+    const user = userEvent.setup()
+    render(<ModelFormHarness />)
+
+    const contextInput = screen.getByPlaceholderText('128000')
+    await user.clear(contextInput)
+    await user.type(contextInput, '12a3')
+    expect(contextInput).toHaveValue(123)
+
+    const maxOutputInput = screen.getByPlaceholderText('8192')
+    await user.clear(maxOutputInput)
+    await user.type(maxOutputInput, '7.5')
+    expect(maxOutputInput).toHaveValue(75)
+
+    const variantMaxOutput = screen.getByLabelText('Variant Max Output Tokens 1')
+    await user.clear(variantMaxOutput)
+    await user.type(variantMaxOutput, '5a1b2')
+    expect(variantMaxOutput).toHaveValue(512)
+
+    const inputPrice = screen.getByLabelText('Input USD per million tokens')
+    await user.clear(inputPrice)
+    await user.type(inputPrice, '1.2.3')
+    expect(inputPrice).toHaveValue(1.23)
+  })
+
+  it('keeps the default variant unchanged when renaming a non-default variant', async () => {
+    const user = userEvent.setup()
+    render(<ModelFormHarness />)
+
+    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
+    const secondNameInput = screen.getByLabelText('Variant ID 2')
+    await user.clear(secondNameInput)
+    await user.type(secondNameInput, 'creative')
+    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
+
+    await user.clear(secondNameInput)
+    await user.type(secondNameInput, 'creative-2')
+    expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
+  })
+
+  it('renders every model field error kind inline', () => {
+    render(
+      <ModelForm
+        draft={{
+          ...emptyModelDraft(),
+          providerName: 'minimax',
+          // defaultVariant 不在 variants 中时 Select 回退到第一个 option
+          defaultVariant: 'stale',
+          reasoning: true,
+        }}
+        mode="create"
+        providers={[
+          {
+            name: 'minimax',
+            description: null,
+            providerType: 'openai',
+            baseUrl: null,
+            configured: true,
+            modelCallTimeoutMillis: 1800000,
+            modelCallIdleTimeoutMillis: 120000,
+            version: '1',
+            createTime: null,
+            updateTime: null,
+          },
+        ]}
+        fieldErrors={{
+          providerName: '请选择 Provider',
+          name: '请填写 Model 名称',
+          contextWindow: '上下文窗口无效',
+          maxOutputTokens: '最大输出长度无效',
+          inputModalities: '请至少选择一种输入类型',
+          pricing: '价格必须为非负数',
+          defaultVariant: '请选择默认 Variant',
+          variants: 'Variant ID 不能重复',
+        }}
+        onChange={() => undefined}
+      />,
+    )
+
+    expect(screen.getByText('请选择 Provider')).toBeInTheDocument()
+    expect(screen.getByText('请填写 Model 名称')).toBeInTheDocument()
+    expect(screen.getByText('上下文窗口无效')).toBeInTheDocument()
+    expect(screen.getByText('最大输出长度无效')).toBeInTheDocument()
+    expect(screen.getByText('请至少选择一种输入类型')).toBeInTheDocument()
+    expect(screen.getByText('价格必须为非负数')).toBeInTheDocument()
+    expect(screen.getByText('请选择默认 Variant')).toBeInTheDocument()
+    expect(screen.getByText('Variant ID 不能重复')).toBeInTheDocument()
+  })
+
   it('edits agent model binding and tools without json editing', async () => {
     const user = userEvent.setup()
     render(<AgentFormHarness />)
