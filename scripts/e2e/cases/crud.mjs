@@ -300,9 +300,9 @@ registerCase({
   id: 'crud.agent.lifecycle',
   level: 'L1',
   title: 'Agent name identity 创建/更新/硬删除/同名重建',
-  docs: '记录存续期间 name/model 不可修改；PUT 仅更新 prompt/variant/config 等 editable properties；DELETE 硬删除后同名可重建，version 从 0 重新开始且读取到新数据',
+  docs: '记录存续期间 name 不可修改；PUT 可更新 default model/prompt/variant/config；DELETE 硬删除后同名可重建，version 从 0 重新开始且读取到新数据',
   async run(ctx) {
-    const model = await firstModel(ctx)
+    const [model, updatedModel] = await firstTwoModels(ctx)
     const name = `e2e-agent-${cid().slice(0, 8)}`
     const agent = envelopeData(
       (
@@ -322,13 +322,17 @@ registerCase({
         await ctx.call('PUT', `/api/ai/catalog/agents/${encodeURIComponent(name)}`, {
           description: 'updated',
           systemPrompt: 'updated prompt',
-          variant: model.config.defaultVariant,
+          model: modelRef(updatedModel),
+          variant: updatedModel.config.defaultVariant,
           config: { tools: [], skills: [], subagents: [] },
           expectedVersion: agent.version,
         })
       ).json,
     )
-    assert(updated.name === name && updated.model === modelRef(model), JSON.stringify(updated))
+    assert(
+      updated.name === name && updated.model === modelRef(updatedModel),
+      JSON.stringify(updated),
+    )
     assert(updated.systemPrompt === 'updated prompt', JSON.stringify(updated))
     await ctx.call(
       'DELETE',
@@ -425,6 +429,7 @@ registerCase({
             {
               description: parent.description,
               systemPrompt: parent.systemPrompt,
+              model: parent.model,
               variant: parent.variant,
               config: { tools: [], skills: [], subagents: [] },
               expectedVersion: parent.version,
@@ -722,9 +727,7 @@ registerCase({
         { status: 404, messageIncludes: /unknown|not found/i },
       )
     } finally {
-      // 先等全部 Thread 的 turn 真正 quiescent（processor 不再写该 Session 的
-      // model_invocation/entry 行），再删除 Chat，避免 cascade 删除与 processor
-      // 写入的锁序交叉死锁。quiescence 失败必须显式抛出（不吞错误）。
+      // 再次确认全部 Thread 已收敛，避免测试结束时的异步事件污染后续 case。
       for (const threadId of materializedThreadIds) {
         await waitForQuiescentThread(ctx, threadId, {
           timeoutMs: 60_000,
@@ -757,6 +760,20 @@ async function firstModel(ctx) {
   )
   assert(models[0]?.providerName && models[0]?.name, 'need seeded Model')
   return models[0]
+}
+
+async function firstTwoModels(ctx) {
+  const models = pageResults(
+    (await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=10')).json,
+  )
+  assert(
+    models[0]?.providerName
+      && models[0]?.name
+      && models[1]?.providerName
+      && models[1]?.name,
+    'need two seeded Models',
+  )
+  return [models[0], models[1]]
 }
 
 async function firstAgent(ctx) {

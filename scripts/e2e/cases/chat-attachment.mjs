@@ -373,6 +373,7 @@ registerCase({
           await ctx.call('PUT', `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}`, {
             description: 'Agent now has the latest tools.',
             systemPrompt: 'Complete without calling tools.',
+            model: agent.model,
             variant: 'default',
             config: { tools: ['read', 'grep'], skills: [], subagents: [] },
             expectedVersion: agent.version,
