@@ -105,6 +105,7 @@ class HarnessSessionDeletionServiceTest {
     when(transaction.listThreadsBySession(SESSION_2)).thenReturn(List.of(thread1));
     when(transaction.lockThread(THREAD_1)).thenReturn(Optional.of(thread1));
     when(transaction.lockThread(THREAD_2)).thenReturn(Optional.of(thread2));
+    when(transaction.deleteThreads(List.of(THREAD_1, THREAD_2))).thenReturn(2);
     when(refManager.listBlobIds(SESSION_1)).thenReturn(List.of(BLOB_2, BLOB_1));
     when(refManager.listBlobIds(SESSION_2)).thenReturn(List.of());
 
@@ -115,8 +116,9 @@ class HarnessSessionDeletionServiceTest {
     storeOrder.verify(transaction).lockSessionForUpdate(SESSION_2);
     storeOrder.verify(transaction).listThreadsBySession(SESSION_1);
     storeOrder.verify(transaction).listThreadsBySession(SESSION_2);
-    verifyThreadDeletion(storeOrder, transaction, THREAD_1);
-    verifyThreadDeletion(storeOrder, transaction, THREAD_2);
+    storeOrder.verify(transaction).lockThread(THREAD_1);
+    storeOrder.verify(transaction).lockThread(THREAD_2);
+    storeOrder.verify(transaction).deleteThreads(List.of(THREAD_1, THREAD_2));
     storeOrder.verify(transaction).deleteEntries(SESSION_1);
     storeOrder.verify(transaction).deleteSession(SESSION_1);
     storeOrder.verify(transaction).deleteEntries(SESSION_2);
@@ -200,7 +202,7 @@ class HarnessSessionDeletionServiceTest {
 
     assertThrows(IllegalStateException.class, () -> service.deleteSessionsByOwner(CHAT_OWNER));
 
-    verify(transaction, never()).deleteWorkByThread(THREAD_1);
+    verify(transaction, never()).deleteThreads(any());
     verify(transaction, never()).deleteEntries(SESSION_1);
     verify(chatSessionRepository, never()).deleteBySessionId(SESSION_1);
     verifyNoInteractions(refManager);
@@ -210,16 +212,6 @@ class HarnessSessionDeletionServiceTest {
   void rejectsNullOwner() {
     // 删除边界不接受缺失 owner。
     assertThrows(NullPointerException.class, () -> service.deleteSessionsByOwner(null));
-  }
-
-  private static void verifyThreadDeletion(
-      InOrder order, HarnessStore.Transaction transaction, UUID threadId) {
-    order.verify(transaction).lockThread(threadId);
-    order.verify(transaction).deleteWorkByThread(threadId);
-    order.verify(transaction).deleteToolInvocations(threadId);
-    order.verify(transaction).deleteModelInvocations(threadId);
-    order.verify(transaction).deleteCommands(threadId);
-    order.verify(transaction).deleteThread(threadId);
   }
 
   private static ThreadState thread(UUID threadId, UUID sessionId) {

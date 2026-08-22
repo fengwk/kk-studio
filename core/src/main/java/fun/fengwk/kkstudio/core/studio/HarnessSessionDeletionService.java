@@ -21,8 +21,8 @@ import java.util.UUID;
 
 /**
  * Chat/Canvas 共享的 Harness Session 深删除：owner 删除在该 owner 对应仓库的排他行锁保护下（调用方已锁定或本服务自取），按 relation 枚举
- * Session，逐 Session 以规范的 Session -&gt; Thread 锁序删除 Work/Tool/Model/Command/Thread、 release Session
- * blob ref、删 relation/Entry/Session，绝不误删其他 owner 的 Session。
+ * Session，逐 Session 以规范的 Session -&gt; Thread 锁序原子删除 Thread 执行事实、release Session blob ref、删
+ * relation/Entry/Session，绝不误删其他 owner 的 Session。
  */
 @Service
 public class HarnessSessionDeletionService {
@@ -110,29 +110,26 @@ public class HarnessSessionDeletionService {
     return canvasDocumentMapper.getByIdForUpdate(owner.id()) != null;
   }
 
-  /** 深删全部目标 Session 的 Thread：全局排序后逐 Thread 以 THREAD -&gt; children 顺序删除。 */
+  /** 深删全部目标 Session 的 Thread：先按 UUID 锁定全部 Thread，再由 Store 跨集合按 child rank 批量删除。 */
   private void deleteThreadsDeep(HarnessStore.Transaction tx, List<UUID> sessionIds) {
     List<ThreadState> threads = new ArrayList<>();
     for (UUID sessionId : sessionIds) {
       threads.addAll(tx.listThreadsBySession(sessionId));
     }
     threads.sort(Comparator.comparing(ThreadState::id, UuidOrder.COMPARATOR));
+    List<UUID> threadIds = threads.stream().map(ThreadState::id).toList();
     for (ThreadState thread : threads) {
-      UUID threadId = thread.id();
-      // Thread FOR UPDATE 并删除其全部 Work/Tool/Model/Command/Thread 行（规范 Thread -&gt; children 顺序）。
-      tx.lockThread(threadId)
+      tx.lockThread(thread.id())
           .orElseThrow(
               () ->
                   new IllegalStateException(
                       "thread "
-                          + threadId
+                          + thread.id()
                           + " disappeared while deleting session "
                           + thread.sessionId()));
-      tx.deleteWorkByThread(threadId);
-      tx.deleteToolInvocations(threadId);
-      tx.deleteModelInvocations(threadId);
-      tx.deleteCommands(threadId);
-      tx.deleteThread(threadId);
+    }
+    if (!threadIds.isEmpty() && tx.deleteThreads(threadIds) != threadIds.size()) {
+      throw new IllegalStateException("not all locked threads were deleted");
     }
   }
 

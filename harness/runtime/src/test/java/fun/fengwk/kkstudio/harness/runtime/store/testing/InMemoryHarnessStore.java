@@ -33,7 +33,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -1184,65 +1183,86 @@ public final class InMemoryHarnessStore implements HarnessStore {
     // ---------- 应用侧深删除原语（与 PostgresqlHarnessTransaction 语义一致） ----------
 
     @Override
-    public int deleteCommands(UUID threadId) {
+    public int deleteThreads(List<UUID> threadIds) {
       checkOpen();
-      Objects.requireNonNull(threadId, "threadId");
-      requireLocked(LockKey.thread(threadId));
-      int deleted = 0;
-      Iterator<ThreadCommand> iterator = state.commands.values().iterator();
-      while (iterator.hasNext()) {
-        if (iterator.next().threadId().equals(threadId)) {
-          iterator.remove();
-          deleted++;
+      Objects.requireNonNull(threadIds, "threadIds");
+      List<UUID> copied = List.copyOf(threadIds).stream().sorted(UuidOrder.COMPARATOR).toList();
+      for (int i = 1; i < copied.size(); i++) {
+        if (copied.get(i).equals(copied.get(i - 1))) {
+          throw new IllegalArgumentException(
+              "duplicate thread id " + copied.get(i) + " must not be deleted twice");
         }
       }
-      return deleted;
-    }
+      for (UUID threadId : copied) {
+        requireLocked(LockKey.thread(threadId));
+        if (!state.threads.containsKey(threadId)) {
+          throw new IllegalArgumentException("thread " + threadId + " does not exist");
+        }
+      }
+      Set<UUID> threadIdSet = Set.copyOf(copied);
 
-    @Override
-    public int deleteToolInvocations(UUID threadId) {
-      checkOpen();
-      Objects.requireNonNull(threadId, "threadId");
-      requireLocked(LockKey.thread(threadId));
+      List<ThreadCommand> commands =
+          state.commands.values().stream()
+              .filter(command -> threadIdSet.contains(command.threadId()))
+              .sorted(COMMAND_LOCK_ORDER)
+              .toList();
+      for (ThreadCommand command : commands) {
+        lock(LockKey.command(command.threadId(), command.sequence()));
+      }
+
+      List<ModelInvocation> models =
+          state.modelInvocations.values().stream()
+              .filter(model -> threadIdSet.contains(model.threadId()))
+              .sorted(Comparator.comparing(ModelInvocation::id, UuidOrder.COMPARATOR))
+              .toList();
       Set<UUID> modelIds = new HashSet<>();
-      for (ModelInvocation model : state.modelInvocations.values()) {
-        if (model.threadId().equals(threadId)) {
-          modelIds.add(model.id());
-        }
+      for (ModelInvocation model : models) {
+        modelIds.add(model.id());
+        lock(LockKey.model(model.id()));
       }
-      int deleted = 0;
-      Iterator<ToolInvocation> iterator = state.toolInvocations.values().iterator();
-      while (iterator.hasNext()) {
-        if (modelIds.contains(iterator.next().modelInvocationId())) {
-          iterator.remove();
-          deleted++;
-        }
-      }
-      return deleted;
-    }
 
-    @Override
-    public int deleteModelInvocations(UUID threadId) {
-      checkOpen();
-      Objects.requireNonNull(threadId, "threadId");
-      requireLocked(LockKey.thread(threadId));
-      int deleted = 0;
-      Iterator<ModelInvocation> iterator = state.modelInvocations.values().iterator();
-      while (iterator.hasNext()) {
-        if (iterator.next().threadId().equals(threadId)) {
-          iterator.remove();
-          deleted++;
-        }
+      List<ToolInvocation> tools =
+          state.toolInvocations.values().stream()
+              .filter(tool -> modelIds.contains(tool.modelInvocationId()))
+              .sorted(TOOL_LOCK_ORDER)
+              .toList();
+      Set<UUID> toolIds = new HashSet<>();
+      for (ToolInvocation tool : tools) {
+        toolIds.add(tool.id());
+        lockTool(tool);
       }
-      return deleted;
-    }
 
-    @Override
-    public boolean deleteThread(UUID threadId) {
-      checkOpen();
-      Objects.requireNonNull(threadId, "threadId");
-      requireLocked(LockKey.thread(threadId));
-      return state.threads.remove(threadId) != null;
+      List<WorkTarget> workTargets =
+          state.works.keySet().stream()
+              .filter(
+                  target ->
+                      (target.type() == WorkTargetType.THREAD && threadIdSet.contains(target.id()))
+                          || (target.type() == WorkTargetType.MODEL
+                              && modelIds.contains(target.id()))
+                          || (target.type() == WorkTargetType.TOOL
+                              && toolIds.contains(target.id())))
+              .sorted(WORK_LOCK_ORDER)
+              .toList();
+      for (WorkTarget target : workTargets) {
+        recordWorkLock(target);
+      }
+
+      for (WorkTarget target : workTargets) {
+        state.works.remove(target);
+      }
+      for (ThreadCommand command : commands) {
+        state.commands.remove(new CommandKey(command.threadId(), command.sequence()));
+      }
+      for (ToolInvocation tool : tools) {
+        state.toolInvocations.remove(tool.id());
+      }
+      for (ModelInvocation model : models) {
+        state.modelInvocations.remove(model.id());
+      }
+      for (UUID threadId : copied) {
+        state.threads.remove(threadId);
+      }
+      return copied.size();
     }
 
     @Override
@@ -1279,39 +1299,6 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(sessionId, "sessionId");
       return state.sessions.remove(sessionId) != null;
-    }
-
-    @Override
-    public int deleteWorkByThread(UUID threadId) {
-      checkOpen();
-      Objects.requireNonNull(threadId, "threadId");
-      requireLocked(LockKey.thread(threadId));
-      Set<UUID> modelIds = new HashSet<>();
-      for (ModelInvocation model : state.modelInvocations.values()) {
-        if (model.threadId().equals(threadId)) {
-          modelIds.add(model.id());
-        }
-      }
-      Set<UUID> toolIds = new HashSet<>();
-      for (ToolInvocation tool : state.toolInvocations.values()) {
-        if (modelIds.contains(tool.modelInvocationId())) {
-          toolIds.add(tool.id());
-        }
-      }
-      int deleted = 0;
-      Iterator<WorkTarget> iterator = state.works.keySet().iterator();
-      while (iterator.hasNext()) {
-        WorkTarget target = iterator.next();
-        boolean owned =
-            (target.type() == WorkTargetType.THREAD && target.id().equals(threadId))
-                || (target.type() == WorkTargetType.MODEL && modelIds.contains(target.id()))
-                || (target.type() == WorkTargetType.TOOL && toolIds.contains(target.id()));
-        if (owned) {
-          iterator.remove();
-          deleted++;
-        }
-      }
-      return deleted;
     }
 
     @Override

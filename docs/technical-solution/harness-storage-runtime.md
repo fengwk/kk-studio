@@ -142,13 +142,13 @@ durable mutation
 
 ## 8. 事务与锁序
 
-`HarnessStore.Transaction` 提供 `nextId`、`lockSessionForKeyShare`/`lockSessionForUpdate`、`lockThread`、`lockWork`、`loadEntryPath`、`loadQueuedCommands`、`updateThread`、`updateCommands`、`insertEntry`、`insertModelInvocation`、`insertToolInvocation`、`updateModelInvocation`、`updateToolInvocation`、`claimNextWork`、`requestWork`、`deleteWorkByThread`、`deleteCommands`、`deleteToolInvocations`、`deleteModelInvocations`、`deleteThread`、`deleteEntries`、`deleteSession` 等；锁序固定：
+`HarnessStore.Transaction` 提供 `nextId`、`lockSessionForKeyShare`/`lockSessionForUpdate`、`lockThread`、`lockWork`、`loadEntryPath`、`loadQueuedCommands`、`updateThread`、`updateCommands`、`insertEntry`、`insertModelInvocation`、`insertToolInvocation`、`updateModelInvocation`、`updateToolInvocation`、`claimNextWork`、`requestWork`、`deleteThreads`、`deleteEntries`、`deleteSession` 等；锁序固定：
 
 ```text
 Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 ```
 
-- 正常写入对 Session 取 KEY SHARE（不串行化 sibling Thread）；删除/归属独占操作用 `lockSessionForUpdate`（FOR UPDATE）。深删除由 Core `HarnessSessionDeletionService` 编排：Owner FOR UPDATE → 全部 Session FOR UPDATE（UUID 排序）→ Threads UUID 排序逐 Thread 锁 + 删 Work/Tool/Model/Command/Thread → SessionBlobRef release → 删 relation/entries/session。
+- 正常写入对 Session 取 KEY SHARE（不串行化 sibling Thread）；删除/归属独占操作用 `lockSessionForUpdate`（FOR UPDATE）。深删除由 Core `HarnessSessionDeletionService` 编排：Owner FOR UPDATE → 全部 Session FOR UPDATE（UUID 排序）→ 全部 Thread 按 UUID 锁定 → Store `deleteThreads` 跨目标集合按 Command/Model/Tool/Work 规范顺序锁定全部 owned fact、再按 FK 顺序原子删除 → SessionBlobRef release → 删 relation/entries/session。运行时 callback 与深删因此共享 Model/Tool → Work 锁方向，不依赖死锁重试。
 
 - 每个 `HarnessRuntime` 方法恰好一个事务；snapshot 单事务一致读取。
 - Tool success 的 `result + effects + SUCCEEDED` 由同一次 `updateToolInvocations` 原子提交；effects 校验必须早于 Resource externalize 与该 durable update。

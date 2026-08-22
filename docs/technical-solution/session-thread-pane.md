@@ -1119,7 +1119,7 @@ lock Thread
 ```text
 lock owner relation and Session
 -> lock Threads by UUID
--> delete every Thread scoped fact
+-> for each Thread, lock Command -> Model -> Tool -> Work and atomically delete scoped facts
 -> release every SessionBlobRef
 -> delete Entries
 -> delete owner relation
