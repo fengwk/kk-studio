@@ -13,23 +13,21 @@ import {
   type OnSelectionChangeParams,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { CanvasAgentDock } from '@/features/canvas/agent/CanvasAgentDock'
-import {
-  CanvasContextMenu,
-  type CanvasContextMenuState,
-  type ContextMenuTarget,
-} from '@/features/canvas/CanvasContextMenu'
+import { CanvasContextMenu } from '@/features/canvas/CanvasContextMenu'
 import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasTextEditor } from '@/features/canvas/CanvasTextEditor'
 import { CanvasToolRail } from '@/features/canvas/CanvasToolRail'
 import { CANVAS_THEME } from '@/features/canvas/canvas-theme'
+import { isValidResourceConnection } from '@/features/canvas/canvas-stage-model'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
-import { groupIdFromFlowId, projectEdges, projectNodes, type CanvasFlowNode } from '@/features/canvas/projection'
+import { projectEdges, projectNodes } from '@/features/canvas/projection'
 import type { CanvasPositionUpdate } from '@/features/canvas/types'
+import { useCanvasStageContextMenu } from '@/features/canvas/useCanvasStageContextMenu'
 import {
   MAX_CANVAS_ZOOM,
   MIN_CANVAS_ZOOM,
@@ -101,105 +99,20 @@ function StageInner() {
     ? nodes.find((node) => node.id === selectedFunctionNode.id)
     : null
 
-  // 右键菜单：Stage 级单一 overlay，记录打开时的选区快照用于关闭判定。
-  const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null)
-  const contextMenuSelectionRef = useRef<string[] | null>(null)
-  const closeContextMenu = useCallback(() => {
-    contextMenuSelectionRef.current = null
-    setContextMenu(null)
-  }, [])
-
-  // Canvas surface 的全局 Escape（capture 相位消费）通过 controller 关闭全部
-  // overlay；右键菜单状态在本组件，注册关闭回调供 closeOverlays 调用。
-  useEffect(() => {
-    closeContextMenuRef.current = closeContextMenu
-    return () => {
-      closeContextMenuRef.current = null
-    }
-  }, [closeContextMenu, closeContextMenuRef])
-
-  const buildMenuTarget = useCallback((nodeIds: string[]): ContextMenuTarget | null => {
-    if (!snapshot) {
-      return null
-    }
-    if (nodeIds.length === 1) {
-      const id = nodeIds[0] as string
-      const groupId = groupIdFromFlowId(id)
-      if (groupId) {
-        const group = snapshot.groups.find((item) => item.id === groupId)
-        return group ? { kind: 'group', group } : null
-      }
-      const node = snapshot.resourceNodes.find((item) => item.id === id)
-      if (!node) {
-        return null
-      }
-      return {
-        kind: 'resource',
-        node,
-        model: node.function
-          ? models.find((model) => model.key === node.function?.modelKey) ?? null
-          : null,
-      }
-    }
-    const selectedResources = nodeIds
-      .map((id) => snapshot.resourceNodes.find((item) => item.id === id))
-      .filter((node) => Boolean(node))
-    const hasUngroupedResource = (
-      selectedResources.length === nodeIds.length
-      && selectedResources.every((node) => !node?.groupId)
-    )
-    return { kind: 'multi', nodeIds, hasUngroupedResource }
-  }, [models, snapshot])
-
-  const openContextMenu = useCallback((
-    event: MouseEvent,
-    nodeIds: string[],
-  ) => {
-    event.preventDefault()
-    const target = buildMenuTarget(nodeIds)
-    if (!target) {
-      return
-    }
-    contextMenuSelectionRef.current = nodeIds
-    setSelection(nodeIds)
-    setContextMenu({ x: event.clientX, y: event.clientY, target })
-  }, [buildMenuTarget, setSelection])
-
-  const handleNodeContextMenu = useCallback((
-    event: MouseEvent,
-    flowNode: CanvasFlowNode,
-  ) => {
-    const isGroup = Boolean(groupIdFromFlowId(flowNode.id))
-    const nodeIds = !isGroup && flowNode.selected && state.selectedIds.includes(flowNode.id)
-      ? [...state.selectedIds]
-      : [flowNode.id]
-    openContextMenu(event, nodeIds)
-  }, [openContextMenu, state.selectedIds])
-
-  const handleSelectionContextMenu = useCallback((
-    event: MouseEvent,
-    selectedNodes: CanvasFlowNode[],
-  ) => {
-    const nodeIds = selectedNodes.map((node) => node.id)
-    if (nodeIds.length === 0) {
-      setContextMenu(null)
-      return
-    }
-    openContextMenu(event, nodeIds)
-  }, [openContextMenu])
-
-  useEffect(() => {
-    if (!contextMenu) {
-      return
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setContextMenu(null)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [contextMenu])
+  const {
+    contextMenu,
+    contextMenuKey,
+    closeContextMenu,
+    openNodeContextMenu,
+    openSelectionContextMenu,
+    handleSelectionChange: handleSelectionChangeMenu,
+  } = useCanvasStageContextMenu({
+    snapshot,
+    models,
+    selectedIds: state.selectedIds,
+    setSelection,
+    closeContextMenuRef,
+  })
 
   const publishMetrics = useCallback(() => {
     const element = containerRef.current
@@ -238,7 +151,8 @@ function StageInner() {
     void setFlowViewport(next)
   }, [setFlowViewport, state.viewport])
 
-  // Chat panel 开关或拖拽调宽只平移 viewport，不得隐式改变用户的 zoom。
+  // 面板/拖拽调宽平移 viewport 时保持 world center；zoom 不得隐式改变。
+  // （宽度不变或首帧时跳过。）
   useEffect(() => {
     const width = containerRef.current?.getBoundingClientRect().width ?? stageMetrics.width
     const previousWidth = flowWidthRef.current
@@ -409,14 +323,9 @@ function StageInner() {
     }
   }, [commitTransforms, moveNodes, snapshot])
 
-  const validConnection = useCallback((connection: Connection | Edge) => {
-    if (!snapshot || !connection.source || !connection.target || connection.source === connection.target) {
-      return false
-    }
-    const source = snapshot.resourceNodes.find((node) => node.id === connection.source)
-    const target = snapshot.resourceNodes.find((node) => node.id === connection.target)
-    return Boolean(source && source.resources.length > 0 && target?.function)
-  }, [snapshot])
+  const validConnection = useCallback((connection: Connection | Edge) => (
+    isValidResourceConnection(snapshot, connection.source, connection.target)
+  ), [snapshot])
 
   const emitViewport = useCallback((viewport: { x: number; y: number; zoom: number }) => {
     const next = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
@@ -433,18 +342,8 @@ function StageInner() {
         targetNodeId: edge.target as UUIDString,
       })),
     )
-    // 选区被外部改变（点击/框选/删除）时关闭右键菜单；右键打开时自身触发的
-    // onSelectionChange 与快照一致，不关闭。
-    const openedSelection = contextMenuSelectionRef.current
-    if (
-      contextMenuSelectionRef.current !== null
-      && openedSelection
-      && !sameIdList(openedSelection, nodeIds)
-    ) {
-      contextMenuSelectionRef.current = null
-      setContextMenu(null)
-    }
-  }, [setSelection])
+    handleSelectionChangeMenu(nodeIds)
+  }, [handleSelectionChangeMenu, setSelection])
 
   return (
     <section
@@ -522,16 +421,15 @@ function StageInner() {
             onNodeDragStop={() => commitTransforms()}
             onMove={(_event, viewport) => {
               emitViewport(viewport)
-              setContextMenu(null)
+              closeContextMenu()
             }}
             onMoveEnd={(_event, viewport) => emitViewport(viewport)}
             onSelectionChange={handleSelectionChange}
-            onNodeContextMenu={handleNodeContextMenu}
-            onSelectionContextMenu={handleSelectionContextMenu}
+            onNodeContextMenu={openNodeContextMenu}
+            onSelectionContextMenu={openSelectionContextMenu}
             onPaneContextMenu={(event) => {
               event.preventDefault()
-              contextMenuSelectionRef.current = null
-              setContextMenu(null)
+              closeContextMenu()
             }}
             onNodeClick={(event, node) => {
               if (!event.shiftKey) {
@@ -546,8 +444,7 @@ function StageInner() {
               }
             }}
             onPaneClick={() => {
-              contextMenuSelectionRef.current = null
-              setContextMenu(null)
+              closeContextMenu()
               setSelection([])
             }}
             proOptions={{ hideAttribution: true }}
@@ -599,31 +496,13 @@ function StageInner() {
       <CanvasTextEditor />
       {contextMenu ? (
         <CanvasContextMenu
-          key={contextMenuTargetKey(contextMenu.target)}
+          key={contextMenuKey}
           state={contextMenu}
           onClose={closeContextMenu}
         />
       ) : null}
     </section>
   )
-}
-
-function contextMenuTargetKey(target: ContextMenuTarget): string {
-  if (target.kind === 'resource') {
-    return `resource:${target.node.id}`
-  }
-  if (target.kind === 'group') {
-    return `group:${target.group.id}`
-  }
-  return `multi:${target.nodeIds.join(',')}`
-}
-
-function sameIdList(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) {
-    return false
-  }
-  const rightIds = new Set(right)
-  return left.every((id) => rightIds.has(id))
 }
 
 export function CanvasStage() {
