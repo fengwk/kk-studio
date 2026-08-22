@@ -41,6 +41,29 @@ describe('CodeBlock copy behavior', () => {
     expect(screen.getByRole('button', { name: '复制' })).toBeInTheDocument()
   })
 
+  it('restarts the reset timer on repeated copy and clears it on unmount', async () => {
+    // 最近一次成功复制独占 reset timer，避免旧 timer 提前清除状态；卸载时不遗留任务。
+    vi.useFakeTimers()
+    setClipboard({ writeText: vi.fn().mockResolvedValue(undefined) })
+    const view = render(<CopyButton source="repeat" />)
+    const button = screen.getByRole('button', { name: '复制' })
+
+    fireEvent.click(button)
+    await flushPromises()
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    fireEvent.click(screen.getByRole('button', { name: '已复制' }))
+    await flushPromises()
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+    expect(screen.getByRole('button', { name: '已复制' })).toBeInTheDocument()
+
+    view.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('falls back to a temporary textarea when Clipboard API rejects', async () => {
     // Clipboard 权限失败时使用 execCommand，并且无论结果如何都清理临时 textarea。
     const writeText = vi.fn().mockRejectedValue(new Error('denied'))
