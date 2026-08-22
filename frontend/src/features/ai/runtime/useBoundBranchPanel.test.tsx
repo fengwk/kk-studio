@@ -15,6 +15,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { agentService } from '@/shared/api/agent-service'
 import { agentPaneService } from '@/shared/api/agent-pane-service'
 import { harnessService } from '@/shared/api/harness-service'
+import { ApiError } from '@/shared/api/client'
 import type {
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
@@ -743,6 +744,148 @@ describe('useBoundBranchPanel', () => {
       agentName: 'assistant2',
       model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
       activeTools: ['web-search'],
+      yoloEnabled: true,
+    })
+    expect(result.current.dirty).toBe(false)
+  })
+
+  it('surfaces raw string and fallback yolo rejection payloads and dismisses them', async () => {
+    vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce('plain string failure')
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // string 拒绝：原样暴露；draft 回滚到 base。
+    expect(result.current.yoloError).toBe('plain string failure')
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    act(() => result.current.dismissYoloError())
+    expect(result.current.yoloError).toBeNull()
+
+    // 非法 error payload（null）→ 回退 updateYoloFailed。
+    vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(null)
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.yoloError).toBe('更新 YOLO 失败')
+  })
+
+  it('ignores yolo toggles while no snapshot is bound yet', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(harnessService.setThreadYolo).not.toHaveBeenCalled()
+    expect(result.current.yoloError).toBeNull()
+  })
+
+  it('follows the base from a newer snapshot while preserving the local draft', async () => {
+    const client = createClient()
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(client),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectAgent('coder')
+    })
+    expect(result.current.draft?.agentName).toBe('coder')
+
+    // 更新的权威 snapshot（settings 变化 + version 前进）：base 跟随，draft 保留本地编辑。
+    await act(async () => {
+      client.setQueryData(
+        queryKeys.threads.snapshot(THREAD_ID),
+        snapshotOf(
+          threadFixture(THREAD_ID, {
+            version: '1',
+            branchSettings: branchSettings({ agentName: 'updated' }),
+          }),
+        ),
+      )
+    })
+    await waitFor(() => expect(result.current.branchState?.base.agentName).toBe('updated'))
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.dirty).toBe(true)
+  })
+
+  it('presents a yolo 409 as a conflict without rolling back the optimistic draft', async () => {
+    vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
+      new ApiError('version moved', 409, 'CONFLICT', {
+        reason: 'STALE_VERSION',
+        detail: 'head moved',
+      }),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 409 分支：conflict 展示、乐观 draft 保留（等待刷新后重试）、错误通道干净。
+    expect(result.current.conflict?.reason).toBe('STALE_VERSION')
+    expect(result.current.conflict?.detail).toContain('head moved')
+    expect(result.current.yoloError).toBeNull()
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+    act(() => result.current.dismissConflict())
+    expect(result.current.conflict).toBeNull()
+  })
+
+  it('reloads base and draft from an authoritative thread DTO and ignores foreign threads', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectAgent('coder')
+    })
+    expect(result.current.dirty).toBe(true)
+
+    // 外国 Thread 的 DTO 被整体忽略，本地编辑保留。
+    act(() => {
+      result.current.resetDraftFromThread(
+        threadFixture(THREAD_ID_2, {
+          branchSettings: branchSettings({ agentName: 'foreign' }),
+        }),
+      )
+    })
+    expect(result.current.draft?.agentName).toBe('coder')
+
+    // 当前 Thread 的权威 DTO：base === draft === snapshot（干净），并采纳其 yolo/version。
+    act(() => {
+      result.current.resetDraftFromThread(
+        threadFixture(THREAD_ID, {
+          version: '3',
+          yoloEnabled: true,
+          branchSettings: branchSettings({ agentName: 'fresh' }),
+        }),
+      )
+    })
+    expect(result.current.draft).toEqual({
+      environment: null,
+      agentName: 'fresh',
+      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      activeTools: [],
       yoloEnabled: true,
     })
     expect(result.current.dirty).toBe(false)

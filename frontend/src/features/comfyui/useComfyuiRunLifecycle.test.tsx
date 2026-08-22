@@ -156,4 +156,50 @@ describe('useComfyuiRunLifecycle', () => {
       run: { runId: 'run-1', status: 'running' },
     })
   })
+
+  it('ignores refresh and cancel without an active run', async () => {
+    const { result } = renderHook(() =>
+      useComfyuiRunLifecycle({ apiName: 'image-upscale', defaultSelector: '$.outputs' }),
+    )
+
+    // 无 run 时 refresh/cancel 都是 no-op，不触碰服务也不进入 pending 状态。
+    await act(async () => {
+      await result.current.refresh()
+      await result.current.cancel()
+    })
+
+    expect(comfyuiService.getRun).not.toHaveBeenCalled()
+    expect(comfyuiService.cancelRun).not.toHaveBeenCalled()
+    expect(result.current.operationPending).toBe(false)
+  })
+
+  it('keeps submit mutually exclusive with an in-flight cancel', async () => {
+    vi.mocked(comfyuiService.getRun).mockResolvedValue(makeJob('completed'))
+    let resolveCancel!: (value: { runId: string; cancelled: boolean }) => void
+    vi.mocked(comfyuiService.cancelRun).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCancel = resolve
+        }),
+    )
+    const { result } = renderHook(() =>
+      useComfyuiRunLifecycle({ apiName: 'image-upscale', defaultSelector: '$.outputs' }),
+    )
+
+    await act(async () => {
+      await result.current.submit({ parameters: {}, files: {} })
+    })
+    await act(async () => {
+      void result.current.cancel()
+      // cancel 进行中 submit 是 no-op（互斥），cancel 的结果仍然生效。
+      await result.current.submit({ parameters: {}, files: {} })
+      resolveCancel({ runId: 'run-1', cancelled: true })
+      await Promise.resolve()
+    })
+
+    expect(comfyuiService.cancelRun).toHaveBeenCalledTimes(1)
+    expect(comfyuiService.runWorkflow).toHaveBeenCalledTimes(1)
+    expect(result.current.run).toMatchObject({ runId: 'run-1', status: 'cancelled' })
+    expect(result.current.operationPending).toBe(false)
+  })
 })

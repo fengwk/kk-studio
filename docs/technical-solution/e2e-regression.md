@@ -6,8 +6,10 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **75** 个 API case；标准入口默认执行免费的 **L1 63** 个 case（其中
-`canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约）。Canvas
+当前注册 **75** 个 API case；标准入口默认执行免费的 **L1 64** 个 case（其中
+`canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约，
+`thread.queued_command_batch` 免费验证运行中两批 USER 的确定性逐 Turn 收割——本地受控
+hold mock，不调用真实 Provider）。Canvas
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
@@ -24,7 +26,7 @@ model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或
 ./scripts/e2e.sh --with-tools            # L4 Environment projection
 ./scripts/e2e.sh --with-canvas-storage   # Canvas Resource 直读预签名 / 全局 Blob 存储边界（需 S3 配置）
 ./scripts/e2e.sh --with-canvas-function  # 免费 fake Function（隐含 storage + rebuild）
-./scripts/e2e.sh --real --with-tools     # L4 真实 Tool turn
+./scripts/e2e.sh --real --with-tools --with-canvas-storage  # L4 真实 Tool turn（durable Resource 外部化需 S3）
 ./scripts/e2e.sh --ui                    # Playwright UI E2E
 ./scripts/e2e.sh --list
 ./scripts/e2e.sh --docs
@@ -88,7 +90,7 @@ env \
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 ```
 
-该命令选择 67 个免费 API case 和 37 个免费 UI case，不启用真实 Provider、Tool 或
+该命令选择 68 个免费 API case 和 37 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
 rebuild；不得为这条回归追加 `--real`。
 
@@ -96,10 +98,10 @@ rebuild；不得为这条回归追加 `--real`。
 
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
-| L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、SystemSettings 完整聚合/CAS、内部工具目录、owner-aware command-batches（NEW_SESSION/ENTRY/THREAD）、Session/Thread 查询、命令 batch 严格 wire、CAS/幂等、IDLE stop no-op、模型 transient attempt retry 可见性、i18n 与 proxy |
-| L2 | `--real` | MiniMax | 文本轮次 durable 边界、真实 task 委派 durable 子 Thread、运行中原子 batch 合并收割、stop partial + REPLAYED + continue |
+| L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、SystemSettings 完整聚合/CAS、内部工具目录、owner-aware command-batches（NEW_SESSION/ENTRY/THREAD）、Session/Thread 查询、命令 batch 严格 wire、CAS/幂等、IDLE stop no-op、模型 transient attempt retry 可见性、运行中 queued batch 逐 Turn 顺序收割（本地 hold mock）、i18n 与 proxy |
+| L2 | `--real` | MiniMax | 文本轮次 durable 边界、真实 task 委派 durable 子 Thread、stop partial + REPLAYED + continue |
 | L3 | `--real --with-branch` | MiniMax | ENTRY target 在同 Session 历史 assistant Entry 下开新 Thread 并继续分支 turn |
-| L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流、Resource 外部化与同源下载验证 |
+| L4 | `--with-tools`（daemon 投影）或 `--real --with-tools --with-canvas-storage`（真实 Tool turn） | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流；Resource 外部化与同源下载验证依赖 backend S3 enabled（`GlobalStorageToolResultHistoryMaterializer` bean，否则 Resource 引用 fail-closed 无法进入 durable history） |
 
 默认 L1 不启动真实 Provider，也不执行 Tool 外部副作用。
 
@@ -121,7 +123,7 @@ FunctionRun，不下载或导入视频。它只准备页面，不触发生成；
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（注册 67，默认 63）
+### L1（注册 68，默认 64）
 
 ```text
 seed.structured_model_config
@@ -139,6 +141,7 @@ thread.entry_cross_session_rejected
 thread.stop_idle_noop
 thread.branch_settings_diff_commands
 thread.yolo_direct_update
+thread.queued_command_batch
 thread_snapshot.unknown_thread_404
 frontend.proxy_model_contract
 crud.provider.invalid_name
@@ -210,6 +213,7 @@ L1 的关键语义断言：
 - ENTRY target 在既有 Session 既有 Entry 下开新 Thread：sessionId 不变、accepted command sequence=1、quiescent 后分支 Thread 的 root→head 路径必须包含 startEntry 与分支 USER、rootEntry 不变；`startEntryId` 不存在 404、跨 Session 400；原 Thread 的 head/version/nextCommandSequence 逐字段不变；
 - `POST /stop` body `{stopRequestId,expectedVersion}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、version 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale version 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
+- `thread.queued_command_batch` 免费 L1：本地受控 OpenAI chat-completions SSE hold mock。首个 USER 启动后 mock 保持响应 open；确认 `modelInvocation` active 后按运行中快照 cursor 连续接受两条 THREAD batch 各一条 USER_MESSAGE，轮询确认两条命令同时处于 `queuedCommands`（QUEUED、sequence 连续、期间无 TURN_END）；release 首响应后 request#2 只新增 firstMarker（不得有 secondMarker，INPUT turn 每轮只消费第一条 user-like、后续保持 QUEUED），request#3 新增 secondMarker 且历史顺序 first->second；最终 entry 顺序 initial USER->assistant->first USER->assistant->second USER->assistant、三个 assistant 文本分别精确等于三个 mock 回复、queuedCommands 清空。case 在 finally 完整清理 thread/chat/agent/model/provider/mock。
 - `model.attempt_failure_visibility` 免费 L1：先通过 `/api/events/v1` 建立 Thread 订阅并收到 `subscribed` ack；case 内 `node:http` OpenAI-compatible SSE mock 的首次 Provider attempt 随后流出确定性 text partial，再通过断连触发 LangChain4j `TRANSIENT`。事件通道必须观测到该 partial；活跃期轮询同一快照精确断言 `modelAttemptFailures`（`attempt=1`、HTTP decimal-string `sequence`、text/thinking、error、合法 `failedAt/retryAt`），立即 retry 的 Provider `messages` 必须与失败前完全一致且不含失败 partial/error；quiescent 后断言 `MODEL_ATTEMPT_FAILURE` 位于成功 assistant 之前且 payload 保留 partial/error/retryAt、未物化列表清空；第二 turn 的 mock request `messages` 同样不含失败 attempt 的 partial/thinking/error，两个 turn 均 `COMPLETED`，成功 assistant 不拼接失败 partial；
 - `events.heartbeat_keepalive` 使用 Node 原生 WebSocket 直连 `/api/events/v1`，不建立资源订阅，在 25 秒上限内等待严格 `{version:1,type:"heartbeat"}`；收到后连接必须仍为 OPEN。服务端所有连接共享单个 scheduler，case 不创建客户端 ping 协议或第三方 WS 依赖；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
@@ -244,12 +248,11 @@ L1 的关键语义断言：
   turn 必须忽略历史 `branchSettings.activeTools` 并发送最新 `read/grep`；本地 MinIO 图片必须作为
   精确 `data:image/png;base64,...` source 发送，请求不得包含 `127.0.0.1`/`localhost` 预签名 URL。
 
-### L2（4）/ L3（1）/ L4（3）
+### L2（3）/ L3（1）/ L4（3）
 
 ```text
 real.text_turn
 real.task_delegation
-real.queued_command_batch
 real.stop_partial_continue
 branch.same_session_entry_thread
 daemon.ready
@@ -257,16 +260,17 @@ daemon.directories
 tool.read_turn
 ```
 
+（运行中 queued batch 的逐 Turn 顺序收割由免费 L1 `thread.queued_command_batch` 覆盖，不再占用真实 L2。）
+
 | Case | 开关 | 重点验证 |
 | --- | --- | --- |
 | `real.text_turn` | `--real` | 真实 Provider 文本轮次；durable `TURN_START -> USER -> assistant MESSAGE -> TURN_END(COMPLETED)` 边界（TurnPlanBuilder 先追加 TURN_START 再追加 USER/CUSTOM）；IDLE 后 `modelInvocation=null`（快照无 `modelInvocations[]` 历史列表） |
 | `real.task_delegation` | `--real` | 父 Agent config 携带 `subagents=[child]` 且 branch `activeTools` 含 `task`：真实 Model 调用内部 `task`，创建 durable 子 Thread（ROOT 携带 `subagentContext{parentThreadId,rootThreadId,taskInvocationId,depth=2}`）；最终 TOOL MESSAGE 冻结 `rendererKey=task` 与 `<task id state>` envelope，`id` 即子 ThreadId |
-| `real.queued_command_batch` | `--real` | 运行中用最新 cursor 连续两个 THREAD batch 各入队一条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
-| `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/version+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 version exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
+| `real.stop_partial_continue` | `--real` | bootstrap 用 missing Agent 确定性 PLANNING_FAILED 物化空闲 Thread（不调用真实 Provider）；随后 THREAD batch SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；流式 stop => `STOPPED`/version+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 version exact replay => `REPLAYED` 且不重复 bump；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；后续轮次在 ASSISTANT_ABORTED barrier 后 |
 | `branch.same_session_entry_thread` | `--real --with-branch` | ENTRY target 在 real.text_turn 的同 Session 历史 assistant Entry 下开新 Thread（不复制 Entry）；sessionId 不变、accepted command sequence=1、分支 turn 在 startEntry 之后继续产生独立 assistant；原 Thread projection 不变 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；`rootPath` 存在；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `daemon.directories` | `--with-tools` | `GET /api/ai/environments/{name}/directories` 缺省 `path="."` 浏览 root（canonical 相对 wire path；`displayPath` 等于请求 `path` 的最后一段，root 为 `'.'`，只作展示、绝不暴露 daemon 本地绝对路径；root `parentPath="."`；`truncated` 布尔；`gitBranch` 可空；entries 只含直属子目录 `{name,path}`：`name` 等于 `path` 最后一段、`path` 是请求目录的直接子路径）；显式 `path="."` 与缺省一致；`..` 段 400 `INVALID_PATH`、不存在目录 404 `NOT_FOUND`、非法环境名 400 `INVALID_ENVIRONMENT_NAME` |
-| `tool.read_turn` | `--real --with-tools` | e2e seed 覆盖 `system_setting` 使 `read/write/edit/bash: ask`（`db/seed/e2e/V2__e2e_seed.sql`），本 case 验证 read；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
+| `tool.read_turn` | `--real --with-tools --with-canvas-storage` | 前置：backend S3 enabled（`GlobalStorageToolResultHistoryMaterializer` bean 注入，否则 Resource 引用 fail-closed，无法进入 durable history）；e2e seed 覆盖 `system_setting` 使 `read/write/edit/bash: ask`（`db/seed/e2e/V2__e2e_seed.sql`），本 case 验证 read；yolo=false 时在 `TOOL_WAITING_APPROVAL` 下冻结 `EnvironmentBinding{name, workspacePath}`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 的完整格式化 `read` 文本结果先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/十进制字符串 sizeBytes 与格式化工具结果字节一致 |
 
 ### L5 UI（默认 37，`--with-tools` / `--real` 各追加 1）
 
@@ -336,7 +340,7 @@ Composer 矩阵的维度与边界如下：
 | `ui.chat.composer.edit_recalled` | durable 历史 + 当前草稿 | 编辑召回内容后提升为新草稿，二次导航与刷新恢复一致 |
 | `ui.chat.composer.draft_persistence_boundaries` | 空 Pane | 精确空白/换行持久化、刷新恢复、纯空白清理、无历史时上键 no-op |
 | `ui.chat.composer.palette_precedence` | durable 历史 + plus/slash palette | palette 打开时方向键只移动命令，不召回消息；菜单模式保留草稿，slash Escape 清理；命令表不重复渲染 Composer 查询行 |
-| `ui.chat.selection_panel.keyboard_mode` | Chat-scoped Thread picker + head 回退后形成的真实分叉 Session + 两条真实 Thread | 无 modal backdrop；Composer 与 interaction panel 互斥；搜索自动聚焦；Tab 切换排序；方向键移动；Tree 面板横向铺满，并在完整 Session Tree 上验证 pi 风格 `›` 选择光标、`•` 当前路径、`├─ / │ / └─` 分叉连续性；丢弃确认明确指出未发送内容且使用 icon-only 关闭按钮，取消后恢复搜索；Esc 返回 Composer 并保留草稿 |
+| `ui.chat.selection_panel.keyboard_mode` | Chat-scoped Session→Thread picker + head 回退后形成的同 Session 两条真实 Thread | 无 modal backdrop；Composer 与 interaction panel 互斥；搜索自动聚焦并只在所选 Session 内过滤 Thread；方向键移动；Esc 按 Thread→Session→Composer 两级退栈并保留当前草稿；Enter 直接切换 sibling Thread，旧 Thread 草稿继续按 per-thread scope 持久化；Tree 面板横向铺满，并在完整 Session Tree 上验证 pi 风格 `›` 选择光标、`•` 当前路径、`├─ / │ / └─` 分叉连续性 |
 | `ui.chat.composer.escape_refocus` | transcript 文字选区 + 当前 Pane 草稿 | 全局 Escape 恢复当前 Pane Composer 的焦点与末尾 caret，草稿/localStorage 不变 |
 | `ui.chat.composer.submit_clears_draft` | durable Thread + 新提交 | 提交后 composer/localStorage 立即清空，用户消息进入 timeline |
 | `ui.chat.composer.attachment_previews` | 浏览器路由内的免费 READY upload stub + 本地 PNG/MP4/PDF | editor pill 完整显示 `[文件名]` 且不做省略；上方注册表固定 200px，长文件名单行 `…`；图片展示可点击缩略图并打开 Lightbox，视频展示首帧 preview，PDF 展示 text 类型图标；只验证草稿 UI，不发送模型请求 |

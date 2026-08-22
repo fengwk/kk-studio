@@ -137,6 +137,49 @@ describe('ai-resource-form-validation additional branches', () => {
     ).toBe(true)
   })
 
+  it('rejects duplicate input modalities through the serialization boundary', () => {
+    // validateResourceDraft 的本地预检只拦截空模态列表；重复项由 codec 序列化时拒绝。
+    // toUserFacingErrorMessage 将 "inputModalities ... duplicate" 翻译为输入类型文案，
+    // 但 mapError 无任何规则命中该原文（/modality/ 不匹配复数 inputModalities），落到 general。
+    const result = validate(
+      { kind: 'model', mode: 'create' },
+      { modelDraft: model({ inputModalities: ['TEXT', 'IMAGE', 'TEXT'] }) },
+    )
+    expect(result.ok).toBe(false)
+    expect(result.fields.general).toBe('请至少选择一种输入类型（建议保留 TEXT）')
+  })
+
+  it('rejects one blank variant among valid ones', () => {
+    // 空白 variant id 在 codec 序列化时被拒绝（variant 2 id is required），
+    // mapError 将其同时映射到 variants 与 defaultVariant。
+    const result = validate(
+      { kind: 'model', mode: 'create' },
+      {
+        modelDraft: model({
+          defaultVariant: 'valid',
+          variants: [
+            { ...model().variants[0]!, id: '' },
+            { ...model().variants[0]!, id: 'valid' },
+          ],
+        }),
+      },
+    )
+    expect(result.ok).toBe(false)
+    expect(result.fields.variants).toBe('请至少添加一个 Variant，并填写 ID')
+    expect(result.fields.defaultVariant).toBe('请至少添加一个 Variant，并填写 ID')
+  })
+
+  it('rejects an empty pricing currency', () => {
+    // 空币种在 codec 序列化时被拒绝（currency must not be blank），
+    // mapError 的 pricing 规则命中 "must not be blank" 之外的 currency 原文。
+    const result = validate(
+      { kind: 'model', mode: 'create' },
+      { modelDraft: model({ pricing: { ...model().pricing, currency: '' } }) },
+    )
+    expect(result.ok).toBe(false)
+    expect(result.fields.pricing).toBe('请检查价格：填写 0 或正数即可')
+  })
+
   it.each([
     [model({ variants: [] }), 'variants'],
     [model({ contextWindow: '0' }), 'contextWindow'],

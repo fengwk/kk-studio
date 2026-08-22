@@ -279,6 +279,9 @@ describe('system settings schema renderer', () => {
     const field = schema.sections[0]!.groups[1]!.fields[0]!
     field.min = 1.5
     expect(validateSystemSettingsSchema(schema, draft)).toMatch(/invalid settings schema bounds/)
+    field.min = null
+    field.max = 2.5
+    expect(validateSystemSettingsSchema(schema, draft)).toMatch(/invalid settings schema bounds/)
     field.min = 10
     field.max = 5
     expect(validateSystemSettingsSchema(schema, draft)).toMatch(/invalid settings schema bounds/)

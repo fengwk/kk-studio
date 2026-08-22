@@ -42,4 +42,32 @@ describe('AssistantMessageBlock', () => {
     render(<AssistantMessageBlock message={message({ aborted: false })} />)
     expect(screen.queryByText('已停止')).not.toBeInTheDocument()
   })
+
+  it('shows the streaming ellipsis placeholder while text and thinking are still empty', () => {
+    const { container } = render(
+      <AssistantMessageBlock
+        message={message({ text: '', thinking: '', status: 'streaming' })}
+      />,
+    )
+    expect(screen.getByText('…')).toBeInTheDocument()
+    expect(container.querySelector('.thread-streaming-hint')).toBeInTheDocument()
+  })
+
+  it('keeps the raw provider payload visible as preformatted text on error', () => {
+    const { container } = render(
+      <AssistantMessageBlock
+        message={message({ text: '{"error":"bad request"}', status: 'error' })}
+      />,
+    )
+    // 失败时原始 JSON/HTML 必须原样保留，禁止 Markdown 重排。
+    expect(container.querySelector('.thread-error-raw')).toHaveTextContent('{"error":"bad request"}')
+    expect(container.querySelector('.thread-assistant-text markdown')).not.toBeInTheDocument()
+    expect(screen.getByText('{"error":"bad request"}')).toBeInTheDocument()
+  })
+
+  it('shows the assistant failure message when an error turn has no text or thinking', () => {
+    render(<AssistantMessageBlock message={message({ text: '', thinking: '', status: 'error' })} />)
+    expect(screen.getByText('助手回复失败')).toBeInTheDocument()
+    expect(screen.queryByText('…')).not.toBeInTheDocument()
+  })
 })

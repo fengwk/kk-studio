@@ -61,4 +61,77 @@ describe('tool previews', () => {
       ' gamma',
     ])
   })
+
+  it('returns null for unknown tools and matches tool names case-insensitively', () => {
+    expect(previewForToolCall('unknown_tool', '{"a":1}')).toBeNull()
+    expect(previewForToolCall('  WRITE  ', '{"path":"a.txt","content":"x"}')?.kind).toBe('write')
+    expect(previewForToolCall('Edit', '{"path":"a.txt","old_string":"a","new_string":"b"}')?.kind)
+      .toBe('edit')
+  })
+
+  it('treats empty and non-object JSON payloads as incomplete with empty values', () => {
+    expect(parseToolArguments('')).toEqual({ raw: '', complete: false, values: {} })
+    expect(parseToolArguments('   ')).toEqual({ raw: '   ', complete: false, values: {} })
+    expect(parseToolArguments('"just-a-string"')).toEqual({
+      raw: '"just-a-string"',
+      complete: true,
+      values: {},
+    })
+    expect(parseToolArguments('[]')).toEqual({ raw: '[]', complete: true, values: {} })
+  })
+
+  it('extracts partial boolean/number/string fields and unescapes string values', () => {
+    // 完整闭合的 JSON 走 complete 路径（JSON.parse 原生解转义）；流式中途的未闭合字符串走 partial 提取。
+    const complete = parseToolArguments(
+      '{"path":"App.java","replace_all":true,"offset":12,"content":"one\\ntwo"}',
+    )
+    expect(complete.complete).toBe(true)
+    expect(complete.values).toEqual({
+      path: 'App.java',
+      replace_all: true,
+      offset: 12,
+      content: 'one\ntwo',
+    })
+    const partial = parseToolArguments(
+      '{"path":"App.java","replace_all":true,"offset":12,"content":"one\\ntwo',
+    )
+    expect(partial.complete).toBe(false)
+    expect(partial.values.path).toBe('App.java')
+    expect(partial.values.replace_all).toBe(true)
+    expect(partial.values.offset).toBe(12)
+    // 流式提取器的 unescapeJsonString 会展开 \\n 字面量。
+    expect(partial.values.content).toBe('one\ntwo')
+  })
+
+  it('keeps an unterminated trailing string value but drops unquoted garbage keys', () => {
+    const parsed = parseToolArguments('{"path":"App.java","content":"unclosed')
+    expect(parsed.complete).toBe(false)
+    expect(parsed.values.path).toBe('App.java')
+    expect(parsed.values.content).toBe('unclosed')
+    expect(parsed.values.garbage).toBeUndefined()
+  })
+
+  it('builds a full diff with context and an empty diff for empty inputs', () => {
+    expect(generateSimpleDiffLines('', '')).toEqual([])
+    expect(generateSimpleDiffLines('keep\na\nb', 'keep\nX\nY')).toEqual([
+      ' keep',
+      '-a',
+      '-b',
+      '+X',
+      '+Y',
+    ])
+    // 只有 new_string 时全部新增；只有 old_string 时全部删除。
+    expect(generateSimpleDiffLines('', 'added')).toEqual(['+added'])
+    expect(generateSimpleDiffLines('removed', '')).toEqual(['-removed'])
+    // 完全相同的内容没有 diff 行。
+    expect(generateSimpleDiffLines('same', 'same')).toEqual([' same'])
+  })
+
+  it('drops the trailing empty line produced by a content that ends with a newline', () => {
+    const parsed = parseToolArguments(JSON.stringify({
+      path: 'a.txt',
+      content: 'one\ntwo\n',
+    }))
+    expect(formatWritePreview(parsed).lines).toEqual(['one', 'two'])
+  })
 })

@@ -7,6 +7,9 @@ import {
   CanvasRuntimeContext,
 } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasSnapshot, ResourceNode } from '@/features/canvas/domain'
+import type {
+  CanvasGenerationPanelAnchor,
+} from '@/features/canvas/CanvasGenerationPanel'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type {
   CanvasFunctionConfigDTO,
@@ -101,7 +104,7 @@ function resourceNode(
   }
 }
 
-function fixture(run: ResourceNode['run'] = null) {
+function fixture(run: ResourceNode['run'] = null, modelKey: 'image-a' | 'image-b' = 'image-a') {
   const target: ResourceNode = {
     id: '9',
     canvasId: CANVAS_ID,
@@ -110,11 +113,16 @@ function fixture(run: ResourceNode['run'] = null) {
     groupId: null,
     resources: [resourceNode('2', 'old-output', 'IMAGE').resources[0]!],
     function: {
-      modelKey: 'image-a',
-      configJson: JSON.stringify({
-        prompt: { segments: [{ type: 'TEXT', text: 'frontback' }] },
-        parameters: { ratio: '1:1' },
-      }),
+      modelKey,
+      configJson: JSON.stringify(modelKey === 'image-a'
+        ? {
+          prompt: { segments: [{ type: 'TEXT', text: 'frontback' }] },
+          parameters: { ratio: '1:1' },
+        }
+        : {
+          prompt: { segments: [{ type: 'TEXT', text: 'frontback' }] },
+          parameters: { duration: 5 },
+        }),
     },
     run,
   }
@@ -145,6 +153,7 @@ function fixture(run: ResourceNode['run'] = null) {
 function renderPanel(
   run: ResourceNode['run'] = null,
   availableModels: CanvasFunctionModelDTO[] = models,
+  rawAnchor?: CanvasGenerationPanelAnchor | { targetNodeId: string },
 ) {
   const scheduleFunctionConfig = vi.fn()
   const flushFunctionConfig = vi.fn(async () => undefined)
@@ -158,12 +167,22 @@ function renderPanel(
     setSelection,
   } as unknown as CanvasController
   const { snapshot, target } = fixture(run)
+  const anchor = rawAnchor && !('targetNodeId' in rawAnchor)
+    ? {
+      ...rawAnchor,
+      node: { ...rawAnchor.node, width: 320, height: 260 },
+    }
+    : undefined
   const tree = (currentSnapshot: CanvasSnapshot, currentNode: ResourceNode) => (
     <QueryClientProvider client={new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })}>
       <CanvasRuntimeContext.Provider value={runtime}>
-        <CanvasGenerationPanel snapshot={currentSnapshot} node={currentNode} />
+        <CanvasGenerationPanel
+          snapshot={currentSnapshot}
+          node={currentNode}
+          anchor={anchor}
+        />
       </CanvasRuntimeContext.Provider>
     </QueryClientProvider>
   )
@@ -178,6 +197,7 @@ function renderPanel(
     },
     scheduleFunctionConfig,
     flushFunctionConfig,
+    setToast,
     setSelection,
   }
 }
@@ -422,5 +442,224 @@ describe('Canvas generic generation panel', () => {
     expect(view.setSelection).toHaveBeenCalledWith([])
     view.unmount()
     expect(view.flushFunctionConfig).toHaveBeenCalledWith('9')
+  })
+
+  it('anchors the panel below the node with compact desktop geometry', () => {
+    // Compact 桌面（<=1600 宽）使用 gap 8/padding 4；节点在视口内时面板贴节点下方。
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 560,
+      height: 190,
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 190,
+      right: 560,
+      toJSON: () => ({}),
+    } as DOMRect)
+    try {
+      const view = renderPanel(null, models, {
+        node: { x: 100, y: 80, width: 320, height: 260 },
+        viewport: { x: 0, y: 0, zoom: 1 },
+        stage: { width: 1440, height: 900, dockTop: 880 },
+      })
+      const panel = view.container.querySelector('.generation-panel') as HTMLElement
+      expect(panel).toHaveAttribute('data-placement', 'below')
+      expect(panel).toHaveStyle({ left: '100px', top: '348px' })
+    } finally {
+      rectSpy.mockRestore()
+    }
+  })
+
+  it('anchors the panel with wide-desktop spacing when the stage exceeds 1600px', () => {
+    // 宽屏走默认 gap 12/padding 12；顶部位置仍从节点下方投影。
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 560,
+      height: 190,
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 190,
+      right: 560,
+      toJSON: () => ({}),
+    } as DOMRect)
+    try {
+      const view = renderPanel(null, models, {
+        node: { x: 100, y: 80, width: 320, height: 260 },
+        viewport: { x: 0, y: 0, zoom: 1 },
+        stage: { width: 1920, height: 900, dockTop: 880 },
+      })
+      const panel = view.container.querySelector('.generation-panel') as HTMLElement
+      expect(panel).toHaveAttribute('data-placement', 'below')
+      expect(panel).toHaveStyle({ left: '100px', top: '352px' })
+    } finally {
+      rectSpy.mockRestore()
+    }
+  })
+
+  it('renders without an anchor while the measuring effect tolerates a missing ResizeObserver', () => {
+    // 无 anchor 时面板不写定位样式；ResizeObserver 缺失时测量 effect 直接早退。
+    const original = globalThis.ResizeObserver
+    // @ts-expect-error 删除全局观察者以覆盖生产代码的 undefined 早退分支。
+    delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver
+    try {
+      const view = renderPanel()
+      const panel = view.container.querySelector('.generation-panel') as HTMLElement
+      expect(panel).not.toHaveAttribute('style')
+      expect(screen.getByLabelText('模型')).toBeInTheDocument()
+    } finally {
+      ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = original
+    }
+  })
+
+  it('skips the panel-size publish when the measured rect is zero-sized', () => {
+    // 初始测量为零尺寸时 publish 早退，面板仍正常渲染且不因 setState 崩溃。
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 0,
+      height: 0,
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 0,
+      right: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+    try {
+      const view = renderPanel()
+      const panel = view.container.querySelector('.generation-panel') as HTMLElement
+      expect(panel).toBeInTheDocument()
+      expect(screen.getByLabelText('提示词片段 1')).toHaveValue('frontback')
+      expect(view.scheduleFunctionConfig).not.toHaveBeenCalled()
+    } finally {
+      rectSpy.mockRestore()
+    }
+  })
+
+  it('disables model, enum, and number controls while a run is in progress', async () => {
+    // 运行中编辑全部冻结：模型下拉、枚举下拉、数字输入都不可改。
+    const view = renderPanel({
+      nodeId: '9',
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
+      status: 'RUNNING',
+      stage: 'GENERATING',
+      error: null,
+      updatedAt: '2026-08-10T00:00:00Z',
+    })
+    expect(screen.getByLabelText('模型')).toBeDisabled()
+    expect(screen.getByLabelText('比例')).toBeDisabled()
+    expect(view.scheduleFunctionConfig).not.toHaveBeenCalled()
+    view.unmount()
+    expect(view.flushFunctionConfig).toHaveBeenCalledWith('9')
+  })
+
+  it('shows the succeeded status and prefers a distinct stage label in the footer', () => {
+    // status=SUCCEEDED 时 header 用成功文案；stage 与 status 不同则 footer 展示 stage。
+    const view = renderPanel({
+      nodeId: '9',
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
+      status: 'SUCCEEDED',
+      stage: 'GENERATING',
+      error: null,
+      updatedAt: '2026-08-10T00:00:00Z',
+    })
+    const header = view.container.querySelector('.generation-panel-head') as HTMLElement
+    expect(within(header).getByText('成功')).toHaveClass('generation-node-status', 'succeeded')
+    expect(screen.getByText('GENERATING')).toHaveClass('generation-run-feedback', 'succeeded')
+    view.unmount()
+  })
+
+  it('falls back to the status label when the run stage equals the status', () => {
+    // stage 与 status 相同时 footer 回退到翻译后的状态文案。
+    const view = renderPanel({
+      nodeId: '9',
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
+      status: 'SUCCEEDED',
+      stage: 'SUCCEEDED',
+      error: null,
+      updatedAt: '2026-08-10T00:00:00Z',
+    })
+    const header = view.container.querySelector('.generation-panel-head') as HTMLElement
+    expect(within(header).getByText('成功')).toHaveClass('generation-node-status', 'succeeded')
+    expect(screen.getAllByText('成功')).toHaveLength(2)
+    view.unmount()
+  })
+
+  it('toasts the reference limit when another distinct reference exceeds the model limit', async () => {
+    // maxReferences=1 时第二个不同参考触发上限提示，且不产生新草稿。
+    const user = userEvent.setup()
+    const limited: CanvasFunctionModelDTO[] = [{
+      ...models[0]!,
+      referencePolicy: {
+        ...models[0]!.referencePolicy,
+        maxReferences: 1,
+      },
+    }]
+    const view = renderPanel(null, limited)
+    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
+    const scheduled = view.scheduleFunctionConfig.mock.calls.length
+    await user.click(screen.getByRole('button', { name: '插入参考 @second_0' }))
+    expect(view.setToast).toHaveBeenCalledWith('当前模型的参考资源数量已达到上限。')
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduled)
+    view.unmount()
+  })
+
+  it('shows an empty candidate menu when no reference candidates exist', async () => {
+    // 模型只接受 AUDIO 而本节点只链接 IMAGE/VIDEO 时，@ 菜单显示空态文案。
+    const user = userEvent.setup()
+    const emptyModels: CanvasFunctionModelDTO[] = [{
+      ...models[0]!,
+      referencePolicy: {
+        allowedKinds: ['AUDIO'],
+        maxReferences: 2,
+        maxByKind: { AUDIO: 2 },
+      },
+    }]
+    renderPanel(null, emptyModels)
+    const input = screen.getByRole('textbox', { name: '提示词片段 1' })
+    await user.click(input)
+    await user.type(input, '@')
+    expect(screen.getByRole('listbox', { name: '@ 引用候选' })).toBeInTheDocument()
+    expect(screen.getByText('没有可用引用')).toBeInTheDocument()
+    expect(screen.queryAllByRole('option').filter((element) => (
+      element.closest('.mention-candidates')
+    ))).toHaveLength(0)
+  })
+
+  it('disables an unavailable model option and ignores an unknown model selection', async () => {
+    // 不可用模型以「label（reason）」展示并禁用；select 收到非法值时静默忽略。
+    const unavailable: CanvasFunctionModelDTO[] = [{
+      ...models[0]!,
+      available: false,
+      unavailableReason: 'quota exceeded',
+    }]
+    const view = renderPanel(null, unavailable)
+    const select = screen.getByLabelText('模型')
+    expect(within(select).getByRole('option', { name: 'Image A（quota exceeded）' }))
+      .toBeDisabled()
+    fireEvent.change(select, { target: { value: 'ghost-model' } })
+    expect(view.scheduleFunctionConfig).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('模型')).toHaveValue('image-a')
+  })
+
+  it('rejects non-integer and below-min number edits for INTEGER parameters', async () => {
+    // 非整数与低于 min 的值不进入草稿；合法值正常调度。
+    const view = renderPanel(null, models)
+    const select = screen.getByLabelText('模型')
+    fireEvent.change(select, { target: { value: 'image-b' } })
+    const numberInput = screen.getByLabelText('时长')
+    expect(numberInput).toHaveValue(5)
+    const scheduled = view.scheduleFunctionConfig.mock.calls.length
+
+    fireEvent.change(numberInput, { target: { value: '3.5' } })
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduled)
+    fireEvent.change(numberInput, { target: { value: '3' } })
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduled)
+
+    fireEvent.change(numberInput, { target: { value: '8' } })
+    expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO)
+      .parameters.duration).toBe(8)
+    view.unmount()
   })
 })

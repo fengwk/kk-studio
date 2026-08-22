@@ -107,6 +107,11 @@ describe('parseTaskFinalText', () => {
 })
 
 describe('TaskToolRenderer call phase', () => {
+  it('returns nothing when a non-streaming call is collapsed and has no live status', () => {
+    const { container } = render(<TaskToolRenderer message={message({})} />)
+    expect(container.querySelector('.task-tool-renderer')).not.toBeInTheDocument()
+  })
+
   it('keeps the collapsed call to live status and defers task arguments until expanded', () => {
     render(
       <TaskToolRenderer
@@ -148,6 +153,24 @@ describe('TaskToolRenderer call phase', () => {
     expect(screen.getByText('5 次工具调用')).toBeInTheDocument()
     expect(screen.getByText('running read')).toBeInTheDocument()
     expect(screen.queryByText(/task\.status/)).not.toBeInTheDocument()
+  })
+
+  it('renders the live strip without optional fields and with a minimal heartbeat', () => {
+    const heartbeat =
+      '{"kind":"task.status","threadId":"101","subagentType":"explorer","state":"running_model",'
+      + '"depth":null,"turns":null,"toolCalls":null,"lastActivity":null,"approvals":[]}\n'
+    render(
+      <TaskToolRenderer
+        message={message({
+          partial: heartbeat,
+          status: 'streaming',
+        })}
+      />,
+    )
+    // state 有文案即可；turns/toolCalls/lastActivity 缺省时不得渲染对应 span。
+    expect(screen.getByText('模型运行中')).toBeInTheDocument()
+    expect(screen.queryByText(/轮/u)).not.toBeInTheDocument()
+    expect(screen.queryByText(/次工具调用/u)).not.toBeInTheDocument()
   })
 
   it('renders without the live strip when the partial is not a task.status heartbeat', () => {
@@ -229,6 +252,53 @@ describe('TaskToolRenderer result phase', () => {
     expect(screen.getByText('失败')).toBeInTheDocument()
     expect(screen.getByText('错误')).toBeInTheDocument()
     expect(screen.getByText('subagent concurrency limit reached (3/3)')).toBeInTheDocument()
+  })
+
+  it('renders the cancelled terminal state copy', () => {
+    render(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'done',
+          text:
+            '<task id="103" state="cancelled">\n'
+            + '<task_error>Cancelled by user</task_error>\n</task>',
+        })}
+      />,
+    )
+    expect(screen.getByText('已取消')).toBeInTheDocument()
+    expect(screen.getByText('错误')).toBeInTheDocument()
+    expect(screen.getByText('Cancelled by user')).toBeInTheDocument()
+  })
+
+  it('falls back to raw text and surfaces a distinct errorMessage for non-task documents', () => {
+    render(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'error',
+          text: 'plain terminal output',
+          errorMessage: 'subagent crashed',
+        })}
+      />,
+    )
+    expect(screen.getByText('plain terminal output')).toBeInTheDocument()
+    expect(screen.getByText('subagent crashed')).toBeInTheDocument()
+  })
+
+  it('omits the error paragraph when errorMessage equals the raw text', () => {
+    render(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'error',
+          text: 'same error',
+          errorMessage: 'same error',
+        })}
+      />,
+    )
+    expect(screen.getByText('same error')).toBeInTheDocument()
+    expect(screen.queryAllByText('same error')).toHaveLength(1)
   })
 
   it('falls back to the raw text when the terminal text is not a task document', () => {

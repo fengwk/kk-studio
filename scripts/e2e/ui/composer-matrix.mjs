@@ -21,7 +21,7 @@ import {
   materializeNewSession,
   setAgentCommand,
   setModelCommand,
-  stopThread,
+  stopThreadForCleanup,
   threadTarget,
   userMessageCommand,
   waitForDurableMessages,
@@ -29,7 +29,7 @@ import {
 } from '../lib/harness.mjs'
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
-const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v1:'
+const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v2:'
 const TINY_IMAGE = readFileSync(
   new URL('../../../core/src/main/resources/fun/fengwk/kkstudio/core/studio/function/fake/tiny.png', import.meta.url),
 )
@@ -72,13 +72,15 @@ export async function runComposerMatrix(ui) {
             `queued 2 ${stamp}`,
             `queued 1 ${stamp}`,
             `durable history ${stamp}`,
-            `durable history ${stamp}`,
+            fixture.bootstrapMessage,
+            fixture.bootstrapMessage,
           ]) {
             await composer.press('ArrowUp')
             await expectComposerText(page, expected)
             await expectStorage(page, draftKey, draft)
           }
           for (const expected of [
+            `durable history ${stamp}`,
             `queued 1 ${stamp}`,
             `queued 2 ${stamp}`,
             draft,
@@ -269,7 +271,7 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           let composer = await bindBlankComposer(page, goto, fixture)
           const draftKey = composerDraftStorageKey(
-            `chat:${fixture.chat.id}:pane:pane-1`,
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
           )
           const exactDraft = '  first line\nsecond line  '
 
@@ -359,7 +361,7 @@ export async function runComposerMatrix(ui) {
 
   await run(
     'ui.chat.selection_panel.keyboard_mode',
-    '轻量交互面板与 Composer 互斥，并支持搜索、排序、方向键和 Esc 返回',
+    '轻量交互面板与 Composer 互斥，并支持 Session 内搜索、方向键和 Esc 返回',
     async (caseArt) => {
       const draft = `selection panel draft ${stamp}`
       await withUiFixture(
@@ -372,7 +374,6 @@ export async function runComposerMatrix(ui) {
             `selection original descendant ${stamp}`,
           ],
           alternateMessage: `selection alternate branch ${stamp}`,
-          extraThreadCount: 1,
         }),
         async (fixture) => {
           const composer = await bindThreadComposer(page, goto, fixture)
@@ -381,8 +382,7 @@ export async function runComposerMatrix(ui) {
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^thread/ }).click()
 
-          const panel = page.getByRole('region', { name: '选择 Thread' })
-          await panel.waitFor({ state: 'visible', timeout: 10_000 })
+          const panel = await openFixtureThreadPanel(page, fixture)
           assert(
             await page.locator('.modal-backdrop').count() === 0,
             'selection panel unexpectedly rendered a modal backdrop',
@@ -400,21 +400,11 @@ export async function runComposerMatrix(ui) {
             { timeout: 10_000 },
           )
 
-          const createdSort = panel.getByRole('button', { name: '创建时间' })
-          assert(
-            await createdSort.getAttribute('aria-pressed') === 'false',
-            'Thread picker did not start from recent sort',
+          const siblingThreadId = fixture.sessionThreadIds.find(
+            (threadId) => threadId !== fixture.threadId,
           )
-          await search.press('Tab')
-          await page.waitForFunction(
-            (element) => element?.getAttribute('aria-pressed') === 'true',
-            await createdSort.elementHandle(),
-            { timeout: 10_000 },
-          )
-
-          const extraThreadId = fixture.extraThreadIds[0]
-          assert(extraThreadId, 'selection fixture did not create an extra Thread')
-          await search.fill(extraThreadId)
+          assert(siblingThreadId, 'selection fixture did not create a sibling Thread')
+          await search.fill(siblingThreadId)
           const filteredOptions = panel.getByRole('option')
           await page.waitForFunction(
             ({ panelLabel, expectedId }) => {
@@ -423,7 +413,7 @@ export async function runComposerMatrix(ui) {
               const options = region?.querySelectorAll('[role="option"]') ?? []
               return options.length === 1 && options[0]?.textContent?.includes(expectedId)
             },
-            { panelLabel: '选择 Thread', expectedId: extraThreadId },
+            { panelLabel: '选择 Thread', expectedId: siblingThreadId },
             { timeout: 10_000 },
           )
           assert(await filteredOptions.count() === 1, 'Thread search did not narrow to one option')
@@ -457,48 +447,42 @@ export async function runComposerMatrix(ui) {
           )
           await shot(caseArt, 'selection-panel-keyboard-mode')
 
-          await search.fill(extraThreadId)
-          await search.press('Enter')
-          const discardDialog = page.getByRole('alertdialog', {
-            name: '丢弃未发送的修改？',
-          })
-          await discardDialog.waitFor({ state: 'visible', timeout: 10_000 })
-          assert(
-            (await discardDialog.innerText()).includes(
-              '切换到所选 Thread 后会丢弃输入框中未发送的消息，是否继续？',
-            ),
-            `discard confirmation does not explain the unsent content: ${await discardDialog.innerText()}`,
-          )
-          const modalClose = discardDialog.getByRole('button', { name: '关闭' })
-          assert(
-            (await modalClose.textContent())?.trim() === ''
-            && (await modalClose.getAttribute('class'))?.includes('modal-close-button'),
-            'discard confirmation did not use the compact icon-only close control',
-          )
-          await shot(caseArt, 'discard-unsent-message-confirmation')
-          const cancelDiscard = discardDialog.getByRole('button', { name: '取消' })
-          await page.waitForFunction(
-            (element) => document.activeElement === element,
-            await cancelDiscard.elementHandle(),
-            { timeout: 10_000 },
-          )
-          await cancelDiscard.press('Escape')
-          await discardDialog.waitFor({ state: 'hidden', timeout: 10_000 })
-          await panel.waitFor({ state: 'visible', timeout: 10_000 })
-          await page.waitForFunction(
-            (element) => document.activeElement === element,
-            await search.elementHandle(),
-            { timeout: 10_000 },
-          )
-
+          // 两级 picker 按层退栈：Thread -> Session -> Composer；草稿与持久值保持。
           await search.press('Escape')
           await panel.waitFor({ state: 'hidden', timeout: 10_000 })
+          const sessionPanel = page.getByRole('region', { name: '选择 Session' })
+          await sessionPanel.waitFor({ state: 'visible', timeout: 10_000 })
+          const sessionSearch = sessionPanel.getByRole('searchbox')
+          await page.waitForFunction(
+            (element) => document.activeElement === element,
+            await sessionSearch.elementHandle(),
+            { timeout: 10_000 },
+          )
+          await sessionSearch.press('Escape')
+          await sessionPanel.waitFor({ state: 'hidden', timeout: 10_000 })
           await page.waitForFunction(
             () => document.activeElement?.classList.contains('composer-editor') === true,
             undefined,
             { timeout: 10_000 },
           )
           await expectComposerText(page, draft)
+          await expectStorage(page, draftKey, draft)
+
+          // 再次打开 Thread picker，Enter 直接切换到同 Session sibling；旧 Thread
+          // 草稿按 per-thread scope 保留，不再使用已删除的 discard modal。
+          await page.getByRole('button', { name: '打开命令表' }).click()
+          await page.getByRole('option', { name: /^thread/ }).click()
+          const switchPanel = await openFixtureThreadPanel(page, fixture)
+          const switchSearch = switchPanel.getByRole('searchbox')
+          await switchSearch.fill(siblingThreadId)
+          await switchSearch.press('Enter')
+          await switchPanel.waitFor({ state: 'hidden', timeout: 10_000 })
+          await page.getByText(`selection original descendant ${stamp}`, { exact: true })
+            .waitFor({ state: 'visible', timeout: 10_000 })
+          assert(
+            await page.getByRole('alertdialog').count() === 0,
+            'Thread selection unexpectedly opened a discard dialog',
+          )
           await expectStorage(page, draftKey, draft)
 
           await page.getByRole('button', { name: '打开命令表' }).click()
@@ -574,7 +558,7 @@ export async function runComposerMatrix(ui) {
             { timeout: 10_000 },
           )
           assert(
-            await originalDescendantRow.getAttribute('aria-pressed') === 'true',
+            await originalBranchRow.getAttribute('aria-pressed') === 'true',
             'ArrowUp did not move the tree selection to the previous visible row',
           )
           await shot(caseArt, 'history-panel-keyboard-mode')
@@ -590,7 +574,7 @@ export async function runComposerMatrix(ui) {
             undefined,
             { timeout: 10_000 },
           )
-          await expectComposerText(page, draft)
+          await expectComposerText(page, '')
           await expectStorage(page, draftKey, draft)
           expectNoFatal(pageErrors, consoleErrors)
         },
@@ -916,7 +900,7 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindBlankComposer(page, goto, fixture)
           const blankDraftKey = composerDraftStorageKey(
-            `chat:${fixture.chat.id}:pane:pane-1`,
+            `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
           )
           await composer.fill(draft)
           await expectStorage(page, blankDraftKey, draft)
@@ -1081,6 +1065,7 @@ export async function runComposerMatrix(ui) {
   await runRefactorContractMatrix({
     ...ui,
     bindThreadComposer,
+    createBranchedHistoryFixture,
     createDurableHistoryFixture,
     createHoldingQueueFixture,
     withUiFixture,
@@ -1109,21 +1094,17 @@ async function createBlankChatFixture(apiCtx, { title }) {
 
 async function createDurableHistoryFixture(
   apiCtx,
-  { title, messages, extraThreadCount = 0 },
+  { title, messages },
 ) {
   assert(
     Array.isArray(messages) && messages.length > 0,
     'durable history messages required',
   )
-  assert(
-    Number.isSafeInteger(extraThreadCount) && extraThreadCount >= 0,
-    'extraThreadCount must be a non-negative integer',
-  )
   const target = await resolveCatalogTarget(apiCtx)
   const state = {
     apiCtx,
     chat: null,
-    extraThreadIds: [],
+    sessionId: null,
     threadId: null,
   }
   try {
@@ -1147,6 +1128,7 @@ async function createDurableHistoryFixture(
       commands: [userMessageCommand(messages[0], cid())],
     })
     state.threadId = String(threadId)
+    state.sessionId = String(sessionId)
     for (const message of messages.slice(1)) {
       // 每条 THREAD batch 前等待上一 turn 收敛（missing agent 的 turn 确定性快速失败），
       // 再读最新 cursor；STALE 409 时短暂等待后重读重试（最多 5 次兜底）。
@@ -1177,17 +1159,6 @@ async function createDurableHistoryFixture(
         throw new Error(`THREAD batch did not stabilize after 5 attempts for message: ${message}`)
       }
     }
-    for (let index = 0; index < extraThreadCount; index += 1) {
-      const extra = await materializeNewSession(apiCtx, {
-        owner,
-        sessionId: cid(),
-        threadId: cid(),
-        rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
-        yoloEnabled: false,
-        commands: [userMessageCommand(`extra ${index} ${cid().slice(0, 8)}`, cid())],
-      })
-      state.extraThreadIds.push(String(extra.thread.threadId))
-    }
     await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 60_000,
       intervalMs: 100,
@@ -1206,7 +1177,6 @@ async function createBranchedHistoryFixture(
     trunkMessage,
     originalMessages,
     alternateMessage,
-    extraThreadCount = 0,
   },
 ) {
   assert(typeof trunkMessage === 'string' && trunkMessage, 'tree trunk message required')
@@ -1219,7 +1189,8 @@ async function createBranchedHistoryFixture(
   const state = {
     apiCtx,
     chat: null,
-    extraThreadIds: [],
+    sessionId: null,
+    sessionThreadIds: [],
     threadId: null,
   }
   try {
@@ -1241,17 +1212,8 @@ async function createBranchedHistoryFixture(
       commands: [userMessageCommand(trunkMessage, cid())],
     })
     state.threadId = String(threadId)
-    for (let index = 0; index < extraThreadCount; index += 1) {
-      const extra = await materializeNewSession(apiCtx, {
-        owner,
-        sessionId: cid(),
-        threadId: cid(),
-        rootSettings: branchSettingsOf({ name: missingAgentName }, target.model),
-        yoloEnabled: false,
-        commands: [userMessageCommand(`extra ${index} ${cid().slice(0, 8)}`, cid())],
-      })
-      state.extraThreadIds.push(String(extra.thread.threadId))
-    }
+    state.sessionId = String(sessionId)
+    state.sessionThreadIds.push(String(threadId))
 
     const { snapshot: trunk } = await waitForDurableMessages(
       apiCtx,
@@ -1262,16 +1224,36 @@ async function createBranchedHistoryFixture(
 
     // 原分支：originalMessages 逐条 THREAD batch。
     for (const message of originalMessages) {
-      const current = await getThreadSnapshot(apiCtx, state.threadId)
-      await acceptCommandBatch(apiCtx, {
-        owner,
-        target: threadTarget({
-          threadId: state.threadId,
-          expectedHeadEntryId: current.thread.headEntryId,
-          expectedNextCommandSequence: current.thread.nextCommandSequence,
-        }),
-        commands: [userMessageCommand(message, cid())],
-      })
+      // 每条 batch 前等待上一 turn 收敛（missing agent 的 turn 确定性快速失败），
+      // 再读最新 cursor；STALE 409 时短暂等待后重读重试（最多 5 次兜底）。
+      let accepted
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        if (attempt > 0) await sleep(80)
+        await waitForQuiescentThread(apiCtx, state.threadId, {
+          timeoutMs: 30_000,
+          intervalMs: 50,
+        }).catch(() => {})
+        const current = await getThreadSnapshot(apiCtx, state.threadId)
+        try {
+          accepted = await acceptCommandBatch(apiCtx, {
+            owner,
+            target: threadTarget({
+              threadId: state.threadId,
+              expectedHeadEntryId: current.thread.headEntryId,
+              expectedNextCommandSequence: current.thread.nextCommandSequence,
+            }),
+            commands: [userMessageCommand(message, cid())],
+          })
+          break
+        } catch (error) {
+          if (!(error instanceof HttpError) || error.status !== 409) throw error
+        }
+      }
+      if (!accepted) {
+        throw new Error(
+          `THREAD batch did not stabilize after 5 attempts for original message: ${message}`,
+        )
+      }
     }
     await waitForDurableMessages(
       apiCtx,
@@ -1290,6 +1272,7 @@ async function createBranchedHistoryFixture(
       commands: [userMessageCommand(alternateMessage, cid())],
     })
     state.threadId = String(branched.thread.threadId)
+    state.sessionThreadIds.push(String(branched.thread.threadId))
     await waitForDurableMessages(
       apiCtx,
       state.threadId,
@@ -1315,10 +1298,12 @@ async function createHoldingQueueFixture(
   const state = {
     apiCtx,
     agent: null,
+    bootstrapMessage: `hold materialize ${suffix}`,
     chat: null,
     mock,
     model: null,
     provider: null,
+    sessionId: null,
     threadId: null,
   }
   try {
@@ -1409,9 +1394,10 @@ async function createHoldingQueueFixture(
         },
       ),
       yoloEnabled: false,
-      commands: [userMessageCommand(`hold materialize ${suffix}`, cid())],
+      commands: [userMessageCommand(state.bootstrapMessage, cid())],
     })
     state.threadId = String(threadId)
+    state.sessionId = String(sessionId)
     const idle = await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 60_000,
       intervalMs: 100,
@@ -1498,19 +1484,7 @@ async function cleanupFixture(state) {
   const errors = []
   await cleanupStep(errors, 'stop thread', async () => {
     if (!state.threadId) return
-    const snapshot = await getThreadSnapshot(state.apiCtx, state.threadId)
-    if (
-      snapshot.thread.status !== 'IDLE'
-      || snapshot.thread.processing
-      || snapshot.queuedCommands.length > 0
-      || snapshot.modelInvocation !== null
-      || snapshot.toolInvocations.length > 0
-    ) {
-      await stopThread(state.apiCtx, state.threadId, {
-        stopRequestId: cid(),
-        expectedVersion: snapshot.thread.version,
-      })
-    }
+    await stopThreadForCleanup(state.apiCtx, state.threadId)
   })
   await cleanupStep(errors, 'hold provider', async () => state.mock?.close())
   await cleanupStep(errors, 'chat', async () => deleteChat(state.apiCtx, state.chat))
@@ -1599,7 +1573,7 @@ async function clearBrowserFixtureState(page, fixture) {
     {
       paneKey: `${CHAT_PANE_STORAGE_PREFIX}${fixture.chat.id}`,
       blankDraftKey: composerDraftStorageKey(
-        `chat:${fixture.chat.id}:pane:pane-1`,
+        `agent-pane:CHAT:${fixture.chat.id}:pane-1`,
       ),
       threadDraftKey: fixture.threadId
         ? composerDraftStorageKey(`thread:${fixture.threadId}`)
@@ -1654,54 +1628,89 @@ async function resolveCatalogTarget(apiCtx) {
  *
  * ChatWorkspacePage 的 save effect 会用首帧 stale state 覆盖 localStorage 中的
  * pane 绑定（chatId 就绪前 default state 抢先写回），因此预写 localStorage 不可靠；
- * 这里走真实 UI 路径：/thread 命令 -> Session 面板 -> Thread 面板搜索 threadId 选择。
- * 面板标题 i18n key 当前缺失（渲染为 raw key），统一用 .thread-selection-panel class 定位。
+ * 这里走真实 UI 路径：/thread 命令 -> 选择 Session 面板 -> 选择 Thread 面板。
+ * 两层面板分别用 fixture.sessionId / fixture.threadId 精确搜索并点击唯一 option。
  */
 async function bindThreadComposer(page, goto, fixture) {
+  assert(fixture.sessionId, `fixture lacks sessionId for ${fixture.chat?.id}`)
   await goto(`/chats/${encodeURIComponent(fixture.chat.id)}`)
   await waitForComposer(page)
   await page.locator('.composer-editor').click()
   await page.locator('.composer-editor').pressSequentially('/thread', { delay: 20 })
   await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
   await page.getByRole('option', { name: /^thread/ }).first().click()
-  await page.locator('.thread-selection-panel').first().waitFor({ state: 'visible', timeout: 10_000 })
+
+  const threadPanel = await openFixtureThreadPanel(page, fixture)
+  const threadSearch = threadPanel.getByRole('searchbox')
+  await threadSearch.fill(String(fixture.threadId))
+  const threadOptions = threadPanel.getByRole('option')
   await page.waitForFunction(
-    () => {
-      const panel = document.querySelector('.thread-selection-panel')
-      return panel != null && panel.querySelectorAll('[role="option"]').length > 0
+    ({ panelLabel, expectedId }) => {
+      const region = [...document.querySelectorAll('[role="region"]')]
+        .find((element) => element.getAttribute('aria-label') === panelLabel)
+      const options = region?.querySelectorAll('[role="option"]') ?? []
+      return options.length === 1 && options[0]?.textContent?.includes(expectedId)
     },
-    undefined,
+    { panelLabel: '选择 Thread', expectedId: String(fixture.threadId) },
     { timeout: 10_000 },
   )
-  const sessionCount = await page.locator('.thread-selection-panel').first().locator('[role="option"]').count()
-  assert(sessionCount > 0, `no Session available to bind Thread ${fixture.threadId}`)
-  let bound = false
-  for (let index = 0; index < sessionCount && !bound; index += 1) {
-    const sessionPanel = page.locator('.thread-selection-panel').first()
-    await sessionPanel.locator('[role="option"]').nth(index).click()
-    await page.waitForTimeout(500)
-    const threadPanel = page.locator('.thread-selection-panel').first()
-    const search = threadPanel.getByRole('searchbox')
-    if ((await search.count()) === 0) {
-      // 选中的 Session 无 Thread：Esc 回 Session 面板继续遍历。
-      await threadPanel.press('Escape')
-      await page.waitForTimeout(400)
-      continue
-    }
-    await search.fill(String(fixture.threadId))
-    await page.waitForTimeout(500)
-    const options = threadPanel.locator('[role="option"]')
-    if ((await options.count()) === 1) {
-      await options.first().click()
-      bound = true
-    } else {
-      await threadPanel.press('Escape')
-      await page.waitForTimeout(400)
-    }
-  }
-  assert(bound, `could not bind Thread ${fixture.threadId} via UI picker`)
+  assert(
+    await threadOptions.count() === 1,
+    `Thread search did not narrow to one option for ${fixture.threadId}`,
+  )
+  await page.waitForFunction(
+    ({ panelLabel, expectedId }) => {
+      const region = [...document.querySelectorAll('[role="region"]')]
+        .find((element) => element.getAttribute('aria-label') === panelLabel)
+      const active = region?.querySelector('[role="option"][aria-selected="true"]')
+      return active?.textContent?.includes(expectedId)
+    },
+    { panelLabel: '选择 Thread', expectedId: String(fixture.threadId) },
+    { timeout: 10_000 },
+  )
+  await threadSearch.press('Enter')
+
   await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
   return waitForComposer(page)
+}
+
+async function openFixtureThreadPanel(page, fixture) {
+  assert(fixture.sessionId, `fixture lacks sessionId for ${fixture.chat?.id}`)
+  const sessionPanel = page.getByRole('region', { name: '选择 Session' })
+  await sessionPanel.waitFor({ state: 'visible', timeout: 10_000 })
+  const sessionSearch = sessionPanel.getByRole('searchbox')
+  await sessionSearch.waitFor({ state: 'visible', timeout: 10_000 })
+  await sessionSearch.fill(String(fixture.sessionId))
+  const sessionOptions = sessionPanel.getByRole('option')
+  await page.waitForFunction(
+    ({ panelLabel, expectedId }) => {
+      const region = [...document.querySelectorAll('[role="region"]')]
+        .find((element) => element.getAttribute('aria-label') === panelLabel)
+      const options = region?.querySelectorAll('[role="option"]') ?? []
+      return options.length === 1 && options[0]?.textContent?.includes(expectedId)
+    },
+    { panelLabel: '选择 Session', expectedId: String(fixture.sessionId) },
+    { timeout: 10_000 },
+  )
+  assert(
+    await sessionOptions.count() === 1,
+    `Session search did not narrow to one option for ${fixture.sessionId}`,
+  )
+  await page.waitForFunction(
+    ({ panelLabel, expectedId }) => {
+      const region = [...document.querySelectorAll('[role="region"]')]
+        .find((element) => element.getAttribute('aria-label') === panelLabel)
+      const active = region?.querySelector('[role="option"][aria-selected="true"]')
+      return active?.textContent?.includes(expectedId)
+    },
+    { panelLabel: '选择 Session', expectedId: String(fixture.sessionId) },
+    { timeout: 10_000 },
+  )
+  await sessionSearch.press('Enter')
+
+  const threadPanel = page.getByRole('region', { name: '选择 Thread' })
+  await threadPanel.waitFor({ state: 'visible', timeout: 10_000 })
+  return threadPanel
 }
 
 async function bindBlankComposer(page, goto, fixture) {
@@ -1737,15 +1746,53 @@ async function expectComposerText(page, expected) {
 }
 
 async function expectStorage(page, key, expected) {
+  let actual = null
   try {
+    if (expected === null) {
+      await page.waitForFunction(
+        (storageKey) => localStorage.getItem(storageKey) === null,
+        key,
+        { timeout: 10_000 },
+      )
+      return
+    }
+    // draft v2 envelope 严格校验：exact keys version/parts、version=2、恰一个 text part。
     await page.waitForFunction(
-      ({ storageKey, storageValue }) =>
-        localStorage.getItem(storageKey) === storageValue,
-      { storageKey: key, storageValue: expected },
+      ({ storageKey, text }) => {
+        const raw = localStorage.getItem(storageKey)
+        if (raw == null) return false
+        let parsed
+        try {
+          parsed = JSON.parse(raw)
+        } catch {
+          return false
+        }
+        if (
+          parsed == null
+          || typeof parsed !== 'object'
+          || Array.isArray(parsed)
+          || JSON.stringify(Object.keys(parsed).sort()) !== '["parts","version"]'
+          || parsed.version !== 2
+          || !Array.isArray(parsed.parts)
+          || parsed.parts.length !== 1
+        ) {
+          return false
+        }
+        const part = parsed.parts[0]
+        return (
+          part != null
+          && typeof part === 'object'
+          && !Array.isArray(part)
+          && JSON.stringify(Object.keys(part).sort()) === '["text","type"]'
+          && part.type === 'text'
+          && part.text === text
+        )
+      },
+      { storageKey: key, text: expected },
       { timeout: 10_000 },
     )
   } catch {
-    const actual = await page.evaluate(
+    actual = await page.evaluate(
       (storageKey) => localStorage.getItem(storageKey),
       key,
     )

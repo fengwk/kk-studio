@@ -141,6 +141,26 @@ describe('comfyui utils', () => {
     ).toThrow('重复')
   })
 
+  it('rejects typed defaultValue mismatches and missing required binding fields', () => {
+    // valueType 与 defaultValue 类型必须一致：string/integer/number 的默认值类型错误直接拒绝。
+    expect(() =>
+      parseComfyuiBindings('[{"name":"x","kind":"parameter","nodeId":"1","inputName":"x","valueType":"string","defaultValue":5}]'),
+    ).toThrow('defaultValue 必须是字符串')
+    expect(() =>
+      parseComfyuiBindings('[{"name":"x","kind":"parameter","nodeId":"1","inputName":"x","valueType":"integer","defaultValue":1.5}]'),
+    ).toThrow('defaultValue 必须是整数')
+    expect(() =>
+      parseComfyuiBindings('[{"name":"x","kind":"parameter","nodeId":"1","inputName":"x","valueType":"number","defaultValue":"1.5"}]'),
+    ).toThrow('defaultValue 必须是数字')
+    // requiredString：字段缺失或全空白都视为必填失败。
+    expect(() =>
+      parseComfyuiBindings('[{"name":"x","kind":"parameter","nodeId":"1"}]'),
+    ).toThrow('inputName 不能为空')
+    expect(() =>
+      parseComfyuiBindings('[{"name":" ","kind":"parameter","nodeId":"1","inputName":"x"}]'),
+    ).toThrow('name 不能为空')
+  })
+
   it('filters workflows, maps drafts, discovers nested unique downloads, and classifies statuses', () => {
     const item = workflow()
     expect(filterComfyuiWorkflows([item], 'image')).toEqual([item])
