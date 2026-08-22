@@ -3,17 +3,11 @@ import {
   buildContextMenuTarget,
   contextMenuTargetKey,
   sameIdList,
-  type ContextMenuTarget,
+  type CanvasContextMenuState,
 } from '@/features/canvas/canvas-stage-model'
 import type { CanvasSnapshot } from '@/features/canvas/domain'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
 import type { CanvasFunctionModelDTO } from '@/shared/api/contracts/studio'
-
-export interface CanvasContextMenuState {
-  x: number
-  y: number
-  target: ContextMenuTarget
-}
 
 export interface CanvasStageContextMenuApi {
   contextMenu: CanvasContextMenuState | null
@@ -70,7 +64,7 @@ export function useCanvasStageContextMenu({
     if (!target) {
       return
     }
-    contextMenuSelectionRef.current = nodeIds
+    contextMenuSelectionRef.current = [...nodeIds]
     setSelection(nodeIds)
     setContextMenu({ x: event.clientX, y: event.clientY, target })
   }, [models, setSelection, snapshot])
@@ -86,11 +80,11 @@ export function useCanvasStageContextMenu({
   const openSelectionContextMenu = useCallback((event: MouseEvent, selectedNodes: CanvasFlowNode[]) => {
     const nodeIds = selectedNodes.map((node) => node.id)
     if (nodeIds.length === 0) {
-      setContextMenu(null)
+      closeContextMenu()
       return
     }
     openContextMenu(event, nodeIds)
-  }, [openContextMenu])
+  }, [closeContextMenu, openContextMenu])
 
   // 打开期间 Escape 关闭菜单（与 CanvasContextMenu 内部的菜单级 Escape 分工：
   // 这里兜底任何仍持有焦点的窗口级 Escape）。
@@ -100,26 +94,21 @@ export function useCanvasStageContextMenu({
     }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setContextMenu(null)
+        closeContextMenu()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [contextMenu])
+  }, [closeContextMenu, contextMenu])
 
   const handleSelectionChange = useCallback((nodeIds: string[]) => {
     // 选区被外部改变（点击/框选/删除）时关闭右键菜单；右键打开时自身触发的
     // onSelectionChange 与快照一致，不关闭。
     const openedSelection = contextMenuSelectionRef.current
-    if (
-      contextMenuSelectionRef.current !== null
-      && openedSelection
-      && !sameIdList(openedSelection, nodeIds)
-    ) {
-      contextMenuSelectionRef.current = null
-      setContextMenu(null)
+    if (openedSelection && !sameIdList(openedSelection, nodeIds)) {
+      closeContextMenu()
     }
-  }, [])
+  }, [closeContextMenu])
 
   const contextMenuKey = contextMenu ? contextMenuTargetKey(contextMenu.target) : null
 

@@ -7,10 +7,17 @@ export type ContextMenuTarget =
   | { kind: 'group'; group: Group }
   | { kind: 'multi'; nodeIds: string[]; hasUngroupedResource: boolean }
 
+export interface CanvasContextMenuState {
+  x: number
+  y: number
+  target: ContextMenuTarget
+}
+
 /**
  * 根据快照与节点 id 列表构建右键菜单目标：单节点解码 group flow id 后指向
  * Group/Resource（Resource 携带匹配的 function model），多选只保留
- * 「全部未分组」标志。任何 id 无法解析时返回 null（右键不打开菜单）。
+ * 「全部未分组」标志。单节点无法解析时返回 null；多选保留原始 id，
+ * 任一 id 无法解析时 `hasUngroupedResource=false`。
  */
 export function buildContextMenuTarget(
   snapshot: CanvasSnapshot,
@@ -43,7 +50,7 @@ export function buildContextMenuTarget(
     selectedResources.length === nodeIds.length
     && selectedResources.every((node) => !node?.groupId)
   )
-  return { kind: 'multi', nodeIds, hasUngroupedResource }
+  return { kind: 'multi', nodeIds: [...nodeIds], hasUngroupedResource }
 }
 
 /**
