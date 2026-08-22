@@ -822,8 +822,7 @@ async function main(argv) {
     )
     await page.getByRole('button', { name: '确认创建' }).click()
     // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
-    await page.getByText('新对话').first().waitFor({ state: 'visible', timeout: 15_000 })
-    await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 10_000 })
+    await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
     assert(
       await page.locator('.chat-workspace .locale-selector').count() === 0,
       'chat workspace must not contain a locale selector',
@@ -885,7 +884,8 @@ async function main(argv) {
           `complete Environment binding was not shown: ${await environmentTrigger.innerText()}`,
         )
         await page.getByRole('button', { name: '确认创建' }).click()
-        await page.getByText('新对话').first().waitFor({ state: 'visible', timeout: 15_000 })
+        // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
+        await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
 
         const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chat')
         const created = (json?.data || []).find((chat) => chat.title === title)
@@ -925,8 +925,9 @@ async function main(argv) {
         'default-assistant',
       )
       await page.getByRole('button', { name: '确认创建' }).click()
-      await page.getByText('新对话').first().waitFor({ state: 'visible', timeout: 15_000 })
+      // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
       const composer = page.getByLabel('给 AI 发送消息')
+      await composer.waitFor({ state: 'visible', timeout: 15_000 })
       await composer.fill('只回复单词 OK，不要调用工具。')
       await page.getByRole('button', { name: '发送消息' }).click()
       // 用户消息应进入 timeline；assistant 成功与否取决于 Provider
