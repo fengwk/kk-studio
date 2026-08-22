@@ -48,7 +48,7 @@ HTTP wire 上的 Java `Long` 使用非负十进制字符串，`Integer` 使用 J
 | Section | 内容 | 生效时机 |
 | --- | --- | --- |
 | `tool` | permission、默认 YOLO、Model/Tool Gateway 重试延迟、skill 加载超时 | permission：下一次 preflight；defaultYolo：下一次未显式指定模式的 Chat 创建；gateway/skill 超时：下一次 invocation |
-| `aiRuntime` | invocation retry；`compactionKeepRecentTokens` 与可空 fallback model；subagent depth/idle/turn，以及每父 `subagentMaxConcurrency=10`、每 root tree 可空 `subagentMaxTotalConcurrency`（null 表示不限） | live：下一次 invocation（retry 判定 / 压缩规划 / task spawn/reserve） |
+| `aiRuntime` | invocation retry；`compactionKeepRecentTokens=20000` 与可空 `compactionFallbackModel`；subagent depth/idle/turn，每父 `subagentMaxConcurrency=10`、每 root tree `subagentMaxTotalConcurrency=0`（primitive `int` 必填，0 表示不额外限制） | live：下一次 invocation（retry 判定 / 压缩规划 / task spawn/reserve） |
 | `environment` | daemon heartbeat、目录查询、资源预算 | 下一次判定或请求 |
 | `integrations` | ComfyUI、OpenCLI Hub、Seedance、GPT Image 2、MiniMax H3 非敏感参数 | 重启 |
 | `storageMedia` | S3 启用、上传/预签名预算、Canvas 媒体处理预算 | Canvas 媒体超时/缩略图：下一次 probe/preview；S3 启用与预签名预算：重启 |

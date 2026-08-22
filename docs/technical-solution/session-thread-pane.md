@@ -1,8 +1,6 @@
-# Harness Session、Thread、Pane 与 Command 模型
+# Harness Session、Thread 与 Pane
 
-本文定义 kk-studio Harness Runtime 当前生效的 Session Tree、Thread materialization、Command mailbox、Chat/Canvas 归属、Pane 交互、Stop 恢复、上传生命周期和前端模块边界。
-
-系统使用单一 clean-slate V1 schema、严格 API/codec 与单轨读写路径。
+本文定义 kk-studio Harness Runtime 当前生效的 Session Tree、Thread materialization、Command mailbox、PaneTarget 三态、SYSTEM steering、Stop 恢复、upload/blob 生命周期与前端模块边界。表结构见 [storage-models.md](storage-models.md)（唯一 V1），执行协议见 [harness-runtime-architecture.md](harness-runtime-architecture.md)，Agent Loop 细节见 [harness-agent-loop.md](harness-agent-loop.md)。
 
 ## 1. 核心模型
 
@@ -89,16 +87,19 @@ Entry {
 4. 一个 Session 只有一个 ROOT。
 5. Entry 提交后不得更新、换 parent 或迁移 Session。
 6. Entry type 固定为：
-   - `ROOT`
-   - `TURN_START`
-   - `MESSAGE`
-   - `CUSTOM`
-   - `MODEL_ATTEMPT_FAILURE`
-   - `CUSTOM_MESSAGE`
-   - `ASSISTANT_ERROR`
-   - `ASSISTANT_ABORTED`
-   - `COMPACTION`
-   - `TURN_END`
+
+```text
+ROOT
+TURN_START
+MESSAGE
+CUSTOM
+MODEL_ATTEMPT_FAILURE
+CUSTOM_MESSAGE
+ASSISTANT_ERROR
+ASSISTANT_ABORTED
+COMPACTION
+TURN_END
+```
 
 Entry Tree 保存 Agent Loop 的完整语义事实；Invocation 保存执行明细，二者不合并。
 
@@ -390,7 +391,7 @@ THREAD
   expectedNextCommandSequence
 ```
 
-NEW_SESSION 和 ENTRY 的第一批必须是用户输入 batch；THREAD 同时允许用户输入 batch和内部 SYSTEM steering batch。
+NEW_SESSION 和 ENTRY 的第一批必须是用户输入 batch；THREAD 同时允许用户输入 batch 和内部 SYSTEM steering batch。
 
 ### 5.1 客户端 ID
 
@@ -547,7 +548,7 @@ accept Commands
 -> create ModelInvocation / Work
 ```
 
-设置命令本身不 append Entry。它们由 reducer 折叠到 `TURN_START.settings` 完整快照。
+设置命令本身不 append Entry。它们由 reducer 折叠到 `TURN_START.settings` 完整快照：
 
 ```text
 /agent
@@ -571,352 +572,6 @@ accept Commands
 - compaction ownership barrier；
 - Invocation 永不跨 Thread 继承；
 - Stop replay 按 owning Thread 界定 raw request id。
-
-### 6.1 Durable compaction
-
-Compaction 是 Thread-owned 的内部 durable Turn，不是 Session 行更新，也不是一条进程内辅助调用：
-
-```text
-owned closed normal Turn
--> compaction due
--> THREAD Work
--> TURN_START(reason=COMPACTION, ownerThreadId)
--> ModelInvocation(request.compaction)
--> COMPACTION payload or ASSISTANT_ERROR / ASSISTANT_ABORTED
--> TURN_END
-```
-
-它复用已有：
-
-- Thread version/head；
-- ModelInvocation 与 MODEL Work；
-- lease、retry 和 crash recovery；
-- Stop 与迟到结果 fence；
-- Entry append-only audit。
-
-不增加 Compaction 表、Session summary 列、Thread compaction status 或独立调度器。
-
-#### 6.1.1 触发
-
-部署配置只有两个字段（来自 `SystemSettings.AiRuntime`，经 `HarnessCompactionConfiguration` 装配）：
-
-```text
-keepRecentTokens = 20000   // compactionKeepRecentTokens 默认值
-fallbackModel    = null    // compactionFallbackModel 默认值；null 表示不做一次性 fallback
-```
-
-派生预算（每次 planning 瞬时重算）：
-
-```text
-effectiveKeepRecentTokens = min(keepRecentTokens, floor(contextWindow / 2))
-effectiveReserve          = min(16384, maxOutputTokens)
-softThreshold             = max(effectiveKeepRecentTokens, contextWindow - effectiveReserve)
-manualMinimum             = min(keepRecentTokens * 2, floor(contextWindow / 2))
-outputBudget              = min(maxOutput, floor(0.8 * effectiveReserve), removedPrefixEstimate)
-```
-
-Trigger 固定为三态：
-
-```text
-THRESHOLD
-  active same-owner CONTINUATION_DUE 或真实 queued user demand
-  AND (
-    current Thread 最近 compatible owned successful Provider usage
-    + 该 Assistant 之后的可见消息估算（含 ToolResult）
-  ) > softThreshold
-
-OVERFLOW
-  current Thread 最新 owned Turn 以 OVERFLOW 失败
-  -> compact
-  -> immediate CONTINUATION
-  -> 最多一次
-
-MANUAL
-  用户在 Bound Thread 发起 /compact
-  -> availability 门控（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT /
-     MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT）
-  -> expectedVersion CAS 提交 MANUAL plan
-  -> 与自动触发共用 MODEL Work、一次 fallback 与 crash recovery
-```
-
-执行优先级：
-
-```text
-owned HISTORY -> TURN_PREFIX obligation
--> active continuation boundary 上 actionable Compaction
--> normal CONTINUATION
--> idle/historical boundary 上 actionable Compaction
--> queued user input
-```
-
-Compaction 消费零 Command。完全结束的 idle run 在没有新 user demand 时不因 soft threshold 自唤醒；长工具链则在每个 `continueModel=true` turn-end boundary 先评估压缩，避免等到最终 idle 才处理已经过大的上下文。压缩期间新输入仍可作为 durable Command 排队。
-
-#### 6.1.2 切分与阶段
-
-切分算法使用当前 root-to-head EntryPath：
-
-1. 从最新 complete `COMPACTION` 的 `cutEntryId` 开始；没有时从 ROOT 后开始。
-2. 从路径尾部按 token 估算反向累加。
-3. 最近保留预算达到 `effectiveKeepRecentTokens` 后选择下一个合法 cut。
-4. cut 只允许可见 USER、ASSISTANT、CUSTOM_MESSAGE、ASSISTANT_ABORTED；绝不切在 ToolResult。
-冻结两个 Entry anchor：
-
-```text
-cutEntryId
-  后续 Provider Context 中首个 retained context message
-
-turnPrefixStartEntryId
-  cut 所属 logical Agent segment 的首个 user-like message；
-  segment 从最近 INPUT 开始并跨后续 CONTINUATION durable turns
-```
-
-Entry 从不删除；retained boundary 只引用 `cutEntryId`，BranchSettings 和控制元数据始终从完整 root-to-head path 派生。最新 complete compaction 是 logical Agent segment 回扫的硬边界。
-
-阶段：
-
-| Phase | 语义 | durable 结果 |
-| --- | --- | --- |
-| `FULL` | 完整历史摘要 | complete `COMPACTION` |
-| `HISTORY` | split turn 的历史部分 | incomplete `COMPACTION` |
-| `TURN_PREFIX` | split turn 的早期部分 | 与紧邻 HISTORY 合并后的 complete `COMPACTION` |
-
-Completeness 由 Phase 派生：
-
-```text
-HISTORY                  -> incomplete
-FULL / TURN_PREFIX       -> complete
-```
-
-不在 payload 中重复保存 `complete` boolean。
-
-`HISTORY -> TURN_PREFIX` 复用已冻结的 `cutEntryId`、`turnPrefixStartEntryId` 和 trigger，不重新选 cut。
-
-最终 TURN_PREFIX payload 必须自包含：
-
-```text
-summaryText =
-  immediately preceding matching HISTORY.summaryText
-  // direct TURN_PREFIX 使用固定 "No prior history."
-  + stable separator
-  + TURN_PREFIX model output
-  + canonical file sections
-```
-
-不能只保存第二次模型的 prefix 输出，也不能扫描并合并任意更早的 stale HISTORY。
-
-最终 `CompactionPayload`：
-
-```text
-summaryText
-```
-
-`phase`、`trigger`、`executionModel`、`cutEntryId`、`turnPrefixStartEntryId`、`historyCompactionEntryId` 全部冻结在对应 `TURN_START` 的 `CompactionStart` 中，不重复写入 payload；complete 由 phase 与 TURN_END outcome 派生。Threshold 使用 owned normal Turn 的权威 Provider usage，并补算该 Assistant 之后的可见消息；cut planning 估算在规划时瞬时重算。
-
-#### 6.1.3 请求与 Provider Context
-
-Compaction 请求只使用：
-
-```text
-当前 path 派生的 Model provider/name/variant
-transient CompactionPreparation（candidate path 已冻结在 TURN_START.compaction / CompactionStart）
-fixed compaction prompt resources
-```
-
-不读取或绑定：
-
-```text
-Agent system prompt
-Environment live state
-Plugin ContextProjector
-Tool / Skill / Subagent
-YOLO
-prompt-cache writes
-```
-
-输出预算：
-
-```text
-FULL / HISTORY  min(model output limit, floor(effectiveReserve * 0.8), removedPrefixEstimate)
-TURN_PREFIX     min(model output limit, floor(effectiveReserve * 0.5), removedPrefixEstimate)
-```
-
-普通 Model 请求的 compaction-aware history：
-
-```text
-preamble
--> latest complete COMPACTION summary as one wrapped USER message
--> entries from cutEntryId onward
-```
-
-以下内容不进入 Provider Context：
-
-- 被 summary 替代的旧前缀；
-- `TURN_START(COMPACTION)...TURN_END` 控制 Turn；
-- `MODEL_ATTEMPT_FAILURE`；
-- `ASSISTANT_ERROR`；
-- failed/stopped/incomplete compaction result。
-
-Entry 历史不删除。Compaction 只改变 Provider Context 投影。
-
-#### 6.1.4 失败与恢复
-
-- Compaction Model 使用普通 Invocation retry 和 Work crash recovery。
-- Compaction retry checkpoint 不物化 `MODEL_ATTEMPT_FAILURE` Entry，保持现有审计契约。
-- failed/stopped Compaction Turn 保留 durable Entry，但对 transcript、token estimate 和 Provider Context不可见。
-- failed/stopped Compaction 不自唤醒；owned incomplete HISTORY 只产生一次机械 TURN_PREFIX wake，不进入 threshold retry spin。
-- complete OVERFLOW Compaction 只产生一次 immediate CONTINUATION；再次 OVERFLOW 后保留失败并停止该恢复链。
-- 成功 THRESHOLD FULL/TURN_PREFIX/fallback 若压缩前存在 same-owner normal continuation，则把该 obligation 重写到新 TURN_END 并继续；foreign owner 不可借用。失败、无增益或 fallback 耗尽后停止该恢复链。
-- Stop 终止当前 Thread 拥有的 Compaction Invocation；queued 用户输入按普通 Stop receipt 取消并恢复到 Composer。
-- owned incomplete HISTORY 与 TURN_PREFIX 之间是 durable continuation obligation；Stop 在 phase gap 获胜时追加一个 `TURN_START(COMPACTION) -> ASSISTANT_ERROR(CANCELLED) -> TURN_END(STOPPED)` barrier，确定性取消该 obligation。
-- Model retry 始终从 Invocation 的 immutable `basisHeadEntryId` 重建摘要请求，不能从已经推进的当前 Thread head 查找 previous checkpoint。
-
-#### 6.1.5 文件清单
-
-摘要末尾的：
-
-```text
-<read-files>
-...
-</read-files>
-
-<modified-files>
-...
-</modified-files>
-```
-
-由 Runtime 根据历史 Assistant `read/write/edit` Tool Call 重算，不信任模型返回的 reserved section。规则：
-
-- 旧 reserved section 先剥离；
-- malformed reserved tag fail closed；
-- 每次完整结果从 ROOT 到 `cutEntryId` 重算累计文件事实，不只扫描本次新增摘要区间；
-- `write/edit` 覆盖同路径的 `read`；
-- 结果按路径排序；
-- Tool result 摘要输入最多保留 2000 字符。
-
-### 6.2 与 `~/proj/pi` 的关系
-
-`~/proj/pi` 同时存在两套 compaction 形态：
-
-1. `packages/coding-agent` 是当前完整可运行实现：`AgentSession` 编排 summarization，并以一个 retained-entry reference 保存最终 summary。
-2. `packages/agent` 是新的 Harness 形态：Compaction 是 operation record，`CompactionEntry` 内嵌 `retainedTail`；但当前 `AgentHarness.compact()` 仍未完成，不作为 kk-studio 行为事实源。
-
-kk-studio 与可运行 Pi 实现保持算法对齐：
-
-| 能力 | 一致语义 |
-| --- | --- |
-| 自动阈值 | projected context tokens 严格大于 soft threshold |
-| 默认预算 | reserve 16384、recent 20000 |
-| token 估算 | 文本约 `ceil(chars / 4)`，媒体使用固定占位预算 |
-| cut point | 可以切 USER/ASSISTANT/custom，不切 ToolResult |
-| split turn | history summary + turn-prefix summary |
-| previous summary | 迭代更新而非从头总结全部历史 |
-| 输出预算 | history 0.8 reserve，turn-prefix 0.5 reserve |
-| 文件清单 | 累积 read/modified files |
-| Tool result | 摘要序列化截断到 2000 字符 |
-| Cache | one-shot summary 请求不写 prompt cache |
-| Overflow | compact-and-retry 最多一次 |
-
-架构差异：
-
-| 维度 | Pi coding-agent | kk-studio |
-| --- | --- | --- |
-| 执行游标 | 一个 Session 当前 leaf | Session `0..N` durable Thread，可并行执行 |
-| Compaction lifecycle | AgentSession 内存编排 | durable internal Turn + Invocation + Work |
-| 持久化结果 | 单个 CompactionEntry | `TURN_START -> COMPACTION -> TURN_END` |
-| split turn | 一个操作中最多调用两次 LLM，最后写一条 Entry | HISTORY 与 TURN_PREFIX 分成两个可恢复 durable Turn |
-| retained suffix | retained-entry reference | 单一 `cutEntryId` 引用，不复制 immutable Entry |
-| 运行恢复 | 主要依赖当前进程/Session reload | lease、Work、Invocation 与 Store 支持进程重启恢复 |
-| Stop | AbortController | Thread-scoped durable Stop + late-result fence |
-| 输入并发 | 普通 prompt 在 compaction 中被拒绝；部分队列等待 | Command 可 durable 排队，Compaction 消费零 Command |
-| usage ownership | 当前 active branch 的最近 assistant usage | 只借用当前 Thread owned usage，shared history 有 barrier |
-| manual | `/compact [instructions]` | `/compact` 手动压缩：availability 门控 + expectedVersion CAS，固定 deterministic prompt，不支持 per-Agent instructions |
-| hook | extension 可取消或替换 summary | 固定 deterministic prompt，无 summary hook |
-| `/tree` | 可把离开分支摘要注入目标分支 | 选择 EntryDraft/Thread，不隐式合并 sibling 分支 |
-| recent budget | 直接使用 `keepRecentTokens` | 额外限制为 context window 的一半 |
-
-### 6.3 多 Thread Compaction 不变量
-
-Compaction 同时具有两种不同归属：
-
-```text
-execution ownership
-  TURN_START.ownerThreadId
-  ModelInvocation / Work / Stop
-  -> 永远 Thread-scoped
-
-complete summary fact
-  COMPACTION Entry
-  -> 属于 Session Entry Tree
-  -> 位于 sibling root-to-head path 时可以共享
-```
-
-Owner barrier：
-
-| 事实或义务 | 是否可以被 sibling 共享 |
-| --- | --- |
-| complete summaryText、cutEntryId、canonical file sections | 可以 |
-| normal Turn usage 触发 threshold | 不可以 |
-| `TURN_END.continueModel=true` continuation | 不可以 |
-| incomplete HISTORY → TURN_PREFIX obligation | 不可以 |
-| OVERFLOW compact-and-retry obligation | 不可以 |
-| Model/Tool Invocation、Work、Stop、late result | 不可以 |
-
-最终规则：
-
-1. Trigger usage 只能来自当前 Thread owned normal Turn；遇到其他 `ownerThreadId` 即停止向前借用 usage。
-2. 完整 `COMPACTION` 是 Entry-only context checkpoint；其 owner Thread 删除后，位于保留路径上的 sibling 仍可使用 summary。
-3. incomplete `HISTORY` 不是可共享 checkpoint；`TURN_PREFIX` obligation 只能由该 COMPACTION Turn 的 `ownerThreadId` 继续。
-4. sibling Thread 遇到 foreign incomplete HISTORY 时忽略整个内部 Compaction Turn，不继承 Invocation、不启动 TURN_PREFIX，直接处理自己的后续输入。
-5. `TURN_END.continueModel=true` 只有其引用 TURN_START 的 `ownerThreadId` 等于当前 Thread 时才是 `CONTINUATION_DUE`；foreign continuation 视为 historical。
-6. complete OVERFLOW checkpoint 可以共享，但其 retry/continuation obligation 绝不共享。
-7. failed/stopped Compaction 不成为 freshness 或 Provider Context barrier。
-8. 新 materialized Thread 在第一条 owned INPUT 前不根据 foreign normal Turn usage 自动压缩。
-9. Thread 从 complete Compaction 后的 Entry materialize 时直接继承 summary；从更早 Entry materialize 时形成独立路径，不受该 summary 影响。
-10. `ownerThreadId` 是不可变 UUID 事实，不要求 owner Thread 行仍存在。
-
-`compactionPreparation` 对 incomplete HISTORY 的机械延续使用 owner 校验：
-
-```text
-latest Turn is completed COMPACTION/HISTORY incomplete
-AND latest TURN_START.ownerThreadId == currentThread.id
-  -> prepare TURN_PREFIX
-otherwise
-  -> no inherited continuation
-```
-
-`ThreadContextClassifier` 的 continuation 分类也必须 owner-aware：
-
-```text
-head is TURN_END(continueModel=true)
-AND referenced TURN_START.ownerThreadId == currentThread.id
-  -> CONTINUATION_DUE
-otherwise
-  -> IDLE_OR_HISTORICAL
-```
-
-### 6.4 最终 Compaction 边界
-
-保留：
-
-- durable internal Compaction Turn；
-- FULL/HISTORY/TURN_PREFIX；
-- 最小 `cutEntryId / turnPrefixStartEntryId` anchor；
-- fixed prompts、file sections、one-shot cache policy；
-- threshold/overflow 自动触发；
-- MANUAL 手动压缩（`/compact` 命令 + `POST /{threadId}/compact`，availability 门控 + expectedVersion CAS）；
-- current Thread ownership barrier；
-- complete summary 的 Session Entry 共享。
-
-不增加：
-
-- per-Agent/custom compaction instructions；
-- extension summary replacement hook；
-- Pi branch summary；
-- copied `retainedTail`；
-- payload 外的重复 retained/tokens/completeness 字段；
-- Compaction 专用表、status 列或调度器。
-
-理由是这些能力都不是上下文容量 correctness 所必需；其中 branch summary 和 copied tail 还会模糊 kk-studio 的 sibling Thread 隔离与 immutable shared-history 模型。
 
 ## 7. Stop 与 Composer 恢复
 
@@ -1078,7 +733,7 @@ READY storage_upload
 lock READY upload
 -> require not expired
 -> materialize USER_MESSAGE attachment as durable RESOURCE(blobId, name, preview)
--> establish harness_session_blob_ref
+-> establish session_blob_ref
 -> idempotently delete upload-scoped temp object
 -> delete storage_upload
 -> transfer or release upload-owned Blob reference
@@ -1143,9 +798,7 @@ chat_session(chatId, sessionId, createdAt)
 canvas_session(canvasId, sessionId, createdAt)
 ```
 
-不使用失去数据库外键能力的多态 owner 表。
-
-创建归属时锁 Session，检查两张表后写入其中一张，保证用户 Session 只属于一个 owner。
+不使用失去数据库外键能力的多态 owner 表。创建归属时锁 Session，检查两张表后写入其中一张，保证用户 Session 只属于一个 owner。
 
 `chat` 和 `canvas_document` 不保存当前 Session 或 Thread。Canvas Graph 与 Agent Session 生命周期独立。
 
@@ -1419,265 +1072,7 @@ POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval
 
 `system-prompt` 返回按当前 root-to-head branch 最新 Agent / Environment / skills / subagents 现算的只读预览（不冻结 ModelInvocation、不校验 Tool catalog）；`compact` 请求体携带 `expectedVersion`（exact 十进制 version cursor），提交成功后返回权威 Thread 投影、`turnStartEntryId` 与可选 `modelInvocationId`。snapshot 同时携带 `manualCompaction.available / disabledReason` 瞬时 availability sidecar；提交仍以 expectedVersion CAS 守护。
 
-## 12. 持久化模型
-
-### 12.1 Session、Entry、Thread
-
-```sql
-create table harness_session (
-    id uuid primary key,
-    created_at timestamptz(3) not null
-);
-
-create table harness_entry (
-    id uuid primary key,
-    session_id uuid not null,
-    parent_entry_id uuid,
-    entry_type varchar(32) not null,
-    payload jsonb not null check (jsonb_typeof(payload) = 'object'),
-    created_at timestamptz(3) not null,
-    constraint uk_harness_entry_session_id unique (session_id, id),
-    constraint fk_harness_entry_session foreign key (session_id)
-        references harness_session(id),
-    constraint fk_harness_entry_parent foreign key (session_id, parent_entry_id)
-        references harness_entry(session_id, id),
-    constraint ck_harness_entry_type check (
-        entry_type in (
-            'ROOT',
-            'TURN_START',
-            'MESSAGE',
-            'CUSTOM',
-            'MODEL_ATTEMPT_FAILURE',
-            'CUSTOM_MESSAGE',
-            'ASSISTANT_ERROR',
-            'ASSISTANT_ABORTED',
-            'COMPACTION',
-            'TURN_END'
-        )
-    ),
-    constraint ck_harness_entry_parent_shape check (
-        (entry_type = 'ROOT' and parent_entry_id is null)
-        or (entry_type <> 'ROOT' and parent_entry_id is not null)
-    ),
-    constraint ck_harness_entry_parent_not_self check (
-        parent_entry_id is null or parent_entry_id <> id
-    )
-);
-
-create unique index uk_harness_entry_single_root
-    on harness_entry(session_id)
-    where entry_type = 'ROOT';
-
-create index idx_harness_entry_parent
-    on harness_entry(session_id, parent_entry_id);
-
-create table harness_thread (
-    id uuid primary key,
-    session_id uuid not null,
-    head_entry_id uuid not null,
-    materialization_hash char(64) not null,
-    yolo_enabled boolean not null,
-    next_command_sequence bigint not null check (next_command_sequence >= 1),
-    version bigint not null check (version >= 0),
-    created_at timestamptz(3) not null,
-    updated_at timestamptz(3) not null,
-    constraint fk_harness_thread_session foreign key (session_id)
-        references harness_session(id),
-    constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
-        references harness_entry(session_id, id),
-    constraint ck_harness_thread_materialization_hash check (
-        materialization_hash ~ '^[0-9a-f]{64}$'
-    ),
-    constraint ck_harness_thread_time_order check (updated_at >= created_at)
-);
-
-create index idx_harness_thread_session
-    on harness_thread(session_id, created_at, id);
-```
-
-### 12.2 Command
-
-```sql
-create table harness_thread_command (
-    thread_id uuid not null,
-    sequence bigint not null check (sequence > 0),
-    command_type varchar(32) not null,
-    payload jsonb not null check (jsonb_typeof(payload) = 'object'),
-    client_command_id uuid not null,
-    request_hash char(64) not null,
-    consumed_turn_start_entry_id uuid,
-    cancel_request_id uuid,
-    cancelled_at timestamptz(3),
-    created_at timestamptz(3) not null,
-    primary key (thread_id, sequence),
-    constraint fk_harness_thread_command_thread foreign key (thread_id)
-        references harness_thread(id),
-    constraint fk_harness_thread_command_consumed foreign key (consumed_turn_start_entry_id)
-        references harness_entry(id),
-    constraint uk_harness_thread_command_client
-        unique (thread_id, client_command_id),
-    constraint ck_harness_thread_command_type check (
-        command_type in (
-            'USER_MESSAGE',
-            'CUSTOM_MESSAGE',
-            'SET_AGENT',
-            'SET_MODEL',
-            'SET_ACTIVE_TOOLS',
-            'SET_ENVIRONMENT'
-        )
-    ),
-    constraint ck_harness_thread_command_request_hash check (
-        request_hash ~ '^[0-9a-f]{64}$'
-    ),
-    constraint ck_harness_thread_command_terminal check (
-        consumed_turn_start_entry_id is null
-        or (cancel_request_id is null and cancelled_at is null)
-    ),
-    constraint ck_harness_thread_command_cancel_pair check (
-        (cancel_request_id is null) = (cancelled_at is null)
-    ),
-    constraint ck_harness_thread_command_cancel_time check (
-        cancelled_at is null or cancelled_at >= created_at
-    )
-);
-
-create index idx_harness_thread_command_queued
-    on harness_thread_command(thread_id, sequence)
-    where consumed_turn_start_entry_id is null
-      and cancelled_at is null;
-
-create index idx_harness_thread_command_cancel_request
-    on harness_thread_command(thread_id, cancel_request_id, sequence)
-    where cancel_request_id is not null;
-```
-
-不增加 StopReceipt 或 durable Batch 表。
-
-`consumed_turn_start_entry_id` 的最小 FK 只能保证 Entry 存在；HarnessStore 在写入时必须额外验证：
-
-```text
-entry.type == TURN_START
-entry.sessionId == command.thread.sessionId
-TURN_START.ownerThreadId == command.threadId
-```
-
-该不变量由 Store integration/structure test 固化，不为此向 Command 重复增加 `session_id` 或引入数据库 trigger。
-
-### 12.3 Owner relation
-
-```sql
-create table chat_session (
-    session_id uuid primary key,
-    chat_id uuid not null,
-    created_at timestamptz(3) not null,
-    foreign key (chat_id) references chat(id) on delete restrict,
-    foreign key (session_id) references harness_session(id) on delete restrict
-);
-
-create index idx_chat_session_chat
-    on chat_session(chat_id, session_id);
-
-create table canvas_session (
-    session_id uuid primary key,
-    canvas_id uuid not null,
-    created_at timestamptz(3) not null,
-    foreign key (canvas_id) references canvas_document(id) on delete restrict,
-    foreign key (session_id) references harness_session(id) on delete restrict
-);
-
-create index idx_canvas_session_canvas
-    on canvas_session(canvas_id, session_id);
-```
-
-删除 `chat_thread` 和 `canvas_document.thread_id`。
-
-### 12.4 Blob relation
-
-```sql
-create table harness_session_blob_ref (
-    session_id uuid not null,
-    blob_id uuid not null,
-    primary key (session_id, blob_id),
-    foreign key (session_id) references harness_session(id),
-    foreign key (blob_id) references storage_blob(id)
-);
-
-create index idx_harness_session_blob_ref_blob
-    on harness_session_blob_ref(blob_id, session_id);
-```
-
-### 12.5 Canvas 辅助表
-
-Canvas command dedup 只保存判断精确重放所需的 identity：
-
-```sql
-create table canvas_command_dedup (
-    canvas_id uuid not null,
-    command_id uuid not null,
-    request_hash char(64) not null,
-    primary key (canvas_id, command_id),
-    constraint ck_canvas_command_dedup_request_hash check (
-        request_hash ~ '^[0-9a-f]{64}$'
-    ),
-    constraint fk_canvas_command_dedup_canvas foreign key (canvas_id)
-        references canvas_document(id) on delete restrict
-);
-```
-
-表字段固定为 `canvas_id / command_id / request_hash`。精确 replay 保证 command identity 和副作用不重复，响应返回当前 Canvas projection。
-
-Function Run 对 Resource 的生命周期保护统一命名为 pin：
-
-```sql
-create table canvas_function_resource_pin (
-    canvas_id uuid not null,
-    node_id uuid not null,
-    request_id uuid not null,
-    role varchar(16) not null,
-    resource_id uuid not null,
-    primary key (canvas_id, node_id, request_id, role, resource_id),
-    constraint ck_canvas_function_resource_pin_role check (
-        role in ('INPUT', 'OUTPUT')
-    ),
-    constraint fk_canvas_function_resource_pin_node
-        foreign key (canvas_id, node_id)
-        references canvas_node(canvas_id, id) on delete restrict
-);
-
-create index idx_canvas_function_resource_pin_resource
-    on canvas_function_resource_pin(canvas_id, resource_id);
-```
-
-`INPUT` / `OUTPUT` pin 只保护 Canvas Resource 生命周期，不参与 Blob refcount；`resource_id` 不增加 FK，因为 OUTPUT 可以是尚未物化的预分配 Resource id。
-
-### 12.6 V1 同步约束
-
-最终 V1、Runtime schema mirror、seed 与 schema tests 必须同时满足：
-
-```text
-canvas_document 不含 thread_id、uk_canvas_document_thread 或对应 FK/comment
-chat_thread 不存在
-canvas_command_dedup 恰含 canvas_id、command_id、request_hash
-canvas_function_resource_ref 不存在
-canvas_function_resource_pin 及 idx_canvas_function_resource_pin_resource 存在
-harness_thread 含 session_id、materialization_hash 与同 Session head FK
-harness_thread_command 含 cancel_request_id 与 cancel receipt index
-chat_session、canvas_session、harness_session_blob_ref 使用本节定义的结构
-```
-
-### 12.7 后端边界映射
-
-- `ThreadState` / `HarnessThreadDTO` 的 `sessionId` 必填；`materializationHash` 只属于领域/Store。PostgreSQL Thread 读写显式携带 `session_id`，head 由同 Session FK 约束。
-- `HarnessRuntime.acceptCommands(target, acceptancePreflight)` 是唯一命令接受原语；Session/Thread materialization 是该原语接受首批 Command 的事务结果。深删除由 Core `HarnessSessionDeletionService` 经 `HarnessStore.Transaction` 按 Work/Invocation/Command/Thread/Entry/Session 顺序编排。
-- complete Compaction checkpoint 可沿 EntryPath 共享；incomplete HISTORY 与 normal continuation obligation 都要求 `TURN_START.ownerThreadId == current Thread`。`CompactionPayload` 只含 `summaryText`，其余冻结事实位于 `TURN_START.compaction`。
-- Chat 与 Canvas 都通过 `StudioCommandAcceptanceService` 绑定 Session ownership；`ChatServiceImpl.deleteChat` 按 `chat_session` 深删 Sessions，Canvas 按 `canvas_session` 深删 Sessions。Canvas document/DTO 不持有 Thread id。
-- 产品写入口为 `POST /api/ai/runtime/command-batches`；Session 查询为 owner-scoped sessions、`GET /api/ai/runtime/sessions/{sessionId}/threads` 与 `/entries`；Thread head 只由 Runtime 沿当前分支推进。
-- Command acceptance DTO 使用 NEW_SESSION / ENTRY / THREAD target；Stop DTO 返回 `status/thread/stoppedTurnEndEntryId/cancelledCommandCount/cancelledUserMessages(sequence,clientCommandId,messageJson)`，无独立 `replayed` 字段。
-- `CanvasCommandDedupDO` / Mapper 只处理 `canvasId/commandId/requestHash`；Function Run 的 Resource 生命周期边使用 `CanvasFunctionResourcePin` 命名。
-
-其余 ModelInvocation、ToolInvocation、Work、Canvas 和 Storage 表继续保持各自职责，不向 Thread 或 Session 复制状态。
-
-## 13. 并发与锁
+## 12. 并发与锁
 
 全局锁序：
 
@@ -1704,9 +1099,9 @@ or FOR UPDATE（归属/删除）
 8. Work producer 与 drain completion 都在 Thread 锁内判断 runnable state，防止 lost wakeup。
 9. version 是对外 projection/CAS fence；每次对外可见 Thread 变化恰好 `+1`。
 
-## 14. 生命周期
+## 13. 生命周期
 
-### 14.1 删除 Thread
+### 13.1 删除 Thread
 
 ```text
 lock Thread
@@ -1719,7 +1114,7 @@ lock Thread
 
 不删除 Session、Entry、SessionBlobRef 或 sibling Thread。删除后仍可从保留 Entry 创建 `ENTRY_DRAFT`，在下一次发送时 materialize 新 Thread。
 
-### 14.2 删除 Session
+### 13.2 删除 Session
 
 ```text
 lock owner relation and Session
@@ -1731,7 +1126,7 @@ lock owner relation and Session
 -> delete Session
 ```
 
-### 14.3 删除 Chat/Canvas
+### 13.3 删除 Chat/Canvas
 
 ```text
 list owned Sessions by UUID
@@ -1742,7 +1137,7 @@ list owned Sessions by UUID
 
 Canvas Resource Blob 和 Session Blob 都通过显式 retain/release 管理，不使用级联删除绕过 refcount。
 
-## 15. Subagent 与 one-shot
+## 14. Subagent 与 one-shot
 
 Task 和 one-shot 使用同一 materialization 事务：
 
@@ -1759,7 +1154,7 @@ Task Session：
 - SYSTEM soft steering 使用只含 SYSTEM CUSTOM_MESSAGE 的 steering batch；
 - resume 时 Agent/Model/Tools 变化与下一条 prompt 放入同一用户输入 batch。
 
-## 16. 代码形态
+## 15. 代码形态
 
 ```text
 AcceptCommandsTarget 三态
@@ -1777,138 +1172,3 @@ canvas_function_resource_pin
 一个 Stop recovery/editor transaction
 一个周期 Storage recovery
 ```
-
-## 17. 数据库引导
-
-```text
-core/src/main/resources/db/migration/V1__schema.sql
-harness/runtime-spring/.../harness-runtime-schema.sql
-dev/e2e/test seed
-PostgreSQL schema structure tests
-```
-
-`V1__schema.sql` 与 runtime schema mirror 定义唯一 schema 基线，profile seeds 只写环境数据；缺失事实使用 NULL。部署不维护增量 schema migration chain 或并行写路径。
-
-## 18. 自动化验收
-
-### 18.1 Materialization
-
-- [ ] `/new` 和 `/tree` 各自产生零数据库写入。
-- [ ] NEW_SESSION 首发原子创建 Session、ROOT、owner relation、Thread、Commands 和 Work。
-- [ ] ENTRY 首发原子创建 Thread、Commands 和 Work，不复制 Entry。
-- [ ] 任一步骤失败都不留下 orphan Session、empty Thread、half-consumed upload。
-- [ ] 两个 EntryDraft 从同一 Entry 并发发送，创建两个共享历史的 Thread。
-- [ ] 相同 materialization request 返回相同接受 identity 和当前 projection。
-- [ ] 相同 Thread id、不同 materialization hash 返回稳定 409。
-- [ ] response 丢失且 upload 已消费后，重试仍命中 replay。
-- [ ] requestHash/materializationHash 由服务端 canonical semantic request 计算。
-- [ ] exact command-set replay 拒绝 partial、缺失、重排、非连续和跨 batch 拼接。
-
-### 18.2 Command 与 Agent Loop
-
-- [ ] 产品输入 batch 恰有一个末尾 user-like message。
-- [ ] SET_* 不能作为产品 settings-only batch 入队。
-- [ ] 已有 Thread 的用户输入 batch 拒绝 SYSTEM CUSTOM_MESSAGE。
-- [ ] steering batch 恰有一条 SYSTEM CUSTOM_MESSAGE。
-- [ ] ThreadProcessor 每次 INPUT 只消费到第一条 user-like message。
-- [ ] 两条 queued 用户消息形成两个独立 INPUT Turn。
-- [ ] leading steering 在下一个 eligible INPUT/CONTINUATION 消费，不越过 queued 用户输入。
-- [ ] SET_* 不在 continuation 中途生效。
-- [ ] TURN_START 冻结完整 BranchSettings，设置命令不产生独立 Entry。
-- [ ] queued SET_ENVIRONMENT 可在 live Turn 期间接受，并只影响下一次 INPUT。
-
-### 18.3 Shared history
-
-- [ ] 任意 committed Entry 可成为 EntryDraft 起点。
-- [ ] foreign open Turn 起点按现有规则 normalization。
-- [ ] 新 Thread 不继承 sibling Model/Tool Invocation。
-- [ ] `TURN_START.ownerThreadId` 始终等于实际执行 Thread。
-- [ ] Stop 不关闭 foreign historical open Turn。
-- [ ] foreign normal Turn usage 不触发新 Thread 的 compaction。
-- [ ] complete Compaction summary 位于 sibling path 时可以共享。
-- [ ] owner Thread 删除后 complete summary 仍可由 sibling 使用。
-- [ ] foreign `TURN_END.continueModel=true` 不产生 CONTINUATION_DUE。
-- [ ] owned `TURN_END.continueModel=true` 继续正常执行。
-- [ ] complete OVERFLOW summary 可共享，但 sibling 不继承 overflow retry。
-- [ ] foreign incomplete HISTORY 不启动 TURN_PREFIX。
-- [ ] owned incomplete HISTORY 机械启动冻结的 TURN_PREFIX。
-- [ ] 数据库拒绝 Thread 指向其他 Session 的 Entry。
-- [ ] 删除原 owner Thread 后，Entry 中的 durable ownerThreadId 仍足以完成 normalization。
-- [ ] 不存在任意 head relocation API。
-
-### 18.4 Compaction
-
-- [ ] threshold 使用当前 Thread owned successful usage，且优先于 queued input。
-- [ ] Compaction 消费零 Command，queued input 在完成后继续处理。
-- [ ] FULL 产生 complete payload，HISTORY 产生 incomplete payload，TURN_PREFIX 产生合并后的 complete payload。
-- [ ] complete 只由 phase 派生，payload 不存 redundant boolean。
-- [ ] HISTORY → TURN_PREFIX 复用冻结 cut/prefix anchors，不重新选 cut。
-- [ ] TURN_PREFIX 最终 summary 自包含紧邻匹配 HISTORY + prefix，绝不合并 stale partial。
-- [ ] ToolResult 永不成为 cut point。
-- [ ] `effectiveKeepRecentTokens = min(keepRecentTokens, floor(contextWindow / 2))`；`effectiveReserve = min(16384, maxOutputTokens)`。
-- [ ] Compaction payload 只含 summaryText；anchor、trigger、executionModel 与 phase 冻结在 TURN_START.CompactionStart，complete 由 phase 与 TURN_END outcome 派生。
-- [ ] repeated compaction 从 latest complete cutEntryId 开始。
-- [ ] latest complete summary + cut 后 suffix 是唯一 Provider Context 投影。
-- [ ] internal Compaction Turn、失败 attempt/error 不进入 transcript 或 Provider Context。
-- [ ] failed/stopped Compaction 不 self-wake；owned incomplete HISTORY 恰好 wake 一次 TURN_PREFIX。
-- [ ] Stop 在 owned HISTORY phase gap 写 stopped Compaction barrier，partial 不会在后续输入时复活。
-- [ ] OVERFLOW compact-and-continuation 最多一次。
-- [ ] Stop Compaction 后迟到 Model 结果不能 append。
-- [ ] file sections 由 Runtime 重算，malformed reserved tags fail closed。
-- [ ] complete file sections 每次从 ROOT 到 cut 累计重算。
-- [ ] MANUAL `/compact`：availability 门控与 expectedVersion CAS 缺一不可，THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT disabledReason 确定性返回。
-- [ ] 不存在 summary replacement hook、branch summary 或 copied retainedTail。
-
-### 18.5 Stop
-
-- [ ] 通过 version fence 的 Stop 处理当前 live Turn 和加锁时全部 queued Commands。
-- [ ] deterministic stale 后沿用 stopRequestId、刷新 version 重试。
-- [ ] cancelled user messages 严格按 sequence 返回。
-- [ ] 返回 durable Resource，不返回已消费 upload handle。
-- [ ] queued-only Stop 可通过 command cancelRequestId 精确 replay。
-- [ ] live Stop 可通过 TURN_END 与 command receipt 精确 replay。
-- [ ] replay receipt 字段稳定，Thread 返回当前 projection。
-- [ ] 相同 raw stopRequestId 在两个 Thread 独立工作。
-- [ ] no-op Stop 不写 marker、不增加 version。
-- [ ] Stop 后到达的 Model/Tool 结果不能 append 或 revive Turn。
-- [ ] 前端恢复保留当前草稿、caret、selection、resource order 和可见滚动位置。
-- [ ] 多条消息合并后使用当前 BranchDraft，不伪造逐消息 settings 恢复。
-- [ ] 同一 stopRequestId 的 replay 不重复 prepend。
-
-### 18.6 Upload
-
-- [ ] consume、DELETE、GC 并发时只释放一次 Blob reference。
-- [ ] 周期 GC 在无新上传、无重启时仍清除过期 PENDING/READY upload。
-- [ ] PENDING temp object 在删除最后 durable locator 前完成幂等删除。
-- [ ] temp object 删除成功后数据库回滚仍可在重试中收敛。
-- [ ] durable Blob 通过 DELETING 状态在 crash 后继续 sweep。
-- [ ] 启动恢复排空积压和 DELETING blob。
-- [ ] submission rollback 后 upload 与 Blob retain 完整回滚。
-- [ ] 已消费 upload 过期不影响 Stop Composer recovery。
-
-### 18.7 Frontend 与 API
-
-- [ ] PaneTarget 永远只有三态。
-- [ ] unknown acceptance 只使用 PendingAcceptance sidecar。
-- [ ] 每个 Pane 同时最多一个 PendingAcceptance，未决期间禁止第二次 durable send。
-- [ ] 放弃请求的迟到成功不修改 active PaneTarget。
-- [ ] definite failure 把 frozen draft 前置合并到新草稿，不覆盖用户后续输入。
-- [ ] Chat 与 Canvas 对三种 target 使用同一命令矩阵测试。
-- [ ] `/thread` 严格执行 Session → Thread 两级搜索。
-- [ ] 零 Thread Session 可通过 Tree 进入 EntryDraft。
-- [ ] `/tree` 选择不创建 Thread。
-- [ ] Canvas `/new` 不修改 Canvas Graph。
-- [ ] `/debug` 完整可用（Conversation/Debug 互斥主视图）。
-- [ ] 切换 Pane 不停止后台 Thread，非活动 Thread 的迟到 realtime 不修改 active target。
-
-### 18.8 结构与覆盖率
-
-- [ ] schema 只承载当前 Entity 必需字段：Session/Thread 无 title/status 冗余列，settings 只存在于 BranchSettings。
-- [ ] owner relation 只建立 `session_id` 主键和 owner listing index。
-- [ ] canvas_command_dedup 只包含 canvasId、commandId 和 requestHash。
-- [ ] 资源引用统一使用 canvas_function_resource_pin。
-- [ ] nullable terminal marker 使用 NULL 和 partial index，不使用 sentinel。
-- [ ] Store 拒绝把 Command 标记为由错误类型、错误 Session 或错误 ownerThreadId 的 Entry 消费。
-- [ ] Session delete 与 acceptance/Entry append 并发测试无锁环。
-- [ ] Chat/Canvas runtime command implementation 只有一份。
-- [ ] materialization、Stop、historical normalization 和 upload ownership 核心路径行覆盖率达到 90% 以上。

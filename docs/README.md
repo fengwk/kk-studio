@@ -13,6 +13,8 @@ flowchart TD
     B --> C[architecture.md]
     B --> S[harness-runtime-architecture.md]
     B --> X[harness-runtime-contracts.md]
+    B --> AA[harness-agent-loop.md]
+    B --> AB[session-thread-pane.md]
     B --> E[backend-implementation-design.md]
     B --> F[storage-models.md]
     B --> G[frontend-implementation-design.md]
@@ -34,6 +36,8 @@ flowchart TD
 | [technical-solution/domain-map.md](technical-solution/domain-map.md) | 领域词汇 | Harness/Studio 双域词汇与前后端映射 |
 | [product-design/frontend-design-system.md](product-design/frontend-design-system.md) | 前端设计规范 | 全局 token、AppShell、组件约定 |
 | [technical-solution/harness-runtime-architecture.md](technical-solution/harness-runtime-architecture.md) | Harness 架构事实源 | Entry/Thread/Command/Invocation/Work、Agent Loop 与 processor |
+| [technical-solution/harness-agent-loop.md](technical-solution/harness-agent-loop.md) | Agent Loop 细节 | reducer/planner/materializer/invocation lifecycle 与分类器规则 |
+| [technical-solution/session-thread-pane.md](technical-solution/session-thread-pane.md) | Session/Thread/Pane | 三态 PaneTarget、lazy materialization、SYSTEM steering、Stop/upload 生命周期 |
 | [technical-solution/harness-runtime-contracts.md](technical-solution/harness-runtime-contracts.md) | Runtime 契约 | JSON/DTO、命令 batch、CAS、replay、snapshot 与 wire 契约 |
 | [technical-solution/architecture.md](technical-solution/architecture.md) | 架构总览 | 模块边界、双域不变量与 Studio 当前事实 |
 | [technical-solution/storage-models.md](technical-solution/storage-models.md) | 关系存储摘要 | Chat、Harness（精确 7 表）、Canvas 当前持久化表；最终 schema 为 V1 |

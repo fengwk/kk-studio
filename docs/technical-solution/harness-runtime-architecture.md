@@ -223,7 +223,7 @@ TURN_START(COMPACTION)
   -> TURN_END
 ```
 
-- 配置只有 `compactionKeepRecentTokens=20000` 与可空 `compactionFallbackModel`（`SystemSettings.AiRuntime` 经 `HarnessCompactionConfiguration` 装配）；派生 `effectiveKeepRecentTokens = min(compactionKeepRecentTokens, floor(contextWindow / 2))`、`effectiveReserve = min(16384, maxOutputTokens)`、`softThreshold = max(effectiveKeepRecentTokens, contextWindow - effectiveReserve)`。THRESHOLD 在两类边界可执行：尚有 same-owner `CONTINUATION_DUE` obligation，或 idle/historical Thread 已有真实 queued user demand。上下文量使用最近 compatible owned successful Assistant 的 Provider usage，加该 Assistant 之后仍进入 Provider Context 的可见消息估算（包括 ToolResult）。完全结束的 idle run 不因 soft threshold 自唤醒。terminal `OVERFLOW` 失败仍可触发一次恢复。
+- 配置只有 `compactionKeepRecentTokens=20000` 与可空 `compactionFallbackModel`（`SystemSettings.AiRuntime` 经 `HarnessCompactionConfiguration` 装配；`SystemSettingsSchemaProvider` 定义 UI schema）；派生 `effectiveKeepRecentTokens = min(compactionKeepRecentTokens, floor(contextWindow / 2))`、`effectiveReserve = min(16384, maxOutputTokens)`、`softThreshold = max(effectiveKeepRecentTokens, contextWindow - effectiveReserve)`、`manualMinimum = min(compactionKeepRecentTokens * 2, floor(contextWindow / 2))`、`outputBudget = min(maxOutput, floor(0.8 * effectiveReserve), removedPrefixEstimate)`（TURN_PREFIX 用 `0.5 * effectiveReserve`）。THRESHOLD 在两类边界可执行：尚有 same-owner `CONTINUATION_DUE` obligation，或 idle/historical Thread 已有真实 queued user demand。上下文量使用最近 compatible owned successful Assistant 的 Provider usage，加该 Assistant 之后仍进入 Provider Context 的可见消息估算（包括 ToolResult）。完全结束的 idle run 不因 soft threshold 自唤醒。terminal `OVERFLOW` 失败仍可触发一次恢复。
 - 有效 recent retention 为 `effectiveKeepRecentTokens`；cut point 只允许 USER/ASSISTANT/CUSTOM_MESSAGE/AssistantAborted，绝不切在 ToolResult。retained 边界由 `cutEntryId` 表达，相邻控制元数据从完整 root-to-head path 派生。
 - logical Agent segment 从最近 INPUT 的首个 user-like message 开始，并跨越其后的 CONTINUATION durable turns；最新 complete compaction 是扫描边界。segment 内 cut 产生 split 时，先生成 incomplete HISTORY，再以完全冻结的 `CompactionStart`（phase/trigger/executionModel/cutEntryId/turnPrefixStartEntryId/historyCompactionEntryId）机械生成 TURN_PREFIX；没有先前 history 的 direct TURN_PREFIX 使用固定文本 `No prior history.`。
 - `TURN_START(COMPACTION)...TURN_END` 内全部对话事实对后续 planner、token estimate、Provider Context 与前端 transcript 不可见；停止压缩的 AssistantAborted 不成为未来 cut 或摘要内容。FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止原地立即重试，出现新的普通 turn 后不再充当长期 freshness barrier。
@@ -289,6 +289,26 @@ durable mutation
 
 通知可重复、乱序或丢失；`wake_version` fence 丢失的 wake，periodic poll 与启动/重连 wake 提供最终收敛。claim 成功后必须二选一：worker 已接受 handoff 或立即 reschedule，禁止 claim→reject 热循环。
 
+### 9.1 事件驱动与周期等待边界
+
+| 路径 | 当前机制 | 是否读取内部 durable 状态 | 保留理由 |
+| --- | --- | --- | --- |
+| Harness work dispatch | PostgreSQL `LISTEN/NOTIFY` 唤醒 + 低频 periodic safety poll | safety poll 会 claim work | NOTIFY 不是 durable queue；周期兜底用于启动、丢通知和恢复 |
+| TaskTool child observation | `HarnessThreadChangeSource` version/resync + registry descendant signal | 仅首次与 version wake 读取 snapshot | 主流程事件驱动；取消主动 wake；heartbeat 使用缓存 |
+| Harness one-shot | `HarnessThreadChangeSource` version/resync | 仅首次与 version wake 读取 snapshot | 100ms timed wait 只检查 caller active/deadline，不读取 snapshot |
+| Canvas graph/run | `canvas_version` PostgreSQL notification + `/changes` patch/snapshot | 前端按 version event 拉取 | Function run 不轮询状态 |
+| Application event connection | WebSocket callback + reconnect backoff + 20s heartbeat | 否 | transport liveness 与断线恢复 |
+| Work heartbeat | fixed-rate lease renew | 是，更新 work lease | 分布式 ownership 协议，不是 UI 状态轮询 |
+| Environment 列表 | 页面可见时 10s React Query refresh | 是 | Daemon/进程 liveness 边界；当前 wire 没有 Environment collection version |
+| ComfyUI / Seedance / OpenCLI | adapter 专用 executor 中按外部 API 状态等待 | 否（外部系统） | 外部平台没有可复用的 kk-studio 事件源；均有 timeout、取消和测试 |
+| PostgreSQL listener | `getNotifications(5s)` + 1s reconnect backoff | 仅收到通知后读当前 cursor | socket wait 与重连，不是固定查询业务表 |
+
+不得重新引入以下模式：
+
+- Task/one-shot 无事件时固定读取 Thread snapshot；
+- Canvas RUNNING node 的固定 `refetchInterval`；
+- 用 heartbeat 替代 durable version 或 version 事实。
+
 ## 10. Stop、approval 与 realtime
 
 - Stop 的 durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」（Thread 锁内 Session 级不可变查找）：重试同 raw ID 且 owner Thread 未变时恒命中 replay，`expectedVersion` 只用于未 replay 的首发 CAS；`REPLAYED` 返回与被重放 Stop 相同的 `stoppedTurnEndEntryId`、`cancelledCommandCount` 与 ordered `cancelledUserMessages`。另一 Thread 复用同一 raw id 不产生冲突；IDLE 不写 stop marker，marker-free IDLE 恒不是 REPLAYED。
@@ -301,7 +321,7 @@ durable mutation
 
 - 子 Thread 创建复用 `runtime.acceptCommands(NEW_SESSION, SubagentContext)`：原子创建 Session + ROOT（`SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}`；普通根 depth=1，子 Session 从 2 开始；rootThreadId 在整棵委派树不变）+ Thread（yolo 继承父 Thread）+ Commands（SYSTEM CUSTOM_MESSAGE + USER_MESSAGE prompt）；branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（activeTools = config.tools + skills 非空时内部 `load_skill` + subagents 非空且 depth < maxDepth 时内部 `task`）。
 - 委派权限冻结在父 `ModelRequestSpec.subagentBindings`（Agent 名称 + 描述）；TaskTool 执行只消费该冻结 allowlist，绝不重读父 Agent 配置扩权。运行中由 `TaskTool` 经内部 `HarnessThreadChangeSource` 事件化观察子 Thread（`ChangeGate.awaitChange` 等 version wake 到达才读 snapshot，无固定轮询）：以 durable 指纹（version/head/model/tool siblings）判定活动，idle 超时排除 active tool 时间；约 1s 一次基于缓存 snapshot 发布非 durable `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整 JSON 快照）。活动 task 的进程内 registry 只 relay 扁平 descendant 状态给祖先心跳，使根 Thread 可审批任意深度调用；durable 子 Thread 仍是唯一执行事实。`maxTurns` 软预算达界后每 5 turn 入队 SYSTEM `CUSTOM_MESSAGE` 提醒。
-- 恢复（`session_id` = 子 ThreadId，canonical UUID）要求同 parent/root 归属且子 Thread quiescent，resume 用 THREAD target + settings diff + prompt 的用户输入 batch；Stop/取消子 Thread 保留可恢复 Session（`cancelChild` 复用 `HarnessRuntime.stop` 的 `task-{invocationId}-cancel` stopRequestId）。进程内 `SubagentRunRegistry` 在同一 synchronized reservation 中执行每父直接子级上限 `subagentMaxConcurrency`（默认 10）与同 root tree 总上限 `subagentMaxTotalConcurrency`（null 表示不限），resume 同样占槽并受单飞保护；超限直接拒绝而非排队。两个值由 SystemSettings schema/UI 配置，每个新 turn / 新 task 调用现读；进程重启后的执行事实仍只由 durable Thread 恢复。
+- 恢复（`session_id` = 子 ThreadId，canonical UUID）要求同 parent/root 归属且子 Thread quiescent，resume 用 THREAD target + settings diff + prompt 的用户输入 batch；Stop/取消子 Thread 保留可恢复 Session（`cancelChild` 复用 `HarnessRuntime.stop` 的 `task-{invocationId}-cancel` stopRequestId）。进程内 `SubagentRunRegistry` 在同一 synchronized reservation 中执行每父直接子级上限 `subagentMaxConcurrency`（默认 10）与同 root tree 总上限 `subagentMaxTotalConcurrency`（默认 0；0 表示不额外限制，`SystemSettings.AiRuntime` 的 primitive `int` 必填，非 null），resume 同样占槽并受单飞保护；超限直接拒绝而非排队。两个值由 SystemSettings schema/UI 配置，每个新 turn / 新 task 调用现读；进程重启后的执行事实仍只由 durable Thread 恢复。
 - 子 Agent 的工具审批仍复用既有 `decideToolApproval`（以子 ThreadId 定位），approval 事实/`WAITING_APPROVAL` 语义与父 Thread 完全一致；子工具执行经同一 ToolGateway 管线，权限判定同 YOLO/Allow/Ask/Deny 规则。
 
 相关文档：

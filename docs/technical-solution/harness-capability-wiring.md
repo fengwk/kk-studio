@@ -77,6 +77,49 @@ public interface ProviderFactory {
 
 `GET /api/ai/catalog/tools` 只返回 Agent 可选择的 Platform/Environment 目录。Agent config 保存可选择 Tool 名称集合，不保存 Tool 实例或 Environment 连接。
 
+### Environment 固定目录
+
+`EnvironmentToolCatalog` 固定暴露以下 11 个工具。所有 schema 都拒绝未知字段；相对路径以 invocation `workdir` 为基准，最终 canonical path 必须位于 Environment Root 内。`apply_patch` 不在当前目录中：pi-base 虽提供该 grammar tool，但 kk-studio 当前约束是不新增工具，自动化测试固定断言目录恰为上述 11 项。
+
+| Tool | Required | Optional | 默认/上限 | 当前实现 |
+| --- | --- | --- | --- | --- |
+| `read` | `path` | `workdir`, `offset`, `limit` | offset=1；limit=200，最大 2000 | 文本窗口、编码/BOM、2000 字符单行截断与 pi-base 对齐；binary 通过 kk-studio Resource result 外部化；LSP header 反映可选 bridge 配置 |
+| `write` | `path`, `content` | `workdir` | 无隐式 cwd 之外的路径 | 保留现有编码/BOM，父目录按需创建，同文件 mutation 串行 |
+| `edit` | `path`, `old_string`, `new_string` | `replace_all`, `workdir` | `replace_all=false` | 在 LF 归一空间精确匹配；保留未修改区域 CR/LF/CRLF；拒绝不唯一、重叠和 no-op，与 pi-base 编辑语义对齐 |
+| `bash` | `command` | `workdir`, `timeout_seconds` | 120s，最大 3600s | 流式 partial、exit code、超时、取消和进程树终止；本地 Daemon 明确使用 bash |
+| `grep` | `pattern`, `path` | `workdir`, `include`, `ignore_case`, `literal`, `multiline`, `limit`, `timeout_seconds` | limit=100；timeout=15s | Java NIO/regex 实现，不依赖宿主 `rg`；通过 JGit 遵守 `.gitignore`、跳过 binary、支持取消 |
+| `find` | `pattern`, `path` | `workdir`, `limit`, `timeout_seconds` | limit=1000；无默认 timeout | `path` 必填，不存在隐式搜索根；Java glob、JGit `.gitignore`、稳定排序与取消 |
+| `lsp_goto_definition` | `path`, `line` | `workdir`, `character` | character=0；2min | schema 与 pi-base 对齐；通过可选本机 LSP bridge，缺失时明确失败 |
+| `lsp_workspace_symbols` | `path`, `query` | `workdir`, `limit` | limit=50，最大 500；2min | schema 与 pi-base 对齐；通过同一 LSP bridge |
+| `lsp_java_decompile` | `path`, `target` | `workdir` | 2min | 优先 LSP bridge；可解析 class 目标允许 `javap` fallback |
+| `mcp_list_tools` | 无 | `server` | 30s | kk-studio 固定 MCP bridge；返回 server 状态与 READY tool schema |
+| `mcp_call_tool` | `server`, `tool`, `arguments` | 无 | 5min | kk-studio 固定 MCP bridge；`arguments` 必须为 object，保留 upstream text/JSON/error |
+
+主要契约测试：
+
+- `harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalogSchemaTest.java`
+- `harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsTest.java`
+- `harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsEdgeTest.java`
+- `harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpBridgeToolsTest.java`
+
+### Platform 与 plugin tools
+
+| Tool | Schema | Visibility / side effect | 当前边界 |
+| --- | --- | --- | --- |
+| `task` v1 | required `subagent_type`, `prompt`; optional `maxTurns`, `session_id` | internal `PLATFORM` / `NON_IDEMPOTENT` | schema、resume、并发、深度、result envelope 与 pi-base 对齐；durable Thread 观察由 version event 驱动，1s status heartbeat 复用缓存 snapshot |
+| `load_skill` v1 | required `name` | internal `PLATFORM` / `READ_ONLY` | kk-studio 既有能力；只加载当前 invocation 已选且具有 Environment body 的 skill，取消会中断 pending future |
+| `create_goal` v2 | required `objective`; optional `tokenBudget` | selectable plugin / `IDEMPOTENT` | 模型可见 schema 与 pi-base 对齐；写入当前 branch durable snapshot |
+| `get_goal` v2 | 无参数 | selectable plugin / `READ_ONLY` | 读取当前 branch 最新 Goal |
+| `update_goal` v2 | required `status`, `reason`; status=`complete\|blocked` | selectable plugin / `IDEMPOTENT` | 模型可见终态 schema 与 pi-base 对齐 |
+
+Goal 插件只实现上述模型工具的 durable snapshot 协议，不实现 pi-base host 侧 `/goal` 命令、pause/resume 或自动 continuation；这些不属于当前 kk-studio ToolCatalog。
+
+主要契约测试：
+
+- `harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/subagent/TaskToolTest.java`
+- `harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/skill/LoadSkillToolTest.java`
+- `plugins/goal/src/test/java/fun/fengwk/kkstudio/plugin/goal/GoalPluginTest.java`
+
 `CoreToolGateway` 是 `ToolGateway` 端口适配：`preflight` 同步无副作用（`Allow` / `Ask(reason)` / `Deny(error)`），外部 I/O 前完成权限判定与机械校验；两阶段激活与 Model 同构；普通 `PLATFORM` binding 走本地 registry，`ENVIRONMENT` binding 经 `RemoteToolTransport`（`EnvironmentDaemonGateway`）发往冻结 route；带 plugin binding 的 `PLATFORM` Tool 按冻结 contribution 精确恢复并同步执行。terminal success 在回调桥内先校验插件 intents，再经 `ToolResultExternalizer` 做瞬时 Resource 外部化（reference plan → put → exact ref check），最后把 `ToolSuccess(result, effects)` 交给 ToolProcessor 原子落 terminal 事实。Tool outcome Entry 写入前，`ToolResultHistoryMaterializer` 再在同一 Store 事务把 Resource 摄入全局 Blob 并转换为 `resource(blobId,name,preview)`。
 
 ### Trusted plugin

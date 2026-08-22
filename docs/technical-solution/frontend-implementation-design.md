@@ -323,6 +323,22 @@ frontend/src
 └── styles.css
 ```
 
+### 13.0 Hook 职责边界
+
+| 模块 | 职责 |
+| --- | --- |
+| `useBoundBranchPanel` | Bound Thread controller、branch base/draft、queued SET_* projection、原子 message batch、Thread rebind fail-closed |
+| `useBoundThreadPanelViews` | Conversation/Debug 互斥视图、system prompt preview、Event detail 与公共 Footer/transcript 投影 |
+| `useComposerFocus` | focus retry、Escape、interaction takeover、pending settle 后恢复与 timer cleanup |
+| `useComposerSubmissionSettle` | submitted draft、失败恢复、detached upload 挂起与释放 |
+| `useFunctionConfigSync` | Function config debounce、并发 flush 去重与失败保留 |
+| `useCanvasFunctionRun` | start/cancel、本地 basis-CAS 投影与 response-lost fallback |
+| `useCanvasTransformBatch` | transform debounce、in-flight owner、失败恢复、显式 group decision |
+| `useCanvasUploadPipeline` | hash/reserve/PUT/complete、进度、alias 生命周期与 Resource node command |
+| `useCanvasController` | Canvas query/queue 与上述 hooks 的 façade 编排；不内联 timer/ref-heavy 子状态机 |
+
+Bound Thread、Composer 与 Canvas 的新状态机必须优先在独立 hook 测试中举证，再由场景组件测试证明 wiring；禁止仅用源码字符串或行数断言代替行为验证。
+
 ### 13.1 Canvas 内容优先交互
 
 - `CanvasStage` 是 React Flow 投影与单一右键菜单所有者；选择状态仍唯一落在
@@ -353,5 +369,15 @@ npm test
 npm run lint
 npm run build
 ```
+
+后端验证入口：
+
+```bash
+env JAVA_HOME=$JAVA_HOME_21 mvn test -B -fae      # Java 全仓
+env JAVA_HOME=$JAVA_HOME_21 mvn validate           # 格式/架构（Spotless + Checkstyle）
+./scripts/e2e.sh                                   # 免费 API E2E；--ui / --with-tools / --real 显式开启其余矩阵
+```
+
+E2E 矩阵与开关见 [e2e-regression.md](e2e-regression.md)；真实 Provider case 执行前硬校验 `minimax/MiniMax-M2.7`。
 
 前端 API 契约重点覆盖名称身份、Model ref、命令 batch 严格 wire、CAS、exact replay 与 409 rebuild、approval/stop 身份、snapshot-first 事件通道、attempt failure 的 active/durable/terminal 投影、stale overlay fence、whitespace 保真与 terminal 投影；task 呈现契约（`task.status` 心跳解析/规范化去重、`<task>` envelope 解析、renderer 分发、TaskStatusWidget 聚合与子审批转发、浏览器通知与浏览器偏好）由前端单测覆盖，不依赖真实付费模型。
