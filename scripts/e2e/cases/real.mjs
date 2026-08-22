@@ -266,7 +266,7 @@ registerCase({
   level: 'L2',
   title: '运行中一次原子 batch 入队两条消息合并收割',
   requires: ['real'],
-  docs: '首轮流式执行期间用最新快照 cursor 一次原子 batch 入队两条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant MESSAGE；queuedCommands 最终清空',
+  docs: '初始 NEW_SESSION 的 rootSettings 直接使用 seed Agent（真实启动，不触发 fabricated PLANNING_FAILED）；首轮流式执行期间用最新快照 cursor 一次原子 batch 入队两条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant MESSAGE；queuedCommands 最终清空',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
@@ -288,10 +288,8 @@ registerCase({
       owner: chatOwner(chat.id),
       sessionId,
       threadId: tid,
-      rootSettings: branchSettingsOf(
-        { name: `e2e-queue-missing-${cid().slice(0, 8)}` },
-        modelSelectionOf(ctx),
-      ),
+      // 初始 NEW_SESSION 直接使用可解析 seed Agent：真实启动，不触发 fabricated PLANNING_FAILED。
+      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx)),
       yoloEnabled: false,
       commands: [userMessageCommand(`queue materialize ${cid().slice(0, 8)}`, cid())],
     })
@@ -404,7 +402,7 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '仅 minimax/MiniMax-M2.7：首个非空文本 delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '仅 minimax/MiniMax-M2.7：初始 NEW_SESSION 的 rootSettings 直接使用 seed Agent（真实启动，不触发 fabricated PLANNING_FAILED）；首个非空文本 delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
@@ -431,10 +429,8 @@ registerCase({
       owner: chatOwner(chat.id),
       sessionId,
       threadId: tid,
-      rootSettings: branchSettingsOf(
-        { name: `e2e-stop-partial-missing-${cid().slice(0, 8)}` },
-        modelSelectionOf(ctx),
-      ),
+      // 初始 NEW_SESSION 直接使用可解析 seed Agent：真实启动，不触发 fabricated PLANNING_FAILED。
+      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx)),
       yoloEnabled: false,
       commands: [userMessageCommand(`stop partial materialize ${cid().slice(0, 8)}`, cid())],
     })
@@ -804,8 +800,8 @@ registerCase({
   id: 'tool.read_turn',
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
-  requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（冻结 EnvironmentBinding、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节',
+  requires: ['real', 'tools', 'canvas-storage'],
+  docs: '仅 minimax/MiniMax-M2.7 + backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（冻结 EnvironmentBinding、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)

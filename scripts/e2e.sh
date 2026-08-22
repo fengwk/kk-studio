@@ -6,7 +6,7 @@
 #   ./scripts/e2e.sh --rebuild        # 强制 Java 21 clean package 并重启 backend/frontend
 #   ./scripts/e2e.sh --real           # + 真 MiniMax 文本轮次（需 TEST_MINIMAX_*）
 #   ./scripts/e2e.sh --real --with-branch
-#   ./scripts/e2e.sh --real --with-tools
+#   ./scripts/e2e.sh --real --with-tools --with-canvas-storage  # 真实 Tool turn（Resource 外部化需 S3）
 #   ./scripts/e2e.sh --ui              # + Playwright UI E2E（截图进报告）
 #   ./scripts/e2e.sh --list           # 只打印矩阵，不执行
 #
@@ -51,7 +51,7 @@ Options:
   --real            Enable real provider cases (requires TEST_MINIMAX_BASE_URL/API_KEY)
   --with-tools      Enable daemon/tool cases (starts/reuses daemon)
   --with-branch     Enable branch usage cases (implies --real)
-  --with-canvas-storage  Enable Canvas Resource reserve contract (backend S3 config required)
+  --with-canvas-storage  Enable Canvas Resource/Blob storage contract (backend S3 config required; also a precondition of real tool.read_turn)
   --with-canvas-function Enable free fake Canvas Function E2E (implies storage + rebuild)
   --ui              Enable Playwright UI E2E (screenshots in report)
   --only <caseId>   Run one case id (repeatable)
