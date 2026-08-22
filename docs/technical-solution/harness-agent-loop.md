@@ -1,26 +1,18 @@
-# Harness Runtime 长程 Agent Loop
+# Harness Agent Loop
 
-本文定义 Harness Runtime Agent Loop 当前生效的 durable reducer、持久化形状、执行协议与验证约束；未覆盖的能力继续遵循其他 Harness Runtime 文档。
+本文定义 Harness Runtime Agent Loop 当前生效的 durable reducer、reducer/planner/materializer/invocation lifecycle 细节；模块、Entry 事实与并发协议见 [harness-runtime-architecture.md](harness-runtime-architecture.md)，公共契约见 [harness-runtime-contracts.md](harness-runtime-contracts.md)，存储与 Work/Redis 见 [harness-storage-runtime.md](harness-storage-runtime.md)。
 
-## 1. 目标
+## 1. Reducer 模型
 
-Harness Runtime 收敛为 durable event-driven reducer：
+Harness Runtime 是 durable event-driven reducer：
 
 ```text
-Entry
-  = append-only 永久语义事实
-
-ThreadState
-  = 当前 branch cursor 与 Thread 控制状态
-
-ThreadCommand
-  = durable 输入 mailbox 与幂等记录
-
+Entry           = append-only 永久语义事实
+ThreadState     = 当前 branch cursor 与 Thread 控制状态
+ThreadCommand   = durable 输入 mailbox 与幂等记录
 ModelInvocation / ToolInvocation
-  = 当前 turn 尚未被 Entry 完整吸收的 workflow state
-
-Work
-  = 唯一调度 mailbox
+                = 当前 turn 尚未被 Entry 完整吸收的 workflow state
+Work            = 唯一调度 mailbox
 ```
 
 核心规则：
@@ -29,7 +21,7 @@ Work
 one THREAD Work claim = one classified action
 ```
 
-ThreadProcessor 不在一次 claim 中提交后重新读取自身刚写入的状态，也不维护内部 run loop。任何后续动作通过 durable Work wake 驱动。
+ThreadProcessor 不在一次 claim 中提交后重新读取自身刚写入的状态，也不维护内部 run loop；任何后续动作通过 durable Work wake 驱动。
 
 长程运行依赖以下既有边界：
 
@@ -40,7 +32,7 @@ ThreadProcessor 不在一次 claim 中提交后重新读取自身刚写入的状
 - Tool permission、YOLO、非幂等 Tool 不重放规则保持 fail-closed。
 - Context compaction 控制模型上下文大小，不删除 Entry 历史。
 
-## 2. 总体结构
+### 1.1 总体流程
 
 ```mermaid
 flowchart TD
@@ -63,7 +55,7 @@ flowchart TD
     O -->|continueModel| B
 ```
 
-## 3. Durable 数据职责
+### 1.2 Durable 数据职责
 
 | 数据 | 职责 | 生命周期 |
 | --- | --- | --- |
@@ -76,26 +68,9 @@ flowchart TD
 
 Closed turn 的展示、Provider context、compaction、branch relocation 与审计不得查询历史 Invocation。
 
-## 4. Entry 与 Turn 元数据
+## 2. TurnStart 元数据
 
-### 4.1 Entry Tree
-
-Entry 继续使用：
-
-```java
-public record Entry(
-    UUID id,
-    UUID sessionId,
-    UUID parentEntryId,
-    EntryPayload payload,
-    Instant createdAt) {}
-```
-
-Entry append-only；`headEntryId` 唯一确定 root-to-head path。
-
-### 4.2 TurnStartPayload
-
-`TURN_START` 增加 closed-turn correctness 所需的最小元数据：
+`TURN_START` 携带 closed-turn correctness 所需的最小元数据：
 
 ```java
 public record TurnStartPayload(
@@ -116,8 +91,6 @@ public record TurnStartPayload(
 
 候选 path 在 Resolver 调用前可以使用 `contextWindow=null`；第二阶段 commit 在 Entry 插入前以 Resolver 结果补齐。
 
-### 4.3 Closed-turn 事实
-
 Closed turn 所需事实来源固定为：
 
 | 事实 | Entry 来源 |
@@ -133,7 +106,7 @@ Closed turn 所需事实来源固定为：
 | compaction split / summary | `CompactionPayload` |
 | turn outcome / continuation | `TurnEndPayload` |
 
-## 5. Thread 控制面与 YOLO
+## 3. Thread 控制面与 YOLO
 
 YOLO 是 Thread 级控制流策略：
 
@@ -150,15 +123,9 @@ public record ThreadState(
     Instant updatedAt) {}
 ```
 
-### 5.1 直接更新
+### 3.1 直接更新
 
-YOLO 是直接控制操作，不经过 ThreadCommand 排队。Runtime 提供：
-
-```text
-setThreadYolo(threadId, expectedVersion, enabled)
-```
-
-事务语义：
+YOLO 是直接控制操作，不经过 ThreadCommand 排队。Runtime 提供 `setThreadYolo(threadId, expectedVersion, enabled)`，事务语义：
 
 ```text
 lock Thread
@@ -170,7 +137,7 @@ lock Thread
 
 `ThreadCommand` 六类中不含 YOLO 命令；Command codec/DTO、TurnPlan、TurnResolver 与 ResolvedRequestValidator 都不携带 YOLO，`ModelRequestSpec` / `ModelInvocation` / `ToolInvocation` 无 YOLO 副本。Resolver 两阶段 commit 使用第二事务中锁到的 `ThreadState.yoloEnabled` 更新 Thread；YOLO 变化不影响 ModelRequestSpec，因此不使进行中的 Resolver plan 失效。
 
-### 5.2 Tool permission 检查
+### 3.2 Tool permission 检查
 
 ToolProcessor 在每次 READY Tool 的 preflight 边界读取已锁定的当前 Thread：
 
@@ -190,9 +157,9 @@ YOLO 的控制语义：
 - 已经进入 WAITING_APPROVAL 的 Tool 保留原审批请求，不因打开 YOLO 自动重写审批事实。
 - 每次 preflight 以锁内读取的 YOLO 快照做一次控制决定；后续切换不追溯已完成的 admission。
 
-## 6. Compact ModelRequestSpec
+## 4. Compact ModelRequestSpec
 
-### 6.1 持久化形状
+### 4.1 持久化形状
 
 ModelInvocation 持久化紧凑 `ModelRequestSpec`，不持久化完整 ProviderRequest：
 
@@ -219,7 +186,7 @@ Spec 之外不持久化：
 - attempt-only Resource URL
 - compaction metadata（压缩调用由 basis EntryPath 末尾 owned `TURN_START.compaction` / `CompactionStart` 识别）
 
-### 6.2 字段语义
+### 4.2 字段语义
 
 #### ProviderType
 
@@ -227,50 +194,19 @@ Provider protocol type 影响 adapter 与 finish/error 归一化，必须随 inv
 
 #### ModelDescriptor / ModelVariant
 
-冻结本次模型调用真正使用的：
-
-- provider/model identity
-- input modalities
-- tool/reasoning capability
-- pricing
-- output/sampling/reasoning 参数
-
-不按名称重新读取可变 Model config。
+冻结本次模型调用真正使用的 provider/model identity、input modalities、tool/reasoning capability、pricing 与 output/sampling/reasoning 参数；不按名称重新读取可变 Model config。
 
 #### preambleMessages
 
-只保存不能从 EntryPath 重建的 Resolver 输出：
-
-- composed Agent system prompt
-- 当前 Environment/date/note 的 prompt 投影
-- skill/subagent prompt 描述
-- Plugin ContextProjector 输出
-
-Resolver 冻结投影结果，不持久化 Agent/Environment/Plugin 的完整输入快照。
-
-Preamble 只允许承载非历史的 bounded 上下文。ContextProjector 不得复制完整 transcript；普通对话历史必须由 EntryPath 重建。
+只保存不能从 EntryPath 重建的 Resolver 输出：composed Agent system prompt、当前 Environment/date/note 的 prompt 投影、skill/subagent prompt 描述与 Plugin ContextProjector 输出。Resolver 冻结投影结果，不持久化 Agent/Environment/Plugin 的完整输入快照。Preamble 只允许承载非历史的 bounded 上下文；ContextProjector 不得复制完整 transcript，普通对话历史必须由 EntryPath 重建。
 
 #### toolBindings
 
-完整 ToolBinding 是本次调用唯一 tool contract，同时用于：
-
-- Provider tool definition
-- ModelResponsePlanner schema validation
-- renderer
-- side-effect/retry policy
-- execution name/version
-- Environment route
-- Plugin provenance/state access
-
-Provider tool definitions每次由 bindings 派生，不保存第二份。
+完整 ToolBinding 是本次调用唯一 tool contract，同时用于 Provider tool definition、ModelResponsePlanner schema validation、renderer、side-effect/retry policy、execution name/version、Environment route 与 Plugin provenance/state access。Provider tool definitions 每次由 bindings 派生，不保存第二份。
 
 #### skillBindings / subagentBindings
 
-继续复用现有小型 binding：
-
-- `load_skill` 从 skillBindings 获取允许的 name/source Environment。
-- `task` 从 subagentBindings 获取允许的 Agent allowlist。
-- Tool 执行期间父 ModelInvocation 保留，因此不向每个 ToolInvocation 复制这些共享事实。
+继续复用现有小型 binding：`load_skill` 从 skillBindings 获取允许的 name/source Environment；`task` 从 subagentBindings 获取允许的 Agent allowlist。Tool 执行期间父 ModelInvocation 保留，因此不向每个 ToolInvocation 复制这些共享事实。
 
 #### cacheControl
 
@@ -278,8 +214,7 @@ Provider tool definitions每次由 bindings 派生，不保存第二份。
 
 #### compaction
 
-压缩元数据不进入 `ModelRequestSpec`。调用是否为 compaction 由 basis EntryPath 末尾的 owned
-`TURN_START.compaction` 识别；冻结形状为：
+压缩元数据不进入 `ModelRequestSpec`。调用是否为 compaction 由 basis EntryPath 末尾的 owned `TURN_START.compaction` 识别；冻结形状为：
 
 ```text
 phase
@@ -292,9 +227,9 @@ historyCompactionEntryId
 
 `CompactionPayload` 只携带 `summaryText`；`messagesToSummarize`、`previousSummary` 与最终 prompt 都是瞬时重建事实。phase/trigger/executionModel 与 cut/prefix/history anchors 位于 `TURN_START.compaction`，complete 由 phase 与 TURN_END outcome 派生。
 
-## 7. ModelRequestMaterializer
+## 5. ModelRequestMaterializer
 
-新增唯一请求重建边界：
+唯一请求重建边界：
 
 ```java
 public final class ModelRequestMaterializer {
@@ -307,7 +242,7 @@ public final class ModelRequestMaterializer {
 }
 ```
 
-### 7.1 普通请求
+### 5.1 普通请求
 
 ```text
 preambleMessages
@@ -326,7 +261,7 @@ preambleMessages
 
 `MODEL_ATTEMPT_FAILURE`、`ASSISTANT_ERROR`、Turn boundary 与内部 COMPACTION turn 不进入 Provider messages。
 
-### 7.2 Compaction 请求
+### 5.2 Compaction 请求
 
 Compaction materialization 只使用：
 
@@ -338,7 +273,7 @@ EntryPath
 
 它按已冻结的 Entry IDs 取出对应消息，不重新运行 cut selection。
 
-### 7.3 执行边界
+### 5.3 执行边界
 
 ModelRequestMaterializer：
 
@@ -360,7 +295,7 @@ record Execution(
 
 每次 retry 重新从相同 `basisHeadEntryId + ModelRequestSpec` materialize logical request。Provider resolution 必须校验当前 Provider 行的 type 等于 execution 中冻结的 type；credential、endpoint、timeout 与 Resource signed URL 保持 attempt-time live。
 
-## 8. Canonical generation model
+## 6. Canonical generation model
 
 Canonical stop reason：
 
@@ -395,19 +330,11 @@ public record ProviderResponse(
 - Provider null/unknown/impossible terminal shape 不构成成功 ProviderResponse。
 - Stream 中的 tool-call fragment 只属于 attempt-local partial；只有最终 ProviderResponse 中经过完整校验的 calls 可以创建 ToolInvocation。
 
-Provider adapter 各自显式做 finish mapping；公共层不得根据 `hasToolCalls` 覆盖 generation stop reason。
+Provider adapter 各自显式做 finish mapping；公共层不得根据 `hasToolCalls` 覆盖 generation stop reason。`ProviderErrorKind.INVALID_RESPONSE` 复用 Model InvocationRetryPolicy；retry 耗尽后 ModelInvocation FAILED。
 
-增加：
+## 7. ModelResponseValidator 与 Planner
 
-```java
-ProviderErrorKind.INVALID_RESPONSE
-```
-
-它复用 Model InvocationRetryPolicy；retry 耗尽后 ModelInvocation FAILED。
-
-## 9. ModelResponseValidator 与 Planner
-
-### 9.1 Validator
+### 7.1 Validator
 
 ModelResponseValidator 只校验 canonical response：
 
@@ -421,9 +348,9 @@ ModelResponseValidator 只校验 canonical response：
 
 它不做 Tool schema validation，不维护 `toolCalls <=> TOOL_CALLS` 约束。
 
-### 9.2 Planner
+### 7.2 Planner
 
-新增纯函数：
+纯函数：
 
 ```java
 public final class ModelResponsePlanner {
@@ -470,16 +397,9 @@ MODEL_OUTPUT_TRUNCATED
 
 `ToolResult` 不携带 terminate 标志。普通 Tool batch 完成后固定反馈模型；主 Agent 是否结束只由后续模型结果或显式控制事实决定。
 
-TurnEnd 增加并使用稳定原因：
+TurnEnd 使用稳定原因 `OUTPUT_TRUNCATED` / `CONTENT_FILTERED`：`LENGTH` 无 calls 使用 FAILED/OUTPUT_TRUNCATED；`FILTERED` 使用 FAILED/CONTENT_FILTERED。
 
-```text
-OUTPUT_TRUNCATED
-CONTENT_FILTERED
-```
-
-`LENGTH` 无 calls 使用 FAILED/OUTPUT_TRUNCATED；`FILTERED` 使用 FAILED/CONTENT_FILTERED。
-
-## 10. ToolInvocation
+## 8. ToolInvocation
 
 ToolInvocation 直接持有 observed call 与可空 binding：
 
@@ -527,7 +447,7 @@ Unknown tool 的 durable renderer fallback 固定为 `tool`。
 
 ToolInvocation 不持久化 `resultEntryId`。Terminal Tool 行始终表示 outcome 尚未进入 ToolResult Entry；batch apply 后物理删除。
 
-## 11. ModelInvocation 生命周期
+## 9. ModelInvocation 生命周期
 
 ModelInvocation 持久化：
 
@@ -571,7 +491,7 @@ READY
 
 Closed turn 不保留 ModelInvocation。
 
-## 12. ThreadContextClassifier
+## 10. ThreadContextClassifier
 
 Classifier 只根据当前 head path 和当前 open turn 的 active Invocation 分类：
 
@@ -589,7 +509,7 @@ ToolTerminalPending
 1. 无 open turn：
    - head 是 `continueModel=true` TURN_END -> `ContinuationDue`
    - 否则 -> `IdleOrHistorical`
-2. 有 open turn且本 Thread 无 ModelInvocation -> `IdleOrHistorical`
+2. 有 open turn 且本 Thread 无 ModelInvocation -> `IdleOrHistorical`
 3. Model `resultEntryId == null` 且 head == basis：
    - non-terminal -> `ModelActive`
    - terminal -> `ModelTerminalPending`
@@ -601,11 +521,11 @@ ToolTerminalPending
 
 Tool sibling 只有三种关系：non-terminal（active）、terminal 未 attach（pending batch apply）与已 apply；不存在“terminal 且已 attach”的持久化状态。
 
-## 13. Single-action ThreadProcessor
+## 11. Single-action ThreadProcessor
 
 ThreadProcessor 每次 claim 只执行一次分类动作。
 
-### 13.1 ModelTerminalPending
+### 11.1 ModelTerminalPending
 
 同一事务（锁序含 queued Commands，与 `HarnessRuntime` 全局锁序一致 `Thread → Commands → Model → Work`）：
 
@@ -640,7 +560,7 @@ no-tools 闭合后基于新 head EntryPath 判定下一步，actionable 则同�
 
 完全结束的普通 turn 不因 soft threshold 自唤醒；有 queued user 时仍在 INPUT 前评估 compaction。Tool batch 关闭后固定产生 `CONTINUATION_DUE`，下一 claim 先计算最近 Provider usage + Assistant 后可见消息（含 ToolResult），越阈则 COMPACTION 优先于普通 CONTINUATION。threshold FULL complete 消费 freshness；FAILED/STOPPED/CANCELLED/incomplete 压缩不原地重试；HISTORY 下一阶段、complete OVERFLOW retry 与成功 THRESHOLD 后保留的 same-owner normal continuation 由显式 THREAD wake 驱动。
 
-### 13.2 ToolTerminalPending
+### 11.2 ToolTerminalPending
 
 同一事务：
 
@@ -657,17 +577,15 @@ lock Thread / Model / Tool siblings / Work
 
 下一次 claim 处理 `ContinuationDue`。
 
-### 13.3 ModelActive / ToolActive
+### 11.3 ModelActive / ToolActive
 
 ```text
 complete current THREAD Work
 ```
 
-不 reschedule。Model/Tool terminal 时重新 wake。
+不 reschedule。Model/Tool terminal 时重新 wake。每个 Tool terminal 都可以 request THREAD Work，Work mailbox 负责合并；Thread 提前 claim 时分类为 ToolActive 并完成，不产生业务 mutation。
 
-每个 Tool terminal 都可以 request THREAD Work，Work mailbox 负责合并；Thread 提前 claim 时分类为 ToolActive 并完成，不产生业务 mutation。
-
-### 13.4 ContinuationDue / Input / Compaction
+### 11.4 ContinuationDue / Input / Compaction
 
 单 action 优先级固定：
 
@@ -703,11 +621,9 @@ transaction 2:
   complete THREAD Work
 ```
 
-Resolver Rejected 追加 barrier 闭合 turn 后：有 deferred input 或闭合后 compaction due 时同事务 request THREAD Work；否则结束（不 always wake、不 self-poll）。compaction due 分支同样遵守 threshold FULL 不 spin 规则（complete 已消费 freshness，FAILED/STOPPED 阻止立即原地重试）。
+Resolver Rejected 追加 barrier 闭合 turn 后：有 deferred input 或闭合后 compaction due 时同事务 request THREAD Work；否则结束（不 always wake、不 self-poll）。compaction due 分支同样遵守 threshold FULL 不 spin 规则（complete 已消费 freshness，FAILED/STOPPED 阻止立即原地重试）。第二事务推进 head 时始终保留锁内读取到的当前 Thread YOLO，不写入 speculative plan 中的控制状态。
 
-第二事务推进 head 时始终保留锁内读取到的当前 Thread YOLO，不写入 speculative plan 中的控制状态。
-
-### 13.5 IdleOrHistorical
+### 11.5 IdleOrHistorical
 
 ```text
 complete current THREAD Work
@@ -715,9 +631,9 @@ complete current THREAD Work
 
 不 self-poll。
 
-## 14. ThreadProcessResult
+## 12. ThreadProcessResult
 
-Processor 返回值收敛为：
+Processor 返回值：
 
 ```java
 public enum ThreadProcessResult {
@@ -733,9 +649,9 @@ public enum ThreadProcessResult {
 
 Processor 是 single-action reducer：一次 claim 恰好消费一个分类动作，下一动作由同事务 `requestWork` 驱动；Processor 不在提交后重新读取自身刚写入的状态。
 
-## 15. Work、lease 与 crash recovery
+## 13. Work、lease 与 crash recovery
 
-任何使 Thread 重新 actionable 的 durable mutation，必须在同一事务中 `requestWork(THREAD)`。
+任何使 Thread 重新 actionable 的 durable mutation，必须在同一事务中 `requestWork(THREAD)`：
 
 ```text
 requestWork(THREAD)
@@ -750,15 +666,13 @@ Model/Tool terminal processor：
 - stale/duplicate callback 通过 attempt、terminal state 与 Work lease fence no-op。
 - DISPATCHING/RUNNING 在 lease 过期后按现有 certainty 规则收敛 UNKNOWN；不重放可能产生副作用的 Tool。
 
-Model request materialization发生在有效 MODEL claim 内，但不持有长事务。EntryPath 是 immutable snapshot；Provider stream 在事务外执行。
+Model request materialization 发生在有效 MODEL claim 内，但不持有长事务。EntryPath 是 immutable snapshot；Provider stream 在事务外执行。
 
-## 16. Stop、approval 与直接控制
+## 14. Stop、approval 与直接控制
 
-### 16.1 Stop
+### 14.1 Stop
 
-Stop 的 durable replay key 是「被关闭 turn 的 TURN_START.ownerThreadId + closeRequestId」：Thread 锁内 Session 级
-不可变查找使 owning Thread 的当前 head 已推进到后续 descendant 时仍能精确 replay，另一 Thread 的相同 raw id 被忽略
-而非冲突；version 只用于未 replay 的首发 CAS。
+Stop 的 durable replay key 是「被关闭 turn 的 TURN_START.ownerThreadId + closeRequestId」：Thread 锁内 Session 级不可变查找使 owning Thread 的当前 head 已推进到后续 descendant 时仍能精确 replay，另一 Thread 的相同 raw id 被忽略而非冲突；version 只用于未 replay 的首发 CAS。
 
 Stop 成功关闭 live turn 的同一事务必须：
 
@@ -774,26 +688,21 @@ delete ToolInvocations
 delete ModelInvocation
 ```
 
-Work mailbox 的净化必须放在展开（append / advance / 删除 Invocation）之前：`deleteWork` 的 owner 校验会反查对应
-Model/Tool Invocation 行，而关闭 live turn 时这些行也要被物理删除。在 Invocation 行删除后删除指向它们的
-mailbox 会形成悬挂 mailbox，Store 刻意以 IAE 拒绝该状态。整个 Stop 仍是单事务，Work 提前删除不改变原子性，
-锁顺序保持 THREAD < MODEL < TOOL。
+Work mailbox 的净化必须放在展开（append / advance / 删除 Invocation）之前：`deleteWork` 的 owner 校验会反查对应 Model/Tool Invocation 行，而关闭 live turn 时这些行也要被物理删除。在 Invocation 行删除后删除指向它们的 mailbox 会形成悬挂 mailbox，Store 刻意以 IAE 拒绝该状态。整个 Stop 仍是单事务，Work 提前删除不改变原子性，锁顺序保持 THREAD < MODEL < TOOL。
 
 事务提交后再 best-effort 取消本地 Provider/Tool handle。迟到 callback 因 Invocation 已删除或 claim 失效而 no-op。
 
 删除 ModelInvocation 前必须执行与现有 `ModelAttemptMaterialization` 等价的严格校验，确保 EntryPath 中的 failed attempts、terminal partial/error 与 invocation 完全一致。实现可以使用专用 consume primitive，也可以在同一事务内先 attach 再 delete；不得通过直接 delete 绕过该校验。
 
-### 16.2 Approval
+### 14.2 Approval
 
-Approval decisionId replay 与 ALLOW/DENY 语义保持不变。
+Approval decisionId replay 与 ALLOW/DENY 语义保持不变。YOLO 不重写已创建的 WAITING_APPROVAL；审批事实只能由 approval API 决定。
 
-YOLO 不重写已创建的 WAITING_APPROVAL；审批事实只能由 approval API 决定。
-
-### 16.3 Head 推进
+### 14.3 Head 推进
 
 `/tree` 选择历史 Entry 只把 Pane 切换为 `ENTRY_DRAFT(sessionId,startEntryId)`（零数据库写入）；第一次 durable batch 以 ENTRY target 提交时原子 materialize 一个新 Thread（`headEntryId = startEntryId`，不复制 Entry、不修改任何已有 Thread）。现有 Thread 的 head 只能由 Runtime 在 turn/compaction/stop 执行中推进到当前 head 的新 descendant；active invocation 期间不允许任何形式的 head 变更（relocation）。
 
-## 17. Command 与长程输入
+## 15. Command 与长程输入
 
 `ThreadCommand` 固定为六类：
 
@@ -817,11 +726,11 @@ SET_ACTIVE_TOOLS
 
 INPUT 从 historical open turn 分支继续时，继续使用 Entry-only normalization：对 Assistant 中缺失结果的 tool calls 追加 synthetic UNKNOWN/HISTORY_CUT ToolResult，再追加 CANCELLED TURN_END。Normalization 不读取旧 Invocation 或 descendant outcome，保证 materialized Provider history 不出现悬空 tool call。
 
-## 18. Durable compaction
+## 16. Durable compaction
 
 Closed-turn compaction 不得读取历史 Invocation。
 
-### 18.1 Threshold
+### 16.1 Threshold
 
 从最新 closed turn 向前扫描：
 
@@ -830,19 +739,19 @@ Closed-turn compaction 不得读取历史 Invocation。
 - 遇到 `ownerThreadId != currentThreadId` 的 shared turn 时停止向前借用 usage（Entry-only 事实，不查询其它 Thread 的 Invocation 行）。
 - threshold 为 `softThreshold = max(effectiveKeepRecentTokens, contextWindow - effectiveReserve)`，其中 `effectiveKeepRecentTokens = min(keepRecentTokens, floor(contextWindow / 2))`、`effectiveReserve = min(16384, maxOutputTokens)`（配置只有 `keepRecentTokens` 默认 20000 与可空 `fallbackModel`）。
 
-### 18.2 Overflow
+### 16.2 Overflow
 
 最新本 Thread turn 的 AssistantError code 为 OVERFLOW 时，可启动一次 durable overflow compaction。Complete overflow compaction 产生一次 immediate continuation；再次 overflow 后保留失败并停止该次恢复链。
 
-### 18.3 Split turn
+### 16.3 Split turn
 
 HISTORY/TURN_PREFIX 继续使用 CompactionStart 冻结的 Entry IDs（`cutEntryId` / `turnPrefixStartEntryId` / `historyCompactionEntryId`）。HISTORY 成功后下一阶段由显式 THREAD self-wake 驱动。
 
-### 18.4 Manual compaction
+### 16.4 Manual compaction
 
 `compactThread(CompactThreadCommand{threadId, expectedVersion})`：锁 Thread 校验 expectedVersion → `manualDecision` 计算 availability（THREAD_BUSY / OWNERSHIP_BARRIER / NO_RESOLVED_CONTEXT / MODEL_CHANGED / BELOW_MINIMUM / NOTHING_TO_COMPACT）→ 以 `CompactionTrigger.MANUAL` 构建 plan → 事务外 Resolver → 第二事务提交 COMPACTION Turn + MODEL Work（commitManual 再次校验 version + source head + queued 快照，消费零 Command）。与自动触发共用 MODEL Work、一次 fallback 与 crash recovery。snapshot 的 `manualCompaction` availability 是瞬时 advisory sidecar，提交成功以 expectedVersion CAS 守护。
 
-### 18.5 Context projection
+### 16.5 Context projection
 
 下一次正常 ModelRequestMaterializer：
 
@@ -850,7 +759,7 @@ HISTORY/TURN_PREFIX 继续使用 CompactionStart 冻结的 Entry IDs（`cutEntry
 - 从 `cutEntryId` 本身继续保留上下文。
 - 屏蔽完整 COMPACTION control turn。
 
-## 19. Subagent
+## 17. Subagent
 
 `task` 继续作为普通 PLATFORM Tool：
 
@@ -859,7 +768,7 @@ HISTORY/TURN_PREFIX 继续使用 CompactionStart 冻结的 Entry IDs（`cutEntry
 - 父 ModelInvocation 保留到父 Tool batch TURN_END，因此 task/load_skill 不需要复制共享 request context。
 - 子 Agent 主循环不设硬 max turns；现有 soft reminder budget 保持独立。
 
-## 20. 长程停止条件
+## 18. 长程停止条件
 
 主 Agent 不设置 model turn、tool round 或语义循环次数上限。
 
@@ -876,38 +785,7 @@ Provider fatal error / retry exhausted
 
 不增加 doom-loop fingerprint、连续 LENGTH 阈值、重复 Tool error 阈值或 `shouldStopAfterTurn`。Provider/Tool transport retry 仍受已有 retry policy 限制。
 
-## 21. Persistence shape
-
-表数量固定为七张。
-
-### harness_thread
-
-- 含 `session_id`、`materialization_hash char(64)` 与 `head_entry_id`（同 Session FK `(session_id, head_entry_id)`）。
-- 保留 `yolo_enabled`，由直接控制 API 更新。
-
-### harness_thread_command
-
-- command type 枚举固定为六类（不含 YOLO 命令）。
-
-### harness_model_invocation
-
-- `request` JSON 为严格 `ModelRequestSpec`（不含完整 history messages、YOLO 与 compaction metadata）。
-- `result_entry_id` 只用于当前 open Tool phase。
-- closed turn 后行必须不存在。
-
-### harness_tool_invocation
-
-- `call` 与可空 `binding` 直接保存（或等价严格 JSON 形状）。
-- 不持久化 `result_entry_id`。
-- batch apply 后行必须不存在。
-
-### harness_work
-
-- 协议不变。
-
-schema 以 clean-slate V1 与 profile seeds 为唯一基线；request codec、enum 与配置字段都按当前单一形状严格解析。
-
-## 22. 稳态与写放大
+## 19. 稳态与写放大
 
 一个已关闭 10,000 个 turn 的空闲 Thread：
 
@@ -932,72 +810,3 @@ attempt state
 ```
 
 它不随 Entry 历史长度增长。完整 Provider messages 只在 attempt 内存中存在。
-
-## 23. 验证矩阵
-
-### 23.1 Request materialization
-
-- 在 resolved preamble/tool bindings 相同的前提下，1 条与 10,000 条普通对话 Entry 产生相同大小的持久化 ModelRequestSpec。
-- 相同 basis head/spec 在进程重启后 materialize 相同 logical ProviderRequest。
-- Resolver 后修改 Agent prompt、Environment note、Plugin projector、Model config，不改变既有 invocation 的 preamble/model/variant。
-- Provider type 被同名更新时既有 invocation 确定性拒绝协议漂移。
-- credential/base URL/timeout 更新在下一 attempt 生效。
-- Tool catalog 更新不改变 frozen ToolBinding。
-- Resource URL 每 attempt 刷新，但 durable Resource block 不变。
-- CompactionStart 冻结的 Entry IDs（cut/prefix/history anchor）可从 TURN_START 重建相同 summary input；`CompactionPayload` 只含 `summaryText`。
-
-### 23.2 Provider / Planner
-
-- OpenAI tool calls 与 compatible STOP+calls。
-- MiniMax OTHER+calls 特例只在对应 adapter 生效。
-- OpenAI Responses incomplete。
-- Anthropic tool_use/max_tokens。
-- Gemini STOP/function/MAX_TOKENS/safety。
-- null/unknown/impossible response -> INVALID_RESPONSE retry。
-- COMPLETE no calls / valid / schema-invalid / unknown / mixed batch。
-- LENGTH no calls / LENGTH 20 calls。
-- FILTERED 清空 calls。
-- duplicate IDs / malformed JSON。
-
-### 23.3 Reducer
-
-- one claim one action。
-- Model complete no calls：TURN_END、删除 Model；无 queued/compaction due 时无 Work，否则 THREAD。
-- Model tools：保留 parent Model、创建完整 siblings、只 request READY。
-- all immediate FAILED：THREAD self-wake。
-- mixed batch：按 ordinal 一次 apply。
-- Tool batch TURN_END：删除 children+parent，恰好建立 continuation wake。
-- active/idle claim：complete、不 reschedule。
-- Resolver rejected：deferred input 或闭合后 compaction due 时同事务 THREAD，否则无 Work。
-- compaction HISTORY/TURN_PREFIX 独立 wake。
-- concurrent newer wake 不被旧 complete 删除。
-
-### 23.4 Lifecycle / crash
-
-- commit 前 crash：Entries 与 delete 一起 rollback。
-- commit 后 ack 前 crash：Invocation 已删除，重复 claim 不重复 apply。
-- TurnEnd 后 Model/Tool invocation count 为 0。
-- 最后一轮没有下一 TurnStart 仍完成清理。
-- Stop 与 terminal callback 并发。
-- approval replay。
-- ENTRY target materialization 从 startEntry 创建新 Thread，不复制 Entry、不修改 sibling；head 只沿 descendant 推进。
-- lease expired MODEL/TOOL certainty 语义。
-
-### 23.5 YOLO
-
-- direct update 修改 Thread version，不创建 Command/Entry/Work。
-- Model request/spec 不含 YOLO。
-- Tool READY preflight 读取最新 Thread YOLO。
-- YOLO=true 不调用 permission evaluator。
-- 已 WAITING_APPROVAL 不被切换自动改变。
-- 已 DISPATCHING/RUNNING 不被关闭 YOLO 撤销。
-
-### 23.6 Long-running / subagent
-
-- 长程主 Agent 不因 turn 数停止。
-- bounded dispatcher 下多 Thread 公平 claim。
-- queued user input 在 active Model/Tool 后保持 durable。
-- task/load_skill 在 Tool phase 读取父 compact spec。
-- 子 Thread Stop/approval/compaction 独立恢复。
-
-关键 reducer、planner、materializer 与 invocation lifecycle 路径的 JaCoCo 行覆盖目标不低于 90%；分支覆盖作为辅助指标。
