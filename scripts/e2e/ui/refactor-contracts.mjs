@@ -591,7 +591,7 @@ export async function runRefactorContractMatrix(ui) {
         await shot(caseArt, 'settings-system-conflict-dialog')
         await Promise.all([
           page.waitForEvent('load'),
-          conflictDialog.getByRole('button', { name: '重新加载' }).click(),
+          conflictDialog.getByRole('button', { name: '刷新' }).click(),
         ])
         await page.getByRole('tab', { name: 'AI 运行时' }).click()
         const refreshedBase = page.getByLabel('基础延迟（毫秒）')
@@ -673,8 +673,10 @@ async function waitForQueuedSettingsBatch(apiCtx, threadId, marker, timeoutMs = 
     const userIndex = commands.findIndex((command) =>
       command.type === 'USER_MESSAGE' && command.payloadJson.includes(marker),
     )
-    if (userIndex >= 0) {
-      return commands
+    if (userIndex > 0 && commands[userIndex - 1]?.type === 'SET_MODEL') {
+      // 只返回本次 batch：marker USER 与其紧邻的 preceding SET_MODEL，
+      // 不把更早已入队的 queued message 卷进来。
+      return [commands[userIndex - 1], commands[userIndex]]
     }
     await sleep(50)
   }

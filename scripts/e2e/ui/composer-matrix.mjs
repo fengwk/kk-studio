@@ -269,7 +269,7 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           let composer = await bindBlankComposer(page, goto, fixture)
           const draftKey = composerDraftStorageKey(
-            `chat:${fixture.chat.id}:pane:pane-1`,
+            `agent-pane:CHAT:${fixture.chat.id}:pane:pane-1`,
           )
           const exactDraft = '  first line\nsecond line  '
 
@@ -916,7 +916,7 @@ export async function runComposerMatrix(ui) {
         async (fixture) => {
           const composer = await bindBlankComposer(page, goto, fixture)
           const blankDraftKey = composerDraftStorageKey(
-            `chat:${fixture.chat.id}:pane:pane-1`,
+            `agent-pane:CHAT:${fixture.chat.id}:pane:pane-1`,
           )
           await composer.fill(draft)
           await expectStorage(page, blankDraftKey, draft)
@@ -1124,6 +1124,7 @@ async function createDurableHistoryFixture(
     apiCtx,
     chat: null,
     extraThreadIds: [],
+    sessionId: null,
     threadId: null,
   }
   try {
@@ -1147,6 +1148,7 @@ async function createDurableHistoryFixture(
       commands: [userMessageCommand(messages[0], cid())],
     })
     state.threadId = String(threadId)
+    state.sessionId = String(sessionId)
     for (const message of messages.slice(1)) {
       // 每条 THREAD batch 前等待上一 turn 收敛（missing agent 的 turn 确定性快速失败），
       // 再读最新 cursor；STALE 409 时短暂等待后重读重试（最多 5 次兜底）。
@@ -1220,6 +1222,7 @@ async function createBranchedHistoryFixture(
     apiCtx,
     chat: null,
     extraThreadIds: [],
+    sessionId: null,
     threadId: null,
   }
   try {
@@ -1241,6 +1244,7 @@ async function createBranchedHistoryFixture(
       commands: [userMessageCommand(trunkMessage, cid())],
     })
     state.threadId = String(threadId)
+    state.sessionId = String(sessionId)
     for (let index = 0; index < extraThreadCount; index += 1) {
       const extra = await materializeNewSession(apiCtx, {
         owner,
@@ -1339,6 +1343,7 @@ async function createHoldingQueueFixture(
     mock,
     model: null,
     provider: null,
+    sessionId: null,
     threadId: null,
   }
   try {
@@ -1432,6 +1437,7 @@ async function createHoldingQueueFixture(
       commands: [userMessageCommand(`hold materialize ${suffix}`, cid())],
     })
     state.threadId = String(threadId)
+    state.sessionId = String(sessionId)
     const idle = await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 60_000,
       intervalMs: 100,
@@ -1619,7 +1625,7 @@ async function clearBrowserFixtureState(page, fixture) {
     {
       paneKey: `${CHAT_PANE_STORAGE_PREFIX}${fixture.chat.id}`,
       blankDraftKey: composerDraftStorageKey(
-        `chat:${fixture.chat.id}:pane:pane-1`,
+        `agent-pane:CHAT:${fixture.chat.id}:pane:pane-1`,
       ),
       threadDraftKey: fixture.threadId
         ? composerDraftStorageKey(`thread:${fixture.threadId}`)
@@ -1674,52 +1680,62 @@ async function resolveCatalogTarget(apiCtx) {
  *
  * ChatWorkspacePage 的 save effect 会用首帧 stale state 覆盖 localStorage 中的
  * pane 绑定（chatId 就绪前 default state 抢先写回），因此预写 localStorage 不可靠；
- * 这里走真实 UI 路径：/thread 命令 -> Session 面板 -> Thread 面板搜索 threadId 选择。
- * 面板标题 i18n key 当前缺失（渲染为 raw key），统一用 .thread-selection-panel class 定位。
+ * 这里走真实 UI 路径：/thread 命令 -> 选择 Session 面板 -> 选择 Thread 面板。
+ * 两层面板分别用 fixture.sessionId / fixture.threadId 精确搜索并点击唯一 option。
  */
 async function bindThreadComposer(page, goto, fixture) {
+  assert(fixture.sessionId, `fixture lacks sessionId for ${fixture.chat?.id}`)
   await goto(`/chats/${encodeURIComponent(fixture.chat.id)}`)
   await waitForComposer(page)
   await page.locator('.composer-editor').click()
   await page.locator('.composer-editor').pressSequentially('/thread', { delay: 20 })
   await page.getByRole('listbox', { name: '命令表' }).waitFor({ state: 'visible', timeout: 10_000 })
   await page.getByRole('option', { name: /^thread/ }).first().click()
-  await page.locator('.thread-selection-panel').first().waitFor({ state: 'visible', timeout: 10_000 })
+
+  const sessionPanel = page.getByRole('region', { name: '选择 Session' })
+  await sessionPanel.waitFor({ state: 'visible', timeout: 10_000 })
+  const sessionSearch = sessionPanel.getByRole('searchbox')
+  await sessionSearch.waitFor({ state: 'visible', timeout: 10_000 })
+  await sessionSearch.fill(String(fixture.sessionId))
+  const sessionOptions = sessionPanel.getByRole('option')
   await page.waitForFunction(
-    () => {
-      const panel = document.querySelector('.thread-selection-panel')
-      return panel != null && panel.querySelectorAll('[role="option"]').length > 0
+    ({ panelLabel, expectedId }) => {
+      const region = [...document.querySelectorAll('[role="region"]')]
+        .find((element) => element.getAttribute('aria-label') === panelLabel)
+      const options = region?.querySelectorAll('[role="option"]') ?? []
+      return options.length === 1 && options[0]?.textContent?.includes(expectedId)
     },
-    undefined,
+    { panelLabel: '选择 Session', expectedId: String(fixture.sessionId) },
     { timeout: 10_000 },
   )
-  const sessionCount = await page.locator('.thread-selection-panel').first().locator('[role="option"]').count()
-  assert(sessionCount > 0, `no Session available to bind Thread ${fixture.threadId}`)
-  let bound = false
-  for (let index = 0; index < sessionCount && !bound; index += 1) {
-    const sessionPanel = page.locator('.thread-selection-panel').first()
-    await sessionPanel.locator('[role="option"]').nth(index).click()
-    await page.waitForTimeout(500)
-    const threadPanel = page.locator('.thread-selection-panel').first()
-    const search = threadPanel.getByRole('searchbox')
-    if ((await search.count()) === 0) {
-      // 选中的 Session 无 Thread：Esc 回 Session 面板继续遍历。
-      await threadPanel.press('Escape')
-      await page.waitForTimeout(400)
-      continue
-    }
-    await search.fill(String(fixture.threadId))
-    await page.waitForTimeout(500)
-    const options = threadPanel.locator('[role="option"]')
-    if ((await options.count()) === 1) {
-      await options.first().click()
-      bound = true
-    } else {
-      await threadPanel.press('Escape')
-      await page.waitForTimeout(400)
-    }
-  }
-  assert(bound, `could not bind Thread ${fixture.threadId} via UI picker`)
+  assert(
+    await sessionOptions.count() === 1,
+    `Session search did not narrow to one option for ${fixture.sessionId}`,
+  )
+  await sessionOptions.first().click()
+
+  const threadPanel = page.getByRole('region', { name: '选择 Thread' })
+  await threadPanel.waitFor({ state: 'visible', timeout: 10_000 })
+  const threadSearch = threadPanel.getByRole('searchbox')
+  await threadSearch.waitFor({ state: 'visible', timeout: 10_000 })
+  await threadSearch.fill(String(fixture.threadId))
+  const threadOptions = threadPanel.getByRole('option')
+  await page.waitForFunction(
+    ({ panelLabel, expectedId }) => {
+      const region = [...document.querySelectorAll('[role="region"]')]
+        .find((element) => element.getAttribute('aria-label') === panelLabel)
+      const options = region?.querySelectorAll('[role="option"]') ?? []
+      return options.length === 1 && options[0]?.textContent?.includes(expectedId)
+    },
+    { panelLabel: '选择 Thread', expectedId: String(fixture.threadId) },
+    { timeout: 10_000 },
+  )
+  assert(
+    await threadOptions.count() === 1,
+    `Thread search did not narrow to one option for ${fixture.threadId}`,
+  )
+  await threadOptions.first().click()
+
   await page.locator('.thread-dialogue').waitFor({ state: 'visible', timeout: 10_000 })
   return waitForComposer(page)
 }
@@ -1757,15 +1773,53 @@ async function expectComposerText(page, expected) {
 }
 
 async function expectStorage(page, key, expected) {
+  let actual = null
   try {
+    if (expected === null) {
+      await page.waitForFunction(
+        (storageKey) => localStorage.getItem(storageKey) === null,
+        key,
+        { timeout: 10_000 },
+      )
+      return
+    }
+    // draft v2 envelope 严格校验：exact keys version/parts、version=2、恰一个 text part。
     await page.waitForFunction(
-      ({ storageKey, storageValue }) =>
-        localStorage.getItem(storageKey) === storageValue,
-      { storageKey: key, storageValue: expected },
+      ({ storageKey, text }) => {
+        const raw = localStorage.getItem(storageKey)
+        if (raw == null) return false
+        let parsed
+        try {
+          parsed = JSON.parse(raw)
+        } catch {
+          return false
+        }
+        if (
+          parsed == null
+          || typeof parsed !== 'object'
+          || Array.isArray(parsed)
+          || JSON.stringify(Object.keys(parsed).sort()) !== '["parts","version"]'
+          || parsed.version !== 2
+          || !Array.isArray(parsed.parts)
+          || parsed.parts.length !== 1
+        ) {
+          return false
+        }
+        const part = parsed.parts[0]
+        return (
+          part != null
+          && typeof part === 'object'
+          && !Array.isArray(part)
+          && JSON.stringify(Object.keys(part).sort()) === '["text","type"]'
+          && part.type === 'text'
+          && part.text === text
+        )
+      },
+      { storageKey: key, text: expected },
       { timeout: 10_000 },
     )
   } catch {
-    const actual = await page.evaluate(
+    actual = await page.evaluate(
       (storageKey) => localStorage.getItem(storageKey),
       key,
     )
