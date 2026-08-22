@@ -198,7 +198,13 @@ async function selectCustomOption(page, trigger, optionName) {
   await trigger.click()
   const listboxId = await trigger.getAttribute('aria-controls')
   assert(listboxId, `Select trigger ${await trigger.getAttribute('aria-label')} lacks aria-controls`)
-  const listbox = page.locator(`#${CSS.escape(listboxId)}`)
+  // 产品 Select.tsx 将 listboxId 固定为 `ui-select-listbox-` + sanitized [A-Za-z0-9_-] instanceId，
+  // 该字符集无需 CSS.escape（Node 22 不保证 CSS global）。
+  assert(
+    /^ui-select-listbox-[A-Za-z0-9_-]+$/.test(listboxId),
+    `Select aria-controls has unexpected shape: ${listboxId}`,
+  )
+  const listbox = page.locator(`#${listboxId}`)
   await listbox.waitFor({ state: 'visible', timeout: 10_000 })
   const option = listbox.getByRole('option', { name: optionName, exact: true })
   await option.waitFor({ state: 'visible', timeout: 10_000 })
