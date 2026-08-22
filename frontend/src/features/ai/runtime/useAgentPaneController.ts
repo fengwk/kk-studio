@@ -623,6 +623,8 @@ export function useAgentPaneController({
     target,
     isBoundTarget(target) ? controller.manualCompaction : null,
   )
+  // queuedCommands 不并入 Composer pending/disabled：运行中 Thread 仍应接受
+  // 新 batch 并保留当前 draft 编辑；target 切换栅栏由 hasPendingOperation 独立维护。
   const pending = pendingAcceptance != null
     || controller.pending
     || controller.compactPending
@@ -630,7 +632,6 @@ export function useAgentPaneController({
     || controller.stopReplayPending
     || controller.approvalPending
     || controller.replayPending
-    || controller.queuedCommands.length > 0
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
   const composer: ChatPanelComposerInput = {
     parts: composerDraft,

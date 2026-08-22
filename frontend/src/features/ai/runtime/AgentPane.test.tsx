@@ -934,6 +934,78 @@ describe('AgentPane orchestration', () => {
     }).title).toBe(THREAD_ID)
   })
 
+  it('renders Session/Thread pickers with the existing ai.chat translations', async () => {
+    const user = userEvent.setup()
+    vi.mocked(agentPaneService.listChatSessions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{
+        sessionId: 'session-1',
+        createdAt: null,
+        lastActivityAt: null,
+        firstMessagePreview: 'session-1',
+        threadCount: 1,
+      }])
+    vi.mocked(agentPaneService.listSessionThreads).mockResolvedValue([])
+    renderPane({ type: 'CHAT', id: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/thread{Enter}')
+    // 复用 ai.chat.* 既有 key，而不是未注册的 ai.runtime.* 缺失消息。
+    expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
+    expect(screen.getByText('暂无 Session')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    await user.click(composer)
+    await user.keyboard('/thread{Enter}')
+    await user.click(await screen.findByRole('option', { name: /session-1/ }))
+    expect(await screen.findByRole('region', { name: '选择 Thread' })).toBeInTheDocument()
+    expect(screen.getByText('暂无 Thread')).toBeInTheDocument()
+    expect(screen.queryByText(/⟦missing:/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the composer editable with queued commands while blocking target switching', async () => {
+    // QUEUED USER_MESSAGE 只保留在 hasPendingOperation 栅栏中：Composer 仍可
+    // 编辑并提交新 batch，/thread 切换则必须被拒绝。
+    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshot(
+      thread(),
+      {
+        queuedCommands: [{
+          threadId: THREAD_ID,
+          sequence: '1',
+          type: 'USER_MESSAGE',
+          state: 'QUEUED',
+          clientCommandId: 'queued-1',
+          requestHash: '0123456789abcdef'.repeat(4),
+          payloadJson: JSON.stringify({
+            message: { role: 'USER', contents: [{ type: 'text', text: '排队中' }] },
+          }),
+          consumedTurnStartEntryId: null,
+          cancelledAt: null,
+          createTime: null,
+        }],
+      },
+    ))
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    const hook = renderController()
+    await waitFor(() => expect(hook.result.current.controller.queuedCommands).toHaveLength(1))
+
+    expect(hook.result.current.composer.disabled).toBe(false)
+    expect(hook.result.current.composer.pending).toBe(false)
+
+    act(() => hook.result.current.composer.onCommand(testCommand('thread')))
+    expect(hook.result.current.interaction).toBeNull()
+    expect(hook.result.current.error).toContain('等待完成或精确重试')
+
+    act(() => hook.result.current.composer.onSubmit([createTextPart('下一条消息')]))
+    await waitFor(() =>
+      expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledWith(
+        expect.objectContaining({ target: expect.objectContaining({ type: 'THREAD' }) }),
+      ),
+    )
+  })
+
   it('does not retain a background subscription for a terminal previous thread', async () => {
     const user = userEvent.setup()
     vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
