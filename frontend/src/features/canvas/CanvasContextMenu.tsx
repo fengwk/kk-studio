@@ -18,21 +18,15 @@ import {
   type ReactNode,
 } from 'react'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
-import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
+import type {
+  CanvasContextMenuState,
+  ContextMenuTarget,
+} from '@/features/canvas/canvas-stage-model'
+import type { Resource } from '@/features/canvas/domain'
 import { useCanvasResourceActions } from '@/features/canvas/useCanvasResourceActions'
-import type { CanvasFunctionModelDTO } from '@/shared/api/contracts/studio'
 import { useI18n } from '@/shared/i18n'
 
-export type ContextMenuTarget =
-  | { kind: 'resource'; node: ResourceNode; model: CanvasFunctionModelDTO | null }
-  | { kind: 'group'; group: Group }
-  | { kind: 'multi'; nodeIds: string[]; hasUngroupedResource: boolean }
-
-export interface CanvasContextMenuState {
-  x: number
-  y: number
-  target: ContextMenuTarget
-}
+export type { CanvasContextMenuState, ContextMenuTarget } from '@/features/canvas/canvas-stage-model'
 
 const MENU_MARGIN = 8
 
