@@ -936,26 +936,34 @@ describe('AgentPane orchestration', () => {
 
   it('renders Session/Thread pickers with the existing ai.chat translations', async () => {
     const user = userEvent.setup()
-    vi.mocked(agentPaneService.listChatSessions)
-      .mockResolvedValueOnce([])
-      .mockResolvedValue([{
+    vi.mocked(agentPaneService.listChatSessions).mockResolvedValue([])
+    vi.mocked(agentPaneService.listSessionThreads).mockResolvedValue([])
+    const emptyPane = renderPane({ type: 'CHAT', id: CHAT_ID })
+    const emptyComposer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(emptyComposer)
+    await user.keyboard('/thread{Enter}')
+    // 复用 ai.chat.* 既有 key，而不是未注册的 ai.runtime.* 缺失消息。
+    expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
+    expect(screen.getByText('暂无 Session')).toBeInTheDocument()
+    emptyPane.unmount()
+
+    vi.mocked(agentPaneService.listChatSessions).mockResolvedValue([{
         sessionId: 'session-1',
         createdAt: null,
         lastActivityAt: null,
         firstMessagePreview: 'session-1',
         threadCount: 1,
       }])
-    vi.mocked(agentPaneService.listSessionThreads).mockResolvedValue([])
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
     renderPane({ type: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
-    // 复用 ai.chat.* 既有 key，而不是未注册的 ai.runtime.* 缺失消息。
     expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
-    expect(screen.getByText('暂无 Session')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '关闭' }))
-    await user.click(composer)
-    await user.keyboard('/thread{Enter}')
+    expect(document.querySelector('.thread-composer')).toHaveAttribute('hidden')
     await user.click(await screen.findByRole('option', { name: /session-1/ }))
     expect(await screen.findByRole('region', { name: '选择 Thread' })).toBeInTheDocument()
     expect(screen.getByText('暂无 Thread')).toBeInTheDocument()
@@ -1004,6 +1012,33 @@ describe('AgentPane orchestration', () => {
         expect.objectContaining({ target: expect.objectContaining({ type: 'THREAD' }) }),
       ),
     )
+  })
+
+  it('keeps the stored draft unchanged while navigating recalled history', async () => {
+    // 历史导航只更新当前受控内容；刷新恢复的持久草稿仍是用户原始编辑。
+    const draftKey = `kkstudio.ai.composer-draft.v2:thread:${THREAD_ID}`
+    const stored = JSON.stringify({
+      version: 2,
+      parts: [{ type: 'text', text: 'original draft' }],
+    })
+    localStorage.setItem(draftKey, stored)
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    const hook = renderController()
+    await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
+
+    act(() =>
+      hook.result.current.composer.onHistoryPartsChange?.([
+        createTextPart('recalled history'),
+      ]),
+    )
+
+    expect(hook.result.current.composer.parts).toEqual([
+      expect.objectContaining({ type: 'text', text: 'recalled history' }),
+    ])
+    expect(localStorage.getItem(draftKey)).toBe(stored)
   })
 
   it('does not retain a background subscription for a terminal previous thread', async () => {

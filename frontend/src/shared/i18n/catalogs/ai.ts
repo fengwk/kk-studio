@@ -65,42 +65,6 @@ export const aiCatalog = {
     'en-US': 'RUNNING',
     'zh-CN': '运行中',
   },
-  'ai.chat.history.confirmDiscardDraft': {
-    'en-US': '{{target}} will discard {{content}}. Continue?',
-    'zh-CN': '{{target}}会丢弃{{content}}，是否继续？',
-  },
-  'ai.chat.history.discardTargetThread': {
-    'en-US': 'Switching to the selected Thread',
-    'zh-CN': '切换到所选 Thread 后',
-  },
-  'ai.chat.history.discardTargetHistory': {
-    'en-US': 'Switching to the selected history position',
-    'zh-CN': '切换到所选历史位置后',
-  },
-  'ai.chat.history.discardTargetNew': {
-    'en-US': 'Switching to a new conversation',
-    'zh-CN': '切换到新对话后',
-  },
-  'ai.chat.history.discardContentMessage': {
-    'en-US': 'the unsent message in the Composer',
-    'zh-CN': '输入框中未发送的消息',
-  },
-  'ai.chat.history.discardContentSettings': {
-    'en-US': 'the Agent, Environment, Model, or Permission settings not yet submitted with a message',
-    'zh-CN': '尚未随消息提交的 Agent、Environment、Model 或 Permission 设置',
-  },
-  'ai.chat.history.discardContentMessageAndSettings': {
-    'en-US': 'the unsent message and settings not yet submitted with it',
-    'zh-CN': '输入框中未发送的消息及尚未随消息提交的设置',
-  },
-  'ai.chat.history.discardDraftTitle': {
-    'en-US': 'Discard unsent changes?',
-    'zh-CN': '丢弃未发送的修改？',
-  },
-  'ai.chat.history.discardDraftConfirm': {
-    'en-US': 'Discard changes',
-    'zh-CN': '丢弃修改',
-  },
   'ai.runtime.approval.title': {
     'en-US': 'Tool approval',
     'zh-CN': '工具审批',
