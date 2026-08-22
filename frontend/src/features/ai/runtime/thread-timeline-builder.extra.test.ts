@@ -500,6 +500,324 @@ describe('thread timeline edge branches', () => {
     expect(parseApproval('not-json')).toBeNull()
     expect(parseApproval('[1]')).toBeNull()
   })
+
+  it('projects empty USER/SYSTEM/TOOL entries and unknown non-message entries', () => {
+    // 防御性 fallback：无内容的 USER/SYSTEM 消息投影为 empty_message 事件；
+    // TOOL role 没有 tool_result 时同样投影 empty_message；未知 entryType
+    // （此处 'CUSTOM' 与 'SOMETHING_ELSE'）投影为 unknown_entry，而不是静默丢弃。
+    const timeline = buildThreadTimeline(
+      [
+        entry('empty-user', 'MESSAGE', { message: { role: 'USER', contents: [] } }),
+        entry('empty-system', 'MESSAGE', {
+          message: { role: 'SYSTEM', contents: [{ type: 'text', text: '' }] },
+        }),
+        entry('empty-tool', 'MESSAGE', {
+          message: { role: 'TOOL', contents: [{ type: 'unexpected', text: 'x' }] },
+        }),
+        entry('unknown-type', 'CUSTOM', { arbitrary: true }),
+        entry('unknown-other', 'SOMETHING_ELSE', { arbitrary: true }),
+      ],
+      [],
+      [],
+    )
+    expect(timeline.messages.map((m) => [m.role, (m as { kind?: string }).kind])).toEqual([
+      ['entry', 'empty_message'],
+      ['entry', 'empty_message'],
+      ['entry', 'empty_message'],
+      ['entry', 'unknown_entry'],
+      ['entry', 'unknown_entry'],
+    ])
+    // 两个 unknown Entry 的 title 展示各自的 entryType（含未知枚举原文）。
+    expect(timeline.messages[3]).toMatchObject({ title: '未识别 Entry：CUSTOM' })
+    expect(timeline.messages[4]).toMatchObject({ title: '未识别 Entry：SOMETHING_ELSE' })
+    expect(timeline.messages[0]).toMatchObject({
+      title: 'USER 消息',
+      text: '该消息 Entry 没有可展示的文本、思考、工具调用或工具结果。',
+    })
+    // 无 text 且有 tool_call 的 ASSISTANT（含无 toolCallId 的残缺调用）：
+    // tool call 正常投影，空 arguments 使用 queue 默认值，title 的 role 插值。
+    const assistantOnlyCall = buildThreadTimeline(
+      [
+        entry('assistant-call', 'MESSAGE', {
+          message: {
+            role: 'ASSISTANT',
+            contents: [{ type: 'tool_call', toolCallId: 'call-x', toolName: 'read', rendererKey: 'read' }],
+          },
+        }),
+        entry(
+          'tool-x',
+          'MESSAGE',
+          messagePayload('TOOL', [
+            {
+              type: 'tool_result',
+              toolCallId: 'call-x',
+              toolName: 'read',
+              rendererKey: 'read',
+              contents: [{ type: 'text', text: 'ok' }],
+            },
+          ]),
+        ),
+      ],
+      [],
+      [],
+    )
+    expect(assistantOnlyCall.messages).toMatchObject([
+      { role: 'tool', phase: 'call', toolCallId: 'call-x', status: 'done' },
+      { role: 'tool', phase: 'result', arguments: '', text: 'ok' },
+    ])
+  })
+
+  it('projects ASSISTANT thinking-only messages and aborted checkpoints with thinking', () => {
+    // ASSISTANT 只有 thinking 没有 text 时仍投影 assistant 消息（thinking 分支）；
+    // ASSISTANT_ABORTED 的 thinking 内容同样保留。
+    const timeline = buildThreadTimeline(
+      [
+        entry('thinking-only', 'MESSAGE', {
+          message: {
+            role: 'ASSISTANT',
+            contents: [{ type: 'thinking', text: 'deep thought' }],
+          },
+        }),
+        entry('aborted-thinking', 'ASSISTANT_ABORTED', {
+          message: {
+            role: 'ASSISTANT',
+            contents: [
+              { type: 'text', text: 'stopped text' },
+              { type: 'thinking', text: 'stopped thinking' },
+            ],
+          },
+        }),
+        entry('aborted-empty', 'ASSISTANT_ABORTED', {
+          message: { role: 'ASSISTANT', contents: [] },
+        }),
+      ],
+      [],
+      [],
+    )
+    expect(timeline.messages).toMatchObject([
+      { role: 'assistant', text: '', thinking: 'deep thought', status: 'done' },
+      {
+        role: 'assistant',
+        text: 'stopped text',
+        thinking: 'stopped thinking',
+        status: 'done',
+        aborted: true,
+      },
+    ])
+    // 无 text/thinking 的 aborted Entry 不投影任何消息。
+    expect(timeline.messages).toHaveLength(2)
+  })
+
+  it('falls back to the default text when ASSISTANT_ERROR has no message', () => {
+    const timeline = buildThreadTimeline(
+      [entry('err', 'ASSISTANT_ERROR', { error: { code: 'UNKNOWN' }, attempt: null })],
+      [],
+      [],
+    )
+    expect(timeline.messages).toMatchObject([
+      { id: 'err', role: 'assistant', text: '助手请求失败', status: 'error' },
+    ])
+  })
+
+  it('falls back to unknown_entry when MODEL_ATTEMPT_FAILURE misses attempt or retryAt', () => {
+    // durable failure 必须同时具备 attempt snapshot 与 retryAt 才投影为
+    // model_attempt_failure；缺失其一都回退为可检查的 unknown_entry。
+    const missingAttempt = buildThreadTimeline(
+      [
+        entry('f-miss-attempt', 'MODEL_ATTEMPT_FAILURE', {
+          attempt: null,
+          error: { code: 'TRANSIENT', message: 'x' },
+          retryAt: '2026-01-01T00:00:05Z',
+        }),
+      ],
+      [],
+      [],
+    )
+    expect(missingAttempt.messages).toMatchObject([
+      { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-miss-attempt' },
+    ])
+    const missingRetry = buildThreadTimeline(
+      [
+        entry('f-miss-retry', 'MODEL_ATTEMPT_FAILURE', {
+          attempt: { attempt: 1, sequence: 2, text: 'p', thinking: 't' },
+          error: { code: 'TRANSIENT', message: 'x' },
+          retryAt: null,
+        }),
+      ],
+      [],
+      [],
+    )
+    expect(missingRetry.messages).toMatchObject([
+      { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-miss-retry' },
+    ])
+    // 解析防御：attempt 快照必须通过完整校验（attempt<=0、sequence 非负整数、
+    // text/thinking 为字符串、retryAt 为 string/number/数字数组），否则同样回退。
+    const invalidAttempt = buildThreadTimeline(
+      [
+        entry('f-invalid-attempt', 'MODEL_ATTEMPT_FAILURE', {
+          attempt: { attempt: 0, sequence: 2, text: 'p', thinking: 't' },
+          error: { code: 'TRANSIENT', message: 'x' },
+          retryAt: '2026-01-01T00:00:05Z',
+        }),
+      ],
+      [],
+      [],
+    )
+    expect(invalidAttempt.messages).toMatchObject([
+      { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-invalid-attempt' },
+    ])
+    const invalidText = buildThreadTimeline(
+      [
+        entry('f-invalid-text', 'MODEL_ATTEMPT_FAILURE', {
+          attempt: { attempt: 1, sequence: 2, text: 123, thinking: 't' },
+          error: { code: 'TRANSIENT', message: 'x' },
+          retryAt: '2026-01-01T00:00:05Z',
+        }),
+      ],
+      [],
+      [],
+    )
+    expect(invalidText.messages).toMatchObject([
+      { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-invalid-text' },
+    ])
+    const retryArray = buildThreadTimeline(
+      [
+        entry('f-retry-array', 'MODEL_ATTEMPT_FAILURE', {
+          attempt: { attempt: 1, sequence: 2, text: 'p', thinking: 't' },
+          error: { code: 'TRANSIENT', message: 'x' },
+          retryAt: [2026, 1, 1, 0, 0, 5],
+        }),
+      ],
+      [],
+      [],
+    )
+    expect(retryArray.messages).toMatchObject([
+      {
+        role: 'model_attempt_failure',
+        retryAt: [2026, 1, 1, 0, 0, 5],
+        nextAttempt: 2,
+      },
+    ])
+    const invalidRetry = buildThreadTimeline(
+      [
+        entry('f-invalid-retry', 'MODEL_ATTEMPT_FAILURE', {
+          attempt: { attempt: 1, sequence: 2, text: 'p', thinking: 't' },
+          error: { code: 'TRANSIENT', message: 'x' },
+          retryAt: { invalid: true },
+        }),
+      ],
+      [],
+      [],
+    )
+    expect(invalidRetry.messages).toMatchObject([
+      { role: 'entry', kind: 'unknown_entry', subjectEntryId: 'f-invalid-retry' },
+    ])
+  })
+
+  it('drops QUEUED CUSTOM_MESSAGE with blank contents and falls back unknown roles to user', () => {
+    // QUEUED 命令提取防御：无文本内容不产生 queued message；非 SYSTEM 的
+    // CUSTOM_MESSAGE role 按生产语义回退投影为 user（仅 SYSTEM 显式保留）。
+    const timeline = buildThreadTimeline(
+      [],
+      [
+        command('blank', '1', 'CUSTOM_MESSAGE', customMessagePayload('SYSTEM', ''), 'QUEUED'),
+        command(
+          'weird-role',
+          '2',
+          'CUSTOM_MESSAGE',
+          { message: { role: 'AGENT', contents: [{ type: 'text', text: 'x' }] } },
+          'QUEUED',
+        ),
+      ],
+      [],
+    )
+    expect(timeline.messages).toEqual([])
+    expect(timeline.queuedMessages).toMatchObject([
+      { clientCommandId: 'cid-weird-role', role: 'user', text: 'x', sequence: '2' },
+    ])
+    expect(timeline.hasPendingInputs).toBe(true)
+  })
+
+  it('projects unsupported message entries for unknown roles with or without role name', () => {
+    // MESSAGE/CUSTOM_MESSAGE 出现非 USER/SYSTEM/ASSISTANT/TOOL 角色时投影为
+    // unsupported_message；带角色名的标题带 role 插值，空角色用通用文案。
+    const withRole = buildThreadTimeline(
+      [
+        entry('weird', 'MESSAGE', { message: { role: 'HUMAN', contents: [{ type: 'text', text: 'x' }] } }),
+        entry('weird-custom', 'CUSTOM_MESSAGE', {
+          message: { role: 'HUMAN', contents: [{ type: 'text', text: 'y' }] },
+        }),
+      ],
+      [],
+      [],
+    )
+    expect(withRole.messages).toMatchObject([
+      {
+        role: 'entry',
+        kind: 'unsupported_message',
+        title: '无法识别消息 Entry',
+        text: '暂不支持的消息角色：HUMAN。原始 payload 可展开查看。',
+        rawPayloadJson: JSON.stringify({
+          message: { role: 'HUMAN', contents: [{ type: 'text', text: 'x' }] },
+        }),
+      },
+      {
+        role: 'entry',
+        kind: 'unsupported_message',
+        subjectEntryId: 'weird-custom',
+      },
+    ])
+    const withoutRole = buildThreadTimeline(
+      [entry('no-role', 'MESSAGE', { message: { contents: [{ type: 'text', text: 'x' }] } })],
+      [],
+      [],
+    )
+    expect(withoutRole.messages).toMatchObject([
+      {
+        role: 'entry',
+        kind: 'unsupported_message',
+        text: '消息角色或 payload 无效。原始 payload 可展开查看。',
+      },
+    ])
+  })
+
+  it('normalizes approval JSON defensively across shape and garbage inputs', () => {
+    // parseApproval 的规范映射：未知 decision 归一为 null、非字符串/空白 reason
+    // 归一为 null、字符串 decisionId 原样保留、required 缺失视为 false。
+    expect(parseApproval(JSON.stringify({ required: true, decision: 'DENIED' }))).toEqual({
+      required: true,
+      decision: 'DENIED',
+      decisionId: null,
+      reason: null,
+    })
+    expect(parseApproval(JSON.stringify({ decision: 'ALLOW' }))).toEqual({
+      required: false,
+      decision: null,
+      decisionId: null,
+      reason: null,
+    })
+    expect(
+      parseApproval(
+        JSON.stringify({
+          required: true,
+          decision: 'ALLOWED',
+          decisionId: 42,
+          reason: '   ',
+        }),
+      ),
+    ).toEqual({
+      required: true,
+      decision: 'ALLOWED',
+      decisionId: null,
+      reason: null,
+    })
+    expect(parseApproval('{"required":true}')).toEqual({
+      required: true,
+      decision: null,
+      decisionId: null,
+      reason: null,
+    })
+  })
 })
 
 function entry(entryId: string, entryType: EntryType, payload: Record<string, unknown>): HarnessSessionEntryDTO {
