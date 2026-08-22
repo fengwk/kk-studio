@@ -11,7 +11,7 @@ import {
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
-  stopThread,
+  stopThreadForCleanup,
   threadTarget,
   userMessageCommand,
   waitForQuiescentThread,
@@ -29,6 +29,7 @@ export async function runRefactorContractMatrix(ui) {
   const {
     apiCtx,
     bindThreadComposer,
+    createBranchedHistoryFixture,
     consoleErrors,
     createDurableHistoryFixture,
     createHoldingQueueFixture,
@@ -170,13 +171,16 @@ export async function runRefactorContractMatrix(ui) {
     async (caseArt) => {
       await withUiFixture(
         page,
-        () => createDurableHistoryFixture(apiCtx, {
+        () => createBranchedHistoryFixture(apiCtx, {
           title: `e2e-ui-composer-multipane-${stamp}`,
-          messages: [`multi pane baseline ${stamp}`],
-          extraThreadCount: 1,
+          trunkMessage: `multi pane baseline ${stamp}`,
+          originalMessages: [`multi pane original ${stamp}`],
+          alternateMessage: `multi pane alternate ${stamp}`,
         }),
         async (fixture) => {
-          const secondThreadId = fixture.extraThreadIds[0]
+          const secondThreadId = fixture.sessionThreadIds.find(
+            (threadId) => threadId !== fixture.threadId,
+          )
           assert(secondThreadId, 'multi-pane fixture did not create a second Thread')
           await bindSplitThreads(page, goto, fixture.chat.id, fixture.threadId, secondThreadId)
           const pane1 = page.locator('[data-pane-id="pane-1"]')
@@ -697,6 +701,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     mock,
     model: null,
     provider: null,
+    sessionId: null,
     threadId: null,
   }
   try {
@@ -750,10 +755,11 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       yoloEnabled: false,
     })
     const owner = chatOwner(state.chat.id)
+    const sessionId = cid()
     const threadId = cid()
     await materializeNewSession(apiCtx, {
       owner,
-      sessionId: cid(),
+      sessionId,
       threadId,
       rootSettings: branchSettingsOf(state.agent, {
         providerName: state.model.providerName,
@@ -764,6 +770,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       commands: [userMessageCommand(`footer usage ${stamp}`, cid())],
     })
     state.threadId = String(threadId)
+    state.sessionId = String(sessionId)
     const completed = await waitForQuiescentThread(apiCtx, state.threadId, {
       timeoutMs: 30_000,
       intervalMs: 100,
@@ -809,6 +816,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     model: null,
     parentAgent: null,
     provider: null,
+    sessionId: null,
     threadId: null,
   }
   try {
@@ -890,6 +898,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       commands: [userMessageCommand(`task materialize ${suffix}`, cid())],
     })
     state.threadId = String(threadId)
+    state.sessionId = String(sessionId)
     return {
       ...state,
       // TOOL_PARTIAL/task.status 是 lossy realtime：浏览器先绑定 Thread，再显式启动 task。
@@ -953,6 +962,7 @@ async function createToolCardFixture(apiCtx, stamp) {
     model: null,
     path,
     provider: null,
+    sessionId: null,
     threadId: null,
   }
   try {
@@ -1022,6 +1032,7 @@ async function createToolCardFixture(apiCtx, stamp) {
       commands: [userMessageCommand(`tool card materialize ${suffix}`, cid())],
     })
     state.threadId = String(threadId)
+    state.sessionId = String(sessionId)
     return {
       ...state,
       start: async (toolName) => {
@@ -1066,18 +1077,7 @@ async function cleanupCompletedUsageFixture(state) {
   const errors = []
   await cleanup('stop thread', errors, async () => {
     if (!state.threadId) return
-    const snapshot = await getThreadSnapshot(state.apiCtx, state.threadId)
-    if (
-      snapshot.thread.status !== 'IDLE'
-      || snapshot.thread.processing
-      || snapshot.queuedCommands.length > 0
-      || snapshot.modelInvocation !== null
-    ) {
-      await stopThread(state.apiCtx, state.threadId, {
-        stopRequestId: cid(),
-        expectedVersion: snapshot.thread.version,
-      })
-    }
+    await stopThreadForCleanup(state.apiCtx, state.threadId)
   })
   await cleanup('mock', errors, () => state.mock.close())
   await cleanup('chat', errors, async () => {
@@ -1121,18 +1121,7 @@ async function cleanupActiveTaskFixture(state) {
   const errors = []
   await cleanup('stop parent task thread', errors, async () => {
     if (!state.threadId) return
-    const snapshot = await getThreadSnapshot(state.apiCtx, state.threadId)
-    if (
-      snapshot.thread.status !== 'IDLE'
-      || snapshot.thread.processing
-      || snapshot.queuedCommands.length > 0
-      || snapshot.modelInvocation !== null
-    ) {
-      await stopThread(state.apiCtx, state.threadId, {
-        stopRequestId: cid(),
-        expectedVersion: snapshot.thread.version,
-      })
-    }
+    await stopThreadForCleanup(state.apiCtx, state.threadId)
   })
   await cleanup('task mock', errors, () => state.mock.close())
   await cleanup('task chat', errors, async () => {
@@ -1181,18 +1170,7 @@ async function cleanupToolCardFixture(state) {
   const errors = []
   await cleanup('stop tool-card thread', errors, async () => {
     if (!state.threadId) return
-    const snapshot = await getThreadSnapshot(state.apiCtx, state.threadId)
-    if (
-      snapshot.thread.status !== 'IDLE'
-      || snapshot.thread.processing
-      || snapshot.queuedCommands.length > 0
-      || snapshot.modelInvocation !== null
-    ) {
-      await stopThread(state.apiCtx, state.threadId, {
-        stopRequestId: cid(),
-        expectedVersion: snapshot.thread.version,
-      })
-    }
+    await stopThreadForCleanup(state.apiCtx, state.threadId)
   })
   await cleanup('tool-card mock', errors, () => state.mock.close())
   await cleanup('tool-card chat', errors, async () => {

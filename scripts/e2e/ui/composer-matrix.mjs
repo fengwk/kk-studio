@@ -21,7 +21,7 @@ import {
   materializeNewSession,
   setAgentCommand,
   setModelCommand,
-  stopThread,
+  stopThreadForCleanup,
   threadTarget,
   userMessageCommand,
   waitForDurableMessages,
@@ -1065,6 +1065,7 @@ export async function runComposerMatrix(ui) {
   await runRefactorContractMatrix({
     ...ui,
     bindThreadComposer,
+    createBranchedHistoryFixture,
     createDurableHistoryFixture,
     createHoldingQueueFixture,
     withUiFixture,
@@ -1483,19 +1484,7 @@ async function cleanupFixture(state) {
   const errors = []
   await cleanupStep(errors, 'stop thread', async () => {
     if (!state.threadId) return
-    const snapshot = await getThreadSnapshot(state.apiCtx, state.threadId)
-    if (
-      snapshot.thread.status !== 'IDLE'
-      || snapshot.thread.processing
-      || snapshot.queuedCommands.length > 0
-      || snapshot.modelInvocation !== null
-      || snapshot.toolInvocations.length > 0
-    ) {
-      await stopThread(state.apiCtx, state.threadId, {
-        stopRequestId: cid(),
-        expectedVersion: snapshot.thread.version,
-      })
-    }
+    await stopThreadForCleanup(state.apiCtx, state.threadId)
   })
   await cleanupStep(errors, 'hold provider', async () => state.mock?.close())
   await cleanupStep(errors, 'chat', async () => deleteChat(state.apiCtx, state.chat))
