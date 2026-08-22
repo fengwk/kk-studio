@@ -1,4 +1,10 @@
-import { assert, envelopeData, sleep } from './http.mjs'
+import {
+  assert,
+  cid,
+  envelopeData,
+  HttpError,
+  sleep,
+} from './http.mjs'
 
 /**
  * Harness Runtime 单轨契约 helper（owner-aware command-batches + Session/Thread 查询）。
@@ -533,6 +539,50 @@ export async function stopThread(ctx, threadId, { stopRequestId, expectedVersion
     JSON.stringify(stop),
   )
   return stop
+}
+
+/**
+ * Cleanup 专用 stop：snapshot/version CAS 之间若发生推进，复用同一 stopRequestId
+ * 重读最新 version 重试；这只处理 STALE_VERSION，不吞掉其他 HTTP 错误。
+ */
+export async function stopThreadForCleanup(
+  ctx,
+  threadId,
+  { maxAttempts = 8, retryDelayMs = 100 } = {},
+) {
+  assert(threadId && typeof threadId === 'string', 'threadId required')
+  const stopRequestId = cid()
+  let lastError = null
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const snapshot = await getThreadSnapshot(ctx, threadId)
+    const active =
+      snapshot.thread.status !== 'IDLE'
+      || snapshot.thread.processing
+      || snapshot.queuedCommands.length > 0
+      || snapshot.modelInvocation !== null
+      || snapshot.toolInvocations.length > 0
+    if (!active) {
+      return
+    }
+    try {
+      await stopThread(ctx, threadId, {
+        stopRequestId,
+        expectedVersion: snapshot.thread.version,
+      })
+      return
+    } catch (error) {
+      if (
+        !(error instanceof HttpError)
+        || error.status !== 409
+        || !String(error.body).includes('STALE_VERSION')
+      ) {
+        throw error
+      }
+      lastError = error
+      await sleep(retryDelayMs)
+    }
+  }
+  throw lastError || new Error(`thread cleanup stop exhausted: ${threadId}`)
 }
 
 /**
