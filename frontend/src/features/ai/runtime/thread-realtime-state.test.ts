@@ -5,6 +5,7 @@ import {
   parseRealtimeModelDelta,
   parseRealtimeToolPartial,
   parseStreamCheckpoint,
+  parseToolErrorText,
   reduceRealtimeModelStream,
   reduceRealtimeToolStream,
   snapshotModelStream,
@@ -854,6 +855,219 @@ describe('thread realtime state', () => {
     expect(appended).toMatchObject({ text: 'first-more' })
   })
 
+  it('rejects non-string, non-record, and non-text deltas and tool partials at the parse boundary', () => {
+    // 非字符串输入、顶层非 record 的 JSON、TEXT_DELTA 但 text 不是字符串，
+    // 以及 TOOL_CALL_DELTA 的 id/name/arguments 类型不合法 —— 全部拒绝整个事件。
+    expect(parseRealtimeModelDelta(123)).toBeNull()
+    expect(parseRealtimeModelDelta('[1]')).toBeNull()
+    expect(
+      parseRealtimeModelDelta(JSON.stringify({
+        ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+        payload: { kind: 'TEXT_DELTA', text: 5 },
+      })),
+    ).toBeNull()
+    expect(
+      parseRealtimeModelDelta(JSON.stringify({
+        ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+        payload: { kind: 'TEXT_DELTA' },
+      })),
+    ).toBeNull()
+    expect(
+      parseRealtimeModelDelta(JSON.stringify({
+        ...JSON.parse(toolCallEvent(1, { index: 0, id: 'c', name: 'r', argumentsJson: '{}' })),
+        payload: { kind: 'TOOL_CALL_DELTA', index: 0, id: 7, name: 'r', argumentsJson: '{}' },
+      })),
+    ).toBeNull()
+    // TOOL_PARTIAL 的 createdAt 只要求非空字符串（非日期字符串也接受）；
+    // 非字符串 createdAt 与非法 JSON 同样拒绝。
+    expect(parseRealtimeToolPartial(JSON.stringify({
+      ...JSON.parse(toolPartialEvent({ payload: { contents: [] } })),
+      createdAt: 123,
+    }))).toBeNull()
+    expect(parseRealtimeToolPartial('not-json')).toBeNull()
+    // createdAt 为空白字符串：isNonBlankString 直接拒绝（不进入 Date.parse）。
+    expect(parseRealtimeModelDelta(JSON.stringify({
+      ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+      createdAt: '  ',
+    }))).toBeNull()
+    // createdAt 是非空字符串但 Date.parse 无法解析：toEpochMillis 返回 null → 拒绝。
+    expect(parseRealtimeModelDelta(JSON.stringify({
+      ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+      createdAt: 'not-a-date',
+    }))).toBeNull()
+    // createdAt 为非字符串（数字）也拒绝 —— toEpochMillis 的非字符串分支（L706）。
+    expect(parseRealtimeModelDelta(JSON.stringify({
+      ...JSON.parse(event(1, 'TEXT_DELTA', 'x')),
+      createdAt: 42,
+    }))).toBeNull()
+    // 顶层是数组 JSON：非 record 拒绝（L97）。
+    expect(parseRealtimeModelDelta('[{"a":1}]')).toBeNull()
+  })
+
+  it('merges tool-call identity fragments from an empty base and skips duplicate tail blocks', () => {
+    // 新 draft 的 identity 从空字符串起步：第一块只有 name 时 id 保持空，
+    // 后续同 index 的完整 id/name 以 grow-only 方式合并（L291 空 current 分支）。
+    const first = parseRealtimeModelDelta(toolCallEvent(1, {
+      index: 0,
+      id: null,
+      name: 'read',
+      argumentsJson: '{"path":',
+    }))!
+    const second = parseRealtimeModelDelta(toolCallEvent(2, {
+      index: 0,
+      id: 'call-1',
+      name: 'read',
+      argumentsJson: '"a"}',
+    }))!
+    const stream = reduceRealtimeModelStream(reduceRealtimeModelStream(null, first), second)
+    expect(stream.toolCalls).toEqual([
+      { index: 0, id: 'call-1', name: 'read', argumentsJson: '{"path":"a"}' },
+    ])
+  })
+
+  it('returns the invocation-attempt base and strict checkpoint error paths', () => {
+    const baseInvocation = (overrides: Partial<ModelInvocationDTO> = {}): ModelInvocationDTO => ({
+      id: 'inv-1',
+      threadId: '7',
+      turnStartEntryId: '1',
+      basisHeadEntryId: '1',
+      status: 'RUNNING',
+      attempt: 1,
+      streamCheckpointJson: null,
+      resultJson: null,
+      errorJson: null,
+      resultEntryId: null,
+      createTime: '2026-07-28T10:00:00Z',
+      updateTime: '2026-07-28T10:00:00Z',
+      ...overrides,
+    })
+    // 数字/数组 updateTime 不是合法字符串：createdAt 回退到 createTime。
+    expect(snapshotModelStream('7', baseInvocation({ updateTime: 123 as never }))).toMatchObject({
+      attempt: 1,
+      sequence: 0,
+      text: '',
+      thinking: '',
+      createdAt: '2026-07-28T10:00:00Z',
+    })
+    // 合法的非终止 error payload：kind/message 均缺失时，errorCode 留空，
+    // errorText 回退到原始 JSON（parseToolErrorText 的 fallback 分支）。
+    expect(
+      snapshotModelStream('7', baseInvocation({ errorJson: '{"foo":"bar"}' })),
+    ).toMatchObject({
+      status: 'error',
+      errorCode: undefined,
+      errorText: '{"foo":"bar"}',
+    })
+  })
+
+  it('tolerates malformed terminal result/error payloads and non-record contents', () => {
+    const baseInvocation = (overrides: Partial<ModelInvocationDTO> = {}): ModelInvocationDTO => ({
+      id: 'inv-1',
+      threadId: '7',
+      turnStartEntryId: '1',
+      basisHeadEntryId: '1',
+      status: 'RUNNING',
+      attempt: 1,
+      streamCheckpointJson: '{"attempt":1,"text":"frozen","thinking":"plan","sequence":4}',
+      resultJson: null,
+      errorJson: null,
+      resultEntryId: null,
+      createTime: '2026-07-28T10:00:00Z',
+      updateTime: '2026-07-28T10:00:00Z',
+      ...overrides,
+    })
+    // 终止态 result 的 JSON 是数组（非 record）：整体视为格式错误，回退冻结 checkpoint。
+    expect(
+      snapshotModelStream('7', baseInvocation({ resultJson: '[1]' })),
+    ).toMatchObject({ text: 'frozen', thinking: 'plan', status: 'done' })
+    // result toolCalls 含非 record 条目与全空条目：非 record 跳过、全空条目丢弃。
+    expect(
+      snapshotModelStream('7', baseInvocation({
+        resultJson: JSON.stringify({
+          text: 'done',
+          thinking: '',
+          toolCalls: [null, { id: '', name: '', argumentsJson: '' }, { id: 'c', name: 'r', argumentsJson: '{}' }],
+        }),
+      })),
+    ).toMatchObject({
+      text: 'done',
+      toolCalls: [{ index: 2, id: 'c', name: 'r', argumentsJson: '{}' }],
+    })
+    // result toolCalls 不是数组：整体按空数组处理（parseCompletedToolCalls 非数组分支）。
+    expect(
+      snapshotModelStream('7', baseInvocation({
+        resultJson: JSON.stringify({ text: 'x', thinking: '', toolCalls: 'nope' }),
+      })),
+    ).toMatchObject({ text: 'x', toolCalls: [] })
+    // error payload 是数组：解析为 null，errorText 回退到原始 JSON。
+    expect(
+      snapshotModelStream('7', baseInvocation({ errorJson: '[1]' })),
+    ).toMatchObject({ status: 'error', errorText: '[1]' })
+    // error payload 是合法 record 但 message 为空：解析失败，同样回退原始 JSON。
+    expect(
+      snapshotModelStream('7', baseInvocation({ errorJson: '{"kind":"X","message":" "}' })),
+    ).toMatchObject({ status: 'error', errorCode: undefined, errorText: '{"kind":"X","message":" "}' })
+    // 非法 JSON 的 error payload：JSON.parse 抛错，回退原始 JSON。
+    expect(
+      snapshotModelStream('7', baseInvocation({ errorJson: 'not-json' })),
+    ).toMatchObject({ status: 'error', errorCode: undefined, errorText: 'not-json' })
+    // tool resultJson 是数组：非 record 回退为空文本 base（error 保持 false）。
+    expect(
+      snapshotToolStream(
+        { ...toolInvocation(), resultJson: '[1]' } as ToolInvocationDTO,
+        '7',
+      ),
+    ).toMatchObject({ text: '', error: false })
+    // result contents 含非 record 条目：其余合法 text 仍聚合，非 record 跳过。
+    expect(
+      snapshotToolStream(
+        {
+          ...toolInvocation(),
+          resultJson: JSON.stringify({
+            toolCallId: 'call-1',
+            contents: [null, { type: 'text', text: 'ok' }],
+            error: false,
+            details: null,
+          }),
+        },
+        '7',
+      ),
+    ).toMatchObject({ text: 'ok', error: false })
+    // 非 record 的 errorJson：错误文本原样暴露。
+    expect(parseToolErrorText('[1]')).toBe('[1]')
+    expect(parseToolErrorText('{"noMessage":1}')).toBe('{"noMessage":1}')
+  })
+
+  it('handles non-record tool partial chunks and json stringify fallbacks', () => {
+    // contents 中的非 record 条目（数字/字符串）被跳过，只聚合合法 text/json 分片。
+    const partial = (contents: unknown[]) => ({
+      threadId: '7',
+      invocationId: 'inv-t',
+      attempt: 1,
+      payload: { toolCallId: 'call-1', contents, error: null, details: null },
+      createdAt: '2026-07-28T10:00:00Z',
+    })
+    expect(reduceRealtimeToolStream(null, partial([42, { type: 'text', text: 'a' }]))).toMatchObject({
+      text: 'a',
+      error: false,
+    })
+    // json 分片的序列化回退：null → ''、数字 → String、不可序列化对象 → ''。
+    expect(reduceRealtimeToolStream(null, partial([
+      { type: 'json', json: null },
+      { type: 'json', json: 42 },
+      { type: 'json', json: { a: 1 } },
+    ]))).toMatchObject({ text: '42\n{"a":1}' })
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    expect(reduceRealtimeToolStream(null, partial([{ type: 'json', json: cyclic }]))).toMatchObject({
+      text: '',
+    })
+    // 非字符串 createdAt 会命中 timestampString 的空回退（由 snapshotToolStream 使用）。
+    expect(
+      snapshotToolStream({ ...toolInvocation(), updateTime: 123 as never } as ToolInvocationDTO, '7'),
+    ).toMatchObject({ createdAt: '2026-07-28T10:00:00Z' })
+  })
+
   it('accepts a tool overlay only for the matching invocation attempt', () => {
     const invocation = (attempt: number) => ({
       id: 'inv-t',
@@ -946,4 +1160,28 @@ function toolPartialEvent({
     payload,
     createdAt: '2026-07-28T10:00:00Z',
   })
+}
+
+function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
+  return {
+    id: 'inv-t',
+    modelInvocationId: 'inv-1',
+    assistantEntryId: 'e-1',
+    ordinal: 0,
+    status: 'RUNNING',
+    attempt: 1,
+    toolCallId: 'call-1',
+    toolName: 'web-search',
+    toolVersion: null,
+    rendererKey: 'web-search',
+    toolType: 'PLATFORM',
+    environment: null,
+    argumentsJson: '{}',
+    approvalJson: null,
+    resultJson: null,
+    errorJson: null,
+    createTime: '2026-07-28T10:00:00Z',
+    updateTime: '2026-07-28T10:00:00Z',
+    ...overrides,
+  }
 }
