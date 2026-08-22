@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import {
   assert,
@@ -262,147 +262,11 @@ registerCase({
 })
 
 registerCase({
-  id: 'real.queued_command_batch',
-  level: 'L2',
-  title: '运行中一次原子 batch 入队两条消息合并收割',
-  requires: ['real'],
-  docs: '初始 NEW_SESSION 的 rootSettings 直接使用 seed Agent（真实启动，不触发 fabricated PLANNING_FAILED）；首轮流式执行期间用最新快照 cursor 一次原子 batch 入队两条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant MESSAGE；queuedCommands 最终清空',
-  async run(ctx) {
-    await requireRealMiniMaxM27(ctx)
-    assert(
-      ctx.vars.provider?.configured && ctx.vars.provider?.baseUrl,
-      'minimax requires TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY',
-    )
-
-    const initialMarker = `QUEUE-INITIAL-${cid()}`
-    const firstMarker = `QUEUE-FIRST-${cid()}`
-    const secondMarker = `QUEUE-SECOND-${cid()}`
-    const chat = await createChat(ctx, {
-      title: `e2e-queue-batch-${cid().slice(0, 8)}`,
-      agentName: ctx.vars.agent.name,
-      yoloEnabled: false,
-    })
-    const sessionId = cid()
-    const tid = cid()
-    await materializeNewSession(ctx, {
-      owner: chatOwner(chat.id),
-      sessionId,
-      threadId: tid,
-      // 初始 NEW_SESSION 直接使用可解析 seed Agent：真实启动，不触发 fabricated PLANNING_FAILED。
-      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx)),
-      yoloEnabled: false,
-      commands: [userMessageCommand(`queue materialize ${cid().slice(0, 8)}`, cid())],
-    })
-    const idle = await waitForQuiescentThread(ctx, tid, { timeoutMs: 60_000, intervalMs: 100 })
-    const { signal: firstDelta, startResult } =
-      await waitForModelTextDeltaAfterEventSubscribed(
-        ctx,
-        tid,
-        () =>
-          acceptCommandBatch(ctx, {
-            owner: chatOwner(chat.id),
-            target: threadTarget({
-              threadId: tid,
-              expectedHeadEntryId: idle.headEntryId,
-              expectedNextCommandSequence: idle.nextCommandSequence,
-            }),
-            commands: [
-              setAgentCommand(ctx.vars.agent.name, cid()),
-              setModelCommand(modelSelectionOf(ctx), cid()),
-              userMessageCommand(
-                `${initialMarker}\n不要调用工具。立即逐行输出 80 行短句，每行以“批次等待”开头并带连续编号；`
-                  + '不要总结，不要提前结束。',
-                cid(),
-              ),
-            ],
-          }),
-        { timeoutMs: 90_000 },
-      )
-    assert(
-      Array.isArray(startResult?.acceptedCommands)
-        && startResult.acceptedCommands.at(-1).type === 'USER_MESSAGE',
-      `initial message batch: ${JSON.stringify(startResult)}`,
-    )
-    assert(firstDelta.text.trim(), `expected non-empty text delta: ${JSON.stringify(firstDelta)}`)
-
-    // 运行中入队：一次原子 batch 两条 USER_MESSAGE。cursor 在入队时推进（消费不推进），
-    // 运行中快照 cursor 必然有效；sequence 连续由同一 batch 保证。
-    const running = await getThreadSnapshot(ctx, tid)
-    const firstQueued = await acceptCommandBatch(ctx, {
-      owner: chatOwner(chat.id),
-      target: threadTarget({
-        threadId: tid,
-        expectedHeadEntryId: running.thread.headEntryId,
-        expectedNextCommandSequence: running.thread.nextCommandSequence,
-      }),
-      commands: [
-        userMessageCommand(`${firstMarker}\n这是下一 turn 队列批次的第一条消息。`, cid()),
-      ],
-    })
-    const secondQueued = await acceptCommandBatch(ctx, {
-      owner: chatOwner(chat.id),
-      target: threadTarget({
-        threadId: tid,
-        expectedHeadEntryId: firstQueued.thread.headEntryId,
-        expectedNextCommandSequence: firstQueued.thread.nextCommandSequence,
-      }),
-      commands: [
-        userMessageCommand(`${secondMarker}\n结合前一条消息，只回复单词 BATCHED，不要解释。`, cid()),
-      ],
-    })
-    const queued = [...firstQueued.acceptedCommands, ...secondQueued.acceptedCommands]
-    assert(queued.length === 2, JSON.stringify(queued))
-    assert(
-      Number(queued[1].sequence) === Number(queued[0].sequence) + 1,
-      `batch sequences must be contiguous: ${JSON.stringify(queued)}`,
-    )
-
-    const finalThread = await waitForQuiescentThread(ctx, tid, {
-      timeoutMs: 180_000,
-      intervalMs: 500,
-    })
-    const finalSnapshot = await getThreadSnapshot(ctx, tid)
-    const entries = finalSnapshot.entries || []
-    const initialUserIndex = findUserEntryIndex(entries, initialMarker)
-    const firstUserIndex = findUserEntryIndex(entries, firstMarker)
-    const secondUserIndex = findUserEntryIndex(entries, secondMarker)
-    const assistants = normalAssistantEntries(entries)
-    assert(
-      assistants.length === 2,
-      `expected initial assistant plus one batched assistant: ${JSON.stringify(entries)}`,
-    )
-    const initialAssistantIndex = entries.findIndex(
-      (entry) => String(entry.entryId) === String(assistants[0].entryId),
-    )
-    const batchedAssistantIndex = entries.findIndex(
-      (entry) => String(entry.entryId) === String(assistants[1].entryId),
-    )
-    assert(
-      initialUserIndex >= 0
-      && initialUserIndex < initialAssistantIndex
-      && initialAssistantIndex < firstUserIndex
-      && firstUserIndex < secondUserIndex
-      && secondUserIndex < batchedAssistantIndex,
-      `expected initial USER -> assistant -> queued USER -> queued USER -> one assistant: ${JSON.stringify(entries)}`,
-    )
-    // 全部命令已消费，queuedCommands 清空。
-    assert(
-      (finalSnapshot.queuedCommands || []).length === 0,
-      `queued commands must be consumed: ${JSON.stringify(finalSnapshot.queuedCommands)}`,
-    )
-    ctx.writeArtifact(
-      'queued-command-batch.json',
-      JSON.stringify({ firstDelta, finalThread, entries }, null, 2),
-    )
-  },
-})
-
-registerCase({
   id: 'real.stop_partial_continue',
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '仅 minimax/MiniMax-M2.7：初始 NEW_SESSION 的 rootSettings 直接使用 seed Agent（真实启动，不触发 fabricated PLANNING_FAILED）；首个非空文本 delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '仅 minimax/MiniMax-M2.7：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 物化空闲 Thread（不调用真实 Provider）；随后 THREAD batch SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空文本 delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
@@ -429,8 +293,12 @@ registerCase({
       owner: chatOwner(chat.id),
       sessionId,
       threadId: tid,
-      // 初始 NEW_SESSION 直接使用可解析 seed Agent：真实启动，不触发 fabricated PLANNING_FAILED。
-      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx)),
+      // bootstrap 用 missing Agent 确定性 PLANNING_FAILED 物化空闲 Thread（不调用真实 Provider）；
+      // 真实 turn 由随后的 THREAD batch 显式 SET_AGENT/SET_MODEL + initialPrompt 启动。
+      rootSettings: branchSettingsOf(
+        { name: `e2e-stop-partial-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
       yoloEnabled: false,
       commands: [userMessageCommand(`stop partial materialize ${cid().slice(0, 8)}`, cid())],
     })
@@ -489,19 +357,21 @@ registerCase({
     )
     const abortedEntry = abortedEntries[0]
     assertAssistantAbortedEntry(abortedEntry)
-    assert(
-      !entriesAfterStop.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
-      `expected partial aborted barrier, not ASSISTANT_ERROR: ${JSON.stringify(entriesAfterStop)}`,
-    )
-    assert(
-      normalAssistantEntries(entriesAfterStop).length === 0,
-      `stopped invocation must not materialize a normal assistant MESSAGE: ${JSON.stringify(entriesAfterStop)}`,
-    )
     const initialUserIndex = findUserEntryIndex(entriesAfterStop, initialMarker)
+    assert(initialUserIndex >= 0, `initial USER entry missing: ${JSON.stringify(entriesAfterStop)}`)
+    // 全局断言会误包含 bootstrap 的 ASSISTANT_ERROR：所有 stop 语义断言限定在 initialMarker 之后的真实 turn。
+    const realTurnEntries = entriesAfterStop.slice(initialUserIndex)
+    assert(
+      !realTurnEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
+      `expected partial aborted barrier, not ASSISTANT_ERROR: ${JSON.stringify(realTurnEntries)}`,
+    )
+    assert(
+      normalAssistantEntries(realTurnEntries).length === 0,
+      `stopped invocation must not materialize a normal assistant MESSAGE: ${JSON.stringify(realTurnEntries)}`,
+    )
     const abortedIndex = entriesAfterStop.findIndex(
       (entry) => String(entry.entryId) === String(abortedEntry.entryId),
     )
-    assert(initialUserIndex >= 0, `initial USER entry missing: ${JSON.stringify(entriesAfterStop)}`)
     assert(
       abortedIndex > initialUserIndex,
       `ASSISTANT_ABORTED must follow initial USER: ${JSON.stringify(entriesAfterStop)}`,
@@ -552,28 +422,33 @@ registerCase({
     )
 
     const finalInitialUserIndex = findUserEntryIndex(finalEntries, initialMarker)
+    assert(
+      finalInitialUserIndex >= 0,
+      `initial USER entry missing after follow-up: ${JSON.stringify(finalEntries)}`,
+    )
     const finalAbortedIndex = finalEntries.findIndex(
       (entry) => String(entry.entryId) === String(abortedEntry.entryId),
     )
     const followUpIndex = findUserEntryIndex(finalEntries, followUpMarker)
-    const normalAssistants = normalAssistantEntries(finalEntries)
+    const finalEntriesAfterInitial = finalEntries.slice(finalInitialUserIndex)
+    const finalRealTurnAssistants = normalAssistantEntries(finalEntriesAfterInitial)
     assert(
-      normalAssistants.length === 1,
+      finalRealTurnAssistants.length === 1,
       `expected exactly one normal assistant for follow-up: ${JSON.stringify(finalEntries)}`,
     )
     const finalAssistantIndex = finalEntries.findIndex(
-      (entry) => String(entry.entryId) === String(normalAssistants[0].entryId),
+      (entry) => String(entry.entryId) === String(finalRealTurnAssistants[0].entryId),
     )
     assert(
-      finalInitialUserIndex >= 0
-      && finalInitialUserIndex < finalAbortedIndex
+      finalInitialUserIndex < finalAbortedIndex
       && finalAbortedIndex < followUpIndex
       && followUpIndex < finalAssistantIndex,
       `expected USER -> ASSISTANT_ABORTED -> follow-up USER -> assistant MESSAGE: ${JSON.stringify(finalEntries)}`,
     )
+    // 只检查真实 turn 区间：bootstrap 的 ASSISTANT_ERROR 属预期，不得进入该断言。
     assert(
-      !finalEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
-      `unexpected cancellation barrier after durable partial: ${JSON.stringify(finalEntries)}`,
+      !finalEntriesAfterInitial.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
+      `unexpected cancellation barrier after durable partial: ${JSON.stringify(finalEntriesAfterInitial)}`,
     )
     ctx.writeArtifact(
       'stop-partial-continue.json',

@@ -49,6 +49,7 @@ await import('./cases/canvas-storage.mjs')
 await import('./cases/canvas-function.mjs')
 await import('./cases/chat-attachment.mjs')
 await import('./cases/canvas-api.mjs')
+await import('./cases/thread-queued-batch.mjs')
 await import('./cases/real.mjs')
 
 class CaseContext {
