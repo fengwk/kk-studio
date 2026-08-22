@@ -19,6 +19,7 @@ import {
   partsToText,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
+import { composerDraftStorageKey } from '@/features/ai/composer/composer-draft'
 import { pendingStopStorageKey } from '@/features/ai/runtime/pending-stop-sidecar'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
@@ -39,6 +40,7 @@ import type {
 
 /** 控制器 Thread id：资源订阅经严格 codec，必须是 canonical UUID。 */
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
+const THREAD_ID_2 = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -51,6 +53,7 @@ vi.mock('@/shared/api/agent-pane-service', () => ({
   agentPaneService: {
     getThreadSnapshot: vi.fn(),
     acceptCommandBatch: vi.fn(),
+    compactThread: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -1436,4 +1439,436 @@ describe('useAgentThreadController', () => {
     expect(denyCall?.decision).toBe('DENY')
   })
 
+  it('falls back to the generic requestFailed message for a non-Error, non-string send rejection', async () => {
+    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(null)
+    const currentThread = threadFixture()
+    const base = branchDraftFromThread(currentThread)
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController(
+          currentThread.threadId,
+          [],
+          undefined,
+          buildBatchFor(currentThread, base, base),
+          new Map(),
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    act(() => result.current.setDraft([createTextPart('hello')]))
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+    await waitFor(() => expect(result.current.actionError).toBeTruthy())
+    // 非法 error payload（null）→ 通用失败文案（本文件 beforeEach 清空 localStorage，locale 为 en-US）。
+    expect(result.current.actionError).toBe('Request failed')
+    act(() => result.current.dismissActionError())
+    expect(result.current.actionError).toBeNull()
+  })
+
+  it('surfaces a raw string rejection from stop without wrapping it', async () => {
+    vi.mocked(harnessService.stopThread).mockRejectedValueOnce('plain string failure')
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    await act(async () => {
+      await result.current.stopThread()
+    })
+    expect(result.current.actionError).toBe('plain string failure')
+  })
+
+  it('no-ops stop and compact before the thread snapshot has loaded', async () => {
+    vi.mocked(agentPaneService.getThreadSnapshot).mockReturnValue(
+      new Promise<HarnessThreadSnapshotDTO>(() => undefined),
+    )
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await act(async () => {
+      await result.current.stopThread()
+    })
+    expect(harnessService.stopThread).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.compactThread()
+    })
+    expect(agentPaneService.compactThread).not.toHaveBeenCalled()
+    expect(result.current.actionError).toBeNull()
+  })
+
+  it('reports threadNotLoaded without a batch builder and silently no-ops a null plan', async () => {
+    const currentThread = threadFixture()
+    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
+    // 缺省 buildBatch（null）：submit 给出 threadNotLoaded 并阻止发送。
+    const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
+      wrapper,
+    })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    act(() => result.current.setDraft([createTextPart('hello')]))
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+    expect(result.current.actionError).toContain('Thread')
+    expect(agentPaneService.acceptCommandBatch).not.toHaveBeenCalled()
+
+    // buildBatch 返回 null（不可构建的 payload）：静默 no-op，draft 原样保留。
+    const { result: nullPlan } = renderHook(
+      () =>
+        useAgentThreadController(
+          currentThread.threadId,
+          [],
+          undefined,
+          () => null,
+          new Map(),
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(nullPlan.current.disabled).toBe(false))
+    act(() => nullPlan.current.setDraft([createTextPart('keep me')]))
+    await act(async () => {
+      await nullPlan.current.submitMessage()
+    })
+    expect(nullPlan.current.actionError).toBeNull()
+    expect(partsToText(nullPlan.current.draft)).toBe('keep me')
+    expect(agentPaneService.acceptCommandBatch).not.toHaveBeenCalled()
+  })
+
+  it('never overwrites a newer composer draft when an earlier send fails', async () => {
+    vi.mocked(agentPaneService.acceptCommandBatch).mockRejectedValueOnce(new Error('queue full'))
+    const currentThread = threadFixture()
+    const base = branchDraftFromThread(currentThread)
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController(
+          currentThread.threadId,
+          [],
+          undefined,
+          buildBatchFor(currentThread, base, base),
+          new Map(),
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    act(() => result.current.setDraft([createTextPart('first attempt')]))
+    await act(async () => {
+      const pendingSubmit = result.current.submitMessage()
+      result.current.setDraft([createTextPart('newer draft')])
+      await pendingSubmit
+    })
+    await waitFor(() => expect(result.current.actionError).toContain('queue full'))
+    // 失败时 composer 已有更新内容：绝不覆盖为失败快照；编辑本身已重置回放身份。
+    expect(partsToText(result.current.draft)).toBe('newer draft')
+    expect(result.current.replayPending).toBe(false)
+  })
+
+  it('only clears the exact replay when the completing request is still the latest one', async () => {
+    const releases: Array<() => void> = []
+    vi.mocked(agentPaneService.acceptCommandBatch).mockImplementation(
+      () =>
+        new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+          releases.push(() => resolve([] as HarnessThreadCommandDTO[]))
+        }),
+    )
+    const currentThread = threadFixture()
+    const base = branchDraftFromThread(currentThread)
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController(
+          currentThread.threadId,
+          [],
+          undefined,
+          buildBatchFor(currentThread, base, base),
+          new Map(),
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    act(() => result.current.setDraft([createTextPart('first')]))
+    await act(async () => {
+      // 两个请求都 deferred：不能 await 完成，只启动它们。
+      void result.current.submitMessage()
+    })
+    act(() => result.current.setDraft([createTextPart('second')]))
+    await act(async () => {
+      void result.current.submitMessage()
+    })
+    expect(agentPaneService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+    const firstPlan = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]?.[0]
+    const secondPlan = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[1]?.[0]
+    expect(secondPlan?.commands[0]?.clientCommandId).not.toBe(
+      firstPlan?.commands[0]?.clientCommandId,
+    )
+    // 较新的请求先完成：replay 被清空。
+    await act(async () => {
+      releases[1]?.()
+    })
+    await waitFor(() => expect(result.current.replayPending).toBe(false))
+    expect(result.current.pending).toBe(true)
+    // 较旧的请求随后完成：身份已不匹配，绝不再触碰 replay/状态。
+    await act(async () => {
+      releases[0]?.()
+    })
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    expect(result.current.actionError).toBeNull()
+    expect(result.current.replayPending).toBe(false)
+  })
+
+  it('skips localStorage persistence for non-edit draft change sources', async () => {
+    const currentThread = threadFixture()
+    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
+    const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
+      wrapper,
+    })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    act(() => result.current.setDraft([createTextPart('edit draft')]))
+    const persisted = localStorage.getItem(composerDraftStorageKey(`thread:${THREAD_ID}`))
+    expect(persisted).toContain('edit draft')
+    // history 来源不写 storage：旧值原样保留。
+    act(() => result.current.setDraft([createTextPart('history draft')], 'history'))
+    expect(localStorage.getItem(composerDraftStorageKey(`thread:${THREAD_ID}`))).toBe(persisted)
+    expect(partsToText(result.current.draft)).toBe('history draft')
+  })
+
+  it('refuses stale retry when cursors are unchanged, commands are empty, or the target is not a THREAD', () => {
+    const currentThread = threadFixture()
+    const base = branchDraftFromThread(currentThread)
+    const messagePlan = buildMessageBatchPlan({
+      thread: currentThread,
+      effectiveBase: base,
+      draft: base,
+      parts: [createTextPart('hello')],
+      createCommandId: () => 'message-id',
+    })
+    // 快照 cursor 与目标完全一致：没有需要追平的推进。
+    expect(canRetryStaleMessageBatch(messagePlan, snapshotOf(currentThread))).toBe(false)
+    // 空 command batch：没有 USER_MESSAGE 可精确重放。
+    const emptyPlan: CommandBatchPlan = {
+      ...messagePlan,
+      request: { ...messagePlan.request, commands: [] },
+    }
+    expect(
+      canRetryStaleMessageBatch(
+        emptyPlan,
+        snapshotOf(threadFixture({ headEntryId: 'h2', nextCommandSequence: '2' })),
+      ),
+    ).toBe(false)
+    // 非 THREAD target（ENTRY）：必须重建而不是回放。
+    const entryPlan: CommandBatchPlan = {
+      ...messagePlan,
+      request: {
+        ...messagePlan.request,
+        target: {
+          type: 'ENTRY',
+          sessionId: 's1',
+          startEntryId: 'e1',
+          threadId: THREAD_ID,
+          yoloEnabled: false,
+        },
+      },
+    }
+    expect(
+      canRetryStaleMessageBatch(
+        entryPlan,
+        snapshotOf(threadFixture({ headEntryId: 'h2', nextCommandSequence: '2' })),
+      ),
+    ).toBe(false)
+  })
+
+  it('runs manual compaction with the snapshot version and clears conflict on success', async () => {
+    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture(), { manualCompaction: { available: true, disabledReason: null } }),
+    )
+    vi.mocked(agentPaneService.compactThread).mockResolvedValue({
+      thread: threadFixture({ version: '1' }),
+      turnStartEntryId: 't1',
+      modelInvocationId: null,
+    })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+      wrapper: clientWrapper(client),
+    })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    await act(async () => {
+      await result.current.compactThread()
+    })
+    expect(agentPaneService.compactThread).toHaveBeenCalledWith(THREAD_ID, {
+      expectedVersion: '0',
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['threads', 'snapshot', THREAD_ID] }),
+    )
+    expect(result.current.actionError).toBeNull()
+    invalidateSpy.mockRestore()
+  })
+
+  it('reports compaction unavailability and surfaces 409/non-conflict failures distinctly', async () => {
+    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture(), { manualCompaction: { available: true, disabledReason: null } }),
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+    // 409：conflict 展示 + 目标 snapshot 失效；draft/错误通道不受影响。
+    vi.mocked(agentPaneService.compactThread).mockRejectedValueOnce(
+      new ApiError('stale compact version', 409, 'CONFLICT', { reason: 'STALE_VERSION' }),
+    )
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+      wrapper: clientWrapper(client),
+    })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    await act(async () => {
+      await result.current.compactThread()
+    })
+    expect(result.current.conflict?.reason).toBe('STALE_VERSION')
+    expect(result.current.actionError).toBeNull()
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['threads', 'snapshot', THREAD_ID] }),
+    )
+    act(() => result.current.dismissConflict())
+    expect(result.current.conflict).toBeNull()
+    // 非 conflict 失败：actionError 通道。
+    vi.mocked(agentPaneService.compactThread).mockRejectedValueOnce(new Error('compact boom'))
+    await act(async () => {
+      await result.current.compactThread()
+    })
+    expect(result.current.actionError).toContain('compact boom')
+    invalidateSpy.mockRestore()
+  })
+
+  it('reports compaction unavailability when the advisory sidecar is missing', async () => {
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    await act(async () => {
+      await result.current.compactThread()
+    })
+    expect(agentPaneService.compactThread).not.toHaveBeenCalled()
+    // 无 advisory sidecar：使用 fallback 的 disabledReason。
+    expect(result.current.actionError).toContain('Thread snapshot is not loaded')
+  })
+
+  it('routes runCommand to stop/compact and reports unknown commands', async () => {
+    vi.mocked(agentPaneService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture(), { manualCompaction: { available: true, disabledReason: null } }),
+    )
+    vi.mocked(agentPaneService.compactThread).mockResolvedValue({
+      thread: threadFixture(),
+      turnStartEntryId: 't1',
+      modelInvocationId: null,
+    })
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    act(() => result.current.runCommand({ id: 'stop', label: 'stop', description: 'stop' }))
+    await waitFor(() => expect(harnessService.stopThread).toHaveBeenCalledTimes(1))
+    act(() => result.current.runCommand({ id: 'compact', label: 'compact', description: 'compact' }))
+    await waitFor(() => expect(agentPaneService.compactThread).toHaveBeenCalledTimes(1))
+    // 未接管的命令 id 必须给出明确错误，而不是静默。
+    act(() => result.current.runCommand({ id: 'agent', label: 'agent', description: 'agent' }))
+    expect(result.current.actionError).toContain('agent')
+  })
+
+  it('guards a late stop success after rebind: invalidates the old thread but never mutates the new panel', async () => {
+    let releaseStop: ((result: HarnessThreadStopResultDTO) => void) | null = null
+    vi.mocked(harnessService.stopThread).mockImplementation(
+      () =>
+        new Promise<HarnessThreadStopResultDTO>((resolve) => {
+          releaseStop = resolve
+        }),
+    )
+    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(snapshotOf(threadFixture({ threadId }))),
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      { wrapper: clientWrapper(client), initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    await act(async () => {
+      void result.current.stopThread()
+    })
+    expect(result.current.stopReplayPending).toBe(true)
+    rerender({ tid: THREAD_ID_2 })
+    await act(async () => {
+      releaseStop?.({
+        status: 'IDLE',
+        thread: threadFixture({ threadId: THREAD_ID }),
+        stoppedTurnEndEntryId: null,
+        cancelledCommandCount: 0,
+        cancelledUserMessages: [],
+      } as HarnessThreadStopResultDTO)
+    })
+    // 旧 Thread 的 snapshot 与 chats 都被失效；旧 sidecar 保留供返回后精确回放。
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['threads', 'snapshot', THREAD_ID] }),
+    )
+    expect(invalidateSpy).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['chats'] }))
+    expect(localStorage.getItem(pendingStopStorageKey(THREAD_ID))).not.toBeNull()
+    // 新面板未受影响：无错误、无 cancelled 消息、无 replay 阻塞。
+    expect(result.current.actionError).toBeNull()
+    expect(partsToText(result.current.draft)).toBe('')
+    expect(result.current.stopReplayPending).toBe(false)
+    invalidateSpy.mockRestore()
+  })
+
+  it('fences a late stop failure after rebind: known 409 clears the old sidecar without touching the new panel', async () => {
+    let rejectStop: ((error: unknown) => void) | null = null
+    vi.mocked(harnessService.stopThread).mockImplementation(
+      () =>
+        new Promise<HarnessThreadStopResultDTO>((_, reject) => {
+          rejectStop = reject
+        }),
+    )
+    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(snapshotOf(threadFixture({ threadId }))),
+    )
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    await act(async () => {
+      void result.current.stopThread()
+    })
+    expect(localStorage.getItem(pendingStopStorageKey(THREAD_ID))).not.toBeNull()
+    rerender({ tid: THREAD_ID_2 })
+    await act(async () => {
+      rejectStop?.(new ApiError('stale version', 409))
+    })
+    // 已知 409：旧 sidecar 被清除；迟到的错误不污染新面板。
+    expect(localStorage.getItem(pendingStopStorageKey(THREAD_ID))).toBeNull()
+    expect(result.current.actionError).toBeNull()
+    expect(result.current.stopReplayPending).toBe(false)
+  })
+
+  it('fences a late non-conflict stop failure after rebind: no error surfaces on the new panel', async () => {
+    let rejectStop: ((error: unknown) => void) | null = null
+    vi.mocked(harnessService.stopThread).mockImplementation(
+      () =>
+        new Promise<HarnessThreadStopResultDTO>((_, reject) => {
+          rejectStop = reject
+        }),
+    )
+    vi.mocked(agentPaneService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(snapshotOf(threadFixture({ threadId }))),
+    )
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    await act(async () => {
+      void result.current.stopThread()
+    })
+    rerender({ tid: THREAD_ID_2 })
+    await act(async () => {
+      rejectStop?.(new Error('network lost'))
+    })
+    // 不确定失败保留旧 sidecar 供精确回放；新面板零污染。
+    expect(localStorage.getItem(pendingStopStorageKey(THREAD_ID))).not.toBeNull()
+    expect(result.current.actionError).toBeNull()
+    expect(result.current.stopReplayPending).toBe(false)
+  })
 })
