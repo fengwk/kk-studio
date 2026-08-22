@@ -66,15 +66,11 @@ class HarnessStoreContractTest {
               "renewWork",
               "completeWork",
               "rescheduleWork",
-              "deleteCommands",
-              "deleteToolInvocations",
               "deleteToolInvocationsByIds",
-              "deleteModelInvocations",
               "deleteModelInvocation",
-              "deleteThread",
+              "deleteThreads",
               "deleteEntries",
-              "deleteSession",
-              "deleteWorkByThread"));
+              "deleteSession"));
 
   @Test
   void storeRootExposesOnlyTheTransactionEntryPoint() {

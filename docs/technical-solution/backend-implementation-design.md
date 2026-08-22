@@ -128,7 +128,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | 组件 | 职责 |
 | --- | --- |
 | `StudioCommandAcceptanceService` | 唯一应用写事务边界：owner 鉴权 + KEY SHARE 锁 owner scope，调用 `HarnessRuntime.acceptCommands`，NEW_SESSION 时写 owner relation（`chat_session`/`canvas_session`），并做 upload validate/consume |
-| `HarnessSessionDeletionService` | Core 删除编排：`deleteSessionsByOwner` 按 owner 列出 Session，UUID 排序后逐 Session/Thread 锁并深删（Work/Tool/Model/Command/Thread/Entries/SessionBlobRef/relation/Session），经 `HarnessStore.Transaction` 执行 |
+| `HarnessSessionDeletionService` | Core 删除编排：`deleteSessionsByOwner` 按 owner 列出 Session，先按 UUID 锁定全部 Session/Thread；Store `deleteThreads` 再跨目标集合以 Command→Model→Tool→Work 规范锁序原子删除 owned facts，最后删除 Entries/SessionBlobRef/relation/Session |
 | `StudioHarnessThreadController` | 仅映射 `HarnessRuntime` 门面 + typed 异常翻译 |
 | `HarnessRuntime` | `acceptCommands`/`findThreadCommand`/`stop`/`decideToolApproval`/`setThreadYolo`/`getThreadSnapshot`/`getSessionEntries`/`listThreadsBySession` 单事务控制面；不暴露 delete/create |
 | `ThreadProcessor` | Agent Loop single-action reducer：每次 claim 恰好一个分类动作，下一动作由同事务 requestWork 驱动，返回 COMPLETED/RESCHEDULED/LOST_OWNERSHIP；Model terminal apply 前按序物化失败 attempt，TURN_END 同事务删除 Model/Tool Invocation；另提供 `compactThread`/`manualCompactionAvailability` |

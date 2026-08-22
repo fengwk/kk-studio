@@ -8,6 +8,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.mappedAssistant;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
@@ -364,6 +365,70 @@ class PostgresqlHarnessStoreConcurrencyTest {
       }
       control.get(10, TimeUnit.SECONDS);
     }
+    assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
+  }
+
+  @Test
+  void deepDeleteWaitsForModelCallbackBeforeLockingItsWork() throws Exception {
+    // Model callback 的规范锁序是 Model -> Work；深删必须先等 Model，再锁 Work，不能反向形成数据库死锁。
+    TurnBaseline baseline = seedTurnBaseline(store);
+    UUID modelId = id(100L);
+    WorkTarget target = new WorkTarget(WorkTargetType.MODEL, modelId);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId()).orElseThrow();
+          tx.insertModelInvocation(
+              modelInvocation(
+                  modelId,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+          tx.requestWork(target, T1);
+        });
+    ClaimedWork claim =
+        store
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.MODEL, T1, "lease-delete", T5))
+            .orElseThrow();
+
+    CountDownLatch modelLocked = new CountDownLatch(1);
+    CountDownLatch continueToWork = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<Boolean> callback =
+          executor.submit(
+              () ->
+                  store.transaction(
+                      tx -> {
+                        tx.lockModelInvocation(modelId).orElseThrow();
+                        modelLocked.countDown();
+                        await(continueToWork);
+                        return tx.lockClaimedWork(claim, T2).isPresent();
+                      }));
+      assertTrue(modelLocked.await(10, TimeUnit.SECONDS));
+
+      Future<Boolean> deletion =
+          executor.submit(
+              () ->
+                  store.transaction(
+                      tx -> {
+                        tx.lockThread(baseline.threadId()).orElseThrow();
+                        return tx.deleteThreads(List.of(baseline.threadId())) == 1;
+                      }));
+      try {
+        assertThrows(TimeoutException.class, () -> deletion.get(200, TimeUnit.MILLISECONDS));
+      } finally {
+        continueToWork.countDown();
+      }
+
+      assertTrue(callback.get(10, TimeUnit.SECONDS));
+      assertTrue(deletion.get(10, TimeUnit.SECONDS));
+    }
+
+    assertTrue(store.transaction(tx -> tx.findThread(baseline.threadId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(modelId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
   }
 
