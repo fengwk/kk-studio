@@ -10,8 +10,8 @@ flowchart TD
     A --> B[architecture.md<br/>架构与模块边界]
     A --> O[domain-map.md<br/>领域词汇与映射]
     A --> Q[harness-runtime-architecture.md<br/>Harness Runtime 架构]
-    A --> T[harness-session-thread-model.md<br/>Session / Thread / Pane lazy materialization]
-    A --> Y[harness-runtime-agent-loop-refactor.md<br/>Agent Loop durable reducer]
+    A --> T[session-thread-pane.md<br/>Session / Thread / Pane lazy materialization]
+    A --> Y[harness-agent-loop.md<br/>Agent Loop durable reducer]
     A --> X[harness-runtime-contracts.md<br/>Runtime 公共契约]
     A --> S[harness-storage-runtime.md<br/>PostgreSQL durable facts 与 Work/Redis]
     A --> D[backend-implementation-design.md<br/>后端实现]
@@ -36,7 +36,7 @@ flowchart TD
 | 1 | [architecture.md](architecture.md) | 模块拓扑、依赖方向与所有权 |
 | 2 | [domain-map.md](domain-map.md) | Harness/Studio 词汇与前后端映射 |
 | 3 | [harness-runtime-architecture.md](harness-runtime-architecture.md) | Entry/Thread/Command/Invocation/Work、Agent Loop 与 processor |
-| 4 | [harness-runtime-agent-loop-refactor.md](harness-runtime-agent-loop-refactor.md) | Agent Loop durable reducer、持久化形状与执行协议 |
+| 4 | [harness-agent-loop.md](harness-agent-loop.md) | Agent Loop durable reducer、持久化形状与执行协议 |
 | 5 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | JSON/DTO、命令 batch、CAS、replay、snapshot 与异常 wire |
 | 6 | [harness-storage-runtime.md](harness-storage-runtime.md) | HarnessStore 事务/锁序、7 表、Work wake 协议与 Redis overlay |
 | 7 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 composition root 与 HTTP 边界 |
@@ -52,7 +52,7 @@ flowchart TD
 | 17 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
 | 18 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
 | 19 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
-| 20 | [harness-session-thread-model.md](harness-session-thread-model.md) | Session Tree、三态 PaneTarget、lazy Thread materialization、Stop 恢复、上传回收与 clean-slate schema |
+| 20 | [session-thread-pane.md](session-thread-pane.md) | Session Tree、三态 PaneTarget、lazy Thread materialization、Stop 恢复与上传回收 |
 
 ## 贯穿约束
 
@@ -81,7 +81,7 @@ flowchart TD
 
 | 规则 | 说明 |
 | --- | --- |
-| 状态准确 | Session/Thread/Pane 重构目标以 [harness-session-thread-model.md](harness-session-thread-model.md) 为准；Agent Loop 以 [harness-runtime-agent-loop-refactor.md](harness-runtime-agent-loop-refactor.md)、[harness-runtime-architecture.md](harness-runtime-architecture.md) 与 [harness-runtime-contracts.md](harness-runtime-contracts.md) 为事实源，存储与 Work/Redis 以 [harness-storage-runtime.md](harness-storage-runtime.md) 为事实源 |
+| 状态准确 | Session/Thread/Pane 以 [session-thread-pane.md](session-thread-pane.md) 为准；Agent Loop 以 [harness-agent-loop.md](harness-agent-loop.md)、[harness-runtime-architecture.md](harness-runtime-architecture.md) 与 [harness-runtime-contracts.md](harness-runtime-contracts.md) 为事实源，存储与 Work/Redis 以 [harness-storage-runtime.md](harness-storage-runtime.md) 为事实源 |
 | 上下文无关 | 文档可独立阅读，不依赖讨论过程；不写否决项、迁移历史或旧方案 |
 | 分层清晰 | 架构、Runtime、存储、前后端实现分别维护 |
 | 当前态 | 所有技术方案只描述当前仓库已生效的职责、结构、协议与约束 |

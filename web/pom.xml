@@ -13,6 +13,11 @@
     <dependencies>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-database</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-core</artifactId>
         </dependency>
         <dependency>

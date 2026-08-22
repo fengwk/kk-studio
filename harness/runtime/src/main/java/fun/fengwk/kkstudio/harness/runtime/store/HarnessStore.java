@@ -293,25 +293,12 @@ public interface HarnessStore {
     // ---------- 应用侧深删除原语（Chat 深删除专用） ----------
 
     /**
-     * 删除该 Thread 的全部 Command 行并返回删除行数。要求该 Thread 已在本事务锁定（锁序 Thread -&gt; commands）， 未锁定抛 {@link
-     * IllegalStateException}。
+     * 批量删除 Thread 及其全部 Command / ModelInvocation / ToolInvocation / Work 行。要求所有 Thread 已按 UUID
+     * 升序在本事务 锁定；实现必须跨全部 Thread 按 Command -&gt; Model -&gt; Tool -&gt; Work 的规范顺序锁定子事实，再按 FK
+     * 顺序删除，避免多 Thread 深删发生锁 rank 回退，也避免与运行时 callback 的 Model/Tool -&gt; Work 锁序形成死锁。Entry 仍由
+     * Session 级删除原语处理。
      */
-    int deleteCommands(UUID threadId);
-
-    /**
-     * 删除该 Thread 的全部 ToolInvocation 行（经其 ModelInvocation 归属判定）并返回删除行数。要求该 Thread 已在本事务 锁定 （锁序
-     * Thread -&gt; Tool）；Tool 行不持有结果引用（Outcome 是自包含的 Entry 数据），无残留 FK 约束。
-     */
-    int deleteToolInvocations(UUID threadId);
-
-    /** 删除该 Thread 的全部 ModelInvocation 行并返回删除行数。要求该 Thread 已在本事务锁定；调用方必须先删除其 ToolInvocation 行。 */
-    int deleteModelInvocations(UUID threadId);
-
-    /**
-     * 删除 Thread 行（head Entry 引用由 Entry 删除顺序负责）并返回是否删除。要求该 Thread 已在本事务锁定；其 Command / Invocation /
-     * Work 行必须先被删除，残留引用使事务回滚。
-     */
-    boolean deleteThread(UUID threadId);
+    int deleteThreads(List<UUID> threadIds);
 
     /**
      * 删除该 Session 的全部 Entry 行并返回删除行数：以叶子优先循环逐批删除（同一语句只删除父不在批内的行），保证自引用 parent FK 顺序；ROOT
@@ -324,12 +311,6 @@ public interface HarnessStore {
      * 负责，本原语绝不触碰。
      */
     boolean deleteSession(UUID sessionId);
-
-    /**
-     * 删除该 Thread 拥有的全部 Work 行并返回删除行数：THREAD target 自身，以及其 ModelInvocation / ToolInvocation 对应的
-     * MODEL / TOOL target。要求该 Thread 已在本事务锁定（控制面删除 Work 的既有约束）。
-     */
-    int deleteWorkByThread(UUID threadId);
 
     // ---------- 运行期 TURN_END / Stop 删除原语 ----------
 

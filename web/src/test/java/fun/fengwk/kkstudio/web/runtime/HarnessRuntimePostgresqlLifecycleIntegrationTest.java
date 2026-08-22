@@ -63,8 +63,8 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
 
   static {
     POSTGRES.start();
-    // 上下文创建期装配 bean 会读取 system_setting 默认行：应用 V1 baseline（含 Harness 7 表 + system_setting 默认行），
-    // 替代纯 harness-runtime-schema.sql，否则缺行会导致上下文启动失败。
+    // 上下文创建期装配 bean 会读取 system_setting 默认行：应用唯一 V1 baseline（database 模块的
+    // db/migration/V1__schema.sql，含 Harness 7 表 + system_setting 默认行），否则缺行会导致上下文启动失败。
     try (Connection connection = newConnection()) {
       resetSchema(connection);
     } catch (SQLException error) {
@@ -183,8 +183,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
       statement.execute("drop schema if exists public cascade");
       statement.execute("create schema public");
     }
-    // V1 baseline 内嵌的 Harness 7 表与 harness-runtime-schema.sql 字节一致（由架构测试守护），并额外提供 system_setting
-    // 默认行。
+    // V1 baseline（唯一事实源）提供 Harness 7 表 + system_setting 默认行。
     Flyway.configure()
         .dataSource(new SingleConnectionDataSource(connection, true))
         .locations("classpath:db/migration")

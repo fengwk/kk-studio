@@ -4,8 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * {@code harness_session_blob_ref} 的显式 owner API：Session 引用边的 insert/delete 与 blob retain/release
- * 成对维护。
+ * {@code session_blob_ref} 的显式 owner API：Session 引用边的 insert/delete 与 blob retain/release 成对维护。
  *
  * <p>不变量：每个 ref 行恰好对应一次 {@link StorageBlobManager#retain}；删除时逐行 {@link
  * StorageBlobManager#release}。ref_count 维护绝不依赖 ON DELETE CASCADE 或触发器。所有变更方法必须运行在事务中 （Spring {@code

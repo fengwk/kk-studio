@@ -120,14 +120,15 @@ public interface ToolGateway {
   }
 
   /**
-   * 一次 execution 的本地取消控制；best effort 且幂等，不保证远程停止。{@link #activate} 的默认实现是 no-op（lambda 兼容）；需要两阶段激活的
-   * Gateway 覆盖它，在 Processor attach handle + durable markRunning 之后打开回调 gate。
+   * 一次 execution 的本地取消控制；best effort 且幂等，不保证远程停止。两阶段激活契约：Gateway 在 {@link #start} 返回 {@link
+   * Started} 时不得打开任何回调 gate，{@link #activate} 由 Processor 在 attach handle + durable markRunning
+   * 之后调用， 此时 Gateway 才允许打开回调 gate / 启动外部执行。
    */
   interface Handle {
     void cancel();
 
     /** 打开 Gateway 回调 gate；只在 {@link Started} 返回后由 Processor 调用；抛异常即激活失败（收敛一次 UNKNOWN）。 */
-    default void activate() {}
+    void activate();
   }
 
   /** partial 与 terminal 回调；duplicate / stale 由 Runtime fence。 */

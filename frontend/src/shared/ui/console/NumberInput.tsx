@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useId } from 'react'
-import { sanitizeIntegerInput } from '@/features/ai/catalog/ai-number-input'
+import { sanitizeIntegerInput } from '@/shared/lib/numeric-input'
 import { useI18n } from '@/shared/i18n'
 
 /**

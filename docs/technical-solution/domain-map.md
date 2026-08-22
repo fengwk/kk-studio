@@ -55,7 +55,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | task | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：以普通 durable Harness Thread 运行子 Agent，`task` 的 id/session_id 即子 ThreadId（canonical UUID）；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
 | Goal state | `goal` 插件拥有的 branch-scoped 完整快照；以 `CUSTOM(goal/state@schemaVersion=1)` 追加，当前分支最近快照生效；状态仅 `active` / `complete` / `blocked` |
-| Resource | Tool 边界可产生瞬时 `ResourceRef(uri,mediaType,name,size,sha256)`；写入 Entry history 前摄入全局 Blob，durable message 只保存 `resource(blobId,name,preview)`，Session 通过 `harness_session_blob_ref` 持有引用 |
+| Resource | Tool 边界可产生瞬时 `ResourceRef(uri,mediaType,name,size,sha256)`；写入 Entry history 前摄入全局 Blob，durable message 只保存 `resource(blobId,name,preview)`，Session 通过 `session_blob_ref` 持有引用 |
 | Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentName`（bounded 小写路由名称）唯一，状态为 CONNECTING/READY；可用性 = READY + 连接打开 + 心跳未过期 |
 | Realtime projection | Redis Streams 中有界、可丢失的输出覆盖层（非 durable） |
 

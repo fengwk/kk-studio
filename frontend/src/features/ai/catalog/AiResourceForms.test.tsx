@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentDraft, ModelDraft, ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
 import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/catalog/AiResourceForms'
-import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
+import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 
 async function selectFormOption(
   user: ReturnType<typeof userEvent.setup>,

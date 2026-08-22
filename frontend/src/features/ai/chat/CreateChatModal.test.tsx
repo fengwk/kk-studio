@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/ai/chat/CreateChatModal'
 import { environmentService } from '@/shared/api/environment-service'
-import { chooseSelectOption } from '@/shared/ui/console/chooseSelectOption'
+import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {

@@ -976,10 +976,6 @@ public final class HarnessRuntime {
     }
   }
 
-  private static String contextName(ThreadContext context) {
-    return context.getClass().getSimpleName();
-  }
-
   private static HarnessRuntimeConflictException conflict(
       HarnessRuntimeConflictException.Reason reason, String message) {
     return new HarnessRuntimeConflictException(reason, message);

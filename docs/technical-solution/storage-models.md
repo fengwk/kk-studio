@@ -1,8 +1,8 @@
 # 存储模型
 
-PostgreSQL 是 Catalog、Chat、Harness 与 Canvas 的 durable truth。权威 DDL 是
-[`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)；其中 Harness Runtime
-七表区块与 `harness-runtime-spring` 的 `harness-runtime-schema.sql` byte-identical。Redis 只保存
+PostgreSQL 是 Catalog、Chat、Harness 与 Canvas 的 durable truth。唯一 schema 基线是
+[`V1__schema.sql`](../../database/src/main/resources/db/migration/V1__schema.sql)（`database` 模块，
+profile seeds 位于 `db/seed/**`）；不存在任何 schema mirror。Redis 只保存
 bounded realtime cache/overlay，S3 保存全局 Blob 与 ComfyUI 临时对象。
 
 ## 1. 身份规则
@@ -36,7 +36,7 @@ Provider/Model/Agent 都使用带 `expectedVersion` 的硬删除。记录存续�
 
 Chat 设置不复制到 Thread。Thread 的完整 BranchSettings 来自 ROOT/TURN_START Entry。不存在 `chat_thread`；用户 Session 恰好归属于一个 Chat 或 Canvas（插入时以 `not exists(canvas_session)` 保证单 owner 原子性）。
 
-删除 Chat 时，应用先枚举关联 Session，显式释放 `harness_session_blob_ref`，再深删除 Harness 执行事实。Blob 引用不能由 FK cascade 隐式维护。
+删除 Chat 时，应用先枚举关联 Session，显式释放 `session_blob_ref`，再深删除 Harness 执行事实。Blob 引用不能由 FK cascade 隐式维护。
 
 ## 4. Harness Runtime 执行表（精确 7 张）
 
@@ -75,7 +75,7 @@ SET_ACTIVE_TOOLS
 | --- | --- |
 | `storage_blob` | `id uuid`；不可变内容与媒体事实；`ACTIVE/DELETING`；唯一 ACTIVE `(sha256,size_bytes)`；唯一一级 `ref_count` |
 | `storage_upload` | `id uuid` 一次性 Handle；`blob_id IS NULL` 为 PENDING，非空为 READY；保存权威 filename/声明/checksum/expiry |
-| `harness_session_blob_ref` | PK `(session_id, blob_id)`；Session 对 Blob 的显式引用边，每行贡献一次 Blob retain |
+| `session_blob_ref` | PK `(session_id, blob_id)`；Session 对 Blob 的显式引用边，每行贡献一次 Blob retain |
 
 对象键不落库：
 
@@ -105,7 +105,7 @@ Reserve 请求为 `{filename, mediaType, sizeBytes, sha256}`：
 
 - READY Upload；
 - Canvas Blob Resource 行；
-- `harness_session_blob_ref` 行。
+- `session_blob_ref` 行。
 
 Function INPUT/OUTPUT pin 不修改 ref_count，只决定无 owner Canvas Resource 是否保留。
 
@@ -123,7 +123,7 @@ Wire `USER_MESSAGE` 的 `ATTACHMENT(uploadId)` 是瞬时内容，不能进入 du
 ResourceMessageContent(blobId, name, preview?)
 ```
 
-并通过 `harness_session_blob_ref` retain。Tool 边界仍可产生瞬时
+并通过 `session_blob_ref` retain。Tool 边界仍可产生瞬时
 `ResourceRef(uri, mediaType, name, size, sha256)`；在 Tool Result Entry 写入前，
 `GlobalStorageToolResultHistoryMaterializer` 有界读取 data/file/http/https/s3 内容，摄入全局 Blob，
 把 durable history 转换为同一 `ResourceMessageContent`。因此 Entry/Command durable JSON 不保存
@@ -162,11 +162,11 @@ Redis Stream 只缓存 after-commit Patch；PostgreSQL trigger 只发 version NO
 ## 8. FK 与删除
 
 - Harness Runtime 七表保持 Runtime schema 原始 FK 规则。
-- `storage_upload -> storage_blob`、`harness_session_blob_ref -> session/blob`、
+- `storage_upload -> storage_blob`、`session_blob_ref -> session/blob`、
   `canvas_resource -> storage_blob` 都是 RESTRICT。
 - Canvas ownership FK 使用 RESTRICT；应用按
   `pins -> resources/runs -> links -> nodes -> groups -> dedup -> document` 显式删除。
-- Canvas/Chat 深删除在删除 Session 前逐行删除 `harness_session_blob_ref` 并 release Blob。
+- Canvas/Chat 深删除在删除 Session 前逐行删除 `session_blob_ref` 并 release Blob。
 - 归属关系表 `chat_session` / `canvas_session` 的 `session_id` 主键 + owner FK（RESTRICT）；删除 Chat/Canvas 时应用先列 Session 深删（`HarnessSessionDeletionService`），再删 owner relation 与 owner 行。
 
 ## 9. 时间与事务

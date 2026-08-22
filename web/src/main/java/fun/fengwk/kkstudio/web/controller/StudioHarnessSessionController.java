@@ -15,7 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeWebMapper;
+import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
+import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,7 +40,7 @@ public class StudioHarnessSessionController {
     return Results.ok(
         withRuntimeTranslation(
             () -> {
-              UUID id = HarnessRuntimeWebMapper.parseUuid(sessionId, "sessionId");
+              UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");
               return harnessQueryService.listThreadSummaries(id);
             }));
   }
@@ -50,11 +51,11 @@ public class StudioHarnessSessionController {
     return Results.ok(
         withRuntimeTranslation(
             () -> {
-              UUID id = HarnessRuntimeWebMapper.parseUuid(sessionId, "sessionId");
+              UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");
               List<Entry> entries = harnessQueryService.listSessionEntries(id);
               List<HarnessSessionEntryDTO> mapped = new ArrayList<>(entries.size());
               for (Entry entry : entries) {
-                mapped.add(HarnessRuntimeWebMapper.toEntryDto(entry));
+                mapped.add(HarnessRuntimeResponseMapper.toEntryDto(entry));
               }
               return List.copyOf(mapped);
             }));

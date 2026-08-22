@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * {@code harness_session_blob_ref} 显式 manager 的 PostgreSQL 集成测试。
+ * {@code session_blob_ref} 显式 manager 的 PostgreSQL 集成测试。
  *
  * <p>覆盖 retain/release 与 ref_count 账本成对维护（含重复 retain/release 幂等）、release 到零切 DELETING、 MANDATORY
  * 传播（事务外调用确定性拒绝），以及 listBlobIds 枚举。
@@ -64,7 +64,7 @@ class SessionBlobRefManagerIntegrationTest extends S3PostgresSpringTestSupport {
     seedSession(SESSION_B);
   }
 
-  /** harness_session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。 */
+  /** session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。 */
   private void seedSession(UUID sessionId) {
     jdbc.update(
         "insert into harness_session (id, created_at) values (?, current_timestamp)", sessionId);
@@ -85,7 +85,7 @@ class SessionBlobRefManagerIntegrationTest extends S3PostgresSpringTestSupport {
     assertEquals(
         1,
         jdbc.queryForObject(
-            "select count(*) from harness_session_blob_ref where session_id = ? and blob_id = ?",
+            "select count(*) from session_blob_ref where session_id = ? and blob_id = ?",
             Integer.class,
             SESSION_A,
             blobUuid));
@@ -106,8 +106,7 @@ class SessionBlobRefManagerIntegrationTest extends S3PostgresSpringTestSupport {
           return null;
         });
     assertEquals(3L, storage.blobRefCount(blobId));
-    assertEquals(
-        2, jdbc.queryForObject("select count(*) from harness_session_blob_ref", Integer.class));
+    assertEquals(2, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
 
     // release：逐行释放，删除后幂等 no-op。
     tx.execute(
@@ -162,8 +161,7 @@ class SessionBlobRefManagerIntegrationTest extends S3PostgresSpringTestSupport {
             "select count(*) from storage_blob where id = ?", Integer.class, blobUuid),
         "release to zero must delete the DELETING row after commit");
     assertFalse(s3Storage.hasObject(StorageObjectKeys.blobOriginal(blobUuid)));
-    assertEquals(
-        0, jdbc.queryForObject("select count(*) from harness_session_blob_ref", Integer.class));
+    assertEquals(0, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
   }
 
   @Test
@@ -179,7 +177,7 @@ class SessionBlobRefManagerIntegrationTest extends S3PostgresSpringTestSupport {
                 }));
     assertEquals(
         0,
-        jdbc.queryForObject("select count(*) from harness_session_blob_ref", Integer.class),
+        jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class),
         "FK rejection must leave no ref row");
   }
 

@@ -285,7 +285,7 @@ class CoreToolGatewayStartTest {
             new ToolGatewayTestSupport.RecordingListener());
 
     ToolGateway.Busy busy = assertInstanceOf(ToolGateway.Busy.class, result);
-    assertEquals(ToolGatewayTestSupport.CONFIG.busyRetryDelay(), busy.retryAfter());
+    assertEquals(ToolGatewayTestSupport.BUSY_RETRY_DELAY.get(), busy.retryAfter());
   }
 
   @Test
@@ -373,7 +373,7 @@ class CoreToolGatewayStartTest {
                 ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
     ToolGateway.Overloaded overloaded = assertInstanceOf(ToolGateway.Overloaded.class, result);
-    assertEquals(ToolGatewayTestSupport.CONFIG.overloadRetryDelay(), overloaded.retryAfter());
+    assertEquals(ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY.get(), overloaded.retryAfter());
     assertEquals(overloaded.retryAfter().toMillis(), overloaded.retryAfter().toNanos() / 1_000_000);
   }
 

@@ -59,7 +59,8 @@ Agent DTO 的 `model` 使用 Model ref，create 与 PUT 都必填；Model DTO �
 | `PluginCatalogConfiguration` | 收集全部 `HarnessPlugin` beans，构造并冻结 `PluginCatalog`；Core 不依赖具体插件实现 |
 | `HarnessToolGatewayConfiguration` | `ObjectProvider<ToolFactory>` + `PluginCatalog` + `PluginBranchViewLoader`；`CoreToolGateway`（preflight + 两阶段激活 + FIFO 回调桥 + intent 校验 + `ToolResultExternalizer`） |
 | `RuntimeToolsConfiguration` | 装配两个内部 Platform Tool `load_skill` 与 `task`（含 `SubagentConfig`、并发 reservation/活动 descendant relay 共用的 `SubagentRunRegistry`、子 Agent 执行线程池）；把本地 `ToolFactory` descriptor 与冻结插件贡献合并为 `ToolCatalog`，按插件 visibility 维护 selectable/internal 名称 |
-| `HarnessRuntimeWebMapper` | canonical UUID/decimal/JSON 校验：DTO → 领域命令 |
+| `HarnessRuntimeRequestMapper` | 严格校验 canonical UUID、decimal cursor 与 sealed DTO union，并映射为领域命令 |
+| `HarnessRuntimeResponseMapper` | 从一致的 Runtime snapshot 投影 Thread status、Entry、Command、Invocation 与 canonical JSON DTO |
 
 ## 4. HTTP API
 
@@ -127,7 +128,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | 组件 | 职责 |
 | --- | --- |
 | `StudioCommandAcceptanceService` | 唯一应用写事务边界：owner 鉴权 + KEY SHARE 锁 owner scope，调用 `HarnessRuntime.acceptCommands`，NEW_SESSION 时写 owner relation（`chat_session`/`canvas_session`），并做 upload validate/consume |
-| `HarnessSessionDeletionService` | Core 删除编排：`deleteSessionsByOwner` 按 owner 列出 Session，UUID 排序后逐 Session/Thread 锁并深删（Work/Tool/Model/Command/Thread/Entries/SessionBlobRef/relation/Session），经 `HarnessStore.Transaction` 执行 |
+| `HarnessSessionDeletionService` | Core 删除编排：`deleteSessionsByOwner` 按 owner 列出 Session，先按 UUID 锁定全部 Session/Thread；Store `deleteThreads` 再跨目标集合以 Command→Model→Tool→Work 规范锁序原子删除 owned facts，最后删除 Entries/SessionBlobRef/relation/Session |
 | `StudioHarnessThreadController` | 仅映射 `HarnessRuntime` 门面 + typed 异常翻译 |
 | `HarnessRuntime` | `acceptCommands`/`findThreadCommand`/`stop`/`decideToolApproval`/`setThreadYolo`/`getThreadSnapshot`/`getSessionEntries`/`listThreadsBySession` 单事务控制面；不暴露 delete/create |
 | `ThreadProcessor` | Agent Loop single-action reducer：每次 claim 恰好一个分类动作，下一动作由同事务 requestWork 驱动，返回 COMPLETED/RESCHEDULED/LOST_OWNERSHIP；Model terminal apply 前按序物化失败 attempt，TURN_END 同事务删除 Model/Tool Invocation；另提供 `compactThread`/`manualCompactionAvailability` |
@@ -150,7 +151,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 - 观察等待期间：先订阅内部 `HarnessThreadChangeSource`（web 组合根把 PostgreSQL Thread version 通知适配为纯 wake）与 `SubagentRunRegistry` descendant 订阅，再读首次权威 durable snapshot；此后只在 version/resync 唤醒后重读 snapshot 并判断 terminal、reminder 与按 active-tools 语义计算 idle deadline（idle 超时排除 active tool 时间；deadline 到点由限时等待本身唤醒，不重读 snapshot），descendant 唤醒只重读进程内 relay。约 1s 一次基于缓存 snapshot 发布非 durable `TOOL_PARTIAL` 心跳（完整 JSON 快照，`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）；心跳与 descendant 唤醒绝不重读 durable snapshot。`descendants` 由进程内活动 registry 扁平 relay 给祖先，仅用于实时展示和审批寻址；`turns >= maxTurns` 起每 5 turn 入队一条 SYSTEM `CUSTOM_MESSAGE` 软提醒；达到 idle 超时/被取消时 `stop` 子 Thread 并保留可恢复 Session（取消 single-owner：整个 TaskExecution 至多执行一条 3-attempt stop 重试序列）。
 - 终态 ToolResult 为 `<task id state>` envelope（`<task_result>` / `<task_error>`，报告正文最多保留 8000 字符），`details.kind=task.result`；`state` 为 `completed` / `error` / `cancelled`。
 
-子 Agent 配置由 `SubagentConfigProvider` 在每个新 turn / 新 task 调用从 `SystemSettings.AiRuntime` 现读：`subagentMaxDepth=2`、`subagentMaxConcurrency=10`（每父）、`subagentMaxTotalConcurrency`（每根，默认不限）、`subagentIdleTimeoutMillis=0`（默认禁用）、`subagentMaxTurns=50`。观察不配置轮询间隔：`HarnessOneShotService.await` 与 `TaskTool.awaitResult` 都通过 `harness.runtime.HarnessThreadChangeSource` 订阅 durable version 变化（web 组合根适配现有 `ThreadVersionEventSource`），无事件时不重复读取 durable snapshot；生产环境缺少该内部 change source 时 Spring 装配直接失败（fail-closed，不回退 polling）。`SubagentRunRegistry` 只做进程内并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
+子 Agent 配置由 `SubagentConfigProvider` 在每个新 turn / 新 task 调用从 `SystemSettings.AiRuntime` 现读：`subagentMaxDepth=2`、`subagentMaxConcurrency=10`（每父）、`subagentMaxTotalConcurrency=0`（每根；primitive `int` 必填，0 表示不额外限制）、`subagentIdleTimeoutMillis=0`（默认禁用）、`subagentMaxTurns=50`。观察不配置轮询间隔：`HarnessOneShotService.await` 与 `TaskTool.awaitResult` 都通过 `harness.runtime.HarnessThreadChangeSource` 订阅 durable version 变化（web 组合根适配现有 `ThreadVersionEventSource`），无事件时不重复读取 durable snapshot；生产环境缺少该内部 change source 时 Spring 装配直接失败（fail-closed，不回退 polling）。`SubagentRunRegistry` 只做进程内并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
 
 权限保持既有管线：YOLO 在加载 settings/evaluator 之前直接 Allow；否则 Allow/Ask/Deny，Ask 即既有 ToolInvocation `WAITING_APPROVAL`，不存在第二套权限实体；子 Thread 继承父 Thread YOLO，子工具审批仍走同一 `POST /tool-invocations/{id}/approval` 端点（携带子 ThreadId）。
 
@@ -171,5 +172,6 @@ GET /api/ai/runtime/threads/{threadId}/snapshot
 - [StudioChatController](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioChatController.java)
 - [StudioToolEnvironmentController](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioToolEnvironmentController.java)
 - [HarnessRuntime](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java)
-- [HarnessRuntimeWebMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeWebMapper.java)
+- [HarnessRuntimeRequestMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapper.java)
+- [HarnessRuntimeResponseMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeResponseMapper.java)
 - [DatabaseTurnResolver](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/DatabaseTurnResolver.java)

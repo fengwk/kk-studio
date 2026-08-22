@@ -78,7 +78,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
   void setUp() {
     s3Storage.clear();
     tx = new TransactionTemplate(transactionManager);
-    // harness_session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。
+    // session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。
     jdbc.update(
         "insert into harness_session (id, created_at) values (?, current_timestamp)", SESSION);
   }
@@ -124,7 +124,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
     assertEquals(
         1,
         jdbc.queryForObject(
-            "select count(*) from harness_session_blob_ref where session_id = ? and blob_id = ?",
+            "select count(*) from session_blob_ref where session_id = ? and blob_id = ?",
             Integer.class,
             SESSION,
             resource.blobId()));
@@ -270,9 +270,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTes
     assertEquals(
         1,
         jdbc.queryForObject(
-            "select count(*) from harness_session_blob_ref where session_id = ?",
-            Integer.class,
-            SESSION));
+            "select count(*) from session_blob_ref where session_id = ?", Integer.class, SESSION));
   }
 
   @Test

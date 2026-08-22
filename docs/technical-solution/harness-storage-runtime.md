@@ -14,7 +14,7 @@ Redis Streams
 
 PostgreSQL 是唯一 durable truth。Redis 重启或清空只会造成流式 overlay 缺口；客户端重新读取 Thread snapshot 即可恢复权威状态。
 
-权威 DDL 有两份 byte-identical 的副本：`core` 的 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)（含七张表）与 `harness-runtime-spring` 的 [`harness-runtime-schema.sql`](../../harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql)；`CoreHarnessArchitectureTest` 逐字节校验两者一致。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable 实体 id 由注入的 `Supplier<UUID>` 生成（生产：`UUID::randomUUID`），API 中编码为 canonical UUID string；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal string，数据库仍保留 bigint。
+权威 DDL 只有一份基线：`database` 模块的 [`V1__schema.sql`](../../database/src/main/resources/db/migration/V1__schema.sql)（含 Harness 七张表与全部 profile seeds）；不存在 schema mirror，`FlywayBootstrapArchitectureTest` 守护全仓唯一 baseline。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable 实体 id 由注入的 `Supplier<UUID>` 生成（生产：`UUID::randomUUID`），API 中编码为 canonical UUID string；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal string，数据库仍保留 bigint。
 
 ## 2. `harness_session` / `harness_entry`
 
@@ -142,13 +142,13 @@ durable mutation
 
 ## 8. 事务与锁序
 
-`HarnessStore.Transaction` 提供 `nextId`、`lockSessionForKeyShare`/`lockSessionForUpdate`、`lockThread`、`lockWork`、`loadEntryPath`、`loadQueuedCommands`、`updateThread`、`updateCommands`、`insertEntry`、`insertModelInvocation`、`insertToolInvocation`、`updateModelInvocation`、`updateToolInvocation`、`claimNextWork`、`requestWork`、`deleteWorkByThread`、`deleteCommands`、`deleteToolInvocations`、`deleteModelInvocations`、`deleteThread`、`deleteEntries`、`deleteSession` 等；锁序固定：
+`HarnessStore.Transaction` 提供 `nextId`、`lockSessionForKeyShare`/`lockSessionForUpdate`、`lockThread`、`lockWork`、`loadEntryPath`、`loadQueuedCommands`、`updateThread`、`updateCommands`、`insertEntry`、`insertModelInvocation`、`insertToolInvocation`、`updateModelInvocation`、`updateToolInvocation`、`claimNextWork`、`requestWork`、`deleteThreads`、`deleteEntries`、`deleteSession` 等；锁序固定：
 
 ```text
 Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 ```
 
-- 正常写入对 Session 取 KEY SHARE（不串行化 sibling Thread）；删除/归属独占操作用 `lockSessionForUpdate`（FOR UPDATE）。深删除由 Core `HarnessSessionDeletionService` 编排：Owner FOR UPDATE → 全部 Session FOR UPDATE（UUID 排序）→ Threads UUID 排序逐 Thread 锁 + 删 Work/Tool/Model/Command/Thread → SessionBlobRef release → 删 relation/entries/session。
+- 正常写入对 Session 取 KEY SHARE（不串行化 sibling Thread）；删除/归属独占操作用 `lockSessionForUpdate`（FOR UPDATE）。深删除由 Core `HarnessSessionDeletionService` 编排：Owner FOR UPDATE → 全部 Session FOR UPDATE（UUID 排序）→ 全部 Thread 按 UUID 锁定 → Store `deleteThreads` 跨目标集合按 Command/Model/Tool/Work 规范顺序锁定全部 owned fact、再按 FK 顺序原子删除 → SessionBlobRef release → 删 relation/entries/session。运行时 callback 与深删因此共享 Model/Tool → Work 锁方向，不依赖死锁重试。
 
 - 每个 `HarnessRuntime` 方法恰好一个事务；snapshot 单事务一致读取。
 - Tool success 的 `result + effects + SUCCEEDED` 由同一次 `updateToolInvocations` 原子提交；effects 校验必须早于 Resource externalize 与该 durable update。
@@ -180,7 +180,7 @@ Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation sib
 - Tool outcome Entry 插入前，`ToolOutcomeAppender` 在同一 Store 事务调用
   `GlobalStorageToolResultHistoryMaterializer`：有界读取 data/file/http/https/s3 内容，摄入
   `storage_blob`，写入 `resource(blobId,name,preview)`，并通过
-  `harness_session_blob_ref` 为 Session 持有 Blob。没有 materializer 时，含 Resource 的成功结果
+  `session_blob_ref` 为 Session 持有 Blob。没有 materializer 时，含 Resource 的成功结果
   fail closed，瞬时 URI 绝不进入 durable message。
 - Provider attempt 从 `storage_blob` 读取权威媒体事实：支持的图片从原始 Blob 受限读取（30 MiB）并生成 attempt-only `data:<mediaType>;base64,...`，避免远端 Provider 访问本地/私网预签名 URL；audio/video 暂使用新鲜预签名 URL。Provider adapter 把 source 统一作为 URI 交给 SDK 的 URI 重载，禁止误走 raw Base64 重载。durable invocation request 只保存 `blobId/name/preview`。前端 durable 渲染走 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview`；`GET /api/ai/runtime/resources/{sha256}` 只处理瞬时/Invocation file/s3 引用。
 

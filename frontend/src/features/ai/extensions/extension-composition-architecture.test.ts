@@ -74,6 +74,9 @@ describe('AI extension composition architecture', () => {
     const chatContext = source('../chat/ChatRuntimeContext.ts')
     const catalogContext = source('../catalog/CatalogRuntimeContext.ts')
     const aiExtensionSource = source('./ai-extension.tsx')
+    const aiDefinitionSource = source('./ai-extension.definition.ts')
+    const createChatDialogSource = source('./CreateChatDialog.tsx')
+    const taskRendererSource = source('./TaskToolRendererLazy.tsx')
     const comfyuiContext = source('../../comfyui/ComfyuiContext.ts')
     const comfyuiExtensionSource = source('../../comfyui/extensions/comfyui-extension.tsx')
 
@@ -85,11 +88,22 @@ describe('AI extension composition architecture', () => {
     expect(catalogContext).toContain(
       "import type { CatalogPageController } from '@/features/ai/catalog/useCatalogPageController'",
     )
-    expect(aiExtensionSource).toContain(
+    expect(createChatDialogSource).toContain(
       "from '@/features/ai/chat/ChatRuntimeContext'",
     )
     expect(aiExtensionSource).toContain(
       "from '@/features/ai/catalog/CatalogRuntimeContext'",
+    )
+    expect(aiExtensionSource).toContain("import('@/features/ai/chat/ChatsRoute')")
+    expect(aiExtensionSource).toContain("import('@/features/ai/chat/ChatWorkspaceRoute')")
+    expect(aiDefinitionSource).not.toContain(
+      "@/features/ai/runtime/thread-panel/messages/TaskToolRenderer'",
+    )
+    expect(aiDefinitionSource).toContain(
+      "from '@/features/ai/extensions/TaskToolRendererLazy'",
+    )
+    expect(taskRendererSource).toContain(
+      "import('@/features/ai/runtime/thread-panel/messages/TaskToolRenderer')",
     )
     expect(aiExtensionSource).not.toContain('useCatalogPageController')
     expect(comfyuiContext).toContain(

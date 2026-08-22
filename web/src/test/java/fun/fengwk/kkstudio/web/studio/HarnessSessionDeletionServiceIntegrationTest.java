@@ -101,9 +101,7 @@ class HarnessSessionDeletionServiceIntegrationTest extends S3WebPostgresTestSupp
 
     UUID blobId =
         jdbc.queryForObject(
-            "select blob_id from harness_session_blob_ref where session_id = ?",
-            UUID.class,
-            chatSession);
+            "select blob_id from session_blob_ref where session_id = ?", UUID.class, chatSession);
     assertEquals(
         2L,
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
@@ -113,11 +111,11 @@ class HarnessSessionDeletionServiceIntegrationTest extends S3WebPostgresTestSupp
     assertEquals(0, count("chat_session", "session_id", chatSession));
     assertEquals(0, count("harness_session", "id", chatSession));
     assertEquals(0, count("harness_thread", "id", chatThread));
-    assertEquals(0, count("harness_session_blob_ref", "session_id", chatSession));
+    assertEquals(0, count("session_blob_ref", "session_id", chatSession));
     assertEquals(1, count("canvas_session", "session_id", canvasSession));
     assertEquals(1, count("harness_session", "id", canvasSession));
     assertEquals(1, count("harness_thread", "id", canvasThread));
-    assertEquals(1, count("harness_session_blob_ref", "session_id", canvasSession));
+    assertEquals(1, count("session_blob_ref", "session_id", canvasSession));
     assertEquals(
         1L,
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));

@@ -11,6 +11,20 @@ import java.util.List;
 
 class PostgresqlHarnessSchemaTest {
 
+  /**
+   * Harness runtime 协议恰好七张表；业务表不使用 harness_ 前缀（V1 中唯一的应用层 Session blob 引用表为 session_blob_ref）， 因此
+   * {@code harness_%} 全量查询结果必须精确等于该七表。
+   */
+  private static final List<String> RUNTIME_TABLES =
+      List.of(
+          "harness_entry",
+          "harness_model_invocation",
+          "harness_session",
+          "harness_thread",
+          "harness_thread_command",
+          "harness_tool_invocation",
+          "harness_work");
+
   private JdbcTemplate jdbc;
 
   @BeforeEach
@@ -21,25 +35,19 @@ class PostgresqlHarnessSchemaTest {
 
   @Test
   void schemaContainsExactlyTheSevenRuntimeTables() {
+    // 精确查询全部 harness_% 表：任何业务表（如 session_blob_ref）不得混入 runtime 协议空间。
     List<String> tables =
         jdbc.queryForList(
             """
             select table_name
             from information_schema.tables
-            where table_schema = 'public' and table_type = 'BASE TABLE'
+            where table_schema = 'public'
+              and table_type = 'BASE TABLE'
+              and table_name like 'harness\\_%'
             order by table_name
             """,
             String.class);
-    assertEquals(
-        List.of(
-            "harness_entry",
-            "harness_model_invocation",
-            "harness_session",
-            "harness_thread",
-            "harness_thread_command",
-            "harness_tool_invocation",
-            "harness_work"),
-        tables);
+    assertEquals(RUNTIME_TABLES, tables);
   }
 
   @Test
@@ -69,12 +77,15 @@ class PostgresqlHarnessSchemaTest {
 
   @Test
   void everyStructuredDurablePayloadUsesJsonb() {
+    // 只统计七张 runtime 表的 jsonb 列：session_blob_ref 无结构化载荷，不应出现。
     List<String> jsonbColumns =
         jdbc.queryForList(
             """
             select table_name || '.' || column_name
             from information_schema.columns
-            where table_schema = 'public' and data_type = 'jsonb'
+            where table_schema = 'public'
+              and data_type = 'jsonb'
+              and table_name like 'harness\\_%'
             order by table_name, column_name
             """,
             String.class);
@@ -104,7 +115,8 @@ class PostgresqlHarnessSchemaTest {
             select indexname
             from pg_indexes
             where schemaname = 'public'
-              and (indexname like 'idx_harness_%' or indexname like 'uk_harness_%')
+              and tablename like 'harness\\_%'
+              and indexname not like '%_pkey'
             order by indexname
             """,
             String.class);

@@ -93,7 +93,7 @@ class ToolGatewayTest {
 
   @Test
   void startedAndBusyOverloadedRejectedIndeterminateValidateTheirFacts() {
-    ToolGateway.Handle handle = () -> {};
+    ToolGateway.Handle handle = noopHandle();
     ToolGateway.Started started = new ToolGateway.Started(handle);
     assertNotNull(started.handle());
     assertThrows(NullPointerException.class, () -> new ToolGateway.Started(null));
@@ -165,7 +165,7 @@ class ToolGatewayTest {
 
           @Override
           public StartResult start(Execution execution, Listener listener) {
-            return new ToolGateway.Started(() -> {});
+            return new ToolGateway.Started(noopHandle());
           }
         };
     assertEquals(new ToolGateway.Allow(), gateway.preflight(PortTestData.toolRequest()));
@@ -197,6 +197,20 @@ class ToolGatewayTest {
 
       @Override
       public void onUnknown(ToolInvocationError error) {}
+    };
+  }
+
+  private static ToolGateway.Handle noopHandle() {
+    return new ToolGateway.Handle() {
+      @Override
+      public void cancel() {
+        // 尽力而为、幂等的取消
+      }
+
+      @Override
+      public void activate() {
+        // 打开 Gateway 回调 gate
+      }
     };
   }
 }

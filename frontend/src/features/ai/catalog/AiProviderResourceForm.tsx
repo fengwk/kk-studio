@@ -1,5 +1,5 @@
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
-import { FormSelect } from '@/shared/ui/console/FormSelect'
+import { Select } from '@/shared/ui/console/Select'
 import { providerTypes } from '@/features/ai/catalog/ai-console-types'
 import type { ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
@@ -59,7 +59,7 @@ export function ProviderForm({
       </label>
       <label className="form-group">
         <FieldLabel required>{t('ai.catalog.form.providerType')}</FieldLabel>
-        <FormSelect
+        <Select
           aria-label={t('ai.catalog.form.providerType')}
           value={draft.providerType}
           required
