@@ -64,7 +64,7 @@ export function AgentPane({
           initialConversationScrollTop: pane.boundViews.initialConversationScrollTop,
         })}
         mainView={pane.boundViews.mainView}
-        composer={pane.composer}
+        composer={{ ...pane.composer, interactionPanel }}
         activity={{
           working: pane.controller.working,
           widgets: pane.boundViews.selectedRecord
@@ -115,7 +115,6 @@ export function AgentPane({
       onMouseDown={onFocus}
     >
       {content}
-      {pane.target.kind === 'BOUND_THREAD' ? interactionPanel : null}
       {pane.pendingAcceptance ? (
         <div className="thread-acceptance-retry">
           {pane.pendingAcceptance.unknownOutcome ? (
@@ -184,10 +183,10 @@ export function AgentPane({
     if (pane.interaction === 'thread-sessions') {
       return (
         <SelectionPanel
-          title={t('ai.runtime.session.select')}
+          title={t('ai.chat.selectSession')}
           items={pane.sessions.map((session) => pane.sessionSelectionItem(session))}
           loading={pane.sessionsLoading}
-          emptyText={t('ai.runtime.session.empty')}
+          emptyText={t('ai.chat.noSessions')}
           onClose={pane.closeInteraction}
           onSelect={(id) => {
             const session = pane.sessions.find((item) => item.sessionId === id)
@@ -201,10 +200,10 @@ export function AgentPane({
     if (pane.interaction === 'thread-threads') {
       return (
         <SelectionPanel
-          title={t('ai.runtime.thread.select')}
+          title={t('ai.chat.selectThread')}
           items={pane.threads.map((thread) => pane.threadSelectionItem(thread))}
           loading={pane.threadsLoading}
-          emptyText={t('ai.runtime.thread.noThreads')}
+          emptyText={t('ai.chat.noThreads')}
           onClose={() => {
             pane.openInteraction('thread-sessions')
           }}

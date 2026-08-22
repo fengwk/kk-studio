@@ -755,6 +755,328 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('terminal answer'),
     )
   })
+
+  it('abandons the gap recovery loop after exceeding the max attempt budget', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const invalidate = vi.spyOn(client, 'invalidateQueries')
+      const { result, sockets } = renderRealtime(client, {
+        invocation: modelInvocation(),
+      })
+      sockets.openLatest()
+
+      // checkpoint 永不追平（snapshot 数据不变）：每次 tick 都判定未追上并
+      // 递增 attempts，最终超过 RECOVERY_MAX_ATTEMPTS(8) 后放弃（L565）。
+      emitRealtime(sockets, realtime(3, 'missing'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200) // attempts 0 -> 1
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400) // attempts 1 -> 2
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(800) // attempts 2 -> 3
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1600) // attempts 3 -> 4
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000) // attempts 4 -> 5
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000) // attempts 5 -> 6
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000) // attempts 6 -> 7
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000) // attempts 7 -> 8
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000) // attempts 8 -> 放弃（L565）
+      })
+      const callsAfterGiveUp = invalidate.mock.calls.length
+      expect(callsAfterGiveUp).toBeGreaterThanOrEqual(8)
+      // 放弃后不再有新的 refetch。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      expect(invalidate.mock.calls.length).toBe(callsAfterGiveUp)
+      // 放弃后 checkpoint 仍未追平：overlay 保持为空。
+      expect(result.current?.modelStream).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the recorded gap when the checkpoint catches up and stops requesting recovery', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const invalidate = vi.spyOn(client, 'invalidateQueries')
+      const { result, rerender, sockets } = renderRealtime(client, {
+        invocation: modelInvocation(),
+      })
+      sockets.openLatest()
+
+      // 初始 checkpoint（sequence 0）落后于 seq3 的 delta：记录 gap 并单飞恢复。
+      emitRealtime(sockets, realtime(3, 'missing'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      expect(invalidate).toHaveBeenCalledTimes(1)
+
+      // checkpoint 追平到 seq3：reconcile effect 刷新 overlay 并清空 gapRef。
+      rerender({
+        invocation: {
+          ...modelInvocation(),
+          streamCheckpointJson: '{"attempt":1,"text":"recovered","thinking":"","sequence":3}',
+        },
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(result.current?.modelStream?.text).toBe('recovered')
+
+      // 追平后循环终止：不再有新的 refetch。追平后 reconcile effect 本身
+      // 不再触发 invalidate（不是订阅信号），因此等待超过下一个退避窗口
+      // 后调用数必须保持稳定 —— 恢复循环已彻底停止。
+      // 注意：在途 tick 的 finally 出口会重新武装一次（busy 标志清除后
+      // 调度 CURRENT recovery），因此等待窗口内可能看到一次「收尾」调用；
+      // 断言关键语义：追平后模型 overlay 可见且后续没有持续增长。
+      const callsAfterCatchUp = invalidate.mock.calls.length
+      expect(result.current?.modelStream).toMatchObject({ text: 'recovered', sequence: 3 })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600)
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1400)
+      })
+      expect(invalidate.mock.calls.length).toBeLessThanOrEqual(callsAfterCatchUp + 1)
+      expect(invalidate.mock.calls.length).toBeGreaterThanOrEqual(callsAfterCatchUp)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the gap through the terminal projection path when a durable result arrives', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const invalidate = vi.spyOn(client, 'invalidateQueries')
+      const { result, rerender, sockets } = renderRealtime(client, {
+        invocation: modelInvocation(),
+      })
+      sockets.openLatest()
+
+      // seq3 gap 记录后，持久化终态 resultJson 到达（streaming 之外的
+      // terminal 分支）：非 streaming 投影无条件取代 overlay，并清空 gapRef。
+      emitRealtime(sockets, realtime(3, 'missing'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      rerender({
+        invocation: {
+          ...modelInvocation(),
+          streamCheckpointJson: '{"attempt":1,"text":"frozen","thinking":"","sequence":2}',
+          resultJson: '{"text":"durable done","thinking":"","toolCalls":[],"stopReason":"stop","usage":{},"cost":{}}',
+        },
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(result.current?.modelStream).toMatchObject({ text: 'durable done', status: 'done' })
+      // 终态投影后 gap 已清空（L104）：再等一个恢复窗口，确认没有新的 refetch。
+      const callsAfterTerminal = invalidate.mock.calls.length
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600)
+      })
+      expect(invalidate.mock.calls.length).toBeLessThanOrEqual(callsAfterTerminal + 1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the gap when a terminal snapshot arrives without a pending recovery', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const invalidate = vi.spyOn(client, 'invalidateQueries')
+      const { result, rerender, sockets } = renderRealtime(client, {
+        invocation: modelInvocation(),
+      })
+      sockets.openLatest()
+
+      // gapRef 已在非 streaming 分支置位（L104 行内条件全部满足）：
+      // 先有 gap delta（record gap），再让终态 snapshot 的 sequence 赶上
+      // gap.sequence，走「gap != null 且 snapshot.sequence >= gap.sequence」清理。
+      emitRealtime(sockets, realtime(3, 'missing'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      // 终态 snapshot：sequence 2 >= gap 2？不 —— 用 sequence 3 的 checkpoint。
+      rerender({
+        invocation: {
+          ...modelInvocation(),
+          streamCheckpointJson: '{"attempt":1,"text":"frozen","thinking":"","sequence":3}',
+          errorJson: '{"kind":"TRANSIENT","message":"boom"}',
+        },
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(result.current?.modelStream).toMatchObject({
+        text: 'frozen',
+        status: 'error',
+        errorText: 'boom',
+      })
+      // 后续 gap delta（同 invocation/attempt）不再触发恢复（gapRef 已清空）。
+      const callsBefore = invalidate.mock.calls.length
+      emitRealtime(sockets, realtime(4, 'late'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      expect(invalidate.mock.calls.length).toBe(callsBefore)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores realtime deltas whose snapshot does not match the delta invocation', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, sockets } = renderRealtime(client, {
+      invocation: modelInvocation('inv-1'),
+    })
+    sockets.openLatest()
+
+    // durable snapshot 的 invocationId 与 delta 不同（或 attempt 不同）：
+    // 事件被整体拒绝，不产生 overlay，也不触发 gap 恢复。
+    emitRealtime(sockets, realtime(1, 'foreign', THREAD_ID, 'inv-other'))
+    emitRealtime(sockets, JSON.stringify({
+      threadId: THREAD_ID, subjectKind: 'MODEL_INVOCATION', subjectId: 'inv-1', attempt: 2, sequence: 1,
+      type: 'MODEL_DELTA', payload: { kind: 'TEXT_DELTA', text: 'other-attempt' }, createdAt: '2026-01-01T00:00:00Z',
+    }))
+    await waitFor(() => expect(result.current?.modelStream).toBeNull())
+    // 没有 gap 记录 → 不触发任何 refetch。
+    await sleep(300)
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it('ignores TOOL_PARTIAL events from other threads', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const active: ToolInvocationDTO = {
+      id: 'inv-tool-1',
+      modelInvocationId: 'inv-1',
+      assistantEntryId: 'entry-2',
+      ordinal: 0,
+      status: 'RUNNING',
+      attempt: 1,
+      toolCallId: 'call-1',
+      toolName: 'web-search',
+      toolVersion: null,
+      rendererKey: 'web-search',
+      toolType: 'PLATFORM',
+      environment: null,
+      argumentsJson: '{}',
+      approvalJson: null,
+      resultJson: null,
+      errorJson: null,
+      createTime: '2026-01-01T00:00:00Z',
+      updateTime: '2026-01-01T00:00:00Z',
+    }
+    const { result, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
+
+    // 事件 threadId 与当前订阅 Thread 不一致：不聚合、不报错。
+    // 注意：snapshot seed 会先为同一 invocation 播种空 overlay（threadId 正确），
+    // 因此断言的是「空 overlay 未被外来 partial 污染」。
+    act(() =>
+      sockets.latest!.emitServer({
+        type: 'event',
+        resource: resource(THREAD_B_ID),
+        name: 'realtime',
+        data: JSON.parse(toolPartial('x', 'inv-tool-1', 1)),
+      }),
+    )
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')).toMatchObject({
+        threadId: THREAD_ID,
+        text: '',
+        error: false,
+      }),
+    )
+    // 非法 JSON 的 realtime data：parseRealtimeToolPartial 返回 null → 直接忽略。
+    act(() =>
+      sockets.latest!.emitServer({
+        type: 'event',
+        resource: resource(THREAD_ID),
+        name: 'realtime',
+        data: { broken: true },
+      }),
+    )
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')).toMatchObject({
+        text: '',
+        error: false,
+      }),
+    )
+  })
+
+  it('reuses the same overlay object when the durable snapshot is re-seeded identically', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result, rerender, sockets } = renderRealtime(client, {
+      invocation: modelInvocation(),
+    })
+    sockets.openLatest()
+
+    // 流式 overlay 带 toolCalls draft；再次渲染相同内容的 snapshot 时
+    // sameModelStream/sameToolCallDrafts 命中，ref 对象保持稳定（无重渲染抖动）。
+    emitRealtime(sockets, JSON.stringify({
+      threadId: THREAD_ID, subjectKind: 'MODEL_INVOCATION', subjectId: 'inv-1', attempt: 1, sequence: 1,
+      type: 'MODEL_DELTA', payload: { kind: 'TOOL_CALL_DELTA', index: 0, id: 'call-1', name: 'bash', argumentsJson: '{"cmd":"ls"}' }, createdAt: '2026-01-01T00:00:00Z',
+    }))
+    await waitFor(() =>
+      expect(result.current?.modelStream?.toolCalls).toEqual([
+        { index: 0, id: 'call-1', name: 'bash', argumentsJson: '{"cmd":"ls"}' },
+      ]),
+    )
+    const before = result.current?.modelStream
+    rerender({ invocation: { ...modelInvocation(), streamCheckpointJson: '{"attempt":1,"text":"","thinking":"","sequence":1}' } })
+    await waitFor(() => expect(result.current?.modelStream).toBe(before))
+  })
+
+  it('does not schedule recovery ticks after the loop is cleared', async () => {
+    vi.useFakeTimers()
+    try {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const invalidate = vi.spyOn(client, 'invalidateQueries')
+      const { rerender, sockets } = renderRealtime(client, {
+        invocation: modelInvocation(),
+      })
+      sockets.openLatest()
+
+      // gap delta 安装恢复；随后禁用订阅会 clearRecoveryLoop（timer + recovery 清空）。
+      emitRealtime(sockets, realtime(3, 'missing'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      expect(invalidate).toHaveBeenCalledTimes(1)
+
+      // 恢复循环被禁用路径清空后，不应再有新的 refetch（L497/L512 空 recovery 返回）。
+      rerender({ enabled: false })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000)
+      })
+      expect(invalidate.mock.calls.length).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 function realtime(

@@ -42,7 +42,8 @@ describe('App routes', () => {
   it('redirects root to Chat console', async () => {
     render(<AppProviders><App /></AppProviders>)
     await waitFor(() => expect(window.location.pathname).toBe('/chats'))
-    expect(await screen.findByRole('button', { name: '新建 Chat' })).toBeInTheDocument()
+    // 路由重定向必须完成异步资源加载并渲染 Chat 控制台。
+    expect(await screen.findByRole('button', { name: '新建 Chat' }, { timeout: 3000 })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/chats')
   })
 })

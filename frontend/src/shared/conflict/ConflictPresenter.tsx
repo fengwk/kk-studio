@@ -20,7 +20,12 @@ export function ConflictPresenter({
     return null
   }
   return (
-    <div className="thread-conflict-modal" role="alertdialog" aria-modal="true">
+    <div
+      className="thread-conflict-modal"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={translate('shared.conflict.title')}
+    >
       <strong>{translate('shared.conflict.title')}</strong>
       <p>{translate('shared.conflict.reason', { reason: conflict.reason })}</p>
       <p>{conflict.detail}</p>

@@ -639,6 +639,108 @@ describe('buildThreadEventTimeline', () => {
     expect(events[1]!.turnStartEntryId).toBeNull()
   })
 
+  it('keeps malformed payload JSON inspectable through compact/pretty fallbacks', () => {
+    // payloadJson 不是合法 JSON：compactJson 折叠为空格归一文本、prettyJson 原样返回，
+    // 事件仍然投影（审计视图不丢信息），且 summary/rawJson 不抛异常。
+    const events = build([
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      { ...entry('bad-1', 'MESSAGE', {}), payloadJson: 'not-json' },
+    ])
+    const bad = events[1]!
+    expect(bad.kind).toBe('CUSTOM_MESSAGE')
+    // compactJson 对非法 JSON 回退为空格折叠文本；prettyJson 原样返回。
+    expect(bad.summary).toBe('not-json')
+    expect(bad.rawJson).toBe('not-json')
+    // 空白 payload 视为空对象（parsePayload 兜底），仍能正常投影。
+    const blank = build([{ ...entry('blank-1', 'MESSAGE', {}), payloadJson: '' }])[0]!
+    expect(blank.kind).toBe('CUSTOM_MESSAGE')
+    // parsePayload 对空字符串兜底为空对象：compactJson 输出 '{}' 作为可展示摘要。
+    expect(blank.summary).toBe('{}')
+  })
+
+  it('maps unknown active statuses to pending and stream errors to failed', () => {
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'go' }])),
+    ]
+    // 未知 invocation 状态冻结为 pending（不做猜测）。
+    const unknown = build(entries, { modelInvocation: modelInvocation('STRANGE', 1) }).find(
+      (event) => event.source === 'active-model',
+    )!
+    expect(unknown.status).toBe('pending')
+    // 活跃 tool overlay 的 stream error 优先于 invocation 状态：failed。
+    const entriesTool = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [
+        { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', rendererKey: 'bash', argumentsJson: '{}' },
+      ])),
+    ]
+    const toolStream = {
+      threadId: 'thread-1',
+      invocationId: 'inv-1',
+      attempt: 1,
+      toolCallId: 'call-1',
+      text: '',
+      error: true,
+      errorText: 'boom',
+      createdAt: '2026-07-28T10:00:00Z',
+    }
+    const failed = build(entriesTool, {
+      toolInvocations: [toolInvocation({ status: 'RUNNING' })],
+      toolStreams: new Map([['inv-1', toolStream]]),
+    }).find((event) => event.source === 'active-tool')!
+    expect(failed.status).toBe('failed')
+    // tool_result 无正文时 summary 回退到空文本占位（不是 undefined）。
+    const emptyResult = build([
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [
+        { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', rendererKey: 'bash', argumentsJson: '{}' },
+      ])),
+      entry('tool-1', 'MESSAGE', messagePayload('TOOL', [
+        { type: 'tool_result', toolCallId: 'call-1', contents: [{ type: 'text', text: '' }] },
+      ])),
+    ])
+    // durable Entry 的 summary 是压缩后的原始 payload JSON（toolResultText 只用于
+    // 详情摘要文本，tool_result 无正文时详情行 value 为空串而非 undefined）。
+    expect(emptyResult[2]!.summary).toContain('"tool_result"')
+    expect(
+      emptyResult[2]!.details.find((row) => row.label === '工具调用 ID')!.value,
+    ).toBe('call-1')
+  })
+
+  it('compares active failure timestamps across string, number, array, and invalid forms', () => {
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
+    ]
+    const failures = [
+      // 数字时间戳（epoch millis）：走得比字符串/数组都小（L745 数字分支）。
+      attemptFailure({ attempt: 2, sequence: '5', failedAt: 1, retryAt: 2 }),
+      // 字符串时间戳：数值上排在数字之后。
+      attemptFailure({ attempt: 2, sequence: '6', failedAt: '2026-07-28T10:00:00Z' }),
+      // 数组时间戳（[y,m,d,...]）：按数组首元素数值参与比较（L751-753）。
+      attemptFailure({ attempt: 2, sequence: '7', failedAt: [2026, 7, 28, 10, 0, 0], retryAt: [2026, 7, 28] }),
+      // 无法解析的字符串：按 0 参与比较，始终排最前（L754 fallback）。
+      attemptFailure({ attempt: 2, sequence: '8', failedAt: 'not-a-date' }),
+      // null 时间戳：同样按 0 处理（L754 fallback），与无法解析的字符串并列。
+      attemptFailure({ attempt: 2, sequence: '9', failedAt: null as never, retryAt: null as never }),
+    ]
+    const events = build(entries, {
+      modelAttemptFailures: failures,
+      modelInvocation: modelInvocation('RUNNING', 3),
+    })
+    // 同 attempt 按 failedAt 稳定排序：不可解析/空值最先，其次数字、字符串、数组。
+    // attempt 相同 → 5 个失败共享同一 identity，只保留一条活跃 overlay（去重语义）。
+    const attemptFailures = events.filter((event) => event.source === 'attempt-failure')
+    expect(attemptFailures.map((event) => event.id)).toEqual([
+      'active:attempt-failure:model-1:2',
+    ])
+    // 去重保留的是排序后第一条（failedAt 不可解析、时间戳按 0 处理的那条）。
+    expect(
+      attemptFailures[0]!.details.find((row) => row.label === '序号')!.value,
+    ).toBe('8')
+  })
+
   it('keeps the full compact payload JSON in the summary and leaves overflow to CSS', () => {
     const long = 'x'.repeat(300)
     const entries = [
