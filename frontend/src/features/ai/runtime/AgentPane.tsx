@@ -64,7 +64,7 @@ export function AgentPane({
           initialConversationScrollTop: pane.boundViews.initialConversationScrollTop,
         })}
         mainView={pane.boundViews.mainView}
-        composer={pane.composer}
+        composer={{ ...pane.composer, interactionPanel }}
         activity={{
           working: pane.controller.working,
           widgets: pane.boundViews.selectedRecord
@@ -115,7 +115,6 @@ export function AgentPane({
       onMouseDown={onFocus}
     >
       {content}
-      {pane.target.kind === 'BOUND_THREAD' ? interactionPanel : null}
       {pane.pendingAcceptance ? (
         <div className="thread-acceptance-retry">
           {pane.pendingAcceptance.unknownOutcome ? (

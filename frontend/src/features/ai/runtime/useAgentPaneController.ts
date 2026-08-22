@@ -642,6 +642,9 @@ export function useAgentPaneController({
         ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
         : activeDraft == null || (isEntryTarget(target) && treeEntriesQuery.data == null)),
     onPartsChange: isBoundTarget(target) ? controller.setDraft : setParts,
+    onHistoryPartsChange: isBoundTarget(target)
+      ? (next) => controller.setDraft(next, 'history')
+      : undefined,
     onSubmit: handleSubmit,
     onCommand: handleCommand,
     commands,
