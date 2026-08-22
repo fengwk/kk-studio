@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   extractPartsFromEditor,
   extractPartsKeyFromEditor,
+  findAdjacentPill,
+  insertPillsAtCaret,
+  insertTextAtCaret,
+  isPillElement,
   normalizeEditorDom,
   renderPartsToEditor,
 } from '@/features/ai/composer/composer-dom'
@@ -14,6 +18,28 @@ import {
 
 function textNode(text: string): Text {
   return document.createTextNode(text)
+}
+
+/** 在 container 的 childOffset 处放置 collapsed caret（jsdom Selection API）。 */
+function setCaret(container: Node, offset: number): void {
+  const range = document.createRange()
+  range.setStart(container, offset)
+  range.collapse(true)
+  const selection = document.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+}
+
+/** 把 root 挂载到 document.body，返回挂载后的元素（jsdom 只跟踪已挂载节点的 selection）。 */
+function mountRoot(root: HTMLElement): HTMLElement {
+  document.body.appendChild(root)
+  return root
+}
+
+/** 卸载测试中挂载的 root，避免跨用例 selection/节点残留。 */
+function unmountRoot(root: HTMLElement): void {
+  root.remove()
+  document.getSelection()?.removeAllRanges()
 }
 
 function pillSpan(attributes: Record<string, string>, text: string): HTMLSpanElement {
@@ -434,5 +460,289 @@ describe('normalizeEditorDom', () => {
     normalizeEditorDom(root)
     const restored = extractPartsFromEditor(root)
     expect(partsToMessageContents(restored)).toEqual(partsToMessageContents(parts))
+  })
+})
+
+describe('isPillElement', () => {
+  it('rejects text nodes and null', () => {
+    // 非元素节点（文本节点）与 null 不满足 pill 契约，必须返回 false。
+    expect(isPillElement(textNode('x'))).toBe(false)
+    expect(isPillElement(null)).toBe(false)
+  })
+})
+
+describe('insertPillsAtCaret with a live selection', () => {
+  it('inserts pills at the caret and moves the caret behind the last pill', () => {
+    // 光标在编辑器内：pills 插入光标处，selection 折叠到最后一颗 pill 之后。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('ab'))
+      setCaret(root.firstChild!, 1)
+      insertPillsAtCaret(root, [
+        createAttachmentPart('upload-1', 'a.txt'),
+        createResourcePart('00000000-0000-0000-0000-000000000001', 'r.txt'),
+      ])
+      // deleteContents 会把光标处文本切分为前后两段：text -> pill -> pill -> text。
+      expect(root.childNodes).toHaveLength(4)
+      expect((root.childNodes[0] as Text).textContent).toBe('a')
+      expect((root.childNodes[1] as HTMLElement).getAttribute('data-upload-id')).toBe('upload-1')
+      expect((root.childNodes[2] as HTMLElement).getAttribute('data-blob-id')).toBe(
+        '00000000-0000-0000-0000-000000000001',
+      )
+      expect((root.childNodes[3] as Text).textContent).toBe('b')
+      const caret = document.getSelection()?.getRangeAt(0)
+      expect(caret?.collapsed).toBe(true)
+      expect(caret?.startContainer).toBe(root)
+      expect(caret?.startOffset).toBe(3)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('appends pills at the end when the selection is outside the editor', () => {
+    // selection 指向编辑器之外时退化为追加到末尾。
+    const root = mountRoot(document.createElement('div'))
+    const outside = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('a'))
+      setCaret(outside, 0)
+      insertPillsAtCaret(root, [createAttachmentPart('upload-2', 'b.txt')])
+      expect(root.childNodes).toHaveLength(2)
+      expect((root.childNodes[1] as HTMLElement).getAttribute('data-upload-id')).toBe('upload-2')
+    } finally {
+      unmountRoot(root)
+      unmountRoot(outside)
+    }
+  })
+})
+
+describe('insertTextAtCaret', () => {
+  it('appends text at the end when there is no selection', () => {
+    // 无 selection（rangeCount 为 0）时退化为追加到编辑器末尾，保证文本不丢失。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('ab'))
+      document.getSelection()?.removeAllRanges()
+      insertTextAtCaret(root, 'cd')
+      expect(root.textContent).toBe('abcd')
+      expect(root.lastChild?.nodeType).toBe(Node.TEXT_NODE)
+      expect(root.lastChild?.textContent).toBe('cd')
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('leaves the editor untouched when the selection is outside it', () => {
+    // selection 指向编辑器之外的节点时视为不可编辑区域，不做任何 DOM 修改。
+    const root = mountRoot(document.createElement('div'))
+    const outside = mountRoot(document.createElement('div'))
+    try {
+      setCaret(outside, 0)
+      insertTextAtCaret(root, 'x')
+      expect(root.textContent).toBe('')
+    } finally {
+      unmountRoot(root)
+      unmountRoot(outside)
+    }
+  })
+
+  it('inserts text at the caret and keeps the caret after the new node', () => {
+    // 正常路径：在光标处插入文本节点，selection 折叠到插入节点之后。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('ab'))
+      setCaret(root.firstChild!, 1)
+      insertTextAtCaret(root, 'X')
+      expect(root.textContent).toBe('aXb')
+      expect(root.childNodes[1]?.textContent).toBe('X')
+      const caret = document.getSelection()?.getRangeAt(0)
+      expect(caret?.collapsed).toBe(true)
+      expect(caret?.startContainer).toBe(root)
+      expect(caret?.startOffset).toBe(2)
+    } finally {
+      unmountRoot(root)
+    }
+  })
+})
+
+describe('insertPillsAtCaret', () => {
+  it('does nothing when no pill parts are given', () => {
+    // 只有 text part 时不创建任何节点，编辑器内容保持不变。
+    const root = document.createElement('div')
+    root.append(textNode('a'))
+    insertPillsAtCaret(root, [createTextPart('ignored')])
+    expect(root.childNodes).toHaveLength(1)
+    expect((root.childNodes[0] as Text).textContent).toBe('a')
+  })
+
+  it('appends pills at the end when there is no selection', () => {
+    // 无 selection（光标不在编辑器内）时退化为追加到末尾，attachment/resource 字段齐全。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      document.getSelection()?.removeAllRanges()
+      insertPillsAtCaret(root, [
+        createAttachmentPart('upload-1', 'a.txt'),
+        createResourcePart('00000000-0000-0000-0000-000000000001', 'r.txt', 'preview'),
+      ])
+      expect(root.childNodes).toHaveLength(2)
+      const attachment = root.childNodes[0] as HTMLElement
+      expect(attachment.getAttribute('data-part-type')).toBe('attachment')
+      expect(attachment.getAttribute('data-upload-id')).toBe('upload-1')
+      expect(attachment.getAttribute('data-filename')).toBe('a.txt')
+      expect(attachment.textContent).toBe('[a.txt]')
+      const resource = root.childNodes[1] as HTMLElement
+      expect(resource.getAttribute('data-part-type')).toBe('resource')
+      expect(resource.getAttribute('data-blob-id')).toBe('00000000-0000-0000-0000-000000000001')
+      expect(resource.getAttribute('data-preview')).toBe('preview')
+      expect(resource.textContent).toBe('[r.txt]')
+    } finally {
+      unmountRoot(root)
+    }
+  })
+})
+
+describe('findAdjacentPill', () => {
+  it('returns null when there is no selection', () => {
+    // 无 selection 时没有可判断的邻接位置。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('a'), attachmentPill('upload-1', 'a.txt'))
+      document.getSelection()?.removeAllRanges()
+      expect(findAdjacentPill(root, 'before')).toBeNull()
+      expect(findAdjacentPill(root, 'after')).toBeNull()
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('returns null for a non-collapsed selection', () => {
+    // 跨选区删除交给浏览器默认行为，不进入 pill 邻接判断。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('a'), attachmentPill('upload-1', 'a.txt'))
+      const range = document.createRange()
+      range.selectNodeContents(root)
+      const selection = document.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      expect(findAdjacentPill(root, 'before')).toBeNull()
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('returns null when the selection is outside the editor', () => {
+    // 光标在编辑器之外时不做邻接判断。
+    const root = mountRoot(document.createElement('div'))
+    const outside = mountRoot(document.createElement('div'))
+    try {
+      setCaret(outside, 0)
+      expect(findAdjacentPill(root, 'before')).toBeNull()
+      expect(findAdjacentPill(root, 'after')).toBeNull()
+    } finally {
+      unmountRoot(root)
+      unmountRoot(outside)
+    }
+  })
+
+  it('finds the pill before a text caret at offset zero', () => {
+    // 文本节点容器 + before：offset 为 0 时命中 previousSibling 上的 pill。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(attachmentPill('upload-1', 'a.txt'), textNode('b'))
+      setCaret(root.childNodes[1]!, 0)
+      expect(findAdjacentPill(root, 'before')).toBe(root.childNodes[0])
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('finds the pill after a text caret at the node end', () => {
+    // 文本节点容器 + after：offset 等于文本长度时命中 nextSibling 上的 pill。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('a'), attachmentPill('upload-1', 'a.txt'))
+      setCaret(root.childNodes[0]!, 1)
+      expect(findAdjacentPill(root, 'after')).toBe(root.childNodes[1])
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('returns null when a text caret is not on a node boundary', () => {
+    // 文本中间偏移：before 需要 offset 0、after 需要 offset 等于长度，否则无候选。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('ab'), attachmentPill('upload-1', 'a.txt'))
+      setCaret(root.childNodes[0]!, 1)
+      expect(findAdjacentPill(root, 'before')).toBeNull()
+      expect(findAdjacentPill(root, 'after')).toBeNull()
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('finds the pill by element child index in both directions', () => {
+    // caret 直接落在编辑器元素上：before 取 offset-1、after 取 offset 处子节点。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(attachmentPill('upload-1', 'a.txt'), textNode('b'))
+      setCaret(root, 1)
+      expect(findAdjacentPill(root, 'before')).toBe(root.childNodes[0])
+      setCaret(root, 0)
+      expect(findAdjacentPill(root, 'after')).toBe(root.childNodes[0])
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('returns null at element caret boundaries without a pill', () => {
+    // 元素容器边界：before 需要 offset > 0、after 需要 offset < 子节点数。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(attachmentPill('upload-1', 'a.txt'), textNode('b'))
+      setCaret(root, 0)
+      expect(findAdjacentPill(root, 'before')).toBeNull()
+      setCaret(root, 2)
+      expect(findAdjacentPill(root, 'after')).toBeNull()
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('returns null when the adjacent node is not a pill', () => {
+    // 邻接节点是普通文本节点时不返回（删除交给浏览器默认行为）。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('a'), textNode('b'))
+      setCaret(root.childNodes[0]!, 1)
+      expect(findAdjacentPill(root, 'after')).toBeNull()
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('returns null when a text caret offset is inside the text node', () => {
+    // 文本节点容器 + after 的「非末尾偏移」侧：offset 不等于文本长度时无候选。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('ab'), attachmentPill('upload-1', 'a.txt'))
+      setCaret(root.childNodes[0]!, 1)
+      expect(findAdjacentPill(root, 'after')).toBeNull()
+    } finally {
+      unmountRoot(root)
+    }
+  })
+
+  it('returns null when a text caret before has no pill sibling at offset zero', () => {
+    // 文本节点容器 + before 的「非零偏移」侧：offset 不为 0 时 previousSibling 无候选。
+    const root = mountRoot(document.createElement('div'))
+    try {
+      root.append(textNode('ab'), attachmentPill('upload-1', 'a.txt'))
+      setCaret(root.childNodes[0]!, 1)
+      expect(findAdjacentPill(root, 'before')).toBeNull()
+    } finally {
+      unmountRoot(root)
+    }
   })
 })
