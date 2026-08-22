@@ -11,19 +11,20 @@ async function copyText(text: string): Promise<boolean> {
   } catch {
     // 失败则继续走兜底逻辑（fall through）
   }
+  let area: HTMLTextAreaElement | null = null
   try {
-    const area = document.createElement('textarea')
+    area = document.createElement('textarea')
     area.value = text
     area.setAttribute('readonly', '')
     area.style.position = 'fixed'
     area.style.left = '-9999px'
     document.body.appendChild(area)
     area.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(area)
-    return ok
+    return document.execCommand('copy')
   } catch {
     return false
+  } finally {
+    area?.remove()
   }
 }
 
