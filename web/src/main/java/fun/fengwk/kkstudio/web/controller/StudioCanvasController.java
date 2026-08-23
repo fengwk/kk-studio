@@ -12,19 +12,19 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.canvas.CanvasCommandService;
+import fun.fengwk.kkstudio.canvas.CanvasConflictException;
+import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
-import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
-import fun.fengwk.kkstudio.share.studio.CanvasDocumentDTO;
-import fun.fengwk.kkstudio.share.studio.CanvasPatchDTO;
-import fun.fengwk.kkstudio.share.studio.CanvasSnapshotDTO;
-import fun.fengwk.kkstudio.share.studio.CreateCanvasRequestDTO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
-import fun.fengwk.kkstudio.studio.canvas.CanvasConflictException;
-import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.share.canvas.ApplyCanvasCommandsRequestDTO;
+import fun.fengwk.kkstudio.share.canvas.CanvasDocumentDTO;
+import fun.fengwk.kkstudio.share.canvas.CanvasPatchDTO;
+import fun.fengwk.kkstudio.share.canvas.CanvasSnapshotDTO;
+import fun.fengwk.kkstudio.share.canvas.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 
 import java.util.List;

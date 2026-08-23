@@ -16,8 +16,8 @@
 
     <modules>
         <module>share</module>
-        <module>studio</module>
         <module>schema</module>
+        <module>canvas</module>
         <module>harness</module>
         <module>core</module>
         <module>web</module>
@@ -45,7 +45,7 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-studio</artifactId>
+                <artifactId>kk-studio-canvas-core</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

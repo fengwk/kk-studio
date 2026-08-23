@@ -7,8 +7,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 
 /** 应用就绪后补 dispatch 所有 durable RUNNING FunctionRun。 */
 @Slf4j

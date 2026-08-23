@@ -2,12 +2,12 @@ package fun.fengwk.kkstudio.core.studio.repo.impl;
 
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionRunStateCodec;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionRunMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasFunctionRunDO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;

@@ -25,8 +25,9 @@
 ## 模块
 
 ```text
-share / studio / core / web
-harness-tool / harness-runtime / harness-infra / harness-daemon
+share / schema / canvas/core / core / web
+harness/tool / harness/runtime / harness/plugin-api / harness/infra
+harness/daemon / harness/plugins/goal
 frontend
 ```
 

@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 
-import fun.fengwk.kkstudio.studio.canvas.CanvasSession;
-import fun.fengwk.kkstudio.studio.canvas.CanvasSessionRepository;
+import fun.fengwk.kkstudio.canvas.CanvasSession;
+import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 
 import java.util.List;
 import java.util.UUID;

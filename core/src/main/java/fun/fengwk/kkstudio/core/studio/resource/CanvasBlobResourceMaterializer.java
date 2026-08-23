@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.core.studio.resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.core.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.StorageObjectKeys;
@@ -16,8 +18,6 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionResourcePinMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasResourceMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasResourceDO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceMaterializer;
 
 import java.io.IOException;
 import java.io.InputStream;

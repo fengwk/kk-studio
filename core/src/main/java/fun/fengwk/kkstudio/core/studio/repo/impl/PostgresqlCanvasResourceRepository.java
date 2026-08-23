@@ -2,10 +2,10 @@ package fun.fengwk.kkstudio.core.studio.repo.impl;
 
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasResourceMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasResourceDO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceRepository;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;

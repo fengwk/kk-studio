@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.studio.function.h3;
 
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenReference;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 
 import java.util.List;
 import java.util.Locale;

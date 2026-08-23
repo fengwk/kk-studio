@@ -5,13 +5,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceMaterializer;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
 
 import java.util.List;
 import java.util.UUID;

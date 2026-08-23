@@ -26,7 +26,7 @@ class AiBoundedContextArchitectureTest {
   void sharedContractsUseOnlyExplicitDomainRoots() throws IOException {
     // 共享根保持精确，可防止通用 share.model 包回归。
     assertEquals(
-        Set.of("ai", "comfyui", "storage", "studio", "systemsettings"),
+        Set.of("ai", "canvas", "comfyui", "storage", "systemsettings"),
         directDirectoryNames(
             repositoryRoot().resolve("share/src/main/java/fun/fengwk/kkstudio/share")));
   }
