@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.platform.persistence.test;
 
-import static fun.fengwk.kkstudio.platform.ai.runtime.persistence.postgresql.PostgresSchemaSupport.POSTGRES;
-import static fun.fengwk.kkstudio.platform.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applyBaseline;
-import static fun.fengwk.kkstudio.platform.ai.runtime.persistence.postgresql.PostgresSchemaSupport.newConnection;
-import static fun.fengwk.kkstudio.platform.ai.runtime.persistence.postgresql.PostgresSchemaSupport.resetDatabase;
+import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.POSTGRES;
+import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.applyBaseline;
+import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
+import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.resetDatabase;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.Driver;
@@ -20,9 +20,8 @@ import java.sql.SQLException;
 /**
  * 非 Harness 业务集成测试的共享 Spring PostgreSQL Testcontainers 支持。
  *
- * <p>复用 {@link
- * fun.fengwk.kkstudio.platform.ai.runtime.persistence.postgresql.PostgresSchemaSupport} 上声明的单一
- * {@code postgres:17-alpine} 容器，并将权威的多数据源配置连接到该容器，使 {@code PlatformTestApplication} 把 {@code
+ * <p>复用 {@link fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport}
+ * 上声明的单一 {@code postgres:17-alpine} 容器，并将权威的多数据源配置连接到该容器，使 {@code PlatformTestApplication} 把 {@code
  * spring.datasource.multi.primary} 绑定到 PostgreSQL 而不是 H2。
  *
  * <p>禁用自动 Flyway；本类在静态初始化阶段即执行 baseline 迁移，保证任何 Spring 上下文创建前 {@code system_setting} 等表与默认行已经

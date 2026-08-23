@@ -8,6 +8,7 @@ import org.springframework.util.Assert;
 import org.springframework.util.MimeTypeUtils;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
@@ -26,7 +27,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageMediaFacts;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;

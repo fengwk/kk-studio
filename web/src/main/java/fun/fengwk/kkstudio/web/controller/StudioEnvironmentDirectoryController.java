@@ -11,9 +11,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.platform.ai.environment.service.EnvironmentDirectoryListResult;
-import fun.fengwk.kkstudio.platform.ai.environment.service.EnvironmentDirectoryLister;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryLister;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;

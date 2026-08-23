@@ -25,9 +25,9 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.platform.studio.StudioCommandAcceptanceService;
-import fun.fengwk.kkstudio.platform.studio.StudioOwner;
-import fun.fengwk.kkstudio.platform.studio.StudioOwnerType;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
@@ -44,13 +44,13 @@ class StudioHarnessCommandBatchControllerTest {
   private static final String ENTRY_ID = "00000000-0000-0000-0000-000000000013";
   private static final String CLIENT_COMMAND_ID = "00000000-0000-0000-0000-000000000014";
 
-  private StudioCommandAcceptanceService acceptanceService;
+  private HarnessCommandAcceptanceOrchestrator acceptanceService;
   private HarnessRuntime runtime;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
-    acceptanceService = mock(StudioCommandAcceptanceService.class);
+    acceptanceService = mock(HarnessCommandAcceptanceOrchestrator.class);
     runtime = mock(HarnessRuntime.class);
     StudioHarnessCommandBatchController controller =
         new StudioHarnessCommandBatchController(acceptanceService, runtime);
@@ -60,7 +60,7 @@ class StudioHarnessCommandBatchControllerTest {
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
                 new ResultResponseBodyAdvice())
             .build();
-    when(acceptanceService.accept(any(StudioOwner.class), any(AcceptCommandsCommand.class)))
+    when(acceptanceService.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))
         .thenReturn(
             new AcceptedCommands(
                 HarnessRuntimeTestFixtures.session(),
@@ -93,7 +93,7 @@ class StudioHarnessCommandBatchControllerTest {
 
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(acceptanceService, times(3)).accept(any(StudioOwner.class), commandCaptor.capture());
+    verify(acceptanceService, times(3)).accept(any(OwnerRef.class), commandCaptor.capture());
     assertEquals(3, commandCaptor.getAllValues().size());
     assertEquals(
         AcceptCommandsTarget.NewSession.class,
@@ -103,10 +103,10 @@ class StudioHarnessCommandBatchControllerTest {
     assertEquals(
         AcceptCommandsTarget.Thread.class, commandCaptor.getAllValues().get(2).target().getClass());
 
-    ArgumentCaptor<StudioOwner> ownerCaptor = ArgumentCaptor.forClass(StudioOwner.class);
+    ArgumentCaptor<OwnerRef> ownerCaptor = ArgumentCaptor.forClass(OwnerRef.class);
     verify(acceptanceService, times(3))
         .accept(ownerCaptor.capture(), any(AcceptCommandsCommand.class));
-    assertEquals(StudioOwnerType.CHAT, ownerCaptor.getAllValues().get(0).type());
+    assertEquals(OwnerType.CHAT, ownerCaptor.getAllValues().get(0).type());
     assertEquals(UUID.fromString(OWNER_ID), ownerCaptor.getAllValues().get(0).id());
   }
 
@@ -144,7 +144,7 @@ class StudioHarnessCommandBatchControllerTest {
                                 "\"unknown\":true,\"expectedNextCommandSequence\":\"4\""))))
         .andExpect(status().isBadRequest());
     verify(acceptanceService, never())
-        .accept(any(StudioOwner.class), any(AcceptCommandsCommand.class));
+        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
@@ -168,7 +168,7 @@ class StudioHarnessCommandBatchControllerTest {
                 .content(custom))
         .andExpect(status().isBadRequest());
     verify(acceptanceService, never())
-        .accept(any(StudioOwner.class), any(AcceptCommandsCommand.class));
+        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
@@ -200,12 +200,12 @@ class StudioHarnessCommandBatchControllerTest {
                 .content(wrongOrder))
         .andExpect(status().isBadRequest());
     verify(acceptanceService, never())
-        .accept(any(StudioOwner.class), any(AcceptCommandsCommand.class));
+        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
   void preservesCommandReplayConflictReasonInUnifiedErrorEnvelope() throws Exception {
-    when(acceptanceService.accept(any(StudioOwner.class), any(AcceptCommandsCommand.class)))
+    when(acceptanceService.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.COMMAND_ID_REUSED,

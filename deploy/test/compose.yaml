@@ -87,7 +87,7 @@ services:
     volumes:
       - ./mock/server.py:/mock/server.py:ro
       - ${CANVAS_TEST_MOCK_ROUTES:-./mock/routes.json}:/config/routes.json:ro
-      - ../../platform/src/test/resources/fun/fengwk/kkstudio/platform/studio/resource:/fixtures:ro
+      - ../../platform/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource:/fixtures:ro
     healthcheck:
       test:
         - CMD

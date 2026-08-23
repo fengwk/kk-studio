@@ -21,11 +21,11 @@ import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.runtime.Comfyui
 import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiBindings.ValueType;
 import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiLookupService;
 import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.runtime.ComfyuiWorkflowApiSelectorValidator;
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectKeyNormalizer;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettings;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowCancelDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;

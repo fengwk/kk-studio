@@ -18,8 +18,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandP
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.platform.studio.StudioOwner;
-import fun.fengwk.kkstudio.platform.studio.StudioOwnerType;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
@@ -47,8 +47,8 @@ class HarnessRuntimeRequestMapperTest {
     HarnessCommandOwnerDTO owner = new HarnessCommandOwnerDTO();
     owner.setType("CANVAS");
     owner.setId(idText(10));
-    StudioOwner mappedOwner = HarnessRuntimeRequestMapper.toOwner(owner);
-    assertEquals(StudioOwnerType.CANVAS, mappedOwner.type());
+    OwnerRef mappedOwner = HarnessRuntimeRequestMapper.toOwner(owner);
+    assertEquals(OwnerType.CANVAS, mappedOwner.type());
     assertEquals(id(10), mappedOwner.id());
 
     AcceptCommandsCommand newSession =

@@ -17,15 +17,15 @@ import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.platform.ai.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.studio.StudioHarnessQueryService;
+import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.canvas.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasPatchDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.share.canvas.CreateCanvasRequestDTO;
-import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
+import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.List;
 import java.util.Objects;
@@ -44,14 +44,14 @@ public class StudioCanvasController {
 
   private final CanvasQueryService canvasQueryService;
   private final CanvasCommandService canvasCommandService;
-  private final StudioHarnessQueryService harnessQueryService;
-  private final StudioWebMapper mapper;
+  private final HarnessOwnerQueryService harnessQueryService;
+  private final WebDtoMapper mapper;
 
   public StudioCanvasController(
       CanvasQueryService canvasQueryService,
       CanvasCommandService canvasCommandService,
-      StudioHarnessQueryService harnessQueryService,
-      StudioWebMapper mapper) {
+      HarnessOwnerQueryService harnessQueryService,
+      WebDtoMapper mapper) {
     this.canvasQueryService = Objects.requireNonNull(canvasQueryService, "canvasQueryService");
     this.canvasCommandService =
         Objects.requireNonNull(canvasCommandService, "canvasCommandService");
@@ -78,7 +78,7 @@ public class StudioCanvasController {
   @GetMapping("/{canvasId}")
   public Result<CanvasSnapshotDTO> get(@PathVariable("canvasId") String canvasIdText) {
     try {
-      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
+      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
       return canvasQueryService
           .findSnapshot(canvasId)
           .map(snapshot -> Results.ok(mapper.toDto(snapshot)))
@@ -95,7 +95,7 @@ public class StudioCanvasController {
   public Result<List<HarnessSessionSummaryDTO>> sessions(
       @PathVariable("canvasId") String canvasIdText) {
     try {
-      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
+      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
       return Results.ok(
           withRuntimeTranslation(() -> harnessQueryService.listCanvasSessions(canvasId)));
     } catch (AiResourceNotFoundException ex) {
@@ -126,8 +126,8 @@ public class StudioCanvasController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
-      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
-      UUID commandId = StudioWebMapper.parseUuid(request.getCommandId(), "commandId");
+      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID commandId = WebDtoMapper.parseUuid(request.getCommandId(), "commandId");
       long expectedVersion = parseVersion(request.getExpectedVersion(), "expectedVersion");
       return Results.ok(
           mapper.toDto(
@@ -143,7 +143,7 @@ public class StudioCanvasController {
   @DeleteMapping("/{canvasId}")
   public Result<Void> delete(@PathVariable("canvasId") String canvasIdText) {
     try {
-      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
+      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
       canvasCommandService.deleteCanvas(canvasId);
       return Results.noContent();
     } catch (IllegalArgumentException ex) {

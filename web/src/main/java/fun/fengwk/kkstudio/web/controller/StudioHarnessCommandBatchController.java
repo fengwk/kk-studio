@@ -11,8 +11,8 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.platform.studio.StudioCommandAcceptanceService;
-import fun.fengwk.kkstudio.platform.studio.StudioOwner;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
@@ -29,11 +29,11 @@ import java.util.Objects;
 @RequestMapping("/api/ai/runtime/command-batches")
 public class StudioHarnessCommandBatchController {
 
-  private final StudioCommandAcceptanceService acceptanceService;
+  private final HarnessCommandAcceptanceOrchestrator acceptanceService;
   private final HarnessRuntime runtime;
 
   public StudioHarnessCommandBatchController(
-      StudioCommandAcceptanceService acceptanceService, HarnessRuntime runtime) {
+      HarnessCommandAcceptanceOrchestrator acceptanceService, HarnessRuntime runtime) {
     this.acceptanceService = Objects.requireNonNull(acceptanceService, "acceptanceService");
     this.runtime = Objects.requireNonNull(runtime, "runtime");
   }
@@ -44,7 +44,7 @@ public class StudioHarnessCommandBatchController {
     return Results.accepted(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
-              StudioOwner owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());
+              OwnerRef owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());
               AcceptCommandsCommand command =
                   HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
               AcceptedCommands accepted = acceptanceService.accept(owner, command);

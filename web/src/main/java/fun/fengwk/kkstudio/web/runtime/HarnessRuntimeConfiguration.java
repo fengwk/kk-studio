@@ -34,13 +34,13 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.platform.ai.runtime.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.platform.ai.runtime.resource.ManagedResourceDownloadService;
-import fun.fengwk.kkstudio.platform.ai.runtime.task.SystemPromptPreviewService;
-import fun.fengwk.kkstudio.platform.ai.runtime.task.SystemPromptPreviewServiceFactory;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettings;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
+import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
+import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewServiceFactory;
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import javax.sql.DataSource;
 

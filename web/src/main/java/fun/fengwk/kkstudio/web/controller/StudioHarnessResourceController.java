@@ -10,8 +10,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.platform.ai.runtime.resource.ManagedResourceDownload;
-import fun.fengwk.kkstudio.platform.ai.runtime.resource.ManagedResourceDownloadService;
+import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownload;
+import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;

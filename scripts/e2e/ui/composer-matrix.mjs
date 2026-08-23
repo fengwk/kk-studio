@@ -31,10 +31,10 @@ import {
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
 const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v2:'
 const TINY_IMAGE = readFileSync(
-  new URL('../../../platform/src/main/resources/fun/fengwk/kkstudio/platform/studio/function/fake/tiny.png', import.meta.url),
+  new URL('../../../platform/src/main/resources/fun/fengwk/kkstudio/platform/canvas/function/fake/tiny.png', import.meta.url),
 )
 const TINY_VIDEO = readFileSync(
-  new URL('../../../platform/src/main/resources/fun/fengwk/kkstudio/platform/studio/function/fake/tiny.mp4', import.meta.url),
+  new URL('../../../platform/src/main/resources/fun/fengwk/kkstudio/platform/canvas/function/fake/tiny.mp4', import.meta.url),
 )
 
 export async function runComposerMatrix(ui) {

@@ -23,9 +23,9 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
-import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.platform.ai.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;

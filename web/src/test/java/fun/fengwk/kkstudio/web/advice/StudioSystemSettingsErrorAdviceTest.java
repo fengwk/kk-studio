@@ -11,9 +11,9 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsValidationException;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsVersionConflictException;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsValidationException;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
 import fun.fengwk.kkstudio.web.controller.StudioSystemSettingsController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 

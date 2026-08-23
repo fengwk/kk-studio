@@ -37,10 +37,10 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.platform.ai.runtime.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.platform.ai.runtime.task.SystemPromptPreviewService;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 

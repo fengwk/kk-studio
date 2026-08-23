@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
 /**
  * @author fengwk
  */
-@BaseMapperScan
-@ComponentScan
+@BaseMapperScan("fun.fengwk.kkstudio.platform")
+@ComponentScan(basePackageClasses = PlatformAutoConfiguration.class)
 @Configuration
 public class PlatformAutoConfiguration {}

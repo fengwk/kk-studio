@@ -19,8 +19,8 @@
  *       ProviderCacheControl} 随请求保存。
  *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.provider}：所有 SDK adapter 必须使用的 Provider
  *       request、response、message、content-block、stream 与 exception 契约。具体 Provider SDK adapter 实现位于
- *       {@code platform} 模块下的 {@code fun.fengwk.kkstudio.platform.ai.runtime.model.provider}，绝不能把
- *       SDK 类型泄漏回本边界。
+ *       {@code platform} 模块下的 {@code fun.fengwk.kkstudio.platform.harness.model.provider}，绝不能把 SDK
+ *       类型泄漏回本边界。
  *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.codec} 与 {@link
  *       fun.fengwk.kkstudio.harness.runtime.model.provider.codec}：在 Model/Provider wire 边界使用的严格
  *       deterministic JSON codec。{@link

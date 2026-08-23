@@ -213,10 +213,10 @@ Allow 写入 `READY + approval.required=false` 后进入实际 Tool dispatch；A
 
 | 目标 | 入口 |
 | --- | --- |
-| ProviderFactory 装配 | [`ModelExecutionConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/ai/runtime/model/ModelExecutionConfiguration.java) |
-| ToolFactory 装配 | [`HarnessToolGatewayConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/ai/runtime/tool/gateway/HarnessToolGatewayConfiguration.java) |
+| ProviderFactory 装配 | [`ModelExecutionConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model/ModelExecutionConfiguration.java) |
+| ToolFactory 装配 | [`HarnessToolGatewayConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/HarnessToolGatewayConfiguration.java) |
 | Tool 目录 | [`EnvironmentToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java) |
-| Resolver | [`DatabaseTurnResolver`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/ai/runtime/thread/command/DatabaseTurnResolver.java) |
+| Resolver | [`DatabaseTurnResolver`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java) |
 | TurnResolver 端口 | [`TurnResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/TurnResolver.java) |
 | ModelGateway 端口 | [`ModelGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ModelGateway.java) |
 | ToolGateway 端口 | [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) |

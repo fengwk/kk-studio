@@ -197,7 +197,7 @@ with urllib.request.urlopen(request, timeout=5) as response:
 if [[ "$WITH_APP" == "true" ]]; then
   step "Checking global Blob upload, Canvas consumption, Function runs, signed media GET, and offline Chat"
   CANVAS_TEST_APP_URL="http://127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}" \
-  CANVAS_TEST_IMAGE_FIXTURE="$SCRIPT_DIR/../../platform/src/test/resources/fun/fengwk/kkstudio/platform/studio/resource/tiny.png" \
+  CANVAS_TEST_IMAGE_FIXTURE="$SCRIPT_DIR/../../platform/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource/tiny.png" \
     python3 - <<'PY'
 import base64
 import hashlib

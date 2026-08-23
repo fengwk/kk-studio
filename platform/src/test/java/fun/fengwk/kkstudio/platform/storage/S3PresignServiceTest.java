@@ -14,8 +14,8 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.net.URI;

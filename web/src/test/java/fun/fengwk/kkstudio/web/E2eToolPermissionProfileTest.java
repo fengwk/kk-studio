@@ -10,7 +10,7 @@ import org.springframework.core.io.ClassPathResource;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
