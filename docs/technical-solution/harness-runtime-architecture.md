@@ -7,8 +7,8 @@
 - PostgreSQL 保存唯一 durable truth；`harness_work` 保存唯一调度 mailbox。
 - Thread 的 Entry/head 推进串行；Model、Tool 通过各自 Invocation + Work 继续执行。
 - Processor 每次处理都是短事务，不在事务内等待外部 I/O（Provider/Tool 执行在事务外）。
-- `harness-runtime` 是纯 Java 模块：不依赖 Spring、数据库、Redis、HTTP、WebSocket、Provider SDK 或业务 Tool 实现。
-- `harness-runtime-spring` 只做持久化与调度适配：`HarnessStore`（PostgreSQL）、Work dispatcher（claim/NOTIFY/poll）、Redis overlay、本地 Resource store。
+- `harness-runtime` 是纯 Java 模块：不依赖 Spring、数据库驱动、HTTP、WebSocket、Provider SDK 或业务 Tool 实现。
+- `harness-runtime-spring` 只做持久化与调度适配：`HarnessStore`（PostgreSQL）、Work dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store。
 - `core` 只提供 Catalog/TurnResolver/ModelGateway/ToolGateway/Environment gateway 适配，不写 `harness_*` 表。
 
 ## 2. 模块
@@ -18,7 +18,7 @@ harness/
 ├── tool/                # Tool API、descriptor、ResourceRef、RemoteTool、Daemon v3 wire
 ├── runtime/             # 纯 Java：Session/Entry/Thread/Command/Invocation/Work/processor
 ├── plugin/              # 纯 Java trusted build-time 插件 API：Catalog/BranchView/Tool/intents/projector
-├── runtime-spring/      # Store/Work/Redis/Resource 适配（PostgreSQL、dispatcher）
+├── runtime-spring/      # Store/Work/notification/Resource 适配（PostgreSQL、dispatcher）
 └── daemon/              # 独立 Environment 进程，只依赖 tool
 ```
 
@@ -239,7 +239,7 @@ ModelProcessor 消费 MODEL Work：
 
 1. claim 校验（fake/expired lease token → `LOST_OWNERSHIP` no-op，绝不 cancel 合法 active execution）；
 2. 两阶段激活：先由 `ModelRequestMaterializer` 在有效 MODEL claim 内从 `basisHeadEntryId + compact spec` 重建内存 ProviderRequest（不持有长事务、不访问 catalog/Environment/插件）；随后 `ModelGateway.start` 返回 `Started` 后由 Processor 在 durable `markRunning` 之后调用 `Handle.activate` 打开回调 gate。`activate` 与 abandon 由单一 monitor 仲裁：abandon 先于 activation 则不调用 activate，activation 已开始则把 cancel 推迟到 activate 返回，外部调用序只能是 ACTIVATE → CANCEL。`start` 返回 `Busy` 稍后重试；`Rejected` 确定性终结；`Indeterminate` 收敛为 `UNKNOWN`；
-3. 回调（serialized FIFO 单 drainer）：`MODEL_DELTA` 节流写 `stream_checkpoint`（text/thinking 归一化为非 null；至少一侧非空，纯空白合法；首个 safe delta 立即 flush；tool-call fragment 只推 sequence 不入 checkpoint），**commit 后才 best-effort 发布 Redis realtime delta**；
+3. 回调（serialized FIFO 单 drainer）：`MODEL_DELTA` 节流写 `stream_checkpoint`（text/thinking 归一化为非 null；至少一侧非空，纯空白合法；首个 safe delta 立即 flush；tool-call fragment 只推 sequence 不入 checkpoint），通过 transaction-aware PostgreSQL `NOTIFY` 在 **commit 后**发布 realtime delta；
 4. retryable `TRANSIENT` terminal 在同一短事务把 accumulator 的完整 text/thinking、最后已提交 sequence、error、`failedAt/retryAt` 追加为 `failedAttempts`，清除 checkpoint，`RUNNING -> READY` 并 reschedule；lease fence 使用原始本地时钟，`failedAt` 则抬升到 Thread/Model durable 时间与上一 `retryAt` 的下界，保证时钟回拨后仍可物化为单调 Entry；terminal/duplicate/stale 回调仍严格 fire-once/no-op；
 5. 最终 `resultJson`（ProviderResponse 全量 `{text, thinking, toolCalls, stopReason, usage, cost, requestId, serviceTier, rawUsageJson}`）或 `errorJson` 写入 Invocation，并请求 THREAD Work 做 apply。Provider resolution 校验当前 Provider 行的 type 等于 spec 冻结的 type 后方可 start；credential/endpoint/timeout 与 Resource signed URL 保持 attempt-time live。
 
@@ -313,7 +313,7 @@ durable mutation
 
 - Stop 的 durable key 是「被关闭 TURN_START 的 `ownerThreadId` + `closeRequestId`」（Thread 锁内 Session 级不可变查找）：重试同 raw ID 且 owner Thread 未变时恒命中 replay，`expectedVersion` 只用于未 replay 的首发 CAS；`REPLAYED` 返回与被重放 Stop 相同的 `stoppedTurnEndEntryId`、`cancelledCommandCount` 与 ordered `cancelledUserMessages`。另一 Thread 复用同一 raw id 不产生冲突；IDLE 不写 stop marker，marker-free IDLE 恒不是 REPLAYED。
 - Stop HTTP 结果为 `{status,thread,stoppedTurnEndEntryId,cancelledCommandCount,cancelledUserMessages[]}`，无独立 `replayed` 字段；每条取消消息为 `{sequence,clientCommandId,messageJson}`。前端把完整操作（stopRequestId + 原始 expectedVersion + basis head/version）保存在 per-Thread local sidecar：basis 未变时精确重试，basis 变化时 retire；成功响应按 sequence 将 TEXT/RESOURCE 转为 ComposerPart，以两个换行连接并前置到当前草稿，同一 stopRequestId 最多应用一次。
-- 客户端先读取 Thread snapshot，再经应用事件通道（`/api/events/v1`）订阅 version。Redis `realtime` 只提供正常 turn 的 text/thinking/tool partial overlay；snapshot 的 `modelAttemptFailures` 提供 active retry 的 durable partial/error/retry 时间，终态后由 root-to-head path 上的 `MODEL_ATTEMPT_FAILURE`/`ASSISTANT_ERROR.attempt` 恢复。version/resync/subscribed 只触发 snapshot invalidate；同 `(modelInvocationId,attempt)` 的 durable failure 会 fence stale overlay，terminal `resultJson`/`errorJson` 无条件压过更高 sequence。Runtime 不发布 compaction ModelDelta/attempt failure，前端仍按 TURN_START reason 抑制完整 COMPACTION turn 及其 Model overlay。事件通道帧协议见 [application-event-channel.md](application-event-channel.md)。
+- 客户端先读取 Thread snapshot，再经应用事件通道（`/api/events/v1`）订阅 version。PostgreSQL `realtime` notification 只提供正常 turn 的 text/thinking/tool partial live overlay；snapshot 的 `modelAttemptFailures` 提供 active retry 的 durable partial/error/retry 时间，终态后由 root-to-head path 上的 `MODEL_ATTEMPT_FAILURE`/`ASSISTANT_ERROR.attempt` 恢复。version/resync/subscribed 只触发 snapshot invalidate；同 `(modelInvocationId,attempt)` 的 durable failure 会 fence stale overlay，terminal `resultJson`/`errorJson` 无条件压过更高 sequence。Runtime 不发布 compaction ModelDelta/attempt failure，前端仍按 TURN_START reason 抑制完整 COMPACTION turn 及其 Model overlay。事件通道帧协议见 [application-event-channel.md](application-event-channel.md)。
 
 ## 11. Subagent 委派（task）
 

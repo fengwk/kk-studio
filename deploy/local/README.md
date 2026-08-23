@@ -1,6 +1,6 @@
 # 本地一键启动栈
 
-`kk-studio` 的本地一键启动栈：`app + postgres + redis`。
+`kk-studio` 的本地一键启动栈：`app + postgres`。
 
 默认 Compose 由仓库根目录构建：
 
@@ -12,9 +12,8 @@
   `kk_studio`。空库由 app 在 `dev` profile 通过 Flyway 执行
   [`V1__schema.sql`](../../database/src/main/resources/db/migration/V1__schema.sql) 和
   [`V2__dev_seed.sql`](../../database/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
-  已执行版本由 `flyway_schema_history` 记录。
-- `redis:7.4-alpine` —— `Harness` 的 lossy realtime projection；
-  `--save "" --appendonly no`，纯内存使用，重启即清空。
+  已执行版本由 `flyway_schema_history` 记录。Harness Work、version 与 realtime 的低延迟
+  提示也复用 PostgreSQL `LISTEN/NOTIFY`；通知丢失时由 durable snapshot 与 periodic poll 恢复。
 
 > Harness Daemon 不在当前栈内。
 
@@ -24,8 +23,8 @@
 docker compose -f deploy/local/compose.yaml up -d --build --wait
 ```
 
-`--wait` 会一直等到三个服务的 healthcheck 全部 `healthy`（PostgreSQL 用
-`pg_isready`、Redis 用 `redis-cli ping`、app 用 `curl http://127.0.0.1:8080/actuator/health`）。
+`--wait` 会一直等到两个服务的 healthcheck 全部 `healthy`（PostgreSQL 用
+`pg_isready`，app 用 `curl http://127.0.0.1:8080/actuator/health`）。
 
 查看状态与日志：
 
@@ -43,10 +42,9 @@ docker compose -f deploy/local/compose.yaml logs -f postgres
 | Harness API | <http://localhost:8080/api/ai/runtime/threads> 等 |
 | Health | <http://localhost:8080/actuator/health> |
 | PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码：`kk_studio`） |
-| Redis | `redis://localhost:6379` |
 
 `localhost` 默认绑定 `127.0.0.1`；通过环境变量 `KK_STUDIO_APP_HOST` /
-`KK_STUDIO_PG_HOST` / `KK_STUDIO_REDIS_HOST` 可改为 `0.0.0.0` 等地址。
+`KK_STUDIO_PG_HOST` 可改为 `0.0.0.0` 等地址。
 
 ## 停止与清理
 
@@ -72,8 +70,6 @@ docker compose -f deploy/local/compose.yaml down -v
 | `KK_STUDIO_APP_HOST` | `127.0.0.1` | app 宿主绑定地址 |
 | `KK_STUDIO_PG_PORT` | `5432` | PostgreSQL **宿主**端口（映射到容器内 `5432`；`KK_STUDIO_DB_URL` 始终指向容器内 `5432`） |
 | `KK_STUDIO_PG_HOST` | `127.0.0.1` | PostgreSQL 宿主绑定地址 |
-| `KK_STUDIO_REDIS_PORT` | `6379` | Redis **宿主**端口（映射到容器内 `6379`；`KK_STUDIO_REDIS_URL` 始终指向容器内 `6379`） |
-| `KK_STUDIO_REDIS_HOST` | `127.0.0.1` | Redis 宿主绑定地址 |
 | `KK_STUDIO_PG_DATABASE` | `kk_studio` | 初始数据库名 |
 | `KK_STUDIO_PG_USER` | `kk_studio` | 初始用户名 |
 | `KK_STUDIO_PG_PASSWORD` | `kk_studio` | 初始密码 |
@@ -114,5 +110,5 @@ seed 或仓库。
 ```bash
 docker compose -f deploy/local/compose.yaml ps -a
 docker compose -f deploy/local/compose.yaml down -v
-ss -ltnp | grep -E ':8080|:5432|:6379' || true
+ss -ltnp | grep -E ':8080|:5432' || true
 ```

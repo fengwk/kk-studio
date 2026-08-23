@@ -1,7 +1,7 @@
 # Docker Reliability 栈
 
 Docker reliability 栈在独立 Compose project 中运行当前源码构建的
-`postgres + redis + app + workspace-init + daemon`。它用于免费基础验证和后续显式开启的
+`postgres + app + workspace-init + daemon`。它用于免费基础验证和后续显式开启的
 真实可靠性任务，但启动、快照、case 准备和隔离检查本身不会发起模型调用。
 
 ## 完整命令流
@@ -34,7 +34,7 @@ Docker reliability 栈在独立 Compose project 中运行当前源码构建的
 
 ## 隔离模型
 
-- Compose project 固定为 `kk-studio-reliability`；五个服务通过 `internal: true` 的专用网络
+- Compose project 固定为 `kk-studio-reliability`；四个服务通过 `internal: true` 的专用网络
   通信，只有 app 额外挂入专用 ingress bridge 以支持 loopback 端口发布；
 - PostgreSQL 数据和 `/workspace` 分别位于该 project 的 named volume；
 - Daemon 只挂载一个目标为 `/workspace` 的 named volume，没有宿主 bind mount；

@@ -1,4 +1,4 @@
-# Harness PostgreSQL 与 Redis 设计
+# Harness PostgreSQL 存储与通知设计
 
 ## 1. 数据职责
 
@@ -7,12 +7,10 @@ PostgreSQL
   -> harness_session / harness_entry / harness_thread
   -> harness_thread_command / harness_model_invocation / harness_tool_invocation
   -> harness_work（唯一调度 mailbox）
-
-Redis Streams
-  -> 有界、可丢失的 realtime overlay（MODEL_DELTA / TOOL_PARTIAL）
+  -> LISTEN/NOTIFY（Work/version/realtime 的低延迟提示）
 ```
 
-PostgreSQL 是唯一 durable truth。Redis 重启或清空只会造成流式 overlay 缺口；客户端重新读取 Thread snapshot 即可恢复权威状态。
+PostgreSQL 是唯一 durable truth。`LISTEN/NOTIFY` 不保存历史且不承担 correctness：Work 通知丢失由 periodic poll 收敛，version/realtime 通知丢失由客户端重新读取 Thread snapshot 恢复。
 
 权威 DDL 只有一份基线：`database` 模块的 [`V1__schema.sql`](../../database/src/main/resources/db/migration/V1__schema.sql)（含 Harness 七张表与全部 profile seeds）；不存在 schema mirror，`FlywayBootstrapArchitectureTest` 守护全仓唯一 baseline。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable 实体 id 由注入的 `Supplier<UUID>` 生成（生产：`UUID::randomUUID`），API 中编码为 canonical UUID string；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal string，数据库仍保留 bigint。
 
@@ -119,9 +117,9 @@ durable mutation
   -> bounded handoff -> ThreadProcessor / ModelProcessor / ToolProcessor
 ```
 
-## 7. Redis realtime overlay
+## 7. PostgreSQL realtime notification
 
-每个 Thread 使用 bounded Redis Stream 保存 Model delta 与 Tool partial：
+Model delta 与 Tool partial 以 canonical JSON envelope 发布到 `harness_realtime` channel：
 
 ```json
 {
@@ -134,11 +132,11 @@ durable mutation
 }
 ```
 
-- realtime event 没有业务恢复语义，也不用于审计；`RealtimeEventSink.append` 失败不改变 durable terminal。
+- realtime event 是 live-only notification，没有业务恢复游标，不重放历史，也不用于审计；`RealtimeEventSink.append` 失败不改变 durable terminal。
 - `TOOL_PARTIAL` 除普通工具进度外，还承载 task 委派的**完整 JSON 快照心跳**（`details.kind=task.status`，约 1s 一次）：它不是 delta，顶层状态可携带扁平 `descendants` 活动子树 relay，前端按规范化快照整帧替换/语义去重；心跳丢失只影响实时展示，恢复仍来自子 Thread 的 durable snapshot。
-- Stream 长度受配置策略（max length）约束，下一次写入时应用。
-- 浏览器订阅经应用事件通道（`/api/events/v1`）：`version`/`version` 事件携带 PostgreSQL durable cursor，Redis stream id 不暴露为 wire cursor；重连重订阅后重新读取 snapshot，再从 live edge 接收新 delta。
-- Model delta 对应的安全 `stream_checkpoint` 由 Processor **先**持久化，commit 后才 best-effort 发布 Redis delta；terminal `resultJson`/`errorJson` 本身是 durable 边界，不依赖 terminal overlay 事件，客户端据此覆盖并最终移除流式投影。
+- canonical notification 超过 PostgreSQL payload 安全上限时发送小型 `RESYNC`；畸形、未知 payload 或 listener 重连同样触发 snapshot 恢复。
+- 浏览器订阅经应用事件通道（`/api/events/v1`）：`version` 事件携带 PostgreSQL durable cursor，`realtime` event 不携带 cursor；重连重订阅后重新读取 snapshot，再从 live edge 接收新 delta。
+- Model delta 对应的安全 `stream_checkpoint` 由 Processor **先**持久化；transaction-aware `pg_notify` 在事务提交后才对 listener 可见。terminal `resultJson`/`errorJson` 本身是 durable 边界，不依赖 terminal notification，客户端据此覆盖并最终移除流式投影。
 
 ## 8. 事务与锁序
 
@@ -163,7 +161,7 @@ Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation sib
 | 故障 | durable 处理 |
 | --- | --- |
 | PostgreSQL NOTIFY 丢失 | periodic poll / 重连 wake / lease 到期重新 claim |
-| Redis Stream 丢失 | 客户端重新获取 snapshot |
+| realtime notification 丢失、损坏或超限 | 客户端重新获取 snapshot |
 | Runtime 进程退出 | 已提交 Entry/Command/Invocation/Work 保留；lease 到期后重新 claim |
 | Provider/Tool 结果不确定 | Invocation 收敛 `UNKNOWN`，不重放不确定副作用 |
 | Provider `TRANSIENT` 且 retry budget 允许 | 原子追加当前 attempt partial/error 到 `failed_attempts`，清 checkpoint，转 READY 并按 `retry_at` reschedule；不改 frozen Provider request |
@@ -186,4 +184,4 @@ Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation sib
 
 ## 11. 验证入口
 
-Runtime 单元测试覆盖状态机、classifier、Stop replay、两阶段激活、FIFO 指纹与 fencing；PostgreSQL 集成测试覆盖锁序、CAS、terminal apply、Work claim/wake 与 schema byte-identity；Redis 集成测试覆盖 Stream cursor 与事件通道订阅。E2E 入口见 [e2e-regression.md](e2e-regression.md)。
+Runtime 单元测试覆盖状态机、classifier、Stop replay、两阶段激活、FIFO 指纹与 fencing；PostgreSQL 集成测试覆盖锁序、CAS、terminal apply、Work claim/wake、notification codec/sink/source、事件通道订阅与 schema byte-identity。E2E 入口见 [e2e-regression.md](e2e-regression.md)。

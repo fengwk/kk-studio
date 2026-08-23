@@ -13,7 +13,7 @@ flowchart TD
     A --> T[session-thread-pane.md<br/>Session / Thread / Pane lazy materialization]
     A --> Y[harness-agent-loop.md<br/>Agent Loop durable reducer]
     A --> X[harness-runtime-contracts.md<br/>Runtime 公共契约]
-    A --> S[harness-storage-runtime.md<br/>PostgreSQL durable facts 与 Work/Redis]
+    A --> S[harness-storage-runtime.md<br/>PostgreSQL durable facts、Work 与 notifications]
     A --> D[backend-implementation-design.md<br/>后端实现]
     A --> E[storage-models.md<br/>存储模型]
     A --> F[frontend-implementation-design.md<br/>前端实现]
@@ -38,7 +38,7 @@ flowchart TD
 | 3 | [harness-runtime-architecture.md](harness-runtime-architecture.md) | Entry/Thread/Command/Invocation/Work、Agent Loop 与 processor |
 | 4 | [harness-agent-loop.md](harness-agent-loop.md) | Agent Loop durable reducer、持久化形状与执行协议 |
 | 5 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | JSON/DTO、命令 batch、CAS、replay、snapshot 与异常 wire |
-| 6 | [harness-storage-runtime.md](harness-storage-runtime.md) | HarnessStore 事务/锁序、7 表、Work wake 协议与 Redis overlay |
+| 6 | [harness-storage-runtime.md](harness-storage-runtime.md) | HarnessStore 事务/锁序、7 表、Work wake 与 realtime notification 协议 |
 | 7 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 composition root 与 HTTP 边界 |
 | 8 | [storage-models.md](storage-models.md) | 全应用表结构；Harness 精确 7 表 |
 | 9 | [frontend-implementation-design.md](frontend-implementation-design.md) | Chat defaults、BranchDraft、first send、batch、replay 与 Pane 门禁 |
@@ -57,8 +57,8 @@ flowchart TD
 ## 贯穿约束
 
 - Harness 单轨协议：恰好 5 个 Harness 基础模块（`harness-tool` / `harness-runtime` / `harness-plugin` / `harness-runtime-spring` / `harness-daemon`）、3 个 processor（Thread/Model/Tool）、3 个 Work target（THREAD/MODEL/TOOL）、7 张表、10 种 `EntryType`、1 个 Agent Loop；受信任插件位于独立 `plugins/*` 构建模块。
-- `harness-runtime` 是纯 Java 领域模块，拥有 Thread 状态机与 processor；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 Store/Work/Redis 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway 与 Environment/Chat 应用能力，不写 `harness_*` 表；Goal 由 `plugins/goal` 提供；`web` 是生产组合根。
-- PostgreSQL 是唯一 durable truth；`harness_work` 是唯一调度 mailbox（`wake_version` + lease）；Redis/NOTIFY 永非 correctness truth。
+- `harness-runtime` 是纯 Java 领域模块，拥有 Thread 状态机与 processor；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway 与 Environment/Chat 应用能力，不写 `harness_*` 表；Goal 由 `plugins/goal` 提供；`web` 是生产组合根。
+- PostgreSQL 是唯一 durable truth；`harness_work` 是唯一调度 mailbox（`wake_version` + lease）；`LISTEN/NOTIFY` 只提供低延迟提示，Work 由 periodic poll、客户端由 snapshot 负责恢复。
 - 所有 Runtime 实体 id（Thread/Session/Entry/Invocation/Command）在 HTTP wire 上是 canonical UUID strings；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal strings，前端以 `DecimalLong=string` 接收并按字段领域约束严格校验。
 - Thread `nextCommandSequence` 从 1 开始；每次可见状态变化 `version` 恰好 +1。
 - Agent Loop 固定 6 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS`；产品输入 batch 恰有一个末尾 user-like message，设置只在下一次 INPUT 边界生效；YOLO 由 Thread 控制 API 修改。
@@ -81,7 +81,7 @@ flowchart TD
 
 | 规则 | 说明 |
 | --- | --- |
-| 状态准确 | Session/Thread/Pane 以 [session-thread-pane.md](session-thread-pane.md) 为准；Agent Loop 以 [harness-agent-loop.md](harness-agent-loop.md)、[harness-runtime-architecture.md](harness-runtime-architecture.md) 与 [harness-runtime-contracts.md](harness-runtime-contracts.md) 为事实源，存储与 Work/Redis 以 [harness-storage-runtime.md](harness-storage-runtime.md) 为事实源 |
+| 状态准确 | Session/Thread/Pane 以 [session-thread-pane.md](session-thread-pane.md) 为准；Agent Loop 以 [harness-agent-loop.md](harness-agent-loop.md)、[harness-runtime-architecture.md](harness-runtime-architecture.md) 与 [harness-runtime-contracts.md](harness-runtime-contracts.md) 为事实源，存储、Work 与通知以 [harness-storage-runtime.md](harness-storage-runtime.md) 为事实源 |
 | 上下文无关 | 文档可独立阅读，不依赖讨论过程；不写否决项、迁移历史或旧方案 |
 | 分层清晰 | 架构、Runtime、存储、前后端实现分别维护 |
 | 当前态 | 所有技术方案只描述当前仓库已生效的职责、结构、协议与约束 |

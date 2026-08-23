@@ -18,7 +18,7 @@
 
 ## 能力摘要
 
-- Harness：Session 共享 append-only Entry Tree（TURN_START/MESSAGE/TOOL/TURN_END 语义）；Thread 以非空 head + 命令 mailbox + version CAS 控制执行；7 张 durable 表 + 唯一 `harness_work` 调度 mailbox；Redis 仅用于 realtime overlay
+- Harness：Session 共享 append-only Entry Tree（TURN_START/MESSAGE/TOOL/TURN_END 语义）；Thread 以非空 head + 命令 mailbox + version CAS 控制执行；7 张 durable 表 + 唯一 `harness_work` 调度 mailbox；PostgreSQL `LISTEN/NOTIFY` 提供低延迟提示，snapshot 与 periodic poll 负责恢复
 - Studio：Canvas 八表持久化 document/group/node/link/resource/function-run/function-resource-ref/command-dedup；typed command batch 使用 document version CAS 与 request hash 幂等
 - 前端：AI 与 Canvas 都接真实 snapshot/command API 与应用事件 WebSocket 通道；Canvas Editor 通过实体 Patch 更新，gap 时回退权威 Snapshot
 
@@ -30,7 +30,7 @@ harness-tool / harness-runtime / harness-runtime-spring / harness-daemon
 frontend
 ```
 
-`harness-runtime` 是纯 Java 领域状态机；`harness-runtime-spring` 只做 Store/Work/Redis 适配。
+`harness-runtime` 是纯 Java 领域状态机；`harness-runtime-spring` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配。
 
 ## 开发
 
@@ -53,10 +53,10 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -Pdistribution -pl web -am clean package
 $JAVA_HOME_21/bin/java -jar web/target/kk-studio-web-1.0.0.jar
 ```
 
-## 本地一键启动（app + PostgreSQL + Redis）
+## 本地一键启动（app + PostgreSQL）
 
 仓库根目录构建 Spring Boot Fat JAR（含 React 产物），由 Docker Compose 拉起
-`app + postgres + redis` 三个服务。Spring 直接服务 UI / API / SPA fallback，
+`app + postgres` 两个服务。Spring 直接服务 UI / API / SPA fallback，
 没有 Nginx，没有独立前端容器。
 
 ```bash
@@ -82,7 +82,6 @@ docker compose -f deploy/local/compose.yaml down -v
 | Harness API | <http://localhost:8080/api/ai/runtime/threads/{threadId}/snapshot> 等 |
 | Health | <http://localhost:8080/actuator/health> |
 | PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码：`kk_studio`） |
-| Redis | `redis://localhost:6379` |
 
 数据库首次初始化的约束：
 

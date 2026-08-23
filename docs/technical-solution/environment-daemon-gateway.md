@@ -14,7 +14,7 @@
 | `harness-runtime` | 统一 `ToolProcessor`、ToolInvocation durable 状态与冻结 route 路由 |
 | `web` | 提供 `/api/ai/environment/daemon/v2` WebSocket 文本帧与只读 `GET /api/ai/environment`；不直接消费 Harness 类型 |
 
-数据库是 ToolInvocation 状态、lease、终态结果与所属 Thread 推进的唯一来源。partial 进度进入 Redis realtime projection。Gateway 拥有连接与协议，不是第二套 durable 状态机。
+数据库是 ToolInvocation 状态、lease、终态结果与所属 Thread 推进的唯一来源。partial 进度通过 PostgreSQL realtime notification 投递，丢失时由 Thread snapshot 恢复。Gateway 拥有连接与协议，不是第二套 durable 状态机。
 
 ## Environment 身份
 
@@ -181,7 +181,7 @@ sequenceDiagram
     G->>D: INVOKE (frozen name@version, arguments, timeout)
     D->>G: STARTED / PARTIAL / COMPLETED / FAILED / CANCELLED
     G->>TP: transport callback (ownership-checked)
-    TP->>DB: partial -> Redis overlay; terminal -> ToolInvocation + Work
+    TP->>DB: partial -> realtime NOTIFY; terminal -> ToolInvocation + Work
 ```
 
 Wire `invocationId` 始终是持久 Invocation ID 的 canonical UUID string。每个 envelope 由 `environmentName` 作用域校验；连接/环境/invocation ownership 不匹配的回调被拒绝。
@@ -202,7 +202,7 @@ Daemon 回调使用连续 sequence；相同 sequence 的完全相同 envelope �
 | Daemon callback | 效果 |
 | --- | --- |
 | `STARTED` | transport 执行确认 |
-| `PARTIAL` | 解码 result，经 ToolProcessor 写入 Redis realtime projection（TOOL_PARTIAL 不携带 Resource） |
+| `PARTIAL` | 解码 result，经 ToolProcessor 写入 PostgreSQL realtime notification（TOOL_PARTIAL 不携带 Resource） |
 | `COMPLETED` | Gateway 解码 Resource 为**瞬时 BinaryToolContent** 后交付回调桥；`CoreToolGateway` 在桥内做 durable 外部化，随后 `SUCCEEDED` terminal CAS |
 | `FAILED` | `FAILED` terminal CAS |
 | `CANCELLED` | `CANCELLED` terminal CAS |

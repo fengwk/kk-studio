@@ -1,6 +1,6 @@
 # Harness Agent Loop
 
-本文定义 Harness Runtime Agent Loop 当前生效的 durable reducer、reducer/planner/materializer/invocation lifecycle 细节；模块、Entry 事实与并发协议见 [harness-runtime-architecture.md](harness-runtime-architecture.md)，公共契约见 [harness-runtime-contracts.md](harness-runtime-contracts.md)，存储与 Work/Redis 见 [harness-storage-runtime.md](harness-storage-runtime.md)。
+本文定义 Harness Runtime Agent Loop 当前生效的 durable reducer、reducer/planner/materializer/invocation lifecycle 细节；模块、Entry 事实与并发协议见 [harness-runtime-architecture.md](harness-runtime-architecture.md)，公共契约见 [harness-runtime-contracts.md](harness-runtime-contracts.md)，存储、Work 与通知见 [harness-storage-runtime.md](harness-storage-runtime.md)。
 
 ## 1. Reducer 模型
 

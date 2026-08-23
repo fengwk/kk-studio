@@ -1,6 +1,6 @@
 name: kk-studio-local
 
-# Single-command local stack: app + PostgreSQL + Redis. No Nginx, no separate
+# Single-command local stack: app + PostgreSQL. No Nginx, no separate
 # frontend container -- the Spring Boot Fat JAR serves the React build output
 # from classpath:/static and falls back to index.html for SPA BrowserRouter
 # refreshes (see web/src/main/java/fun/fengwk/kkstudio/web/SpaFallbackConfig.java).
@@ -12,8 +12,6 @@ name: kk-studio-local
 #   KK_STUDIO_APP_HOST     (default 127.0.0.1) -- host bind address for app
 #   KK_STUDIO_PG_PORT      (default 5432)  -- host port mapped to PG container 5432
 #   KK_STUDIO_PG_HOST      (default 127.0.0.1) -- host bind address for PG
-#   KK_STUDIO_REDIS_PORT   (default 6379)  -- host port mapped to Redis container 6379
-#   KK_STUDIO_REDIS_HOST   (default 127.0.0.1) -- host bind address for Redis
 #   KK_STUDIO_PG_DATABASE / KK_STUDIO_PG_USER / KK_STUDIO_PG_PASSWORD
 #   KK_STUDIO_SPRING_PROFILES_ACTIVE (default dev)
 #   KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES (default 16777216) -- Daemon WebSocket frame cap
@@ -38,17 +36,6 @@ services:
       # Durable facts: persisted across `down`; wiped only by `down -v`.
       - kk-studio-postgres:/var/lib/postgresql/data
 
-  redis:
-    image: redis:7.4-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
-    ports:
-      - "${KK_STUDIO_REDIS_HOST:-127.0.0.1}:${KK_STUDIO_REDIS_PORT:-6379}:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
   app:
     build:
       context: ../..
@@ -60,7 +47,6 @@ services:
       KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/${KK_STUDIO_PG_DATABASE:-kk_studio}
       KK_STUDIO_DB_USER: ${KK_STUDIO_PG_USER:-kk_studio}
       KK_STUDIO_DB_PASSWORD: ${KK_STUDIO_PG_PASSWORD:-kk_studio}
-      KK_STUDIO_REDIS_URL: redis://redis:6379
     # Container-internal port is fixed at 8080 (server.port=8080 in
     # web/src/main/resources/application.yml; matching the Dockerfile
     # HEALTHCHECK). Only the host-side mapping is overridable.
@@ -68,8 +54,6 @@ services:
       - "${KK_STUDIO_APP_HOST:-127.0.0.1}:${KK_STUDIO_APP_PORT:-8080}:8080"
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     healthcheck:
       test:

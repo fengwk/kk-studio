@@ -1,6 +1,6 @@
 # 应用事件通道
 
-浏览器与后端之间唯一的实时事件通道是单条应用级 WebSocket 连接 `ws(s)://<host>/api/events/v1`（服务端 `ApplicationEventWebSocketHandler.PATH`，前端 `ApplicationEventProvider` 应用生命周期内单例）。Thread 的 durable version 与 Canvas 的 graph version 前进、Redis realtime overlay 都经这条连接投递；`subscribe/unsubscribe` 之外**不搬运任何 HTTP 能力**——snapshot、`command-batches`、stop、approval 等仍全部走 REST（无 head relocation 端点）。
+浏览器与后端之间唯一的实时事件通道是单条应用级 WebSocket 连接 `ws(s)://<host>/api/events/v1`（服务端 `ApplicationEventWebSocketHandler.PATH`，前端 `ApplicationEventProvider` 应用生命周期内单例）。Thread 的 durable version、Canvas 的 graph version 前进与 PostgreSQL realtime notification 都经这条连接投递；`subscribe/unsubscribe` 之外**不搬运任何 HTTP 能力**——snapshot、`command-batches`、stop、approval 等仍全部走 REST（无 head relocation 端点）。
 
 事实源：`web/.../events/`（`EventFrameCodec` / `ApplicationEventHub` / `ApplicationEventWebSocketHandler` / `AsyncTextSender` / `ThreadVersionHub` / `CanvasVersionHub`）与前端 `frontend/src/shared/app-events/`（`protocol` / `connection` / `manager` / `context`）。
 

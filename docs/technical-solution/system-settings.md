@@ -87,8 +87,8 @@ model selection 使用 custom renderer。permission 的 tool 名与 compaction f
 
 以下内容继续由部署配置或业务实体持有：
 
-- DB/Redis 连接、端口、worker 进程开关；
-- Environment root/workdir、ffmpeg/ffprobe 路径、临时目录、Redis key prefix；
+- DB 连接、数据库/应用端口、worker 进程开关；
+- Environment root/workdir、ffmpeg/ffprobe 路径、临时目录；
 - S3 endpoint/region/bucket、OpenCLI instance identity；
 - daemon token、API key、access key/secret key、bearer token；
 - Provider/Model/Agent、Chat、Canvas function 等资源自身属性；

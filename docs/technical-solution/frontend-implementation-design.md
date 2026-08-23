@@ -12,7 +12,7 @@
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
 | Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `system-prompt` / `compact` / `yolo` / `stop` / `tool-invocations/{id}/approval`；`/api/ai/runtime/sessions/{sessionId}` 的 `threads` / `entries`；`/api/ai/runtime/command-batches`；WebSocket `/api/events/v1` 订阅（见 [application-event-channel.md](application-event-channel.md)） |
-| Realtime | REST snapshot first；应用事件 WebSocket（durable `version`/`resync` + 无 cursor 的 Redis realtime overlay） |
+| Realtime | REST snapshot first；应用事件 WebSocket（durable `version`/`resync` + 无 cursor 的 PostgreSQL realtime notification） |
 | 浏览器路由 | `BrowserRouter`，服务端对 SPA 路径回退 `index.html` |
 | 视觉规范 | [前端设计规范](../product-design/frontend-design-system.md) |
 
@@ -247,13 +247,13 @@ mainView?.debug ?? ThreadConversationView   # 互斥：任一时刻只有一个�
    snapshot-seeded overlay：只有 Thread 消失或订阅真正禁用（`!threadId || !subscriptionReady`）
    才清空，因此 snapshot 首次就含 terminal-pending tool result 时，overlay 在
    事件通道订阅建立前后都保持可见（有回归测试）。
-2. Redis `realtime` 事件叠加流式 overlay：MODEL_DELTA 按 invocation+attempt+sequence 严格推进；`TOOL_CALL_DELTA` 按 index 累积 `id/name/argumentsJson`，在 durable assistant `tool_call` 到达前投影为 streaming tool call；TOOL_PARTIAL 按 `createdAt|canonical payload` 指纹去重（FIFO 有界，attempt 变化/terminal/resultEntryId/消失时清空）。Transcript 把同一 `toolCallId` 的 call/result 收成一张卡片：header 展示工具名、Agent 原样给出的路径和 `WORKING/DONE/FAILED` 三态，长路径允许换行且不与状态争抢空间；body 上半是 write/edit 等自定义 preview，下半是 result。折叠 preview 固定五行并可滚动，不展示剩余行数文案；展开后显示完整高度；复制只作用于这一张卡。
+2. PostgreSQL `realtime` notification 叠加流式 overlay：MODEL_DELTA 按 invocation+attempt+sequence 严格推进；`TOOL_CALL_DELTA` 按 index 累积 `id/name/argumentsJson`，在 durable assistant `tool_call` 到达前投影为 streaming tool call；TOOL_PARTIAL 按 `createdAt|canonical payload` 指纹去重（FIFO 有界，attempt 变化/terminal/resultEntryId/消失时清空）。Transcript 把同一 `toolCallId` 的 call/result 收成一张卡片：header 展示工具名、Agent 原样给出的路径和 `WORKING/DONE/FAILED` 三态，长路径允许换行且不与状态争抢空间；body 上半是 write/edit 等自定义 preview，下半是 result。折叠 preview 固定五行并可滚动，不展示剩余行数文案；展开后显示完整高度；复制只作用于这一张卡。
 3. **Attempt visibility**：snapshot `modelAttemptFailures` 按 attempt 排序并以 `(modelInvocationId,attempt)` 去重，先于当前 Model overlay 投影；`sequence` 必须是 canonical 非负 `DecimalLong`，malformed item fail closed 且不能 fence 当前输出。同 identity 的 durable failure 到达后抑制 stale realtime overlay；只有 invocation 仍处于同 attempt 的 READY/DISPATCHING 时显示活动倒计时，下一 attempt 已 RUNNING 后改为静态“已安排重试”。
 4. **Durable recovery**：root-to-head `MODEL_ATTEMPT_FAILURE` 与 terminal `ASSISTANT_ERROR.attempt` 都投影为同一 failure block，保留原始 text/thinking、具体 error 与 retry 状态；状态标题使用“模型请求失败”并把 attempt 显示为次级“请求 #N”，错误码与正文分离，避免整块警告/危险色高亮；error 与 partial 分开渲染。纯空白 text/thinking 是合法用户可见内容，解析、渲染与复制都不得 trim。retryable failure 仍是 pending，不触发错误/完成浏览器通知。
 5. **Gap recovery**：缺失 sequence 触发 `useGapRecoveryLoop`——单飞、指数退避（200→2000ms、最多 8 次）refetch snapshot；immutable per-recovery token 防旧 Thread tick 干扰新 Thread；refetch 失败继续退避不冻结；caught-up/stale/terminal 停止。
-6. **Terminal fence**：`resultJson`/`errorJson`/`resultEntryId` 是 durable 边界——late MODEL_DELTA 被拒绝；snapshot reconcile 中 `status:'done'|'error'` 的 durable projection **无条件**压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后 overlay 移除。terminal error 从 checkpoint 提取 partial、从 `errorJson` 提取 code/message；CANCELLED + partial 与 durable `ASSISTANT_ABORTED` 一致，timeline 绝不把 terminal projection 标为 streaming。
+6. **Terminal fence**：`resultJson`/`errorJson`/`resultEntryId` 是 durable 边界——late MODEL_DELTA 被拒绝；snapshot reconcile 中 `status:'done'|'error'` 的 durable projection **无条件**压过更高 sequence 的 notification overlay；`resultEntryId` 落地后 overlay 移除。terminal error 从 checkpoint 提取 partial、从 `errorJson` 提取 code/message；CANCELLED + partial 与 durable `ASSISTANT_ABORTED` 一致，timeline 绝不把 terminal projection 标为 streaming。
 7. TOOL_PARTIAL 永不携带 Resource；Tool overlay 投影按 `(assistantEntryId, ordinal)` durable identity + toolCallId 一致性匹配，禁止 first-candidate fallback；`task.status` 心跳是**完整 JSON 快照**（非 delta），顶层状态与扁平 `descendants` 一起进入规范化指纹并整帧替换、语义去重，绝不追加/合并——同一子 Thread 只保留最新一帧。
-8. **Compaction suppression**：Runtime 不发布 compaction Redis MODEL_DELTA，也不向 snapshot/Entry transcript 暴露 compaction retry failure；timeline 按 root-to-head Entry 顺序识别 `TURN_START(reason=COMPACTION)...TURN_END`，整个内部 turn（COMPACTION/ASSISTANT_ERROR/ASSISTANT_ABORTED）不进入 transcript；最新 turn 是 COMPACTION 时，持久 checkpoint overlay 同样不渲染。Session Tree 的 all 视图仍保留这些 durable 审计节点。
+8. **Compaction suppression**：Runtime 不发布 compaction realtime MODEL_DELTA，也不向 snapshot/Entry transcript 暴露 compaction retry failure；timeline 按 root-to-head Entry 顺序识别 `TURN_START(reason=COMPACTION)...TURN_END`，整个内部 turn（COMPACTION/ASSISTANT_ERROR/ASSISTANT_ABORTED）不进入 transcript；最新 turn 是 COMPACTION 时，持久 checkpoint overlay 同样不渲染。Session Tree 的 all 视图仍保留这些 durable 审计节点。
 
 ## 10. Resource 安全呈现
 

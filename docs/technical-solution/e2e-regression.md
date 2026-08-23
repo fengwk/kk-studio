@@ -65,8 +65,8 @@ node scripts/e2e/ui-smoke.mjs \
 
 默认 backend URL 是 `http://127.0.0.1:18081`，默认 frontend URL 由 `scripts/e2e.sh` 传入 `http://127.0.0.1:5173`。真实 Provider 使用 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`；所有付费 API/UI case 都在执行前硬校验 Provider/Model 为 `minimax/MiniMax-M2.7`，不得静默切换到其它付费 Provider。
 
-本地完整免费 Canvas 回归使用 `deploy/test` 提供 PostgreSQL、Redis 与 MinIO，只连接本机
-Redis/S3-compatible endpoint；`s3Enabled` 由 canvas-test Flyway seed（`db/seed/canvas-test`
+本地完整免费 Canvas 回归使用 `deploy/test` 提供 PostgreSQL、MinIO 与 HTTP mock，只连接本机
+PostgreSQL/S3-compatible/mock endpoint；`s3Enabled` 由 canvas-test Flyway seed（`db/seed/canvas-test`
 `V3__canvas_test_system_settings.sql`）写入 SystemSettings：
 
 ```bash
@@ -78,7 +78,6 @@ env \
   KK_STUDIO_DB_URL=jdbc:postgresql://127.0.0.1:15432/canvas_test \
   KK_STUDIO_DB_USER=canvas_test \
   KK_STUDIO_DB_PASSWORD=canvas_test_only \
-  KK_STUDIO_REDIS_URL=redis://127.0.0.1:16379 \
   KK_STUDIO_STORAGE_S3_ENDPOINT=http://127.0.0.1:19000 \
   KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT=http://127.0.0.1:19000 \
   KK_STUDIO_STORAGE_S3_REGION=us-east-1 \
@@ -554,8 +553,8 @@ WebSocket /api/ai/environment/daemon/v2
 
 默认 L1 API 不执行 task Tool；前端单测覆盖 `task.status` 解析、renderer 分发、TaskStatusWidget 与审批转发，免费 UI case `ui.chat.task_status.bound_widget` 使用本地 parent/child OpenAI-compatible mock 验证真实 task heartbeat 的浏览器呈现。完整 durable 子 Thread 与终态 envelope 仍由显式 `--real` 的 `real.task_delegation` 覆盖。
 
-WebSocket `/api/events/v1`：Thread 订阅 ack cursor 是 canonical decimal durable version，Redis
- realtime delta 经 `event{name:'realtime'}` 投递；version 事件只携带 ack 之后的前进值
+WebSocket `/api/events/v1`：Thread 订阅 ack cursor 是 canonical decimal durable version，PostgreSQL
+ realtime notification 经 `event{name:'realtime'}` 投递；version 事件只携带 ack 之后的前进值
 （`event{name,cursor,data}`，十进制字符串，客户端随后拉 snapshot），`resync` 要求整体快照；连接级 `{version:1,type:'heartbeat'}` 每 20 秒保活，由 `events.heartbeat_keepalive` 覆盖。
 
 ## 5. MiniMax-H3 手工 smoke
