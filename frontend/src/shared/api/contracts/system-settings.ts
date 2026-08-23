@@ -133,9 +133,6 @@ export interface SystemSettingsAdvancedDTO {
   dispatcherMaxDispatchTasks: number
   dispatcherWorkerConcurrency: number
   dispatcherWorkerQueueCapacity: number
-  canvasFunctionExecutorCoreSize: number
-  canvasFunctionExecutorMaxSize: number
-  canvasFunctionExecutorQueueCapacity: number
   applicationEventQueueCapacity: number
   applicationEventMaxBytes: DecimalLong
   applicationEventSendTimeoutMillis: DecimalLong
