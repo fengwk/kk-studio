@@ -4,8 +4,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
-import fun.fengwk.kkstudio.core.storage.S3PresignService;
-import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 
 /**
  * 存储 HTTP 边界测试的 S3 假件：以内存对象与记录式预签名替换真实 S3 客户端， 使 reserve/complete/delete/预签名端点全链路在

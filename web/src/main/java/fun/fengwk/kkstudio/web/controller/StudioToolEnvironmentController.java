@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.ai.environment.service.LiveEnvironmentQueryService;
+import fun.fengwk.kkstudio.platform.ai.environment.service.LiveEnvironmentQueryService;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentDTO;
 
 import java.util.List;

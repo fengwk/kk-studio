@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-/** web adapter 把 {@link ThreadVersionEventSource} 的 cursor/handle 语义透传给 core 内部 wake 源。 */
+/** web adapter 把 {@link ThreadVersionEventSource} 的 cursor/handle 语义透传给 platform 内部 wake 源。 */
 class WebHarnessThreadChangeSourceTest {
 
   private static final UUID THREAD_ID = new UUID(0L, 7L);

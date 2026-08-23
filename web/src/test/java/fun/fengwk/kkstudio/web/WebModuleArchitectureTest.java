@@ -24,7 +24,7 @@ class WebModuleArchitectureTest {
   private static final String HARNESS_INFRA_PREFIX = "fun.fengwk.kkstudio.harness.infra.";
   private static final String GOAL_PLUGIN_PREFIX = "fun.fengwk.kkstudio.harness.plugins.goal.";
   private static final String HARNESS_TOOL_PREFIX = "fun.fengwk.kkstudio.harness.tool.";
-  private static final String CORE_AI_REFERENCE_PREFIX = "fun.fengwk.kkstudio.core.ai.";
+  private static final String PLATFORM_AI_REFERENCE_PREFIX = "fun.fengwk.kkstudio.platform.ai.";
   private static final List<String> ALLOWED_HARNESS_PACKAGE_PREFIXES =
       List.of(HARNESS_RUNTIME_PREFIX, HARNESS_INFRA_PREFIX, GOAL_PLUGIN_PREFIX);
 
@@ -40,9 +40,9 @@ class WebModuleArchitectureTest {
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
-          CORE_AI_REFERENCE_PREFIX + "environment.gateway." + "EnvironmentDaemonGateway",
-          CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironment",
-          CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry");
+          PLATFORM_AI_REFERENCE_PREFIX + "environment.gateway." + "EnvironmentDaemonGateway",
+          PLATFORM_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironment",
+          PLATFORM_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry");
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
       List.of("kk-studio-harness-tool", "kk-studio-harness-daemon");
   private static final List<String> REQUIRED_POM_ARTIFACTS =

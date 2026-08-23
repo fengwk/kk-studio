@@ -13,7 +13,7 @@ import java.util.Objects;
  * 传输无关的远程 Tool 代理；与本地 {@link Tool} 共享同一异步执行 API。
  *
  * <p>本类只委托 {@link RemoteToolTransport} 发送 INVOKE/CANCEL 并把远程回调映射为 listener 事件，不依赖
- * runtime/core/daemon/Spring/DB。路由只使用冻结的完整 {@link EnvironmentBinding}。
+ * runtime/platform/daemon/Spring/DB。路由只使用冻结的完整 {@link EnvironmentBinding}。
  */
 public final class RemoteTool implements Tool {
 

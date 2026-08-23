@@ -9,13 +9,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.core.ai.runtime.resource.ManagedResourceDownloadService;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
-import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewServiceFactory;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
@@ -41,6 +34,13 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.platform.ai.runtime.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.platform.ai.runtime.resource.ManagedResourceDownloadService;
+import fun.fengwk.kkstudio.platform.ai.runtime.task.SystemPromptPreviewService;
+import fun.fengwk.kkstudio.platform.ai.runtime.task.SystemPromptPreviewServiceFactory;
+import fun.fengwk.kkstudio.platform.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
 
 import javax.sql.DataSource;
 
@@ -59,7 +59,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Web 组合根：把 core 的 gateway / resolver 与 infra 的 PostgreSQL 持久化和调度适配装配为完整的 Harness Runtime。
+ * Web 组合根：把 platform 的 gateway / resolver 与 infra 的 PostgreSQL 持久化和调度适配装配为完整的 Harness Runtime。
  *
  * <p>进程内 worker dispatcher 只受 {@code workers-enabled} 控制；关闭时控制/查询平面（{@link
  * HarnessRuntime}、store、processor 与 realtime 适配）仍然可用，只是不启动调度。PostgreSQL notification loop

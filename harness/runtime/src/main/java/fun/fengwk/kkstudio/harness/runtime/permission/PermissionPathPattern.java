@@ -15,7 +15,7 @@ import java.util.Objects;
  * pattern 一样在 {@link #of(String)} 直接拒绝，绝不静默失效；持久化的安全子集（有效非否定 pattern）也经 {@link #validate(String)}
  * 复用同一事实语义。
  *
- * <p>{@link FastIgnoreRule} 只在本类（runtime 模块）内被直接使用，core 等上层模块不得直接 import JGit，而是使用本公共 API。
+ * <p>{@link FastIgnoreRule} 只在本类（runtime 模块）内被直接使用，platform 等上层模块不得直接 import JGit，而是使用本公共 API。
  */
 public final class PermissionPathPattern {
 

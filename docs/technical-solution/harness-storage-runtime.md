@@ -146,7 +146,7 @@ Model delta 与 Tool partial 以 canonical JSON envelope 发布到 `harness_real
 Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 ```
 
-- 正常写入对 Session 取 KEY SHARE（不串行化 sibling Thread）；删除/归属独占操作用 `lockSessionForUpdate`（FOR UPDATE）。深删除由 Core `HarnessSessionDeletionService` 编排：Owner FOR UPDATE → 全部 Session FOR UPDATE（UUID 排序）→ 全部 Thread 按 UUID 锁定 → Store `deleteThreads` 跨目标集合按 Command/Model/Tool/Work 规范顺序锁定全部 owned fact、再按 FK 顺序原子删除 → SessionBlobRef release → 删 relation/entries/session。运行时 callback 与深删因此共享 Model/Tool → Work 锁方向，不依赖死锁重试。
+- 正常写入对 Session 取 KEY SHARE（不串行化 sibling Thread）；删除/归属独占操作用 `lockSessionForUpdate`（FOR UPDATE）。深删除由 Platform `HarnessSessionDeletionService` 编排：Owner FOR UPDATE → 全部 Session FOR UPDATE（UUID 排序）→ 全部 Thread 按 UUID 锁定 → Store `deleteThreads` 跨目标集合按 Command/Model/Tool/Work 规范顺序锁定全部 owned fact、再按 FK 顺序原子删除 → SessionBlobRef release → 删 relation/entries/session。运行时 callback 与深删因此共享 Model/Tool → Work 锁方向，不依赖死锁重试。
 
 - 每个 `HarnessRuntime` 方法恰好一个事务；snapshot 单事务一致读取。
 - Tool success 的 `result + effects + SUCCEEDED` 由同一次 `updateToolInvocations` 原子提交；effects 校验必须早于 Resource externalize 与该 durable update。
@@ -174,7 +174,7 @@ Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation sib
 ## 10. Resource store
 
 - `harness-infra` 提供瞬时 `LocalFileResourceStore`：`ResourceStore.reference` 无副作用地计划 canonical `file:///` `ResourceRef`，`put` 返回精确相同引用；`harness-daemon` 的 coding 工具使用同构 store。
-- `ToolResultExternalizer` 位于 `CoreToolGateway` callback bridge。插件 intents 先完整校验为 effects；Text/Json UTF-8 ≤ 8KB 保持 inline，超过阈值或 Binary 才按 `reference -> put -> exact ref check` 转为瞬时 `ResourceRef`，随后 `ToolProcessor` 原子持久化 terminal `result + effects + SUCCEEDED`。
+- `ToolResultExternalizer` 位于 `PlatformToolGateway` callback bridge。插件 intents 先完整校验为 effects；Text/Json UTF-8 ≤ 8KB 保持 inline，超过阈值或 Binary 才按 `reference -> put -> exact ref check` 转为瞬时 `ResourceRef`，随后 `ToolProcessor` 原子持久化 terminal `result + effects + SUCCEEDED`。
 - Tool outcome Entry 插入前，`ToolOutcomeAppender` 在同一 Store 事务调用
   `GlobalStorageToolResultHistoryMaterializer`：有界读取 data/file/http/https/s3 内容，摄入
   `storage_blob`，写入 `resource(blobId,name,preview)`，并通过

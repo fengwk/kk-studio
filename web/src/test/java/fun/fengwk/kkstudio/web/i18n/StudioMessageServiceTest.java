@@ -7,7 +7,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
 
-import fun.fengwk.kkstudio.core.ai.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.ai.error.DomainErrorCode;
 
 import java.util.Locale;
 import java.util.Map;

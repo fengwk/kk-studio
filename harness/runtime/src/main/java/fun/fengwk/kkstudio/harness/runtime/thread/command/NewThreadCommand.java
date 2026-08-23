@@ -14,7 +14,7 @@ import java.util.UUID;
  *
  * <p>因此三参构造可用于承载「payload 已物化、但幂等键（{@code clientCommandId} + {@code requestHash}）保持原始值」的命令；
  * preflight 应使用 {@link #withPayload} 替换 durable payload，以确保同 clientCommandId 的 raw 重试仍能命中 ordered
- * replay。下游 core 的 attachment 物化逻辑应使用该方法。
+ * replay。下游 platform 的 attachment 物化逻辑应使用该方法。
  */
 public record NewThreadCommand(
     ThreadCommandPayload payload, UUID clientCommandId, String requestHash) {

@@ -13,12 +13,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.core.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.platform.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 

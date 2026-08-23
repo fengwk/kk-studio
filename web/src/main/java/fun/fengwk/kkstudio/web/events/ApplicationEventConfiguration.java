@@ -3,14 +3,14 @@ package fun.fengwk.kkstudio.web.events;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsChangeHandler;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.platform.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsChangeHandler;
+import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 

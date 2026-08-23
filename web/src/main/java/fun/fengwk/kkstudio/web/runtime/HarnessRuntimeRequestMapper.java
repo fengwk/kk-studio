@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.runtime;
 
-import fun.fengwk.kkstudio.core.studio.StudioOwner;
-import fun.fengwk.kkstudio.core.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
@@ -28,6 +26,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.platform.studio.StudioOwner;
+import fun.fengwk.kkstudio.platform.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;

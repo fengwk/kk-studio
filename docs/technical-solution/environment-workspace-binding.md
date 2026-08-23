@@ -2,7 +2,7 @@
 
 Environment 的选择在持久化与 wire 上都是**原子**的完整绑定 `{name, workspacePath}` 或 `null`（未绑定）：name 是 canonical 路由身份，workspacePath 是 Environment Root 下的 canonical 相对 wire 路径。不存在只传 name 或只传 path 的中间形态，也不存在独立展示名。
 
-事实源：`harness/tool` 的 `EnvironmentBinding` / `EnvironmentWorkspacePath` / `EnvironmentName`，`share` 的 `EnvironmentBindingDTO` / `HarnessBranchSettingsDTO` / `ToolInvocationDTO` / `HarnessCommandCreateDTO`，`core` 的 `CoreToolGateway`（preflight）与 `EnvironmentDaemonGateway`，`harness/daemon` 的 `DaemonRuntime` / `EnvironmentDirectoryBrowser`，前端 `EnvironmentWorkspacePanel`。
+事实源：`harness/tool` 的 `EnvironmentBinding` / `EnvironmentWorkspacePath` / `EnvironmentName`，`share` 的 `EnvironmentBindingDTO` / `HarnessBranchSettingsDTO` / `ToolInvocationDTO` / `HarnessCommandCreateDTO`，`platform` 的 `PlatformToolGateway`（preflight）与 `EnvironmentDaemonGateway`，`harness/daemon` 的 `DaemonRuntime` / `EnvironmentDirectoryBrowser`，前端 `EnvironmentWorkspacePanel`。
 
 ## 1. 原子语义与 canonical 规则
 
@@ -26,7 +26,7 @@ Environment 的选择在持久化与 wire 上都是**原子**的完整绑定 `{n
 
 ## 5. ENVIRONMENT preflight 与 daemon 执行
 
-- **preflight**（`CoreToolGateway`）：ENVIRONMENT 工具的权限路径上下文体现冻结 binding 的 workspace——以配置的 `environmentRoot` 作为逻辑 root，把 canonical `workspacePath` 纯路径解析为 effective workdir；**不查询 live registry、不做文件系统 IO**。权限 `path` pattern 的唯一基准是该 effective workdir，`environmentRoot` 只参与 workdir 计算与边界定义，不再额外生成 Environment root 相对匹配 alias。PLATFORM 工具与 null binding 保持 server 默认 workdir；null binding 的确定性拒绝发生在 `start`（发送前 `Rejected`，绝不进入 transport，避免 null binding 变成不确定结果）。
+- **preflight**（`PlatformToolGateway`）：ENVIRONMENT 工具的权限路径上下文体现冻结 binding 的 workspace——以配置的 `environmentRoot` 作为逻辑 root，把 canonical `workspacePath` 纯路径解析为 effective workdir；**不查询 live registry、不做文件系统 IO**。权限 `path` pattern 的唯一基准是该 effective workdir，`environmentRoot` 只参与 workdir 计算与边界定义，不再额外生成 Environment root 相对匹配 alias。PLATFORM 工具与 null binding 保持 server 默认 workdir；null binding 的确定性拒绝发生在 `start`（发送前 `Rejected`，绝不进入 transport，避免 null binding 变成不确定结果）。
 - **daemon 执行**（`DaemonRuntime.canonicalWorkspace`）：INVOKE 的 `workspacePath` 先过 `EnvironmentWorkspacePath` 形状校验，再相对 environment root 解析并 `toRealPath()` canonicalize；symlink 越界（real path 不在 root 内）、**路径已删除**、非目录都是确定性 FAILED，且必须在发送 `STARTED` 之前完成——绝不产生 STARTED 后再失败。root 内 symlink alias 的 real path 仍在 root 内时允许。
 
 ## 6. 目录 API 隐私

@@ -16,7 +16,7 @@ import java.util.stream.Stream;
  * Tool 模块的轻量级架构守卫。
  *
  * <p>Tool 主源码只能依赖 JDK、Jackson 和 {@code fun.fengwk.kkstudio.harness.tool}。 禁止依赖
- * Runtime/daemon/core/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。
+ * Runtime/daemon/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。
  */
 class ToolModuleArchitectureTest {
 
@@ -25,7 +25,7 @@ class ToolModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.daemon.",
           "fun.fengwk.kkstudio.harness.kernel.",
-          "fun.fengwk.kkstudio.core.",
+          "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.web.",
           "org.springframework.",
           "org.mybatis.",

@@ -12,8 +12,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
-import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionModelRegistry;
-import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionRuntimeService;
+import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionModelRegistry;
+import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionRuntimeService;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionModelDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunRequestDTO;

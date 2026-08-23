@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
-import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
 

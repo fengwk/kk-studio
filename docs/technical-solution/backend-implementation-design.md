@@ -1,6 +1,6 @@
 # 后端落地设计
 
-本文描述当前 `share`、`core`、`web`、Harness Runtime 与受信任插件的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-plugin-api` 提供构建期注册、启动时冻结的插件 API；`harness-infra` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment 与 Chat 应用能力；Goal 由 `harness/plugins/goal` 提供；`web` 是生产组合根并映射 HTTP/WebSocket。
+本文描述当前 `share`、`platform`、`web`、Harness Runtime 与受信任插件的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-plugin-api` 提供构建期注册、启动时冻结的插件 API；`harness-infra` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`platform` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment 与 Chat 应用能力；Goal 由 `harness/plugins/goal` 提供；`web` 是生产组合根并映射 HTTP/WebSocket。
 
 ## 1. 分层
 
@@ -8,26 +8,26 @@
 flowchart LR
     Client[Browser / Daemon]
     Web[web controllers]
-    Core[core application services / adapters]
+    Platform[platform application services / adapters]
     Infra[harness-infra]
     Runtime[harness-runtime]
     Store[(PostgreSQL / S3)]
 
     Client --> Web
-    Web --> Core
+    Web --> Platform
     Web --> Infra --> Runtime
     Web --> Runtime
-    Core --> Runtime
-    Core --> Store
+    Platform --> Runtime
+    Platform --> Store
 ```
 
 | 层 | 职责 |
 | --- | --- |
 | `share` | DTO、JSON 字段、分页与错误边界 |
 | `web` | 生产组合根、Runtime/dispatcher 与 PostgreSQL notification loop 生命周期、路由、参数校验、HTTP 状态、浏览器事件 WebSocket adapter、Daemon WebSocket v2 adapter |
-| `core.ai.catalog` | Provider/Model/Agent 的名称身份、结构化 config 与版本并发 |
-| `core.ai.chat` | Chat CRUD、`agentName`/可空默认 `EnvironmentBinding{name, workspacePath}`/`yoloEnabled` 可见发送设置与 Chat↔Session 关系（`chat_session`） |
-| `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
+| `platform.ai.catalog` | Provider/Model/Agent 的名称身份、结构化 config 与版本并发 |
+| `platform.ai.chat` | Chat CRUD、`agentName`/可空默认 `EnvironmentBinding{name, workspacePath}`/`yoloEnabled` 可见发送设置与 Chat↔Session 关系（`chat_session`） |
+| `platform.ai.runtime` | `DatabaseTurnResolver`、`PlatformModelGateway`/`PlatformToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
 | `harness-plugin-api` | `PluginCatalog`、`BranchView`、同步 `PluginTool`、state access 声明、intent、context projector 与提示词模板 |
 | `harness/plugins/goal` | Goal v2 工具、`goal/state` 完整快照 codec 与 active context projector |
 | `harness-infra` | `HarnessStore`（PostgreSQL）、Work dispatcher、PostgreSQL realtime notification、瞬时 `LocalFileResourceStore` |
@@ -48,17 +48,17 @@ Agent DTO 的 `model` 使用 Model ref，create 与 PUT 都必填；Model DTO �
 
 ## 3. Composition root
 
-生产组合根位于 `web`；它把 Core ports 与 infra adapters 装配成完整 Runtime。Core 的 Spring beans 只提供应用能力与端口适配，不写 `harness_*` 表：
+生产组合根位于 `web`；它把 Platform ports 与 infra adapters 装配成完整 Runtime。Platform 的 Spring beans 只提供应用能力与端口适配，不写 `harness_*` 表：
 
 | 配置 | 装配 |
 | --- | --- |
-| `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、realtime sink/source、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/executor；注入 Core 的 TurnResolver/ModelGateway/ToolGateway ports |
+| `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、realtime sink/source、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/executor；注入 Platform 的 TurnResolver/ModelGateway/ToolGateway ports |
 | `ApplicationEventConfiguration` | 构造单连接 PostgreSQL notification loop，固定注册 Work、Thread version、Canvas version、SystemSettings 与 realtime channel handler |
 | `HarnessRuntimeLifecycle` | 按 worker 开关启动/停止 dispatcher；REST 与事件通道只经 `HarnessRuntime` 门面 |
-| `ModelExecutionConfiguration` | `ObjectProvider<ProviderFactory>` 收集并索引；`CoreModelGateway`（serialized FIFO 单 drainer 回调桥） |
+| `ModelExecutionConfiguration` | `ObjectProvider<ProviderFactory>` 收集并索引；`PlatformModelGateway`（serialized FIFO 单 drainer 回调桥） |
 | `web.runtime.BuiltInPluginConfiguration` | 在生产组合根注册随应用交付的受信任 `GoalPlugin` |
-| `PluginCatalogConfiguration` | 收集全部 `HarnessPlugin` beans，构造并冻结 `PluginCatalog`；Core 不依赖具体插件实现 |
-| `HarnessToolGatewayConfiguration` | `ObjectProvider<ToolFactory>` + `PluginCatalog` + `PluginBranchViewLoader`；`CoreToolGateway`（preflight + 两阶段激活 + FIFO 回调桥 + intent 校验 + `ToolResultExternalizer`） |
+| `PluginCatalogConfiguration` | 收集全部 `HarnessPlugin` beans，构造并冻结 `PluginCatalog`；Platform 不依赖具体插件实现 |
+| `HarnessToolGatewayConfiguration` | `ObjectProvider<ToolFactory>` + `PluginCatalog` + `PluginBranchViewLoader`；`PlatformToolGateway`（preflight + 两阶段激活 + FIFO 回调桥 + intent 校验 + `ToolResultExternalizer`） |
 | `RuntimeToolsConfiguration` | 装配两个内部 Platform Tool `load_skill` 与 `task`（含 `SubagentConfig`、并发 reservation/活动 descendant relay 共用的 `SubagentRunRegistry`、子 Agent 执行线程池）；把本地 `ToolFactory` descriptor 与冻结插件贡献合并为 `ToolCatalog`，按插件 visibility 维护 selectable/internal 名称 |
 | `HarnessRuntimeRequestMapper` | 严格校验 canonical UUID、decimal cursor 与 sealed DTO union，并映射为领域命令 |
 | `HarnessRuntimeResponseMapper` | 从一致的 Runtime snapshot 投影 Thread status、Entry、Command、Invocation 与 canonical JSON DTO |
@@ -94,7 +94,7 @@ Agent DTO 的 `model` 使用 Model ref，create 与 PUT 都必填；Model DTO �
 | POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedVersion}`；STOPPED/IDLE/REPLAYED |
 | POST | `/api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval` | `{decision: ALLOW|DENY, decisionId, actor, reason}` |
 | WebSocket | `/api/events/v1` | 浏览器事件通道（thread/canvas 订阅；协议见 [application-event-channel.md](application-event-channel.md)） |
-| GET | `/api/ai/runtime/resources/{sha256}` | 瞬时/Invocation `ResourceRef` 下载：Core `ManagedResourceDownloadService` 按 `mediaType`/`size`/可选 `name` 重建引用，Web 只负责 attachment + `X-Content-Type-Options: nosniff`；Entry history 的 Blob Resource 不走该端点 |
+| GET | `/api/ai/runtime/resources/{sha256}` | 瞬时/Invocation `ResourceRef` 下载：Platform `ManagedResourceDownloadService` 按 `mediaType`/`size`/可选 `name` 重建引用，Web 只负责 attachment + `X-Content-Type-Options: nosniff`；Entry history 的 Blob Resource 不走该端点 |
 | POST/DELETE | `/api/storage/uploads[/{uploadId}]` | 全局 Upload reserve、complete 与释放；READY Handle 供 `ATTACHMENT(uploadId)` 原子消费 |
 | GET | `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` | durable Blob Resource 的渲染期短期 URL；原件响应额外携带权威 `mediaType/sizeBytes` |
 
@@ -129,7 +129,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | 组件 | 职责 |
 | --- | --- |
 | `StudioCommandAcceptanceService` | 唯一应用写事务边界：owner 鉴权 + KEY SHARE 锁 owner scope，调用 `HarnessRuntime.acceptCommands`，NEW_SESSION 时写 owner relation（`chat_session`/`canvas_session`），并做 upload validate/consume |
-| `HarnessSessionDeletionService` | Core 删除编排：`deleteSessionsByOwner` 按 owner 列出 Session，先按 UUID 锁定全部 Session/Thread；Store `deleteThreads` 再跨目标集合以 Command→Model→Tool→Work 规范锁序原子删除 owned facts，最后删除 Entries/SessionBlobRef/relation/Session |
+| `HarnessSessionDeletionService` | Platform 删除编排：`deleteSessionsByOwner` 按 owner 列出 Session，先按 UUID 锁定全部 Session/Thread；Store `deleteThreads` 再跨目标集合以 Command→Model→Tool→Work 规范锁序原子删除 owned facts，最后删除 Entries/SessionBlobRef/relation/Session |
 | `StudioHarnessThreadController` | 仅映射 `HarnessRuntime` 门面 + typed 异常翻译 |
 | `HarnessRuntime` | `acceptCommands`/`findThreadCommand`/`stop`/`decideToolApproval`/`setThreadYolo`/`getThreadSnapshot`/`getSessionEntries`/`listThreadsBySession` 单事务控制面；不暴露 delete/create |
 | `ThreadProcessor` | Agent Loop single-action reducer：每次 claim 恰好一个分类动作，下一动作由同事务 requestWork 驱动，返回 COMPLETED/RESCHEDULED/LOST_OWNERSHIP；Model terminal apply 前按序物化失败 attempt，TURN_END 同事务删除 Model/Tool Invocation；另提供 `compactThread`/`manualCompactionAvailability` |
@@ -175,4 +175,4 @@ GET /api/ai/runtime/threads/{threadId}/snapshot
 - [HarnessRuntime](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java)
 - [HarnessRuntimeRequestMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapper.java)
 - [HarnessRuntimeResponseMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeResponseMapper.java)
-- [DatabaseTurnResolver](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/DatabaseTurnResolver.java)
+- [DatabaseTurnResolver](../../platform/src/main/java/fun/fengwk/kkstudio/platform/ai/runtime/thread/command/DatabaseTurnResolver.java)

@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.ComfyuiWorkflowApiService;
+import fun.fengwk.kkstudio.platform.comfyui.workflow_api.service.ComfyuiWorkflowApiService;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiCreateDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiUpdateDTO;

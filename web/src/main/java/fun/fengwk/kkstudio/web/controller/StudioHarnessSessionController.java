@@ -9,10 +9,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.platform.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;

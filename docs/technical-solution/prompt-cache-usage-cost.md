@@ -23,7 +23,7 @@ flowchart LR
 2. `PromptCacheRequestFinalizer` 是 turn-time cache control 的唯一生成点；
 3. spec 冻结 `providerType`/model/variant/preamble/tool/skill/subagent bindings/`cacheControl`/可空 compaction；**不包含 history messages、YOLO、contextWindow 与完整 ProviderRequest**；`ModelDescriptor` 只含 providerName/modelName/inputModalities/tools/reasoning/pricing 六个字段；
 4. 每次 MODEL attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存 ProviderRequest；
-5. attempt 时按 `providerName` 读取当前 `agent_provider` 行构造 Provider；CoreModelGateway 仅按当前 `ProviderFactory` capability 规范化 cache control，其他 spec 字段保持不变，不兼容能力降级为 `none()`；
+5. attempt 时按 `providerName` 读取当前 `agent_provider` 行构造 Provider；PlatformModelGateway 仅按当前 `ProviderFactory` capability 规范化 cache control，其他 spec 字段保持不变，不兼容能力降级为 `none()`；
 6. terminal `ProviderResponse` 的 `usage`/`cost` 冻结进 `resultJson`；
 7. apply 时由 `HistoryPayloadMapper` 把 `stopReason`、`usage`、`cost` 快照进 ASSISTANT Message Entry 的 `AssistantMessageMetadata`（`turn_usage` 前端 meta 消息展示）。
 

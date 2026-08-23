@@ -20,14 +20,14 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.core.studio.StudioCommandAcceptanceService;
-import fun.fengwk.kkstudio.core.studio.StudioOwner;
-import fun.fengwk.kkstudio.core.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.platform.studio.StudioCommandAcceptanceService;
+import fun.fengwk.kkstudio.platform.studio.StudioOwner;
+import fun.fengwk.kkstudio.platform.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;

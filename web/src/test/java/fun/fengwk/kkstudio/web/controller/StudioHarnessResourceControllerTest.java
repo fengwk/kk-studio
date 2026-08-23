@@ -16,8 +16,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import fun.fengwk.kkstudio.core.ai.runtime.resource.ManagedResourceDownload;
-import fun.fengwk.kkstudio.core.ai.runtime.resource.ManagedResourceDownloadService;
+import fun.fengwk.kkstudio.platform.ai.runtime.resource.ManagedResourceDownload;
+import fun.fengwk.kkstudio.platform.ai.runtime.resource.ManagedResourceDownloadService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 /** Managed Resource 完整输出下载 HTTP 契约。 */

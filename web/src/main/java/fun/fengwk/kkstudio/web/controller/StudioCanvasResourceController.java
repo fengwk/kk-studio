@@ -13,7 +13,7 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
-import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.canvas.CanvasPresignedUrlDTO;
 import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 

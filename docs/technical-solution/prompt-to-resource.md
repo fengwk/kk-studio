@@ -145,18 +145,18 @@ Provider Tool Call 按名称找到冻结 binding，按 ordinal 写入 ToolInvoca
 ```text
 ToolBinding.type == PLATFORM
   + ToolBinding.plugin == null
-    -> CoreToolGateway -> local Platform Tool
+    -> PlatformToolGateway -> local Platform Tool
   + ToolBinding.plugin != null
-    -> CoreToolGateway -> frozen PluginContribution -> PluginTool(BranchView)
+    -> PlatformToolGateway -> frozen PluginContribution -> PluginTool(BranchView)
 
 ToolBinding.type == ENVIRONMENT
-  -> CoreToolGateway -> RemoteToolTransport -> EnvironmentDaemonGateway -> Daemon v3 -> Tool
+  -> PlatformToolGateway -> RemoteToolTransport -> EnvironmentDaemonGateway -> Daemon v3 -> Tool
 ```
 
 - 外部 I/O 前 `ToolGateway.preflight`：权限判定（Allow/Ask/Deny）与机械校验（未取消/未过期、`name@version` 命中固定目录、arguments 是 JSON object）；plugin Tool 还按 frozen `(pluginId, contributionLocalName)` 恢复贡献并校验 descriptor/state accesses 未漂移；发送结果不确定收敛 `UNKNOWN`，不重放副作用。
 - Tool partial 写 PostgreSQL realtime notification（`TOOL_PARTIAL` 永不携带 Resource）。
-- plugin Tool 是同步纯函数，只读取 Assistant Entry 对应的冻结 `BranchView` 并返回声明式 intents。Core 只接受 owner 匹配、customType 已注册且 binding 声明 WRITE 的 `AppendCustomEntry`，映射为有序 `ToolEffectBatch`；intent 校验失败在任何 Resource 写入与 durable `SUCCEEDED` 之前终结为 `PLUGIN_CONTRACT_VIOLATION`。
-- **瞬时外部化发生在 CoreToolGateway 回调桥**（`ToolResultExternalizer`）：effects 校验通过后的 terminal success 回调 all-or-nothing 处理：
+- plugin Tool 是同步纯函数，只读取 Assistant Entry 对应的冻结 `BranchView` 并返回声明式 intents。Platform 只接受 owner 匹配、customType 已注册且 binding 声明 WRITE 的 `AppendCustomEntry`，映射为有序 `ToolEffectBatch`；intent 校验失败在任何 Resource 写入与 durable `SUCCEEDED` 之前终结为 `PLUGIN_CONTRACT_VIOLATION`。
+- **瞬时外部化发生在 PlatformToolGateway 回调桥**（`ToolResultExternalizer`）：effects 校验通过后的 terminal success 回调 all-or-nothing 处理：
 
 ```text
 Text/Json 内容 UTF-8 <= 8KB（INLINE_RESULT_UTF8_BYTES） -> 保持 inline ToolContent 编码进 ToolResult JSON
@@ -176,7 +176,7 @@ size        # 可选，非负
 sha256      # 可选，64 位小写 hex
 ```
 
-- `LocalFileResourceStore` 生成 canonical `file:///` URI（空 authority、无 dot/空 segment、非空 size/sha256）。daemon coding tool 自身可因输出超过 preview 限制（默认 2000 行 / 50KB）或二进制内容先产生 Resource，core 对 Text/Json >8KB 及 Binary 统一再次外部化/透传。
+- `LocalFileResourceStore` 生成 canonical `file:///` URI（空 authority、无 dot/空 segment、非空 size/sha256）。daemon coding tool 自身可因输出超过 preview 限制（默认 2000 行 / 50KB）或二进制内容先产生 Resource，platform 对 Text/Json >8KB 及 Binary 统一再次外部化/透传。
 - Tool outcome Entry 写入前，`ToolOutcomeAppender` 在同一 Store 事务调用 `GlobalStorageToolResultHistoryMaterializer`：有界读取 data/file/http/https/s3，摄入 `storage_blob`，通过 `session_blob_ref` retain，并把 durable 内容转换为 `resource(blobId,name,preview)`。任何一步失败时事务整体回滚；没有 materializer 时含 Resource 的成功结果 fail closed。
 - ToolProcessor 接收 `ToolSuccess(已外部化 ToolResult, effects)` 并在短事务内做严格 terminal CAS（fire-once、claim ownership 校验），以一次 Store update 原子持久化 `SUCCEEDED + result + effects`，不做存储外部化。
 - Model terminal materialize siblings 时按 ordinal 静态检查 plugin state accesses；同一 `(pluginId, customType)` 的 WRITE 后再 READ/WRITE 直接写成 `FAILED(kind=SIBLING_STATE_CONFLICT)`，不 dispatch。

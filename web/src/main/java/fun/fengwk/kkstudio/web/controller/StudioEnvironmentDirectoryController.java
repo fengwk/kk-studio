@@ -10,10 +10,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryListResult;
-import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentDirectoryLister;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.platform.ai.environment.service.EnvironmentDirectoryListResult;
+import fun.fengwk.kkstudio.platform.ai.environment.service.EnvironmentDirectoryLister;
+import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;

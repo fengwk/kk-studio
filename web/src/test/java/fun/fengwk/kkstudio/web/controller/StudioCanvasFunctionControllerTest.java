@@ -28,9 +28,9 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
-import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionModelRegistry;
-import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionRuntimeService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionModelRegistry;
+import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionRuntimeService;
 import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
 import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 

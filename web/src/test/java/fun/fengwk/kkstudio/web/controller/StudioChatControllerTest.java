@@ -25,8 +25,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
-import fun.fengwk.kkstudio.core.studio.StudioHarnessQueryService;
+import fun.fengwk.kkstudio.platform.ai.chat.service.ChatService;
+import fun.fengwk.kkstudio.platform.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;

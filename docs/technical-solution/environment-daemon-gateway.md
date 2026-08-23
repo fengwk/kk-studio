@@ -8,7 +8,7 @@
 
 | 层 | 职责 |
 | --- | --- |
-| `core/ai/environment` | `LiveEnvironmentRegistry`、`EnvironmentDaemonGateway`（endpoint/skill loader/transport）、daemon 协议 codec |
+| `platform/ai/environment` | `LiveEnvironmentRegistry`、`EnvironmentDaemonGateway`（endpoint/skill loader/transport）、daemon 协议 codec |
 | `harness-tool` | route-neutral Tool API、`EnvironmentName`、`ResourceRef`、`RemoteTool`、Daemon v3 envelope/result codec |
 | `harness-daemon` | 独立 Daemon 连接、重连、本地工具执行、invocation journal 与 skill 发现 |
 | `harness-runtime` | 统一 `ToolProcessor`、ToolInvocation durable 状态与冻结 route 路由 |
@@ -69,7 +69,7 @@ READY payload 是严格版本化/类型化的能力对象（`DaemonCapabilities`
 
 READY 只上报 canonical `rootPath`（Environment Root 展示路径），不上报其它本地路径，并禁止 SKILL.md 正文、headers/environment 值、命令、URL 与完整工具 schema；完整 schema 只通过固定 `mcp_list_tools` 桥接工具按需返回。公共 `GET /api/ai/environment` 只投影 rootPath，不投影 operatingSystem/timeZone/note。READY 每个连接恰好一次；Gateway 必须先 `updateCapabilities` 再 `markReady`，而 registry 的 `markReady` 会拒绝 null capabilities；`HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
 
-**并发约束**：每个 Environment 同时最多 1 个 active remote invocation——`EnvironmentDaemonGateway` 以 `activeByEnvironment` 登记 in-flight 调用。已存在 active 时，同 Environment 的并发 sibling 在发送任何 wire INVOKE 前返回 typed `RemoteToolBusyException`；`CoreToolGateway` 把它映射为带配置延迟的 `ToolGateway.Busy`，Harness 将调用重新调度并以 retry 序列化，而不是写入 terminal failure。不同 Environment 的 active 槽位互相独立，可以并发执行。发送 CANCEL 只做幂等取消请求，不立即释放槽位；active 槽位仍在 COMPLETED / FAILED / CANCELLED terminal callback 或连接 cleanup 时释放。
+**并发约束**：每个 Environment 同时最多 1 个 active remote invocation——`EnvironmentDaemonGateway` 以 `activeByEnvironment` 登记 in-flight 调用。已存在 active 时，同 Environment 的并发 sibling 在发送任何 wire INVOKE 前返回 typed `RemoteToolBusyException`；`PlatformToolGateway` 把它映射为带配置延迟的 `ToolGateway.Busy`，Harness 将调用重新调度并以 retry 序列化，而不是写入 terminal failure。不同 Environment 的 active 槽位互相独立，可以并发执行。发送 CANCEL 只做幂等取消请求，不立即释放槽位；active 槽位仍在 COMPLETED / FAILED / CANCELLED terminal callback 或连接 cleanup 时释放。
 
 只读查询：
 
@@ -150,7 +150,7 @@ claim TOOL Work（Work-only 短事务）
   -> 两阶段激活（start 返回 Started 后由 Processor 在 durable markRunning 之后调用 activate）
   -> RemoteToolTransport.send -> Gateway -> Daemon INVOKE
   -> 回调（serialized FIFO）：STARTED / PARTIAL / COMPLETED / FAILED / CANCELLED
-  -> CoreToolGateway 回调桥内 ToolResultExternalizer（durable 外部化）
+  -> PlatformToolGateway 回调桥内 ToolResultExternalizer（durable 外部化）
   -> ToolProcessor 接收 ToolSuccess(result, empty effects) -> terminal CAS -> 请求 THREAD Work 做 sibling apply
 ```
 
@@ -193,7 +193,7 @@ Wire `invocationId` 始终是持久 Invocation ID 的 canonical UUID string。�
 3. frozen arguments 是 JSON object；
 4. recovered lease 的非幂等调用保守收敛为 `UNKNOWN`，不重发。
 
-连接丢失或发送失败（send outcome uncertain / connection-close notify）对 active listener 上报 uncertain；`RemoteToolSendUncertainException` 由 `CoreToolGateway` 令 Invocation 收敛 `UNKNOWN`，**不重发可能已发生的副作用**。瞬时 active handle 只是传输状态，持久 lease 与 fencing 仍由 PostgreSQL claim 约束。
+连接丢失或发送失败（send outcome uncertain / connection-close notify）对 active listener 上报 uncertain；`RemoteToolSendUncertainException` 由 `PlatformToolGateway` 令 Invocation 收敛 `UNKNOWN`，**不重发可能已发生的副作用**。瞬时 active handle 只是传输状态，持久 lease 与 fencing 仍由 PostgreSQL claim 约束。
 
 ## 回调、结果与 Resource
 
@@ -203,14 +203,14 @@ Daemon 回调使用连续 sequence；相同 sequence 的完全相同 envelope �
 | --- | --- |
 | `STARTED` | transport 执行确认 |
 | `PARTIAL` | 解码 result，经 ToolProcessor 写入 PostgreSQL realtime notification（TOOL_PARTIAL 不携带 Resource） |
-| `COMPLETED` | Gateway 解码 Resource 为**瞬时 BinaryToolContent** 后交付回调桥；`CoreToolGateway` 在桥内做 durable 外部化，随后 `SUCCEEDED` terminal CAS |
+| `COMPLETED` | Gateway 解码 Resource 为**瞬时 BinaryToolContent** 后交付回调桥；`PlatformToolGateway` 在桥内做 durable 外部化，随后 `SUCCEEDED` terminal CAS |
 | `FAILED` | `FAILED` terminal CAS |
 | `CANCELLED` | `CANCELLED` terminal CAS |
 
 `ACK` / `ERROR` 只描述 transport，不单独改写 durable 状态。`DaemonToolResultCodec` 使用严格 JSON shape；Gateway 的 COMPLETED 解码会把 Resource 引用读回并校验为瞬时 Binary 内容，**不直接形成最终 durable file URI**：
 
 - daemon coding tool 自身可因输出超过 preview 限制（默认 2000 行 / 50KB）或二进制内容产生 Resource（daemon 侧 `resourceStore.store` 落盘并返回 ref）；ANSI terminal 文本中的 ESC 不单独触发二进制判定，常见彩色测试输出仍以可读 Text 投影；
-- core 对 Text/Json >8KB 及 Binary 内容统一在 `ToolResultExternalizer`（CoreToolGateway callback bridge）外部化：先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 与计划精确相等。Text/Json 的 durable `ResourceToolContent` 同时携带最多 16 KiB 的 UTF-8 安全 preview（能完整容纳时原样保留，否则稳定前缀加截断标记）；Binary preview 为 null。preview 是可选字段，缺省时按 null 解码。
+- platform 对 Text/Json >8KB 及 Binary 内容统一在 `ToolResultExternalizer`（PlatformToolGateway callback bridge）外部化：先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 与计划精确相等。Text/Json 的 durable `ResourceToolContent` 同时携带最多 16 KiB 的 UTF-8 安全 preview（能完整容纳时原样保留，否则稳定前缀加截断标记）；Binary preview 为 null。preview 是可选字段，缺省时按 null 解码。
 
 terminal CAS 成功后请求 owning Thread Work；CAS 失败表示 ownership 已丢失，仅丢弃本地 handle。
 

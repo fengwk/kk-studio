@@ -37,7 +37,7 @@ import { registerCase, getCase } from '../lib/registry.mjs'
 const PI_MODEL_CATALOG = JSON.parse(
   readFileSync(
     new URL(
-      '../../../core/src/test/resources/fun/fengwk/kkstudio/core/ai/runtime/persistence/postgresql/pi-model-catalog.json',
+      '../../../platform/src/test/resources/fun/fengwk/kkstudio/platform/ai/runtime/persistence/postgresql/pi-model-catalog.json',
       import.meta.url,
     ),
     'utf8',

@@ -7,7 +7,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 把 web 的 {@link ThreadVersionEventSource}（PostgreSQL LISTEN fan-out）适配为 core 内部 {@link
+ * 把 web 的 {@link ThreadVersionEventSource}（PostgreSQL LISTEN fan-out）适配为 platform 内部 {@link
  * HarnessThreadChangeSource}。
  *
  * <p>直接透传既有「先注册再读 cursor、断线 resync」语义：本适配只把带 payload 的 version 事件折叠为纯 wake 信号，自身不维护第二套

@@ -21,9 +21,9 @@ class FlywayBootstrapArchitectureTest {
   private static final String LEGACY_SCHEMA_ARTIFACT = "kk-studio-" + LEGACY_SCHEMA_MODULE;
   private static final List<String> LEGACY_RESOURCES =
       List.of(
-          "core/src/main/resources/schema-postgresql.sql",
-          "core/src/main/resources/data-dev-postgresql.sql",
-          "core/src/main/resources/data-e2e-postgresql.sql");
+          "platform/src/main/resources/schema-postgresql.sql",
+          "platform/src/main/resources/data-dev-postgresql.sql",
+          "platform/src/main/resources/data-e2e-postgresql.sql");
   private static final List<String> FLYWAY_RESOURCES =
       List.of(
           "schema/src/main/resources/db/migration/V1__schema.sql",
@@ -37,7 +37,7 @@ class FlywayBootstrapArchitectureTest {
       List.of(
           "web/src/main/resources/application-dev.yml",
           "web/src/main/resources/application-e2e.yml",
-          "core/src/test/resources/application.yml",
+          "platform/src/test/resources/application.yml",
           "web/src/test/resources/application.yml",
           "deploy/local/compose.yaml");
   private static final List<String> FORBIDDEN_BOOTSTRAPS =
@@ -112,15 +112,16 @@ class FlywayBootstrapArchitectureTest {
             "<artifactId>kk-studio-schema</artifactId>\n            <scope>runtime</scope>"),
         "web must depend on the schema module at runtime");
 
-    String corePom = Files.readString(root.resolve("core/pom.xml"), StandardCharsets.UTF_8);
+    String platformPom = Files.readString(root.resolve("platform/pom.xml"), StandardCharsets.UTF_8);
     assertTrue(
-        corePom.contains(
+        platformPom.contains(
             "<artifactId>kk-studio-schema</artifactId>\n            <scope>test</scope>"),
-        "core must depend on the schema module for infrastructure tests");
+        "platform must depend on the schema module for infrastructure tests");
     assertTrue(
-        corePom.contains("<artifactId>flyway-core</artifactId>\n            <scope>test</scope>"));
+        platformPom.contains(
+            "<artifactId>flyway-core</artifactId>\n            <scope>test</scope>"));
     assertTrue(
-        corePom.contains(
+        platformPom.contains(
             "<artifactId>flyway-database-postgresql</artifactId>\n            <scope>test</scope>"));
 
     String harnessInfraPom =
@@ -166,7 +167,7 @@ class FlywayBootstrapArchitectureTest {
     for (Path candidate : List.of(cwd, cwd.getParent())) {
       if (candidate != null
           && Files.isRegularFile(candidate.resolve("pom.xml"))
-          && Files.isDirectory(candidate.resolve("core/src/main/java"))
+          && Files.isDirectory(candidate.resolve("platform/src/main/java"))
           && Files.isDirectory(candidate.resolve("web/src/main/java"))) {
         return candidate;
       }

@@ -14,8 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.core.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;

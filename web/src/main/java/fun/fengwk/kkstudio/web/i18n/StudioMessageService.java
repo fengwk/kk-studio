@@ -6,7 +6,7 @@ import fun.fengwk.convention4j.common.i18n.StringManager;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.core.ai.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.ai.error.DomainErrorCode;
 
 import java.util.Collections;
 import java.util.Locale;
@@ -19,7 +19,7 @@ import java.util.ResourceBundle;
  * Web 边界的消息解析器，用于按请求作用域解析用户可见的错误文案。
  *
  * <p>convention starter 只暴露单一启动 locale 的 manager。本服务有意为每个受支持的请求 locale 各持有一个
- * manager，使请求可以选择自己的语言，而无需改动 core 错误模型或进程级 convention 配置。
+ * manager，使请求可以选择自己的语言，而无需改动 platform 错误模型或进程级 convention 配置。
  */
 @Component
 public class StudioMessageService {
