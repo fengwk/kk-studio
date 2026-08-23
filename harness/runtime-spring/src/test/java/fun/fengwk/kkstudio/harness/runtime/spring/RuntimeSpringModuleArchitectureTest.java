@@ -18,6 +18,7 @@ class RuntimeSpringModuleArchitectureTest {
   private static final String PACKAGE_PREFIX = "package fun.fengwk.kkstudio.harness.runtime.spring";
   private static final List<String> ALLOWED_IMPORT_PREFIXES =
       List.of(
+          "com.fasterxml.jackson.",
           "java.",
           "javax.",
           "fun.fengwk.kkstudio.harness.runtime.",

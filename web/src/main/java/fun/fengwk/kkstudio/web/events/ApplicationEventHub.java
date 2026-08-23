@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.web.events;
 
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventSource;
+import fun.fengwk.kkstudio.harness.runtime.spring.realtime.RealtimeEventSource;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
