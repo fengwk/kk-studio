@@ -25,6 +25,9 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionConfigCodec;
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunStateCodec;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
@@ -53,7 +56,7 @@ class CanvasFunctionWorkerTest {
   private CanvasFunctionRunRepository repository;
   private CanvasFunctionAdapter adapter;
   private CanvasFunctionRunTransactions transactions;
-  private CanvasFunctionRunStateCodec stateCodec;
+  private CanvasFunctionRunStateCodecPort stateCodec;
   private CanvasFunctionWorker worker;
   private CanvasFunctionFrozenRun frozen;
   private CanvasFunctionRun running;

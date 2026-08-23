@@ -7,12 +7,13 @@
 | 域 | 代码位置 | 职责 |
 | --- | --- | --- |
 | Harness / AI | `harness-tool`、`harness-runtime`、`harness-plugin-api`、`harness/plugins/*`、`harness-infra`、`harness-daemon`、`platform.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、插件 branch state、Work |
-| Studio / Canvas | `canvas/core`、`platform.studio`、`features/canvas` | Canvas document、ResourceNode、Resource、Function、Group、Link、typed command |
+| Studio / Canvas | `canvas/core`、`canvas/infra`、`platform.studio`、`features/canvas` | Canvas document、ResourceNode、Resource、Function、Group、Link、typed command |
 
 ```text
 frontend
   -> web
     -> platform
+    -> canvas-infra -> canvas-core
     -> harness-infra -> harness-runtime -> harness-tool
     -> harness-runtime
 platform -> canvas-core
@@ -24,7 +25,10 @@ platform -> harness-tool
 harness-daemon -> harness-tool
 ```
 
-`canvas-core` 只依赖 JDK；`harness-runtime` 不依赖 Spring、MyBatis、Harness Tool 实现或 Web；`harness-*` 不依赖 `canvas-core`。
+`canvas-core` 只依赖 JDK；`canvas-infra` 实现 Canvas PostgreSQL/MyBatis 持久化与 JSON codec
+端口且不依赖 Platform/Harness/Web；Platform 生产代码只经 `canvas-core` 端口访问，Web 作为组合根装配
+`canvas-infra`。`harness-runtime` 不依赖 Spring、MyBatis、Harness Tool 实现或 Web；`harness-*` 不依赖
+`canvas-core`。
 
 ## 2. Catalog 词汇
 

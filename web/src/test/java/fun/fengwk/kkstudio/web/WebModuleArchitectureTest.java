@@ -46,7 +46,7 @@ class WebModuleArchitectureTest {
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
       List.of("kk-studio-harness-tool", "kk-studio-harness-daemon");
   private static final List<String> REQUIRED_POM_ARTIFACTS =
-      List.of("kk-studio-harness-infra", "kk-studio-harness-plugin-goal");
+      List.of("kk-studio-canvas-infra", "kk-studio-harness-infra", "kk-studio-harness-plugin-goal");
 
   @Test
   void webMainSourcesUseCoreBoundariesAndAvoidDirectHarnessDependencies() throws IOException {

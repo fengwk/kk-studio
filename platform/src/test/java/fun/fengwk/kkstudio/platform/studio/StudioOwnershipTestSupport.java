@@ -5,11 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.platform.ai.chat.repo.impl.mapper.ChatMapper;
 import fun.fengwk.kkstudio.platform.ai.chat.repo.impl.model.ChatDO;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasDocumentDO;
 
 import java.util.UUID;
 
@@ -23,7 +22,7 @@ public abstract class StudioOwnershipTestSupport extends PostgresSpringTestSuppo
 
   @Autowired protected JdbcTemplate jdbc;
   @Autowired protected ChatMapper chatMapper;
-  @Autowired protected CanvasDocumentMapper canvasDocumentMapper;
+  @Autowired protected CanvasStore canvasStore;
 
   /** 建一个 Chat owner 行并返回 id。 */
   protected UUID chatOwner() {
@@ -40,11 +39,7 @@ public abstract class StudioOwnershipTestSupport extends PostgresSpringTestSuppo
   /** 建一个 Canvas owner 行并返回 id。 */
   protected UUID canvasOwner() {
     UUID id = uuid();
-    CanvasDocumentDO document = new CanvasDocumentDO();
-    document.setId(id);
-    document.setTitle("owner-" + id);
-    document.setVersion(0L);
-    assertEquals(1, canvasDocumentMapper.insert(document));
+    canvasStore.addDocument(id, "owner-" + id);
     return id;
   }
 

@@ -21,8 +21,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasSession;
 import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -50,8 +52,6 @@ import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundExcepti
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasDocumentDO;
 
 import java.time.Instant;
 import java.util.List;
@@ -79,7 +79,7 @@ class StudioCommandAcceptanceServiceTest {
   private ChatSessionRepository chatSessionRepository;
   private CanvasSessionRepository canvasSessionRepository;
   private ChatRepository chatRepository;
-  private CanvasDocumentMapper canvasDocumentMapper;
+  private CanvasStore canvasStore;
   private ObjectProvider<HarnessStore> stores;
   private ObjectProvider<HarnessRuntime> runtimes;
   private ObjectProvider<StorageUploadService> uploadServices;
@@ -98,7 +98,7 @@ class StudioCommandAcceptanceServiceTest {
     chatSessionRepository = mock(ChatSessionRepository.class);
     canvasSessionRepository = mock(CanvasSessionRepository.class);
     chatRepository = mock(ChatRepository.class);
-    canvasDocumentMapper = mock(CanvasDocumentMapper.class);
+    canvasStore = mock(CanvasStore.class);
     stores = mock(ObjectProvider.class);
     runtimes = mock(ObjectProvider.class);
     uploadServices = mock(ObjectProvider.class);
@@ -122,8 +122,8 @@ class StudioCommandAcceptanceServiceTest {
             });
     when(transaction.findSession(any())).thenReturn(Optional.empty());
     when(chatRepository.lockForKeyShare(CHAT_ID)).thenReturn(mock(Chat.class));
-    when(canvasDocumentMapper.getByIdForKeyShare(CANVAS_ID))
-        .thenReturn(mock(CanvasDocumentDO.class));
+    when(canvasStore.lockDocumentForKeyShare(CANVAS_ID))
+        .thenReturn(Optional.of(mock(CanvasDocument.class)));
     when(runtime.acceptCommands(any(), any())).thenReturn(accepted);
 
     service =
@@ -131,7 +131,7 @@ class StudioCommandAcceptanceServiceTest {
             chatSessionRepository,
             canvasSessionRepository,
             chatRepository,
-            canvasDocumentMapper,
+            canvasStore,
             stores,
             runtimes,
             uploadServices,
@@ -194,7 +194,7 @@ class StudioCommandAcceptanceServiceTest {
     assertSame(accepted, service.accept(CANVAS_OWNER, threadCommand));
 
     verify(chatRepository, times(2)).lockForKeyShare(CHAT_ID);
-    verify(canvasDocumentMapper).getByIdForKeyShare(CANVAS_ID);
+    verify(canvasStore).lockDocumentForKeyShare(CANVAS_ID);
     verify(chatSessionRepository, times(2)).findBySessionId(SESSION_ID);
     verify(canvasSessionRepository).findBySessionId(SESSION_ID);
   }
@@ -207,7 +207,7 @@ class StudioCommandAcceptanceServiceTest {
         IllegalArgumentException.class,
         () -> service.accept(CHAT_OWNER, newSession(user(new TextMessageContent("missing chat")))));
 
-    when(canvasDocumentMapper.getByIdForKeyShare(CANVAS_ID)).thenReturn(null);
+    when(canvasStore.lockDocumentForKeyShare(CANVAS_ID)).thenReturn(Optional.empty());
     assertThrows(
         IllegalArgumentException.class,
         () ->

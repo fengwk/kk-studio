@@ -4,6 +4,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
@@ -23,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.ai.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.ai.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.ai.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
@@ -48,21 +48,20 @@ public class StudioHarnessQueryService {
 
   private final ChatRepository chatRepository;
   private final ChatSessionRepository chatSessionRepository;
-  private final CanvasDocumentMapper canvasDocumentMapper;
+  private final CanvasStore canvasStore;
   private final CanvasSessionRepository canvasSessionRepository;
   private final ObjectProvider<HarnessRuntime> runtimes;
 
   public StudioHarnessQueryService(
       ChatRepository chatRepository,
       ChatSessionRepository chatSessionRepository,
-      CanvasDocumentMapper canvasDocumentMapper,
+      CanvasStore canvasStore,
       CanvasSessionRepository canvasSessionRepository,
       ObjectProvider<HarnessRuntime> runtimes) {
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
-    this.canvasDocumentMapper =
-        Objects.requireNonNull(canvasDocumentMapper, "canvasDocumentMapper");
+    this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.canvasSessionRepository =
         Objects.requireNonNull(canvasSessionRepository, "canvasSessionRepository");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
@@ -80,7 +79,7 @@ public class StudioHarnessQueryService {
   /** 返回 Canvas owner 的 Session 摘要，关系顺序保持最近归属优先。 */
   public List<HarnessSessionSummaryDTO> listCanvasSessions(UUID canvasId) {
     Objects.requireNonNull(canvasId, "canvasId");
-    if (canvasDocumentMapper.getById(canvasId) == null) {
+    if (canvasStore.findDocument(canvasId).isEmpty()) {
       throw new AiResourceNotFoundException("canvas", "canvas not found: " + canvasId);
     }
     return listSessionSummaries(canvasSessionRepository.listSessionIds(canvasId));

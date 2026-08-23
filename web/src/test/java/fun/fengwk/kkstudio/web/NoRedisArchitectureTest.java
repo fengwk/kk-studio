@@ -49,6 +49,9 @@ class NoRedisArchitectureTest {
         continue;
       }
       Path path = root.resolve(relative);
+      if (!Files.isRegularFile(path)) {
+        continue;
+      }
       if (isProductionJava(relative)) {
         inspectJava(relative, Files.readString(path, StandardCharsets.UTF_8), violations);
       } else if (relative.endsWith("pom.xml")) {

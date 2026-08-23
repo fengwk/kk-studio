@@ -11,6 +11,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -29,11 +31,7 @@ class PlatformArchitectureTest {
 
   /** platform/pom.xml 禁止声明的下游模块 artifactId。 */
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
-      List.of(
-          "kk-studio-harness-infra",
-          "kk-studio-canvas-infra",
-          "kk-studio-web",
-          "kk-studio-harness-daemon");
+      List.of("kk-studio-harness-infra", "kk-studio-web", "kk-studio-harness-daemon");
 
   /** platform 不是组合根：main 源码禁止 import framework 基础设施与 web/daemon；pom 不得声明对应的下游模块 artifactId。 */
   @Test
@@ -70,6 +68,7 @@ class PlatformArchitectureTest {
           pomText.contains("<artifactId>" + artifactId + "</artifactId>"),
           "platform/pom.xml must not declare " + artifactId);
     }
+    assertCanvasInfraIsTestScoped(pomText);
 
     assertTrue(
         violations.isEmpty(),
@@ -104,6 +103,23 @@ class PlatformArchitectureTest {
     assertTrue(
         violations.isEmpty(),
         () -> "Platform JGit imports must not exist:\n" + String.join("\n", violations));
+  }
+
+  private static void assertCanvasInfraIsTestScoped(String pomText) {
+    Matcher matcher =
+        Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(pomText);
+    int declarations = 0;
+    while (matcher.find()) {
+      String dependency = matcher.group(1);
+      if (!dependency.contains("<artifactId>kk-studio-canvas-infra</artifactId>")) {
+        continue;
+      }
+      declarations++;
+      assertTrue(
+          dependency.contains("<scope>test</scope>"),
+          "platform may depend on kk-studio-canvas-infra only in test scope");
+    }
+    assertTrue(declarations == 1, "platform must declare one test-scoped canvas infra dependency");
   }
 
   private static String normalizeImport(String importLine) {

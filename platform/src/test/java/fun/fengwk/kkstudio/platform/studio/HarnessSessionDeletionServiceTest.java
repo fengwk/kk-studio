@@ -14,7 +14,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -22,8 +24,6 @@ import fun.fengwk.kkstudio.platform.ai.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.ai.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasDocumentDO;
 
 import java.time.Instant;
 import java.util.List;
@@ -49,7 +49,7 @@ class HarnessSessionDeletionServiceTest {
   private ChatSessionRepository chatSessionRepository;
   private CanvasSessionRepository canvasSessionRepository;
   private ChatRepository chatRepository;
-  private CanvasDocumentMapper canvasDocumentMapper;
+  private CanvasStore canvasStore;
   private ObjectProvider<HarnessStore> stores;
   private ObjectProvider<SessionBlobRefManager> refManagers;
   private HarnessStore store;
@@ -63,7 +63,7 @@ class HarnessSessionDeletionServiceTest {
     chatSessionRepository = mock(ChatSessionRepository.class);
     canvasSessionRepository = mock(CanvasSessionRepository.class);
     chatRepository = mock(ChatRepository.class);
-    canvasDocumentMapper = mock(CanvasDocumentMapper.class);
+    canvasStore = mock(CanvasStore.class);
     stores = mock(ObjectProvider.class);
     refManagers = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
@@ -79,14 +79,14 @@ class HarnessSessionDeletionServiceTest {
               return callback.apply(transaction);
             });
     when(chatRepository.lockById(CHAT_ID)).thenReturn(mock(Chat.class));
-    when(canvasDocumentMapper.getByIdForUpdate(CANVAS_ID)).thenReturn(mock(CanvasDocumentDO.class));
+    when(canvasStore.lockDocument(CANVAS_ID)).thenReturn(Optional.of(mock(CanvasDocument.class)));
 
     service =
         new HarnessSessionDeletionService(
             chatSessionRepository,
             canvasSessionRepository,
             chatRepository,
-            canvasDocumentMapper,
+            canvasStore,
             stores,
             refManagers);
   }
@@ -159,7 +159,7 @@ class HarnessSessionDeletionServiceTest {
   void missingChatOrCanvasOwnerIsAnIdempotentNoop() {
     // Owner 已不存在等价于删除已完成，不能枚举 relation 或打开 Harness 事务。
     when(chatRepository.lockById(CHAT_ID)).thenReturn(null);
-    when(canvasDocumentMapper.getByIdForUpdate(CANVAS_ID)).thenReturn(null);
+    when(canvasStore.lockDocument(CANVAS_ID)).thenReturn(Optional.empty());
 
     service.deleteSessionsByOwner(CHAT_OWNER);
     service.deleteSessionsByOwner(CANVAS_OWNER);
