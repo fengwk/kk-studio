@@ -31,13 +31,11 @@ import org.springframework.test.web.servlet.MvcResult;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.core.studio.StudioHarnessQueryService;
-import fun.fengwk.kkstudio.core.studio.realtime.CanvasRealtimeService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasCommandDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasTransformDTO;
 import fun.fengwk.kkstudio.share.studio.CreateCanvasRequestDTO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasChanges;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasConflictException;
@@ -81,7 +79,6 @@ class StudioCanvasControllerTest {
   private ObjectMapper objectMapper;
   private CanvasQueryService queryService;
   private CanvasCommandService commandService;
-  private CanvasRealtimeService realtimeService;
   private StudioHarnessQueryService harnessQueryService;
   private StorageBlobManager blobManager;
 
@@ -93,7 +90,6 @@ class StudioCanvasControllerTest {
     objectMapper = ObjectMapperHolder.getInstance();
     queryService = mock(CanvasQueryService.class);
     commandService = mock(CanvasCommandService.class);
-    realtimeService = mock(CanvasRealtimeService.class);
     harnessQueryService = mock(StudioHarnessQueryService.class);
     blobManager = mock(StorageBlobManager.class);
     FixedObjectProvider<StorageBlobManager> blobManagers = new FixedObjectProvider<>(blobManager);
@@ -109,7 +105,6 @@ class StudioCanvasControllerTest {
                 new StudioCanvasController(
                     queryService,
                     commandService,
-                    realtimeService,
                     harnessQueryService,
                     new StudioWebMapper(blobManagers)))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
@@ -355,15 +350,6 @@ class StudioCanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(validCommandJson().replace(COMMAND.toString(), "cmd-1")))
         .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=abc"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=01"))
-        .andExpect(status().isBadRequest());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=9223372036854775808"))
-        .andExpect(status().isBadRequest());
     verify(commandService, never())
         .applyCommands(any(UUID.class), anyLong(), any(UUID.class), anyList());
   }
@@ -406,25 +392,11 @@ class StudioCanvasControllerTest {
   }
 
   @Test
-  void changesReturnsContinuousPatchesOrAuthoritativeSnapshot() throws Exception {
-    when(realtimeService.readChanges(CANVAS, 1L))
-        .thenReturn(new CanvasChanges(List.of(patch()), null));
+  void changesEndpointIsNotExposed() throws Exception {
+    // Canvas 跨窗口恢复只允许读取标准 Snapshot；旧 changes 路由必须彻底消失，避免兼容路径回流。
     mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=1"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.patches[0].baseVersion").value("2"))
-        .andExpect(jsonPath("$.data.patches[0].version").value("3"))
-        .andExpect(jsonPath("$.data.patches[0].groups[0].op").value("UPSERT"))
-        .andExpect(jsonPath("$.data.snapshot").value(nullValue()));
-
-    when(queryService.findSnapshot(CANVAS)).thenReturn(Optional.of(snapshot()));
-    when(realtimeService.readChanges(CANVAS, 0L))
-        .thenReturn(new CanvasChanges(List.of(), snapshot()));
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/changes"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.patches").isEmpty())
-        .andExpect(jsonPath("$.data.snapshot.document.version").value("3"));
+        .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=0"))
+        .andExpect(status().isNotFound());
   }
 
   @Test

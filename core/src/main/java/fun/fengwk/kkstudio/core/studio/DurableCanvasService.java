@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.core.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionConfigCodec;
 import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionModelRegistry;
-import fun.fengwk.kkstudio.core.studio.realtime.CanvasRealtimeService;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasCommandDedupMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasGroupMapper;
@@ -94,7 +93,6 @@ public class DurableCanvasService implements CanvasCommandService {
   private final CanvasFunctionConfigCodec functionConfigCodec;
   private final CanvasFunctionModelRegistry functionModelRegistry;
   private final ObjectMapper objectMapper;
-  private final CanvasRealtimeService realtimeService;
   private final HarnessSessionDeletionService sessionDeletionService;
 
   public DurableCanvasService(
@@ -112,7 +110,6 @@ public class DurableCanvasService implements CanvasCommandService {
       CanvasFunctionConfigCodec functionConfigCodec,
       CanvasFunctionModelRegistry functionModelRegistry,
       ObjectMapper objectMapper,
-      CanvasRealtimeService realtimeService,
       HarnessSessionDeletionService sessionDeletionService) {
     this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
     this.groupMapper = Objects.requireNonNull(groupMapper, "groupMapper");
@@ -129,7 +126,6 @@ public class DurableCanvasService implements CanvasCommandService {
     this.functionModelRegistry =
         Objects.requireNonNull(functionModelRegistry, "functionModelRegistry");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-    this.realtimeService = Objects.requireNonNull(realtimeService, "realtimeService");
     this.sessionDeletionService =
         Objects.requireNonNull(sessionDeletionService, "sessionDeletionService");
   }
@@ -208,9 +204,7 @@ public class DurableCanvasService implements CanvasCommandService {
     } catch (DuplicateKeyException error) {
       throw conflict(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT);
     }
-    CanvasPatch patch = accumulator.toPatch(expectedVersion, newVersion);
-    realtimeService.publish(canvasId, patch);
-    return patch;
+    return accumulator.toPatch(expectedVersion, newVersion);
   }
 
   @Override

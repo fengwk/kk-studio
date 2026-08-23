@@ -296,7 +296,7 @@ durable mutation
 | Harness work dispatch | PostgreSQL `LISTEN/NOTIFY` 唤醒 + 低频 periodic safety poll | safety poll 会 claim work | NOTIFY 不是 durable queue；周期兜底用于启动、丢通知和恢复 |
 | TaskTool child observation | `HarnessThreadChangeSource` version/resync + registry descendant signal | 仅首次与 version wake 读取 snapshot | 主流程事件驱动；取消主动 wake；heartbeat 使用缓存 |
 | Harness one-shot | `HarnessThreadChangeSource` version/resync | 仅首次与 version wake 读取 snapshot | 100ms timed wait 只检查 caller active/deadline，不读取 snapshot |
-| Canvas graph/run | `canvas_version` PostgreSQL notification + `/changes` patch/snapshot | 前端按 version event 拉取 | Function run 不轮询状态 |
+| Canvas graph/run | `canvas_version` PostgreSQL notification + 标准 Snapshot | 前端按更高 version、重连或 resync 拉取 | Function run 不轮询状态 |
 | Application event connection | WebSocket callback + reconnect backoff + 20s heartbeat | 否 | transport liveness 与断线恢复 |
 | Work heartbeat | fixed-rate lease renew | 是，更新 work lease | 分布式 ownership 协议，不是 UI 状态轮询 |
 | Environment 列表 | 页面可见时 10s React Query refresh | 是 | Daemon/进程 liveness 边界；当前 wire 没有 Environment collection version |

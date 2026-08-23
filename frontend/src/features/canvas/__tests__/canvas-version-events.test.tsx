@@ -15,16 +15,14 @@ interface Props {
 
 function renderEvents(initialProps: Props = {}) {
   const sockets = new FakeWebSocketHarness()
-  const onVersion = vi.fn()
-  const onResync = vi.fn()
+  const onSnapshot = vi.fn()
   const rendered = renderHook(
     (props: Props) =>
       useCanvasVersionEvents({
         canvasId: CANVAS_ID,
         enabled: props.enabled ?? true,
         version: props.version ?? '0',
-        onVersion,
-        onResync,
+        onSnapshot,
       }),
     {
       initialProps,
@@ -35,7 +33,7 @@ function renderEvents(initialProps: Props = {}) {
       ),
     },
   )
-  return { ...rendered, sockets, onVersion, onResync }
+  return { ...rendered, sockets, onSnapshot }
 }
 
 function versionEvent(sockets: FakeWebSocketHarness, version: string) {
@@ -56,53 +54,54 @@ function versionEvent(sockets: FakeWebSocketHarness, version: string) {
 }
 
 describe('useCanvasVersionEvents', () => {
-  it('subscribes the canvas resource and syncs changes once on the subscribed ack', () => {
-    const { sockets, onVersion } = renderEvents({ version: '7' })
+  it('subscribes the canvas resource and refreshes the snapshot on the subscribed ack', () => {
+    const { sockets, onSnapshot } = renderEvents({ version: '7' })
     const socket = sockets.openLatest()
 
     expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: canvasResource }])
     // 快照 GET 与 wire 建立之间的缺口由 subscribed ack 关闭。
-    expect(onVersion).not.toHaveBeenCalled()
+    expect(onSnapshot).not.toHaveBeenCalled()
     act(() => socket.emitServer({ type: 'subscribed', resource: canvasResource, cursor: '0' }))
-    expect(onVersion).toHaveBeenCalledTimes(1)
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
   })
 
-  it('triggers changes sync only for versions newer than the known one', () => {
-    const { sockets, onVersion, rerender } = renderEvents({ version: '7' })
+  it('refreshes the snapshot only for versions newer than the known one', () => {
+    const { sockets, onSnapshot, rerender } = renderEvents({ version: '7' })
 
     // codec 已拒绝数字/前导零/负数/畸形 data 与缺失/不匹配的 cursor；hook 层
     // 只负责与最后已知版本比较，旧版本事件不触发同步。
+    versionEvent(sockets, '7')
     versionEvent(sockets, '6')
     versionEvent(sockets, '8')
-    expect(onVersion).toHaveBeenCalledTimes(1)
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
 
     // 本地版本前进后，迟到的旧事件不再触发同步。
     rerender({ version: '8' })
     versionEvent(sockets, '8')
-    expect(onVersion).toHaveBeenCalledTimes(1)
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
   })
 
   it('compares versions beyond Number.MAX_SAFE_INTEGER without JS number loss', () => {
-    const { sockets, onVersion, rerender } = renderEvents({ version: '9007199254740992' })
+    const { sockets, onSnapshot, rerender } = renderEvents({ version: '9007199254740992' })
 
     // MAX_SAFE_INTEGER+1 在 JS number 中无法区分，但十进制字符串必须精确比较。
     versionEvent(sockets, '9007199254740993')
-    expect(onVersion).toHaveBeenCalledTimes(1)
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
     versionEvent(sockets, '9007199254740992')
-    expect(onVersion).toHaveBeenCalledTimes(1)
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
 
     rerender({ version: '9007199254740993' })
     versionEvent(sockets, '9007199254740994')
-    expect(onVersion).toHaveBeenCalledTimes(2)
+    expect(onSnapshot).toHaveBeenCalledTimes(2)
   })
 
-  it('triggers full resync on resync events and on resource errors', () => {
-    const { sockets, onResync } = renderEvents()
+  it('refreshes the full snapshot on resync events and resource errors', () => {
+    const { sockets, onSnapshot } = renderEvents()
     const socket = sockets.openLatest()
 
     act(() => socket.emitServer({ type: 'resync', resource: canvasResource }))
-    expect(onResync).toHaveBeenCalledTimes(1)
-    // 订阅/事件处理失败：增量状态不可信，回退全量快照。
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
+    // 订阅/事件处理失败：本地状态不可信，重新读取权威快照。
     act(() =>
       socket.emitServer({
         type: 'error',
@@ -111,14 +110,14 @@ describe('useCanvasVersionEvents', () => {
         message: 'boom',
       }),
     )
-    expect(onResync).toHaveBeenCalledTimes(2)
+    expect(onSnapshot).toHaveBeenCalledTimes(2)
   })
 
-  it('re-syncs via the subscribed ack after a shared-connection reconnect', async () => {
-    const { sockets, onVersion } = renderEvents({ version: '3' })
+  it('refreshes the snapshot via the subscribed ack after a shared-connection reconnect', async () => {
+    const { sockets, onSnapshot } = renderEvents({ version: '3' })
     const first = sockets.openLatest()
     act(() => first.emitServer({ type: 'subscribed', resource: canvasResource, cursor: '0' }))
-    expect(onVersion).toHaveBeenCalledTimes(1)
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
 
     // 断线重连由共享 Connection 负责：新 socket 上重发 subscribe，
     // 重连后的 subscribed ack 再次同步，关闭断线窗口内的版本缺口。
@@ -127,7 +126,7 @@ describe('useCanvasVersionEvents', () => {
     const second = sockets.openLatest()
     expect(second.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: canvasResource }])
     act(() => second.emitServer({ type: 'subscribed', resource: canvasResource, cursor: '0' }))
-    expect(onVersion).toHaveBeenCalledTimes(2)
+    expect(onSnapshot).toHaveBeenCalledTimes(2)
   })
 
   it('does not subscribe when disabled and unsubscribes when disabled again', () => {

@@ -162,9 +162,9 @@ PostgreSQL 是唯一 durable truth，`harness_work` 是 Harness 唯一调度 mai
 事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）
 订阅 durable `version` 与 realtime delta。
 
-Canvas 使用同一原则：PostgreSQL 实体与 `canvas_document.version` 是事实源，Redis Stream 只保存事务
-提交后的 bounded Patch Cache，PostgreSQL `NOTIFY canvas_version` 只唤醒事件通道的 version source。`/changes` 仅在
-cache 覆盖连续版本时返回 Patch；任何 gap、损坏或 Redis 不可用都回退权威 Snapshot。
+Canvas 使用同一原则：PostgreSQL 实体与 `canvas_document.version` 是事实源，命令响应返回 Patch 供发起窗口
+即时应用；PostgreSQL `NOTIFY canvas_version` 只唤醒事件通道的 version source。其他窗口收到更高 version，
+以及首次订阅、重连或 `resync` 时，都重新读取权威 Snapshot 收敛。
 
 ## 8. Subagent 委派（task）
 

@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
 import type {
-  CanvasChangesDTO,
   CanvasPatchDTO,
   CanvasSnapshotDTO,
 } from '@/shared/api/contracts/studio'
@@ -40,10 +39,6 @@ function advancePatch(from: number | string, to: number | string): CanvasPatchDT
   }
 }
 
-function changesOf(patches: CanvasPatchDTO[] = [], snapshotValue: CanvasSnapshotDTO | null = null): CanvasChangesDTO {
-  return { patches, snapshot: snapshotValue }
-}
-
 describe('CanvasCommandQueue', () => {
   it('serializes batches and applies the returned patch to the latest version', async () => {
     const calls: string[] = []
@@ -55,7 +50,6 @@ describe('CanvasCommandQueue', () => {
       initialSnapshot: snapshot(7),
       apply,
       refetch: vi.fn(),
-      getChanges: vi.fn(),
       createCommandId: vi.fn()
         .mockReturnValueOnce('aaaaaaaa-0000-4000-8000-000000000001')
         .mockReturnValueOnce('aaaaaaaa-0000-4000-8000-000000000002'),
@@ -81,7 +75,6 @@ describe('CanvasCommandQueue', () => {
       initialSnapshot: snapshot(10),
       apply,
       refetch,
-      getChanges: vi.fn(),
       createCommandId: () => 'aaaaaaaa-0000-4000-8000-000000000003',
       onSnapshot: (value) => versions.push(value.document.version),
     })
@@ -107,7 +100,6 @@ describe('CanvasCommandQueue', () => {
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
-      getChanges: vi.fn(),
       createCommandId: () => 'aaaaaaaa-0000-4000-8000-000000000004',
     })
 
@@ -126,7 +118,6 @@ describe('CanvasCommandQueue', () => {
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
-      getChanges: vi.fn(),
     })
 
     await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }], { signal })
@@ -146,7 +137,6 @@ describe('CanvasCommandQueue', () => {
       initialSnapshot: initial,
       apply,
       refetch: vi.fn(),
-      getChanges: vi.fn(),
     })
 
     await expect(queue.enqueue([])).resolves.toBe(initial)
@@ -158,7 +148,6 @@ describe('CanvasCommandQueue', () => {
       initialSnapshot: snapshot(8),
       apply: vi.fn(),
       refetch: vi.fn(),
-      getChanges: vi.fn(),
     })
     const stale = snapshot(7)
     const equal = {
@@ -175,31 +164,25 @@ describe('CanvasCommandQueue', () => {
     expect(queue.currentSnapshot().document.title).toBe('runtime update')
   })
 
-  it('recovers a gap through changes when the command response is not continuous', async () => {
+  it('recovers a non-continuous command patch through the full snapshot', async () => {
     const apply = vi.fn(async (_canvasId, request) => advancePatch(
       nextVersion(request.expectedVersion),
       nextVersion(nextVersion(request.expectedVersion)),
     ))
-    const getChanges = vi.fn(async (_canvasId, afterVersion) => {
-      // 服务端 head 已包含本命令的效果：changes 从当前版本补全完整链
-      //（他人提交 1->2 + 本命令 2->4）。
-      expect(afterVersion).toBe('1')
-      return changesOf([advancePatch(1, 2), advancePatch(2, 4)])
-    })
+    const refetch = vi.fn().mockResolvedValue(snapshot(4))
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       initialSnapshot: snapshot(1),
       apply,
-      refetch: vi.fn(),
-      getChanges,
+      refetch,
       createCommandId: () => 'aaaaaaaa-0000-4000-8000-000000000006',
     })
 
-    // 响应 patch base=2 -> version=4：base 与当前版本 1 不连续（gap），
-    // 通过 changes 补全 1->2 与 2->4。
+    // 响应 patch base=2 -> version=4：base 与当前版本 1 不连续；
+    // 不尝试补 patch window，直接读取权威 Snapshot。
     await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).resolves.toMatchObject({
       document: { version: '4' },
     })
-    expect(getChanges).toHaveBeenCalledWith(CANVAS_ID, '1', { signal: undefined })
+    expect(refetch).toHaveBeenCalledWith(CANVAS_ID, { signal: undefined })
   })
 
   it('handles versions beyond Number.MAX_SAFE_INTEGER without JS number loss', async () => {
@@ -212,7 +195,6 @@ describe('CanvasCommandQueue', () => {
       initialSnapshot: snapshot(huge),
       apply,
       refetch: vi.fn(),
-      getChanges: vi.fn(),
       createCommandId: () => 'aaaaaaaa-0000-4000-8000-000000000007',
     })
 
@@ -225,38 +207,4 @@ describe('CanvasCommandQueue', () => {
     expect(queue.currentSnapshot().document.version).toBe(hugeNext)
   })
 
-  it('syncFrom falls back to the full snapshot when changes cannot close the gap', async () => {
-    const getChanges = vi.fn().mockResolvedValue(changesOf([advancePatch(2, 3)]))
-    const refetch = vi.fn().mockResolvedValue(snapshot(4))
-    const queue = new CanvasCommandQueue(CANVAS_ID, {
-      initialSnapshot: snapshot(1),
-      apply: vi.fn(),
-      refetch,
-      getChanges,
-    })
-
-    const synced = await queue.syncFrom('1')
-
-    expect(synced.document.version).toBe('4')
-    expect(refetch).toHaveBeenCalledWith(CANVAS_ID, { signal: undefined })
-  })
-
-  it('syncFrom adopts a returned snapshot and folds continuous patches', async () => {
-    const snapshotValue = { ...snapshot(9), document: { ...snapshot(9).document, title: 'snapshot title' } }
-    const queue = new CanvasCommandQueue(CANVAS_ID, {
-      initialSnapshot: snapshot(7),
-      apply: vi.fn(),
-      refetch: vi.fn(),
-      getChanges: vi.fn()
-        .mockResolvedValueOnce(changesOf([advancePatch(7, 8), advancePatch(8, 9)]))
-        .mockResolvedValueOnce(changesOf([], snapshotValue)),
-    })
-
-    await queue.syncFrom('7')
-    expect(queue.currentSnapshot().document.version).toBe('9')
-
-    await queue.syncFrom('9')
-    expect(queue.currentSnapshot().document.title).toBe('snapshot title')
-    expect(queue.currentSnapshot().document.version).toBe('9')
-  })
 })

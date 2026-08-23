@@ -3,7 +3,6 @@ import {
   cancelCanvasFunctionRun,
   createCanvas,
   getCanvas,
-  getCanvasChanges,
   getCanvasFunctionRun,
   getCanvasResourceOriginalUrl,
   getCanvasResourcePreviewUrl,
@@ -85,10 +84,6 @@ describe('studio service transport adapter', () => {
       .mockResolvedValueOnce(response(envelope(documentPayload())))
       .mockResolvedValueOnce(response(envelope(snapshotPayload())))
       .mockResolvedValueOnce(response(envelope(patchPayload())))
-      .mockResolvedValueOnce(response(envelope({
-        patches: [patchPayload()],
-        snapshot: snapshotPayload(),
-      })))
       .mockResolvedValueOnce(response(envelope([{ key: 'image' }])))
       .mockResolvedValueOnce(response(envelope({ method: 'GET', url: 'https://download', headers: {}, expiresAt: 'later' })))
       .mockResolvedValueOnce(response(envelope({ method: 'GET', url: 'https://preview', headers: {}, expiresAt: 'later' })))
@@ -105,7 +100,6 @@ describe('studio service transport adapter', () => {
       commandId: ID,
       commands: [],
     })).version).toBe('4')
-    expect((await getCanvasChanges(CANVAS_ID, '3')).snapshot).not.toBeNull()
     expect(await listCanvasFunctionModels()).toEqual([{ key: 'image' }])
     expect((await getCanvasResourceOriginalUrl(CANVAS_ID, ID)).method).toBe('GET')
     expect((await getCanvasResourcePreviewUrl(CANVAS_ID, ID)).url).toContain('preview')
@@ -114,7 +108,7 @@ describe('studio service transport adapter', () => {
     expect((await cancelCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID })).status)
       .toBe('CANCELLED')
     expect((await getCanvasFunctionRun(CANVAS_ID, NODE_ID)).status).toBe('SUCCEEDED')
-    expect(fetchMock).toHaveBeenCalledTimes(12)
+    expect(fetchMock).toHaveBeenCalledTimes(11)
   })
 
   it('issues the expected endpoints, methods, bodies, and signals', async () => {
@@ -122,13 +116,11 @@ describe('studio service transport adapter', () => {
       .mockResolvedValueOnce(response(envelope(documentPayload())))
       .mockResolvedValueOnce(response(envelope(snapshotPayload())))
       .mockResolvedValueOnce(response(envelope(patchPayload())))
-      .mockResolvedValueOnce(response(envelope({ patches: [], snapshot: null })))
 
     const controller = new AbortController()
     await createCanvas('Named', { signal: controller.signal })
     await getCanvas(CANVAS_ID, { signal: controller.signal })
     await postCanvasCommands(CANVAS_ID, { expectedVersion: '3', commandId: ID, commands: [] }, { signal: controller.signal })
-    await getCanvasChanges(CANVAS_ID, '7', { signal: controller.signal })
 
     const calls = fetchMock.mock.calls.map(([url, init]: [string, RequestInit]) => ({
       url,
@@ -143,7 +135,6 @@ describe('studio service transport adapter', () => {
       method: 'POST',
       body: JSON.stringify({ expectedVersion: '3', commandId: ID, commands: [] }),
     })
-    expect(calls[3]).toMatchObject({ url: `/api/canvases/${CANVAS_ID}/changes?afterVersion=7`, method: 'GET' })
     for (const call of calls) {
       expect(call.signal).toBe(controller.signal)
     }

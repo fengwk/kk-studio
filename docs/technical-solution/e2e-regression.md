@@ -7,7 +7,7 @@ node scripts/e2e/run-matrix.mjs --list
 ```
 
 当前注册 **75** 个 API case；标准入口默认执行免费的 **L1 64** 个 case（其中
-`canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约，
+`canvas.api_version_contract` 免费验证 Canvas UUID/version/command patch/snapshot 契约，
 `thread.queued_command_batch` 免费验证运行中两批 USER 的确定性逐 Turn 收割——本地受控
 hold mock，不调用真实 Provider）。Canvas
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
@@ -488,7 +488,6 @@ POST   /api/canvases                        -> 200 CREATED CanvasDocumentDTO
 GET    /api/canvases/{canvasId}             -> CanvasSnapshotDTO
 POST   /api/canvases/{canvasId}/commands    -> CanvasPatchDTO
 DELETE /api/canvases/{canvasId}             -> 深删除（含该 Canvas owner 的全部 owned Session 与 Thread）
-GET    /api/canvases/{canvasId}/changes?afterVersion=N -> CanvasChangesDTO
 GET    /api/canvas-function-models
 POST   /api/canvases/{canvasId}/nodes/{nodeId}/runs
 GET    /api/canvases/{canvasId}/nodes/{nodeId}/run
@@ -521,9 +520,8 @@ GET  /api/storage/blobs/{blobId}/presigned-preview
   `mediaType/width/height` 来自 blob 权威事实列；`sizeBytes/durationMs` 是 Java long，
   wire 为十进制字符串或 null，前端 API adapter 归一化为内部 number|null（非负且
   Number.isSafeInteger，非法/超限 fail closed）；
-- `GET /changes`：要么返回从 `afterVersion`（含 0）起连续 patches（客户端逐个应用），
-  要么返回必须整体替换的权威 snapshot（缓存缺失/gap/损坏）；已处于尾部时返回空 delta，
-  未知 canvas 400；
+- Canvas 只保留标准 `GET /api/canvases/{canvasId}` Snapshot 查询；`/changes` 不存在。命令响应 Patch
+  只由发起窗口本地应用，其他窗口收到更高 version、首次订阅、重连或 `resync` 后读取完整 Snapshot；
 - WebSocket `/api/events/v1`：所有帧都带 `version:1`。客户端帧
   `{version:1, type:'subscribe'|'unsubscribe', resource:{kind,id}}`（kind 为 `thread`/`canvas`，
   id 为 canonical UUID）；服务端帧 `subscribed{resource,cursor}`（cursor 为 canonical 非负十进制，
@@ -558,7 +556,7 @@ WebSocket /api/ai/environment/daemon/v2
 
 WebSocket `/api/events/v1`：Thread 订阅 ack cursor 是 canonical decimal durable version，Redis
  realtime delta 经 `event{name:'realtime'}` 投递；version 事件只携带 ack 之后的前进值
-（`event{name,cursor,data}`，十进制字符串，客户端随后拉 snapshot/changes），`resync` 要求整体快照；连接级 `{version:1,type:'heartbeat'}` 每 20 秒保活，由 `events.heartbeat_keepalive` 覆盖。
+（`event{name,cursor,data}`，十进制字符串，客户端随后拉 snapshot），`resync` 要求整体快照；连接级 `{version:1,type:'heartbeat'}` 每 20 秒保活，由 `events.heartbeat_keepalive` 覆盖。
 
 ## 5. MiniMax-H3 手工 smoke
 

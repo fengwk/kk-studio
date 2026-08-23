@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>每个资源只有一组共享上游（Thread = version source + realtime source；Canvas = version source）：首个本地
  * 订阅建立上游，最后一个释放时关闭；重复订阅幂等由传输层保证。订阅原子返回建立瞬间的 durable cursor 作为 {@code subscribed} ack 游标——上游注册先于
  * cursor 读取，且 fan-out 与「读取 cursor + 注册订阅者」在同一把 资源锁内互斥，因此 ack cursor 之后的事件不因注册竞态丢失（cursor
- * 之前的由客户端随后拉取的 snapshot/changes 覆盖）。
+ * 之前的由客户端随后拉取的 snapshot 覆盖）。
  *
  * <p>同一资源的状态（上游句柄、订阅者集合、early 缓冲）由该状态的监视器串行化；map 只做「生命周期围栏内创建/获取」与「状态锁内的 identity 条件删除」。{@link
  * #lifecycleFence} 只把「{@link #closed} 边界」与「向 map 发布新状态」串在同一把锁上：{@link #close()} 一旦设立 closed，之后的

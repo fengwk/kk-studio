@@ -14,7 +14,6 @@ import type {
 import {
   cancelCanvasFunctionRun,
   getCanvas,
-  getCanvasChanges,
   getCanvasFunctionRun,
   listCanvasFunctionModels,
   postCanvasCommands,
@@ -78,7 +77,6 @@ vi.mock('@/shared/api/studio-service', () => ({
   postCanvasCommands: vi.fn(),
   cancelCanvasFunctionRun: vi.fn(),
   getCanvas: vi.fn(),
-  getCanvasChanges: vi.fn(),
   getCanvasFunctionRun: vi.fn(),
   listCanvasFunctionModels: vi.fn(),
   startCanvasFunctionRun: vi.fn(),
@@ -114,6 +112,15 @@ function emitCanvasResync() {
   act(() => {
     for (const subscription of canvasEventSubscriptions) {
       subscription.onResync?.()
+    }
+  })
+}
+
+/** 模拟首次订阅或断线重连后的 subscribed ack。 */
+function emitCanvasSubscribed(cursor: string) {
+  act(() => {
+    for (const subscription of canvasEventSubscriptions) {
+      subscription.onSubscribed?.(cursor)
     }
   })
 }
@@ -312,7 +319,6 @@ describe('useCanvasController real snapshot runtime', () => {
     current = snapshot()
     commands = []
     vi.mocked(getCanvas).mockImplementation(async () => current)
-    vi.mocked(getCanvasChanges).mockResolvedValue({ patches: [], snapshot: null })
     vi.mocked(listCanvasFunctionModels).mockResolvedValue([{
       key: 'fake-image',
       label: 'Fake Image',
@@ -776,7 +782,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
   it('flushes config before start, projects RUNNING without polling, converges via version events, and cancels', async () => {
     // 调用顺序与不变的 Resource id 证明 config/run 编排不引入第二个快照；run 状态由
-    // version 事件驱动的 changes 收敛，绝无固定间隔轮询。
+    // version 事件驱动的权威 Snapshot 收敛，绝无固定间隔轮询。
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
     act(() => result.current.openEditor(CANVAS_ID))
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
@@ -816,7 +822,7 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(getCanvasFunctionRun).not.toHaveBeenCalled()
 
     // 服务端推进真实版本序列：start=2、checkpoint=3、terminal=4（flush 的 UPDATE_FUNCTION 已把
-    // 本地推进到 version '1'）。version 事件按 afterVersion 依次回放 patch，不能一步跳到终态。
+    // 本地推进到 version '1'）。每个更高 version 事件都直接读取对应权威 Snapshot。
     const steps: Record<string, CanvasFunctionRunDTO> = {
       '1': {
         nodeId: NODE_FN,
@@ -843,16 +849,7 @@ describe('useCanvasController real snapshot runtime', () => {
         updatedAt: '2026-08-10T00:00:03Z',
       },
     }
-    vi.mocked(getCanvasChanges).mockImplementation(async (_canvasId, afterVersion) => {
-      const run = steps[afterVersion]
-      if (!run) {
-        return { patches: [], snapshot: null }
-      }
-      return {
-        patches: [diffPatch(snapshotWithRun(nextVersion(afterVersion), run), afterVersion)],
-        snapshot: null,
-      }
-    })
+    current = snapshotWithRun(2, steps['1'])
     emitCanvasVersion('2')
     await waitFor(() => {
       const node = result.current.snapshot?.nodes.find((item) => item.id === NODE_FN)
@@ -860,12 +857,14 @@ describe('useCanvasController real snapshot runtime', () => {
       expect(node?.run?.stage).toBe('QUEUED')
       expect(result.current.snapshot?.document.version).toBe('2')
     })
+    current = snapshotWithRun(3, steps['2'])
     emitCanvasVersion('3')
     await waitFor(() => {
       const node = result.current.snapshot?.nodes.find((item) => item.id === NODE_FN)
       expect(node?.run?.stage).toBe('CHECKPOINTED')
       expect(result.current.snapshot?.document.version).toBe('3')
     })
+    current = snapshotWithRun(4, steps['3'])
     emitCanvasVersion('4')
     await waitFor(() => {
       const node = result.current.snapshot?.nodes.find((item) => item.id === NODE_FN)
@@ -873,9 +872,9 @@ describe('useCanvasController real snapshot runtime', () => {
       expect(node?.run?.stage).toBe('FAILED')
       expect(result.current.snapshot?.document.version).toBe('4')
     })
-    // 失败保留旧输出；patch 闭环后不需要再次全量 GET，也没有任何 run polling。
+    // 失败保留旧输出；每次版本前进都读取一次 Snapshot，但没有任何 run polling。
     expect(result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.resources[0]?.id).toBe(RES_OUTPUT)
-    expect(getCanvas).toHaveBeenCalledTimes(1)
+    expect(getCanvas).toHaveBeenCalledTimes(4)
     expect(getCanvasFunctionRun).not.toHaveBeenCalled()
 
     await act(async () => {
@@ -912,8 +911,8 @@ describe('useCanvasController real snapshot runtime', () => {
 
   it('replays the create/start/checkpoint/terminal version sequence and converges replaced output', async () => {
     // 初始快照 = create function 之后的 version '1'；随后严格按 start=2、checkpoint=3、
-    // terminal=4 逐版本回放 patch，每一步断言 stage/status/version。
-    vi.mocked(getCanvas).mockResolvedValue(snapshot(1))
+    // terminal=4 逐版本读取 Snapshot，每一步断言 stage/status/version。
+    current = snapshot(1)
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
     act(() => result.current.openEditor(CANVAS_ID))
     await waitFor(() => expect(result.current.snapshot?.document.version).toBe('1'))
@@ -953,30 +952,27 @@ describe('useCanvasController real snapshot runtime', () => {
         createdAt: '2026-08-10T00:00:03Z',
       }],
     } : node)
-    const steps: Record<string, CanvasPatchDTO> = {
-      '1': diffPatch(snapshotWithRun(2, {
+    const steps: Record<string, CanvasSnapshotDTO> = {
+      '2': snapshotWithRun(2, {
         nodeId: NODE_FN,
         requestId: REQUEST_STARTED,
         status: 'RUNNING',
         stage: 'QUEUED',
         error: null,
         updatedAt: '2026-08-10T00:00:01Z',
-      }), 1),
-      '2': diffPatch(snapshotWithRun(3, {
+      }),
+      '3': snapshotWithRun(3, {
         nodeId: NODE_FN,
         requestId: REQUEST_STARTED,
         status: 'RUNNING',
         stage: 'CHECKPOINTED',
         error: null,
         updatedAt: '2026-08-10T00:00:02Z',
-      }), 2),
-      '3': diffPatch(terminal, 3),
+      }),
+      '4': terminal,
     }
-    vi.mocked(getCanvasChanges).mockImplementation(async (_canvasId, afterVersion) => {
-      const patch = steps[afterVersion]
-      return patch ? { patches: [patch], snapshot: null } : { patches: [], snapshot: null }
-    })
 
+    current = steps['2']
     emitCanvasVersion('2')
     await waitFor(() => {
       const node = result.current.snapshot?.nodes.find((item) => item.id === NODE_FN)
@@ -984,22 +980,24 @@ describe('useCanvasController real snapshot runtime', () => {
       expect(node?.run?.stage).toBe('QUEUED')
       expect(result.current.snapshot?.document.version).toBe('2')
     })
+    current = steps['3']
     emitCanvasVersion('3')
     await waitFor(() => {
       const node = result.current.snapshot?.nodes.find((item) => item.id === NODE_FN)
       expect(node?.run?.stage).toBe('CHECKPOINTED')
       expect(result.current.snapshot?.document.version).toBe('3')
     })
+    current = steps['4']
     emitCanvasVersion('4')
     await waitFor(() => {
       const node = result.current.snapshot?.nodes.find((item) => item.id === NODE_FN)
       expect(node?.run?.status).toBe('SUCCEEDED')
       expect(result.current.snapshot?.document.version).toBe('4')
     })
-    // terminal patch 携带后端物化后的新输出 Resource；全程只走 changes 闭环，无额外全量 GET。
+    // terminal Snapshot 携带后端物化后的新输出 Resource。
     expect(result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.resources[0]?.id)
       .toBe('ffffffff-0000-4000-8000-000000000031')
-    expect(getCanvas).toHaveBeenCalledTimes(1)
+    expect(getCanvas).toHaveBeenCalledTimes(4)
   })
 
   it('ignores a stale local cancel response for an older request', async () => {
@@ -1071,14 +1069,14 @@ describe('useCanvasController real snapshot runtime', () => {
 
   it('ignores an in-flight start B response once an authoritative C run arrived', async () => {
     // start B 在途期间权威 C 到达（basis 仍是旧 A）：B 的迟到响应不能被投影、更不能换掉 C。
-    vi.mocked(getCanvas).mockResolvedValue(snapshotWithRun(1, {
+    current = snapshotWithRun(1, {
       nodeId: NODE_FN,
       requestId: REQUEST_STARTED,
       status: 'SUCCEEDED',
       stage: 'SUCCEEDED',
       error: null,
       updatedAt: '2026-08-10T00:00:01Z',
-    }))
+    })
     const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
@@ -1088,16 +1086,13 @@ describe('useCanvasController real snapshot runtime', () => {
     await waitFor(() => expect(startCanvasFunctionRun).toHaveBeenCalledTimes(1))
 
     // B 响应到达前，version 事件权威带入 C。
-    vi.mocked(getCanvasChanges).mockResolvedValue({
-      patches: [diffPatch(snapshotWithRun(2, {
-        nodeId: NODE_FN,
-        requestId: REQUEST_CURRENT,
-        status: 'RUNNING',
-        stage: 'CHECKPOINTED',
-        error: null,
-        updatedAt: '2026-08-10T00:00:05Z',
-      }), 1)],
-      snapshot: null,
+    current = snapshotWithRun(2, {
+      nodeId: NODE_FN,
+      requestId: REQUEST_CURRENT,
+      status: 'RUNNING',
+      stage: 'CHECKPOINTED',
+      error: null,
+      updatedAt: '2026-08-10T00:00:05Z',
     })
     emitCanvasVersion('2')
     await waitFor(() => {
@@ -1124,16 +1119,31 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(result.current.snapshot?.document.version).toBe('2')
   })
 
-  it('replaces the snapshot authoritatively on a resync event', async () => {
+  it('skips the current version event and refreshes snapshots for newer versions, reconnect, and resync', async () => {
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
     act(() => result.current.openEditor(CANVAS_ID))
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     expect(getCanvas).toHaveBeenCalledTimes(1)
 
-    emitCanvasResync()
+    // 当前版本事件是迟到/重复提示，不得产生额外 HTTP 请求。
+    emitCanvasVersion('0')
+    expect(getCanvas).toHaveBeenCalledTimes(1)
 
+    current = snapshot(2)
+    emitCanvasVersion('2')
     await waitFor(() => expect(getCanvas).toHaveBeenCalledTimes(2))
-    expect(result.current.snapshot?.document.id).toBe(CANVAS_ID)
+    await waitFor(() => expect(result.current.snapshot?.document.version).toBe('2'))
+
+    // subscribed ack 代表首次订阅或重连后的恢复边界，即使 cursor 已知也读取完整 Snapshot。
+    current = snapshot(3)
+    emitCanvasSubscribed('3')
+    await waitFor(() => expect(getCanvas).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(result.current.snapshot?.document.version).toBe('3'))
+
+    current = snapshot(4)
+    emitCanvasResync()
+    await waitFor(() => expect(getCanvas).toHaveBeenCalledTimes(4))
+    await waitFor(() => expect(result.current.snapshot?.document.version).toBe('4'))
   })
 
   it('retains a failed config draft so start retries the save before posting the run', async () => {

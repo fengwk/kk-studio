@@ -6,7 +6,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.core.studio.realtime.CanvasRealtimeService;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasLinkMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasNodeMapper;
@@ -15,18 +14,12 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasDocumentDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasNodeDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasResourceDO;
 import fun.fengwk.kkstudio.core.studio.resource.CanvasResourceLifecycle;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
-import fun.fengwk.kkstudio.studio.canvas.CanvasNodePatch;
-import fun.fengwk.kkstudio.studio.canvas.CanvasPatch;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceNode;
-import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
@@ -60,7 +53,6 @@ public class CanvasFunctionRunTransactions {
   private final CanvasFunctionRunStateCodec stateCodec;
   private final CanvasResourceLifecycle resourceLifecycle;
   private final ObjectProvider<StorageBlobManager> blobManagers;
-  private final CanvasRealtimeService realtimeService;
   private final Clock clock;
 
   public CanvasFunctionRunTransactions(
@@ -75,7 +67,6 @@ public class CanvasFunctionRunTransactions {
       CanvasFunctionRunStateCodec stateCodec,
       CanvasResourceLifecycle resourceLifecycle,
       ObjectProvider<StorageBlobManager> blobManagers,
-      CanvasRealtimeService realtimeService,
       Clock clock) {
     this.nodeMapper = Objects.requireNonNull(nodeMapper, "nodeMapper");
     this.resourceMapper = Objects.requireNonNull(resourceMapper, "resourceMapper");
@@ -88,7 +79,6 @@ public class CanvasFunctionRunTransactions {
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
     this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
-    this.realtimeService = Objects.requireNonNull(realtimeService, "realtimeService");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -162,7 +152,7 @@ public class CanvasFunctionRunTransactions {
     } else {
       throw conflict("terminal FunctionRun was replaced concurrently");
     }
-    bumpAndPublishNode(document, canvasId, nodeId);
+    bumpVersion(document, canvasId);
     return new CanvasFunctionStartResult(running, created);
   }
 
@@ -195,7 +185,7 @@ public class CanvasFunctionRunTransactions {
       throw conflict("FunctionRun changed while cancelling");
     }
     resourceLifecycle.discardUnownedTarget(canvasId, frozen.targetResourceId());
-    bumpAndPublishNode(document, canvasId, nodeId);
+    bumpVersion(document, canvasId);
     return terminal;
   }
 
@@ -249,7 +239,7 @@ public class CanvasFunctionRunTransactions {
       throw new CanvasFunctionInternalCancellation(
           "FunctionRun checkpoint CAS failed because the run is no longer RUNNING");
     }
-    bumpAndPublishNode(document, canvasId, nodeId);
+    bumpVersion(document, canvasId);
     return next;
   }
 
@@ -293,7 +283,7 @@ public class CanvasFunctionRunTransactions {
     if (!runRepository.transitionTerminal(terminal)) {
       throw new IllegalStateException("FunctionRun success CAS failed after row lock");
     }
-    bumpAndPublishNode(document, frozen.canvasId(), frozen.nodeId());
+    bumpVersion(document, frozen.canvasId());
     return true;
   }
 
@@ -322,7 +312,7 @@ public class CanvasFunctionRunTransactions {
       throw new IllegalStateException("FunctionRun failure CAS failed after row lock");
     }
     resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
-    bumpAndPublishNode(document, frozen.canvasId(), frozen.nodeId());
+    bumpVersion(document, frozen.canvasId());
     return true;
   }
 
@@ -413,54 +403,12 @@ public class CanvasFunctionRunTransactions {
     return List.copyOf(refs);
   }
 
-  private void bumpAndPublishNode(CanvasDocumentDO document, UUID canvasId, UUID nodeId) {
+  private void bumpVersion(CanvasDocumentDO document, UUID canvasId) {
     long baseVersion = document.getVersion();
     long newVersion = baseVersion + 1L;
     if (documentMapper.compareAndSetVersion(canvasId, baseVersion, newVersion) != 1) {
       throw new IllegalStateException("canvas document version CAS failed under row lock");
     }
-    CanvasResourceNode node = projectNode(canvasId, nodeId);
-    realtimeService.publish(
-        canvasId,
-        new CanvasPatch(
-            baseVersion,
-            newVersion,
-            List.of(),
-            List.of(new CanvasNodePatch.Upsert(node)),
-            List.of()));
-  }
-
-  private CanvasResourceNode projectNode(UUID canvasId, UUID nodeId) {
-    CanvasNodeDO node = nodeMapper.getById(canvasId, nodeId);
-    if (node == null) {
-      throw new IllegalStateException("node disappeared under document row lock: " + nodeId);
-    }
-    List<CanvasResource> resources = new ArrayList<>();
-    for (CanvasResourceDO resource : resourceMapper.listByOwnerNode(canvasId, nodeId)) {
-      resources.add(
-          new CanvasResource(
-              resource.getId(),
-              resource.getCanvasId(),
-              resource.getOwnerNodeId(),
-              resource.getResourceIndex(),
-              resource.getBlobId(),
-              resource.getName(),
-              resource.getTextContent(),
-              resource.getCreatedAt().toInstant()));
-    }
-    CanvasFunction function =
-        node.getModelKey() == null
-            ? null
-            : new CanvasFunction(node.getModelKey(), node.getFunctionConfigJson());
-    return new CanvasResourceNode(
-        node.getId(),
-        node.getCanvasId(),
-        node.getName(),
-        new CanvasTransform(node.getX(), node.getY(), node.getWidth(), node.getHeight()),
-        node.getGroupId(),
-        resources,
-        function,
-        runRepository.findByNodeId(nodeId).orElse(null));
   }
 
   private CanvasFunctionFrozenRun decode(CanvasFunctionRun run) {

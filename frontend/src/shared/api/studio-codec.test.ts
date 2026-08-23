@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import {
-  decodeCanvasChanges,
   decodeCanvasDocument,
   decodeCanvasDocumentList,
   decodeCanvasPatch,
   decodeCanvasSnapshot,
 } from '@/shared/api/studio-codec'
-import type { CanvasChangesDTO, CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
+import type { CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
 
 const ID = '11111111-1111-4111-8111-111111111111'
 const CANVAS_ID = '22222222-2222-4222-8222-222222222222'
@@ -143,7 +142,7 @@ describe('studio codec', () => {
     ])
   })
 
-  it('decodes nullable fields and empty changes with a null snapshot', () => {
+  it('decodes nullable snapshot fields', () => {
     const value = {
       document: documentPayload(),
       nodes: [{
@@ -177,9 +176,6 @@ describe('studio codec', () => {
     expect(snapshot.nodes[0]?.resources[0]?.sizeBytes).toBeNull()
     expect(snapshot.nodes[0]?.resources[0]?.durationMs).toBeNull()
 
-    const changes: CanvasChangesDTO = decodeCanvasChanges({ patches: [], snapshot: null })
-    expect(changes.snapshot).toBeNull()
-    expect(changes.patches).toEqual([])
   })
 
   it('rejects undefined/missing nullable fields instead of treating them as null', () => {
@@ -212,8 +208,6 @@ describe('studio codec', () => {
     }
     expect(() => decodeCanvasSnapshot(missingRunError)).toThrow('node.run.error must be explicitly null')
 
-    const missingChangesSnapshot = { patches: [], snapshot: undefined }
-    expect(() => decodeCanvasChanges(missingChangesSnapshot)).toThrow('changes.snapshot must be explicitly null')
   })
 
   it('rejects invalid resource kind and function run status', () => {
@@ -256,16 +250,6 @@ describe('studio codec', () => {
     expect(() => decodeCanvasPatch(invalidLinkOp)).toThrow('link patch.op must be one of')
   })
 
-  it('decodes changes with patches and a snapshot', () => {
-    const changes = decodeCanvasChanges({
-      patches: [patchPayload()],
-      snapshot: snapshotPayload(),
-    })
-    expect(changes.patches).toHaveLength(1)
-    expect(changes.patches[0]?.version).toBe('4')
-    expect(changes.snapshot?.document.version).toBe('3')
-  })
-
   it('fails closed for a non-object document list', () => {
     let error: unknown
     try {
@@ -281,7 +265,6 @@ describe('studio codec', () => {
     expect(() => decodeCanvasDocument(null)).toThrow('document must be an object')
     expect(() => decodeCanvasSnapshot(null)).toThrow('snapshot must be an object')
     expect(() => decodeCanvasPatch(null)).toThrow('patch must be an object')
-    expect(() => decodeCanvasChanges(null)).toThrow('changes must be an object')
   })
 
   it.each([

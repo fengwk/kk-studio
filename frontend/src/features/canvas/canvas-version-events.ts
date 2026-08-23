@@ -10,32 +10,28 @@ export interface CanvasVersionEventsOptions {
   enabled: boolean
   /** 客户端当前已知的 graph 版本（每次渲染的最新值，canonical 十进制字符串）。 */
   version: CanvasVersion
-  /** 'version' 事件或订阅建立后：按最后已知版本拉取 changes 并应用。 */
-  onVersion: () => void
-  /** 'resync' 事件：需要整体替换为全量快照。 */
-  onResync: () => void
+  /** 更高 version、订阅建立/重连或 resync/error 后读取权威 Snapshot。 */
+  onSnapshot: () => void
 }
 
 /**
  * Canvas 版本事件订阅（应用级 WebSocket，经 ApplicationEventManager）：
- * - 'subscribed'（首次订阅与每次重连重订阅后）触发 changes 同步，关闭
+ * - 'subscribed'（首次订阅与每次重连重订阅后）触发 Snapshot 同步，关闭
  *   快照 GET 与 wire 建立之间以及断线窗口内的版本缺口；
- * - 'version' 事件（data {"version":"N"}）触发 changes 拉取（不携带载荷
+ * - 'version' 事件（data {"version":"N"}）触发 Snapshot 拉取（不携带载荷
  *   应用逻辑），codec 保证 canonical 非负十进制字符串，只接受严格大于
  *   当前版本的事件；
  * - 'resync' 事件触发全量快照。
  */
 export function useCanvasVersionEvents(options: CanvasVersionEventsOptions) {
-  const { canvasId, enabled, version, onVersion, onResync } = options
+  const { canvasId, enabled, version, onSnapshot } = options
   const versionRef = useRef(version)
-  const onVersionRef = useRef(onVersion)
-  const onResyncRef = useRef(onResync)
+  const onSnapshotRef = useRef(onSnapshot)
   const applicationEvents = useApplicationEvents()
 
   useEffect(() => {
-    onVersionRef.current = onVersion
-    onResyncRef.current = onResync
-  }, [onResync, onVersion])
+    onSnapshotRef.current = onSnapshot
+  }, [onSnapshot])
 
   useEffect(() => {
     if (!enabled || !canvasId) {
@@ -52,7 +48,7 @@ export function useCanvasVersionEvents(options: CanvasVersionEventsOptions) {
       { kind: 'canvas', id: canvasId },
       {
         onSubscribed: () => {
-          onVersionRef.current()
+          onSnapshotRef.current()
         },
         onEvent: (name, data) => {
           if (name !== 'version') {
@@ -63,14 +59,14 @@ export function useCanvasVersionEvents(options: CanvasVersionEventsOptions) {
           if (compareCanvasVersions(payload.version, versionRef.current) <= 0) {
             return
           }
-          onVersionRef.current()
+          onSnapshotRef.current()
         },
         onResync: () => {
-          onResyncRef.current()
+          onSnapshotRef.current()
         },
         onError: () => {
-          // 订阅/事件处理失败：增量状态不可信，回退全量快照。
-          onResyncRef.current()
+          // 订阅/事件处理失败：本地状态不可信，重新读取权威快照。
+          onSnapshotRef.current()
         },
       },
     )

@@ -1,7 +1,6 @@
 import { ApiError, apiBaseUrl } from '@/shared/api/client'
-import type { CanvasVersion, ResultEnvelope } from '@/shared/api/contracts/base'
+import type { ResultEnvelope } from '@/shared/api/contracts/base'
 import {
-  decodeCanvasChanges,
   decodeCanvasDocument,
   decodeCanvasDocumentList,
   decodeCanvasPatch,
@@ -9,7 +8,6 @@ import {
 } from '@/shared/api/studio-codec'
 import type {
   ApplyCanvasCommandsRequestDTO,
-  CanvasChangesDTO,
   CanvasDocumentDTO,
   CanvasFunctionModelDTO,
   CanvasFunctionRunDTO,
@@ -52,7 +50,7 @@ export function getCanvas(
 /**
  * POST /canvases/{id}/commands：应用命令批并返回 graph patch。
  * 响应通过本地 reducer 直接应用；重复/过期 patch 会被忽略，
- * 存在 gap 时通过 getCanvasChanges 恢复。
+ * baseVersion 不连续时读取权威 Snapshot 恢复。
  */
 export function postCanvasCommands(
   canvasId: UUIDString,
@@ -65,22 +63,6 @@ export function postCanvasCommands(
     signal: options?.signal,
   }, decodeCanvasPatch)
 }
-
-/**
- * GET /canvases/{id}/changes?afterVersion=N：返回连续 patches 或
- * 必须整体替换的全量 snapshot（gap 恢复 / resync）。
- */
-export function getCanvasChanges(
-  canvasId: UUIDString,
-  afterVersion: CanvasVersion,
-  options?: CanvasRequestOptions,
-): Promise<CanvasChangesDTO> {
-  const query = new URLSearchParams({ afterVersion })
-  return canvasRequest(`/canvases/${canvasId}/changes?${query}`, {
-    signal: options?.signal,
-  }, decodeCanvasChanges)
-}
-
 
 export function listCanvasFunctionModels(
   options?: CanvasRequestOptions,
