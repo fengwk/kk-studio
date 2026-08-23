@@ -1,6 +1,6 @@
 # Harness 能力装配
 
-Core 通过 Spring `ObjectProvider` 直接收集 ProviderFactory、ToolFactory、Tool interceptor 与受信任 `HarnessPlugin`，并在启动时冻结为不可变集合、`PluginCatalog`、统一 `ToolCatalog` 和 gateway。`core` 只做 Catalog/TurnResolver/ModelGateway/ToolGateway/插件 host 适配，不写 `harness_*` 表；领域状态机全部在 `harness-runtime`。
+Platform 通过 Spring `ObjectProvider` 直接收集 ProviderFactory、ToolFactory、Tool interceptor 与受信任 `HarnessPlugin`，并在启动时冻结为不可变集合、`PluginCatalog`、统一 `ToolCatalog` 和 gateway。`platform` 只做 Catalog/TurnResolver/ModelGateway/ToolGateway/插件 host 适配，不写 `harness_*` 表；领域状态机全部在 `harness-runtime`。
 
 ## 1. 装配图
 
@@ -8,14 +8,14 @@ Core 通过 Spring `ObjectProvider` 直接收集 ProviderFactory、ToolFactory�
 ModelExecutionConfiguration
   -> ProviderFactory beans
   -> ProviderFactories（按 ProviderType 不可变索引）
-  -> CoreModelGateway（serialized FIFO 回调桥）
+  -> PlatformModelGateway（serialized FIFO 回调桥）
 
 HarnessToolGatewayConfiguration
   -> ToolFactory beans
   -> ToolFactories（按 (name, version) 索引）
   -> PluginCatalog（受信任 build-time contributions，启动时冻结）
   -> ToolCatalog（ToolFactory + plugin tools + ENVIRONMENT 两类 + 内部 load_skill/task）
-  -> CoreToolGateway（普通 Tool / plugin Tool + preflight + 两阶段激活 + FIFO 回调桥）
+  -> PlatformToolGateway（普通 Tool / plugin Tool + preflight + 两阶段激活 + FIFO 回调桥）
 
 RuntimeToolsConfiguration
   -> loadSkillTool / TaskTool（内部 PLATFORM Tool beans；TaskTool 位于 harness.runtime.subagent，依赖 HarnessThreadChangeSource，由 web 组合根适配 ThreadVersionEventSource 提供）
@@ -30,7 +30,7 @@ DatabaseTurnResolver
   -> AgentPromptComposer（Agent 正文 -> current_environment -> available_skills -> available_subagents）
   -> 冻结 compact ModelRequestSpec（含 subagentBindings；无 messages/YOLO/contextWindow）
 
-CoreModelGateway.start（每次 attempt）
+PlatformModelGateway.start（每次 attempt）
   -> ModelRequestMaterializer 在有效 claim 内从 basisHeadEntryId + spec 重建内存 ProviderRequest
   -> DatabaseProviderResolutionService 按 providerName 读取当前 agent_provider 行
   -> 当前 ProviderFactory.create(当前 credential/config) -> attempt-local adapter
@@ -50,7 +50,7 @@ public interface ProviderFactory {
 }
 ```
 
-当前 Core 装配：
+当前 Platform 装配：
 
 | Bean | ProviderType | cache capability |
 | --- | --- | --- |
@@ -61,7 +61,7 @@ public interface ProviderFactory {
 
 `ProviderFactories` 按 ProviderType 建立不可变索引，重复注册在构造阶段失败。Provider 资源就是当前 `agent_provider` 行：每次 Model attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前行，以当前 providerType/baseUrl/credential/config 选择 `ProviderFactory` 并构造短生命周期 attempt-local adapter；Provider 更新后下一 attempt 立即使用新值，当前行缺失时确定性 not found，同名重建后解析到新行。credential 只在写入 DTO 反序列化与 attempt 时 adapter 构造使用，不进入 response 或 invocation JSON。
 
-`CoreModelGateway` 是 `ModelGateway` 端口适配：admission 两阶段激活（`start` → Processor `markRunning` 后 `activate`），回调桥是 serialized FIFO 单 drainer 状态机，terminal-once；`Busy` 重试、`Rejected` 确定性终结、`Indeterminate` 收敛 `UNKNOWN`。已启动 attempt 的 retryable `TRANSIENT` 失败由 Runtime 保存完整 partial/error/retryAt 后重放冻结 `ModelRequestSpec`（每次 attempt 从相同 `basisHeadEntryId + spec` 重新 materialize 内存 ProviderRequest），不由 Gateway 拼接历史输出。
+`PlatformModelGateway` 是 `ModelGateway` 端口适配：admission 两阶段激活（`start` → Processor `markRunning` 后 `activate`），回调桥是 serialized FIFO 单 drainer 状态机，terminal-once；`Busy` 重试、`Rejected` 确定性终结、`Indeterminate` 收敛 `UNKNOWN`。已启动 attempt 的 retryable `TRANSIENT` 失败由 Runtime 保存完整 partial/error/retryAt 后重放冻结 `ModelRequestSpec`（每次 attempt 从相同 `basisHeadEntryId + spec` 重新 materialize 内存 ProviderRequest），不由 Gateway 拼接历史输出。
 
 ## 3. ToolCatalog
 
@@ -69,7 +69,7 @@ public interface ProviderFactory {
 
 - selectable Platform：
   - 冻结 `PluginCatalog` 的 SELECTABLE contributions；当前包括 Goal 插件 `create_goal` / `get_goal` / `update_goal` v2；
-  - Core 提供的其他 Platform `ToolFactory`；
+  - Platform 提供的其他 Platform `ToolFactory`；
 - 固定的十一个 `ENVIRONMENT` Tool descriptor：9 个 pi-base coding 能力的本地 Java 实现
   `read, write, edit, bash, grep, find, lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile`，
   加上 2 个固定 MCP 桥接工具 `mcp_list_tools, mcp_call_tool`；它们与 `PLATFORM`/动态 MCP 工具互不进入对方目录；
@@ -120,14 +120,14 @@ Goal 插件只实现上述模型工具的 durable snapshot 协议，不实现 pi
 - `harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/skill/LoadSkillToolTest.java`
 - `harness/plugins/goal/src/test/java/fun/fengwk/kkstudio/harness/plugins/goal/GoalPluginTest.java`
 
-`CoreToolGateway` 是 `ToolGateway` 端口适配：`preflight` 同步无副作用（`Allow` / `Ask(reason)` / `Deny(error)`），外部 I/O 前完成权限判定与机械校验；两阶段激活与 Model 同构；普通 `PLATFORM` binding 走本地 registry，`ENVIRONMENT` binding 经 `RemoteToolTransport`（`EnvironmentDaemonGateway`）发往冻结 route；带 plugin binding 的 `PLATFORM` Tool 按冻结 contribution 精确恢复并同步执行。terminal success 在回调桥内先校验插件 intents，再经 `ToolResultExternalizer` 做瞬时 Resource 外部化（reference plan → put → exact ref check），最后把 `ToolSuccess(result, effects)` 交给 ToolProcessor 原子落 terminal 事实。Tool outcome Entry 写入前，`ToolResultHistoryMaterializer` 再在同一 Store 事务把 Resource 摄入全局 Blob 并转换为 `resource(blobId,name,preview)`。
+`PlatformToolGateway` 是 `ToolGateway` 端口适配：`preflight` 同步无副作用（`Allow` / `Ask(reason)` / `Deny(error)`），外部 I/O 前完成权限判定与机械校验；两阶段激活与 Model 同构；普通 `PLATFORM` binding 走本地 registry，`ENVIRONMENT` binding 经 `RemoteToolTransport`（`EnvironmentDaemonGateway`）发往冻结 route；带 plugin binding 的 `PLATFORM` Tool 按冻结 contribution 精确恢复并同步执行。terminal success 在回调桥内先校验插件 intents，再经 `ToolResultExternalizer` 做瞬时 Resource 外部化（reference plan → put → exact ref check），最后把 `ToolSuccess(result, effects)` 交给 ToolProcessor 原子落 terminal 事实。Tool outcome Entry 写入前，`ToolResultHistoryMaterializer` 再在同一 Store 事务把 Resource 摄入全局 Blob 并转换为 `resource(blobId,name,preview)`。
 
 ### Trusted plugin
 
 - 插件只从应用 classpath 的 `HarnessPlugin` beans 收集；`PluginCatalog.from(...)` 在启动时执行一次注册与 freeze。不存在动态 JAR、远程脚本、安装表、依赖解析、热加载或卸载。
 - `PluginTool` 是同步纯函数：输入冻结到 Assistant Entry 的 `BranchView`、执行时间与 `ToolCall`，输出 `ToolResult + List<AppendCustomEntry>`；插件不能访问 `HarnessStore`，也不能推进 Thread/Invocation/Work。
 - `ToolContribution` 冻结 `(pluginId, contributionLocalName)`、descriptor、visibility 与声明的 `(customType, READ|WRITE)`；注册阶段校验该 customType 已由同一插件注册，重复或漂移 fail closed。
-- `CoreToolGateway` 执行前按 binding 中的 contribution id 恢复贡献，descriptor/state accesses 漂移分别确定性拒绝；当前 intent 只接受同 owner、已注册且声明 WRITE 的 `AppendCustomEntry`。
+- `PlatformToolGateway` 执行前按 binding 中的 contribution id 恢复贡献，descriptor/state accesses 漂移分别确定性拒绝；当前 intent 只接受同 owner、已注册且声明 WRITE 的 `AppendCustomEntry`。
 - 合法 intents 映射为有序 `ToolEffectBatch`。校验必须发生在 Resource externalize 与 durable `SUCCEEDED` 之前，违规以 `PLUGIN_CONTRACT_VIOLATION` 失败且 effects 为空。
 
 当前 `goal` 插件注册 `goal/state@schemaVersion=1`、三个 SELECTABLE Platform Tool（均为 v2）和一个 context projector：
@@ -203,7 +203,7 @@ Compaction resolver 不读取 Agent prompt、plugin projector、Environment live
 
 ## 6. 权限预检与审批
 
-权限链路固定为 `ToolProcessor（READY 边界读取当前 Thread YOLO 短路）-> ToolGateway.preflight -> CoreToolGateway -> PermissionEvaluator -> Allow/Ask/Deny`。`ToolProcessor` 只在 ToolInvocation 为 `READY` 且尚无 approval 事实时、在当前已锁定的 Thread 上读取 YOLO：为 true 时直接 `Allow`，不调用 permission evaluator；否则把 READY/binding 非空临时构造的 executable request 交给 `ToolGateway.preflight`（`preflight` 不接收 YOLO，也不查询 HarnessStore）。重试、重新调度以及已经进入 `WAITING_APPROVAL` 的 invocation 都不会重新评估。`CoreToolGateway` 通过 `ToolSettingsProvider` 现读数据库 `system_setting` 的 `SystemSettings.Tool.permission` 并评估。V1 默认规则为 `write/edit/bash: ask`，read 不受限，未匹配工具保持 Allow。
+权限链路固定为 `ToolProcessor（READY 边界读取当前 Thread YOLO 短路）-> ToolGateway.preflight -> PlatformToolGateway -> PermissionEvaluator -> Allow/Ask/Deny`。`ToolProcessor` 只在 ToolInvocation 为 `READY` 且尚无 approval 事实时、在当前已锁定的 Thread 上读取 YOLO：为 true 时直接 `Allow`，不调用 permission evaluator；否则把 READY/binding 非空临时构造的 executable request 交给 `ToolGateway.preflight`（`preflight` 不接收 YOLO，也不查询 HarnessStore）。重试、重新调度以及已经进入 `WAITING_APPROVAL` 的 invocation 都不会重新评估。`PlatformToolGateway` 通过 `ToolSettingsProvider` 现读数据库 `system_setting` 的 `SystemSettings.Tool.permission` 并评估。V1 默认规则为 `write/edit/bash: ask`，read 不受限，未匹配工具保持 Allow。
 
 Allow 写入 `READY + approval.required=false` 后进入实际 Tool dispatch；Ask 写入 `WAITING_APPROVAL + approval.decision=null`；Deny 写入 `FAILED + PERMISSION_DENIED`。审批 API 把 Allow 决策写成 durable `ALLOWED` 并恢复原 binding 执行，把 Deny 决策写成 durable `DENIED` 与失败终态；`decisionId` 保证幂等，相同 ID 的不同 payload 返回 409。子 Agent Thread 继承父 Thread 的 YOLO，子工具审批复用同一端点并以实际子 ThreadId 寻址。
 
@@ -213,10 +213,10 @@ Allow 写入 `READY + approval.required=false` 后进入实际 Tool dispatch；A
 
 | 目标 | 入口 |
 | --- | --- |
-| ProviderFactory 装配 | [`ModelExecutionConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/ModelExecutionConfiguration.java) |
-| ToolFactory 装配 | [`HarnessToolGatewayConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/gateway/HarnessToolGatewayConfiguration.java) |
+| ProviderFactory 装配 | [`ModelExecutionConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/ai/runtime/model/ModelExecutionConfiguration.java) |
+| ToolFactory 装配 | [`HarnessToolGatewayConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/ai/runtime/tool/gateway/HarnessToolGatewayConfiguration.java) |
 | Tool 目录 | [`EnvironmentToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java) |
-| Resolver | [`DatabaseTurnResolver`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/DatabaseTurnResolver.java) |
+| Resolver | [`DatabaseTurnResolver`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/ai/runtime/thread/command/DatabaseTurnResolver.java) |
 | TurnResolver 端口 | [`TurnResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/TurnResolver.java) |
 | ModelGateway 端口 | [`ModelGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ModelGateway.java) |
 | ToolGateway 端口 | [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) |

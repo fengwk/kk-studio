@@ -10,9 +10,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import fun.fengwk.kkstudio.core.storage.error.StorageConflictException;
-import fun.fengwk.kkstudio.core.storage.error.StorageResourceNotFoundException;
-import fun.fengwk.kkstudio.core.storage.error.StorageVerificationException;
+import fun.fengwk.kkstudio.platform.storage.error.StorageConflictException;
+import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.web.controller.StudioStorageController;
 
 import java.util.LinkedHashMap;

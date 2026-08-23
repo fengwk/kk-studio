@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.web.storage;
 
-import fun.fengwk.kkstudio.core.storage.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.time.Instant;

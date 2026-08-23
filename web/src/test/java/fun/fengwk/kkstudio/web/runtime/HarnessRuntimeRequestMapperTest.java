@@ -8,8 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.core.studio.StudioOwner;
-import fun.fengwk.kkstudio.core.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
@@ -20,6 +18,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandP
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.platform.studio.StudioOwner;
+import fun.fengwk.kkstudio.platform.studio.StudioOwnerType;
 import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;

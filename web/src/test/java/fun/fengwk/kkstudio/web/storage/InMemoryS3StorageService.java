@@ -6,10 +6,10 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
-import fun.fengwk.kkstudio.core.storage.S3ObjectContent;
-import fun.fengwk.kkstudio.core.storage.S3ObjectMetadata;
-import fun.fengwk.kkstudio.core.storage.S3ObjectStream;
-import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
+import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
+import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
+import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;

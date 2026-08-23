@@ -16,14 +16,14 @@
 | 模块 | 角色 |
 | --- | --- |
 | `share/.../ComfyuiWorkflow*.java` | HTTP / DTO 边界 DTO；卡片 `id` 在边界以 canonical UUID string 形式暴露，持久层内部为 `uuid` |
-| `core/comfyui/ComfyuiConfiguration` | Spring 配置：按启动时 SystemSettings 快照决定是否创建 `ComfyUIClient` |
-| `core/comfyui/ComfyuiProperties` | 只承载部署秘密 `kk-studio.comfyui.api-key` |
-| `core/comfyui/ComfyuiRuntimeService` | 无状态运行期：参数映射、S3 输入桥、提交、查询（按 JSONPath selector 投影规范化结果）、取消、job-scoped 输出下载 |
-| `core/comfyui/workflow_api/service/ComfyuiWorkflowApiIds` | 边界 ID 严格解析；`parseUuid` / `format` |
-| `core/comfyui/workflow_api/service/runtime/*` | binding 模型 + parser + selector validator + lookup service（runtime 入口） |
-| `core/comfyui/workflow_api/repo/*` | MyBatis 仓储 |
-| `core/storage/S3ObjectContent` | 固定 bucket 读取的对象字节 + content type |
-| `core/storage/S3StorageService#download(String, long)` | HEAD-before + 后置字节复核的双层大小保护 |
+| `platform/comfyui/ComfyuiConfiguration` | Spring 配置：按启动时 SystemSettings 快照决定是否创建 `ComfyUIClient` |
+| `platform/comfyui/ComfyuiProperties` | 只承载部署秘密 `kk-studio.comfyui.api-key` |
+| `platform/comfyui/ComfyuiRuntimeService` | 无状态运行期：参数映射、S3 输入桥、提交、查询（按 JSONPath selector 投影规范化结果）、取消、job-scoped 输出下载 |
+| `platform/comfyui/workflow_api/service/ComfyuiWorkflowApiIds` | 边界 ID 严格解析；`parseUuid` / `format` |
+| `platform/comfyui/workflow_api/service/runtime/*` | binding 模型 + parser + selector validator + lookup service（runtime 入口） |
+| `platform/comfyui/workflow_api/repo/*` | MyBatis 仓储 |
+| `platform/storage/S3ObjectContent` | 固定 bucket 读取的对象字节 + content type |
+| `platform/storage/S3StorageService#download(String, long)` | HEAD-before + 后置字节复核的双层大小保护 |
 
 ## 端点
 
@@ -74,7 +74,7 @@ ComfyUI 的启用、base URL、连接/读取/WebSocket 超时与文件上限来�
 - `fun.fengwk.convention4j:convention4j-comfyui:1.2.2`：SDK 直接依赖。
 - `com.jayway.jsonpath:json-path:2.9.0`：selector 解析与校验。
 
-两个依赖都已加入根 `pom.xml` 的 `dependencyManagement` 与 `core/pom.xml` 的 `<dependencies>`。根 `pom.xml` 的 `<parent>` 与 `convention4j-comfyui` 同批对齐到 `1.2.2`，所有 convention4j 依赖（包含 `convention4j-common`、`convention4j-spring-boot-starter` 等）随同一发布批次解析，避免出现 `convention4j-comfyui:1.2.2` 自身 `common` 仍被旧 parent 管理降级的情况。
+两个依赖都已加入根 `pom.xml` 的 `dependencyManagement` 与 `platform/pom.xml` 的 `<dependencies>`。根 `pom.xml` 的 `<parent>` 与 `convention4j-comfyui` 同批对齐到 `1.2.2`，所有 convention4j 依赖（包含 `convention4j-common`、`convention4j-spring-boot-starter` 等）随同一发布批次解析，避免出现 `convention4j-comfyui:1.2.2` 自身 `common` 仍被旧 parent 管理降级的情况。
 
 **远程发布前置条件**：`convention4j:1.2.2` 发布批次在 22 个模块上的本地 `~/.m2` 安装仅用于开发期验证。远程环境必须把 `fun.fengwk.convention4j` 全套 `1.2.2` 构件（不止 `convention4j-comfyui`，还需 `convention4j-parent` 及所有 starter / tracer / oauth2 等 1.2.2 发布批次构件）发布到内网 Maven 仓库，依赖解析才可复现。
 
@@ -94,13 +94,13 @@ ComfyUI 的启用、base URL、连接/读取/WebSocket 超时与文件上限来�
 | 关注点 | 文件 |
 | --- | --- |
 | 全局行为配置 | `system_setting.config.integrations.comfyui` |
-| 装配与部署秘密 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/Comfyui{Configuration,Properties}.java` |
-| 运行服务 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/ComfyuiRuntimeService.java` |
-| 卡片实体 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/workflow_api/service/model/ComfyuiWorkflowApi.java` |
-| 仓储 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/workflow_api/repo/impl/MysqlComfyuiWorkflowApiRepository.java` 与 mapper |
-| 服务 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/workflow_api/service/impl/ComfyuiWorkflowApiServiceImpl.java` |
-| ID 解析 | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/workflow_api/service/ComfyuiWorkflowApiIds.java` |
-| 运行时 binding / selector / lookup | `core/src/main/java/fun/fengwk/kkstudio/core/comfyui/workflow_api/service/runtime/*` |
-| S3 输入桥 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3StorageService(Impl).java` |
+| 装配与部署秘密 | `platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/Comfyui{Configuration,Properties}.java` |
+| 运行服务 | `platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/ComfyuiRuntimeService.java` |
+| 卡片实体 | `platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/workflow_api/service/model/ComfyuiWorkflowApi.java` |
+| 仓储 | `platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/workflow_api/repo/impl/MysqlComfyuiWorkflowApiRepository.java` 与 mapper |
+| 服务 | `platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/workflow_api/service/impl/ComfyuiWorkflowApiServiceImpl.java` |
+| ID 解析 | `platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/workflow_api/service/ComfyuiWorkflowApiIds.java` |
+| 运行时 binding / selector / lookup | `platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/workflow_api/service/runtime/*` |
+| S3 输入桥 | `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/S3StorageService(Impl).java` |
 | HTTP 入口 | `web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioComfyui{WorkflowApi,Runtime}Controller.java` |
 | DTO | `share/src/main/java/fun/fengwk/kkstudio/share/comfyui/ComfyuiWorkflow*.java` |

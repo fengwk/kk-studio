@@ -7,12 +7,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.studio.StudioCommandAcceptanceService;
-import fun.fengwk.kkstudio.core.studio.StudioOwner;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.platform.studio.StudioCommandAcceptanceService;
+import fun.fengwk.kkstudio.platform.studio.StudioOwner;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;

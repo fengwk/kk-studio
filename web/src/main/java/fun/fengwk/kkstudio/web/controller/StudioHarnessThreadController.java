@@ -12,7 +12,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
@@ -22,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.ai.runtime.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSystemPromptPreviewDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;

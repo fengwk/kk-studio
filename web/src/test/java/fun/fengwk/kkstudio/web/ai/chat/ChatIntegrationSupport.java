@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.web.ai.chat;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import fun.fengwk.kkstudio.core.storage.StorageObjectKeys;
-import fun.fengwk.kkstudio.core.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;

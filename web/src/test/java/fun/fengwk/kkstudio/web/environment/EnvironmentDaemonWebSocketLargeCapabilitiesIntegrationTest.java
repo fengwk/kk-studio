@@ -11,9 +11,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -26,6 +23,9 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.platform.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;

@@ -8,9 +8,9 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.adapter.NativeWebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonEndpoint;
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
+import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentDaemonEndpoint;
+import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentGatewayProperties;
 
 import java.io.IOException;
 import java.util.Objects;

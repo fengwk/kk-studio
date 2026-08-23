@@ -83,12 +83,12 @@ kk-studio:
 
 | 关注点 | 文件 |
 | --- | --- |
-| 全局行为配置 | `system_setting.config.storageMedia` / `core/.../systemsettings/SystemSettings.java` |
-| 部署连接与秘密 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/configuration/S3StorageProperties.java` |
-| Spring 自动配置 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/configuration/S3StorageConfiguration.java` |
-| 预签名服务 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3PresignService.java` |
-| 预签名实现 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3PresignServiceImpl.java` |
-| 对象键校验 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3ObjectKeyNormalizer.java` |
-| 服务端读写 | `core/src/main/java/fun/fengwk/kkstudio/core/storage/S3StorageService(Impl).java` |
+| 全局行为配置 | `system_setting.config.storageMedia` / `platform/.../systemsettings/SystemSettings.java` |
+| 部署连接与秘密 | `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/configuration/S3StorageProperties.java` |
+| Spring 自动配置 | `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/configuration/S3StorageConfiguration.java` |
+| 预签名服务 | `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/S3PresignService.java` |
+| 预签名实现 | `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/S3PresignServiceImpl.java` |
+| 对象键校验 | `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/S3ObjectKeyNormalizer.java` |
+| 服务端读写 | `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/S3StorageService(Impl).java` |
 | HTTP 入口 | `web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioS3PresignController.java` |
 | 请求 / 响应 DTO | `share/src/main/java/fun/fengwk/kkstudio/share/storage/S3Presigned{Request,Response}DTO.java` |

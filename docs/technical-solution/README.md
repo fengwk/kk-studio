@@ -39,7 +39,7 @@ flowchart TD
 | 4 | [harness-agent-loop.md](harness-agent-loop.md) | Agent Loop durable reducer、持久化形状与执行协议 |
 | 5 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | JSON/DTO、命令 batch、CAS、replay、snapshot 与异常 wire |
 | 6 | [harness-storage-runtime.md](harness-storage-runtime.md) | HarnessStore 事务/锁序、7 表、Work wake 与 realtime notification 协议 |
-| 7 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 composition root 与 HTTP 边界 |
+| 7 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `platform` / `web` 的 composition root 与 HTTP 边界 |
 | 8 | [storage-models.md](storage-models.md) | 全应用表结构；Harness 精确 7 表 |
 | 9 | [frontend-implementation-design.md](frontend-implementation-design.md) | Chat defaults、BranchDraft、first send、batch、replay 与 Pane 门禁 |
 | 10 | [harness-capability-wiring.md](harness-capability-wiring.md) | BranchSettings → Resolver → Model/Tool Gateway 装配 |
@@ -57,7 +57,7 @@ flowchart TD
 ## 贯穿约束
 
 - Harness 单轨协议：恰好 5 个 Harness 基础模块（`harness-tool` / `harness-runtime` / `harness-plugin-api` / `harness-infra` / `harness-daemon`）、3 个 processor（Thread/Model/Tool）、3 个 Work target（THREAD/MODEL/TOOL）、7 张表、10 种 `EntryType`、1 个 Agent Loop；受信任插件位于独立 `harness/plugins/*` 构建模块。
-- `harness-runtime` 是纯 Java 领域模块，拥有 Thread 状态机与 processor；`harness-plugin-api` 提供构建期注册、启动时冻结的插件 API；`harness-infra` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway 与 Environment/Chat 应用能力，不写 `harness_*` 表；Goal 由 `harness/plugins/goal` 提供；`web` 是生产组合根。
+- `harness-runtime` 是纯 Java 领域模块，拥有 Thread 状态机与 processor；`harness-plugin-api` 提供构建期注册、启动时冻结的插件 API；`harness-infra` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`platform` 提供 Catalog、TurnResolver、Model/Tool Gateway 与 Environment/Chat 应用能力，不写 `harness_*` 表；Goal 由 `harness/plugins/goal` 提供；`web` 是生产组合根。
 - PostgreSQL 是唯一 durable truth；`harness_work` 是唯一调度 mailbox（`wake_version` + lease）；`LISTEN/NOTIFY` 只提供低延迟提示，Work 由 periodic poll、客户端由 snapshot 负责恢复。
 - 所有 Runtime 实体 id（Thread/Session/Entry/Invocation/Command）在 HTTP wire 上是 canonical UUID strings；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal strings，前端以 `DecimalLong=string` 接收并按字段领域约束严格校验。
 - Thread `nextCommandSequence` 从 1 开始；每次可见状态变化 `version` 恰好 +1。

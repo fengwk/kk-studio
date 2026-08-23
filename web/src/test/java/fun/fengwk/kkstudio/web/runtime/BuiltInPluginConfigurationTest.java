@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
-import fun.fengwk.kkstudio.core.ai.runtime.plugin.PluginCatalogConfiguration;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
+import fun.fengwk.kkstudio.platform.ai.runtime.plugin.PluginCatalogConfiguration;
 
 import java.util.List;
 

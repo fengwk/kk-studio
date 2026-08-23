@@ -9,8 +9,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSchemaProvider;
-import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsService;
+import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSchemaProvider;
+import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;

@@ -13,11 +13,11 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
-import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
-import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.ai.error.AiDuplicateException;
+import fun.fengwk.kkstudio.platform.ai.error.AiInUseException;
+import fun.fengwk.kkstudio.platform.ai.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.ai.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;

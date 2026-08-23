@@ -18,7 +18,7 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-core</artifactId>
+            <artifactId>kk-studio-platform</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>

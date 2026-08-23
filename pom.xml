@@ -19,7 +19,7 @@
         <module>schema</module>
         <module>canvas</module>
         <module>harness</module>
-        <module>core</module>
+        <module>platform</module>
         <module>web</module>
     </modules>
 
@@ -85,7 +85,7 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-core</artifactId>
+                <artifactId>kk-studio-platform</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

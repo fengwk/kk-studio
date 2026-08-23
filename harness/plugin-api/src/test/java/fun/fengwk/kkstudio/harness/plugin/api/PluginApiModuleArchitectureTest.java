@@ -32,7 +32,6 @@ class PluginApiModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.runtime.processor.",
           "fun.fengwk.kkstudio.harness.infra.",
           "fun.fengwk.kkstudio.harness.daemon.",
-          "fun.fengwk.kkstudio.core.",
           "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.web.",
           "org.springframework.",

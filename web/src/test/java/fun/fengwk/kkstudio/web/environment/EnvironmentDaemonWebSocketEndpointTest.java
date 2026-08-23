@@ -12,8 +12,8 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonGateway;
+import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;

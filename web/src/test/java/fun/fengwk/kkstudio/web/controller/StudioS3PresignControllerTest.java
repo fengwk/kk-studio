@@ -24,7 +24,7 @@ import fun.fengwk.kkstudio.web.storage.S3WebPostgresTestSupport;
  * {@link StudioS3PresignController} 端到端测试.
  *
  * <p>通过 S3 测试基座把 {@code system_setting.storageMedia.s3Enabled} 置为 true 后走完整的 {@link
- * fun.fengwk.kkstudio.core.storage.S3PresignService} 自动配置链路：使用 AWS SDK 真实 {@code
+ * fun.fengwk.kkstudio.platform.storage.S3PresignService} 自动配置链路：使用 AWS SDK 真实 {@code
  * S3Presigner}（path-style + SigV4）在本地完成签名， 不与对象存储产生任何 IO。专注于验证 controller
  * 的请求解析、响应字段映射以及入参校验失败的传播路径。
  *

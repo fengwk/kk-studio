@@ -6,20 +6,20 @@
 
 | 域 | 代码位置 | 职责 |
 | --- | --- | --- |
-| Harness / AI | `harness-tool`、`harness-runtime`、`harness-plugin-api`、`harness/plugins/*`、`harness-infra`、`harness-daemon`、`core.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、插件 branch state、Work |
-| Studio / Canvas | `canvas/core`、`core.studio`、`features/canvas` | Canvas document、ResourceNode、Resource、Function、Group、Link、typed command |
+| Harness / AI | `harness-tool`、`harness-runtime`、`harness-plugin-api`、`harness/plugins/*`、`harness-infra`、`harness-daemon`、`platform.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、插件 branch state、Work |
+| Studio / Canvas | `canvas/core`、`platform.studio`、`features/canvas` | Canvas document、ResourceNode、Resource、Function、Group、Link、typed command |
 
 ```text
 frontend
   -> web
-    -> core
+    -> platform
     -> harness-infra -> harness-runtime -> harness-tool
     -> harness-runtime
-core -> canvas-core
-core -> harness-runtime -> harness-tool
-core -> harness-plugin-api -> harness-runtime
+platform -> canvas-core
+platform -> harness-runtime -> harness-tool
+platform -> harness-plugin-api -> harness-runtime
 harness/plugins/* -> harness-plugin-api
-core -> harness-tool
+platform -> harness-tool
   -> share
 harness-daemon -> harness-tool
 ```
@@ -60,7 +60,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentName`（bounded 小写路由名称）唯一，状态为 CONNECTING/READY；可用性 = READY + 连接打开 + 心跳未过期 |
 | Realtime projection | PostgreSQL `NOTIFY` 承载的 live-only、可丢失输出覆盖层（非 durable，snapshot 恢复） |
 
-Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`DatabaseTurnResolver` 从 `BranchSettings` 读取 agent/model/environment 引用，再读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route，并把插件 `ContextProjector` 基于当前 candidate branch 产生的消息注入 preamble（Agent/Model 修改下一 turn 生效）。直接工具按最新 `Agent.config.tools` 的顺序绑定；skills 非空时追加内部 `load_skill`；subagents 非空且 Session depth 小于 `maxDepth` 时追加内部 `task`。历史 `BranchSettings.activeTools` 不得限制或扩张新 turn。结果冻结为 compact `ModelRequestSpec`（无 YOLO/contextWindow/messages）；每次 Model attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存 ProviderRequest，再由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。后续 turn 的上下文只白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 projector，`MODEL_ATTEMPT_FAILURE`、`ASSISTANT_ERROR` 及其中的 partial/error 永不进入 Provider context。ENVIRONMENT 工具按最新 `EnvironmentBinding` 绑定、规划不拒绝；Agent skills 必须由最新选中且 live 的 Environment 精确提供。subagent 名称 + 描述冻结进 `subagentBindings`，执行绝不重读父 Agent 配置扩权。所有确定性 planning 拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
+Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`DatabaseTurnResolver` 从 `BranchSettings` 读取 agent/model/environment 引用，再读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route，并把插件 `ContextProjector` 基于当前 candidate branch 产生的消息注入 preamble（Agent/Model 修改下一 turn 生效）。直接工具按最新 `Agent.config.tools` 的顺序绑定；skills 非空时追加内部 `load_skill`；subagents 非空且 Session depth 小于 `maxDepth` 时追加内部 `task`。历史 `BranchSettings.activeTools` 不得限制或扩张新 turn。结果冻结为 compact `ModelRequestSpec`（无 YOLO/contextWindow/messages）；每次 Model attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存 ProviderRequest，再由 Platform 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。后续 turn 的上下文只白名单投影 MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ABORTED 与插件 projector，`MODEL_ATTEMPT_FAILURE`、`ASSISTANT_ERROR` 及其中的 partial/error 永不进入 Provider context。ENVIRONMENT 工具按最新 `EnvironmentBinding` 绑定、规划不拒绝；Agent skills 必须由最新选中且 live 的 Environment 精确提供。subagent 名称 + 描述冻结进 `subagentBindings`，执行绝不重读父 Agent 配置扩权。所有确定性 planning 拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
 
 ## 4. Chat、Thread 与前端映射
 

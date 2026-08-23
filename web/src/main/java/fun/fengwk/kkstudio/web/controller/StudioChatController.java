@@ -15,11 +15,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.ai.chat.service.ChatIds;
-import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
-import fun.fengwk.kkstudio.core.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.platform.ai.chat.service.ChatIds;
+import fun.fengwk.kkstudio.platform.ai.chat.service.ChatService;
+import fun.fengwk.kkstudio.platform.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;

@@ -17,7 +17,7 @@ flowchart LR
     AI[frontend/features/ai]
     Canvas[frontend/features/canvas]
     Web[web]
-    Core[core]
+    Platform[platform]
     Runtime[harness-runtime]
     Plugin[harness-plugin-api]
     Goal[harness/plugins/goal]
@@ -32,22 +32,22 @@ flowchart LR
     Browser --> Canvas
     AI --> Web
     Canvas --> Web
-    Web --> Core
+    Web --> Platform
     Web --> Infra
     Web --> Runtime
     Web --> Goal
     Infra --> Runtime
-    Core --> Plugin
+    Platform --> Plugin
     Goal --> Plugin
     Plugin --> Runtime
     Runtime --> Tool
-    Core --> Runtime
-    Core --> Tool
+    Platform --> Runtime
+    Platform --> Tool
     Daemon --> Tool
-    Core --> PG
+    Platform --> PG
     Infra --> PG
     Web --> PG
-    Core --> S3
+    Platform --> S3
     Browser --> S3
     Env <-->|WebSocket v2| Web
 ```
@@ -62,8 +62,8 @@ flowchart LR
 | `harness/plugins/goal` | Goal 插件：`create_goal` / `get_goal` / `update_goal` v2、branch-scoped `goal/state` 快照与 active goal 上下文投影 |
 | `harness-infra` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store |
 | `harness-daemon` | 独立 Environment 进程适配器，只依赖 `harness-tool` |
-| `core` | Catalog、全局 Blob Storage、`DatabaseTurnResolver`、Model/Tool Gateway、Environment、Chat 与 Canvas 应用服务；装配并执行受信任插件；Harness 执行表只经 Runtime/Store 端口写入 |
-| `web` | **生产组合根**：装配 Runtime、infra 与 Core ports，管理 dispatcher 与单连接 PostgreSQL notification loop 生命周期，并提供 HTTP、WebSocket（浏览器事件通道与 daemon v2）与静态资源适配 |
+| `platform` | Catalog、全局 Blob Storage、`DatabaseTurnResolver`、Model/Tool Gateway、Environment、Chat 与 Canvas 应用服务；装配并执行受信任插件；Harness 执行表只经 Runtime/Store 端口写入 |
+| `web` | **生产组合根**：装配 Runtime、infra 与 Platform ports，管理 dispatcher 与单连接 PostgreSQL notification loop 生命周期，并提供 HTTP、WebSocket（浏览器事件通道与 daemon v2）与静态资源适配 |
 | `share` | HTTP DTO 与公开 JSON 结构 |
 | `frontend` | React 页面、Pane、本地状态与 API client |
 
@@ -71,13 +71,13 @@ flowchart LR
 
 ```text
 frontend -> web API / composition root
-web -> core
+web -> platform
 web -> harness-infra -> harness-runtime -> harness-tool
 web -> harness-runtime
 web -> harness/plugins/* -> harness-plugin-api
-core -> harness-runtime -> harness-tool
-core -> harness-plugin-api -> harness-runtime
-core -> harness-tool
+platform -> harness-runtime -> harness-tool
+platform -> harness-plugin-api -> harness-runtime
+platform -> harness-tool
 web -> share
 harness-daemon -> harness-tool
 ```
@@ -94,7 +94,7 @@ harness-daemon -> harness-tool
 
 公开 Model ref 的格式是 `providerName/modelName`。`ModelRef.parse` 只在第一个 `/` 切分，因此 `modelName` 可以包含额外 `/`。Catalog response 只使用名称、结构化 config 和版本字段，不使用 bigint resource ID。
 
-Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名称资源表。三表都是带 `expectedVersion` CAS 的硬删除：删除后同名立即可重建，重建行 `version` 从 0 重新开始；记录存续期间名称不可修改。所有引用都只按名称：Chat 的 `agentName`、Thread 的 `BranchSettings`、Model 的 `providerName` 都不绑定资源 ID。Agent/Model 修改在下一 turn 由 `DatabaseTurnResolver` 解析最新行生效；每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config）形成短生命周期 attempt-local Provider。硬删除到同名重建之间既有名称引用 fail closed（turn 拒绝 / attempt 确定性失败）；重建后既有 Chat/Thread 的名称引用解析到当前同名资源。
+Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名称资源表。三表都是带 `expectedVersion` CAS 的硬删除：删除后同名立即可重建，重建行 `version` 从 0 重新开始；记录存续期间名称不可修改。所有引用都只按名称：Chat 的 `agentName`、Thread 的 `BranchSettings`、Model 的 `providerName` 都不绑定资源 ID。Agent/Model 修改在下一 turn 由 `DatabaseTurnResolver` 解析最新行生效；每次 Model attempt 由 Platform 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config）形成短生命周期 attempt-local Provider。硬删除到同名重建之间既有名称引用 fail closed（turn 拒绝 / attempt 确定性失败）；重建后既有 Chat/Thread 的名称引用解析到当前同名资源。
 
 ## 4. Harness 所有权模型
 
@@ -137,7 +137,7 @@ ENTRY_DRAFT / Bound Thread 的每次发送:
   -> TURN_END(COMPLETED, continueModel=true) -> continuation，直到 Model 无 ToolCall
 ```
 
-`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 command acceptance/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread version、维护 Work，并发布 PostgreSQL realtime notification。Model terminal apply 与 Stop 会先把普通 invocation 的 `failedAttempts` 物化为透明 `MODEL_ATTEMPT_FAILURE` Entry，再写唯一 Assistant 结果。插件 Tool terminal success 先由 `CoreToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
+`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 command acceptance/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread version、维护 Work，并发布 PostgreSQL realtime notification。Model terminal apply 与 Stop 会先把普通 invocation 的 `failedAttempts` 物化为透明 `MODEL_ATTEMPT_FAILURE` Entry，再写唯一 Assistant 结果。插件 Tool terminal success 先由 `PlatformToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
 
 ## 6. Canvas
 

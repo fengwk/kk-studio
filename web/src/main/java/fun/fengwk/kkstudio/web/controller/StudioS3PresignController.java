@@ -11,8 +11,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.core.storage.S3ObjectKeyNormalizer;
-import fun.fengwk.kkstudio.core.storage.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.S3ObjectKeyNormalizer;
+import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.share.storage.S3PresignedRequestDTO;
 import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 

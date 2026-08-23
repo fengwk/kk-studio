@@ -25,7 +25,6 @@ class CanvasCoreArchitectureTest {
           "java.sql.",
           "javax.sql.",
           "jakarta.persistence.",
-          "fun.fengwk.kkstudio.core.",
           "fun.fengwk.kkstudio.harness.",
           "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.share.",

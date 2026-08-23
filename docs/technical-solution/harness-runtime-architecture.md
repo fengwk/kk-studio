@@ -9,7 +9,7 @@
 - Processor 每次处理都是短事务，不在事务内等待外部 I/O（Provider/Tool 执行在事务外）。
 - `harness-runtime` 是纯 Java 模块：不依赖 Spring、数据库驱动、HTTP、WebSocket、Provider SDK 或业务 Tool 实现。
 - `harness-infra` 只做持久化与调度适配：`HarnessStore`（PostgreSQL）、Work dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store。
-- `core` 只提供 Catalog/TurnResolver/ModelGateway/ToolGateway/Environment gateway 适配，不写 `harness_*` 表。
+- `platform` 只提供 Catalog/TurnResolver/ModelGateway/ToolGateway/Environment gateway 适配，不写 `harness_*` 表。
 
 ## 2. 模块
 
@@ -27,13 +27,13 @@ harness/
 依赖方向：
 
 ```text
-web composition root -> core application API / share DTO
+web composition root -> platform application API / share DTO
 web composition root -> harness-infra -> harness-runtime -> harness-tool
 web composition root -> harness-runtime
 web composition root -> harness/plugins/goal -> harness-plugin-api
-core -> harness-plugin-api -> harness-runtime -> harness-tool
-core -> harness-runtime -> harness-tool
-core -> harness-tool
+platform -> harness-plugin-api -> harness-runtime -> harness-tool
+platform -> harness-runtime -> harness-tool
+platform -> harness-tool
 harness-daemon -> harness-tool
 ```
 
@@ -123,7 +123,7 @@ TURN_START/CONTINUATION 消费但不产生 Message Entry。
 | `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、compact `ModelRequestSpec` JSON（providerType/model/variant/preamble/**toolBindings**/skillBindings/subagentBindings/cacheControl；无 history messages/tools/YOLO/contextWindow/compaction metadata；压缩身份由 basis path 末尾的 `TURN_START.compaction` 表达）、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`failed_attempts`（append-only TRANSIENT 失败前缀）、`result`/`error`/`result_entry_id`、时间 |
 | `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`（(assistant_entry_id, ordinal) 唯一）、`call`（ToolCall JSON）+ 可空 `binding`（descriptor/type/environment/plugin provenance/access；unknown tool 为 null）、status、attempt、`approval` JSON、`result`/`effects`/`error`、时间 |
 
-冻结 spec 中的 `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。完整 ProviderRequest 永不持久化：每次 MODEL attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存请求。
+冻结 spec 中的 `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Platform 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。完整 ProviderRequest 永不持久化：每次 MODEL attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存请求。
 
 状态机（Model）：
 
@@ -255,7 +255,7 @@ ToolProcessor 消费 TOOL Work：
 3. **ToolProcessor 接收已验证、已外部化的 `ToolSuccess(result, effects)`**，先做领域校验（toolCallId、禁止 inline Binary、canonical size、effects 上限与 payload 等），再在短事务内做严格 terminal CAS（fire-once、attempt/claim ownership 校验），以一次 Store update 同时落 `SUCCEEDED + result + effects`，不做任何存储外部化；
 4. terminal 后请求 THREAD Work 做 sibling apply。本地执行取消（Stop 后）通过 process-local `modelExecutionCanceller` / `toolExecutionCanceller` best-effort 回调。
 
-`ToolResultExternalizer` 在 CoreToolGateway callback bridge 只做**瞬时** Resource 外部化：插件
+`ToolResultExternalizer` 在 PlatformToolGateway callback bridge 只做**瞬时** Resource 外部化：插件
 Tool 先把声明式 intents 映射并校验为 `ToolEffectBatch`；effects 合法后才按
 `ResourceStore.reference -> put -> exact ref check` 生成 `ResourceRef`，随后把
 `ToolSuccess(result,effects)` 交给 ToolProcessor 落 terminal 事实；partial 拒绝
@@ -271,7 +271,7 @@ Binary/Resource 且零存储 I/O。durable 物化发生在 `ToolOutcomeAppender`
 Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 ```
 
-实现 `acceptCommands`（NEW_SESSION / ENTRY / THREAD 单原语）、`findThreadCommand`、`stop`、`decideToolApproval`、`setThreadYolo`、`getThreadSnapshot`、`getSessionEntries`、`listThreadsBySession`；不提供 create/delete（Session/Thread 只允许在第一批 Command 被接受时创建，深删除由 Core `HarnessSessionDeletionService` 经 `HarnessStore.Transaction` 编排）。
+实现 `acceptCommands`（NEW_SESSION / ENTRY / THREAD 单原语）、`findThreadCommand`、`stop`、`decideToolApproval`、`setThreadYolo`、`getThreadSnapshot`、`getSessionEntries`、`listThreadsBySession`；不提供 create/delete（Session/Thread 只允许在第一批 Command 被接受时创建，深删除由 Platform `HarnessSessionDeletionService` 经 `HarnessStore.Transaction` 编排）。
 
 - `acceptCommands(target, preflight)`：单个写入原语。NEW_SESSION 原子创建 Session + ROOT（rootSettings + 可选 SubagentContext）+ Thread（head=ROOT，version 0 / nextCommandSequence 1）+ owner relation（preflight）+ Commands（sequence 从 1 起）+ THREAD Work；ENTRY 校验 startEntry 属于 Session 后创建 Thread（head=startEntryId，不复制 Entry）+ Commands + Work；THREAD 先读 immutable `thread.sessionId` 并 KEY SHARE Session、再锁 Thread 复核，exact ordered replay 查找必须先于任何 cursor/preflight admission，全新 batch 要求精确 expected head + next sequence（否则 `STALE_COMMAND_CURSOR`）。materialization replay：同 hash + 同 Session 的 client threadId 精确重放原始初始命令（验证 requestHash 相等且 sequence 从 1 连续）；同 threadId 不同 session/hash 返回 `MATERIALIZATION_ID_REUSED`。
 - `stop`：先在 Thread 锁内做 Session 级不可变查找，`findReplay` 按「被引用 TURN_START 的 `ownerThreadId` == thread + `closeRequestId` == stopRequestId」精确命中（在 version CAS **之前**）→ `REPLAYED`；否则 version CAS。另一 Thread 的相同 raw id 被忽略而非冲突，owning Thread 迁移到兄弟分支后仍可命中。`IDLE_OR_HISTORICAL` 取消 queued（有取消则 version +1、不写 stop marker；无 queued 则真正 no-op）；`CONTINUATION_DUE` 先物化 `TURN_START(CONTINUATION)` + `ASSISTANT_ERROR(CANCELLED)`，再追加 `TURN_END(STOPPED)`；Model/Tool active 则写安全 `ASSISTANT_ABORTED` 或取消/不确定 Tool Result，再追加 `TURN_END(STOPPED)`。Tool terminal winner 在 Stop 路径也共用 `ToolOutcomeAppender`，成功 sibling 的 effects 不会丢失；所有 STOPPED 路径同时取消 queued、先净化 Work mailbox 再删除当前 Tool/Model Invocations、fence 后续 callback，closed turn 不保留 Invocation 行。

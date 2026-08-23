@@ -150,7 +150,7 @@ class HarnessRuntimeAcceptThreadTest {
                         new AttachmentMessageContent(TestIds.id(77)),
                         new TextMessageContent("please summarize")))),
             TestIds.id(1));
-    // 模拟 attachment 物化：ATTACHMENT -> RESOURCE，保留原始幂等键（下游 core 应对 preflight 使用 withPayload）。
+    // 模拟 attachment 物化：ATTACHMENT -> RESOURCE，保留原始幂等键（下游 platform 应对 preflight 使用 withPayload）。
     NewThreadCommand durable =
         raw.withPayload(
             new UserMessageCommandPayload(
