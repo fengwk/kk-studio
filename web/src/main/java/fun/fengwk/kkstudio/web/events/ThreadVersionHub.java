@@ -20,9 +20,10 @@ import java.util.function.Consumer;
 /**
  * PostgreSQL Thread version 通知的进程内 fan-out。
  *
- * <p>初始订阅 cursor 从持久表权威读取；notification payload 携带提交后的 {@code threadId:version}，只做轻量解析与 fan-out。共享
- * LISTEN loop 启动/重连成功时调用 {@link #broadcastResync()}，覆盖断连期间不可恢复的通知。{@link #subscribe} 先注册 consumer
- * 再读当前 version 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
+ * <p>初始订阅 cursor 从持久表权威读取；notification payload 携带提交后的 {@code threadId:version}，合法 payload 只做轻量解析与
+ * fan-out，畸形 payload 广播 resync。共享 LISTEN loop 启动/重连成功时也调用 {@link
+ * #broadcastResync()}，覆盖断连期间不可恢复的通知。{@link #subscribe} 先注册 consumer 再读当前 version 返回，保证返回的 cursor
+ * 之后的事件不因注册竞态丢失。
  */
 @Slf4j
 @Component
@@ -72,6 +73,8 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
   void onNotification(String payload) {
     ThreadVersion notification = parseNotification(payload);
     if (notification == null) {
+      log.warn("malformed thread version notification payload={}; broadcasting resync", payload);
+      broadcastResync();
       return;
     }
     publish(notification.threadId(), new Event(notification.version(), false));
