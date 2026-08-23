@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.persistence.postgresql.mapper.StorageBlobMapper;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
@@ -17,7 +18,6 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionResourcePinMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasResourceMapper;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceMaterializer;
 
 import java.util.Objects;
 

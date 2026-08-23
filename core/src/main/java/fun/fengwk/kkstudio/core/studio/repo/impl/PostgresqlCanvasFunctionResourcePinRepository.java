@@ -2,10 +2,10 @@ package fun.fengwk.kkstudio.core.studio.repo.impl;
 
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionResourcePinMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasFunctionResourcePinDO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePin;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePinRepository;
 
 import java.util.ArrayList;
 import java.util.List;

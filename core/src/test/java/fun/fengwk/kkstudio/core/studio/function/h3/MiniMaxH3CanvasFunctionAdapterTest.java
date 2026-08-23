@@ -19,17 +19,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.TextSegment;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionExecutionContext;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenReference;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionResourceStream;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;

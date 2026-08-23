@@ -1,19 +1,19 @@
 package fun.fengwk.kkstudio.core.studio.function.opencli;
 
+import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionParameterDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.ExecutionResource;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.ExecutionStatus;
 import fun.fengwk.kkstudio.core.studio.function.opencli.OpenCliHubClient.HubResourceStream;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionExecutionContext;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenReference;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionParameterDefinition;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

@@ -4,6 +4,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.core.storage.service.SessionBlobRefManager;
@@ -11,7 +12,6 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.studio.canvas.CanvasSessionRepository;
 
 import java.util.ArrayList;
 import java.util.Comparator;

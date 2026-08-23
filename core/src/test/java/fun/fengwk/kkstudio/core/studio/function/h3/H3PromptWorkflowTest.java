@@ -12,15 +12,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.TextSegment;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenReference;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
 
 import java.util.LinkedHashMap;
 import java.util.List;

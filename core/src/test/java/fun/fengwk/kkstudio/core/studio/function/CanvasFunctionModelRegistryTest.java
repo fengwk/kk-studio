@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionExecutionContext;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 
 import java.util.List;
 import java.util.Map;

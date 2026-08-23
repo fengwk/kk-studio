@@ -9,12 +9,12 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.PromptSegment;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.TextSegment;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionParameterDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.PromptSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionParameterDefinition;
 
 import java.util.ArrayList;
 import java.util.HashSet;

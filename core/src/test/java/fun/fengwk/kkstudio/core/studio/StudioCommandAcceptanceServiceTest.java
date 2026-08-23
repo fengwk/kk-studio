@@ -21,6 +21,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.canvas.CanvasSession;
+import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatSessionRepository;
@@ -50,8 +52,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.studio.canvas.CanvasSession;
-import fun.fengwk.kkstudio.studio.canvas.CanvasSessionRepository;
 
 import java.time.Instant;
 import java.util.List;

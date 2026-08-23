@@ -5,6 +5,15 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionParameterDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
@@ -18,15 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPa
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionExecutionContext;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenReference;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionParameterDefinition;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionResourceStream;
 
 import java.io.IOException;
 import java.io.InputStream;

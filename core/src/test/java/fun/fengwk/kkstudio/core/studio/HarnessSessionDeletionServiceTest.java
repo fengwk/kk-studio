@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
@@ -23,7 +24,6 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasDocumentDO;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.studio.canvas.CanvasSessionRepository;
 
 import java.time.Instant;
 import java.util.List;

@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.core.studio.function.h3;
 
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenReference;
+import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 
 import java.util.ArrayList;
 import java.util.List;

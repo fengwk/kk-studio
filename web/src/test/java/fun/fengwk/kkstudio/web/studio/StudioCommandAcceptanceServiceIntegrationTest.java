@@ -11,6 +11,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 
+import fun.fengwk.kkstudio.canvas.CanvasCommandService;
+import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
 import fun.fengwk.kkstudio.core.storage.service.StorageUploadService;
@@ -34,8 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
-import fun.fengwk.kkstudio.studio.canvas.CanvasSessionRepository;
 import fun.fengwk.kkstudio.web.ai.chat.ChatIntegrationSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.S3WebPostgresTestSupport;

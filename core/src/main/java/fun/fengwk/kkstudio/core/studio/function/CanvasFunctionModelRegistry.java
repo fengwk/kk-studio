@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.core.studio.function;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 
 import java.util.ArrayList;
 import java.util.Comparator;

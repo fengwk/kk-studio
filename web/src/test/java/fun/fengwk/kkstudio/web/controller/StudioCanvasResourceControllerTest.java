@@ -16,14 +16,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
+import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
+import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceNode;
-import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
-import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
 
 import java.time.Instant;

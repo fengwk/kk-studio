@@ -2,6 +2,17 @@ package fun.fengwk.kkstudio.core.studio;
 
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.CanvasFunction;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
+import fun.fengwk.kkstudio.canvas.CanvasGroup;
+import fun.fengwk.kkstudio.canvas.CanvasLink;
+import fun.fengwk.kkstudio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
+import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
+import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasGroupMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasLinkMapper;
@@ -12,17 +23,6 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasGroupDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasLinkDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasNodeDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasResourceDO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunction;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
-import fun.fengwk.kkstudio.studio.canvas.CanvasGroup;
-import fun.fengwk.kkstudio.studio.canvas.CanvasLink;
-import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourceNode;
-import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
-import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
 
 import java.util.ArrayList;
 import java.util.HashMap;

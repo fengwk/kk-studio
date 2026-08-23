@@ -11,9 +11,9 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
-import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 
 import java.time.Instant;
 import java.util.List;

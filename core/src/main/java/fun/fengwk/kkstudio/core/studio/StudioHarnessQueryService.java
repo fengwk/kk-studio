@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.studio;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.core.ai.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
@@ -26,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasSessionRepository;
 
 import java.time.Instant;
 import java.util.ArrayList;
