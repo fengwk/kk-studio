@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.systemsettings;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
@@ -47,8 +48,10 @@ class SystemSettingsServiceImplTest {
   private final SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
   private final SystemSettingsSnapshot snapshot =
       new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+  private final SystemSettingsChangeHandler changeHandler =
+      new SystemSettingsChangeHandler(repository, snapshot);
   private final SystemSettingsServiceImpl service =
-      new SystemSettingsServiceImpl(repository, codec, snapshot);
+      new SystemSettingsServiceImpl(repository, codec, changeHandler);
 
   @AfterEach
   void clearSynchronization() {
@@ -121,6 +124,28 @@ class SystemSettingsServiceImplTest {
     assertEquals(SystemSettings.DEFAULT, snapshot.get());
   }
 
+  /** 数据库已经提交后，afterCommit 权威回读短暂失败不得向 API 线程冒泡或写入错误快照；后续通知仍可恢复到最新版本。 */
+  @Test
+  void afterCommitRefreshFailureDoesNotEscapeAndLaterNotificationRecovers() {
+    when(repository.get())
+        .thenReturn(record(0), record(1))
+        .thenThrow(new IllegalStateException("database temporarily unavailable"))
+        .thenReturn(record(1));
+    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+
+    TransactionSynchronizationManager.initSynchronization();
+    assertEquals("1", service.update(update("0")).getVersion());
+    assertDoesNotThrow(
+        () ->
+            TransactionSynchronizationManager.getSynchronizations()
+                .forEach(TransactionSynchronization::afterCommit));
+    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+
+    changeHandler.onNotification("");
+
+    assertEquals(UPDATED_SETTINGS, snapshot.get());
+  }
+
   /** 无活跃事务同步的调用路径（纯单元测试）直接回读替换，保证快照与数据库一致。 */
   @Test
   void replacesSnapshotDirectlyWithoutActiveSynchronization() {
@@ -130,6 +155,18 @@ class SystemSettingsServiceImplTest {
     service.update(update("0"));
 
     assertEquals(UPDATED_SETTINGS, snapshot.get());
+  }
+
+  /** 无事务同步路径的提交后刷新失败同样不得改变已完成写结果或写入错误快照。 */
+  @Test
+  void refreshFailureWithoutActiveSynchronizationDoesNotChangeWriteResult() {
+    when(repository.get())
+        .thenReturn(record(0), record(1))
+        .thenThrow(new IllegalStateException("database temporarily unavailable"));
+    when(repository.update(SystemSettings.DEFAULT, 0)).thenReturn(true);
+
+    assertEquals("1", assertDoesNotThrow(() -> service.update(update("0"))).getVersion());
+    assertEquals(SystemSettings.DEFAULT, snapshot.get());
   }
 
   private SystemSettingsUpdateDTO update(String expectedVersion) {

@@ -54,8 +54,9 @@ HTTP wire 上的 Java `Long` 使用非负十进制字符串，`Integer` 使用 J
 | `storageMedia` | S3 启用、上传/预签名预算、Canvas 媒体处理预算 | Canvas 媒体超时/缩略图：下一次 probe/preview；S3 启用与预签名预算：重启 |
 | `advanced` | processor、dispatcher、executor、realtime 与事件通道预算 | 重启 |
 
-`SystemSettingsSnapshot` 是进程内 live 快照：启动时读取一次，PUT 在事务 `afterCommit` 成功后以回读的
-权威记录原子替换（回滚绝不更新内存）。跨节点刷新由统一 PostgreSQL listener 调用
+`SystemSettingsSnapshot` 是进程内 live 快照：启动时读取一次，PUT 在事务 `afterCommit` 成功后通过
+`SystemSettingsChangeHandler` 回读权威记录并原子替换（回滚绝不更新内存）。提交后的回读失败只记日志，
+不改变已完成写结果，快照保持原值等待后续通知恢复。跨节点刷新由统一 PostgreSQL listener 调用
 `SystemSettingsChangeHandler.onNotification(payload)`；listener 建连或重连后调用 `onResync()` 补齐断连窗口。
 两条入口都忽略 payload 语义并回读 `system_setting.id=1`，回读失败只记日志，不中断 listener。Snapshot
 同时保存 repository record version，并以 CAS 门控阻止较旧的并发回读覆盖较新配置。
