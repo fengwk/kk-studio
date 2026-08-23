@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -22,22 +23,21 @@ class NoRedisArchitectureTest {
       List.of(
           "io.lettuce.",
           "org.redisson.",
+          "org.springframework.boot.autoconfigure.data.redis.",
           "org.springframework.data.redis.",
-          "reactor.core.",
-          "reactor.util.",
           "redis.clients.");
   private static final Pattern FORBIDDEN_JAVA_TYPE =
-      Pattern.compile("\\b(?:Lettuce|Redis)[A-Za-z0-9_]*\\b");
+      Pattern.compile("\\b(?:Jedis|Lettuce|Redis|Redisson)[A-Za-z0-9_]*\\b");
   private static final Pattern FORBIDDEN_POM_GROUP =
       Pattern.compile(
-          "<groupId>\\s*(?:io\\.lettuce|io\\.projectreactor|redis\\.clients)\\s*</groupId>",
+          "<groupId>\\s*(?:io\\.lettuce|org\\.redisson|redis\\.clients)\\s*</groupId>",
           Pattern.CASE_INSENSITIVE);
   private static final Pattern FORBIDDEN_POM_ARTIFACT =
       Pattern.compile(
-          "<artifactId>\\s*[^<]*(?:lettuce|reactor-core|redis)[^<]*</artifactId>",
+          "<artifactId>\\s*[^<]*(?:jedis|lettuce|redis|redisson)[^<]*</artifactId>",
           Pattern.CASE_INSENSITIVE);
   private static final Pattern FORBIDDEN_CONFIGURATION =
-      Pattern.compile("(?:lettuce|redis)", Pattern.CASE_INSENSITIVE);
+      Pattern.compile("(?:jedis|lettuce|redis|redisson)", Pattern.CASE_INSENSITIVE);
 
   /** 扫描 Git 索引而非工作目录猜测，确保最终集成时 deploy 配置也自动进入同一守卫。 */
   @Test
@@ -62,6 +62,44 @@ class NoRedisArchitectureTest {
         () ->
             "Redis stack must be absent from tracked backend files:\n"
                 + String.join("\n", violations));
+  }
+
+  /** Reactor 是独立能力：合法 Reactor 用法必须放行，而 Redis Java/POM/环境配置必须分别命中。 */
+  @Test
+  void reactorIsAllowedAndRedisFixturesAreRejected() {
+    List<String> reactorViolations = new ArrayList<>();
+    String reactorImport =
+        "import "
+            + String.join(".", "reactor", "core", "publisher", "Mono")
+            + ";\nclass ReactorService { Mono<String> get() { return Mono.just(\"ok\"); } }";
+    inspectJava(
+        "sample/src/main/java/sample/ReactorService.java", reactorImport, reactorViolations);
+    inspectPom(
+        "sample/pom.xml",
+        "<dependency><groupId>io.projectreactor</groupId>"
+            + "<artifactId>reactor-core</artifactId></dependency>",
+        reactorViolations);
+    assertTrue(
+        reactorViolations.isEmpty(),
+        () -> "Reactor must remain a legal non-Redis dependency: " + reactorViolations);
+
+    List<String> redisViolations = new ArrayList<>();
+    String redisImport =
+        "import "
+            + String.join(".", "org", "springframework", "data", "redis", "core", "RedisTemplate")
+            + ";";
+    inspectJava("sample/src/main/java/sample/RedisStore.java", redisImport, redisViolations);
+    inspectPom(
+        "sample/pom.xml",
+        "<dependency><groupId>org.springframework.boot</groupId>"
+            + "<artifactId>spring-boot-starter-data-redis</artifactId></dependency>",
+        redisViolations);
+    inspectConfiguration(
+        "sample/application.yml",
+        "url: ${KK_STUDIO_REDIS_URL:redis://localhost:6379}",
+        redisViolations);
+    assertEquals(
+        3, redisViolations.size(), () -> "Redis fixtures must be rejected: " + redisViolations);
   }
 
   private static void inspectJava(String relative, String source, List<String> violations) {
