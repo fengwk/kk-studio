@@ -29,9 +29,9 @@ export interface HarnessThreadRealtimeState {
  * Snapshot 优先的 realtime 订阅。
  *
  * 1) 先加载权威的 PostgreSQL snapshot。
- * 2) 在其持久化 version 之后监听。Redis 支撑的 {@code realtime} MODEL_DELTA / TOOL_PARTIAL
- *    事件渲染为瞬态 overlay，直到持久化 Entries 到达；重连与流丢失后 PostgreSQL 仍是
- *    权威来源。Redis 永远不是持久化事实。
+ * 2) 在其持久化 version 之后监听。lossy {@code realtime} MODEL_DELTA / TOOL_PARTIAL
+ *    通知渲染为瞬态 overlay，直到持久化 Entries 到达；重连与通知丢失后 PostgreSQL 仍是
+ *    权威来源。realtime notification 永远不是持久化事实。
  */
 export function useHarnessThreadRealtime(
   threadId: string,
@@ -59,7 +59,7 @@ export function useHarnessThreadRealtime(
     attempt: number
     sequence: number
   } | null>(null)
-  // TOOL_PARTIAL 的有界精确去重指纹（Redis 可能重投递）：按
+  // TOOL_PARTIAL 的有界精确去重指纹（realtime notification 可能重投递）：按
   // thread:invocation:attempt 分组，因此 attempt 变化/终态 snapshot 会自然淘汰它们。
   const toolPartialFingerprintsRef = useRef<Map<string, Set<string>>>(new Map())
   const subscriptionReady = enabled && version != null
@@ -90,7 +90,7 @@ export function useHarnessThreadRealtime(
       next = null
     } else if (snapshot.status !== 'streaming') {
       // 持久化终态边界：resultJson/errorJson 投影无条件
-      // 取代任何更高 sequence 的 Redis overlay（流式 seq8 绝不能压过
+      // 取代任何更高 sequence 的 lossy realtime overlay（流式 seq8 绝不能压过
       // 持久化 seq7 的结果）。resultEntryId == null 时投影保持可见，直到
       // 持久化 Entry 到达；期间事件处理器 fence 拒绝后续 delta。
       next = snapshot
@@ -264,7 +264,7 @@ export function useHarnessThreadRealtime(
       // Snapshot 优先：只有 invocation 在持久化 snapshot 中仍然活跃时
       // （同 attempt、无终态 result/error）才聚合 partial。一旦终态
       // resultJson/errorJson 成为权威（ToolResult Entry 与 invocation 删除原子
-      // 提交：Entry 落地即 invocation 消失），迟到的或重复的 Redis partial
+      // 提交：Entry 落地即 invocation 消失），迟到的或重复的 lossy realtime partial
       // 绝不能追加到完整的终态投影上。
       const invocation = toolInvocationsRef.current.find(
         (item) => item.id === partial.invocationId,
@@ -277,7 +277,7 @@ export function useHarnessThreadRealtime(
       ) {
         return
       }
-      // 精确去重 fence：Redis 可能重投递同一 TOOL_PARTIAL 事件；稳定
+      // 精确去重 fence：realtime notification 可能重投递同一 TOOL_PARTIAL 事件；稳定
       // 指纹（规范化 payload + createdAt）不能让同一块追加两次。
       const fingerprintKey = `${threadId}:${partial.invocationId}:${partial.attempt}`
       let fingerprints = toolPartialFingerprintsRef.current.get(fingerprintKey)

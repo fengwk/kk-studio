@@ -133,7 +133,6 @@ export interface SystemSettingsAdvancedDTO {
   dispatcherMaxDispatchTasks: number
   dispatcherWorkerConcurrency: number
   dispatcherWorkerQueueCapacity: number
-  canvasRealtimeMaxLength: DecimalLong
   canvasFunctionExecutorCoreSize: number
   canvasFunctionExecutorMaxSize: number
   canvasFunctionExecutorQueueCapacity: number
@@ -143,7 +142,6 @@ export interface SystemSettingsAdvancedDTO {
   applicationEventHeartbeatIntervalMillis: DecimalLong
   postgresqlWorkNotificationPollMillis: DecimalLong
   postgresqlWorkReconnectBackoffMillis: DecimalLong
-  redisRealtimeRetryDelayMillis: DecimalLong
 }
 
 /** GET/PUT 的公共 section 载体（tool / aiRuntime / environment / integrations / storageMedia / advanced）。 */

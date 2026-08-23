@@ -137,7 +137,6 @@ export interface SystemSettingsAdvancedDraft {
   dispatcherMaxDispatchTasks: DraftNumericField
   dispatcherWorkerConcurrency: DraftNumericField
   dispatcherWorkerQueueCapacity: DraftNumericField
-  canvasRealtimeMaxLength: DraftNumericField
   canvasFunctionExecutorCoreSize: DraftNumericField
   canvasFunctionExecutorMaxSize: DraftNumericField
   canvasFunctionExecutorQueueCapacity: DraftNumericField
@@ -147,7 +146,6 @@ export interface SystemSettingsAdvancedDraft {
   applicationEventHeartbeatIntervalMillis: DraftNumericField
   postgresqlWorkNotificationPollMillis: DraftNumericField
   postgresqlWorkReconnectBackoffMillis: DraftNumericField
-  redisRealtimeRetryDelayMillis: DraftNumericField
 }
 
 export interface SystemSettingsSectionsDraft {
@@ -223,7 +221,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       dispatcherMaxDispatchTasks: String(dto.advanced.dispatcherMaxDispatchTasks),
       dispatcherWorkerConcurrency: String(dto.advanced.dispatcherWorkerConcurrency),
       dispatcherWorkerQueueCapacity: String(dto.advanced.dispatcherWorkerQueueCapacity),
-      canvasRealtimeMaxLength: dto.advanced.canvasRealtimeMaxLength,
       canvasFunctionExecutorCoreSize: String(dto.advanced.canvasFunctionExecutorCoreSize),
       canvasFunctionExecutorMaxSize: String(dto.advanced.canvasFunctionExecutorMaxSize),
       canvasFunctionExecutorQueueCapacity: String(dto.advanced.canvasFunctionExecutorQueueCapacity),
@@ -234,7 +231,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       postgresqlWorkNotificationPollMillis:
         dto.advanced.postgresqlWorkNotificationPollMillis,
       postgresqlWorkReconnectBackoffMillis: dto.advanced.postgresqlWorkReconnectBackoffMillis,
-      redisRealtimeRetryDelayMillis: dto.advanced.redisRealtimeRetryDelayMillis,
     },
   }
 }
@@ -508,7 +504,6 @@ export function assembleSettingsUpdate(
       dispatcherWorkerQueueCapacity: requiredInt(
         draft.advanced.dispatcherWorkerQueueCapacity,
       ),
-      canvasRealtimeMaxLength: requiredLong(draft.advanced.canvasRealtimeMaxLength),
       canvasFunctionExecutorCoreSize: requiredInt(
         draft.advanced.canvasFunctionExecutorCoreSize,
       ),
@@ -532,7 +527,6 @@ export function assembleSettingsUpdate(
       postgresqlWorkReconnectBackoffMillis: requiredLong(
         draft.advanced.postgresqlWorkReconnectBackoffMillis,
       ),
-      redisRealtimeRetryDelayMillis: requiredLong(draft.advanced.redisRealtimeRetryDelayMillis),
     },
     expectedVersion,
   }
