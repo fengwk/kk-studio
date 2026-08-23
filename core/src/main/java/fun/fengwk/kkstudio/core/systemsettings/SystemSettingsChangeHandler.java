@@ -8,7 +8,7 @@ import java.util.Objects;
 /**
  * System settings 变更通知的应用处理器。
  *
- * <p>通知 payload 只用于唤醒，不承载可信状态；普通通知与 listener 重连同步都必须回读数据库权威记录。运行期回读失败只记录日志， 不得中断统一 listener。
+ * <p>通知 payload 只用于唤醒，不承载可信状态；本地事务提交、普通通知与 listener 重连同步都必须回读数据库权威记录。运行期回读失败只记录日志， 不得中断调用方。
  */
 @Slf4j
 @Component
@@ -31,6 +31,11 @@ public class SystemSettingsChangeHandler {
   /** listener 建连或重连后执行一次完整权威同步。 */
   public void onResync() {
     refresh("resync");
+  }
+
+  /** 本地更新提交成功后立即刷新；回读失败不得改变已经完成的写结果。 */
+  void onLocalCommit() {
+    refresh("local commit");
   }
 
   private void refresh(String reason) {

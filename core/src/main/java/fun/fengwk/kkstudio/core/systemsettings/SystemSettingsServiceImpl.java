@@ -14,8 +14,8 @@ import java.util.Objects;
 /**
  * 单行 system settings 的 CAS 读写；数据库行是权威，服务只在读回时严格解码并校验。
  *
- * <p>PUT 成功后不直接更新内存：先在 {@code afterCommit} 回调中回读权威记录，再按版本原子替换 {@link
- * SystemSettingsSnapshot}。事务回滚绝不触碰内存快照。无活跃事务同步（纯单元测试路径）时退化为直接回读替换。
+ * <p>PUT 成功后不直接更新内存：先在 {@code afterCommit} 回调中通过 {@link SystemSettingsChangeHandler} 容错回读权威记录，
+ * 再按版本原子替换 {@link SystemSettingsSnapshot}。事务回滚绝不触碰内存快照；提交后的刷新失败不得向调用方冒泡。无活跃事务同步 （纯单元测试路径）时使用相同刷新语义。
  */
 @Service
 public class SystemSettingsServiceImpl implements SystemSettingsService {
@@ -24,15 +24,16 @@ public class SystemSettingsServiceImpl implements SystemSettingsService {
 
   private final SystemSettingsRepository systemSettingsRepository;
   private final SystemSettingsCodec systemSettingsCodec;
-  private final SystemSettingsSnapshot systemSettingsSnapshot;
+  private final SystemSettingsChangeHandler systemSettingsChangeHandler;
 
   public SystemSettingsServiceImpl(
       SystemSettingsRepository systemSettingsRepository,
       SystemSettingsCodec systemSettingsCodec,
-      SystemSettingsSnapshot systemSettingsSnapshot) {
+      SystemSettingsChangeHandler systemSettingsChangeHandler) {
     this.systemSettingsRepository = Objects.requireNonNull(systemSettingsRepository, "repository");
     this.systemSettingsCodec = Objects.requireNonNull(systemSettingsCodec, "codec");
-    this.systemSettingsSnapshot = Objects.requireNonNull(systemSettingsSnapshot, "snapshot");
+    this.systemSettingsChangeHandler =
+        Objects.requireNonNull(systemSettingsChangeHandler, "changeHandler");
   }
 
   @Override
@@ -81,18 +82,13 @@ public class SystemSettingsServiceImpl implements SystemSettingsService {
           new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-              applyAuthoritativeSnapshot();
+              systemSettingsChangeHandler.onLocalCommit();
             }
           });
     } else {
-      // 无事务同步（纯单元测试 / 非事务调用路径）：直接回读替换，保证快照与数据库一致。
-      applyAuthoritativeSnapshot();
+      // 无事务同步（纯单元测试 / 非事务调用路径）：使用相同的容错权威刷新，不改变已完成写结果。
+      systemSettingsChangeHandler.onLocalCommit();
     }
-  }
-
-  private void applyAuthoritativeSnapshot() {
-    SystemSettingsRepository.SystemSettingsRecord record = requireRecord();
-    systemSettingsSnapshot.replaceIfNotOlder(record);
   }
 
   private SystemSettingsRepository.SystemSettingsRecord requireRecord() {
