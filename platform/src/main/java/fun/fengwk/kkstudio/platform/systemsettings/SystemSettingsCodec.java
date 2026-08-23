@@ -392,13 +392,6 @@ public class SystemSettingsCodec {
         requiredInt(
             dto.getDispatcherWorkerQueueCapacity(), "advanced.dispatcherWorkerQueueCapacity"),
         requiredInt(
-            dto.getCanvasFunctionExecutorCoreSize(), "advanced.canvasFunctionExecutorCoreSize"),
-        requiredInt(
-            dto.getCanvasFunctionExecutorMaxSize(), "advanced.canvasFunctionExecutorMaxSize"),
-        requiredInt(
-            dto.getCanvasFunctionExecutorQueueCapacity(),
-            "advanced.canvasFunctionExecutorQueueCapacity"),
-        requiredInt(
             dto.getApplicationEventQueueCapacity(), "advanced.applicationEventQueueCapacity"),
         requiredMillis(dto.getApplicationEventMaxBytes(), "advanced.applicationEventMaxBytes"),
         requiredMillis(
@@ -621,9 +614,6 @@ public class SystemSettingsCodec {
     dto.setDispatcherMaxDispatchTasks(advanced.dispatcherMaxDispatchTasks());
     dto.setDispatcherWorkerConcurrency(advanced.dispatcherWorkerConcurrency());
     dto.setDispatcherWorkerQueueCapacity(advanced.dispatcherWorkerQueueCapacity());
-    dto.setCanvasFunctionExecutorCoreSize(advanced.canvasFunctionExecutorCoreSize());
-    dto.setCanvasFunctionExecutorMaxSize(advanced.canvasFunctionExecutorMaxSize());
-    dto.setCanvasFunctionExecutorQueueCapacity(advanced.canvasFunctionExecutorQueueCapacity());
     dto.setApplicationEventQueueCapacity(advanced.applicationEventQueueCapacity());
     dto.setApplicationEventMaxBytes(advanced.applicationEventMaxBytes());
     dto.setApplicationEventSendTimeoutMillis(advanced.applicationEventSendTimeoutMillis());

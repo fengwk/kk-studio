@@ -31,7 +31,7 @@ import java.util.UUID;
  * drop/recreate public schema。Docker 不可用时测试直接失败，不以 mock 或跳过掩盖适配器问题。
  */
 @SpringBootTest(classes = CanvasInfraTestApplication.class)
-abstract class PostgresCanvasInfraTestSupport {
+public abstract class PostgresCanvasInfraTestSupport {
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =

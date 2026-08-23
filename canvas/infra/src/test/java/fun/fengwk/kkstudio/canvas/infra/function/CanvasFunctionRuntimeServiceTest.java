@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
@@ -29,8 +30,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionConfigCodec;
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunStateCodec;
 
 import java.time.Instant;
 import java.util.List;
@@ -174,7 +173,7 @@ class CanvasFunctionRuntimeServiceTest {
     CanvasFunctionAdapter adapter = mock(CanvasFunctionAdapter.class);
     when(transactions.cancel(CANVAS_ID, NODE_ID, "request")).thenReturn(run);
     when(registry.require(MODEL.key()))
-        .thenReturn(new CanvasFunctionModelRegistry.RegisteredModel(MODEL, adapter));
+        .thenReturn(new CanvasFunctionCatalog.RegisteredModel(MODEL, adapter));
 
     assertSame(run, service.cancel(CANVAS_ID, NODE_ID, "request"));
     verify(adapter).cancel(cancelled);

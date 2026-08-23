@@ -33,12 +33,6 @@ public class SystemSettingsAdvancedDTO {
 
   private Integer dispatcherWorkerQueueCapacity;
 
-  private Integer canvasFunctionExecutorCoreSize;
-
-  private Integer canvasFunctionExecutorMaxSize;
-
-  private Integer canvasFunctionExecutorQueueCapacity;
-
   private Integer applicationEventQueueCapacity;
 
   private Long applicationEventMaxBytes;

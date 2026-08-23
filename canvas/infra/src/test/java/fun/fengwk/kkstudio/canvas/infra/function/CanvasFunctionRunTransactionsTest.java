@@ -1,7 +1,9 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -13,30 +15,30 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionConfigCodec;
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunStateCodec;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.platform.studio.resource.CanvasResourceLifecycle;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -73,6 +75,10 @@ class CanvasFunctionRunTransactionsTest {
   private CanvasFunctionRunRepository runRepository;
   private CanvasFunctionRunTransactions transactions;
   private CanvasFunctionRunStateCodecPort stateCodec;
+  private CanvasFunctionBlobAccess blobAccess;
+  private CanvasResourceLifecycle resourceLifecycle;
+  private CanvasFunctionModelRegistry registry;
+  private CanvasFunctionAdapter adapter;
   private CanvasFixture fixture;
 
   @BeforeEach
@@ -82,15 +88,14 @@ class CanvasFunctionRunTransactionsTest {
     runRepository = mock(CanvasFunctionRunRepository.class);
     CanvasFunctionResourcePinRepository refRepository =
         mock(CanvasFunctionResourcePinRepository.class);
-    CanvasFunctionModelRegistry registry = mock(CanvasFunctionModelRegistry.class);
+    registry = mock(CanvasFunctionModelRegistry.class);
+    adapter = mock(CanvasFunctionAdapter.class);
     when(registry.require(MODEL.key()))
-        .thenReturn(
-            new CanvasFunctionModelRegistry.RegisteredModel(
-                MODEL, mock(CanvasFunctionAdapter.class)));
+        .thenReturn(new CanvasFunctionCatalog.RegisteredModel(MODEL, adapter));
     CanvasFunctionConfigCodecPort configCodec = new CanvasFunctionConfigCodec(new ObjectMapper());
     stateCodec = new CanvasFunctionRunStateCodec(new ObjectMapper(), configCodec);
-    CanvasResourceLifecycle resourceLifecycle = mock(CanvasResourceLifecycle.class);
-    ObjectProvider<StorageBlobManager> blobManagers = provider(mock(StorageBlobManager.class));
+    resourceLifecycle = mock(CanvasResourceLifecycle.class);
+    blobAccess = mock(CanvasFunctionBlobAccess.class);
     transactions =
         new CanvasFunctionRunTransactions(
             canvasStore,
@@ -101,7 +106,7 @@ class CanvasFunctionRunTransactionsTest {
             configCodec,
             stateCodec,
             resourceLifecycle,
-            blobManagers,
+            blobAccess,
             Clock.fixed(NOW, ZoneOffset.UTC));
     fixture = new CanvasFixture(stateCodec);
     when(canvasStore.lockDocument(CANVAS)).thenReturn(Optional.of(fixture.document));
@@ -212,11 +217,95 @@ class CanvasFunctionRunTransactionsTest {
     verify(canvasStore, never()).advanceDocumentVersion(any(), anyLong(), anyLong());
   }
 
-  @SuppressWarnings("unchecked")
-  private static <T> ObjectProvider<T> provider(T value) {
-    ObjectProvider<T> provider = mock(ObjectProvider.class);
-    when(provider.getIfAvailable()).thenReturn(value);
-    return provider;
+  /** failure 只对同 request 的 RUNNING 生效，并在 terminal CAS 后清理未挂接目标与前进 version。 */
+  @Test
+  void failIfRunningTransitionsMatchingRunAndIgnoresStaleObservation() {
+    when(runRepository.transitionTerminal(any())).thenReturn(true);
+    when(canvasStore.advanceDocumentVersion(CANVAS, 5L, 6L)).thenReturn(true);
+
+    assertTrue(transactions.failIfRunning(NODE, REQUEST.toString(), "safe failure"));
+
+    verify(runRepository).transitionTerminal(any());
+    verify(canvasStore).advanceDocumentVersion(CANVAS, 5L, 6L);
+
+    when(runRepository.findByNodeId(NODE)).thenReturn(Optional.empty());
+    assertFalse(transactions.failIfRunning(NODE, REQUEST.toString(), "ignored"));
+
+    when(runRepository.findByNodeId(NODE)).thenReturn(fixture.runningRun());
+    when(canvasStore.lockNode(CANVAS, NODE)).thenReturn(Optional.empty());
+    assertFalse(transactions.failIfRunning(NODE, REQUEST.toString(), "missing node"));
+  }
+
+  /** success 必须精确接受预分配目标，且 Blob kind 与 frozen output kind 一致。 */
+  @Test
+  void completeSuccessRejectsWrongTargetAndBlobKind() {
+    CanvasFunctionFrozenRun frozen = fixture.frozen("QUEUED", Map.of());
+    assertThrows(
+        IllegalArgumentException.class, () -> transactions.completeSuccess(frozen, List.of()));
+
+    UUID blobId = UUID.randomUUID();
+    CanvasResource output =
+        new CanvasResource(TARGET, CANVAS, null, null, blobId, "output.png", null, NOW);
+    when(resourceRepository.findById(CANVAS, TARGET)).thenReturn(Optional.of(output));
+    when(blobAccess.findFacts(blobId))
+        .thenReturn(
+            Optional.of(
+                new CanvasFunctionBlobAccess.BlobFacts(blobId, "video/mp4", 3L, 1L, 1L, null)));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> transactions.completeSuccess(frozen, List.of(TARGET)));
+  }
+
+  /** start/cancel 必须拒绝非 Function、不可用 adapter 与不匹配 request，并幂等返回既有终态。 */
+  @Test
+  void startAndCancelValidateRuntimeIdentityBeforeWriting() {
+    NodeRecord plain =
+        new NodeRecord(NODE, CANVAS, "plain", fixture.node.transform(), null, null, null);
+    when(canvasStore.lockNode(CANVAS, NODE)).thenReturn(Optional.of(plain));
+    assertThrows(
+        IllegalArgumentException.class, () -> transactions.start(CANVAS, NODE, REQUEST.toString()));
+
+    when(canvasStore.lockNode(CANVAS, NODE)).thenReturn(Optional.of(fixture.node));
+    when(runRepository.findByNodeIdForUpdate(NODE)).thenReturn(Optional.empty());
+    when(adapter.enabled()).thenReturn(false);
+    when(adapter.unavailableReason()).thenReturn("disabled");
+    assertThrows(
+        IllegalArgumentException.class, () -> transactions.start(CANVAS, NODE, REQUEST.toString()));
+
+    CanvasFunctionRun terminal =
+        new CanvasFunctionRun(
+            NODE,
+            REQUEST,
+            CanvasFunctionRunStatus.CANCELLED,
+            "CANCELLED",
+            stateCodec.encode(fixture.frozen("CANCELLED", Map.of())),
+            null,
+            NOW);
+    when(runRepository.findByNodeIdForUpdate(NODE)).thenReturn(Optional.of(terminal));
+    assertThrows(
+        CanvasFunctionRunException.class,
+        () -> transactions.cancel(CANVAS, NODE, OTHER_REQUEST.toString()));
+    assertEquals(terminal, transactions.cancel(CANVAS, NODE, REQUEST.toString()));
+  }
+
+  /** 迟到 success 必须清理孤立目标并返回 false；未物化目标不能进入 terminal swap。 */
+  @Test
+  void completeSuccessRejectsStaleOrUnmaterializedTarget() {
+    CanvasFunctionFrozenRun frozen = fixture.frozen("QUEUED", Map.of());
+    when(canvasStore.lockNode(CANVAS, NODE)).thenReturn(Optional.empty());
+    assertFalse(transactions.completeSuccess(frozen, List.of(TARGET)));
+    verify(resourceLifecycle).discardUnownedTarget(CANVAS, TARGET);
+
+    when(canvasStore.lockNode(CANVAS, NODE)).thenReturn(Optional.of(fixture.node));
+    when(runRepository.findByNodeIdForUpdate(NODE)).thenReturn(Optional.empty());
+    assertFalse(transactions.completeSuccess(frozen, List.of(TARGET)));
+
+    when(runRepository.findByNodeIdForUpdate(NODE)).thenReturn(fixture.runningRun());
+    when(resourceRepository.findById(CANVAS, TARGET)).thenReturn(Optional.empty());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> transactions.completeSuccess(frozen, List.of(TARGET)));
   }
 
   private static final class CanvasFixture {
@@ -236,7 +325,8 @@ class CanvasFunctionRunTransactionsTest {
               new CanvasTransform(0.0, 0.0, 100.0, 80.0),
               null,
               MODEL.key(),
-              "{}");
+              "{\"prompt\":{\"segments\":[{\"type\":\"TEXT\",\"text\":\"prompt\"}]},"
+                  + "\"parameters\":{}}");
     }
 
     private Optional<CanvasFunctionRun> runningRun() {

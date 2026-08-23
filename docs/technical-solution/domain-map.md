@@ -25,10 +25,11 @@ platform -> harness-tool
 harness-daemon -> harness-tool
 ```
 
-`canvas-core` 只依赖 JDK；`canvas-infra` 实现 Canvas PostgreSQL/MyBatis 持久化与 JSON codec
-端口且不依赖 Platform/Harness/Web；Platform 生产代码只经 `canvas-core` 端口访问，Web 作为组合根装配
-`canvas-infra`。`harness-runtime` 不依赖 Spring、MyBatis、Harness Tool 实现或 Web；`harness-*` 不依赖
-`canvas-core`。
+`canvas-core` 只依赖 JDK，并定义 Function Catalog/Service/BlobAccess 与 ResourceLifecycle 窄端口；
+`canvas-infra` 实现 Canvas PostgreSQL/MyBatis 持久化、JSON codec 与 Function Runtime 基座且不依赖
+Platform/Harness/Web；Platform 生产代码只经 `canvas-core` 端口访问并实现 BlobAccess/ResourceLifecycle，
+第三方 Function Adapter 仍留在 Platform，Web 作为组合根装配 `canvas-infra`。`harness-runtime` 不依赖
+Spring、MyBatis、Harness Tool 实现或 Web；`harness-*` 不依赖 `canvas-core`。
 
 ## 2. Catalog 词汇
 

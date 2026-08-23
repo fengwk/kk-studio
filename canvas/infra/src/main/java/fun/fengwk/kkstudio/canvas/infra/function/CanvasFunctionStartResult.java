@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 

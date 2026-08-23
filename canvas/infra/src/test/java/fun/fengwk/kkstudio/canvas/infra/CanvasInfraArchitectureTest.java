@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,7 +20,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-/** 守护 Canvas Infra 只承载 Canvas Core 的 PostgreSQL/MyBatis 与 codec 适配。 */
+/** 守护 Canvas Infra 只承载 Canvas Core 的 PostgreSQL/MyBatis、codec 与 Function Runtime。 */
 class CanvasInfraArchitectureTest {
 
   private static final String PACKAGE_PREFIX = "package fun.fengwk.kkstudio.canvas.infra";
@@ -90,6 +93,14 @@ class CanvasInfraArchitectureTest {
                 ".", "fun", "fengwk", "kkstudio", "canvas", "infra", "CanvasInfraAutoConfiguration")
             + "\n",
         Files.readString(imports, StandardCharsets.UTF_8));
+  }
+
+  /** Function Runtime 的部署属性必须由唯一 Infra 自动配置入口显式启用。 */
+  @Test
+  void autoConfigurationEnablesFunctionRuntimeProperties() {
+    EnableConfigurationProperties annotation =
+        CanvasInfraAutoConfiguration.class.getAnnotation(EnableConfigurationProperties.class);
+    assertEquals(List.of(CanvasFunctionRuntimeProperties.class), List.of(annotation.value()));
   }
 
   private static void inspect(Path main, Path path, List<String> violations) {

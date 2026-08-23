@@ -23,14 +23,14 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionModelRegistry;
-import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionRuntimeService;
 import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
 import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 
@@ -49,14 +49,17 @@ class StudioCanvasFunctionControllerTest {
   private static final UUID REQUEST = new UUID(0L, 3L);
 
   private MockMvc mockMvc;
-  private CanvasFunctionRuntimeService runtimeService;
+  private CanvasFunctionService runtimeService;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    runtimeService = mock(CanvasFunctionRuntimeService.class);
-    CanvasFunctionModelRegistry registry =
-        new CanvasFunctionModelRegistry(List.of(adapter("fake-image")));
+    runtimeService = mock(CanvasFunctionService.class);
+    CanvasFunctionAdapter adapter = adapter("fake-image");
+    CanvasFunctionCatalog registry = mock(CanvasFunctionCatalog.class);
+    when(registry.list())
+        .thenReturn(
+            List.of(new CanvasFunctionCatalog.RegisteredModel(adapter.models().get(0), adapter)));
     FixedObjectProvider<StorageBlobManager> blobManagers =
         new FixedObjectProvider<>(mock(StorageBlobManager.class));
     ObjectMapper mapper = new ObjectMapper();

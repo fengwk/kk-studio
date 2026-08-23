@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -45,6 +45,23 @@ class CanvasFunctionModelRegistryTest {
                 List.of(adapter(model("same"), true, null), adapter(model("same"), true, null))));
   }
 
+  /** Adapter availability facts 必须自洽，空 model 与矛盾 reason 在启动时 fail-fast。 */
+  @Test
+  void rejectsInvalidAdapterAvailabilityDeclarations() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasFunctionModelRegistry(List.of(adapter(model("enabled"), true, "reason"))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasFunctionModelRegistry(List.of(adapter(model("disabled"), false, null))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasFunctionModelRegistry(List.of(emptyAdapter())));
+    CanvasFunctionModelRegistry registry =
+        new CanvasFunctionModelRegistry(List.of(adapter(model("known"), true, null)));
+    assertThrows(IllegalArgumentException.class, () -> registry.require("unknown"));
+  }
+
   private static CanvasFunctionModel model(String key) {
     return new CanvasFunctionModel(
         key,
@@ -70,6 +87,34 @@ class CanvasFunctionModelRegistryTest {
       @Override
       public String unavailableReason() {
         return reason;
+      }
+
+      @Override
+      public void preflight(CanvasFunctionFrozenRun run) {}
+
+      @Override
+      public List<UUID> execute(
+          CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+        throw new UnsupportedOperationException();
+      }
+    };
+  }
+
+  private static CanvasFunctionAdapter emptyAdapter() {
+    return new CanvasFunctionAdapter() {
+      @Override
+      public List<CanvasFunctionModel> models() {
+        return List.of();
+      }
+
+      @Override
+      public boolean enabled() {
+        return true;
+      }
+
+      @Override
+      public String unavailableReason() {
+        return null;
       }
 
       @Override

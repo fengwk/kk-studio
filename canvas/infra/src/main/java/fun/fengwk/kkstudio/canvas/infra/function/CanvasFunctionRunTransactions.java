@@ -1,6 +1,5 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,10 +11,14 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess.BlobFacts;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
@@ -25,9 +28,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.platform.studio.resource.CanvasResourceLifecycle;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -46,11 +46,11 @@ public class CanvasFunctionRunTransactions {
   private final CanvasResourceRepository resourceRepository;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionResourcePinRepository refRepository;
-  private final CanvasFunctionModelRegistry registry;
+  private final CanvasFunctionCatalog registry;
   private final CanvasFunctionConfigCodecPort configCodec;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final CanvasResourceLifecycle resourceLifecycle;
-  private final ObjectProvider<StorageBlobManager> blobManagers;
+  private final CanvasFunctionBlobAccess blobAccess;
   private final Clock clock;
 
   public CanvasFunctionRunTransactions(
@@ -58,11 +58,11 @@ public class CanvasFunctionRunTransactions {
       CanvasResourceRepository resourceRepository,
       CanvasFunctionRunRepository runRepository,
       CanvasFunctionResourcePinRepository refRepository,
-      CanvasFunctionModelRegistry registry,
+      CanvasFunctionCatalog registry,
       CanvasFunctionConfigCodecPort configCodec,
       CanvasFunctionRunStateCodecPort stateCodec,
       CanvasResourceLifecycle resourceLifecycle,
-      ObjectProvider<StorageBlobManager> blobManagers,
+      CanvasFunctionBlobAccess blobAccess,
       Clock clock) {
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
@@ -72,7 +72,7 @@ public class CanvasFunctionRunTransactions {
     this.configCodec = Objects.requireNonNull(configCodec, "configCodec");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
-    this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
+    this.blobAccess = Objects.requireNonNull(blobAccess, "blobAccess");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -97,7 +97,7 @@ public class CanvasFunctionRunTransactions {
       throw conflict("another requestId is already RUNNING for this node");
     }
 
-    CanvasFunctionModelRegistry.RegisteredModel registered = registry.require(node.modelKey());
+    CanvasFunctionCatalog.RegisteredModel registered = registry.require(node.modelKey());
     CanvasFunctionAdapter adapter = registered.adapter();
     if (!adapter.enabled()) {
       throw new IllegalArgumentException(
@@ -263,8 +263,8 @@ public class CanvasFunctionRunTransactions {
       throw new IllegalArgumentException(
           "adapter result must be materialized as an unowned blob Resource");
     }
-    StorageBlob outputBlob = requireBlobManager().getBlob(output.blobId());
-    if (outputBlob == null || kindOf(outputBlob.getMediaType()) != frozen.model().outputKind()) {
+    BlobFacts outputBlob = blobAccess.findFacts(output.blobId()).orElse(null);
+    if (outputBlob == null || kindOf(outputBlob.mediaType()) != frozen.model().outputKind()) {
       throw new IllegalArgumentException(
           "adapter result blob kind must match the frozen Function output kind");
     }
@@ -332,7 +332,7 @@ public class CanvasFunctionRunTransactions {
       if (resource.blobId() == null) {
         throw new IllegalArgumentException("referenced resource must be a Storage blob");
       }
-      StorageBlob blob = requireBlobManager().getBlob(resource.blobId());
+      BlobFacts blob = blobAccess.findFacts(resource.blobId()).orElse(null);
       if (blob == null) {
         throw new IllegalArgumentException("referenced blob is missing: " + resource.blobId());
       }
@@ -342,13 +342,13 @@ public class CanvasFunctionRunTransactions {
               reference.index(),
               resource.id(),
               resource.blobId(),
-              kindOf(blob.getMediaType()),
+              kindOf(blob.mediaType()),
               resource.name(),
-              blob.getMediaType(),
-              blob.getSizeBytes(),
-              blob.getWidth(),
-              blob.getHeight(),
-              blob.getDurationMs()));
+              blob.mediaType(),
+              blob.sizeBytes(),
+              blob.width(),
+              blob.height(),
+              blob.durationMs()));
     }
     validateReferencePolicy(manifest, policy);
     return List.copyOf(manifest);
@@ -428,14 +428,6 @@ public class CanvasFunctionRunTransactions {
     return canvasStore
         .lockDocument(canvasId)
         .orElseThrow(() -> notFound("Canvas document not found"));
-  }
-
-  private StorageBlobManager requireBlobManager() {
-    StorageBlobManager blobManager = blobManagers.getIfAvailable();
-    if (blobManager == null) {
-      throw new IllegalStateException("global blob storage is unavailable");
-    }
-    return blobManager;
   }
 
   private static CanvasResourceKind kindOf(String mediaType) {

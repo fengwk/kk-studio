@@ -1,8 +1,7 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -20,21 +19,16 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
-import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
 import java.util.List;
@@ -56,8 +50,7 @@ class CanvasFunctionExecutionContextImplTest {
 
   private CanvasFunctionRunRepository runs;
   private CanvasFunctionRunTransactions transactions;
-  private S3StorageService storage;
-  private StorageBlobManager blobManager;
+  private CanvasFunctionBlobAccess blobAccess;
   private CanvasResourceMaterializer materializer;
   private CanvasFunctionFrozenRun frozen;
 
@@ -65,8 +58,7 @@ class CanvasFunctionExecutionContextImplTest {
   void setUp() {
     runs = mock(CanvasFunctionRunRepository.class);
     transactions = mock(CanvasFunctionRunTransactions.class);
-    storage = mock(S3StorageService.class);
-    blobManager = mock(StorageBlobManager.class);
+    blobAccess = mock(CanvasFunctionBlobAccess.class);
     materializer = mock(CanvasResourceMaterializer.class);
     CanvasFunctionModel model =
         new CanvasFunctionModel(
@@ -115,15 +107,17 @@ class CanvasFunctionExecutionContextImplTest {
   }
 
   @Test
-  void opensOnlyFrozenOriginalAndClosesLengthMismatch() {
-    TrackingInputStream mismatch = new TrackingInputStream(new byte[] {1, 2});
-    when(storage.readObject(StorageObjectKeys.blobOriginal(BLOB)))
-        .thenReturn(new S3ObjectStream(mismatch, new S3ObjectMetadata(2L, "image/png", null)));
+  void opensOnlyFrozenOriginalWithFrozenLength() {
+    CanvasFunctionResourceStream stream =
+        new CanvasFunctionResourceStream(
+            new ByteArrayInputStream(new byte[] {1, 2, 3}),
+            3L,
+            new ByteArrayInputStream(new byte[0]));
+    when(blobAccess.openOriginal(BLOB, 3L)).thenReturn(stream);
     CanvasFunctionExecutionContextImpl context = context();
 
-    assertThrows(
-        IllegalArgumentException.class, () -> context.openOriginal(frozen.manifest().get(0)));
-    assertTrue(mismatch.closed);
+    assertEquals(stream, context.openOriginal(frozen.manifest().get(0)));
+    verify(blobAccess).openOriginal(BLOB, 3L);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -163,13 +157,12 @@ class CanvasFunctionExecutionContextImplTest {
 
   @Test
   void presignsOnlyFrozenOriginalWhileRunIsRunning() {
-    when(blobManager.presignOriginalUrl(BLOB))
-        .thenReturn(StoragePresignedUrlDTO.builder().url("https://s3.example/object").build());
+    when(blobAccess.originalUrl(BLOB, 120L)).thenReturn("https://s3.example/object");
     CanvasFunctionExecutionContextImpl context = context();
 
     assertEquals(
         "https://s3.example/object", context.presignOriginal(frozen.manifest().get(0), 120L));
-    verify(blobManager).presignOriginalUrl(BLOB);
+    verify(blobAccess).originalUrl(BLOB, 120L);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -238,11 +231,9 @@ class CanvasFunctionExecutionContextImplTest {
   }
 
   private CanvasFunctionExecutionContextImpl context() {
-    ObjectProvider<S3StorageService> storageProvider = provider(storage);
-    ObjectProvider<StorageBlobManager> blobManagerProvider = provider(blobManager);
     ObjectProvider<CanvasResourceMaterializer> materializerProvider = provider(materializer);
     return new CanvasFunctionExecutionContextImpl(
-        runs, transactions, storageProvider, blobManagerProvider, materializerProvider, frozen);
+        runs, transactions, blobAccess, materializerProvider, frozen);
   }
 
   @SuppressWarnings("unchecked")
@@ -250,19 +241,5 @@ class CanvasFunctionExecutionContextImplTest {
     ObjectProvider<T> provider = mock(ObjectProvider.class);
     when(provider.getIfAvailable()).thenReturn(value);
     return provider;
-  }
-
-  private static final class TrackingInputStream extends ByteArrayInputStream {
-    private boolean closed;
-
-    private TrackingInputStream(byte[] buffer) {
-      super(buffer);
-    }
-
-    @Override
-    public void close() throws IOException {
-      closed = true;
-      super.close();
-    }
   }
 }

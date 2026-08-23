@@ -63,8 +63,8 @@ flowchart LR
 | `harness-infra` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store |
 | `harness-daemon` | 独立 Environment 进程适配器，只依赖 `harness-tool` |
 | `canvas-core` | **纯 Java Canvas 领域模块**：document、graph、Resource/Function、typed command、repository/query/codec 端口 |
-| `canvas-infra` | Canvas PostgreSQL/MyBatis 持久化、Query 投影与 Function JSON codec 的端口实现 |
-| `platform` | Catalog、全局 Blob Storage、`DatabaseTurnResolver`、Model/Tool Gateway、Environment、Chat 与 Canvas 应用服务；Canvas 持久化只经 Core 端口访问；装配并执行受信任插件；Harness 执行表只经 Runtime/Store 端口写入 |
+| `canvas-infra` | Canvas PostgreSQL/MyBatis 持久化、Query 投影、Function JSON codec，以及依赖 Core 窄端口的 Function Runtime 基座 |
+| `platform` | Catalog、全局 Blob Storage、`DatabaseTurnResolver`、Model/Tool Gateway、Environment、Chat 与 Canvas 应用服务；实现 Canvas Blob/Resource 生命周期端口并保留第三方 Function Adapter；Canvas 持久化只经 Core 端口访问；装配并执行受信任插件；Harness 执行表只经 Runtime/Store 端口写入 |
 | `web` | **生产组合根**：装配 Runtime、infra 与 Platform ports，管理 dispatcher 与单连接 PostgreSQL notification loop 生命周期，并提供 HTTP、WebSocket（浏览器事件通道与 daemon v2）与静态资源适配 |
 | `share` | HTTP DTO 与公开 JSON 结构 |
 | `frontend` | React 页面、Pane、本地状态与 API client |

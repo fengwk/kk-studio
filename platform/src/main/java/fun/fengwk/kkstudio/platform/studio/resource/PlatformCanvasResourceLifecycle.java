@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
@@ -22,13 +23,13 @@ import java.util.UUID;
  * 是否保留，不额外修改 ref_count。
  */
 @Component
-public class CanvasResourceLifecycle {
+public class PlatformCanvasResourceLifecycle implements CanvasResourceLifecycle {
 
   private final CanvasResourceRepository resourceRepository;
   private final CanvasFunctionResourcePinRepository pinRepository;
   private final ObjectProvider<StorageBlobManager> blobManagers;
 
-  public CanvasResourceLifecycle(
+  public PlatformCanvasResourceLifecycle(
       CanvasResourceRepository resourceRepository,
       CanvasFunctionResourcePinRepository pinRepository,
       ObjectProvider<StorageBlobManager> blobManagers) {
@@ -38,6 +39,7 @@ public class CanvasResourceLifecycle {
   }
 
   /** 释放指定 Run 的全部 pin，并回收因此失去最后一个 pin 的无 owner Resource。 */
+  @Override
   public void releaseRunPins(UUID canvasId, UUID nodeId, UUID requestId) {
     List<CanvasFunctionResourcePin> refs = pinRepository.findByRun(canvasId, nodeId, requestId);
     pinRepository.deleteByRun(canvasId, nodeId, requestId);
@@ -45,6 +47,7 @@ public class CanvasResourceLifecycle {
   }
 
   /** 释放节点当前 Run 的全部 pin，并回收因此失去最后一个 pin 的无 owner Resource。 */
+  @Override
   public void releaseNodePins(UUID canvasId, UUID nodeId) {
     List<CanvasFunctionResourcePin> refs = pinRepository.findByNode(canvasId, nodeId);
     pinRepository.deleteByNode(canvasId, nodeId);
@@ -52,11 +55,13 @@ public class CanvasResourceLifecycle {
   }
 
   /** 画布深删除前清空全部 pin；画布内全部 Resource 随后由 {@link #deleteCanvasResources} 回收。 */
+  @Override
   public void releaseCanvasPins(UUID canvasId) {
     pinRepository.deleteByCanvas(canvasId);
   }
 
   /** 删除节点拥有的资源。仍被任一 Function Run pin 的资源只解除 owner；无 pin 资源删除行并释放其 Blob 引用。 */
+  @Override
   public void deleteOwnedResources(UUID canvasId, UUID nodeId) {
     for (CanvasResource resource : resourceRepository.findByOwnerNode(canvasId, nodeId)) {
       if (pinRepository.countByResource(canvasId, resource.id()) > 0) {
@@ -70,6 +75,7 @@ public class CanvasResourceLifecycle {
   }
 
   /** Function success 的资源交换：旧 owned Resource 若仍被其他 Run pin 则解除 owner，否则删除；随后把预分配目标挂到 index 0。 */
+  @Override
   public CanvasResource replaceOwnedWithTarget(UUID canvasId, UUID nodeId, UUID targetResourceId) {
     CanvasResource target =
         resourceRepository.findByIdForUpdate(canvasId, targetResourceId).orElse(null);
@@ -106,6 +112,7 @@ public class CanvasResourceLifecycle {
   }
 
   /** 失败、取消或迟到结果清理：只有无 owner 的目标 Resource 会被删除；保留 OUTPUT pin 本身。 */
+  @Override
   public void discardUnownedTarget(UUID canvasId, UUID targetResourceId) {
     resourceRepository
         .findByIdForUpdate(canvasId, targetResourceId)
@@ -114,6 +121,7 @@ public class CanvasResourceLifecycle {
   }
 
   /** 画布深删除：调用方须先删除全部 pin，随后删除每个 Resource 行并释放其 Blob 引用。 */
+  @Override
   public void deleteCanvasResources(UUID canvasId) {
     for (CanvasResource resource : resourceRepository.findByCanvasId(canvasId)) {
       deleteResource(resource);

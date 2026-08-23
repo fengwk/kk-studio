@@ -63,6 +63,10 @@ kk-studio:
       max-message-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES:16777216}
   canvas:
     function:
+      runtime:
+        core-size: ${KK_STUDIO_CANVAS_FUNCTION_RUNTIME_CORE_SIZE:2}
+        max-size: ${KK_STUDIO_CANVAS_FUNCTION_RUNTIME_MAX_SIZE:4}
+        queue-capacity: ${KK_STUDIO_CANVAS_FUNCTION_RUNTIME_QUEUE_CAPACITY:64}
       minimax-h3:
         # 仅保留部署秘密；启用、路由与超时由 system_setting.integrations.minimaxH3 提供。
         comfy-bearer-token: ${KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN:}

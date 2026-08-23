@@ -11,9 +11,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
-import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionModelRegistry;
-import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionRuntimeService;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionModelDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunRequestDTO;
@@ -28,13 +28,13 @@ import java.util.UUID;
 @RequestMapping("/api")
 public class StudioCanvasFunctionController {
 
-  private final CanvasFunctionModelRegistry registry;
-  private final CanvasFunctionRuntimeService runtimeService;
+  private final CanvasFunctionCatalog registry;
+  private final CanvasFunctionService runtimeService;
   private final StudioWebMapper mapper;
 
   public StudioCanvasFunctionController(
-      CanvasFunctionModelRegistry registry,
-      CanvasFunctionRuntimeService runtimeService,
+      CanvasFunctionCatalog registry,
+      CanvasFunctionService runtimeService,
       StudioWebMapper mapper) {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.runtimeService = Objects.requireNonNull(runtimeService, "runtimeService");
