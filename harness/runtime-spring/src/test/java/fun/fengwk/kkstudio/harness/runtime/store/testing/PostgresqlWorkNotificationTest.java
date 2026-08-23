@@ -9,7 +9,6 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,7 +22,6 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlWorkListener;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -39,15 +37,13 @@ import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 class PostgresqlWorkNotificationTest {
+
+  private static final String WORK_CHANNEL = "harness_runtime_work";
 
   private HarnessStore store;
   private DataSource dataSource;
@@ -67,7 +63,7 @@ class PostgresqlWorkNotificationTest {
         Statement statement = connection.createStatement()) {
       connection.setAutoCommit(true);
       PGConnection notifications = connection.unwrap(PGConnection.class);
-      statement.execute("LISTEN " + PostgresqlWorkListener.CHANNEL);
+      statement.execute("LISTEN " + WORK_CHANNEL);
 
       assertThrows(
           IllegalStateException.class,
@@ -124,79 +120,6 @@ class PostgresqlWorkNotificationTest {
       assertTrue(deleted);
       assertNoNotification(notifications);
     }
-  }
-
-  @Test
-  void listenerWakesAfterListenAndAfterCommittedNotification() throws Exception {
-    Baseline baseline = seedThreadBaseline(store);
-    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
-    AtomicInteger wakes = new AtomicInteger();
-    CountDownLatch connected = new CountDownLatch(1);
-    CountDownLatch notified = new CountDownLatch(1);
-    Runnable wake =
-        () -> {
-          if (wakes.incrementAndGet() == 1) {
-            connected.countDown();
-          } else {
-            notified.countDown();
-          }
-        };
-    PostgresqlWorkListener listener =
-        new PostgresqlWorkListener(dataSource, wake, Duration.ofMillis(100), Duration.ofMillis(20));
-    try {
-      listener.start();
-      listener.start();
-      assertTrue(connected.await(10, TimeUnit.SECONDS));
-
-      requestWork(baseline.threadId(), target, T0);
-      assertTrue(notified.await(10, TimeUnit.SECONDS));
-      assertTrue(wakes.get() >= 2);
-    } finally {
-      listener.stop();
-      listener.stop();
-    }
-    assertFalse(listener.isRunning());
-    assertThrows(IllegalStateException.class, listener::start);
-  }
-
-  @Test
-  void listenerConfigurationRejectsInvalidIntervalsAndNullDependencies() {
-    Runnable wake = () -> {};
-    assertThrows(
-        NullPointerException.class,
-        () -> new PostgresqlWorkListener(null, wake, Duration.ofMillis(1), Duration.ofMillis(1)));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new PostgresqlWorkListener(
-                dataSource, (Runnable) null, Duration.ofMillis(1), Duration.ofMillis(1)));
-    assertThrows(
-        NullPointerException.class,
-        () -> new PostgresqlWorkListener(dataSource, wake, null, Duration.ofMillis(1)));
-    assertThrows(
-        NullPointerException.class,
-        () -> new PostgresqlWorkListener(dataSource, wake, Duration.ofMillis(1), null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new PostgresqlWorkListener(dataSource, wake, Duration.ZERO, Duration.ofMillis(1)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PostgresqlWorkListener(
-                dataSource, wake, Duration.ofNanos(1_500_000), Duration.ofMillis(1)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PostgresqlWorkListener(
-                dataSource,
-                wake,
-                Duration.ofMillis((long) Integer.MAX_VALUE + 1),
-                Duration.ofMillis(1)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PostgresqlWorkListener(
-                dataSource, wake, Duration.ofMillis(1), Duration.ofNanos(1_500_000)));
   }
 
   @Test
@@ -372,7 +295,7 @@ class PostgresqlWorkNotificationTest {
     PGNotification[] notifications = connection.getNotifications(5_000);
     assertNotNull(notifications);
     assertTrue(notifications.length > 0);
-    assertEquals(PostgresqlWorkListener.CHANNEL, notifications[0].getName());
+    assertEquals(WORK_CHANNEL, notifications[0].getName());
     drainNotifications(connection);
   }
 

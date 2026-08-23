@@ -36,13 +36,13 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlWorkListener;
+import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlRealtimeEventSink;
+import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.spring.realtime.RealtimeEventSource;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeConfig;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.spring.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.web.WebTestApplication;
+import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -58,7 +58,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Web 组合根装配测试：完整 Spring 上下文（{@code workers-enabled=false}）中验证 bean 构造、资源根目录、Redis 配置、 executor
+ * Web 组合根装配测试：完整 Spring 上下文（{@code workers-enabled=false}）中验证 bean 构造、资源根目录、PostgreSQL realtime、executor
  * 拒绝策略与「控制平面可用但 worker 不启动」。
  */
 @SpringBootTest(
@@ -103,7 +103,6 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private HarnessStore harnessStore;
   @Autowired private ResourceStore resourceStore;
   @Autowired private SystemSettingsSnapshot systemSettingsSnapshot;
-  @Autowired private RedisRealtimeConfig redisRealtimeConfig;
   @Autowired private RealtimeEventSink realtimeEventSink;
   @Autowired private RealtimeEventSource realtimeEventSource;
   @Autowired private InvocationRetryPolicyProvider invocationRetryPolicyProvider;
@@ -113,7 +112,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private HarnessRuntime harnessRuntime;
   @Autowired private SystemPromptPreviewService systemPromptPreviewService;
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
-  @Autowired private PostgresqlWorkListener postgresqlWorkListener;
+  @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
   @Autowired private EnvironmentReadyListener environmentReadyListener;
 
   @Autowired
@@ -132,15 +131,15 @@ class HarnessRuntimeConfigurationTest {
   void composesTheFullRuntimeBeanGraph() {
     assertInstanceOf(PostgresqlHarnessStore.class, harnessStore);
     assertInstanceOf(LocalFileResourceStore.class, resourceStore);
-    assertInstanceOf(RedisRealtimeEventSource.class, realtimeEventSource);
-    assertNotNull(realtimeEventSink);
+    assertInstanceOf(PostgresqlRealtimeEventSource.class, realtimeEventSource);
+    assertInstanceOf(PostgresqlRealtimeEventSink.class, realtimeEventSink);
     assertNotNull(threadProcessor);
     assertNotNull(modelProcessor);
     assertNotNull(toolProcessor);
     assertNotNull(harnessRuntime);
     assertNotNull(systemPromptPreviewService);
     assertNotNull(harnessWorkDispatcher);
-    assertNotNull(postgresqlWorkListener);
+    assertNotNull(postgresqlNotificationLoop);
     assertNotNull(environmentReadyListener);
     assertEquals(
         new InvocationRetryPolicy(
@@ -167,16 +166,13 @@ class HarnessRuntimeConfigurationTest {
   }
 
   @Test
-  void redisRealtimeConfigUsesDeploymentDefaults() {
-    assertEquals("kk-studio:harness:realtime:", redisRealtimeConfig.prefix());
-  }
-
-  @Test
   void workersDisabledKeepsControlPlaneButDoesNotStartWorkers() {
     assertFalse(properties.isWorkersEnabled(), "web test profile must keep workers disabled");
     assertNotNull(harnessRuntime, "control/query plane must stay available");
     assertFalse(harnessRuntimeLifecycle.isRunning());
-    assertFalse(postgresqlWorkListener.isRunning());
+    assertTrue(
+        postgresqlNotificationLoop.isRunning(),
+        "application notification loop remains active for Thread/Canvas when workers are disabled");
   }
 
   @Test

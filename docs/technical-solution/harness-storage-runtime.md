@@ -104,7 +104,7 @@ lease_until      # 与 lease_token 成对
 
 - **claim**：`available_at <= now` 且 lease 已过期 → 写入新 lease token/until；claim 是 Work-only 短事务，不读业务状态。
 - **wake**：`available_at = least(available_at, excluded.available_at)` + `wake_version = wake_version + 1`；幂等合并。
-- **NOTIFY**：wake 提交后经 `harness_runtime_work` channel 发送通知；`PostgresqlWorkListener` 只把它合并为 dispatcher wake，通知丢失不改变正确性。
+- **NOTIFY**：wake 提交后经 `harness_runtime_work` channel 发送通知；Web 共享的 PostgreSQL notification loop 只把它合并为 dispatcher wake，通知丢失不改变正确性。
 - **poll**：dispatcher 以 fixed-delay periodic poll 做 due scan，与启动/重连 wake 一起保证最终收敛；claim 成功后必须二选一（worker 接受 handoff 或立即 reschedule）。
 - **heartbeat**：processor 长任务（Resolver 调用）期间 `WorkHeartbeat` 续租；lease 过期后 stale worker 的后续提交被 ownership 校验拒绝。
 - **complete**：`work.complete(leaseToken, claimedWakeVersion, now)` 校验 claim 与 wake 版本后删除/降级行；reschedule 校验后改写 `available_at`（wake_version 不变或按协议递增）。

@@ -1,9 +1,6 @@
 package fun.fengwk.kkstudio.web.events;
 
 import lombok.extern.slf4j.Slf4j;
-import org.postgresql.PGConnection;
-import org.postgresql.PGNotification;
-import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
@@ -12,7 +9,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -22,21 +18,20 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.Consumer;
 
 /**
- * PostgreSQL Thread version 失效通知的进程内 fan-out。
+ * PostgreSQL Thread version 通知的进程内 fan-out。
  *
- * <p>LISTEN/NOTIFY 故意只作为唤醒信号。收到通知后，本 hub 先读取当前持久 version 再通知订阅者；LISTEN 启动/重连成功时广播
- * resync，因为断连期间的通知不可恢复。{@link #subscribe} 先注册 consumer 再读当前 version 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
+ * <p>初始订阅 cursor 从持久表权威读取；notification payload 携带提交后的 {@code threadId:version}，只做轻量解析与 fan-out。共享
+ * LISTEN loop 启动/重连成功时调用 {@link #broadcastResync()}，覆盖断连期间不可恢复的通知。{@link #subscribe} 先注册 consumer
+ * 再读当前 version 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
  */
 @Slf4j
 @Component
-final class ThreadVersionHub implements SmartLifecycle, ThreadVersionEventSource {
+final class ThreadVersionHub implements ThreadVersionEventSource {
 
   static final String CHANNEL = "harness_thread_version";
 
   private final DataSource dataSource;
   private final Map<UUID, Set<Consumer<Event>>> subscribers = new ConcurrentHashMap<>();
-  private volatile boolean running;
-  private volatile Thread listenerThread;
 
   ThreadVersionHub(DataSource dataSource) {
     this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
@@ -74,78 +69,12 @@ final class ThreadVersionHub implements SmartLifecycle, ThreadVersionEventSource
         });
   }
 
-  @Override
-  public void start() {
-    if (running) {
+  void onNotification(String payload) {
+    ThreadVersion notification = parseNotification(payload);
+    if (notification == null) {
       return;
     }
-    running = true;
-    Thread thread = new Thread(this::listen, "thread-version-listen");
-    thread.setDaemon(true);
-    listenerThread = thread;
-    thread.start();
-  }
-
-  @Override
-  public void stop() {
-    running = false;
-    Thread thread = listenerThread;
-    if (thread != null) {
-      thread.interrupt();
-    }
-  }
-
-  @Override
-  public boolean isRunning() {
-    return running;
-  }
-
-  @Override
-  public int getPhase() {
-    return Integer.MIN_VALUE;
-  }
-
-  private void listen() {
-    while (running) {
-      try (Connection connection = dataSource.getConnection();
-          Statement statement = connection.createStatement()) {
-        PGConnection pgConnection = connection.unwrap(PGConnection.class);
-        statement.execute("LISTEN " + CHANNEL);
-        broadcastResync();
-        while (running) {
-          PGNotification[] notifications = pgConnection.getNotifications(5_000);
-          if (notifications != null) {
-            for (PGNotification notification : notifications) {
-              publishCurrentVersion(connection, notification.getParameter());
-            }
-          }
-        }
-      } catch (SQLException | RuntimeException error) {
-        if (running) {
-          log.warn("thread version LISTEN connection lost; reconnecting", error);
-          sleep();
-        }
-      }
-    }
-  }
-
-  private void publishCurrentVersion(Connection connection, String rawThreadId)
-      throws SQLException {
-    UUID threadId;
-    try {
-      threadId = UUID.fromString(rawThreadId);
-    } catch (IllegalArgumentException ignored) {
-      return;
-    }
-    try (PreparedStatement statement =
-        connection.prepareStatement("select version from harness_thread where id = ?")) {
-      statement.setObject(1, threadId);
-      try (ResultSet result = statement.executeQuery()) {
-        if (result.next()) {
-          publish(threadId, new Event(result.getString(1), false));
-        }
-      }
-    }
+    publish(notification.threadId(), new Event(notification.version(), false));
   }
 
   private long currentVersion(UUID threadId) {
@@ -168,6 +97,31 @@ final class ThreadVersionHub implements SmartLifecycle, ThreadVersionEventSource
     subscribers.forEach((threadId, ignored) -> publish(threadId, new Event(null, true)));
   }
 
+  static ThreadVersion parseNotification(String payload) {
+    if (payload == null) {
+      return null;
+    }
+    int colon = payload.indexOf(':');
+    if (colon <= 0 || colon != payload.lastIndexOf(':')) {
+      return null;
+    }
+    String rawThreadId = payload.substring(0, colon);
+    String version = payload.substring(colon + 1);
+    if (!version.matches("0|[1-9]\\d*")) {
+      return null;
+    }
+    try {
+      UUID threadId = UUID.fromString(rawThreadId);
+      if (!threadId.toString().equals(rawThreadId)) {
+        return null;
+      }
+      Long.parseLong(version);
+      return new ThreadVersion(threadId, version);
+    } catch (IllegalArgumentException ignored) {
+      return null;
+    }
+  }
+
   private void publish(UUID threadId, Event event) {
     Set<Consumer<Event>> threadSubscribers = subscribers.get(threadId);
     if (threadSubscribers != null) {
@@ -183,11 +137,5 @@ final class ThreadVersionHub implements SmartLifecycle, ThreadVersionEventSource
     }
   }
 
-  private static void sleep() {
-    try {
-      Thread.sleep(1_000);
-    } catch (InterruptedException ignored) {
-      Thread.currentThread().interrupt();
-    }
-  }
+  record ThreadVersion(UUID threadId, String version) {}
 }

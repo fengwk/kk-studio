@@ -70,6 +70,6 @@
 
 ## 4. 不占阻塞线程
 
-发送走 jakarta `AsyncRemote.sendText(SendHandler)`：同一时刻只有一个 in-flight 发送，完成回调驱动下一帧，帧顺序严格串行且**不占用任何常驻或阻塞 worker**；AsyncRemote 设置 10s send timeout，卡死的对端不会无限占用发送链。所有浏览器连接共享一个 daemon `ScheduledExecutorService`，每 20 秒只把 heartbeat 放入既有异步发送队列，不为连接创建线程；连接关闭后立即停止向该连接入队，应用 shutdown 取消共享任务。Thread/Canvas 的事件源（PostgreSQL LISTEN）是各自独立的守护线程，与浏览器连接数无关。
+发送走 jakarta `AsyncRemote.sendText(SendHandler)`：同一时刻只有一个 in-flight 发送，完成回调驱动下一帧，帧顺序严格串行且**不占用任何常驻或阻塞 worker**；AsyncRemote 设置 10s send timeout，卡死的对端不会无限占用发送链。所有浏览器连接共享一个 daemon `ScheduledExecutorService`，每 20 秒只把 heartbeat 放入既有异步发送队列，不为连接创建线程；连接关闭后立即停止向该连接入队，应用 shutdown 取消共享任务。Thread/Canvas version 与 Harness Work 共用一个应用级 PostgreSQL notification loop、一个专用 JDBC connection 和一个 daemon platform thread，与浏览器连接数无关。
 
 相关文档：[architecture.md](architecture.md)、[harness-runtime-contracts.md](harness-runtime-contracts.md)、[frontend-implementation-design.md](frontend-implementation-design.md)、[e2e-regression.md](e2e-regression.md)。

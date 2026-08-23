@@ -281,7 +281,7 @@ Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation sib
 durable mutation
   -> work wake（available_at = least(...), wake_version+1）
   -> PostgreSQL NOTIFY（harness_runtime_work channel，仅可用性提示）
-  -> listener -> dispatcher wake（合并，单 drain）
+  -> Web 共享 notification loop -> dispatcher wake（合并，单 drain）
   -> periodic poll（due scan）
   -> claim next work（Work-only 短事务，round-robin THREAD/MODEL/TOOL）
   -> bounded handoff -> ThreadProcessor / ModelProcessor / ToolProcessor
@@ -301,7 +301,7 @@ durable mutation
 | Work heartbeat | fixed-rate lease renew | 是，更新 work lease | 分布式 ownership 协议，不是 UI 状态轮询 |
 | Environment 列表 | 页面可见时 10s React Query refresh | 是 | Daemon/进程 liveness 边界；当前 wire 没有 Environment collection version |
 | ComfyUI / Seedance / OpenCLI | adapter 专用 executor 中按外部 API 状态等待 | 否（外部系统） | 外部平台没有可复用的 kk-studio 事件源；均有 timeout、取消和测试 |
-| PostgreSQL listener | `getNotifications(5s)` + 1s reconnect backoff | 仅收到通知后读当前 cursor | socket wait 与重连，不是固定查询业务表 |
+| PostgreSQL notification loop | 单连接固定 LISTEN work/thread/canvas；`getNotifications(5s)` + 1s reconnect backoff | Thread/Canvas 初始订阅读权威 cursor；通知 handler 只解析 payload | socket wait、重连 resync 与轻量 fan-out，不固定查询业务表 |
 
 不得重新引入以下模式：
 
