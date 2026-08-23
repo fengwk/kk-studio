@@ -17,7 +17,7 @@
     <modules>
         <module>share</module>
         <module>studio</module>
-        <module>database</module>
+        <module>schema</module>
         <module>core</module>
         <module>web</module>
         <module>harness</module>
@@ -76,7 +76,7 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-database</artifactId>
+                <artifactId>kk-studio-schema</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

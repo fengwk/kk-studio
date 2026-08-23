@@ -86,8 +86,8 @@ docker compose -f deploy/local/compose.yaml down -v
 数据库首次初始化的约束：
 
 - 应用通过 Flyway 执行
-  [`V1__schema.sql`](database/src/main/resources/db/migration/V1__schema.sql) 与
-  [`V2__dev_seed.sql`](database/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
+  [`V1__schema.sql`](schema/src/main/resources/db/migration/V1__schema.sql) 与
+  [`V2__dev_seed.sql`](schema/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
   `flyway_schema_history` 确保重启不会重复迁移。
 - `V2__dev_seed.sql` 只写入 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。

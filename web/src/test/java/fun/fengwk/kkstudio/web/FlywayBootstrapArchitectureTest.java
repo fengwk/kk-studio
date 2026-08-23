@@ -17,6 +17,8 @@ import java.util.stream.Stream;
 /** 守护生产与集成测试共用的唯一 Flyway 引导路径。 */
 class FlywayBootstrapArchitectureTest {
 
+  private static final String LEGACY_SCHEMA_MODULE = "data" + "base";
+  private static final String LEGACY_SCHEMA_ARTIFACT = "kk-studio-" + LEGACY_SCHEMA_MODULE;
   private static final List<String> LEGACY_RESOURCES =
       List.of(
           "core/src/main/resources/schema-postgresql.sql",
@@ -24,10 +26,10 @@ class FlywayBootstrapArchitectureTest {
           "core/src/main/resources/data-e2e-postgresql.sql");
   private static final List<String> FLYWAY_RESOURCES =
       List.of(
-          "database/src/main/resources/db/migration/V1__schema.sql",
-          "database/src/main/resources/db/seed/dev/V2__dev_seed.sql",
-          "database/src/main/resources/db/seed/e2e/V2__e2e_seed.sql",
-          "database/src/main/resources/db/seed/canvas-test/V3__canvas_test_system_settings.sql");
+          "schema/src/main/resources/db/migration/V1__schema.sql",
+          "schema/src/main/resources/db/seed/dev/V2__dev_seed.sql",
+          "schema/src/main/resources/db/seed/e2e/V2__e2e_seed.sql",
+          "schema/src/main/resources/db/seed/canvas-test/V3__canvas_test_system_settings.sql");
   private static final String OLD_HARNESS_SCHEMA =
       "harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/"
           + "postgresql/harness-runtime-schema.sql";
@@ -46,6 +48,9 @@ class FlywayBootstrapArchitectureTest {
   @Test
   void onlyFlywayMigrationResourcesExist() {
     Path root = repositoryRoot();
+    assertTrue(Files.isDirectory(root.resolve("schema")), "schema module must exist");
+    assertFalse(
+        Files.exists(root.resolve(LEGACY_SCHEMA_MODULE)), "legacy schema module must be absent");
     for (String resource : LEGACY_RESOURCES) {
       assertFalse(
           Files.exists(root.resolve(resource)), "legacy resource must be absent: " + resource);
@@ -71,9 +76,9 @@ class FlywayBootstrapArchitectureTest {
             .sorted()
             .toList();
     assertEquals(
-        List.of("database/src/main/resources/db/migration/V1__schema.sql"),
+        List.of("schema/src/main/resources/db/migration/V1__schema.sql"),
         migrations,
-        "V1 baseline must exist exactly once across the whole repository, owned by the database module");
+        "V1 baseline must exist exactly once across the whole repository, owned by the schema module");
     assertFalse(
         files.stream()
             .anyMatch(path -> path.getFileName().toString().equals("harness-runtime-schema.sql")),
@@ -92,21 +97,48 @@ class FlywayBootstrapArchitectureTest {
   }
 
   @Test
-  void webRunsWithFlywayAndCoreHarnessHasExplicitTestScope() throws IOException {
+  void schemaModuleIsWiredWithRequiredScopes() throws IOException {
     Path root = repositoryRoot();
+    String rootPom = Files.readString(root.resolve("pom.xml"), StandardCharsets.UTF_8);
+    assertTrue(rootPom.contains("<module>schema</module>"));
+    assertFalse(rootPom.contains("<module>" + LEGACY_SCHEMA_MODULE + "</module>"));
+    assertTrue(rootPom.contains("<artifactId>kk-studio-schema</artifactId>"));
+
     String webPom = Files.readString(root.resolve("web/pom.xml"), StandardCharsets.UTF_8);
     assertTrue(webPom.contains("<artifactId>flyway-core</artifactId>"));
     assertTrue(webPom.contains("<artifactId>flyway-database-postgresql</artifactId>"));
     assertTrue(
-        webPom.contains("<artifactId>kk-studio-database</artifactId>"),
-        "web must depend on the database module");
+        webPom.contains(
+            "<artifactId>kk-studio-schema</artifactId>\n            <scope>runtime</scope>"),
+        "web must depend on the schema module at runtime");
 
     String corePom = Files.readString(root.resolve("core/pom.xml"), StandardCharsets.UTF_8);
+    assertTrue(
+        corePom.contains(
+            "<artifactId>kk-studio-schema</artifactId>\n            <scope>test</scope>"),
+        "core must depend on the schema module for infrastructure tests");
     assertTrue(
         corePom.contains("<artifactId>flyway-core</artifactId>\n            <scope>test</scope>"));
     assertTrue(
         corePom.contains(
             "<artifactId>flyway-database-postgresql</artifactId>\n            <scope>test</scope>"));
+
+    String runtimeSpringPom =
+        Files.readString(root.resolve("harness/runtime-spring/pom.xml"), StandardCharsets.UTF_8);
+    assertTrue(
+        runtimeSpringPom.contains(
+            "<artifactId>kk-studio-schema</artifactId>\n            <scope>test</scope>"),
+        "runtime-spring must depend on the schema module for infrastructure tests");
+
+    for (Path pom :
+        repositoryFiles(root).stream()
+            .filter(path -> path.getFileName().toString().equals("pom.xml"))
+            .toList()) {
+      assertFalse(
+          Files.readString(pom, StandardCharsets.UTF_8)
+              .contains("<artifactId>" + LEGACY_SCHEMA_ARTIFACT + "</artifactId>"),
+          "old schema artifact must be absent: " + root.relativize(pom));
+    }
   }
 
   /** 一次性物化整个仓库的常规文件（跳过生成/依赖目录），Stream 在方法内关闭。 */
