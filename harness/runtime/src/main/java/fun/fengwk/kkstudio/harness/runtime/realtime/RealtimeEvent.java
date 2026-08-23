@@ -12,8 +12,8 @@ import java.util.UUID;
  * 只用于短期 UI 重放的非 durable projection event。
  *
  * <p>每个 subtype 都包含归属 Thread、durable subject 与创建时间。可重试的 Invocation projection 还必须携带 attempt，使
- * snapshot-first 客户端能够丢弃旧 attempt 的残留片段。Redis adapter 将其编码为 stream envelope；Entry、Invocation 或
- * Thread 的恢复逻辑不得依赖该 event 是否存在。
+ * snapshot-first 客户端能够丢弃旧 attempt 的残留片段。PostgreSQL notification adapter 将其编码为 live overlay
+ * envelope；Entry、Invocation 或 Thread 的恢复逻辑不得依赖该 event 是否存在。
  */
 public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, RealtimeEvent.ToolPartial {
 

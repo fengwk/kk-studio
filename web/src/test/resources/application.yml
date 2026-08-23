@@ -15,11 +15,6 @@ spring:
         username: unused
         password: unused
 
-  data:
-    redis:
-      host: 127.0.0.1
-      port: 6379
-
   mybatis:
     mapper-locations: classpath:**/*Mapper.xml
     type-aliases-package: fun.fengwk.kkstudio.**.model

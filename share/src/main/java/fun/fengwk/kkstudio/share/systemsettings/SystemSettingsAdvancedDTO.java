@@ -33,8 +33,6 @@ public class SystemSettingsAdvancedDTO {
 
   private Integer dispatcherWorkerQueueCapacity;
 
-  private Long canvasRealtimeMaxLength;
-
   private Integer canvasFunctionExecutorCoreSize;
 
   private Integer canvasFunctionExecutorMaxSize;
@@ -52,8 +50,6 @@ public class SystemSettingsAdvancedDTO {
   private Long postgresqlWorkNotificationPollMillis;
 
   private Long postgresqlWorkReconnectBackoffMillis;
-
-  private Long redisRealtimeRetryDelayMillis;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

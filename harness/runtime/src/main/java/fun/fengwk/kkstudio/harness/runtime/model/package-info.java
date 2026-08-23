@@ -35,6 +35,6 @@
  *
  * <p>durable 的 {@code ModelInvocation} aggregate 与其 codec 位于 {@code
  * harness.runtime.invocation}；状态转换由 {@code harness.runtime.processor} 执行。依赖方向：本包只依赖 Jackson {@code
- * JsonNode}；Spring、JDBC、Redis、HTTP 与 SDK 类型不得泄漏到本包或其任何子包。
+ * JsonNode}；Spring、JDBC、HTTP 与 SDK 类型不得泄漏到本包或其任何子包。
  */
 package fun.fengwk.kkstudio.harness.runtime.model;

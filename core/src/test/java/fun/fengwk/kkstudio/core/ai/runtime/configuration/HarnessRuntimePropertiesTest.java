@@ -9,7 +9,7 @@ import java.nio.file.Path;
 
 class HarnessRuntimePropertiesTest {
 
-  /** 纯 bootstrap 默认值：worker 开关、沙箱根目录/工作目录与 Redis prefix 有界。 */
+  /** 纯 bootstrap 默认值只包含 worker 开关与有界的沙箱根目录/工作目录。 */
   @Test
   void providesBootstrapDeploymentDefaults() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
@@ -21,7 +21,6 @@ class HarnessRuntimePropertiesTest {
     assertEquals(
         Path.of(System.getProperty("user.dir", ".")).toAbsolutePath(),
         properties.resolvedWorkdir());
-    assertEquals("kk-studio:harness:realtime:", properties.getRedisPrefix());
   }
 
   /** 相对 workdir 在 environmentRoot 下解析，越界与绝对路径逃逸必须失败。 */

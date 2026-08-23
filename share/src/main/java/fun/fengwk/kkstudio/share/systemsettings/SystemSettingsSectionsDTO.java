@@ -9,7 +9,7 @@ import lombok.Data;
  *
  * <p>每个 section 都是必填对象；客户端必须发送完整聚合，缺失 section 或未知字段都会失败。仓库/Web 约定：{@code Long} 字段（时长 {@code
  * *Millis}、字节、秒数）在 HTTP wire 上输出规范非负十进制字符串（前端友好、bigint-safe），{@code Integer} 字段为 JSON 数值。秘密与
- * bootstrap 输入（DB/Redis/server 配置、filesystem 路径、key/token、 OpenCLI instanceId 等）不进入任何 DTO。
+ * bootstrap 输入（DB/server 配置、filesystem 路径、key/token、 OpenCLI instanceId 等）不进入任何 DTO。
  */
 @Data
 public class SystemSettingsSectionsDTO {

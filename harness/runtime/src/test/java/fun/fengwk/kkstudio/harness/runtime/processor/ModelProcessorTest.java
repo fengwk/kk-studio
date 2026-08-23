@@ -1210,7 +1210,7 @@ class ModelProcessorTest {
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    fixture.sink.failure = new IllegalStateException("redis down");
+    fixture.sink.failure = new IllegalStateException("notification channel unavailable");
 
     listener.onEvent(new ProviderStreamEvent.TextDelta("ans"));
     listener.onSucceeded(response("answer", GenerationStopReason.COMPLETE));
