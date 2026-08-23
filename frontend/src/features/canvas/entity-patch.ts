@@ -1,5 +1,4 @@
 import type {
-  CanvasChangesDTO,
   CanvasGroupDTO,
   CanvasLinkDTO,
   CanvasPatchDTO,
@@ -12,7 +11,7 @@ import { compareCanvasVersions } from '@/shared/lib/canvas-version'
  * 应用单个 graph patch。返回 null 表示该 patch 无法连续应用：
  * - `patch.version <= snapshot.document.version`：重复/过期 patch，调用方应忽略；
  * - `patch.baseVersion !== snapshot.document.version`：存在 gap，
- *   调用方必须通过 changes（getCanvasChanges）或全量快照恢复。
+ *   调用方必须读取权威 Snapshot 恢复。
  * 版本是 canonical 非负十进制字符串，比较使用长度/字典序（bigint-safe）。
  */
 export function applyEntityPatch(
@@ -31,31 +30,6 @@ export function applyEntityPatch(
     groups: applyGroupPatches(snapshot.groups, patch.groups),
     links: applyLinkPatches(snapshot.links, patch.links),
   }
-}
-
-/**
- * 应用 changes 恢复载荷：优先整体替换 snapshot；否则按顺序折叠连续
- * patches。任一 patch 无法连续应用（或载荷为空但版本落后）时返回 null，
- * 调用方必须回退到全量快照。
- */
-export function applyCanvasChanges(
-  snapshot: CanvasSnapshotDTO,
-  changes: CanvasChangesDTO,
-): CanvasSnapshotDTO | null {
-  if (changes.snapshot) {
-    return compareCanvasVersions(changes.snapshot.document.version, snapshot.document.version) >= 0
-      ? changes.snapshot
-      : null
-  }
-  let current = snapshot
-  for (const patch of changes.patches) {
-    const next = applyEntityPatch(current, patch)
-    if (!next) {
-      return null
-    }
-    current = next
-  }
-  return current
 }
 
 function applyNodePatches(

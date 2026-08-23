@@ -347,15 +347,12 @@ assert resource["mediaType"] == "image/png"
 assert resource["width"] > 0 and resource["height"] > 0
 assert resource["sizeBytes"] == str(len(image))
 
-changes = json_call(
-    "GET",
-    f"/api/canvases/{canvas['id']}/changes?afterVersion=0",
+resource_snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
+assert decimal_version(resource_snapshot["document"]["version"]) == 1
+snapshot_resource_node = next(
+    node for node in resource_snapshot["nodes"] if node["id"] == resource_node_id
 )
-assert changes["snapshot"] is None, changes
-assert len(changes["patches"]) == 1, changes
-cached_patch = changes["patches"][0]
-assert decimal_version(cached_patch["baseVersion"]) == 0
-assert decimal_version(cached_patch["version"]) == 1
+assert snapshot_resource_node["resources"][0]["id"] == resource["id"]
 
 original = json_call(
     "POST",

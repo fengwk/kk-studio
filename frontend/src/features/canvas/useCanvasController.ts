@@ -115,12 +115,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }
   }, [queryClient, snapshotQuery.data, state.canvasId])
 
-  // 应用事件 WebSocket version：按最后已知版本拉取 changes（连续 patches 或全量快照）；
-  // resync 事件通过 invalidate 触发权威快照整体替换。
-  const syncCanvasChanges = useCallback(() => {
-    void queueRef.current?.syncFrom().catch(() => undefined)
-  }, [])
-  const resyncCanvas = useCallback(() => {
+  // 应用事件 WebSocket 的更高 version、重连与 resync 都直接刷新权威 Snapshot。
+  const refreshCanvasSnapshot = useCallback(() => {
     const canvasId = state.canvasId
     if (!canvasId) {
       return
@@ -131,8 +127,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     canvasId: state.canvasId,
     enabled: state.view === 'editor' && snapshotQuery.isSuccess,
     version: snapshotQuery.data?.document.version ?? '0',
-    onVersion: syncCanvasChanges,
-    onResync: resyncCanvas,
+    onSnapshot: refreshCanvasSnapshot,
   })
 
   useEffect(() => {

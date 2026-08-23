@@ -151,13 +151,13 @@ Provider attempt 才从 `storage_blob` 读取媒体事实并生成新鲜预签�
 物化中与 pinned orphan 可以暂时无 owner。Canvas Resource 行贡献一个 Blob 引用；删除行必须显式
 release。
 
-`canvas_document.version` 是 command、Patch、事件通道与 Function 可见状态的公共坐标，初始 0：
+`canvas_document.version` 是 command 响应 Patch、事件通道、Snapshot 与 Function 可见状态的公共坐标，初始 0：
 
 - 成功 graph command batch +1；
 - Function start/cancel/checkpoint/success/failure 状态前进 +1；
 - exact replay 不增加；Harness command acceptance 不前移 graph version（Canvas 与 Agent Session 生命周期独立，无 Thread 绑定版本变化）。
 
-Redis Stream 只缓存 after-commit Patch；PostgreSQL trigger 只发 version NOTIFY 提示，不修改实体。
+Canvas 不持久化或缓存 Patch Stream；PostgreSQL trigger 只发 version NOTIFY 提示，不修改实体。
 
 ## 8. FK 与删除
 

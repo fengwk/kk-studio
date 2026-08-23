@@ -40,8 +40,8 @@
 `--with-app` 还会使用仓库内极小 PNG/MP4 fixture 执行完整的全局 Blob + Canvas Resource
 `create canvas -> reserve -> checksummed create-only PUT -> complete -> CREATE_RESOURCE_NODE ->
 preview signed GET` smoke，并验证首次写入成功、不同内容的重复写入被 MinIO 拒绝、
-original 字节不变、URL DTO 不暴露 bucket/key，以及 Redis Patch Cache 能从
-`afterVersion=0` 返回连续 `0 -> 1` Patch。随后显式开启
+original 字节不变、URL DTO 不暴露 bucket/key，以及标准 Canvas Snapshot 能读取
+`version=1` 与新建 Resource。随后显式开启
 `kk-studio.canvas.function.fake-enabled`，执行
 `create fake-image Function node -> start -> poll -> snapshot Resource 替换 -> preview signed GET`，
 并验证 `document.version` 按 resource command、Function start 与 terminal success 前进到 4

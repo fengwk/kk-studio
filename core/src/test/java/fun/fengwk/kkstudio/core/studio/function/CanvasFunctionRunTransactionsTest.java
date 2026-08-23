@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -17,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.core.studio.realtime.CanvasRealtimeService;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasLinkMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasNodeMapper;
@@ -29,7 +27,6 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
-import fun.fengwk.kkstudio.studio.canvas.CanvasNodePatch;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
@@ -49,8 +46,8 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Transactional checkpoint 单元覆盖：成功一次事务内完成 run CAS、canvas version 前进并发布 node patch； run CAS 失败、run
- * 不再是该请求 RUNNING、节点消失、非法 stage/超大 adapterState 一律零版本变更且不发布。
+ * Transactional checkpoint 单元覆盖：成功一次事务内完成 run CAS 与 canvas version 前进；run CAS 失败、run 不再是该请求
+ * RUNNING、节点消失、非法 stage/超大 adapterState 一律零版本变更。
  */
 class CanvasFunctionRunTransactionsTest {
 
@@ -73,7 +70,6 @@ class CanvasFunctionRunTransactionsTest {
   private CanvasLinkMapper linkMapper;
   private CanvasDocumentMapper documentMapper;
   private CanvasFunctionRunRepository runRepository;
-  private CanvasRealtimeService realtimeService;
   private CanvasFunctionRunTransactions transactions;
   private CanvasFunctionRunStateCodec stateCodec;
   private CanvasFixture fixture;
@@ -96,7 +92,6 @@ class CanvasFunctionRunTransactionsTest {
     stateCodec = new CanvasFunctionRunStateCodec(new ObjectMapper(), configCodec);
     CanvasResourceLifecycle resourceLifecycle = mock(CanvasResourceLifecycle.class);
     ObjectProvider<StorageBlobManager> blobManagers = provider(mock(StorageBlobManager.class));
-    realtimeService = mock(CanvasRealtimeService.class);
     transactions =
         new CanvasFunctionRunTransactions(
             nodeMapper,
@@ -110,7 +105,6 @@ class CanvasFunctionRunTransactionsTest {
             stateCodec,
             resourceLifecycle,
             blobManagers,
-            realtimeService,
             Clock.fixed(NOW, ZoneOffset.UTC));
     fixture = new CanvasFixture(stateCodec);
     when(documentMapper.getByIdForUpdate(CANVAS)).thenReturn(fixture.document);
@@ -122,22 +116,10 @@ class CanvasFunctionRunTransactionsTest {
   }
 
   @Test
-  void checkpointPersistsRunBumpsVersionAndPublishesNodePatch() {
+  void checkpointPersistsRunAndBumpsVersion() {
     when(runRepository.checkpoint(eq(NODE), eq(REQUEST), any(), eq("SUBMITTING"), eq(NOW)))
         .thenReturn(true);
     when(documentMapper.compareAndSetVersion(CANVAS, 5L, 6L)).thenReturn(1);
-    // bumpAndPublishNode 投影读到的是 CAS 已落库的 checkpoint 后 run。
-    when(runRepository.findByNodeId(NODE))
-        .thenReturn(
-            Optional.of(
-                new CanvasFunctionRun(
-                    NODE,
-                    REQUEST,
-                    CanvasFunctionRunStatus.RUNNING,
-                    "SUBMITTING",
-                    stateCodec.encode(fixture.frozen("SUBMITTING", Map.of("jobId", "job"))),
-                    null,
-                    NOW)));
 
     CanvasFunctionFrozenRun next =
         transactions.checkpoint(
@@ -147,24 +129,10 @@ class CanvasFunctionRunTransactionsTest {
     assertEquals(Map.of("jobId", "job"), next.adapterState());
     verify(runRepository).checkpoint(eq(NODE), eq(REQUEST), any(), eq("SUBMITTING"), eq(NOW));
     verify(documentMapper).compareAndSetVersion(CANVAS, 5L, 6L);
-    verify(realtimeService)
-        .publish(
-            eq(CANVAS),
-            argThat(
-                patch -> {
-                  return patch.baseVersion() == 5L
-                      && patch.version() == 6L
-                      && patch.nodes().size() == 1
-                      && patch.nodes().get(0) instanceof CanvasNodePatch.Upsert upsert
-                      && upsert.node().id().equals(NODE)
-                      && upsert.node().run() != null
-                      && upsert.node().run().status() == CanvasFunctionRunStatus.RUNNING
-                      && "SUBMITTING".equals(upsert.node().run().stage());
-                }));
   }
 
   @Test
-  void checkpointCasFailureThrowsInternalCancellationWithoutVersionOrPublish() {
+  void checkpointCasFailureThrowsInternalCancellationWithoutVersionChange() {
     when(runRepository.checkpoint(any(), any(), any(), any(), any())).thenReturn(false);
 
     assertThrows(
@@ -172,7 +140,6 @@ class CanvasFunctionRunTransactionsTest {
         () -> transactions.checkpoint(CANVAS, NODE, REQUEST.toString(), "SUBMITTING", Map.of()));
 
     verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
-    verify(realtimeService, never()).publish(any(), any());
   }
 
   @Test
@@ -197,11 +164,10 @@ class CanvasFunctionRunTransactionsTest {
 
     verify(runRepository, never()).checkpoint(any(), any(), any(), any(), any());
     verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
-    verify(realtimeService, never()).publish(any(), any());
   }
 
   @Test
-  void checkpointMissingNodeThrowsInternalCancellationWithoutPublish() {
+  void checkpointMissingNodeThrowsInternalCancellationWithoutVersionChange() {
     when(nodeMapper.getByIdForUpdate(CANVAS, NODE)).thenReturn(null);
 
     assertThrows(
@@ -210,23 +176,21 @@ class CanvasFunctionRunTransactionsTest {
 
     verify(runRepository, never()).findByNodeIdForUpdate(any());
     verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
-    verify(realtimeService, never()).publish(any(), any());
   }
 
   @Test
-  void checkpointMissingDocumentThrowsInternalCancellationWithoutWriteOrPublish() {
+  void checkpointMissingDocumentThrowsInternalCancellationWithoutWrite() {
     when(documentMapper.getByIdForUpdate(CANVAS)).thenReturn(null);
 
     assertThrows(
         CanvasFunctionInternalCancellation.class,
         () -> transactions.checkpoint(CANVAS, NODE, REQUEST.toString(), "SUBMITTING", Map.of()));
 
-    // 零写：不触碰 node/run 行；零发布：不前进 version、不发布 patch。
+    // 零写：不触碰 node/run 行，也不前进 version。
     verify(nodeMapper, never()).getByIdForUpdate(any(), any());
     verify(runRepository, never()).findByNodeIdForUpdate(any());
     verify(runRepository, never()).checkpoint(any(), any(), any(), any(), any());
     verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
-    verify(realtimeService, never()).publish(any(), any());
   }
 
   @Test
@@ -240,7 +204,6 @@ class CanvasFunctionRunTransactionsTest {
 
     verify(runRepository, never()).checkpoint(any(), any(), any(), any(), any());
     verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
-    verify(realtimeService, never()).publish(any(), any());
   }
 
   @Test
@@ -251,7 +214,6 @@ class CanvasFunctionRunTransactionsTest {
 
     verify(runRepository, never()).checkpoint(any(), any(), any(), any(), any());
     verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
-    verify(realtimeService, never()).publish(any(), any());
   }
 
   @SuppressWarnings("unchecked")

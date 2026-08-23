@@ -19,7 +19,6 @@ vi.mock('@/shared/api/studio-service', () => ({
   listCanvases: vi.fn(),
   createCanvas: vi.fn(),
   getCanvas: vi.fn(),
-  getCanvasChanges: vi.fn(),
   postCanvasCommands: vi.fn(),
   listCanvasFunctionModels: vi.fn(),
   getCanvasResourceOriginalUrl: vi.fn(),

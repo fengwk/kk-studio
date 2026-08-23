@@ -119,7 +119,6 @@ Agent 的最新 tools/skills/subagents 决定每个新 turn 的运行能力；`D
 | `GET/POST /api/canvases` | Canvas 列表与创建 |
 | `GET /api/canvases/{canvasId}` | Canvas document、ResourceNode/Resource/Function/Run、Group、Link 完整快照 |
 | `POST /api/canvases/{canvasId}/commands` | typed Canvas command batch；version CAS、commandId/hash 幂等与实体 Patch |
-| `GET /api/canvases/{canvasId}/changes` | 连续 Patch 或 gap Snapshot 恢复 |
 | `POST /api/storage/uploads` | 全局 Upload reserve；PENDING 返回带 checksum 的 create-only PUT |
 | `POST /api/storage/uploads/{uploadId}/complete` | 校验并绑定 READY Blob |
 | `GET /api/storage/blobs/{blobId}/presigned-original` | durable Blob Resource 的渲染期原件 URL，并返回权威 `mediaType/sizeBytes` |

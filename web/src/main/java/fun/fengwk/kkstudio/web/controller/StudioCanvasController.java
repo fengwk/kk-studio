@@ -9,18 +9,15 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.studio.StudioHarnessQueryService;
-import fun.fengwk.kkstudio.core.studio.realtime.CanvasRealtimeService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
-import fun.fengwk.kkstudio.share.studio.CanvasChangesDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasPatchDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasSnapshotDTO;
@@ -39,7 +36,7 @@ import java.util.function.Supplier;
  * 持久化全局单实例产品的 Canvas HTTP 边界，统一返回 convention {@link Result}。
  *
  * <p>所有实体 id 都以 canonical UUID 字符串跨 HTTP 边界；graph 版本是 long（{@code canvas_document.version} 的
- * 公共坐标系）。实时事件经事件通道（{@code /api/events/v1}）订阅，本控制器只提供 snapshot/changes/命令 HTTP。
+ * 公共坐标系）。实时事件经事件通道（{@code /api/events/v1}）订阅，本控制器只提供 snapshot 与命令 HTTP。
  */
 @RestController
 @RequestMapping("/api/canvases")
@@ -47,20 +44,17 @@ public class StudioCanvasController {
 
   private final CanvasQueryService canvasQueryService;
   private final CanvasCommandService canvasCommandService;
-  private final CanvasRealtimeService realtimeService;
   private final StudioHarnessQueryService harnessQueryService;
   private final StudioWebMapper mapper;
 
   public StudioCanvasController(
       CanvasQueryService canvasQueryService,
       CanvasCommandService canvasCommandService,
-      CanvasRealtimeService realtimeService,
       StudioHarnessQueryService harnessQueryService,
       StudioWebMapper mapper) {
     this.canvasQueryService = Objects.requireNonNull(canvasQueryService, "canvasQueryService");
     this.canvasCommandService =
         Objects.requireNonNull(canvasCommandService, "canvasCommandService");
-    this.realtimeService = Objects.requireNonNull(realtimeService, "realtimeService");
     this.harnessQueryService = Objects.requireNonNull(harnessQueryService, "harnessQueryService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
   }
@@ -152,19 +146,6 @@ public class StudioCanvasController {
       UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
       canvasCommandService.deleteCanvas(canvasId);
       return Results.noContent();
-    } catch (IllegalArgumentException ex) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-    }
-  }
-
-  @GetMapping("/{canvasId}/changes")
-  public Result<CanvasChangesDTO> changes(
-      @PathVariable("canvasId") String canvasIdText,
-      @RequestParam(defaultValue = "0") String afterVersion) {
-    try {
-      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
-      long version = parseVersion(afterVersion, "afterVersion");
-      return Results.ok(mapper.toDto(realtimeService.readChanges(canvasId, version)));
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
     }

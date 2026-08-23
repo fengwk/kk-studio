@@ -2,7 +2,6 @@ import { ApiError } from '@/shared/api/client'
 import type { CanvasVersion } from '@/shared/api/contracts/base'
 import { isCanvasVersion } from '@/shared/lib/canvas-version'
 import type {
-  CanvasChangesDTO,
   CanvasDocumentDTO,
   CanvasGroupPatchDTO,
   CanvasLinkPatchDTO,
@@ -296,15 +295,5 @@ export function decodeCanvasPatch(value: unknown): CanvasPatchDTO {
     groups: requireArray(candidate.groups, 'patch.groups').map(decodeCanvasGroupPatch),
     nodes: requireArray(candidate.nodes, 'patch.nodes').map(decodeCanvasNodePatch),
     links: requireArray(candidate.links, 'patch.links').map(decodeCanvasLinkPatch),
-  }
-}
-
-export function decodeCanvasChanges(value: unknown): CanvasChangesDTO {
-  const candidate = requireRecord(value, 'changes')
-  return {
-    patches: requireArray(candidate.patches, 'changes.patches').map(decodeCanvasPatch),
-    snapshot: decodeNullable(candidate.snapshot, 'changes.snapshot')
-      ? decodeCanvasSnapshot(candidate.snapshot)
-      : null,
   }
 }

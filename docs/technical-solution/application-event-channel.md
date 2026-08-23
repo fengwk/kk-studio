@@ -1,6 +1,6 @@
 # 应用事件通道
 
-浏览器与后端之间唯一的实时事件通道是单条应用级 WebSocket 连接 `ws(s)://<host>/api/events/v1`（服务端 `ApplicationEventWebSocketHandler.PATH`，前端 `ApplicationEventProvider` 应用生命周期内单例）。Thread 的 durable version 与 Canvas 的 graph version 前进、Redis realtime overlay 都经这条连接投递；`subscribe/unsubscribe` 之外**不搬运任何 HTTP 能力**——snapshot、`/changes`、`command-batches`、stop、approval 等仍全部走 REST（无 head relocation 端点）。
+浏览器与后端之间唯一的实时事件通道是单条应用级 WebSocket 连接 `ws(s)://<host>/api/events/v1`（服务端 `ApplicationEventWebSocketHandler.PATH`，前端 `ApplicationEventProvider` 应用生命周期内单例）。Thread 的 durable version 与 Canvas 的 graph version 前进、Redis realtime overlay 都经这条连接投递；`subscribe/unsubscribe` 之外**不搬运任何 HTTP 能力**——snapshot、`command-batches`、stop、approval 等仍全部走 REST（无 head relocation 端点）。
 
 事实源：`web/.../events/`（`EventFrameCodec` / `ApplicationEventHub` / `ApplicationEventWebSocketHandler` / `AsyncTextSender` / `ThreadVersionHub` / `CanvasVersionHub`）与前端 `frontend/src/shared/app-events/`（`protocol` / `connection` / `manager` / `context`）。
 
@@ -30,12 +30,12 @@
 {"version":1,"type":"error","code":"<string>","message":"<string>","resource":{...}}
 ```
 
-- `subscribed`：订阅已在 wire 上建立（首次与每次重连重订阅后都会发送）；`cursor` 是订阅建立瞬间的 durable cursor——Thread 为 version、Canvas 为 version。该 cursor 之后的事件保证送达，之前的由客户端随后拉取的 snapshot / `/changes` 覆盖。
+- `subscribed`：订阅已在 wire 上建立（首次与每次重连重订阅后都会发送）；`cursor` 是订阅建立瞬间的 durable cursor——Thread 为 version、Canvas 为 version。该 cursor 之后的事件保证送达，之前的由客户端随后拉取的 snapshot 覆盖。
 - `event` 的 `name` 为 `version` / `realtime` / `version`：
   - Thread `version`：`data` 为 `{"version":"N"}`，顶层 `cursor` 必带且与 `data.version` 完全相等；
   - Thread `realtime`：`data` 是 realtime codec 的 JSON 对象（`MODEL_DELTA` / `TOOL_PARTIAL` envelope：`threadId/subjectKind/subjectId/attempt/sequence?/type/payload/createdAt`），**绝不携带 `cursor`**；
   - Canvas `version`：`data` 为 `{"version":"N"}`，顶层 `cursor` 必带且与 `data.version` 完全相等。
-- `resync`：整体替换为全量快照（重新读取 snapshot / `/changes`）。
+- `resync`：整体替换为全量快照（重新读取 snapshot）。
 - `heartbeat`：连接级空闲保活，不绑定 resource、不携带 cursor/data；前端严格解码后静默消费，不触发业务 listener。
 - `error`：`code` / `message`；资源级错误（`RESOURCE_NOT_FOUND`）额外携带 `resource` 供客户端定位，连接级错误不携带。
 

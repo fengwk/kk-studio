@@ -6,7 +6,6 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
-import fun.fengwk.kkstudio.share.studio.CanvasChangesDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasCommandDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasFunctionDTO;
@@ -25,7 +24,6 @@ import fun.fengwk.kkstudio.share.studio.CanvasResourceDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasResourceNodeDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasTransformDTO;
-import fun.fengwk.kkstudio.studio.canvas.CanvasChanges;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunction;
@@ -113,14 +111,6 @@ public class StudioWebMapper {
     dto.setGroups(patch.groups().stream().map(this::toGroupPatchDto).toList());
     dto.setNodes(patch.nodes().stream().map(this::toNodePatchDto).toList());
     dto.setLinks(patch.links().stream().map(this::toLinkPatchDto).toList());
-    return dto;
-  }
-
-  public CanvasChangesDTO toDto(CanvasChanges changes) {
-    Objects.requireNonNull(changes, "changes");
-    CanvasChangesDTO dto = new CanvasChangesDTO();
-    dto.setPatches(changes.patches().stream().map(this::toDto).toList());
-    dto.setSnapshot(changes.snapshot() == null ? null : toDto(changes.snapshot()));
     return dto;
   }
 

@@ -24,7 +24,6 @@ class CanvasDtoContractTest {
     "CanvasResourceDTO.height",
     "CanvasResourceDTO.durationMs",
     "CanvasFunctionRunDTO.error",
-    "CanvasChangesDTO.snapshot",
     "CanvasFunctionModelDTO.unavailableReason",
     "CanvasFunctionParameterDefinitionDTO.defaultValue",
     "CanvasFunctionParameterDefinitionDTO.min",

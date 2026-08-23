@@ -19,7 +19,7 @@ export interface FunctionRunActions {
 
 /**
  * Function run 生命周期：本地 start/cancel 响应只做即时投影，绝对不做固定间隔轮询；
- * 权威收敛仍由 version 事件驱动的 changes/snapshot 负责；start 响应丢失时以匹配
+ * 权威收敛仍由 version 事件驱动的 Snapshot 负责；start 响应丢失时以匹配
  * requestId 的服务端 run 做 authoritative fallback，其余失败 toast。
  */
 export function useCanvasFunctionRun(options: {

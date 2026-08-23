@@ -6,9 +6,9 @@ const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 registerCase({
   id: 'canvas.api_version_contract',
   level: 'L1',
-  title: 'Canvas UUID/version/patch/changes HTTP 契约',
+  title: 'Canvas UUID/version/command patch/snapshot HTTP 契约',
   docs:
-    '免费 L1：create/list/get/commands 的 canonical UUID id 与十进制字符串 long version，expectedVersion CAS 409，同 commandId 精确回放空 patch 与不同内容 409，changes 连续 patches 或权威 snapshot，Group 重命名与成员子集解绑，删除后 404',
+    '免费 L1：create/list/get/commands 的 canonical UUID id 与十进制字符串 long version，expectedVersion CAS 409，同 commandId 精确回放空 patch 与不同内容 409，标准 snapshot 收敛且旧 changes 端点不存在，Group 重命名与成员子集解绑，删除后 404',
   async run(ctx) {
     const { json: createJson } = await ctx.call('POST', '/api/canvases', {
       title: 'e2e-version-contract',
@@ -95,33 +95,6 @@ registerCase({
         }),
       { status: 409 },
     )
-
-    // changes：缓存完整时 afterVersion=0 可直接回放 0→1；缓存缺失时回退权威 snapshot。
-    const { json: changesJson } = await ctx.call(
-      'GET',
-      `/api/canvases/${canvas.id}/changes?afterVersion=0`,
-    )
-    const changes = envelopeData(changesJson)
-    const firstPatchOk =
-      changes.snapshot === null
-      && changes.patches.length === 1
-      && changes.patches[0].baseVersion === '0'
-      && changes.patches[0].version === '1'
-    const firstSnapshotOk =
-      changes.patches.length === 0
-      && changes.snapshot !== null
-      && assertDecimalVersionSafe(changes.snapshot.document.version)
-      && changes.snapshot.document.version === '1'
-    assert(firstPatchOk || firstSnapshotOk, JSON.stringify(changes))
-
-    // 已处于权威尾部时没有 delta，也无需返回 snapshot。
-    const { json: tailChangesJson } = await ctx.call(
-      'GET',
-      `/api/canvases/${canvas.id}/changes?afterVersion=1`,
-    )
-    const tailChanges = envelopeData(tailChangesJson)
-    assert(tailChanges.patches.length === 0, JSON.stringify(tailChanges))
-    assert(tailChanges.snapshot === null, JSON.stringify(tailChanges))
 
     // RENAME_GROUP：标题更新只发 group UPSERT patch；空白 title 与未知 group 都是 400。
     const groupId = cid()
@@ -247,16 +220,13 @@ registerCase({
     assertDecimalVersion(listed?.version, 'listed canvas.version')
     assert(listed?.version === '4', JSON.stringify(listed))
 
-    await ctx.call('DELETE', `/api/canvases/${canvas.id}`)
-    await expectHttpError(() => ctx.call('GET', `/api/canvases/${canvas.id}`), { status: 404 })
+    // 跨窗口/version/reconnect 恢复只允许标准 Snapshot；旧 changes 兼容端点必须不存在。
     await expectHttpError(
       () => ctx.call('GET', `/api/canvases/${canvas.id}/changes?afterVersion=0`),
-      { status: 400 },
+      { status: 404 },
     )
+
+    await ctx.call('DELETE', `/api/canvases/${canvas.id}`)
+    await expectHttpError(() => ctx.call('GET', `/api/canvases/${canvas.id}`), { status: 404 })
   },
 })
-
-/** 只校验而不断言的版本形状检查，供二选一分支使用。 */
-function assertDecimalVersionSafe(value) {
-  return typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value)
-}

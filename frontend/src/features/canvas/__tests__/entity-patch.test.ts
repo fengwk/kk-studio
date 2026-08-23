@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  applyCanvasChanges,
-  applyEntityPatch,
-} from '@/features/canvas/entity-patch'
+import { applyEntityPatch } from '@/features/canvas/entity-patch'
 import type {
-  CanvasChangesDTO,
   CanvasPatchDTO,
   CanvasSnapshotDTO,
 } from '@/shared/api/contracts/studio'
@@ -149,48 +145,4 @@ describe('Canvas entity patch reducer', () => {
     })).toBeNull()
   })
 
-  it('folds continuous patches in order and rejects a broken chain', () => {
-    const current = snapshot(1)
-    const changes: CanvasChangesDTO = {
-      patches: [
-        { baseVersion: '1', version: '2', nodes: [{ op: 'UPSERT', node: NODE_DTO(NODE_B) }], groups: [], links: [] },
-        { baseVersion: '2', version: '3', nodes: [{ op: 'REMOVE', nodeId: NODE_A }], groups: [], links: [] },
-      ],
-      snapshot: null,
-    }
-
-    const folded = applyCanvasChanges(current, changes)
-
-    expect(folded?.document.version).toBe('3')
-    expect(folded?.nodes.map((node) => node.id)).toEqual([NODE_B])
-
-    const broken = applyCanvasChanges(current, {
-      patches: [
-        { baseVersion: '1', version: '2', nodes: [], groups: [], links: [] },
-        { baseVersion: '3', version: '4', nodes: [], groups: [], links: [] },
-      ],
-      snapshot: null,
-    })
-    expect(broken).toBeNull()
-  })
-
-  it('prefers the returned snapshot and rejects an older one', () => {
-    const current = snapshot(5)
-    const fresh = { ...snapshot(7), document: { ...snapshot(7).document, title: 'fresh' } }
-    expect(applyCanvasChanges(current, {
-      patches: [],
-      snapshot: fresh,
-    })?.document.title).toBe('fresh')
-
-    expect(applyCanvasChanges(current, {
-      patches: [],
-      snapshot: snapshot(4),
-    })).toBeNull()
-  })
-
-  it('keeps the current state when changes report no progress', () => {
-    const current = snapshot(5)
-    const unchanged = applyCanvasChanges(current, { patches: [], snapshot: null })
-    expect(unchanged).toBe(current)
-  })
 })
