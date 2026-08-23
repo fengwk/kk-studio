@@ -18,7 +18,8 @@ import java.util.function.Consumer;
  * PostgreSQL realtime notification 的本地订阅与分发器。
  *
  * <p>本类不创建线程或连接。统一 LISTEN loop 把 payload 交给 {@link #onNotification(String)}，连接建立或重建后调用 {@link
- * #onResync()}。malformed/unknown payload 触发全部本地订阅 resync；合法 envelope 仅分发到对应 Thread。
+ * #onResync()}。malformed/unknown payload 触发全部本地订阅 resync；合法 envelope 仅分发到对应 Thread。全局生命周期锁只保护
+ * closed/map 与 subscriber 快照，用户回调由每个 subscriber 的独立关闭围栏管理并始终在全局锁外执行。
  */
 public final class PostgresqlRealtimeEventSource implements RealtimeEventSource {
 
@@ -30,7 +31,17 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
   private final Map<UUID, List<Subscriber>> subscribersByThread = new HashMap<>();
   private final Object lifecycleFence = new Object();
 
+  /**
+   * Source-wide callback 完成围栏。唯一嵌套顺序是 Subscriber callbackFence -> sourceCallbackFence； source close
+   * 会先逐个关闭 Subscriber 围栏，再单独等待本围栏，禁止反向持锁。
+   */
+  private final Object sourceCallbackFence = new Object();
+
+  private final ThreadLocal<Integer> sourceCallbackDepth = ThreadLocal.withInitial(() -> 0);
+
   private boolean closed;
+  private int activeSourceCallbacks;
+  private boolean subscriberFencesClosed;
 
   public PostgresqlRealtimeEventSource(RealtimeNotificationCodec notificationCodec) {
     this.notificationCodec = Objects.requireNonNull(notificationCodec, "notificationCodec");
@@ -62,65 +73,145 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
       onResync();
       return;
     }
+    List<Subscriber> subscribers;
     synchronized (lifecycleFence) {
       if (closed) {
         return;
       }
       if (envelope instanceof RealtimeNotificationCodec.Envelope.Event event) {
-        dispatchEvent(event.event());
+        subscribers = snapshot(event.event().threadId());
       } else if (envelope instanceof RealtimeNotificationCodec.Envelope.Resync resync) {
-        dispatchResync(resync.threadId());
+        subscribers = snapshot(resync.threadId());
+      } else {
+        return;
       }
+    }
+    if (envelope instanceof RealtimeNotificationCodec.Envelope.Event event) {
+      dispatchEvent(subscribers, event.event());
+    } else {
+      dispatchResync(subscribers);
     }
   }
 
   /** 由统一 listener 在显式建立或重建连接后触发全部本地订阅恢复。 */
   public void onResync() {
+    List<Subscriber> subscribers;
     synchronized (lifecycleFence) {
       if (closed) {
         return;
       }
-      for (List<Subscriber> subscribers : List.copyOf(subscribersByThread.values())) {
-        for (Subscriber subscriber : List.copyOf(subscribers)) {
-          subscriber.resync();
-        }
-      }
+      subscribers = snapshotAll();
     }
+    dispatchResync(subscribers);
   }
 
   @Override
   public void close() {
+    List<Subscriber> subscribers = List.of();
+    boolean firstCloser = false;
     synchronized (lifecycleFence) {
-      if (closed) {
-        return;
+      if (!closed) {
+        closed = true;
+        subscribers = snapshotAll();
+        subscribersByThread.clear();
+        firstCloser = true;
       }
-      closed = true;
-      for (List<Subscriber> subscribers : subscribersByThread.values()) {
-        for (Subscriber subscriber : subscribers) {
-          subscriber.closed = true;
-        }
+    }
+    if (firstCloser) {
+      for (Subscriber subscriber : subscribers) {
+        subscriber.disable();
       }
-      subscribersByThread.clear();
+      synchronized (sourceCallbackFence) {
+        subscriberFencesClosed = true;
+        sourceCallbackFence.notifyAll();
+      }
+      awaitCallbacks(sourceCallbackDepth.get());
+    } else if (sourceCallbackDepth.get() > 0) {
+      awaitSubscriberFences();
+    } else {
+      awaitCallbacks(0);
     }
   }
 
-  private void dispatchEvent(RealtimeEvent event) {
-    List<Subscriber> subscribers = subscribersByThread.get(event.threadId());
+  /** 仅在 lifecycleFence 内调用，复制目标 Thread 当前 subscriber 快照。 */
+  private List<Subscriber> snapshot(UUID threadId) {
+    List<Subscriber> subscribers = subscribersByThread.get(threadId);
     if (subscribers == null) {
-      return;
+      return List.of();
     }
-    for (Subscriber subscriber : List.copyOf(subscribers)) {
+    return List.copyOf(subscribers);
+  }
+
+  /** 仅在 lifecycleFence 内调用，复制全部当前 subscriber 快照。 */
+  private List<Subscriber> snapshotAll() {
+    List<Subscriber> snapshot = new ArrayList<>();
+    for (List<Subscriber> subscribers : subscribersByThread.values()) {
+      snapshot.addAll(subscribers);
+    }
+    return List.copyOf(snapshot);
+  }
+
+  private static void dispatchEvent(List<Subscriber> subscribers, RealtimeEvent event) {
+    for (Subscriber subscriber : subscribers) {
       subscriber.event(event);
     }
   }
 
-  private void dispatchResync(UUID threadId) {
-    List<Subscriber> subscribers = subscribersByThread.get(threadId);
-    if (subscribers == null) {
-      return;
-    }
-    for (Subscriber subscriber : List.copyOf(subscribers)) {
+  private static void dispatchResync(List<Subscriber> subscribers) {
+    for (Subscriber subscriber : subscribers) {
       subscriber.resync();
+    }
+  }
+
+  private void callbackStarted() {
+    synchronized (sourceCallbackFence) {
+      activeSourceCallbacks++;
+    }
+    sourceCallbackDepth.set(sourceCallbackDepth.get() + 1);
+  }
+
+  private void callbackFinished() {
+    int depth = sourceCallbackDepth.get() - 1;
+    if (depth == 0) {
+      sourceCallbackDepth.remove();
+    } else {
+      sourceCallbackDepth.set(depth);
+    }
+    synchronized (sourceCallbackFence) {
+      activeSourceCallbacks--;
+      sourceCallbackFence.notifyAll();
+    }
+  }
+
+  private void awaitSubscriberFences() {
+    boolean interrupted = false;
+    synchronized (sourceCallbackFence) {
+      while (!subscriberFencesClosed) {
+        try {
+          sourceCallbackFence.wait();
+        } catch (InterruptedException ignored) {
+          interrupted = true;
+        }
+      }
+    }
+    if (interrupted) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  private void awaitCallbacks(int callbacksOwnedByCurrentThread) {
+    boolean interrupted = false;
+    synchronized (sourceCallbackFence) {
+      while (!subscriberFencesClosed || activeSourceCallbacks > callbacksOwnedByCurrentThread) {
+        try {
+          sourceCallbackFence.wait();
+        } catch (InterruptedException ignored) {
+          interrupted = true;
+        }
+      }
+    }
+    if (interrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 
@@ -129,7 +220,11 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
     private final UUID threadId;
     private final Consumer<RealtimeEvent> onEvent;
     private final Runnable onResync;
+    private final Object callbackFence = new Object();
+    private final ThreadLocal<Integer> callbackDepth = ThreadLocal.withInitial(() -> 0);
+
     private boolean closed;
+    private int activeCallbacks;
 
     private Subscriber(UUID threadId, Consumer<RealtimeEvent> onEvent, Runnable onResync) {
       this.threadId = threadId;
@@ -138,33 +233,34 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
     }
 
     private void event(RealtimeEvent event) {
-      if (closed) {
+      if (!startCallback()) {
         return;
       }
       try {
         onEvent.accept(event);
       } catch (RuntimeException error) {
         log.warn("realtime subscriber callback failed for threadId={}; skipping", threadId, error);
+      } finally {
+        finishCallback();
       }
     }
 
     private void resync() {
-      if (closed) {
+      if (!startCallback()) {
         return;
       }
       try {
         onResync.run();
       } catch (RuntimeException error) {
         log.warn("realtime resync callback failed for threadId={}; skipping", threadId, error);
+      } finally {
+        finishCallback();
       }
     }
 
     private void close() {
+      disableAndAwaitCallbacks();
       synchronized (lifecycleFence) {
-        if (closed) {
-          return;
-        }
-        closed = true;
         List<Subscriber> subscribers = subscribersByThread.get(threadId);
         if (subscribers == null) {
           return;
@@ -173,6 +269,57 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
         if (subscribers.isEmpty()) {
           subscribersByThread.remove(threadId);
         }
+      }
+    }
+
+    private boolean startCallback() {
+      synchronized (callbackFence) {
+        if (closed) {
+          return false;
+        }
+        activeCallbacks++;
+        callbackDepth.set(callbackDepth.get() + 1);
+        PostgresqlRealtimeEventSource.this.callbackStarted();
+        return true;
+      }
+    }
+
+    private void finishCallback() {
+      synchronized (callbackFence) {
+        int depth = callbackDepth.get() - 1;
+        if (depth == 0) {
+          callbackDepth.remove();
+        } else {
+          callbackDepth.set(depth);
+        }
+        activeCallbacks--;
+        callbackFence.notifyAll();
+      }
+      PostgresqlRealtimeEventSource.this.callbackFinished();
+    }
+
+    private void disable() {
+      synchronized (callbackFence) {
+        closed = true;
+      }
+    }
+
+    private void disableAndAwaitCallbacks() {
+      boolean interrupted = false;
+      synchronized (callbackFence) {
+        closed = true;
+        if (callbackDepth.get() == 0) {
+          while (activeCallbacks > 0) {
+            try {
+              callbackFence.wait();
+            } catch (InterruptedException ignored) {
+              interrupted = true;
+            }
+          }
+        }
+      }
+      if (interrupted) {
+        Thread.currentThread().interrupt();
       }
     }
   }
