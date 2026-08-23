@@ -16,6 +16,13 @@ import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SystemPromptPreviewServiceFactory;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
+import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
+import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
+import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
+import fun.fengwk.kkstudio.harness.infra.postgresql.RealtimeNotificationCodec;
+import fun.fengwk.kkstudio.harness.infra.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
@@ -33,13 +40,6 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
-import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
-import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcherConfig;
-import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlRealtimeEventSink;
-import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlRealtimeEventSource;
-import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.RealtimeNotificationCodec;
-import fun.fengwk.kkstudio.harness.runtime.spring.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
 import javax.sql.DataSource;
@@ -59,7 +59,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Web 组合根：把 core 的 gateway / resolver 与 runtime-spring 的 PostgreSQL 持久化和调度适配装配为完整的 Harness Runtime。
+ * Web 组合根：把 core 的 gateway / resolver 与 infra 的 PostgreSQL 持久化和调度适配装配为完整的 Harness Runtime。
  *
  * <p>进程内 worker dispatcher 只受 {@code workers-enabled} 控制；关闭时控制/查询平面（{@link
  * HarnessRuntime}、store、processor 与 realtime 适配）仍然可用，只是不启动调度。PostgreSQL notification loop

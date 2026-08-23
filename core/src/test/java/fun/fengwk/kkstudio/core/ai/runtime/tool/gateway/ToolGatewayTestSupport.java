@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.plugin.PluginBranchViewLoader;
 import fun.fengwk.kkstudio.core.testing.TestEnvironmentBindings;
-import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;

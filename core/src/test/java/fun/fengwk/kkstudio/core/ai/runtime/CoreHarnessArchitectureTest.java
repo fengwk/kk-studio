@@ -16,20 +16,18 @@ import java.util.stream.Stream;
 /** 守护 Core 与 framework-free Harness runtime API 的组合/应用边界。 */
 class CoreHarnessArchitectureTest {
 
-  private static final String HARNESS_RUNTIME_SPRING =
-      "fun.fengwk.kkstudio.harness.runtime.spring.";
+  private static final String HARNESS_INFRA = "fun.fengwk.kkstudio.harness.infra.";
 
-  /** Core 不是组合根：main 源码和 pom 不得依赖 runtime-spring。 */
+  /** Core 不是组合根：main 源码和 pom 不得依赖 infra。 */
   @Test
-  void coreNeverDependsOnRuntimeSpring() throws IOException {
+  void coreNeverDependsOnInfra() throws IOException {
     Path main = locateCoreMainJava();
     List<String> violations = new ArrayList<>();
     try (Stream<Path> paths = Files.walk(main)) {
       for (Path path : paths.filter(candidate -> candidate.toString().endsWith(".java")).toList()) {
         for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
           String trimmed = line.trim();
-          if (trimmed.startsWith("import ")
-              && normalizeImport(trimmed).startsWith(HARNESS_RUNTIME_SPRING)) {
+          if (trimmed.startsWith("import ") && normalizeImport(trimmed).startsWith(HARNESS_INFRA)) {
             violations.add(relative(main, path) + ": " + trimmed);
           }
         }
@@ -39,12 +37,12 @@ class CoreHarnessArchitectureTest {
     Path pom = locateCorePom(main);
     String pomText = Files.readString(pom, StandardCharsets.UTF_8);
     assertFalse(
-        pomText.contains("<artifactId>kk-studio-harness-runtime-spring</artifactId>"),
-        "core/pom.xml must not declare kk-studio-harness-runtime-spring");
+        pomText.contains("<artifactId>kk-studio-harness-infra</artifactId>"),
+        "core/pom.xml must not declare kk-studio-harness-infra");
 
     assertTrue(
         violations.isEmpty(),
-        () -> "Core runtime-spring dependency violations:\n" + String.join("\n", violations));
+        () -> "Core infra dependency violations:\n" + String.join("\n", violations));
   }
 
   /**

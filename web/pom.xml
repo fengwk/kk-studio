@@ -30,11 +30,11 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-runtime-spring</artifactId>
+            <artifactId>kk-studio-harness-infra</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-plugin-goal</artifactId>
+            <artifactId>kk-studio-harness-plugin-goal</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.convention4j</groupId>

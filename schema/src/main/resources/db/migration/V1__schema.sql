@@ -8,9 +8,9 @@
 -- `updated_at` is application-managed; PostgreSQL never emulates MySQL's
 -- ON UPDATE CURRENT_TIMESTAMP.
 --
--- Harness execution state is the exact runtime-spring protocol: section 2 below
+-- Harness execution state is the exact infra protocol: section 2 below
 -- (the seven tables + their indexes) is the single authoritative definition of
--- the durable Harness protocol schema. There is no separate runtime-spring
+-- the durable Harness protocol schema. There is no separate infra
 -- schema file; this block is the only copy. HarnessRuntime owns every execution
 -- id via the injected Supplier<UUID> (production: UUID::randomUUID) and owns
 -- `version`; the database never mutates them. The only V1 additions around it

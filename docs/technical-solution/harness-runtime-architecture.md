@@ -8,7 +8,7 @@
 - Thread 的 Entry/head 推进串行；Model、Tool 通过各自 Invocation + Work 继续执行。
 - Processor 每次处理都是短事务，不在事务内等待外部 I/O（Provider/Tool 执行在事务外）。
 - `harness-runtime` 是纯 Java 模块：不依赖 Spring、数据库驱动、HTTP、WebSocket、Provider SDK 或业务 Tool 实现。
-- `harness-runtime-spring` 只做持久化与调度适配：`HarnessStore`（PostgreSQL）、Work dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store。
+- `harness-infra` 只做持久化与调度适配：`HarnessStore`（PostgreSQL）、Work dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store。
 - `core` 只提供 Catalog/TurnResolver/ModelGateway/ToolGateway/Environment gateway 适配，不写 `harness_*` 表。
 
 ## 2. 模块
@@ -17,18 +17,21 @@
 harness/
 ├── tool/                # Tool API、descriptor、ResourceRef、RemoteTool、Daemon v3 wire
 ├── runtime/             # 纯 Java：Session/Entry/Thread/Command/Invocation/Work/processor
-├── plugin/              # 纯 Java trusted build-time 插件 API：Catalog/BranchView/Tool/intents/projector
-├── runtime-spring/      # Store/Work/notification/Resource 适配（PostgreSQL、dispatcher）
-└── daemon/              # 独立 Environment 进程，只依赖 tool
+├── plugin-api/          # 纯 Java trusted build-time 插件 API：Catalog/BranchView/Tool/intents/projector
+├── infra/               # Store/Work/notification/Resource 适配（PostgreSQL、dispatcher）
+├── daemon/              # 独立 Environment 进程，只依赖 tool
+└── plugins/
+    └── goal/            # Goal v2 内建插件
 ```
 
 依赖方向：
 
 ```text
 web composition root -> core application API / share DTO
-web composition root -> harness-runtime-spring -> harness-runtime -> harness-tool
+web composition root -> harness-infra -> harness-runtime -> harness-tool
 web composition root -> harness-runtime
-core -> harness-plugin -> harness-runtime -> harness-tool
+web composition root -> harness/plugins/goal -> harness-plugin-api
+core -> harness-plugin-api -> harness-runtime -> harness-tool
 core -> harness-runtime -> harness-tool
 core -> harness-tool
 harness-daemon -> harness-tool

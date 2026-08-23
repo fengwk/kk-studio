@@ -23,7 +23,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
-import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 

@@ -173,7 +173,7 @@ Session KEY SHARE -> Thread -> Commands -> ModelInvocation -> ToolInvocation sib
 
 ## 10. Resource store
 
-- `harness-runtime-spring` 提供瞬时 `LocalFileResourceStore`：`ResourceStore.reference` 无副作用地计划 canonical `file:///` `ResourceRef`，`put` 返回精确相同引用；`harness-daemon` 的 coding 工具使用同构 store。
+- `harness-infra` 提供瞬时 `LocalFileResourceStore`：`ResourceStore.reference` 无副作用地计划 canonical `file:///` `ResourceRef`，`put` 返回精确相同引用；`harness-daemon` 的 coding 工具使用同构 store。
 - `ToolResultExternalizer` 位于 `CoreToolGateway` callback bridge。插件 intents 先完整校验为 effects；Text/Json UTF-8 ≤ 8KB 保持 inline，超过阈值或 Binary 才按 `reference -> put -> exact ref check` 转为瞬时 `ResourceRef`，随后 `ToolProcessor` 原子持久化 terminal `result + effects + SUCCEEDED`。
 - Tool outcome Entry 插入前，`ToolOutcomeAppender` 在同一 Store 事务调用
   `GlobalStorageToolResultHistoryMaterializer`：有界读取 data/file/http/https/s3 内容，摄入

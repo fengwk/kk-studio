@@ -15,14 +15,18 @@ import java.util.stream.Stream;
 /**
  * web 模块的轻量架构守护。
  *
- * <p>生产源码不得引用 Harness Tool/Daemon 包或选定的 Core 基础设施实现。web 模块是 Harness 组合根：它按设计将 Runtime 契约与
- * runtime-spring 传输适配器声明为直接依赖，且 {@code web/pom.xml} 必须保留该声明。
+ * <p>生产源码不得引用 Harness Tool/Daemon 包或选定的 Core 基础设施实现。web 模块是 Harness 组合根：它按设计将 Runtime 契约与 infra
+ * 传输适配器声明为直接依赖，且 {@code web/pom.xml} 必须保留该声明。
  */
 class WebModuleArchitectureTest {
 
   private static final String HARNESS_RUNTIME_PREFIX = "fun.fengwk.kkstudio.harness.runtime.";
+  private static final String HARNESS_INFRA_PREFIX = "fun.fengwk.kkstudio.harness.infra.";
+  private static final String GOAL_PLUGIN_PREFIX = "fun.fengwk.kkstudio.harness.plugins.goal.";
   private static final String HARNESS_TOOL_PREFIX = "fun.fengwk.kkstudio.harness.tool.";
   private static final String CORE_AI_REFERENCE_PREFIX = "fun.fengwk.kkstudio.core.ai.";
+  private static final List<String> ALLOWED_HARNESS_PACKAGE_PREFIXES =
+      List.of(HARNESS_RUNTIME_PREFIX, HARNESS_INFRA_PREFIX, GOAL_PLUGIN_PREFIX);
 
   /**
    * Web mapper 直接使用的 canonical tool types (EnvironmentBinding, EnvironmentName,
@@ -41,7 +45,8 @@ class WebModuleArchitectureTest {
           CORE_AI_REFERENCE_PREFIX + "environment.registry." + "LiveEnvironmentRegistry");
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
       List.of("kk-studio-harness-tool", "kk-studio-harness-daemon");
-  private static final String REQUIRED_POM_ARTIFACT = "kk-studio-harness-runtime-spring";
+  private static final List<String> REQUIRED_POM_ARTIFACTS =
+      List.of("kk-studio-harness-infra", "kk-studio-harness-plugin-goal");
 
   @Test
   void webMainSourcesUseCoreBoundariesAndAvoidDirectHarnessDependencies() throws IOException {
@@ -62,9 +67,10 @@ class WebModuleArchitectureTest {
         pomViolations.add("direct dependency declared: " + artifactId);
       }
     }
-    if (!pomText.contains("<artifactId>" + REQUIRED_POM_ARTIFACT + "</artifactId>")) {
-      pomViolations.add(
-          "composition root must declare direct dependency: " + REQUIRED_POM_ARTIFACT);
+    for (String artifactId : REQUIRED_POM_ARTIFACTS) {
+      if (!pomText.contains("<artifactId>" + artifactId + "</artifactId>")) {
+        pomViolations.add("composition root must declare direct dependency: " + artifactId);
+      }
     }
     assertTrue(
         pomViolations.isEmpty(),
@@ -106,9 +112,9 @@ class WebModuleArchitectureTest {
     return violations;
   }
 
-  /** 仅 Runtime 契约（及其 Spring transport 包）和规范化的 tool 类型可被直接引用。 */
+  /** 组合根只直接引用 Runtime、Infra、内建 Goal 插件和规范化的 Tool 类型。 */
   private static boolean isForbiddenHarnessImport(String imported) {
-    if (imported.startsWith(HARNESS_RUNTIME_PREFIX)) {
+    if (ALLOWED_HARNESS_PACKAGE_PREFIXES.stream().anyMatch(imported::startsWith)) {
       return false;
     }
     if (!imported.startsWith("fun.fengwk.kkstudio.harness.")) {
@@ -118,7 +124,8 @@ class WebModuleArchitectureTest {
   }
 
   private static boolean isForbiddenHarnessReference(String line) {
-    return line.contains("fun.fengwk.kkstudio.harness.") && !line.contains(HARNESS_RUNTIME_PREFIX);
+    return line.contains("fun.fengwk.kkstudio.harness.")
+        && ALLOWED_HARNESS_PACKAGE_PREFIXES.stream().noneMatch(line::contains);
   }
 
   private static String normalizeImport(String importLine) {

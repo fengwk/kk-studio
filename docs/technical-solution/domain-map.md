@@ -6,18 +6,18 @@
 
 | 域 | 代码位置 | 职责 |
 | --- | --- | --- |
-| Harness / AI | `harness-tool`、`harness-runtime`、`harness-plugin`、`plugins/*`、`harness-runtime-spring`、`harness-daemon`、`core.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、插件 branch state、Work |
+| Harness / AI | `harness-tool`、`harness-runtime`、`harness-plugin-api`、`harness/plugins/*`、`harness-infra`、`harness-daemon`、`core.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、插件 branch state、Work |
 | Studio / Canvas | `studio`、`core.studio`、`features/canvas` | Canvas document、ResourceNode、Resource、Function、Group、Link、typed command |
 
 ```text
 frontend
   -> web
     -> core
-    -> harness-runtime-spring -> harness-runtime -> harness-tool
+    -> harness-infra -> harness-runtime -> harness-tool
     -> harness-runtime
 core -> harness-runtime -> harness-tool
-core -> harness-plugin -> harness-runtime
-plugins/* -> harness-plugin
+core -> harness-plugin-api -> harness-runtime
+harness/plugins/* -> harness-plugin-api
 core -> harness-tool
   -> share
 harness-daemon -> harness-tool

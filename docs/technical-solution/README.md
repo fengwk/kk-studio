@@ -56,8 +56,8 @@ flowchart TD
 
 ## 贯穿约束
 
-- Harness 单轨协议：恰好 5 个 Harness 基础模块（`harness-tool` / `harness-runtime` / `harness-plugin` / `harness-runtime-spring` / `harness-daemon`）、3 个 processor（Thread/Model/Tool）、3 个 Work target（THREAD/MODEL/TOOL）、7 张表、10 种 `EntryType`、1 个 Agent Loop；受信任插件位于独立 `plugins/*` 构建模块。
-- `harness-runtime` 是纯 Java 领域模块，拥有 Thread 状态机与 processor；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway 与 Environment/Chat 应用能力，不写 `harness_*` 表；Goal 由 `plugins/goal` 提供；`web` 是生产组合根。
+- Harness 单轨协议：恰好 5 个 Harness 基础模块（`harness-tool` / `harness-runtime` / `harness-plugin-api` / `harness-infra` / `harness-daemon`）、3 个 processor（Thread/Model/Tool）、3 个 Work target（THREAD/MODEL/TOOL）、7 张表、10 种 `EntryType`、1 个 Agent Loop；受信任插件位于独立 `harness/plugins/*` 构建模块。
+- `harness-runtime` 是纯 Java 领域模块，拥有 Thread 状态机与 processor；`harness-plugin-api` 提供构建期注册、启动时冻结的插件 API；`harness-infra` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway 与 Environment/Chat 应用能力，不写 `harness_*` 表；Goal 由 `harness/plugins/goal` 提供；`web` 是生产组合根。
 - PostgreSQL 是唯一 durable truth；`harness_work` 是唯一调度 mailbox（`wake_version` + lease）；`LISTEN/NOTIFY` 只提供低延迟提示，Work 由 periodic poll、客户端由 snapshot 负责恢复。
 - 所有 Runtime 实体 id（Thread/Session/Entry/Invocation/Command）在 HTTP wire 上是 canonical UUID strings；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal strings，前端以 `DecimalLong=string` 接收并按字段领域约束严格校验。
 - Thread `nextCommandSequence` 从 1 开始；每次可见状态变化 `version` 恰好 +1。

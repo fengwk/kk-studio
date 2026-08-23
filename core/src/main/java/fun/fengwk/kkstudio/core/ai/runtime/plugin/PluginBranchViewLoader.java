@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.runtime.plugin;
 
-import fun.fengwk.kkstudio.harness.plugin.BranchView;
+import fun.fengwk.kkstudio.harness.plugin.api.BranchView;
 
 import java.util.UUID;
 

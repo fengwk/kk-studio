@@ -16,8 +16,9 @@
     <modules>
         <module>tool</module>
         <module>runtime</module>
-        <module>plugin</module>
-        <module>runtime-spring</module>
+        <module>plugin-api</module>
+        <module>infra</module>
         <module>daemon</module>
+        <module>plugins/goal</module>
     </modules>
 </project>
