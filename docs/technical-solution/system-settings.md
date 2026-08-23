@@ -55,10 +55,10 @@ HTTP wire 上的 Java `Long` 使用非负十进制字符串，`Integer` 使用 J
 | `advanced` | processor、dispatcher、executor、realtime 与事件通道预算 | 重启 |
 
 `SystemSettingsSnapshot` 是进程内 live 快照：启动时读取一次，PUT 在事务 `afterCommit` 成功后以回读的
-权威聚合原子替换（回滚绝不更新内存），再向 Redis channel `kk-studio:system-settings` PUBLISH
-一条无语义唤醒。各节点用 `receiveLater` 订阅该 channel：订阅确认成功（含断线重挂成功）与每次唤醒都回读
-`system_setting.id=1` 再替换快照。Pub/Sub 有损，断连窗口靠重挂后的订阅确认回读补齐；PUBLISH 失败只记日志，
-不回滚 PUT。重连间隔复用 `advanced.redisRealtimeRetryDelayMillis`。
+权威记录原子替换（回滚绝不更新内存）。跨节点刷新由统一 PostgreSQL listener 调用
+`SystemSettingsChangeHandler.onNotification(payload)`；listener 建连或重连后调用 `onResync()` 补齐断连窗口。
+两条入口都忽略 payload 语义并回读 `system_setting.id=1`，回读失败只记日志，不中断 listener。Snapshot
+同时保存 repository record version，并以 CAS 门控阻止较旧的并发回读覆盖较新配置。
 
 aiRuntime 的 compaction / retry / subagent 决策点经
 `CompactionConfigProvider` / `InvocationRetryPolicyProvider` / `SubagentConfigProvider` 每次现读快照，
