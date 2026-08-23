@@ -23,19 +23,6 @@ services:
     networks:
       - canvas-test
 
-  redis:
-    image: redis:7.4-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
-    ports:
-      - "127.0.0.1:${CANVAS_TEST_REDIS_PORT:-16379}:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-    networks:
-      - canvas-test
-
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     command: ["server", "/data", "--console-address", ":9001"]
@@ -131,7 +118,6 @@ services:
       KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/canvas_test
       KK_STUDIO_DB_USER: canvas_test
       KK_STUDIO_DB_PASSWORD: canvas_test_only
-      KK_STUDIO_REDIS_URL: redis://redis:6379
       KK_STUDIO_STORAGE_S3_ENDPOINT: http://minio:9000
       KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT: http://127.0.0.1:${CANVAS_TEST_MINIO_PORT:-19000}
       KK_STUDIO_STORAGE_S3_REGION: us-east-1
@@ -146,8 +132,6 @@ services:
       - "127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}:8080"
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       minio:
         condition: service_healthy

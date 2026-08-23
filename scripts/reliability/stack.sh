@@ -55,7 +55,7 @@ Commands:
       Fail-closed isolation, runtime-tooling, and Environment READY checks.
   tool-smoke
       Compile and run direct Java find/grep/bash smoke assertions inside Daemon.
-  logs [postgres|redis|app|workspace-init|daemon ...]
+  logs [postgres|app|workspace-init|daemon ...]
       Print the last RELIABILITY_LOG_TAIL lines (default 200).
   status
       Print service state and the public Environment status without commands/env.
@@ -475,7 +475,7 @@ logs_stack() {
   local service
   for service in "$@"; do
     case "$service" in
-      postgres | redis | app | workspace-init | daemon) ;;
+      postgres | app | workspace-init | daemon) ;;
       *) die "invalid service '$service'" ;;
     esac
   done

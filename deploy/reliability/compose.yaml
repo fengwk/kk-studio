@@ -17,17 +17,6 @@ services:
     networks:
       - reliability
 
-  redis:
-    image: redis:7.4-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-    networks:
-      - reliability
-
   app:
     build:
       context: ../..
@@ -39,13 +28,10 @@ services:
       KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/kk_studio_reliability
       KK_STUDIO_DB_USER: kk_studio
       KK_STUDIO_DB_PASSWORD: kk_studio
-      KK_STUDIO_REDIS_URL: redis://redis:6379
     ports:
       - "127.0.0.1:${RELIABILITY_APP_PORT:-18091}:8080"
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/actuator/health"]

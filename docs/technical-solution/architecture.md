@@ -25,7 +25,6 @@ flowchart LR
     Tool[harness-tool]
     Daemon[harness-daemon]
     PG[(PostgreSQL)]
-    Redis[(Redis)]
     S3[(Object storage)]
     Env[Environment Daemon]
 
@@ -46,7 +45,8 @@ flowchart LR
     Core --> Tool
     Daemon --> Tool
     Core --> PG
-    Core --> Redis
+    RuntimeSpring --> PG
+    Web --> PG
     Core --> S3
     Browser --> S3
     Env <-->|WebSocket v2| Web
@@ -57,10 +57,10 @@ flowchart LR
 | 模块 | 职责 |
 | --- | --- |
 | `harness-tool` | `Tool`、descriptor、schema、`ResourceRef`、`RemoteTool` 与 Daemon v3 wire |
-| `harness-runtime` | **纯 Java 领域模块**：Session/Entry/Thread/Command/Invocation/Work 状态机、Thread/Model/Tool processor、Stop/Approval/fencing；不依赖 Spring、数据库、Redis、HTTP 或 Provider SDK |
+| `harness-runtime` | **纯 Java 领域模块**：Session/Entry/Thread/Command/Invocation/Work 状态机、Thread/Model/Tool processor、Stop/Approval/fencing；不依赖 Spring、数据库驱动、HTTP 或 Provider SDK |
 | `harness-plugin` | **纯 Java 受信任插件 API**：构建期注册、启动时冻结的 `PluginCatalog`，以及 `BranchView`、同步 `PluginTool`、声明式 `AppendCustomEntry` 与 context projector |
 | `plugins/goal` | Goal 插件：`create_goal` / `get_goal` / `update_goal` v2、branch-scoped `goal/state` 快照与 active goal 上下文投影 |
-| `harness-runtime-spring` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、Redis realtime overlay、本地 Resource store |
+| `harness-runtime-spring` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store |
 | `harness-daemon` | 独立 Environment 进程适配器，只依赖 `harness-tool` |
 | `core` | Catalog、全局 Blob Storage、`DatabaseTurnResolver`、Model/Tool Gateway、Environment、Chat 与 Canvas 应用服务；装配并执行受信任插件；Harness 执行表只经 Runtime/Store 端口写入 |
 | `web` | **生产组合根**：装配 Runtime、runtime-spring 与 Core ports，管理 dispatcher 与单连接 PostgreSQL notification loop 生命周期，并提供 HTTP、WebSocket（浏览器事件通道与 daemon v2）与静态资源适配 |
@@ -137,7 +137,7 @@ ENTRY_DRAFT / Bound Thread 的每次发送:
   -> TURN_END(COMPLETED, continueModel=true) -> continuation，直到 Model 无 ToolCall
 ```
 
-`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 command acceptance/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread version、维护 Work，并发布 realtime overlay。Model terminal apply 与 Stop 会先把普通 invocation 的 `failedAttempts` 物化为透明 `MODEL_ATTEMPT_FAILURE` Entry，再写唯一 Assistant 结果。插件 Tool terminal success 先由 `CoreToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
+`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 command acceptance/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread version、维护 Work，并发布 PostgreSQL realtime notification。Model terminal apply 与 Stop 会先把普通 invocation 的 `failedAttempts` 物化为透明 `MODEL_ATTEMPT_FAILURE` Entry，再写唯一 Assistant 结果。插件 Tool terminal success 先由 `CoreToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
 
 ## 6. Canvas
 
@@ -157,10 +157,11 @@ command/function 状态变化才前进 +1；Harness command acceptance 不前移
 
 ## 7. Realtime 与恢复
 
-PostgreSQL 是唯一 durable truth，`harness_work` 是 Harness 唯一调度 mailbox（NOTIFY 只是可用性
-提示）。Harness Redis Streams 只保存有界 realtime overlay；浏览器先读取 REST snapshot，再经应用
-事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）
-订阅 durable `version` 与 realtime delta。
+PostgreSQL 是唯一 durable truth，`harness_work` 是 Harness 唯一调度 mailbox。Work 的
+`NOTIFY` 只是可用性提示，丢失时由 periodic poll 收敛；realtime 使用 live-only PostgreSQL
+notification，不保存历史。浏览器先读取 REST snapshot，再经应用事件 WebSocket
+（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）订阅 durable
+`version` 与 realtime delta；首次订阅、重连、gap 或 `resync` 都重新读取 snapshot。
 
 Canvas 使用同一原则：PostgreSQL 实体与 `canvas_document.version` 是事实源，命令响应返回 Patch 供发起窗口
 即时应用；PostgreSQL `NOTIFY canvas_version` 只唤醒事件通道的 version source。其他窗口收到更高 version，
@@ -173,6 +174,6 @@ Canvas 使用同一原则：PostgreSQL 实体与 `canvas_document.version` 是�
 - 子 Thread ROOT payload 携带可选 `subagentContext {parentThreadId, rootThreadId, taskInvocationId, depth}`；`task` 的 id/session_id 是子 ThreadId（canonical UUID）。
 - 委派权限在父 ModelRequestSpec 冻结为 `subagentBindings`（Agent 名称 + 描述 allowlist）；执行绝不重读父 Agent 配置扩权。子 Agent branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且未达最大深度时 task`）。
 - 运行期控制全部是配置（`SubagentConfig`）：`maxDepth`、每父/每根并发上限、idle 超时、`maxTurns` 软预算；观察完全事件驱动（`ChangeGate.awaitChange` 等 version wake 到达才读 snapshot，无固定轮询）；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth。恢复（`session_id`）要求同 parent/root 归属且子 Thread quiescent；Stop/取消保留可恢复 Session。
-- 进度经非 durable Redis `TOOL_PARTIAL` 心跳（约 1s）发布完整 JSON 快照（`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）；`descendants` 是进程内 relay 的扁平活动子树状态，使根 Thread 可直接处理任意深度审批，且不参与调度或终态判定。前端整帧替换而非增量合并。最终 ToolResult 是 `<task id state>` envelope（`<task_result>` / `<task_error>`），`details.kind=task.result`。
+- 进度经非 durable PostgreSQL `TOOL_PARTIAL` notification（约 1s）发布完整 JSON 快照（`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）；`descendants` 是进程内 relay 的扁平活动子树状态，使根 Thread 可直接处理任意深度审批，且不参与调度或终态判定。前端整帧替换而非增量合并；通知丢失时重新读取 durable snapshot。最终 ToolResult 是 `<task id state>` envelope（`<task_result>` / `<task_error>`），`details.kind=task.result`。
 
 详细契约见 [harness-runtime-architecture.md](harness-runtime-architecture.md)、[harness-runtime-contracts.md](harness-runtime-contracts.md) 与 [harness-storage-runtime.md](harness-storage-runtime.md)。

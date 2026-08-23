@@ -124,7 +124,7 @@ Compaction summarizer 走独立最小请求路径，不调用 `AgentPromptCompos
 
 `harness_model_invocation.request` 保存 compact `ModelRequestSpec`（不持久化完整 ProviderRequest）。每次 MODEL attempt 由 `ModelRequestMaterializer` 在有效 claim 内从 `basisHeadEntryId + spec` 重建内存 ProviderRequest（preamble + compaction-aware Entry 历史投影），随后 `ModelProcessor` 两阶段激活（每次 attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造 attempt-local Provider，见 [harness-capability-wiring.md](harness-capability-wiring.md)）：
 
-- `MODEL_DELTA` 节流持久化 `stream_checkpoint`（attempt-local），**commit 后**才 best-effort 发布 Redis realtime delta；
+- `MODEL_DELTA` 节流持久化 `stream_checkpoint`（attempt-local），通过 transaction-aware PostgreSQL `NOTIFY` 在 **commit 后**发布 realtime delta；
 - retryable `TRANSIENT` 失败把当前 accumulator 的 text/thinking、最后已提交 sequence、error 与 `failedAt/retryAt` 追加到 Invocation `failedAttempts`，清除 checkpoint 并按 retryAt reschedule；每次 retry 从相同 `basisHeadEntryId + spec` 重新 materialize logical request（credential/baseURL/timeout/Resource URL 保持 attempt-time live）；
 - terminal `resultJson` 是 canonical `ProviderResponse`：
 
@@ -154,7 +154,7 @@ ToolBinding.type == ENVIRONMENT
 ```
 
 - 外部 I/O 前 `ToolGateway.preflight`：权限判定（Allow/Ask/Deny）与机械校验（未取消/未过期、`name@version` 命中固定目录、arguments 是 JSON object）；plugin Tool 还按 frozen `(pluginId, contributionLocalName)` 恢复贡献并校验 descriptor/state accesses 未漂移；发送结果不确定收敛 `UNKNOWN`，不重放副作用。
-- Tool partial 写 Redis realtime（`TOOL_PARTIAL` 永不携带 Resource）。
+- Tool partial 写 PostgreSQL realtime notification（`TOOL_PARTIAL` 永不携带 Resource）。
 - plugin Tool 是同步纯函数，只读取 Assistant Entry 对应的冻结 `BranchView` 并返回声明式 intents。Core 只接受 owner 匹配、customType 已注册且 binding 声明 WRITE 的 `AppendCustomEntry`，映射为有序 `ToolEffectBatch`；intent 校验失败在任何 Resource 写入与 durable `SUCCEEDED` 之前终结为 `PLUGIN_CONTRACT_VIOLATION`。
 - **瞬时外部化发生在 CoreToolGateway 回调桥**（`ToolResultExternalizer`）：effects 校验通过后的 terminal success 回调 all-or-nothing 处理：
 
@@ -189,7 +189,7 @@ sha256      # 可选，64 位小写 hex
 ```text
 path Entries
   + snapshot modelAttemptFailures（durable active retry audit）
-  + Redis realtime text/thinking/tool partial overlay（非 durable）
+  + PostgreSQL realtime text/thinking/tool partial notification（非 durable）
   + durable terminal projection（resultJson/errorJson 无条件压过 overlay）
 ```
 

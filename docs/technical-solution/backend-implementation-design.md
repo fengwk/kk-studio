@@ -1,6 +1,6 @@
 # 后端落地设计
 
-本文描述当前 `share`、`core`、`web`、Harness Runtime 与受信任插件的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 Store/Work/Redis 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment 与 Chat 应用能力；Goal 由 `plugins/goal` 提供；`web` 是生产组合根并映射 HTTP/WebSocket。
+本文描述当前 `share`、`core`、`web`、Harness Runtime 与受信任插件的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment 与 Chat 应用能力；Goal 由 `plugins/goal` 提供；`web` 是生产组合根并映射 HTTP/WebSocket。
 
 ## 1. 分层
 
@@ -11,7 +11,7 @@ flowchart LR
     Core[core application services / adapters]
     RuntimeSpring[harness-runtime-spring]
     Runtime[harness-runtime]
-    Store[(PostgreSQL / Redis / S3)]
+    Store[(PostgreSQL / S3)]
 
     Client --> Web
     Web --> Core
@@ -30,7 +30,7 @@ flowchart LR
 | `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
 | `harness-plugin` | `PluginCatalog`、`BranchView`、同步 `PluginTool`、state access 声明、intent、context projector 与提示词模板 |
 | `plugins/goal` | Goal v2 工具、`goal/state` 完整快照 codec 与 active context projector |
-| `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、Redis overlay、瞬时 `LocalFileResourceStore` |
+| `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、PostgreSQL realtime notification、瞬时 `LocalFileResourceStore` |
 | `harness-runtime` | Thread/Command/Invocation/Work 状态机与 Thread/Model/Tool processor |
 | `harness-tool` | Tool API、descriptor、`ResourceRef`、RemoteTool 与 Daemon v3 wire |
 
@@ -52,8 +52,8 @@ Agent DTO 的 `model` 使用 Model ref，create 与 PUT 都必填；Model DTO �
 
 | 配置 | 装配 |
 | --- | --- |
-| `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、Redis sink/tail、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/executor；注入 Core 的 TurnResolver/ModelGateway/ToolGateway ports |
-| `ApplicationEventConfiguration` | 构造单连接 PostgreSQL notification loop，固定注册 Work、Thread version、Canvas version 三个 channel handler |
+| `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、realtime sink/source、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/executor；注入 Core 的 TurnResolver/ModelGateway/ToolGateway ports |
+| `ApplicationEventConfiguration` | 构造单连接 PostgreSQL notification loop，固定注册 Work、Thread version、Canvas version、SystemSettings 与 realtime channel handler |
 | `HarnessRuntimeLifecycle` | 按 worker 开关启动/停止 dispatcher；REST 与事件通道只经 `HarnessRuntime` 门面 |
 | `ModelExecutionConfiguration` | `ObjectProvider<ProviderFactory>` 收集并索引；`CoreModelGateway`（serialized FIFO 单 drainer 回调桥） |
 | `web.runtime.BuiltInPluginConfiguration` | 在生产组合根注册随应用交付的受信任 `GoalPlugin` |
@@ -165,7 +165,7 @@ GET /api/ai/runtime/threads/{threadId}/snapshot
 -> WS subscribe {version:1, type:'subscribe', resource:{kind:'thread', id}}
 ```
 
-`subscribed` ack 携带订阅建立瞬间的 durable version；其后的事件保证送达（事件帧不先于 ack 帧）。`version` 事件只触发 snapshot invalidate，Redis `realtime` delta 只作为临时 overlay；`resync` 要求整体快照。重连重订阅后重新读取 snapshot，Redis Stream 不承担恢复职责。完整帧协议见 [application-event-channel.md](application-event-channel.md)。
+`subscribed` ack 携带订阅建立瞬间的 durable version；其后的事件保证送达（事件帧不先于 ack 帧）。`version` 事件只触发 snapshot invalidate，PostgreSQL `realtime` notification 只作为临时 overlay；`resync` 要求整体快照。重连重订阅后重新读取 snapshot，notification 不承担恢复职责。完整帧协议见 [application-event-channel.md](application-event-channel.md)。
 
 ## 8. 代码入口
 

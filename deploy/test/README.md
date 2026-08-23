@@ -3,7 +3,6 @@
 `deploy/test` 提供不依赖远端服务的本地容器测试底座：
 
 - PostgreSQL；
-- Redis realtime overlay；
 - MinIO 与 bucket 初始化服务；
 - 一个可配置的 HTTP mock，同时提供容器网络别名 `opencli-hub` 和 `comfyui`；
 - 可选的当前 `deploy/local/Dockerfile` 应用服务（`dev` profile + dev seed）。
@@ -28,7 +27,7 @@
 4. 启动依赖并等待 healthcheck；
 5. 在应用 runtime image 中确认非 root `kkstudio` 用户以及 Canvas Resource 使用的
    `ffmpeg` / `ffprobe`；
-6. 执行 PostgreSQL `SELECT 1`、Redis `PING`，并检查 MinIO bucket 和 HTTP mock 健康；
+6. 执行 PostgreSQL `SELECT 1`，并检查 MinIO bucket 和 HTTP mock 健康；
 7. 无论成功或失败，都执行 `down --volumes --remove-orphans`。
 
 需要同时启动并等待应用健康检查时：
@@ -61,7 +60,7 @@ assistant MESSAGE 文本包含确定性 stub 回复、`TURN_END` outcome 为 `CO
 `ASSISTANT_ERROR` 条目。其他本地栈若要使用该 stub 聊天，可提供同名本地 DNS/hosts
 映射，或经 catalog API 把 provider 指向自己的 OpenAI 兼容端点。
 
-应用通过环境变量连接 `postgres:5432`、`redis:6379`、`minio:9000`、`comfyui:8080`、
+应用通过环境变量连接 `postgres:5432`、`minio:9000`、`comfyui:8080`、
 `opencli-hub:8080` 与 `http-mock:8080`。ComfyUI 保持禁用；OpenCLI adapters 只在该隔离栈中指向内置 fake Hub。
 Canvas Resource 媒体进程显式配置为容器内的 `ffprobe` / `ffmpeg`，
 临时目录为 `/tmp`，每次 finalize/materialize 都会清理自己的工作目录。
@@ -84,12 +83,11 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 | 服务 | 地址 |
 | --- | --- |
 | PostgreSQL | `postgresql://canvas_test:canvas_test_only@127.0.0.1:15432/canvas_test` |
-| Redis | `redis://127.0.0.1:16379` |
 | MinIO S3 API | `http://127.0.0.1:19000` |
 | HTTP mock | `http://127.0.0.1:18089` |
 | 可选 app | `http://127.0.0.1:18088` |
 
-宿主端口可分别通过 `CANVAS_TEST_PG_PORT`、`CANVAS_TEST_REDIS_PORT`、`CANVAS_TEST_MINIO_PORT`、
+宿主端口可分别通过 `CANVAS_TEST_PG_PORT`、`CANVAS_TEST_MINIO_PORT`、
 `CANVAS_TEST_MOCK_PORT`、`CANVAS_TEST_APP_PORT` 覆盖。
 
 应用镜像构建使用 BuildKit Maven/npm cache。脚本会继承标准

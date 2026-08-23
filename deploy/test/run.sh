@@ -149,10 +149,6 @@ postgres_result=$(
 )
 [[ "$postgres_result" == "1" ]] || die "PostgreSQL SELECT 1 returned '$postgres_result'"
 
-step "Checking Redis"
-redis_result=$("${COMPOSE[@]}" exec -T redis redis-cli ping)
-[[ "$redis_result" == "PONG" ]] || die "Redis ping returned '$redis_result'"
-
 step "Checking MinIO and initialized bucket"
 "${COMPOSE[@]}" exec -T minio-init \
   /bin/sh -ec 'mc ready local >/dev/null && mc stat "local/$MINIO_BUCKET" >/dev/null'

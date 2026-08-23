@@ -304,7 +304,7 @@ public record ModelRequestSpec(
 
 `task` 是内部 `PLATFORM` Tool（`rendererKey=task`、`NON_IDEMPOTENT`），其调用与结果仍是普通 ToolInvocation/TOOL MESSAGE 事实，不引入新表或新状态机：
 
-- 运行中进度以**非 durable** Redis `TOOL_PARTIAL` 心跳发布（约 1s 一次），`details.kind=task.status`，payload 是**完整 JSON 快照**：`{threadId, subagentType, state, depth, turns, toolCalls, lastActivity, approvals[], descendants[]}`；`state` 为 `queued` / `running_model` / `running_tool` / `waiting_approval`，`approvals[]` 项为 `{invocationId, toolName, reason}`（该状态 Thread 的待决审批），`descendants[]` 是应用相同字段契约的扁平活动子树状态。descendant relay 仅用于实时呈现与审批寻址，不参与调度、并发计数或终态判定；前端按规范化完整快照整帧替换/语义去重，绝不追加或 delta 合并。
+- 运行中进度以**非 durable** PostgreSQL `TOOL_PARTIAL` notification 发布（约 1s 一次），`details.kind=task.status`，payload 是**完整 JSON 快照**：`{threadId, subagentType, state, depth, turns, toolCalls, lastActivity, approvals[], descendants[]}`；`state` 为 `queued` / `running_model` / `running_tool` / `waiting_approval`，`approvals[]` 项为 `{invocationId, toolName, reason}`（该状态 Thread 的待决审批），`descendants[]` 是应用相同字段契约的扁平活动子树状态。descendant relay 仅用于实时呈现与审批寻址，不参与调度、并发计数或终态判定；前端按规范化完整快照整帧替换/语义去重，绝不追加或 delta 合并；通知丢失由 durable snapshot 恢复。
 - 终态 ToolResult 文本为 `<task id="..." state="completed|error|cancelled">` envelope：成功含 `<task_result>` 报告，失败/取消含 `<task_error>`（报告正文最多保留 8000 字符）；`details.kind=task.result`，`details` 携带 `threadId`/`subagentType`/`state`。`id` 即子 ThreadId（canonical UUID），可作 `session_id` 恢复。
 - 恢复契约：`session_id` 必须指向同 parent/root 归属的既有子 Session，且子 Thread quiescent；`maxTurns` 是软预算——达到后每 5 turn 注入一条 SYSTEM `CUSTOM_MESSAGE` 提醒（`rendererKey=message`），不是硬终止。
 
@@ -354,9 +354,9 @@ record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable b
 
 ## 11. Realtime
 
-- `RealtimeEventSink.append` 只写 bounded Redis projection；sink 失败不改变 durable terminal。
-- 浏览器经应用事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）订阅：`version`/`version` 事件携带 durable cursor（canonical 非负十进制），`realtime` 事件的 data 是 Redis delta envelope JSON 对象且不携带 cursor。
-- 客户端恢复顺序：REST snapshot → 应用事件通道订阅（`subscribed` ack 携带建立瞬间 cursor）→ Redis realtime overlay；durable version 是唯一恢复游标。
-- 前端把 `resultJson`/`errorJson` 当作 terminal 边界：durable terminal projection 无条件压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后移除 overlay。
+- `RealtimeEventSink.append` 写 PostgreSQL `NOTIFY` live projection；sink 失败不改变 durable terminal。
+- 浏览器经应用事件 WebSocket（`/api/events/v1`，见 [application-event-channel.md](application-event-channel.md)）订阅：`version` 事件携带 durable cursor（canonical 非负十进制），`realtime` 事件的 data 是 PostgreSQL notification envelope JSON 对象且不携带 cursor。
+- 客户端恢复顺序：REST snapshot → 应用事件通道订阅（`subscribed` ack 携带建立瞬间 cursor）→ live realtime notification；durable version 是唯一恢复游标，重连、gap、畸形 payload 与 `resync` 都重新读取 snapshot。
+- 前端把 `resultJson`/`errorJson` 当作 terminal 边界：durable terminal projection 无条件压过更高 sequence 的 notification overlay；`resultEntryId` 落地后移除 overlay。
 - snapshot failure 以 `(modelInvocationId, attempt)` fence 同 attempt 的 stale Model overlay；只有 invocation 仍处于相同 attempt 的 READY/DISPATCHING 时该 failure 是 live retry countdown，下一 attempt 已 RUNNING 后转为静态历史。终态 error 将 checkpoint partial 与 `errorJson` 分开投影，刷新后由 `MODEL_ATTEMPT_FAILURE` / `ASSISTANT_ERROR.attempt` 恢复相同可见轨迹。
 - Runtime 不向 RealtimeEventSink 发布 compaction ModelDelta；其 checkpoint 仅作 Stop/恢复 durable fact。前端再按 `TURN_START(COMPACTION)...TURN_END` 状态化抑制该 turn 的 COMPACTION/ERROR/ABORTED Entry，latest turn 是 COMPACTION 时也不渲染 snapshot Model overlay。

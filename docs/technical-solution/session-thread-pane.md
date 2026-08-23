@@ -23,7 +23,7 @@ PaneTarget  = 用户当前想查看或从哪里继续的浏览器本地意图
 6. `/tree` 选择 Entry 时不创建 Thread；第一次 durable command batch 被原子接受时才 materialize。
 7. `/new` 只进入本地 Draft；第一次发送才原子创建 Session、ROOT、Thread、Command 和 Work。
 8. Chat 与 Canvas 使用同一套 Pane、Command、Runtime 和 Composer 内核。
-9. PostgreSQL 是唯一 durable truth；Work 只负责调度，Redis/realtime 只负责加速和展示。
+9. PostgreSQL 是唯一 durable truth；Work 只负责调度，realtime notification 只负责加速和展示，恢复依赖 snapshot 与 poll。
 
 ## 2. 领域关系
 
