@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
@@ -181,7 +182,7 @@ class CanvasVersionHubTest {
   }
 
   @Test
-  void notificationPayloadFanOutsVersionAndMalformedPayloadIsIgnored() throws Exception {
+  void malformedNotificationPayloadBroadcastsResyncAndIsolatesFailingSubscriber() throws Exception {
     DataSource dataSource = mock(DataSource.class);
     Connection connection = mock(Connection.class);
     PreparedStatement statement = mock(PreparedStatement.class);
@@ -195,19 +196,45 @@ class CanvasVersionHubTest {
 
     CanvasVersionHub hub = new CanvasVersionHub(dataSource);
     UUID canvasId = new UUID(0L, 9L);
+    hub.subscribe(
+        canvasId,
+        ignored -> {
+          throw new IllegalStateException("boom");
+        });
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     hub.subscribe(canvasId, received::add);
 
-    // handler 只解析 canvasId:version 并 fan-out；畸形 payload 不触发订阅者，也不访问数据库。
+    // 合法 payload 轻量 fan-out；每个畸形 payload 都降级为 resync，失败订阅者不阻断正常订阅者或后续通知。
     hub.onNotification("00000000-0000-0000-0000-000000000009:7");
     hub.onNotification("not-a-uuid:7");
     hub.onNotification("00000000-0000-0000-0000-000000000009");
     hub.onNotification("00000000-0000-0000-0000-000000000009:07");
     hub.onNotification("00000000-0000-0000-0000-000000000009:-1");
     hub.onNotification("00000000-0000-0000-0000-000000000009:9223372036854775808");
+    hub.onNotification("00000000-0000-0000-0000-00000000009:7");
     hub.onNotification(null);
 
-    assertEquals(List.of(new CanvasVersionEventSource.Event(7L, false)), received);
-    verify(dataSource, times(1)).getConnection();
+    assertEquals(
+        List.of(
+            new CanvasVersionEventSource.Event(7L, false),
+            new CanvasVersionEventSource.Event(null, true),
+            new CanvasVersionEventSource.Event(null, true),
+            new CanvasVersionEventSource.Event(null, true),
+            new CanvasVersionEventSource.Event(null, true),
+            new CanvasVersionEventSource.Event(null, true),
+            new CanvasVersionEventSource.Event(null, true),
+            new CanvasVersionEventSource.Event(null, true)),
+        received);
+    verify(dataSource, times(2)).getConnection();
+  }
+
+  @Test
+  void validNotificationWithoutLocalSubscriberDoesNotReadDatabase() {
+    DataSource dataSource = mock(DataSource.class);
+    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+
+    hub.onNotification("00000000-0000-0000-0000-000000000009:7");
+
+    verifyNoInteractions(dataSource);
   }
 }
