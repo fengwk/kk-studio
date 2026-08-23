@@ -16,12 +16,6 @@ spring:
         username: unused
         password: unused
 
-  data:
-    redis:
-      # 默认本地 Redis 占位；RedisSpringTestSupport 覆盖到 Testcontainers。
-      host: 127.0.0.1
-      port: 6379
-
   mybatis:
     mapper-locations: classpath:**/*Mapper.xml
     type-aliases-package: fun.fengwk.kkstudio.**.model

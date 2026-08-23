@@ -14,11 +14,6 @@ spring:
       # gson GsonHttpMessageConvertersConfiguration
       preferred-json-mapper: jackson
 
-  data:
-    redis:
-      # Redis 仅用于 harness realtime projection；可用环境变量覆盖。
-      url: ${KK_STUDIO_REDIS_URL:redis://localhost:6379}
-
   # PostgreSQL 连接配置（唯一 durable 数据库）
   datasource:
     driver-class-name: org.postgresql.Driver

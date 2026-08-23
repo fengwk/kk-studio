@@ -391,7 +391,6 @@ public class SystemSettingsCodec {
         requiredInt(dto.getDispatcherWorkerConcurrency(), "advanced.dispatcherWorkerConcurrency"),
         requiredInt(
             dto.getDispatcherWorkerQueueCapacity(), "advanced.dispatcherWorkerQueueCapacity"),
-        requiredMillis(dto.getCanvasRealtimeMaxLength(), "advanced.canvasRealtimeMaxLength"),
         requiredInt(
             dto.getCanvasFunctionExecutorCoreSize(), "advanced.canvasFunctionExecutorCoreSize"),
         requiredInt(
@@ -413,9 +412,7 @@ public class SystemSettingsCodec {
             "advanced.postgresqlWorkNotificationPollMillis"),
         requiredMillis(
             dto.getPostgresqlWorkReconnectBackoffMillis(),
-            "advanced.postgresqlWorkReconnectBackoffMillis"),
-        requiredMillis(
-            dto.getRedisRealtimeRetryDelayMillis(), "advanced.redisRealtimeRetryDelayMillis"));
+            "advanced.postgresqlWorkReconnectBackoffMillis"));
   }
 
   private static Map<String, List<PermissionRule>> toPermission(
@@ -624,7 +621,6 @@ public class SystemSettingsCodec {
     dto.setDispatcherMaxDispatchTasks(advanced.dispatcherMaxDispatchTasks());
     dto.setDispatcherWorkerConcurrency(advanced.dispatcherWorkerConcurrency());
     dto.setDispatcherWorkerQueueCapacity(advanced.dispatcherWorkerQueueCapacity());
-    dto.setCanvasRealtimeMaxLength(advanced.canvasRealtimeMaxLength());
     dto.setCanvasFunctionExecutorCoreSize(advanced.canvasFunctionExecutorCoreSize());
     dto.setCanvasFunctionExecutorMaxSize(advanced.canvasFunctionExecutorMaxSize());
     dto.setCanvasFunctionExecutorQueueCapacity(advanced.canvasFunctionExecutorQueueCapacity());
@@ -635,7 +631,6 @@ public class SystemSettingsCodec {
         advanced.applicationEventHeartbeatIntervalMillis());
     dto.setPostgresqlWorkNotificationPollMillis(advanced.postgresqlWorkNotificationPollMillis());
     dto.setPostgresqlWorkReconnectBackoffMillis(advanced.postgresqlWorkReconnectBackoffMillis());
-    dto.setRedisRealtimeRetryDelayMillis(advanced.redisRealtimeRetryDelayMillis());
     return dto;
   }
 

@@ -159,7 +159,7 @@ class ToolProcessorCallbackTest {
   void partialSinkFailureIsIsolated() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
-    fixture.sink.failure = new IllegalStateException("redis down");
+    fixture.sink.failure = new IllegalStateException("notification channel unavailable");
 
     listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
 
@@ -693,7 +693,7 @@ class ToolProcessorCallbackTest {
   void sinkFailureDoesNotAffectDurableTerminal() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
-    fixture.sink.failure = new IllegalStateException("redis down");
+    fixture.sink.failure = new IllegalStateException("notification channel unavailable");
 
     listener.onSucceeded(
         ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));

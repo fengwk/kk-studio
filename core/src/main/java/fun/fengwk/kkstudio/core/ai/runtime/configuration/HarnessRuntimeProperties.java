@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.nio.file.Path;
 
 /**
- * Harness Runtime 的纯 bootstrap 部署配置：进程内 worker 开关、沙箱路径与 Redis realtime overlay 前缀。
+ * Harness Runtime 的纯 bootstrap 部署配置：进程内 worker 开关与沙箱路径。
  *
  * <p>processor/dispatcher/compaction/subagent 等运行软策略已迁移到数据库 SystemSettings（Advanced / AiRuntime /
  * Tool section），不再由本类承载。
@@ -23,9 +23,6 @@ public class HarnessRuntimeProperties {
 
   /** 默认工作目录：绝对路径直接使用，相对路径基于 environmentRoot 解析，必须位于 environmentRoot 之内。 */
   private Path workdir = Path.of(".");
-
-  /** Redis realtime overlay 的 Pub/Sub channel 前缀。 */
-  private String redisPrefix = "kk-studio:harness:realtime:";
 
   public Path resolvedEnvironmentRoot() {
     if (environmentRoot == null) {

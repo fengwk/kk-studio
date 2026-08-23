@@ -21,7 +21,7 @@ import java.util.Objects;
  * heartbeat&lt;lease、comfyPollInterval&lt;comfyMaxWait）以及「启用集成必须携带其身份 / 位置字段」。permission 规则数组保序；不依赖
  * JSON 对象键顺序。
  *
- * <p>安全边界：本聚合只承载可持久化的非敏感配置。DB/Redis/server 连接、filesystem root/workdir/temp/二进制路径、 daemon
+ * <p>安全边界：本聚合只承载可持久化的非敏感配置。DB/server 连接、filesystem root/workdir/temp/二进制路径、 daemon
  * token/identity、access/API key、bearer token、OpenCLI instanceId 等秘密与 bootstrap 输入绝不进入本模型。
  */
 public record SystemSettings(
@@ -469,7 +469,6 @@ public record SystemSettings(
       int dispatcherMaxDispatchTasks,
       int dispatcherWorkerConcurrency,
       int dispatcherWorkerQueueCapacity,
-      long canvasRealtimeMaxLength,
       int canvasFunctionExecutorCoreSize,
       int canvasFunctionExecutorMaxSize,
       int canvasFunctionExecutorQueueCapacity,
@@ -478,8 +477,7 @@ public record SystemSettings(
       long applicationEventSendTimeoutMillis,
       long applicationEventHeartbeatIntervalMillis,
       long postgresqlWorkNotificationPollMillis,
-      long postgresqlWorkReconnectBackoffMillis,
-      long redisRealtimeRetryDelayMillis) {
+      long postgresqlWorkReconnectBackoffMillis) {
 
     public static final Advanced DEFAULT =
         new Advanced(
@@ -496,7 +494,6 @@ public record SystemSettings(
             64,
             16,
             64,
-            5_000L,
             2,
             4,
             64,
@@ -505,7 +502,6 @@ public record SystemSettings(
             10_000L,
             20_000L,
             5_000L,
-            1_000L,
             1_000L);
 
     public Advanced {
@@ -539,8 +535,6 @@ public record SystemSettings(
           dispatcherWorkerConcurrency, 1, "advanced.dispatcherWorkerConcurrency");
       SystemSettingsValidation.requireAtLeast(
           dispatcherWorkerQueueCapacity, 1, "advanced.dispatcherWorkerQueueCapacity");
-      SystemSettingsValidation.requirePositiveMillis(
-          canvasRealtimeMaxLength, "advanced.canvasRealtimeMaxLength");
       SystemSettingsValidation.requireAtLeast(
           canvasFunctionExecutorCoreSize, 1, "advanced.canvasFunctionExecutorCoreSize");
       if (canvasFunctionExecutorMaxSize < canvasFunctionExecutorCoreSize) {
@@ -563,8 +557,6 @@ public record SystemSettings(
           postgresqlWorkNotificationPollMillis, "advanced.postgresqlWorkNotificationPollMillis");
       SystemSettingsValidation.requirePositiveMillis(
           postgresqlWorkReconnectBackoffMillis, "advanced.postgresqlWorkReconnectBackoffMillis");
-      SystemSettingsValidation.requirePositiveMillis(
-          redisRealtimeRetryDelayMillis, "advanced.redisRealtimeRetryDelayMillis");
     }
   }
 }

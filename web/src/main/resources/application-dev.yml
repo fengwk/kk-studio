@@ -14,10 +14,6 @@ spring:
         username: ${KK_STUDIO_DB_USER:kk_studio}
         password: ${KK_STUDIO_DB_PASSWORD:kk_studio}
 
-  data:
-    redis:
-      url: ${KK_STUDIO_REDIS_URL:redis://127.0.0.1:6379}
-
   mybatis:
     mapper-locations: classpath:**/*Mapper.xml
     type-aliases-package: fun.fengwk.kkstudio.**.model

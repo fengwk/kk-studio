@@ -58,8 +58,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Web 组合根装配测试：完整 Spring 上下文（{@code workers-enabled=false}）中验证 bean 构造、资源根目录、PostgreSQL realtime、executor
- * 拒绝策略与「控制平面可用但 worker 不启动」。
+ * Web 组合根装配测试：完整 Spring 上下文（{@code workers-enabled=false}）中验证 bean 构造、资源根目录、PostgreSQL
+ * realtime、executor 拒绝策略与「控制平面可用但 worker 不启动」。
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.NONE,

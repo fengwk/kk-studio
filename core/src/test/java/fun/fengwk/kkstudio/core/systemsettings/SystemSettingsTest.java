@@ -107,7 +107,6 @@ class SystemSettingsTest {
     assertEquals(64, advanced.dispatcherMaxDispatchTasks());
     assertEquals(16, advanced.dispatcherWorkerConcurrency());
     assertEquals(64, advanced.dispatcherWorkerQueueCapacity());
-    assertEquals(5_000L, advanced.canvasRealtimeMaxLength());
     assertEquals(2, advanced.canvasFunctionExecutorCoreSize());
     assertEquals(4, advanced.canvasFunctionExecutorMaxSize());
     assertEquals(64, advanced.canvasFunctionExecutorQueueCapacity());
@@ -117,7 +116,6 @@ class SystemSettingsTest {
     assertEquals(20_000L, advanced.applicationEventHeartbeatIntervalMillis());
     assertEquals(5_000L, advanced.postgresqlWorkNotificationPollMillis());
     assertEquals(1_000L, advanced.postgresqlWorkReconnectBackoffMillis());
-    assertEquals(1_000L, advanced.redisRealtimeRetryDelayMillis());
   }
 
   @Test
@@ -250,7 +248,6 @@ class SystemSettingsTest {
                 base.dispatcherMaxDispatchTasks(),
                 base.dispatcherWorkerConcurrency(),
                 base.dispatcherWorkerQueueCapacity(),
-                base.canvasRealtimeMaxLength(),
                 4,
                 2,
                 base.canvasFunctionExecutorQueueCapacity(),
@@ -259,8 +256,7 @@ class SystemSettingsTest {
                 base.applicationEventSendTimeoutMillis(),
                 base.applicationEventHeartbeatIntervalMillis(),
                 base.postgresqlWorkNotificationPollMillis(),
-                base.postgresqlWorkReconnectBackoffMillis(),
-                base.redisRealtimeRetryDelayMillis()));
+                base.postgresqlWorkReconnectBackoffMillis()));
   }
 
   @Test

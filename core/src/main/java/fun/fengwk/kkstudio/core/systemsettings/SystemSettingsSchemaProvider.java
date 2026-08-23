@@ -764,14 +764,6 @@ public class SystemSettingsSchemaProvider {
                     true,
                     null,
                     field(
-                        "advanced.canvasRealtimeMaxLength",
-                        "settings.field.advanced.canvasRealtimeMaxLength",
-                        null,
-                        FieldType.LONG,
-                        false,
-                        1,
-                        null),
-                    field(
                         "advanced.canvasFunctionExecutorCoreSize",
                         "settings.field.advanced.canvasFunctionExecutorCoreSize",
                         null,
@@ -850,14 +842,6 @@ public class SystemSettingsSchemaProvider {
                     field(
                         "advanced.postgresqlWorkReconnectBackoffMillis",
                         "settings.field.advanced.postgresqlWorkReconnectBackoffMillis",
-                        null,
-                        FieldType.LONG,
-                        false,
-                        1,
-                        null),
-                    field(
-                        "advanced.redisRealtimeRetryDelayMillis",
-                        "settings.field.advanced.redisRealtimeRetryDelayMillis",
                         null,
                         FieldType.LONG,
                         false,
