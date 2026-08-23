@@ -45,6 +45,48 @@ describe('system settings draft codec', () => {
     )
   })
 
+  it('round-trips the current aggregate without removed realtime transport settings', () => {
+    const dto = makeSettingsDto()
+
+    // 完整对象相等与精确 advanced 键集合共同证明旧传输配置不会被 draft 重新写入 PUT。
+    const update = assembleSettingsUpdate(settingsSectionsToDraft(dto), dto.version)
+    expect(update).toEqual({
+      tool: dto.tool,
+      aiRuntime: dto.aiRuntime,
+      environment: dto.environment,
+      integrations: dto.integrations,
+      storageMedia: dto.storageMedia,
+      advanced: dto.advanced,
+      expectedVersion: dto.version,
+    })
+    expect(Object.keys(update.advanced).sort()).toEqual(
+      [
+        'applicationEventHeartbeatIntervalMillis',
+        'applicationEventMaxBytes',
+        'applicationEventQueueCapacity',
+        'applicationEventSendTimeoutMillis',
+        'canvasFunctionExecutorCoreSize',
+        'canvasFunctionExecutorMaxSize',
+        'canvasFunctionExecutorQueueCapacity',
+        'dispatcherLeaseDurationMillis',
+        'dispatcherMaxDispatchTasks',
+        'dispatcherPollIntervalMillis',
+        'dispatcherRejectionDelayMillis',
+        'dispatcherWorkerConcurrency',
+        'dispatcherWorkerQueueCapacity',
+        'modelDispatchBusyFallbackDelayMillis',
+        'postgresqlWorkNotificationPollMillis',
+        'postgresqlWorkReconnectBackoffMillis',
+        'processorHeartbeatIntervalMillis',
+        'processorLeaseDurationMillis',
+        'resourceMaxBytes',
+        'threadResolveFailureDelayMillis',
+        'toolDispatchBusyFallbackDelayMillis',
+        'toolPreflightFailureDelayMillis',
+      ].sort(),
+    )
+  })
+
   it('normalizes blank optional text to null', () => {
     const draft = settingsSectionsToDraft(makeSettingsDto())
     draft.integrations.minimaxH3.comfyBaseUrl = '   '

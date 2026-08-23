@@ -536,7 +536,7 @@ describe('thread realtime state', () => {
       createTime: '2026-07-28T10:00:00Z',
       updateTime: '2026-07-28T10:00:00Z',
     }
-    // result payload 非法时回退到冻结的 checkpoint，绝不是空或仅有 Redis 的片段。
+    // result payload 非法时回退到冻结的 checkpoint，绝不是空或仅有 lossy realtime delta 的片段。
     expect(snapshotModelStream('7', invocation)).toMatchObject({
       attempt: 1,
       sequence: 4,
@@ -603,7 +603,7 @@ describe('thread realtime state', () => {
       createTime: '2026-07-28T10:00:00Z',
       updateTime: '2026-07-28T10:00:00Z',
     }
-    // result payload 非法时回退到冻结的 checkpoint，绝不是空或仅有 Redis 的片段。
+    // result payload 非法时回退到冻结的 checkpoint，绝不是空或仅有 lossy realtime delta 的片段。
     expect(snapshotModelStream('7', invocation)).toMatchObject({
       attempt: 1,
       sequence: 4,

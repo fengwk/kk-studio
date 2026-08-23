@@ -325,7 +325,7 @@ describe('useHarnessThreadRealtime', () => {
     const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
     sockets.openLatest()
 
-    // 持久化 checkpoint 在 seq5；Redis 流式到达 seq8。
+    // 持久化 checkpoint 在 seq5；lossy realtime delta 流式到达 seq8。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -342,7 +342,7 @@ describe('useHarnessThreadRealtime', () => {
     expect(result.current?.modelStream?.status).toBe('streaming')
 
     // checkpoint 仍落后于 seq5 时终态 resultJson 到达：完整的
-    // 持久化投影必须无条件取代 seq8 的 Redis overlay。
+    // 持久化投影必须无条件取代 seq8 的 lossy realtime overlay。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -356,7 +356,7 @@ describe('useHarnessThreadRealtime', () => {
     )
     expect(result.current?.modelStream?.thinking).toBe('durable plan')
     expect(result.current?.modelStream?.status).toBe('done')
-    // 迟到的 Redis delta 绝不会追加到持久化投影上。
+    // 迟到的 lossy realtime delta 绝不会追加到持久化投影上。
     emitRealtime(sockets, realtime(9, '-late'))
     await waitFor(() =>
       expect(result.current?.modelStream?.text).toBe('durable complete answer'),
@@ -415,7 +415,7 @@ describe('useHarnessThreadRealtime', () => {
     const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
-    // 完全相同的 Redis 重投递不能追加两次。
+    // 完全相同的 realtime notification 重投递不能追加两次。
     emitRealtime(sockets, toolPartial('one'))
     await waitFor(() => expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('one'))
     emitRealtime(sockets, toolPartial('one'))
@@ -639,7 +639,7 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('terminal answer'),
     )
 
-    // 迟到的 Redis partial 绝不能追加到完整的终态投影上。
+    // 迟到的 lossy realtime partial 绝不能追加到完整的终态投影上。
     emitRealtime(sockets, toolPartial('-late'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('terminal answer'),

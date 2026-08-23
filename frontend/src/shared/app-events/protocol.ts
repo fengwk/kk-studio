@@ -9,8 +9,10 @@
  * - {"version":1,"type":"subscribed","resource":{...},"cursor":"<canonical>"}
  *   订阅已在 wire 上建立（首次与重连后都会发送）；cursor 是资源当前游标。
  * - {"version":1,"type":"event","resource":{...},"name":"version"|"realtime"|"version","data":{...},"cursor":"<canonical>"}
- *   - thread version：data {"version":"N"}，cursor 必带且与 data.version 完全相等。
- *   - thread realtime：data 为 Redis delta envelope 的 JSON 对象（如 MODEL_DELTA），绝不携带 cursor。
+ *   - thread version：data {"version":"N"}，cursor 必带且与 data.version 完全相等；服务端通过
+ *     PostgreSQL notification 感知持久化变更，浏览器只依赖此 version/cursor 契约。
+ *   - thread realtime：data 为 lossy realtime delta envelope 的 JSON 对象（如 MODEL_DELTA），
+ *     绝不携带 cursor。
  *   - canvas version：data {"version":"N"}，cursor 必带且与 data.version 完全相等。
  * - {"version":1,"type":"resync","resource":{...}}：需要整体替换为全量快照。
  * - {"version":1,"type":"heartbeat"}：连接级保活；客户端严格解码后静默消费。

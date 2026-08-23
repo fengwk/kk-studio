@@ -936,8 +936,8 @@ export const settingsCatalog = {
     'zh-CN': '画布运行时',
   },
   'settings.section.advanced.canvas.description': {
-    'en-US': 'Canvas realtime and function executor budgets.',
-    'zh-CN': '画布实时通道与函数执行器预算。',
+    'en-US': 'Canvas function executor budgets.',
+    'zh-CN': '画布函数执行器预算。',
   },
   'settings.section.advanced.applicationEvent.title': {
     'en-US': 'Application events',
@@ -1059,14 +1059,6 @@ export const settingsCatalog = {
     'en-US': 'Maximum task queue capacity for dispatcher worker threads.',
     'zh-CN': '调度器工作线程池任务等待队列的容量上限。',
   },
-  'settings.field.advanced.canvasRealtimeMaxLength': {
-    'en-US': 'Realtime max length',
-    'zh-CN': 'Realtime 最大长度',
-  },
-  'settings.field.advanced.canvasRealtimeMaxLength.hint': {
-    'en-US': 'Maximum character length allowed for a single message in the canvas real-time channel.',
-    'zh-CN': '画布实时流式协同通道允许传输的单条消息最大字符长度。',
-  },
   'settings.field.advanced.canvasFunctionExecutorCoreSize': {
     'en-US': 'Function executor core size',
     'zh-CN': '函数执行器核心线程数',
@@ -1138,13 +1130,5 @@ export const settingsCatalog = {
   'settings.field.advanced.postgresqlWorkReconnectBackoffMillis.hint': {
     'en-US': 'Backoff delay in milliseconds before attempting to reconnect to PostgreSQL notifications.',
     'zh-CN': 'PostgreSQL 通知通道断开重连时的退避延迟毫秒数。',
-  },
-  'settings.field.advanced.redisRealtimeRetryDelayMillis': {
-    'en-US': 'Redis realtime retry delay (ms)',
-    'zh-CN': 'Redis Realtime 重试延迟（毫秒）',
-  },
-  'settings.field.advanced.redisRealtimeRetryDelayMillis.hint': {
-    'en-US': 'Retry delay in milliseconds for reconnecting the Redis real-time subscription channel.',
-    'zh-CN': 'Redis 实时订阅与广播通道异常中断后的重试重连延迟毫秒数。',
   },
 } satisfies LocaleCatalog

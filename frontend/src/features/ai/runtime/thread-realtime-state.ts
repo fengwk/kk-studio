@@ -83,7 +83,7 @@ const TOOL_RESULT_TOOL_CALL_ID_KEY = 'toolCallId'
 const TOOL_RESULT_ERROR_KEY = 'error'
 
 /**
- * 从 Redis realtime overlay 中解析 model 文本/思考 delta 与 tool partial payload。
+ * 从 lossy realtime overlay 中解析 model 文本/思考 delta 与 tool partial payload。
  * 其他 payload 仍会触发 snapshot 刷新，但不在 transcript 中保留瞬态表示。
  */
 export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | null {
@@ -389,8 +389,8 @@ export function snapshotModelStream(
   const resultJson = invocation.resultJson
   if (resultJson != null && resultJson.trim()) {
     // 持久终止态边界：规范的 ProviderResponse 投影无条件覆盖
-    // 任何更高 sequence 的 Redis overlay。当 result payload 格式不合法时，
-    // text/thinking 回退到冻结的 checkpoint（绝不是仅有 Redis 的片段）。
+    // 任何更高 sequence 的 lossy realtime overlay。当 result payload 格式不合法时，
+    // text/thinking 回退到冻结的 checkpoint（绝不是仅有 lossy realtime delta 的片段）。
     const result = parseModelResultPayload(resultJson)
     return {
       ...base,
