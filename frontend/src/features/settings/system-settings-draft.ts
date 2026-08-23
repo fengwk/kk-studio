@@ -137,9 +137,6 @@ export interface SystemSettingsAdvancedDraft {
   dispatcherMaxDispatchTasks: DraftNumericField
   dispatcherWorkerConcurrency: DraftNumericField
   dispatcherWorkerQueueCapacity: DraftNumericField
-  canvasFunctionExecutorCoreSize: DraftNumericField
-  canvasFunctionExecutorMaxSize: DraftNumericField
-  canvasFunctionExecutorQueueCapacity: DraftNumericField
   applicationEventQueueCapacity: DraftNumericField
   applicationEventMaxBytes: DraftNumericField
   applicationEventSendTimeoutMillis: DraftNumericField
@@ -221,9 +218,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       dispatcherMaxDispatchTasks: String(dto.advanced.dispatcherMaxDispatchTasks),
       dispatcherWorkerConcurrency: String(dto.advanced.dispatcherWorkerConcurrency),
       dispatcherWorkerQueueCapacity: String(dto.advanced.dispatcherWorkerQueueCapacity),
-      canvasFunctionExecutorCoreSize: String(dto.advanced.canvasFunctionExecutorCoreSize),
-      canvasFunctionExecutorMaxSize: String(dto.advanced.canvasFunctionExecutorMaxSize),
-      canvasFunctionExecutorQueueCapacity: String(dto.advanced.canvasFunctionExecutorQueueCapacity),
       applicationEventQueueCapacity: String(dto.advanced.applicationEventQueueCapacity),
       applicationEventMaxBytes: dto.advanced.applicationEventMaxBytes,
       applicationEventSendTimeoutMillis: dto.advanced.applicationEventSendTimeoutMillis,
@@ -503,15 +497,6 @@ export function assembleSettingsUpdate(
       dispatcherWorkerConcurrency: requiredInt(draft.advanced.dispatcherWorkerConcurrency),
       dispatcherWorkerQueueCapacity: requiredInt(
         draft.advanced.dispatcherWorkerQueueCapacity,
-      ),
-      canvasFunctionExecutorCoreSize: requiredInt(
-        draft.advanced.canvasFunctionExecutorCoreSize,
-      ),
-      canvasFunctionExecutorMaxSize: requiredInt(
-        draft.advanced.canvasFunctionExecutorMaxSize,
-      ),
-      canvasFunctionExecutorQueueCapacity: requiredInt(
-        draft.advanced.canvasFunctionExecutorQueueCapacity,
       ),
       applicationEventQueueCapacity: requiredInt(draft.advanced.applicationEventQueueCapacity),
       applicationEventMaxBytes: requiredLong(draft.advanced.applicationEventMaxBytes),

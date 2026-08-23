@@ -904,8 +904,8 @@ export const settingsCatalog = {
   },
   // --- Advanced ---
   'settings.section.advanced.description': {
-    'en-US': 'Process-level runtime budgets for processor, dispatcher, executors and work notification.',
-    'zh-CN': '处理器/分发器/执行器/工作通知的进程级运行预算。',
+    'en-US': 'Process-level runtime budgets for processing, dispatching, events and work notification.',
+    'zh-CN': '任务处理、分发、事件与工作通知的进程级运行预算。',
   },
   'settings.section.advanced.resource.title': {
     'en-US': 'Resource budget',
@@ -930,14 +930,6 @@ export const settingsCatalog = {
   'settings.section.advanced.dispatcher.description': {
     'en-US': 'Dispatch concurrency, queue and rejection budgets.',
     'zh-CN': '分发并发、队列与拒绝预算。',
-  },
-  'settings.section.advanced.canvas.title': {
-    'en-US': 'Canvas runtime',
-    'zh-CN': '画布运行时',
-  },
-  'settings.section.advanced.canvas.description': {
-    'en-US': 'Canvas function executor budgets.',
-    'zh-CN': '画布函数执行器预算。',
   },
   'settings.section.advanced.applicationEvent.title': {
     'en-US': 'Application events',
@@ -1058,30 +1050,6 @@ export const settingsCatalog = {
   'settings.field.advanced.dispatcherWorkerQueueCapacity.hint': {
     'en-US': 'Maximum task queue capacity for dispatcher worker threads.',
     'zh-CN': '调度器工作线程池任务等待队列的容量上限。',
-  },
-  'settings.field.advanced.canvasFunctionExecutorCoreSize': {
-    'en-US': 'Function executor core size',
-    'zh-CN': '函数执行器核心线程数',
-  },
-  'settings.field.advanced.canvasFunctionExecutorCoreSize.hint': {
-    'en-US': 'Core pool size for the canvas custom function execution thread pool.',
-    'zh-CN': '画布自定义函数执行器线程池的核心线程数。',
-  },
-  'settings.field.advanced.canvasFunctionExecutorMaxSize': {
-    'en-US': 'Function executor max size',
-    'zh-CN': '函数执行器最大线程数',
-  },
-  'settings.field.advanced.canvasFunctionExecutorMaxSize.hint': {
-    'en-US': 'Maximum pool size for the canvas custom function execution thread pool.',
-    'zh-CN': '画布自定义函数执行器线程池的最大线程数。',
-  },
-  'settings.field.advanced.canvasFunctionExecutorQueueCapacity': {
-    'en-US': 'Function executor queue capacity',
-    'zh-CN': '函数执行器队列容量',
-  },
-  'settings.field.advanced.canvasFunctionExecutorQueueCapacity.hint': {
-    'en-US': 'Queue capacity for pending tasks in the canvas function executor thread pool.',
-    'zh-CN': '画布自定义函数执行器任务等待队列的容量上限。',
   },
   'settings.field.advanced.applicationEventQueueCapacity': {
     'en-US': 'Event queue capacity',

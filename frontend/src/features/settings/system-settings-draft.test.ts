@@ -45,10 +45,10 @@ describe('system settings draft codec', () => {
     )
   })
 
-  it('round-trips the current aggregate without removed realtime transport settings', () => {
+  it('round-trips the current aggregate without non-editable runtime infrastructure settings', () => {
     const dto = makeSettingsDto()
 
-    // 完整对象相等与精确 advanced 键集合共同证明旧传输配置不会被 draft 重新写入 PUT。
+    // 完整对象相等与精确 advanced 键集合共同证明非热更新基础设施配置不会被 draft 重新写入 PUT。
     const update = assembleSettingsUpdate(settingsSectionsToDraft(dto), dto.version)
     expect(update).toEqual({
       tool: dto.tool,
@@ -65,9 +65,6 @@ describe('system settings draft codec', () => {
         'applicationEventMaxBytes',
         'applicationEventQueueCapacity',
         'applicationEventSendTimeoutMillis',
-        'canvasFunctionExecutorCoreSize',
-        'canvasFunctionExecutorMaxSize',
-        'canvasFunctionExecutorQueueCapacity',
         'dispatcherLeaseDurationMillis',
         'dispatcherMaxDispatchTasks',
         'dispatcherPollIntervalMillis',
