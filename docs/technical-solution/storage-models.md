@@ -1,7 +1,7 @@
 # 存储模型
 
 PostgreSQL 是 Catalog、Chat、Harness 与 Canvas 的 durable truth。唯一 schema 基线是
-[`V1__schema.sql`](../../database/src/main/resources/db/migration/V1__schema.sql)（`database` 模块，
+[`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)（`schema` 模块，
 profile seeds 位于 `db/seed/**`）；不存在任何 schema mirror。PostgreSQL `LISTEN/NOTIFY`
 承载 Work/version/realtime 的低延迟提示，通知丢失由 periodic poll 或 snapshot 恢复；S3 保存
 全局 Blob 与 ComfyUI 临时对象。

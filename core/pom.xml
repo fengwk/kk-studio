@@ -30,7 +30,7 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-database</artifactId>
+            <artifactId>kk-studio-schema</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

@@ -20,7 +20,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
-/** 整个进程共用一个 PostgreSQL 容器，并为每个 contract 测试应用唯一 V1 baseline（database 模块）。 */
+/** 整个进程共用一个 PostgreSQL 容器，并为每个 contract 测试应用唯一 V1 baseline（schema 模块）。 */
 final class PostgresqlHarnessStoreFixture {
 
   @SuppressWarnings("resource")
@@ -70,7 +70,7 @@ final class PostgresqlHarnessStoreFixture {
         Statement statement = connection.createStatement()) {
       statement.execute("drop schema if exists public cascade");
       statement.execute("create schema public");
-      // 唯一 V1 baseline（database 模块）：与生产 bootstrap 同一 Flyway 机制应用。
+      // 唯一 V1 baseline（schema 模块）：与生产 bootstrap 同一 Flyway 机制应用。
       Flyway.configure()
           .dataSource(DATA_SOURCE)
           .locations("classpath:db/migration")

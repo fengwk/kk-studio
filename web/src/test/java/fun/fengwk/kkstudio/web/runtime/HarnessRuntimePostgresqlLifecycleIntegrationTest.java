@@ -61,7 +61,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
 
   static {
     POSTGRES.start();
-    // 上下文创建期装配 bean 会读取 system_setting 默认行：应用唯一 V1 baseline（database 模块的
+    // 上下文创建期装配 bean 会读取 system_setting 默认行：应用唯一 V1 baseline（schema 模块的
     // db/migration/V1__schema.sql，含 Harness 7 表 + system_setting 默认行），否则缺行会导致上下文启动失败。
     try (Connection connection = newConnection()) {
       resetSchema(connection);

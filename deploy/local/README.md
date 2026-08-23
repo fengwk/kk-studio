@@ -10,8 +10,8 @@
   fallback；不加 Nginx，也不另起前端容器。容器内端口固定为 `8080`。
 - `postgres:17-alpine` —— 唯一 durable 数据库，命名为 `kk_studio`，默认用户
   `kk_studio`。空库由 app 在 `dev` profile 通过 Flyway 执行
-  [`V1__schema.sql`](../../database/src/main/resources/db/migration/V1__schema.sql) 和
-  [`V2__dev_seed.sql`](../../database/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
+  [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 和
+  [`V2__dev_seed.sql`](../../schema/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
   已执行版本由 `flyway_schema_history` 记录。Harness Work、version 与 realtime 的低延迟
   提示也复用 PostgreSQL `LISTEN/NOTIFY`；通知丢失时由 durable snapshot 与 periodic poll 恢复。
 
@@ -88,8 +88,8 @@ MiniMax Provider。
 `minimax/MiniMax-M2.7`。同步不会输出密钥，也不应通过 app environment 手工同步。
 
 E2E profile 通过 Flyway 执行
-[`V1__schema.sql`](../../database/src/main/resources/db/migration/V1__schema.sql) 和
-[`V2__e2e_seed.sql`](../../database/src/main/resources/db/seed/e2e/V2__e2e_seed.sql)。seed 仍保留
+[`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 和
+[`V2__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/V2__e2e_seed.sql)。seed 仍保留
 7 个 Provider 和 19 个 Pi 模型 catalog，但不包含真实凭证；真实凭证不会写入镜像、SQL
 seed 或仓库。
 

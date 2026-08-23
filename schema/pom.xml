@@ -10,7 +10,7 @@
         <version>1.0.0</version>
     </parent>
 
-    <artifactId>kk-studio-database</artifactId>
+    <artifactId>kk-studio-schema</artifactId>
 
-    <!-- 纯资源模块：唯一 Flyway baseline（db/migration）与 profile seed（db/seed/**）事实源，无 Java 依赖。 -->
+    <!-- Schema 纯资源模块：唯一 Flyway baseline（db/migration）与 profile seed（db/seed/**）事实源，无 Java 依赖。 -->
 </project>

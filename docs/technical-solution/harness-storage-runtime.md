@@ -12,7 +12,7 @@ PostgreSQL
 
 PostgreSQL 是唯一 durable truth。`LISTEN/NOTIFY` 不保存历史且不承担 correctness：Work 通知丢失由 periodic poll 收敛，version/realtime 通知丢失由客户端重新读取 Thread snapshot 恢复。
 
-权威 DDL 只有一份基线：`database` 模块的 [`V1__schema.sql`](../../database/src/main/resources/db/migration/V1__schema.sql)（含 Harness 七张表与全部 profile seeds）；不存在 schema mirror，`FlywayBootstrapArchitectureTest` 守护全仓唯一 baseline。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable 实体 id 由注入的 `Supplier<UUID>` 生成（生产：`UUID::randomUUID`），API 中编码为 canonical UUID string；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal string，数据库仍保留 bigint。
+权威 DDL 只有一份基线：`schema` 模块的 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)（含 Harness 七张表与全部 profile seeds）；不存在 schema mirror，`FlywayBootstrapArchitectureTest` 守护全仓唯一 baseline。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable 实体 id 由注入的 `Supplier<UUID>` 生成（生产：`UUID::randomUUID`），API 中编码为 canonical UUID string；HTTP DTO 的 Java `long`/`Long` 统一编码为 canonical decimal string，数据库仍保留 bigint。
 
 ## 2. `harness_session` / `harness_entry`
 
