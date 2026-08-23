@@ -615,8 +615,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void versionNotifyTriggerIsTheOnlyHarnessTriggerAndNeverMutatesVersion() throws SQLException {
-    // 整个 public schema 中仅有两个用户 trigger：harness thread version hint 与 canvas document version hint。
+  void versionNotifyTriggersAreExactAndNeverMutateVersions() throws SQLException {
+    // 整个 public schema 中仅有三个用户 trigger：system settings、harness thread 与 canvas document
+    // version hint。
     Set<String> triggers = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -629,9 +630,26 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("trg_harness_thread_version_notify", "trg_canvas_document_version_notify"),
+        Set.of(
+            "trg_system_setting_version_notify",
+            "trg_harness_thread_version_notify",
+            "trg_canvas_document_version_notify"),
         triggers,
         "no legacy trigger (version bump, activation notify, child version) may remain");
+
+    String systemSettingsDefinition =
+        singleString(
+            "select pg_get_triggerdef(oid) from pg_trigger"
+                + " where tgname = 'trg_system_setting_version_notify'");
+    assertTrue(
+        systemSettingsDefinition.contains("AFTER INSERT OR UPDATE OF version"),
+        () ->
+            "system settings trigger must fire after insert or version update: "
+                + systemSettingsDefinition);
+    assertTrue(
+        systemSettingsDefinition.contains("system_setting_version_notify"),
+        () ->
+            "system settings trigger must invoke the notify function: " + systemSettingsDefinition);
 
     String definition =
         singleString(
@@ -656,8 +674,35 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         functionSource.contains("harness_thread_version"),
         () -> "notify function must use the harness_thread_version channel");
     assertTrue(
+        functionSource.contains("new.id::text || ':' || new.version::text"),
+        () -> "thread notify payload must be the strict threadId:version text: " + functionSource);
+    assertTrue(
         !functionSource.contains("version := ") && !functionSource.contains("version = version"),
         () -> "notify function must never mutate version: " + functionSource);
+
+    // system settings version hint 触发器只发送 NEW.version，不替应用自增或改写版本。
+    String systemSettingsFunctionSource =
+        singleString(
+            "select prosrc from pg_proc"
+                + " where pronamespace = 'public'::regnamespace"
+                + " and proname = 'system_setting_version_notify'");
+    assertTrue(
+        systemSettingsFunctionSource.contains("pg_notify"),
+        () -> "system settings notify function must call pg_notify");
+    assertTrue(
+        systemSettingsFunctionSource.contains("system_settings_changed"),
+        () -> "system settings notify function must use the system_settings_changed channel");
+    assertTrue(
+        systemSettingsFunctionSource.contains("new.version::text"),
+        () ->
+            "system settings notify payload must be NEW.version text: "
+                + systemSettingsFunctionSource);
+    assertTrue(
+        !systemSettingsFunctionSource.contains("version := ")
+            && !systemSettingsFunctionSource.contains("version = version"),
+        () ->
+            "system settings notify function must never mutate version: "
+                + systemSettingsFunctionSource);
 
     // canvas version hint 触发器同样只做 NOTIFY，永不写版本。
     String canvasDefinition =
@@ -679,7 +724,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         canvasFunctionSource.contains("canvas_version"),
         () -> "canvas notify function must use the canvas_version channel");
 
-    // 除两个 notify 辅助函数外不存在其它 public 函数：version 自增函数已移除。
+    // 除三个 notify 辅助函数外不存在其它 public 函数：version 自增函数已移除。
     Set<String> functions = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -692,7 +737,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("harness_thread_version_notify", "canvas_document_version_notify"),
+        Set.of(
+            "system_setting_version_notify",
+            "harness_thread_version_notify",
+            "canvas_document_version_notify"),
         functions,
         "the database must never mutate version; only the notify helpers may exist");
 

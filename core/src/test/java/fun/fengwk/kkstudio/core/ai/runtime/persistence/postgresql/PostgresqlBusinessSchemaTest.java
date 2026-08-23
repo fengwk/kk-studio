@@ -2,13 +2,20 @@ package fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql;
 
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.assertTransactionConstraintViolation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.postgresql.PGConnection;
+import org.postgresql.PGNotification;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /** 验证 PostgreSQL schema 是否完全表达非 Harness 的业务数据。 */
@@ -101,6 +108,102 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           0L,
           queryLong(conn, "select version from harness_thread where id = ?", threadId),
           "version is owned by HarnessRuntime; an application UPDATE must never bump it");
+    }
+  }
+
+  /** Thread 通知必须在提交后携带严格 threadId:version；回滚既不发通知，也不改变权威版本。 */
+  @Test
+  void threadVersionNotificationsPublishOnlyCommittedCanonicalPayloads() throws Exception {
+    UUID threadId = uuid();
+    UUID sessionId = uuid();
+    UUID entryId = uuid();
+    String insertedPayload = threadId + ":0";
+
+    try (Connection listener = newConnection();
+        Connection writer = newConnection();
+        Statement listen = listener.createStatement()) {
+      listener.setAutoCommit(true);
+      PGConnection notifications = listener.unwrap(PGConnection.class);
+      listen.execute("LISTEN harness_thread_version");
+
+      writer.setAutoCommit(false);
+      insertThread(writer, threadId, sessionId, entryId);
+      assertNoNotification(notifications);
+      writer.commit();
+      assertEquals(
+          List.of(insertedPayload),
+          awaitPayloads(notifications, "harness_thread_version", insertedPayload),
+          "INSERT notification must be exactly <uuid>:<nonnegative-version>");
+
+      updateThreadVersion(writer, threadId, 1L);
+      assertNoNotification(notifications);
+      writer.rollback();
+      assertNoNotification(notifications);
+      assertEquals(
+          0L,
+          queryLong(writer, "select version from harness_thread where id = ?", threadId),
+          "rolled-back version writes must leave the authoritative row unchanged");
+
+      updateThreadVersion(writer, threadId, 1L);
+      updateThreadVersion(writer, threadId, 2L);
+      writer.commit();
+      List<String> payloads =
+          awaitPayloads(notifications, "harness_thread_version", threadId + ":2");
+      assertTrue(
+          Set.of(threadId + ":1", threadId + ":2").containsAll(payloads),
+          () -> "transaction notifications must contain only written versions: " + payloads);
+      assertTrue(
+          payloads.contains(threadId + ":2"),
+          () -> "the committed final thread version must be observable: " + payloads);
+      assertEquals(
+          2L,
+          queryLong(writer, "select version from harness_thread where id = ?", threadId),
+          "multiple updates in one transaction must preserve the final application version");
+    }
+  }
+
+  /** Singleton settings 通知遵循 PostgreSQL 事务边界；同事务多次更新允许标准折叠或多通知，但最终版本必须可观察且数据库绝不代写版本。 */
+  @Test
+  void systemSettingsNotificationsRespectTransactionsAndFinalVersion() throws Exception {
+    try (Connection listener = newConnection();
+        Connection writer = newConnection();
+        Statement listen = listener.createStatement()) {
+      listener.setAutoCommit(true);
+      PGConnection notifications = listener.unwrap(PGConnection.class);
+      listen.execute("LISTEN system_settings_changed");
+
+      writer.setAutoCommit(false);
+      updateSystemSettingsVersion(writer, 1L);
+      assertNoNotification(notifications);
+      writer.commit();
+      assertEquals(
+          List.of("1"),
+          awaitPayloads(notifications, "system_settings_changed", "1"),
+          "committed settings notification payload must be NEW.version text");
+
+      updateSystemSettingsVersion(writer, 2L);
+      assertNoNotification(notifications);
+      writer.rollback();
+      assertNoNotification(notifications);
+      assertEquals(
+          1L,
+          queryLong(writer, "select version from system_setting where id = ?", 1L),
+          "rolled-back settings updates must neither notify nor change the authoritative version");
+
+      updateSystemSettingsVersion(writer, 2L);
+      updateSystemSettingsVersion(writer, 3L);
+      writer.commit();
+      List<String> payloads = awaitPayloads(notifications, "system_settings_changed", "3");
+      assertTrue(
+          Set.of("2", "3").containsAll(payloads),
+          () -> "transaction notifications must contain only written versions: " + payloads);
+      assertTrue(
+          payloads.contains("3"),
+          () -> "the committed final settings version must be observable: " + payloads);
+      assertEquals(
+          3L,
+          queryLong(writer, "select version from system_setting where id = ?", 1L),
+          "the trigger must preserve the final version written by the application");
     }
   }
 
@@ -335,6 +438,52 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       thread.setObject(3, entryId);
       assertEquals(1, thread.executeUpdate());
     }
+  }
+
+  private static void updateThreadVersion(Connection conn, UUID threadId, long version)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement("update harness_thread set version = ? where id = ?")) {
+      ps.setLong(1, version);
+      ps.setObject(2, threadId);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private static void updateSystemSettingsVersion(Connection conn, long version)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement("update system_setting set version = ? where id = 1")) {
+      ps.setLong(1, version);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private static List<String> awaitPayloads(
+      PGConnection connection, String channel, String finalPayload) throws SQLException {
+    List<String> payloads = new ArrayList<>();
+    long deadlineNanos = System.nanoTime() + 5_000_000_000L;
+    while (!payloads.contains(finalPayload) && System.nanoTime() < deadlineNanos) {
+      PGNotification[] received = connection.getNotifications(250);
+      if (received == null) {
+        continue;
+      }
+      for (PGNotification notification : received) {
+        assertEquals(channel, notification.getName());
+        payloads.add(notification.getParameter());
+      }
+    }
+    assertTrue(
+        payloads.contains(finalPayload),
+        () -> "timed out waiting for final payload " + finalPayload + "; received=" + payloads);
+    return payloads;
+  }
+
+  private static void assertNoNotification(PGConnection connection) throws SQLException {
+    PGNotification[] notifications = connection.getNotifications(200);
+    assertTrue(
+        notifications == null || notifications.length == 0,
+        "rolled-back or uncommitted writes must not notify");
   }
 
   private long queryLong(Connection conn, String sql, UUID id) throws SQLException {

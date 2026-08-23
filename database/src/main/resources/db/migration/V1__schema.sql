@@ -388,6 +388,25 @@ insert into system_setting (id, config) values (
     '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"canvasFunctionExecutorCoreSize":2,"canvasFunctionExecutorMaxSize":4,"canvasFunctionExecutorQueueCapacity":64,"canvasRealtimeMaxLength":5000,"dispatcherLeaseDurationMillis":30000,"dispatcherMaxDispatchTasks":64,"dispatcherPollIntervalMillis":1000,"dispatcherRejectionDelayMillis":1000,"dispatcherWorkerConcurrency":16,"dispatcherWorkerQueueCapacity":64,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"redisRealtimeRetryDelayMillis":1000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionKeepRecentTokens":20000,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentIdleTimeoutMillis":0,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},"environment":{"directoryListTimeoutMillis":10000,"heartbeatTimeoutMillis":60000,"maxResourceBytes":8388608},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":"http://vps-opencli-hub:8080","connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3Enabled":false,"s3PresignDefaultExpiresSeconds":600,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":3600},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"skillLoadTimeoutMillis":30000,"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
 );
 
+-- System settings version NOTIFY hint.
+--
+-- version is owned by the application; PostgreSQL never bumps it. This trigger
+-- only wakes settings listeners after a committed insert or actual version
+-- change. The payload is the nonnegative decimal `version`.
+
+create or replace function system_setting_version_notify()
+returns trigger language plpgsql as $$
+begin
+    if tg_op = 'INSERT' or new.version is distinct from old.version then
+        perform pg_notify('system_settings_changed', new.version::text);
+    end if;
+    return new;
+end $$;
+
+create trigger trg_system_setting_version_notify
+    after insert or update of version on system_setting
+    for each row execute function system_setting_version_notify();
+
 ------------------------------------------------------------------------------
 -- 2. Harness runtime execution protocol
 --
@@ -784,16 +803,19 @@ comment on column canvas_session.created_at is '归属创建时间（毫秒精�
 -- version is owned by HarnessRuntime; PostgreSQL never bumps it. This trigger
 -- is only a wake-up hint for in-process projection listeners: it notifies when
 -- a Thread row is inserted or its version column actually changed, and never
--- mutates the row. The NOTIFY payload is the canonical UUID text of
--- `harness_thread.id` (`new.id::text`); there are deliberately no child-table
--- version triggers.
+-- mutates the row. The NOTIFY payload is the strict parsable text
+-- `{threadId}:{version}`; there are deliberately no child-table version
+-- triggers.
 ------------------------------------------------------------------------------
 
 create or replace function harness_thread_version_notify()
 returns trigger language plpgsql as $$
 begin
     if tg_op = 'INSERT' or new.version is distinct from old.version then
-        perform pg_notify('harness_thread_version', new.id::text);
+        perform pg_notify(
+            'harness_thread_version',
+            new.id::text || ':' || new.version::text
+        );
     end if;
     return new;
 end $$;
