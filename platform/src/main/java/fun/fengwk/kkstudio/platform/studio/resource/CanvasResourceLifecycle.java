@@ -3,11 +3,11 @@ package fun.fengwk.kkstudio.platform.studio.resource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
+import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasFunctionResourcePinMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasResourceMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasFunctionResourcePinDO;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasResourceDO;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -24,45 +24,44 @@ import java.util.UUID;
 @Component
 public class CanvasResourceLifecycle {
 
-  private final CanvasResourceMapper resourceMapper;
-  private final CanvasFunctionResourcePinMapper refMapper;
+  private final CanvasResourceRepository resourceRepository;
+  private final CanvasFunctionResourcePinRepository pinRepository;
   private final ObjectProvider<StorageBlobManager> blobManagers;
 
   public CanvasResourceLifecycle(
-      CanvasResourceMapper resourceMapper,
-      CanvasFunctionResourcePinMapper refMapper,
+      CanvasResourceRepository resourceRepository,
+      CanvasFunctionResourcePinRepository pinRepository,
       ObjectProvider<StorageBlobManager> blobManagers) {
-    this.resourceMapper = Objects.requireNonNull(resourceMapper, "resourceMapper");
-    this.refMapper = Objects.requireNonNull(refMapper, "refMapper");
+    this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
+    this.pinRepository = Objects.requireNonNull(pinRepository, "pinRepository");
     this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
   }
 
   /** 释放指定 Run 的全部 pin，并回收因此失去最后一个 pin 的无 owner Resource。 */
   public void releaseRunPins(UUID canvasId, UUID nodeId, UUID requestId) {
-    List<CanvasFunctionResourcePinDO> refs = refMapper.findByRun(canvasId, nodeId, requestId);
-    refMapper.deleteByRun(canvasId, nodeId, requestId);
+    List<CanvasFunctionResourcePin> refs = pinRepository.findByRun(canvasId, nodeId, requestId);
+    pinRepository.deleteByRun(canvasId, nodeId, requestId);
     collectUnowned(canvasId, refs);
   }
 
   /** 释放节点当前 Run 的全部 pin，并回收因此失去最后一个 pin 的无 owner Resource。 */
   public void releaseNodePins(UUID canvasId, UUID nodeId) {
-    List<CanvasFunctionResourcePinDO> refs = refMapper.findByNode(canvasId, nodeId);
-    refMapper.deleteByNode(canvasId, nodeId);
+    List<CanvasFunctionResourcePin> refs = pinRepository.findByNode(canvasId, nodeId);
+    pinRepository.deleteByNode(canvasId, nodeId);
     collectUnowned(canvasId, refs);
   }
 
   /** 画布深删除前清空全部 pin；画布内全部 Resource 随后由 {@link #deleteCanvasResources} 回收。 */
   public void releaseCanvasPins(UUID canvasId) {
-    refMapper.deleteByCanvas(canvasId);
+    pinRepository.deleteByCanvas(canvasId);
   }
 
   /** 删除节点拥有的资源。仍被任一 Function Run pin 的资源只解除 owner；无 pin 资源删除行并释放其 Blob 引用。 */
   public void deleteOwnedResources(UUID canvasId, UUID nodeId) {
-    for (CanvasResourceDO resource : resourceMapper.listByOwnerNode(canvasId, nodeId)) {
-      if (refMapper.countByResource(canvasId, resource.getId()) > 0) {
-        if (resourceMapper.detachOwner(canvasId, resource.getId(), nodeId) != 1) {
-          throw new IllegalStateException(
-              "detach pinned canvas resource failed: " + resource.getId());
+    for (CanvasResource resource : resourceRepository.findByOwnerNode(canvasId, nodeId)) {
+      if (pinRepository.countByResource(canvasId, resource.id()) > 0) {
+        if (!resourceRepository.detachOwner(canvasId, resource.id(), nodeId)) {
+          throw new IllegalStateException("detach pinned canvas resource failed: " + resource.id());
         }
       } else {
         deleteResource(resource);
@@ -71,72 +70,77 @@ public class CanvasResourceLifecycle {
   }
 
   /** Function success 的资源交换：旧 owned Resource 若仍被其他 Run pin 则解除 owner，否则删除；随后把预分配目标挂到 index 0。 */
-  public CanvasResourceDO replaceOwnedWithTarget(
-      UUID canvasId, UUID nodeId, UUID targetResourceId) {
-    CanvasResourceDO target = resourceMapper.getByIdForUpdate(canvasId, targetResourceId);
+  public CanvasResource replaceOwnedWithTarget(UUID canvasId, UUID nodeId, UUID targetResourceId) {
+    CanvasResource target =
+        resourceRepository.findByIdForUpdate(canvasId, targetResourceId).orElse(null);
     if (target == null
-        || target.getBlobId() == null
-        || target.getOwnerNodeId() != null
-        || target.getResourceIndex() != null) {
+        || target.blobId() == null
+        || target.ownerNodeId() != null
+        || target.resourceIndex() != null) {
       throw new IllegalArgumentException(
           "Function target must be an unowned blob Resource in the same canvas");
     }
-    for (CanvasResourceDO current : resourceMapper.listByOwnerNode(canvasId, nodeId)) {
-      if (refMapper.countByResource(canvasId, current.getId()) > 0) {
-        if (resourceMapper.detachOwner(canvasId, current.getId(), nodeId) != 1) {
+    for (CanvasResource current : resourceRepository.findByOwnerNode(canvasId, nodeId)) {
+      if (pinRepository.countByResource(canvasId, current.id()) > 0) {
+        if (!resourceRepository.detachOwner(canvasId, current.id(), nodeId)) {
           throw new IllegalStateException(
-              "detach replaced canvas resource failed: " + current.getId());
+              "detach replaced canvas resource failed: " + current.id());
         }
       } else {
         deleteResource(current);
       }
     }
-    if (resourceMapper.attachOwner(canvasId, targetResourceId, nodeId, 0) != 1) {
+    if (!resourceRepository.attachOwner(canvasId, targetResourceId, nodeId, 0)) {
       throw new IllegalStateException(
           "attach Function target Resource failed: " + targetResourceId);
     }
-    target.setOwnerNodeId(nodeId);
-    target.setResourceIndex(0);
-    return target;
+    return new CanvasResource(
+        target.id(),
+        target.canvasId(),
+        nodeId,
+        0,
+        target.blobId(),
+        target.name(),
+        target.textContent(),
+        target.createdAt());
   }
 
   /** 失败、取消或迟到结果清理：只有无 owner 的目标 Resource 会被删除；保留 OUTPUT pin 本身。 */
   public void discardUnownedTarget(UUID canvasId, UUID targetResourceId) {
-    CanvasResourceDO resource = resourceMapper.getByIdForUpdate(canvasId, targetResourceId);
-    if (resource != null && resource.getOwnerNodeId() == null) {
-      deleteResource(resource);
-    }
+    resourceRepository
+        .findByIdForUpdate(canvasId, targetResourceId)
+        .filter(resource -> resource.ownerNodeId() == null)
+        .ifPresent(this::deleteResource);
   }
 
   /** 画布深删除：调用方须先删除全部 pin，随后删除每个 Resource 行并释放其 Blob 引用。 */
   public void deleteCanvasResources(UUID canvasId) {
-    for (CanvasResourceDO resource : resourceMapper.listByCanvas(canvasId)) {
+    for (CanvasResource resource : resourceRepository.findByCanvasId(canvasId)) {
       deleteResource(resource);
     }
   }
 
-  private void collectUnowned(UUID canvasId, List<CanvasFunctionResourcePinDO> refs) {
+  private void collectUnowned(UUID canvasId, List<CanvasFunctionResourcePin> refs) {
     Set<UUID> resourceIds = new LinkedHashSet<>();
-    for (CanvasFunctionResourcePinDO ref : refs) {
-      resourceIds.add(ref.getResourceId());
+    for (CanvasFunctionResourcePin ref : refs) {
+      resourceIds.add(ref.resourceId());
     }
     for (UUID resourceId : resourceIds) {
-      if (refMapper.countByResource(canvasId, resourceId) == 0) {
-        CanvasResourceDO resource = resourceMapper.getByIdForUpdate(canvasId, resourceId);
-        if (resource != null && resource.getOwnerNodeId() == null) {
-          deleteResource(resource);
-        }
+      if (pinRepository.countByResource(canvasId, resourceId) == 0) {
+        resourceRepository
+            .findByIdForUpdate(canvasId, resourceId)
+            .filter(resource -> resource.ownerNodeId() == null)
+            .ifPresent(this::deleteResource);
       }
     }
   }
 
-  private void deleteResource(CanvasResourceDO resource) {
-    if (resourceMapper.delete(resource.getCanvasId(), resource.getId()) != 1) {
-      throw new IllegalStateException("delete canvas resource failed: " + resource.getId());
+  private void deleteResource(CanvasResource resource) {
+    if (!resourceRepository.delete(resource.canvasId(), resource.id())) {
+      throw new IllegalStateException("delete canvas resource failed: " + resource.id());
     }
-    if (resource.getBlobId() != null && !requireBlobManager().release(resource.getBlobId())) {
-      throw new IllegalStateException(
-          "release canvas resource blob failed: " + resource.getBlobId());
+    if (resource.blobId() != null && !requireBlobManager().release(resource.blobId())) {
+      throw new IllegalStateException("release canvas resource blob failed: " + resource.blobId());
     }
   }
 

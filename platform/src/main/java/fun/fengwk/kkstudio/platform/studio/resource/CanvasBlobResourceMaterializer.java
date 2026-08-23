@@ -3,8 +3,11 @@ package fun.fengwk.kkstudio.platform.studio.resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
+import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
@@ -13,11 +16,6 @@ import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.model.Storage
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageMediaFacts;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.PostgresqlCanvasResourceRepository;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasFunctionResourcePinMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasResourceMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasResourceDO;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -27,8 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.Objects;
@@ -48,9 +45,9 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
   private final StorageMediaProbe mediaProbe;
   private final StorageBlobManager blobManager;
   private final StorageBlobMapper blobMapper;
-  private final CanvasDocumentMapper documentMapper;
-  private final CanvasFunctionResourcePinMapper refMapper;
-  private final CanvasResourceMapper resourceMapper;
+  private final CanvasStore canvasStore;
+  private final CanvasFunctionResourcePinRepository pinRepository;
+  private final CanvasResourceRepository resourceRepository;
   private final CanvasBlobPreviewService previewService;
   private final CanvasMediaProperties properties;
   private final TransactionTemplate transactionTemplate;
@@ -60,9 +57,9 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
       StorageMediaProbe mediaProbe,
       StorageBlobManager blobManager,
       StorageBlobMapper blobMapper,
-      CanvasDocumentMapper documentMapper,
-      CanvasFunctionResourcePinMapper refMapper,
-      CanvasResourceMapper resourceMapper,
+      CanvasStore canvasStore,
+      CanvasFunctionResourcePinRepository pinRepository,
+      CanvasResourceRepository resourceRepository,
       CanvasBlobPreviewService previewService,
       CanvasMediaProperties properties,
       TransactionTemplate transactionTemplate) {
@@ -70,9 +67,9 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.blobMapper = Objects.requireNonNull(blobMapper, "blobMapper");
-    this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
-    this.refMapper = Objects.requireNonNull(refMapper, "refMapper");
-    this.resourceMapper = Objects.requireNonNull(resourceMapper, "resourceMapper");
+    this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
+    this.pinRepository = Objects.requireNonNull(pinRepository, "pinRepository");
+    this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
     this.previewService = Objects.requireNonNull(previewService, "previewService");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.transactionTemplate = Objects.requireNonNull(transactionTemplate, "transactionTemplate");
@@ -85,9 +82,9 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
     Objects.requireNonNull(resourceId, "resourceId");
     Objects.requireNonNull(name, "name");
     Objects.requireNonNull(content, "content");
-    CanvasResourceDO existing = resourceMapper.getById(canvasId, resourceId);
+    CanvasResource existing = resourceRepository.findById(canvasId, resourceId).orElse(null);
     if (existing != null) {
-      return PostgresqlCanvasResourceRepository.toDomain(existing);
+      return existing;
     }
     Path workDir = createWorkDir();
     UUID candidateBlobId = UUID.randomUUID();
@@ -117,13 +114,13 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
         // blob 去重或 resourceId 竞争落败：candidate 对象未成为持久资源内容，直接清理。
         storageService.deleteObjectIfExists(originalKey);
       }
-      StorageBlobDO persistedBlob = blobMapper.getById(outcome.resource().getBlobId());
+      StorageBlobDO persistedBlob = blobMapper.getById(outcome.resource().blobId());
       if (persistedBlob == null) {
         throw new IllegalStateException(
-            "materialized Resource references a missing blob: " + outcome.resource().getBlobId());
+            "materialized Resource references a missing blob: " + outcome.resource().blobId());
       }
-      generatePreviewBestEffort(outcome.resource().getBlobId(), persistedBlob.getMediaType());
-      return PostgresqlCanvasResourceRepository.toDomain(outcome.resource());
+      generatePreviewBestEffort(outcome.resource().blobId(), persistedBlob.getMediaType());
+      return outcome.resource();
     } catch (IOException error) {
       if (!keepCandidateObject) {
         storageService.deleteObjectIfExists(originalKey);
@@ -147,10 +144,10 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
       String sha256Hex,
       long sizeBytes,
       StorageMediaFacts facts) {
-    if (documentMapper.getByIdForUpdate(canvasId) == null) {
+    if (canvasStore.lockDocument(canvasId).isEmpty()) {
       throw new IllegalStateException("Canvas no longer exists: " + canvasId);
     }
-    if (refMapper.findRunningOutputPins(canvasId, resourceId).size() != 1) {
+    if (pinRepository.findRunningOutputPins(canvasId, resourceId).size() != 1) {
       throw new IllegalStateException(
           "Function target is no longer pinned by exactly one RUNNING run: " + resourceId);
     }
@@ -176,21 +173,17 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
       blobManager.retain(active.getId());
       owningBlobId = active.getId();
     }
-    OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-    CanvasResourceDO resource = new CanvasResourceDO();
-    resource.setId(resourceId);
-    resource.setCanvasId(canvasId);
-    resource.setOwnerNodeId(null);
-    resource.setResourceIndex(null);
-    resource.setBlobId(owningBlobId);
-    resource.setName(name);
-    resource.setTextContent(null);
-    resource.setCreatedAt(now);
-    if (resourceMapper.insertIfAbsent(resource) != 1) {
-      CanvasResourceDO winner = resourceMapper.getById(canvasId, resourceId);
-      if (winner == null) {
-        throw new IllegalStateException("resource insertIfAbsent race: winner row is missing");
-      }
+    CanvasResource resource =
+        new CanvasResource(
+            resourceId, canvasId, null, null, owningBlobId, name, null, Instant.now());
+    if (!resourceRepository.addIfAbsent(resource)) {
+      CanvasResource winner =
+          resourceRepository
+              .findById(canvasId, resourceId)
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "resource insertIfAbsent race: winner row is missing"));
       if (inserted) {
         // 我们刚插入的 candidate 行引用减到 0 会转 DELETING，对象由 blob 管理器 afterCommit 清理。
         blobManager.release(candidateBlobId);
@@ -266,5 +259,5 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
 
   private record Spooled(long sizeBytes, String sha256Hex) {}
 
-  private record MaterializeOutcome(CanvasResourceDO resource, boolean keepCandidateObject) {}
+  private record MaterializeOutcome(CanvasResource resource, boolean keepCandidateObject) {}
 }

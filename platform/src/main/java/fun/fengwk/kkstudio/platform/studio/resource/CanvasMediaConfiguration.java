@@ -9,14 +9,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
+import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.mapper.StorageBlobMapper;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasFunctionResourcePinMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasResourceMapper;
 import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
 
 import java.util.Objects;
@@ -68,9 +68,9 @@ public class CanvasMediaConfiguration {
       ObjectProvider<StorageMediaProbe> mediaProbe,
       ObjectProvider<StorageBlobManager> blobManager,
       StorageBlobMapper blobMapper,
-      CanvasDocumentMapper documentMapper,
-      CanvasFunctionResourcePinMapper refMapper,
-      CanvasResourceMapper resourceMapper,
+      CanvasStore canvasStore,
+      CanvasFunctionResourcePinRepository pinRepository,
+      CanvasResourceRepository resourceRepository,
       ObjectProvider<CanvasBlobPreviewService> previewService,
       TransactionTemplate transactionTemplate) {
     if (!s3Enabled(snapshot)) {
@@ -81,9 +81,9 @@ public class CanvasMediaConfiguration {
         Objects.requireNonNull(mediaProbe.getIfAvailable(), "mediaProbe"),
         Objects.requireNonNull(blobManager.getIfAvailable(), "blobManager"),
         blobMapper,
-        documentMapper,
-        refMapper,
-        resourceMapper,
+        canvasStore,
+        pinRepository,
+        resourceRepository,
         Objects.requireNonNull(previewService.getIfAvailable(), "previewService"),
         properties,
         transactionTemplate);

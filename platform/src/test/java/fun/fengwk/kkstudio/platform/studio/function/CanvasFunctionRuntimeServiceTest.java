@@ -18,6 +18,9 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
+import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
+import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
@@ -25,8 +28,9 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasNodeMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasNodeDO;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionConfigCodec;
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunStateCodec;
 
 import java.time.Instant;
 import java.util.List;
@@ -51,18 +55,18 @@ class CanvasFunctionRuntimeServiceTest {
           new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()),
           List.of());
 
-  private CanvasNodeMapper nodeMapper;
+  private CanvasStore canvasStore;
   private CanvasFunctionRunRepository repository;
   private CanvasFunctionRunTransactions transactions;
   private CanvasFunctionDispatcher dispatcher;
   private CanvasFunctionModelRegistry registry;
-  private CanvasFunctionRunStateCodec stateCodec;
+  private CanvasFunctionRunStateCodecPort stateCodec;
   private CanvasFunctionRuntimeService service;
   private CanvasFunctionFrozenRun frozen;
 
   @BeforeEach
   void setUp() {
-    nodeMapper = mock(CanvasNodeMapper.class);
+    canvasStore = mock(CanvasStore.class);
     repository = mock(CanvasFunctionRunRepository.class);
     transactions = mock(CanvasFunctionRunTransactions.class);
     dispatcher = mock(CanvasFunctionDispatcher.class);
@@ -72,7 +76,7 @@ class CanvasFunctionRuntimeServiceTest {
             new ObjectMapper(), new CanvasFunctionConfigCodec(new ObjectMapper()));
     service =
         new CanvasFunctionRuntimeService(
-            nodeMapper, repository, transactions, dispatcher, registry, stateCodec);
+            canvasStore, repository, transactions, dispatcher, registry, stateCodec);
     when(dispatcher.dispatch(NODE_ID, REQUEST)).thenReturn(true);
     frozen =
         new CanvasFunctionFrozenRun(
@@ -141,7 +145,17 @@ class CanvasFunctionRuntimeServiceTest {
         assertThrows(CanvasFunctionRunException.class, () -> service.get(CANVAS_ID, NODE_ID));
     assertEquals(CanvasFunctionRunException.Reason.NOT_FOUND, missingNode.reason());
 
-    when(nodeMapper.getById(CANVAS_ID, NODE_ID)).thenReturn(new CanvasNodeDO());
+    when(canvasStore.findNode(CANVAS_ID, NODE_ID))
+        .thenReturn(
+            Optional.of(
+                new NodeRecord(
+                    NODE_ID,
+                    CANVAS_ID,
+                    "node",
+                    new CanvasTransform(0, 0, 1, 1),
+                    null,
+                    MODEL.key(),
+                    "{}")));
     when(repository.findByNodeId(NODE_ID)).thenReturn(Optional.empty());
     CanvasFunctionRunException missingRun =
         assertThrows(CanvasFunctionRunException.class, () -> service.get(CANVAS_ID, NODE_ID));

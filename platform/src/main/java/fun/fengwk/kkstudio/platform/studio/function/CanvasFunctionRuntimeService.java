@@ -7,9 +7,10 @@ import org.springframework.stereotype.Service;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasNodeMapper;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -22,12 +23,12 @@ public class CanvasFunctionRuntimeService {
 
   private static final String DISPATCH_FAILURE = "Function execution could not be scheduled";
 
-  private final CanvasNodeMapper nodeMapper;
+  private final CanvasStore canvasStore;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionRunTransactions transactions;
   private final CanvasFunctionDispatcher dispatcher;
   private final CanvasFunctionModelRegistry registry;
-  private final CanvasFunctionRunStateCodec stateCodec;
+  private final CanvasFunctionRunStateCodecPort stateCodec;
 
   public CanvasFunctionRun start(UUID canvasId, UUID nodeId, String requestId) {
     Objects.requireNonNull(canvasId, "canvasId");
@@ -85,7 +86,7 @@ public class CanvasFunctionRuntimeService {
   }
 
   private void requireNode(UUID canvasId, UUID nodeId) {
-    if (nodeMapper.getById(canvasId, nodeId) == null) {
+    if (canvasStore.findNode(canvasId, nodeId).isEmpty()) {
       throw notFound("Canvas Function node not found");
     }
   }

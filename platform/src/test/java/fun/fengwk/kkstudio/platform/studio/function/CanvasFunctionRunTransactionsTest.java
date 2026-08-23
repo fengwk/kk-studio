@@ -15,29 +15,31 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
+import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
+import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionConfigCodec;
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunStateCodec;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasLinkMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasNodeMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasResourceMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasDocumentDO;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasNodeDO;
 import fun.fengwk.kkstudio.platform.studio.resource.CanvasResourceLifecycle;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +59,7 @@ class CanvasFunctionRunTransactionsTest {
   private static final UUID OTHER_REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000004");
   private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000005");
   private static final Instant NOW = Instant.parse("2026-01-02T03:04:05Z");
+  private static final int MAX_ADAPTER_STATE_BYTES = 64 * 1024;
   private static final CanvasFunctionModel MODEL =
       new CanvasFunctionModel(
           "test-image",
@@ -65,21 +68,17 @@ class CanvasFunctionRunTransactionsTest {
           new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()),
           List.of());
 
-  private CanvasNodeMapper nodeMapper;
-  private CanvasResourceMapper resourceMapper;
-  private CanvasLinkMapper linkMapper;
-  private CanvasDocumentMapper documentMapper;
+  private CanvasStore canvasStore;
+  private CanvasResourceRepository resourceRepository;
   private CanvasFunctionRunRepository runRepository;
   private CanvasFunctionRunTransactions transactions;
-  private CanvasFunctionRunStateCodec stateCodec;
+  private CanvasFunctionRunStateCodecPort stateCodec;
   private CanvasFixture fixture;
 
   @BeforeEach
   void setUp() {
-    nodeMapper = mock(CanvasNodeMapper.class);
-    resourceMapper = mock(CanvasResourceMapper.class);
-    linkMapper = mock(CanvasLinkMapper.class);
-    documentMapper = mock(CanvasDocumentMapper.class);
+    canvasStore = mock(CanvasStore.class);
+    resourceRepository = mock(CanvasResourceRepository.class);
     runRepository = mock(CanvasFunctionRunRepository.class);
     CanvasFunctionResourcePinRepository refRepository =
         mock(CanvasFunctionResourcePinRepository.class);
@@ -88,16 +87,14 @@ class CanvasFunctionRunTransactionsTest {
         .thenReturn(
             new CanvasFunctionModelRegistry.RegisteredModel(
                 MODEL, mock(CanvasFunctionAdapter.class)));
-    CanvasFunctionConfigCodec configCodec = new CanvasFunctionConfigCodec(new ObjectMapper());
+    CanvasFunctionConfigCodecPort configCodec = new CanvasFunctionConfigCodec(new ObjectMapper());
     stateCodec = new CanvasFunctionRunStateCodec(new ObjectMapper(), configCodec);
     CanvasResourceLifecycle resourceLifecycle = mock(CanvasResourceLifecycle.class);
     ObjectProvider<StorageBlobManager> blobManagers = provider(mock(StorageBlobManager.class));
     transactions =
         new CanvasFunctionRunTransactions(
-            nodeMapper,
-            resourceMapper,
-            linkMapper,
-            documentMapper,
+            canvasStore,
+            resourceRepository,
             runRepository,
             refRepository,
             registry,
@@ -107,10 +104,10 @@ class CanvasFunctionRunTransactionsTest {
             blobManagers,
             Clock.fixed(NOW, ZoneOffset.UTC));
     fixture = new CanvasFixture(stateCodec);
-    when(documentMapper.getByIdForUpdate(CANVAS)).thenReturn(fixture.document);
-    when(nodeMapper.getByIdForUpdate(CANVAS, NODE)).thenReturn(fixture.node);
-    when(nodeMapper.getById(CANVAS, NODE)).thenReturn(fixture.node);
-    when(resourceMapper.listByOwnerNode(CANVAS, NODE)).thenReturn(List.of());
+    when(canvasStore.lockDocument(CANVAS)).thenReturn(Optional.of(fixture.document));
+    when(canvasStore.lockNode(CANVAS, NODE)).thenReturn(Optional.of(fixture.node));
+    when(canvasStore.findNode(CANVAS, NODE)).thenReturn(Optional.of(fixture.node));
+    when(resourceRepository.findByOwnerNode(CANVAS, NODE)).thenReturn(List.of());
     when(runRepository.findByNodeIdForUpdate(NODE)).thenReturn(fixture.runningRun());
     when(runRepository.findByNodeId(NODE)).thenReturn(fixture.runningRun());
   }
@@ -119,7 +116,7 @@ class CanvasFunctionRunTransactionsTest {
   void checkpointPersistsRunAndBumpsVersion() {
     when(runRepository.checkpoint(eq(NODE), eq(REQUEST), any(), eq("SUBMITTING"), eq(NOW)))
         .thenReturn(true);
-    when(documentMapper.compareAndSetVersion(CANVAS, 5L, 6L)).thenReturn(1);
+    when(canvasStore.advanceDocumentVersion(CANVAS, 5L, 6L)).thenReturn(true);
 
     CanvasFunctionFrozenRun next =
         transactions.checkpoint(
@@ -128,7 +125,7 @@ class CanvasFunctionRunTransactionsTest {
     assertEquals("SUBMITTING", next.stage());
     assertEquals(Map.of("jobId", "job"), next.adapterState());
     verify(runRepository).checkpoint(eq(NODE), eq(REQUEST), any(), eq("SUBMITTING"), eq(NOW));
-    verify(documentMapper).compareAndSetVersion(CANVAS, 5L, 6L);
+    verify(canvasStore).advanceDocumentVersion(CANVAS, 5L, 6L);
   }
 
   @Test
@@ -139,7 +136,7 @@ class CanvasFunctionRunTransactionsTest {
         CanvasFunctionInternalCancellation.class,
         () -> transactions.checkpoint(CANVAS, NODE, REQUEST.toString(), "SUBMITTING", Map.of()));
 
-    verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
+    verify(canvasStore, never()).advanceDocumentVersion(any(), anyLong(), anyLong());
   }
 
   @Test
@@ -163,47 +160,46 @@ class CanvasFunctionRunTransactionsTest {
         () -> transactions.checkpoint(CANVAS, NODE, OTHER_REQUEST.toString(), "LATE", Map.of()));
 
     verify(runRepository, never()).checkpoint(any(), any(), any(), any(), any());
-    verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
+    verify(canvasStore, never()).advanceDocumentVersion(any(), anyLong(), anyLong());
   }
 
   @Test
   void checkpointMissingNodeThrowsInternalCancellationWithoutVersionChange() {
-    when(nodeMapper.getByIdForUpdate(CANVAS, NODE)).thenReturn(null);
+    when(canvasStore.lockNode(CANVAS, NODE)).thenReturn(Optional.empty());
 
     assertThrows(
         CanvasFunctionInternalCancellation.class,
         () -> transactions.checkpoint(CANVAS, NODE, REQUEST.toString(), "SUBMITTING", Map.of()));
 
     verify(runRepository, never()).findByNodeIdForUpdate(any());
-    verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
+    verify(canvasStore, never()).advanceDocumentVersion(any(), anyLong(), anyLong());
   }
 
   @Test
   void checkpointMissingDocumentThrowsInternalCancellationWithoutWrite() {
-    when(documentMapper.getByIdForUpdate(CANVAS)).thenReturn(null);
+    when(canvasStore.lockDocument(CANVAS)).thenReturn(Optional.empty());
 
     assertThrows(
         CanvasFunctionInternalCancellation.class,
         () -> transactions.checkpoint(CANVAS, NODE, REQUEST.toString(), "SUBMITTING", Map.of()));
 
     // 零写：不触碰 node/run 行，也不前进 version。
-    verify(nodeMapper, never()).getByIdForUpdate(any(), any());
+    verify(canvasStore, never()).lockNode(any(), any());
     verify(runRepository, never()).findByNodeIdForUpdate(any());
     verify(runRepository, never()).checkpoint(any(), any(), any(), any(), any());
-    verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
+    verify(canvasStore, never()).advanceDocumentVersion(any(), anyLong(), anyLong());
   }
 
   @Test
   void checkpointRejectsOversizedAdapterStateBeforeAnyWrite() {
-    Map<String, Object> oversized =
-        Map.of("payload", "x".repeat(CanvasFunctionRunStateCodec.MAX_ADAPTER_STATE_BYTES + 1));
+    Map<String, Object> oversized = Map.of("payload", "x".repeat(MAX_ADAPTER_STATE_BYTES + 1));
 
     assertThrows(
         IllegalArgumentException.class,
         () -> transactions.checkpoint(CANVAS, NODE, REQUEST.toString(), "SUBMITTING", oversized));
 
     verify(runRepository, never()).checkpoint(any(), any(), any(), any(), any());
-    verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
+    verify(canvasStore, never()).advanceDocumentVersion(any(), anyLong(), anyLong());
   }
 
   @Test
@@ -213,7 +209,7 @@ class CanvasFunctionRunTransactionsTest {
         () -> transactions.checkpoint(CANVAS, NODE, REQUEST.toString(), "lower case", Map.of()));
 
     verify(runRepository, never()).checkpoint(any(), any(), any(), any(), any());
-    verify(documentMapper, never()).compareAndSetVersion(any(), anyLong(), anyLong());
+    verify(canvasStore, never()).advanceDocumentVersion(any(), anyLong(), anyLong());
   }
 
   @SuppressWarnings("unchecked")
@@ -225,28 +221,22 @@ class CanvasFunctionRunTransactionsTest {
 
   private static final class CanvasFixture {
 
-    private final CanvasDocumentDO document;
-    private final CanvasNodeDO node;
-    private final CanvasFunctionRunStateCodec stateCodec;
+    private final CanvasDocument document;
+    private final NodeRecord node;
+    private final CanvasFunctionRunStateCodecPort stateCodec;
 
-    private CanvasFixture(CanvasFunctionRunStateCodec stateCodec) {
+    private CanvasFixture(CanvasFunctionRunStateCodecPort stateCodec) {
       this.stateCodec = stateCodec;
-      document = new CanvasDocumentDO();
-      document.setId(CANVAS);
-      document.setTitle("canvas");
-      document.setVersion(5L);
-      document.setCreatedAt(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
-      document.setUpdatedAt(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
-      node = new CanvasNodeDO();
-      node.setId(NODE);
-      node.setCanvasId(CANVAS);
-      node.setName("output");
-      node.setX(0.0);
-      node.setY(0.0);
-      node.setWidth(100.0);
-      node.setHeight(80.0);
-      node.setModelKey(MODEL.key());
-      node.setFunctionConfigJson("{}");
+      document = new CanvasDocument(CANVAS, "canvas", 5L, NOW, NOW);
+      node =
+          new NodeRecord(
+              NODE,
+              CANVAS,
+              "output",
+              new CanvasTransform(0.0, 0.0, 100.0, 80.0),
+              null,
+              MODEL.key(),
+              "{}");
     }
 
     private Optional<CanvasFunctionRun> runningRun() {

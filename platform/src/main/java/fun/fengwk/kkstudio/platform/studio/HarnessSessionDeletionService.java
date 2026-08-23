@@ -5,13 +5,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.ai.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.ai.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -30,7 +30,7 @@ public class HarnessSessionDeletionService {
   private final ChatSessionRepository chatSessionRepository;
   private final CanvasSessionRepository canvasSessionRepository;
   private final ChatRepository chatRepository;
-  private final CanvasDocumentMapper canvasDocumentMapper;
+  private final CanvasStore canvasStore;
   private final ObjectProvider<HarnessStore> stores;
   private final ObjectProvider<SessionBlobRefManager> refManagers;
 
@@ -38,7 +38,7 @@ public class HarnessSessionDeletionService {
       ChatSessionRepository chatSessionRepository,
       CanvasSessionRepository canvasSessionRepository,
       ChatRepository chatRepository,
-      CanvasDocumentMapper canvasDocumentMapper,
+      CanvasStore canvasStore,
       ObjectProvider<HarnessStore> stores,
       ObjectProvider<SessionBlobRefManager> refManagers) {
     this.chatSessionRepository =
@@ -46,8 +46,7 @@ public class HarnessSessionDeletionService {
     this.canvasSessionRepository =
         Objects.requireNonNull(canvasSessionRepository, "canvasSessionRepository");
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
-    this.canvasDocumentMapper =
-        Objects.requireNonNull(canvasDocumentMapper, "canvasDocumentMapper");
+    this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.stores = Objects.requireNonNull(stores, "stores");
     this.refManagers = Objects.requireNonNull(refManagers, "refManagers");
   }
@@ -107,7 +106,7 @@ public class HarnessSessionDeletionService {
     if (owner.type() == StudioOwnerType.CHAT) {
       return chatRepository.lockById(owner.id()) != null;
     }
-    return canvasDocumentMapper.getByIdForUpdate(owner.id()) != null;
+    return canvasStore.lockDocument(owner.id()).isPresent();
   }
 
   /** 深删全部目标 Session 的 Thread：先按 UUID 锁定全部 Thread，再由 Store 跨集合按 child rank 批量删除。 */

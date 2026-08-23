@@ -11,7 +11,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -32,14 +34,13 @@ import fun.fengwk.kkstudio.platform.ai.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.ai.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.ai.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasDocumentDO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 class StudioHarnessQueryServiceTest {
@@ -55,7 +56,7 @@ class StudioHarnessQueryServiceTest {
 
   private ChatRepository chatRepository;
   private ChatSessionRepository chatSessionRepository;
-  private CanvasDocumentMapper canvasDocumentMapper;
+  private CanvasStore canvasStore;
   private CanvasSessionRepository canvasSessionRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
@@ -66,18 +67,14 @@ class StudioHarnessQueryServiceTest {
   void setUp() {
     chatRepository = mock(ChatRepository.class);
     chatSessionRepository = mock(ChatSessionRepository.class);
-    canvasDocumentMapper = mock(CanvasDocumentMapper.class);
+    canvasStore = mock(CanvasStore.class);
     canvasSessionRepository = mock(CanvasSessionRepository.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     service =
         new StudioHarnessQueryService(
-            chatRepository,
-            chatSessionRepository,
-            canvasDocumentMapper,
-            canvasSessionRepository,
-            runtimes);
+            chatRepository, chatSessionRepository, canvasStore, canvasSessionRepository, runtimes);
   }
 
   @Test
@@ -154,7 +151,7 @@ class StudioHarnessQueryServiceTest {
     // Canvas 与 Chat 共用完全相同的 Session projection；缺 ROOT 的 durable history 必须 fail closed。
     UUID canvasId = id(20);
     UUID sessionId = id(21);
-    when(canvasDocumentMapper.getById(canvasId)).thenReturn(mock(CanvasDocumentDO.class));
+    when(canvasStore.findDocument(canvasId)).thenReturn(Optional.of(mock(CanvasDocument.class)));
     when(canvasSessionRepository.listSessionIds(canvasId)).thenReturn(List.of(sessionId));
     Entry root = root(sessionId, id(401), T1, ROOT_SETTINGS);
     when(runtime.getSessionEntries(sessionId)).thenReturn(List.of(root));

@@ -15,5 +15,6 @@
 
     <modules>
         <module>core</module>
+        <module>infra</module>
     </modules>
 </project>

@@ -14,13 +14,23 @@ public interface CanvasResourceRepository {
 
   void add(CanvasResource resource);
 
+  boolean addIfAbsent(CanvasResource resource);
+
   Optional<CanvasResource> findById(UUID canvasId, UUID resourceId);
 
   Optional<CanvasResource> findByIdForUpdate(UUID canvasId, UUID resourceId);
 
   List<CanvasResource> findByCanvasId(UUID canvasId);
 
+  List<CanvasResource> findByOwnerNode(UUID canvasId, UUID nodeId);
+
   List<CanvasResource> findByOwnerNodeId(UUID nodeId);
+
+  boolean detachOwner(UUID canvasId, UUID resourceId, UUID ownerNodeId);
+
+  boolean attachOwner(UUID canvasId, UUID resourceId, UUID ownerNodeId, int resourceIndex);
+
+  boolean updateTextContent(UUID canvasId, UUID nodeId, String textContent);
 
   boolean delete(UUID canvasId, UUID resourceId);
 

@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionParameterDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
@@ -94,7 +95,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresSpringTestSupport {
   @Autowired private StorageBlobRepository blobRepository;
   @Autowired private CanvasFunctionRunTransactions transactions;
   @Autowired private CanvasFunctionModelRegistry registry;
-  @Autowired private CanvasFunctionRunStateCodec stateCodec;
+  @Autowired private CanvasFunctionRunStateCodecPort stateCodec;
   @Autowired private PlatformTransactionManager transactionManager;
 
   /** 相同 requestId exact replay；不同并发 request 只有一个成功；终态允许新 request 覆盖；每次状态前进 bump version。 */

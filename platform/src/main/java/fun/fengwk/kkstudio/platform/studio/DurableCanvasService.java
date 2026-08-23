@@ -27,32 +27,23 @@ import fun.fengwk.kkstudio.canvas.CanvasNodePatch;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
+import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
+import fun.fengwk.kkstudio.canvas.CanvasStore.CommandDedup;
+import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionConfigCodec;
 import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionModelRegistry;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasCommandDedupMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasGroupMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasLinkMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasNodeMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasResourceMapper;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasCommandDedupDO;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasDocumentDO;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasGroupDO;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasLinkDO;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasNodeDO;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.model.CanvasResourceDO;
 import fun.fengwk.kkstudio.platform.studio.resource.CanvasBlobPreviewService;
 import fun.fengwk.kkstudio.platform.studio.resource.CanvasResourceLifecycle;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.text.Normalizer;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -79,44 +70,32 @@ public class DurableCanvasService implements CanvasCommandService {
   private static final String DEFAULT_TITLE = "未命名画布";
   private static final String COMMAND_HASH_ALGORITHM = "SHA-256";
 
-  private final CanvasDocumentMapper documentMapper;
-  private final CanvasGroupMapper groupMapper;
-  private final CanvasNodeMapper nodeMapper;
-  private final CanvasResourceMapper resourceMapper;
-  private final CanvasLinkMapper linkMapper;
-  private final CanvasCommandDedupMapper commandDedupMapper;
+  private final CanvasStore canvasStore;
+  private final CanvasResourceRepository resourceRepository;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasResourceLifecycle resourceLifecycle;
   private final ObjectProvider<StorageUploadService> uploadServices;
   private final ObjectProvider<StorageBlobManager> blobManagers;
   private final ObjectProvider<CanvasBlobPreviewService> previewServices;
-  private final CanvasFunctionConfigCodec functionConfigCodec;
+  private final CanvasFunctionConfigCodecPort functionConfigCodec;
   private final CanvasFunctionModelRegistry functionModelRegistry;
   private final ObjectMapper objectMapper;
   private final HarnessSessionDeletionService sessionDeletionService;
 
   public DurableCanvasService(
-      CanvasDocumentMapper documentMapper,
-      CanvasGroupMapper groupMapper,
-      CanvasNodeMapper nodeMapper,
-      CanvasResourceMapper resourceMapper,
-      CanvasLinkMapper linkMapper,
-      CanvasCommandDedupMapper commandDedupMapper,
+      CanvasStore canvasStore,
+      CanvasResourceRepository resourceRepository,
       CanvasFunctionRunRepository runRepository,
       CanvasResourceLifecycle resourceLifecycle,
       ObjectProvider<StorageUploadService> uploadServices,
       ObjectProvider<StorageBlobManager> blobManagers,
       ObjectProvider<CanvasBlobPreviewService> previewServices,
-      CanvasFunctionConfigCodec functionConfigCodec,
+      CanvasFunctionConfigCodecPort functionConfigCodec,
       CanvasFunctionModelRegistry functionModelRegistry,
       ObjectMapper objectMapper,
       HarnessSessionDeletionService sessionDeletionService) {
-    this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
-    this.groupMapper = Objects.requireNonNull(groupMapper, "groupMapper");
-    this.nodeMapper = Objects.requireNonNull(nodeMapper, "nodeMapper");
-    this.resourceMapper = Objects.requireNonNull(resourceMapper, "resourceMapper");
-    this.linkMapper = Objects.requireNonNull(linkMapper, "linkMapper");
-    this.commandDedupMapper = Objects.requireNonNull(commandDedupMapper, "commandDedupMapper");
+    this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
+    this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
     this.uploadServices = Objects.requireNonNull(uploadServices, "uploadServices");
@@ -134,18 +113,7 @@ public class DurableCanvasService implements CanvasCommandService {
   @Transactional
   public CanvasDocument createCanvas(String title) {
     String canonicalTitle = canonicalDisplayName(title, DEFAULT_TITLE, "title");
-    CanvasDocumentDO document = new CanvasDocumentDO();
-    document.setId(UUID.randomUUID());
-    document.setTitle(canonicalTitle);
-    document.setVersion(0L);
-    if (documentMapper.insert(document) != 1) {
-      throw new IllegalStateException("insert canvas document failed");
-    }
-    CanvasDocumentDO persisted = documentMapper.getById(document.getId());
-    if (persisted == null) {
-      throw new IllegalStateException("canvas document disappeared after insert");
-    }
-    return toDocument(persisted);
+    return canvasStore.addDocument(UUID.randomUUID(), canonicalTitle);
   }
 
   @Override
@@ -165,20 +133,20 @@ public class DurableCanvasService implements CanvasCommandService {
 
     String requestHash = requestHash(commandBatch);
     // 行锁先于一切：并发命令与精确回放都在 document 行锁上串行化。
-    CanvasDocumentDO document = documentMapper.getByIdForUpdate(canvasId);
-    if (document == null) {
-      throw new IllegalArgumentException("Canvas not found: " + canvasId);
-    }
-    CanvasCommandDedupDO existing = commandDedupMapper.findById(canvasId, commandId);
+    CanvasDocument document =
+        canvasStore
+            .lockDocument(canvasId)
+            .orElseThrow(() -> new IllegalArgumentException("Canvas not found: " + canvasId));
+    CommandDedup existing = canvasStore.findCommandDedup(canvasId, commandId).orElse(null);
     if (existing != null) {
-      if (!requestHash.equals(existing.getRequestHash())) {
+      if (!requestHash.equals(existing.requestHash())) {
         throw conflict(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT);
       }
       // 精确回放：命令早已应用；返回当前版本的确定性空 patch（客户端按 version <= 本地版本忽略或按 base 对齐）。
-      long currentVersion = document.getVersion();
+      long currentVersion = document.version();
       return new CanvasPatch(currentVersion, currentVersion, List.of(), List.of(), List.of());
     }
-    if (document.getVersion() != expectedVersion) {
+    if (document.version() != expectedVersion) {
       throw conflict(CanvasConflictException.Reason.VERSION_CONFLICT);
     }
 
@@ -192,15 +160,11 @@ public class DurableCanvasService implements CanvasCommandService {
     }
 
     long newVersion = Math.addExact(expectedVersion, 1L);
-    if (documentMapper.compareAndSetVersion(canvasId, expectedVersion, newVersion) != 1) {
+    if (!canvasStore.advanceDocumentVersion(canvasId, expectedVersion, newVersion)) {
       throw conflict(CanvasConflictException.Reason.VERSION_CONFLICT);
     }
-    CanvasCommandDedupDO dedup = new CanvasCommandDedupDO();
-    dedup.setCanvasId(canvasId);
-    dedup.setCommandId(commandId);
-    dedup.setRequestHash(requestHash);
     try {
-      commandDedupMapper.insert(dedup);
+      canvasStore.addCommandDedup(new CommandDedup(canvasId, commandId, requestHash));
     } catch (DuplicateKeyException error) {
       throw conflict(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT);
     }
@@ -211,25 +175,24 @@ public class DurableCanvasService implements CanvasCommandService {
   @Transactional
   public void deleteCanvas(UUID canvasId) {
     Objects.requireNonNull(canvasId, "canvasId");
-    CanvasDocumentDO document = documentMapper.getByIdForUpdate(canvasId);
-    if (document == null) {
-      throw new IllegalArgumentException("Canvas not found: " + canvasId);
-    }
+    canvasStore
+        .lockDocument(canvasId)
+        .orElseThrow(() -> new IllegalArgumentException("Canvas not found: " + canvasId));
     // canvas_document 行锁（Owner FOR UPDATE）保护：先删 graph 内容，再经共享会话深删除移除全部归属 Session
     // （relation 行先于 document 行删除，FK RESTRICT 顺序由应用显式驱动），最后 CAS 删除 document 行。
     resourceLifecycle.releaseCanvasPins(canvasId);
     resourceLifecycle.deleteCanvasResources(canvasId);
     runRepository.deleteByCanvasId(canvasId);
-    linkMapper.deleteByCanvas(canvasId);
-    for (CanvasNodeDO node : nodeMapper.listByCanvas(canvasId)) {
-      nodeMapper.deleteById(canvasId, node.getId());
+    canvasStore.deleteLinksByCanvas(canvasId);
+    for (NodeRecord node : canvasStore.listNodes(canvasId)) {
+      canvasStore.deleteNode(canvasId, node.id());
     }
-    for (CanvasGroupDO group : groupMapper.listByCanvas(canvasId)) {
-      groupMapper.deleteById(canvasId, group.getId());
+    for (CanvasGroup group : canvasStore.listGroups(canvasId)) {
+      canvasStore.deleteGroup(canvasId, group.id());
     }
-    commandDedupMapper.deleteByCanvas(canvasId);
+    canvasStore.deleteCommandDedupByCanvas(canvasId);
     sessionDeletionService.deleteSessionsByOwner(new StudioOwner(StudioOwnerType.CANVAS, canvasId));
-    if (documentMapper.deleteById(canvasId) != 1) {
+    if (!canvasStore.deleteDocument(canvasId)) {
       throw new IllegalStateException("canvas document delete failed under row lock");
     }
   }
@@ -259,53 +222,54 @@ public class DurableCanvasService implements CanvasCommandService {
 
   private void createTextNode(
       UUID canvasId, CanvasCommand.CreateTextNode command, PatchAccumulator accumulator) {
-    if (nodeMapper.getById(canvasId, command.nodeId()) != null) {
+    if (canvasStore.findNode(canvasId, command.nodeId()).isPresent()) {
       throw new IllegalArgumentException("node already exists: " + command.nodeId());
     }
     String name = canonicalNodeName(command.name());
-    CanvasNodeDO node = newNode(canvasId, command.nodeId(), name, command.transform(), null, null);
-    nodeMapper.insert(node);
-    CanvasResourceDO resource = new CanvasResourceDO();
-    resource.setId(UUID.randomUUID());
-    resource.setCanvasId(canvasId);
-    resource.setOwnerNodeId(node.getId());
-    resource.setResourceIndex(0);
-    resource.setBlobId(null);
-    resource.setName(name);
-    resource.setTextContent(command.markdown());
-    resource.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
-    resourceMapper.insert(resource);
+    NodeRecord node = newNode(canvasId, command.nodeId(), name, command.transform(), null, null);
+    canvasStore.addNode(node);
+    CanvasResource resource =
+        new CanvasResource(
+            UUID.randomUUID(),
+            canvasId,
+            node.id(),
+            0,
+            null,
+            name,
+            command.markdown(),
+            Instant.now());
+    resourceRepository.add(resource);
     accumulator.upsertNode(projectNode(node, List.of(resource), Map.of()));
   }
 
   private void updateTextNode(
       UUID canvasId, CanvasCommand.UpdateTextNode command, PatchAccumulator accumulator) {
-    CanvasNodeDO node = requireNode(canvasId, command.nodeId());
-    if (node.getModelKey() != null) {
+    NodeRecord node = requireNode(canvasId, command.nodeId());
+    if (node.modelKey() != null) {
       throw new IllegalArgumentException("UPDATE_TEXT_NODE requires an ordinary node");
     }
-    if (resourceMapper.updateTextContent(canvasId, command.nodeId(), command.markdown()) != 1) {
+    if (!resourceRepository.updateTextContent(canvasId, command.nodeId(), command.markdown())) {
       throw new IllegalArgumentException("UPDATE_TEXT_NODE requires one TEXT resource");
     }
-    accumulator.upsertNode(projectNode(node, resourcesOfNode(canvasId, node.getId()), Map.of()));
+    accumulator.upsertNode(projectNode(node, resourcesOfNode(canvasId, node.id()), Map.of()));
   }
 
   private void createResourceNode(
       UUID canvasId, CanvasCommand.CreateResourceNode command, PatchAccumulator accumulator) {
-    if (nodeMapper.getById(canvasId, command.nodeId()) != null) {
+    if (canvasStore.findNode(canvasId, command.nodeId()).isPresent()) {
       throw new IllegalArgumentException("node already exists: " + command.nodeId());
     }
     requireDistinctIds(command.uploadIds(), "uploadIds");
     String name = canonicalNodeName(command.name());
-    CanvasNodeDO node = newNode(canvasId, command.nodeId(), name, command.transform(), null, null);
-    nodeMapper.insert(node);
-    List<CanvasResourceDO> resources = new ArrayList<>(command.uploadIds().size());
+    NodeRecord node = newNode(canvasId, command.nodeId(), name, command.transform(), null, null);
+    canvasStore.addNode(node);
+    List<CanvasResource> resources = new ArrayList<>(command.uploadIds().size());
     for (int index = 0; index < command.uploadIds().size(); index++) {
       resources.add(
-          consumeUpload(canvasId, node.getId(), index, command.uploadIds().get(index), name));
+          consumeUpload(canvasId, node.id(), index, command.uploadIds().get(index), name));
     }
-    for (CanvasResourceDO resource : resources) {
-      resourceMapper.insert(resource);
+    for (CanvasResource resource : resources) {
+      resourceRepository.add(resource);
       registerPreviewAfterCommit(resource);
     }
     accumulator.upsertNode(projectNode(node, resources, Map.of()));
@@ -313,15 +277,15 @@ public class DurableCanvasService implements CanvasCommandService {
 
   private void createFunctionNode(
       UUID canvasId, CanvasCommand.CreateFunctionNode command, PatchAccumulator accumulator) {
-    if (nodeMapper.getById(canvasId, command.nodeId()) != null) {
+    if (canvasStore.findNode(canvasId, command.nodeId()).isPresent()) {
       throw new IllegalArgumentException("node already exists: " + command.nodeId());
     }
     String modelKey = canonicalModelKey(command.modelKey());
     String configJson = canonicalFunctionConfig(modelKey, command.configJson());
     String name = canonicalNodeName(command.name());
-    CanvasNodeDO node =
+    NodeRecord node =
         newNode(canvasId, command.nodeId(), name, command.transform(), modelKey, configJson);
-    nodeMapper.insert(node);
+    canvasStore.addNode(node);
     accumulator.upsertNode(projectNode(node, List.of(), Map.of()));
   }
 
@@ -329,31 +293,28 @@ public class DurableCanvasService implements CanvasCommandService {
       UUID canvasId, CanvasCommand.UpdateFunction command, PatchAccumulator accumulator) {
     String modelKey = canonicalModelKey(command.modelKey());
     String configJson = canonicalFunctionConfig(modelKey, command.configJson());
-    CanvasNodeDO node = requireNode(canvasId, command.nodeId());
-    if (node.getModelKey() == null) {
+    NodeRecord node = requireNode(canvasId, command.nodeId());
+    if (node.modelKey() == null) {
       throw new IllegalArgumentException("UPDATE_FUNCTION requires a Function node");
     }
-    node.setModelKey(modelKey);
-    node.setFunctionConfigJson(configJson);
-    if (nodeMapper.updateFunction(node) != 1) {
+    node = node.withFunction(modelKey, configJson);
+    if (!canvasStore.updateNodeFunction(canvasId, node.id(), modelKey, configJson)) {
       throw new IllegalArgumentException("Unknown Function node: " + command.nodeId());
     }
     accumulator.upsertNode(
-        projectNode(
-            node, resourcesOfNode(canvasId, node.getId()), runsOfNode(canvasId, node.getId())));
+        projectNode(node, resourcesOfNode(canvasId, node.id()), runsOfNode(canvasId, node.id())));
   }
 
   private void renameNode(
       UUID canvasId, CanvasCommand.RenameNode command, PatchAccumulator accumulator) {
-    CanvasNodeDO node = requireNode(canvasId, command.nodeId());
+    NodeRecord node = requireNode(canvasId, command.nodeId());
     String name = canonicalNodeName(command.name());
-    node.setName(name);
-    if (nodeMapper.updateName(node) != 1) {
+    node = node.withName(name);
+    if (!canvasStore.renameNode(canvasId, node.id(), name)) {
       throw new IllegalArgumentException("Unknown node: " + command.nodeId());
     }
     accumulator.upsertNode(
-        projectNode(
-            node, resourcesOfNode(canvasId, node.getId()), runsOfNode(canvasId, node.getId())));
+        projectNode(node, resourcesOfNode(canvasId, node.id()), runsOfNode(canvasId, node.id())));
   }
 
   private void updateNodeTransforms(
@@ -363,67 +324,60 @@ public class DurableCanvasService implements CanvasCommandService {
       if (!seen.add(update.nodeId())) {
         throw new IllegalArgumentException("updates must not contain duplicate node ids");
       }
-      CanvasNodeDO node = requireNode(canvasId, update.nodeId());
-      applyTransform(node, update.transform());
-      if (nodeMapper.updateTransform(node) != 1) {
+      NodeRecord node = requireNode(canvasId, update.nodeId()).withTransform(update.transform());
+      if (!canvasStore.updateNodeTransform(node)) {
         throw new IllegalArgumentException("Unknown node: " + update.nodeId());
       }
       accumulator.upsertNode(
-          projectNode(
-              node, resourcesOfNode(canvasId, node.getId()), runsOfNode(canvasId, node.getId())));
+          projectNode(node, resourcesOfNode(canvasId, node.id()), runsOfNode(canvasId, node.id())));
     }
   }
 
   private void deleteNode(
       UUID canvasId, CanvasCommand.DeleteNode command, PatchAccumulator accumulator) {
-    CanvasNodeDO node = requireNode(canvasId, command.nodeId());
-    List<CanvasLinkDO> removedLinks =
-        linkMapper.listByCanvas(canvasId).stream()
+    NodeRecord node = requireNode(canvasId, command.nodeId());
+    List<CanvasLink> removedLinks =
+        canvasStore.listLinks(canvasId).stream()
             .filter(
                 link ->
-                    link.getSourceNodeId().equals(node.getId())
-                        || link.getTargetNodeId().equals(node.getId()))
+                    link.sourceNodeId().equals(node.id()) || link.targetNodeId().equals(node.id()))
             .toList();
-    linkMapper.deleteByNode(canvasId, node.getId());
-    for (CanvasLinkDO link : removedLinks) {
-      accumulator.removeLink(link.getSourceNodeId(), link.getTargetNodeId());
+    canvasStore.deleteLinksByNode(canvasId, node.id());
+    for (CanvasLink link : removedLinks) {
+      accumulator.removeLink(link.sourceNodeId(), link.targetNodeId());
     }
-    resourceLifecycle.releaseNodePins(canvasId, node.getId());
-    runRepository.deleteByNodeId(node.getId());
-    resourceLifecycle.deleteOwnedResources(canvasId, node.getId());
-    if (nodeMapper.deleteById(canvasId, node.getId()) != 1) {
+    resourceLifecycle.releaseNodePins(canvasId, node.id());
+    runRepository.deleteByNodeId(node.id());
+    resourceLifecycle.deleteOwnedResources(canvasId, node.id());
+    if (!canvasStore.deleteNode(canvasId, node.id())) {
       throw new IllegalArgumentException("Unknown node: " + command.nodeId());
     }
-    accumulator.removeNode(node.getId());
+    accumulator.removeNode(node.id());
   }
 
   private void createLink(
       UUID canvasId, CanvasCommand.CreateLink command, PatchAccumulator accumulator) {
     requireNode(canvasId, command.sourceNodeId());
-    CanvasNodeDO target = requireNode(canvasId, command.targetNodeId());
-    if (target.getModelKey() == null) {
+    NodeRecord target = requireNode(canvasId, command.targetNodeId());
+    if (target.modelKey() == null) {
       throw new IllegalArgumentException("link target must have a Function");
     }
-    if (resourceMapper.listByOwnerNode(canvasId, command.sourceNodeId()).isEmpty()) {
+    if (resourceRepository.findByOwnerNode(canvasId, command.sourceNodeId()).isEmpty()) {
       throw new IllegalArgumentException("link source must own at least one Resource");
     }
-    if (linkMapper.exists(canvasId, command.sourceNodeId(), command.targetNodeId()) == 1) {
+    if (canvasStore.linkExists(canvasId, command.sourceNodeId(), command.targetNodeId())) {
       throw new IllegalArgumentException("link already exists");
     }
-    CanvasLinkDO link = new CanvasLinkDO();
-    link.setCanvasId(canvasId);
-    link.setSourceNodeId(command.sourceNodeId());
-    link.setTargetNodeId(command.targetNodeId());
-    linkMapper.insert(link);
-    accumulator.upsertLink(
-        new CanvasLink(canvasId, link.getSourceNodeId(), link.getTargetNodeId()));
+    CanvasLink link = new CanvasLink(canvasId, command.sourceNodeId(), command.targetNodeId());
+    canvasStore.addLink(link);
+    accumulator.upsertLink(link);
   }
 
   private void deleteLink(
       UUID canvasId, CanvasCommand.DeleteLink command, PatchAccumulator accumulator) {
     requireNode(canvasId, command.sourceNodeId());
     requireNode(canvasId, command.targetNodeId());
-    if (linkMapper.delete(canvasId, command.sourceNodeId(), command.targetNodeId()) != 1) {
+    if (!canvasStore.deleteLink(canvasId, command.sourceNodeId(), command.targetNodeId())) {
       throw new IllegalArgumentException("Unknown link");
     }
     accumulator.removeLink(command.sourceNodeId(), command.targetNodeId());
@@ -431,63 +385,68 @@ public class DurableCanvasService implements CanvasCommandService {
 
   private void createGroup(
       UUID canvasId, CanvasCommand.CreateGroup command, PatchAccumulator accumulator) {
-    if (groupMapper.getById(canvasId, command.groupId()) != null) {
+    if (canvasStore.findGroup(canvasId, command.groupId()).isPresent()) {
       throw new IllegalArgumentException("group already exists: " + command.groupId());
     }
     requireDistinctIds(command.memberNodeIds(), "memberNodeIds");
-    CanvasGroupDO group = new CanvasGroupDO();
-    group.setId(command.groupId());
-    group.setCanvasId(canvasId);
-    group.setTitle(canonicalDisplayName(command.title(), null, "title"));
-    applyTransform(group, command.transform());
-    groupMapper.insert(group);
+    CanvasGroup group =
+        new CanvasGroup(
+            command.groupId(),
+            canvasId,
+            canonicalDisplayName(command.title(), null, "title"),
+            command.transform());
+    canvasStore.addGroup(group);
     for (UUID memberNodeId : command.memberNodeIds()) {
-      CanvasNodeDO node = requireNode(canvasId, memberNodeId);
-      if (node.getGroupId() != null) {
+      NodeRecord node = requireNode(canvasId, memberNodeId);
+      if (node.groupId() != null) {
         throw new IllegalArgumentException(
             "group member node already belongs to a group: " + memberNodeId);
       }
-      node.setGroupId(group.getId());
-      if (nodeMapper.attachGroupIfUngrouped(node) != 1) {
+      node = node.withGroupId(group.id());
+      if (!canvasStore.attachNodeToGroupIfUngrouped(canvasId, memberNodeId, group.id())) {
         throw new IllegalArgumentException("group member node is not ungrouped: " + memberNodeId);
       }
       accumulator.upsertNode(
-          projectNode(
-              node, resourcesOfNode(canvasId, node.getId()), runsOfNode(canvasId, node.getId())));
+          projectNode(node, resourcesOfNode(canvasId, node.id()), runsOfNode(canvasId, node.id())));
     }
-    accumulator.upsertGroup(projectGroup(group));
+    accumulator.upsertGroup(group);
   }
 
   private void moveGroup(
       UUID canvasId, CanvasCommand.MoveGroup command, PatchAccumulator accumulator) {
-    CanvasGroupDO group = requireGroup(canvasId, command.groupId());
-    double deltaX = command.x() - group.getX();
-    double deltaY = command.y() - group.getY();
+    CanvasGroup group = requireGroup(canvasId, command.groupId());
+    double deltaX = command.x() - group.transform().x();
+    double deltaY = command.y() - group.transform().y();
     if (!Double.isFinite(deltaX) || !Double.isFinite(deltaY)) {
       throw new IllegalArgumentException("group move delta must be finite");
     }
-    group.setX(command.x());
-    group.setY(command.y());
-    if (groupMapper.updatePosition(group) != 1) {
+    group =
+        new CanvasGroup(
+            group.id(),
+            group.canvasId(),
+            group.title(),
+            new CanvasTransform(
+                command.x(), command.y(), group.transform().width(), group.transform().height()));
+    if (!canvasStore.moveGroup(group)) {
       throw new IllegalArgumentException("Unknown group: " + command.groupId());
     }
-    nodeMapper.moveGroupMembers(canvasId, command.groupId(), deltaX, deltaY);
-    for (CanvasNodeDO node : nodeMapper.listByCanvas(canvasId)) {
-      if (Objects.equals(node.getGroupId(), command.groupId())) {
+    canvasStore.moveGroupNodes(canvasId, command.groupId(), deltaX, deltaY);
+    for (NodeRecord node : canvasStore.listNodes(canvasId)) {
+      if (Objects.equals(node.groupId(), command.groupId())) {
         accumulator.upsertNode(
             projectNode(
-                node, resourcesOfNode(canvasId, node.getId()), runsOfNode(canvasId, node.getId())));
+                node, resourcesOfNode(canvasId, node.id()), runsOfNode(canvasId, node.id())));
       }
     }
-    accumulator.upsertGroup(projectGroup(group));
+    accumulator.upsertGroup(group);
   }
 
   private void ungroup(UUID canvasId, CanvasCommand.Ungroup command, PatchAccumulator accumulator) {
-    CanvasGroupDO group = requireGroup(canvasId, command.groupId());
-    Map<UUID, CanvasNodeDO> current = new HashMap<>();
-    for (CanvasNodeDO node : nodeMapper.listByCanvas(canvasId)) {
-      if (Objects.equals(node.getGroupId(), command.groupId())) {
-        current.put(node.getId(), node);
+    CanvasGroup group = requireGroup(canvasId, command.groupId());
+    Map<UUID, NodeRecord> current = new HashMap<>();
+    for (NodeRecord node : canvasStore.listNodes(canvasId)) {
+      if (Objects.equals(node.groupId(), command.groupId())) {
+        current.put(node.id(), node);
       }
     }
     Set<UUID> requested = new HashSet<>(command.memberNodeIds());
@@ -498,19 +457,17 @@ public class DurableCanvasService implements CanvasCommandService {
       throw new IllegalArgumentException("memberNodeIds must belong to the current group");
     }
     for (UUID memberNodeId : command.memberNodeIds()) {
-      if (nodeMapper.detachGroupMember(canvasId, command.groupId(), memberNodeId) != 1) {
+      if (!canvasStore.detachNodeFromGroup(canvasId, command.groupId(), memberNodeId)) {
         throw new IllegalArgumentException("Unknown group member: " + memberNodeId);
       }
     }
     for (UUID memberNodeId : command.memberNodeIds()) {
-      CanvasNodeDO node = current.get(memberNodeId);
-      node.setGroupId(null);
+      NodeRecord node = current.get(memberNodeId).withGroupId(null);
       accumulator.upsertNode(
-          projectNode(
-              node, resourcesOfNode(canvasId, node.getId()), runsOfNode(canvasId, node.getId())));
+          projectNode(node, resourcesOfNode(canvasId, node.id()), runsOfNode(canvasId, node.id())));
     }
     if (requested.size() == current.size()) {
-      if (groupMapper.deleteById(canvasId, command.groupId()) != 1) {
+      if (!canvasStore.deleteGroup(canvasId, command.groupId())) {
         throw new IllegalArgumentException("Unknown group: " + command.groupId());
       }
       accumulator.removeGroup(command.groupId());
@@ -519,37 +476,41 @@ public class DurableCanvasService implements CanvasCommandService {
 
   private void deleteGroup(
       UUID canvasId, CanvasCommand.DeleteGroup command, PatchAccumulator accumulator) {
-    CanvasGroupDO group = requireGroup(canvasId, command.groupId());
-    List<CanvasNodeDO> members = new ArrayList<>();
-    for (CanvasNodeDO node : nodeMapper.listByCanvas(canvasId)) {
-      if (Objects.equals(node.getGroupId(), command.groupId())) {
+    requireGroup(canvasId, command.groupId());
+    List<NodeRecord> members = new ArrayList<>();
+    for (NodeRecord node : canvasStore.listNodes(canvasId)) {
+      if (Objects.equals(node.groupId(), command.groupId())) {
         members.add(node);
       }
     }
-    nodeMapper.detachAllGroupMembers(canvasId, command.groupId());
-    if (groupMapper.deleteById(canvasId, command.groupId()) != 1) {
+    canvasStore.detachAllNodesFromGroup(canvasId, command.groupId());
+    if (!canvasStore.deleteGroup(canvasId, command.groupId())) {
       throw new IllegalArgumentException("Unknown group: " + command.groupId());
     }
-    for (CanvasNodeDO node : members) {
-      node.setGroupId(null);
+    for (NodeRecord member : members) {
+      NodeRecord node = member.withGroupId(null);
       accumulator.upsertNode(
-          projectNode(
-              node, resourcesOfNode(canvasId, node.getId()), runsOfNode(canvasId, node.getId())));
+          projectNode(node, resourcesOfNode(canvasId, node.id()), runsOfNode(canvasId, node.id())));
     }
     accumulator.removeGroup(command.groupId());
   }
 
   private void renameGroup(
       UUID canvasId, CanvasCommand.RenameGroup command, PatchAccumulator accumulator) {
-    CanvasGroupDO group = requireGroup(canvasId, command.groupId());
-    group.setTitle(canonicalDisplayName(command.title(), null, "title"));
-    if (groupMapper.updateTitle(group) != 1) {
+    CanvasGroup current = requireGroup(canvasId, command.groupId());
+    CanvasGroup group =
+        new CanvasGroup(
+            current.id(),
+            current.canvasId(),
+            canonicalDisplayName(command.title(), null, "title"),
+            current.transform());
+    if (!canvasStore.renameGroup(canvasId, group.id(), group.title())) {
       throw new IllegalArgumentException("Unknown group: " + command.groupId());
     }
-    accumulator.upsertGroup(projectGroup(group));
+    accumulator.upsertGroup(group);
   }
 
-  private CanvasResourceDO consumeUpload(
+  private CanvasResource consumeUpload(
       UUID canvasId, UUID nodeId, int resourceIndex, UUID uploadId, String nodeName) {
     StorageUploadService uploadService = uploadServices.getIfAvailable();
     if (uploadService == null) {
@@ -561,27 +522,26 @@ public class DurableCanvasService implements CanvasCommandService {
     blobManager.retain(blobId);
     uploadService.delete(uploadId);
     String filename = upload.filename();
-    CanvasResourceDO resource = new CanvasResourceDO();
-    resource.setId(UUID.randomUUID());
-    resource.setCanvasId(canvasId);
-    resource.setOwnerNodeId(nodeId);
-    resource.setResourceIndex(resourceIndex);
-    resource.setBlobId(blobId);
-    resource.setName(filename == null || filename.isBlank() ? nodeName : filename);
-    resource.setTextContent(null);
-    resource.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
-    return resource;
+    return new CanvasResource(
+        UUID.randomUUID(),
+        canvasId,
+        nodeId,
+        resourceIndex,
+        blobId,
+        filename == null || filename.isBlank() ? nodeName : filename,
+        null,
+        Instant.now());
   }
 
-  private void registerPreviewAfterCommit(CanvasResourceDO resource) {
-    if (resource.getBlobId() == null) {
+  private void registerPreviewAfterCommit(CanvasResource resource) {
+    if (resource.blobId() == null) {
       return;
     }
     StorageBlobManager blobManager = blobManagers.getIfAvailable();
     if (blobManager == null) {
       return;
     }
-    StorageBlob blob = blobManager.getBlob(resource.getBlobId());
+    StorageBlob blob = blobManager.getBlob(resource.blobId());
     if (blob == null || !isPreviewable(blob.getMediaType())) {
       return;
     }
@@ -589,7 +549,7 @@ public class DurableCanvasService implements CanvasCommandService {
     if (previewService == null) {
       return;
     }
-    UUID blobId = resource.getBlobId();
+    UUID blobId = resource.blobId();
     String mediaType = blob.getMediaType();
     TransactionSynchronizationManager.registerSynchronization(
         new TransactionSynchronization() {
@@ -620,30 +580,24 @@ public class DurableCanvasService implements CanvasCommandService {
   }
 
   private CanvasResourceNode projectNode(
-      CanvasNodeDO node,
-      List<CanvasResourceDO> resources,
-      Map<UUID, CanvasFunctionRun> runsByNode) {
-    List<CanvasResource> projected = new ArrayList<>(resources.size());
-    for (CanvasResourceDO resource : resources) {
-      projected.add(toResource(resource));
-    }
+      NodeRecord node, List<CanvasResource> resources, Map<UUID, CanvasFunctionRun> runsByNode) {
     CanvasFunction function =
-        node.getModelKey() == null
+        node.modelKey() == null
             ? null
-            : new CanvasFunction(node.getModelKey(), node.getFunctionConfigJson());
+            : new CanvasFunction(node.modelKey(), node.functionConfigJson());
     return new CanvasResourceNode(
-        node.getId(),
-        node.getCanvasId(),
-        node.getName(),
-        transformOf(node),
-        node.getGroupId(),
-        projected,
+        node.id(),
+        node.canvasId(),
+        node.name(),
+        node.transform(),
+        node.groupId(),
+        resources,
         function,
-        runsByNode.get(node.getId()));
+        runsByNode.get(node.id()));
   }
 
-  private List<CanvasResourceDO> resourcesOfNode(UUID canvasId, UUID nodeId) {
-    return resourceMapper.listByOwnerNode(canvasId, nodeId);
+  private List<CanvasResource> resourcesOfNode(UUID canvasId, UUID nodeId) {
+    return resourceRepository.findByOwnerNode(canvasId, nodeId);
   }
 
   private Map<UUID, CanvasFunctionRun> runsOfNode(UUID canvasId, UUID nodeId) {
@@ -652,14 +606,6 @@ public class DurableCanvasService implements CanvasCommandService {
       byNode.put(run.nodeId(), run);
     }
     return byNode;
-  }
-
-  private static CanvasGroup projectGroup(CanvasGroupDO group) {
-    return new CanvasGroup(
-        group.getId(),
-        group.getCanvasId(),
-        group.getTitle(),
-        new CanvasTransform(group.getX(), group.getY(), group.getWidth(), group.getHeight()));
   }
 
   private String canonicalFunctionConfig(String modelKey, String configJson) {
@@ -706,76 +652,26 @@ public class DurableCanvasService implements CanvasCommandService {
     return new CanvasConflictException(reason);
   }
 
-  private CanvasNodeDO requireNode(UUID canvasId, UUID nodeId) {
-    CanvasNodeDO node = nodeMapper.getById(canvasId, nodeId);
-    if (node == null) {
-      throw new IllegalArgumentException("Unknown node: " + nodeId);
-    }
-    return node;
+  private NodeRecord requireNode(UUID canvasId, UUID nodeId) {
+    return canvasStore
+        .findNode(canvasId, nodeId)
+        .orElseThrow(() -> new IllegalArgumentException("Unknown node: " + nodeId));
   }
 
-  private CanvasGroupDO requireGroup(UUID canvasId, UUID groupId) {
-    CanvasGroupDO group = groupMapper.getById(canvasId, groupId);
-    if (group == null) {
-      throw new IllegalArgumentException("Unknown group: " + groupId);
-    }
-    return group;
+  private CanvasGroup requireGroup(UUID canvasId, UUID groupId) {
+    return canvasStore
+        .findGroup(canvasId, groupId)
+        .orElseThrow(() -> new IllegalArgumentException("Unknown group: " + groupId));
   }
 
-  private static CanvasNodeDO newNode(
+  private static NodeRecord newNode(
       UUID canvasId,
       UUID nodeId,
       String name,
       CanvasTransform transform,
       String modelKey,
       String functionConfigJson) {
-    CanvasNodeDO node = new CanvasNodeDO();
-    node.setId(nodeId);
-    node.setCanvasId(canvasId);
-    node.setName(name);
-    applyTransform(node, transform);
-    node.setModelKey(modelKey);
-    node.setFunctionConfigJson(functionConfigJson);
-    return node;
-  }
-
-  private static CanvasDocument toDocument(CanvasDocumentDO document) {
-    return new CanvasDocument(
-        document.getId(),
-        document.getTitle(),
-        document.getVersion(),
-        document.getCreatedAt().toInstant(),
-        document.getUpdatedAt().toInstant());
-  }
-
-  private static CanvasResource toResource(CanvasResourceDO resource) {
-    return new CanvasResource(
-        resource.getId(),
-        resource.getCanvasId(),
-        resource.getOwnerNodeId(),
-        resource.getResourceIndex(),
-        resource.getBlobId(),
-        resource.getName(),
-        resource.getTextContent(),
-        resource.getCreatedAt().toInstant());
-  }
-
-  private static CanvasTransform transformOf(CanvasNodeDO node) {
-    return new CanvasTransform(node.getX(), node.getY(), node.getWidth(), node.getHeight());
-  }
-
-  private static void applyTransform(CanvasNodeDO node, CanvasTransform transform) {
-    node.setX(transform.x());
-    node.setY(transform.y());
-    node.setWidth(transform.width());
-    node.setHeight(transform.height());
-  }
-
-  private static void applyTransform(CanvasGroupDO group, CanvasTransform transform) {
-    group.setX(transform.x());
-    group.setY(transform.y());
-    group.setWidth(transform.width());
-    group.setHeight(transform.height());
+    return new NodeRecord(nodeId, canvasId, name, transform, null, modelKey, functionConfigJson);
   }
 
   private static String canonicalNodeName(String name) {

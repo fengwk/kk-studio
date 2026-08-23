@@ -6,6 +6,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.canvas.CanvasSession;
 import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -27,7 +28,6 @@ import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundExcepti
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.platform.studio.repo.impl.mapper.CanvasDocumentMapper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -53,7 +53,7 @@ public class StudioCommandAcceptanceService {
   private final ChatSessionRepository chatSessionRepository;
   private final CanvasSessionRepository canvasSessionRepository;
   private final ChatRepository chatRepository;
-  private final CanvasDocumentMapper canvasDocumentMapper;
+  private final CanvasStore canvasStore;
   private final ObjectProvider<HarnessStore> stores;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final ObjectProvider<StorageUploadService> uploadServices;
@@ -63,7 +63,7 @@ public class StudioCommandAcceptanceService {
       ChatSessionRepository chatSessionRepository,
       CanvasSessionRepository canvasSessionRepository,
       ChatRepository chatRepository,
-      CanvasDocumentMapper canvasDocumentMapper,
+      CanvasStore canvasStore,
       ObjectProvider<HarnessStore> stores,
       ObjectProvider<HarnessRuntime> runtimes,
       ObjectProvider<StorageUploadService> uploadServices,
@@ -73,8 +73,7 @@ public class StudioCommandAcceptanceService {
     this.canvasSessionRepository =
         Objects.requireNonNull(canvasSessionRepository, "canvasSessionRepository");
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
-    this.canvasDocumentMapper =
-        Objects.requireNonNull(canvasDocumentMapper, "canvasDocumentMapper");
+    this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.stores = Objects.requireNonNull(stores, "stores");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.uploadServices = Objects.requireNonNull(uploadServices, "uploadServices");
@@ -127,7 +126,7 @@ public class StudioCommandAcceptanceService {
         throw new IllegalArgumentException("chat " + owner.id() + " does not exist");
       }
     } else {
-      if (canvasDocumentMapper.getByIdForKeyShare(owner.id()) == null) {
+      if (canvasStore.lockDocumentForKeyShare(owner.id()).isEmpty()) {
         throw new IllegalArgumentException("canvas " + owner.id() + " does not exist");
       }
     }
