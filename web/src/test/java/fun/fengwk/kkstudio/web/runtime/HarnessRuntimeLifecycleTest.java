@@ -14,7 +14,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 

@@ -1,6 +1,6 @@
 # 后端落地设计
 
-本文描述当前 `share`、`core`、`web`、Harness Runtime 与受信任插件的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment 与 Chat 应用能力；Goal 由 `plugins/goal` 提供；`web` 是生产组合根并映射 HTTP/WebSocket。
+本文描述当前 `share`、`core`、`web`、Harness Runtime 与受信任插件的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-plugin-api` 提供构建期注册、启动时冻结的插件 API；`harness-infra` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment 与 Chat 应用能力；Goal 由 `harness/plugins/goal` 提供；`web` 是生产组合根并映射 HTTP/WebSocket。
 
 ## 1. 分层
 
@@ -9,13 +9,13 @@ flowchart LR
     Client[Browser / Daemon]
     Web[web controllers]
     Core[core application services / adapters]
-    RuntimeSpring[harness-runtime-spring]
+    Infra[harness-infra]
     Runtime[harness-runtime]
     Store[(PostgreSQL / S3)]
 
     Client --> Web
     Web --> Core
-    Web --> RuntimeSpring --> Runtime
+    Web --> Infra --> Runtime
     Web --> Runtime
     Core --> Runtime
     Core --> Store
@@ -28,9 +28,9 @@ flowchart LR
 | `core.ai.catalog` | Provider/Model/Agent 的名称身份、结构化 config 与版本并发 |
 | `core.ai.chat` | Chat CRUD、`agentName`/可空默认 `EnvironmentBinding{name, workspacePath}`/`yoloEnabled` 可见发送设置与 Chat↔Session 关系（`chat_session`） |
 | `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
-| `harness-plugin` | `PluginCatalog`、`BranchView`、同步 `PluginTool`、state access 声明、intent、context projector 与提示词模板 |
-| `plugins/goal` | Goal v2 工具、`goal/state` 完整快照 codec 与 active context projector |
-| `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、PostgreSQL realtime notification、瞬时 `LocalFileResourceStore` |
+| `harness-plugin-api` | `PluginCatalog`、`BranchView`、同步 `PluginTool`、state access 声明、intent、context projector 与提示词模板 |
+| `harness/plugins/goal` | Goal v2 工具、`goal/state` 完整快照 codec 与 active context projector |
+| `harness-infra` | `HarnessStore`（PostgreSQL）、Work dispatcher、PostgreSQL realtime notification、瞬时 `LocalFileResourceStore` |
 | `harness-runtime` | Thread/Command/Invocation/Work 状态机与 Thread/Model/Tool processor |
 | `harness-tool` | Tool API、descriptor、`ResourceRef`、RemoteTool 与 Daemon v3 wire |
 
@@ -48,7 +48,7 @@ Agent DTO 的 `model` 使用 Model ref，create 与 PUT 都必填；Model DTO �
 
 ## 3. Composition root
 
-生产组合根位于 `web`；它把 Core ports 与 runtime-spring adapters 装配成完整 Runtime。Core 的 Spring beans 只提供应用能力与端口适配，不写 `harness_*` 表：
+生产组合根位于 `web`；它把 Core ports 与 infra adapters 装配成完整 Runtime。Core 的 Spring beans 只提供应用能力与端口适配，不写 `harness_*` 表：
 
 | 配置 | 装配 |
 | --- | --- |

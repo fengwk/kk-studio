@@ -7,8 +7,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import fun.fengwk.kkstudio.core.ai.runtime.plugin.PluginCatalogConfiguration;
-import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
-import fun.fengwk.kkstudio.harness.plugin.PluginId;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
 
 import java.util.List;
 

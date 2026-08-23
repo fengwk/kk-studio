@@ -26,8 +26,8 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 /**
- * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 runtime-spring 的七张表（业务表 不得使用 harness_
- * 前缀），被禁止的遗留 harness 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
+ * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 infra 的七张表（业务表 不得使用 harness_ 前缀），被禁止的遗留
+ * harness 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
  *
  * <p>public schema 的相等性校验是严格的：{@code public} 中 {@code BASE TABLE} 的集合必须与期望列表完全一致，因此任何残留或桩表都会立即被发现。
  */
@@ -63,7 +63,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "storage_upload",
           "system_setting");
 
-  /** 精确的 runtime-spring 执行协议七表；业务表（如 session_blob_ref）不得使用 harness_ 前缀。 */
+  /** 精确的 infra 执行协议七表；业务表（如 session_blob_ref）不得使用 harness_ 前缀。 */
   private static final Set<String> HARNESS_TABLES =
       Set.of(
           "harness_session",
@@ -120,7 +120,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertEquals(
         new TreeSet<>(HARNESS_TABLES),
         harnessTables,
-        "only the runtime-spring execution tables may use the harness_ prefix");
+        "only the infra execution tables may use the harness_ prefix");
   }
 
   @Test

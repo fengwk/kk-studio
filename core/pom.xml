@@ -42,11 +42,11 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-plugin</artifactId>
+            <artifactId>kk-studio-harness-plugin-api</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-plugin-goal</artifactId>
+            <artifactId>kk-studio-harness-plugin-goal</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

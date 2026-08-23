@@ -26,6 +26,8 @@ import java.util.stream.Stream;
 class RuntimeModuleArchitectureTest {
 
   private static final String JGIT_IMPORT_PREFIX = "org.eclipse.jgit.";
+  private static final String CONCRETE_PLUGIN_IMPORT_PREFIX =
+      "fun.fengwk.kkstudio.harness.plugins.";
   private static final String JGIT_OWNER =
       "fun/fengwk/kkstudio/harness/runtime/permission/PermissionPathPattern.java";
 
@@ -79,7 +81,11 @@ class RuntimeModuleArchitectureTest {
     Path harnessRoot = moduleRoot.getParent();
     assertHarnessModules(harnessRoot.resolve("pom.xml"));
     assertManagedInternalDependency(
-        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-runtime-spring");
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-plugin-api");
+    assertManagedInternalDependency(
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-infra");
+    assertManagedInternalDependency(
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-plugin-goal");
     assertDirectProductionDependencies(
         harnessRoot.resolve("tool/pom.xml"), Set.of("com.fasterxml.jackson.core:jackson-databind"));
     assertDirectProductionDependencies(
@@ -90,14 +96,14 @@ class RuntimeModuleArchitectureTest {
             "org.eclipse.jgit:org.eclipse.jgit",
             "org.slf4j:slf4j-api"));
     assertDirectProductionDependencies(
-        harnessRoot.resolve("plugin/pom.xml"),
+        harnessRoot.resolve("plugin-api/pom.xml"),
         Set.of("fun.fengwk.kk-studio:kk-studio-harness-runtime"));
     assertDirectProductionDependencies(
-        harnessRoot.resolve("runtime-spring/pom.xml"),
+        harnessRoot.resolve("infra/pom.xml"),
         Set.of(
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
+            "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "org.postgresql:postgresql",
-            "org.slf4j:slf4j-api",
             "org.springframework:spring-jdbc"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("daemon/pom.xml"),
@@ -107,6 +113,12 @@ class RuntimeModuleArchitectureTest {
             "dev.langchain4j:langchain4j-skills",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "org.eclipse.jgit:org.eclipse.jgit"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("plugins/goal/pom.xml"),
+        Set.of(
+            "com.fasterxml.jackson.core:jackson-databind",
+            "fun.fengwk.kk-studio:kk-studio-harness-plugin-api",
+            "fun.fengwk.kk-studio:kk-studio-harness-runtime"));
 
     List<String> violations = scanViolations(main);
     assertTrue(
@@ -127,7 +139,12 @@ class RuntimeModuleArchitectureTest {
                     String trimmed = line.trim();
                     if (trimmed.startsWith("import ")) {
                       String imported = normalizeImport(trimmed);
-                      if (!isAllowedImport(imported)) {
+                      if (imported.startsWith(CONCRETE_PLUGIN_IMPORT_PREFIX)) {
+                        violations.add(
+                            relative(main, path)
+                                + ": runtime must not depend on concrete plugin "
+                                + trimmed);
+                      } else if (!isAllowedImport(imported)) {
                         violations.add(relative(main, path) + ": disallowed import " + trimmed);
                       }
                       if (imported.startsWith(JGIT_IMPORT_PREFIX)
@@ -166,9 +183,9 @@ class RuntimeModuleArchitectureTest {
       modules.add(matcher.group(1).trim());
     }
     assertTrue(
-        modules.equals(List.of("tool", "runtime", "plugin", "runtime-spring", "daemon")),
+        modules.equals(List.of("tool", "runtime", "plugin-api", "infra", "daemon", "plugins/goal")),
         () ->
-            "harness modules must be exactly tool/runtime/plugin/runtime-spring/daemon, got "
+            "harness modules must be exactly tool/runtime/plugin-api/infra/daemon/plugins/goal, got "
                 + modules);
   }
 

@@ -18,10 +18,9 @@
         <module>share</module>
         <module>studio</module>
         <module>schema</module>
+        <module>harness</module>
         <module>core</module>
         <module>web</module>
-        <module>harness</module>
-        <module>plugins</module>
     </modules>
 
     <properties>
@@ -61,17 +60,17 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-harness-plugin</artifactId>
+                <artifactId>kk-studio-harness-plugin-api</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-plugin-goal</artifactId>
+                <artifactId>kk-studio-harness-plugin-goal</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-harness-runtime-spring</artifactId>
+                <artifactId>kk-studio-harness-infra</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

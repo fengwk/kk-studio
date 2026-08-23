@@ -19,9 +19,9 @@ flowchart LR
     Web[web]
     Core[core]
     Runtime[harness-runtime]
-    Plugin[harness-plugin]
-    Goal[plugins/goal]
-    RuntimeSpring[harness-runtime-spring]
+    Plugin[harness-plugin-api]
+    Goal[harness/plugins/goal]
+    Infra[harness-infra]
     Tool[harness-tool]
     Daemon[harness-daemon]
     PG[(PostgreSQL)]
@@ -33,10 +33,10 @@ flowchart LR
     AI --> Web
     Canvas --> Web
     Web --> Core
-    Web --> RuntimeSpring
+    Web --> Infra
     Web --> Runtime
     Web --> Goal
-    RuntimeSpring --> Runtime
+    Infra --> Runtime
     Core --> Plugin
     Goal --> Plugin
     Plugin --> Runtime
@@ -45,7 +45,7 @@ flowchart LR
     Core --> Tool
     Daemon --> Tool
     Core --> PG
-    RuntimeSpring --> PG
+    Infra --> PG
     Web --> PG
     Core --> S3
     Browser --> S3
@@ -58,12 +58,12 @@ flowchart LR
 | --- | --- |
 | `harness-tool` | `Tool`、descriptor、schema、`ResourceRef`、`RemoteTool` 与 Daemon v3 wire |
 | `harness-runtime` | **纯 Java 领域模块**：Session/Entry/Thread/Command/Invocation/Work 状态机、Thread/Model/Tool processor、Stop/Approval/fencing；不依赖 Spring、数据库驱动、HTTP 或 Provider SDK |
-| `harness-plugin` | **纯 Java 受信任插件 API**：构建期注册、启动时冻结的 `PluginCatalog`，以及 `BranchView`、同步 `PluginTool`、声明式 `AppendCustomEntry` 与 context projector |
-| `plugins/goal` | Goal 插件：`create_goal` / `get_goal` / `update_goal` v2、branch-scoped `goal/state` 快照与 active goal 上下文投影 |
-| `harness-runtime-spring` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store |
+| `harness-plugin-api` | **纯 Java 受信任插件 API**：构建期注册、启动时冻结的 `PluginCatalog`，以及 `BranchView`、同步 `PluginTool`、声明式 `AppendCustomEntry` 与 context projector |
+| `harness/plugins/goal` | Goal 插件：`create_goal` / `get_goal` / `update_goal` v2、branch-scoped `goal/state` 快照与 active goal 上下文投影 |
+| `harness-infra` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store |
 | `harness-daemon` | 独立 Environment 进程适配器，只依赖 `harness-tool` |
 | `core` | Catalog、全局 Blob Storage、`DatabaseTurnResolver`、Model/Tool Gateway、Environment、Chat 与 Canvas 应用服务；装配并执行受信任插件；Harness 执行表只经 Runtime/Store 端口写入 |
-| `web` | **生产组合根**：装配 Runtime、runtime-spring 与 Core ports，管理 dispatcher 与单连接 PostgreSQL notification loop 生命周期，并提供 HTTP、WebSocket（浏览器事件通道与 daemon v2）与静态资源适配 |
+| `web` | **生产组合根**：装配 Runtime、infra 与 Core ports，管理 dispatcher 与单连接 PostgreSQL notification loop 生命周期，并提供 HTTP、WebSocket（浏览器事件通道与 daemon v2）与静态资源适配 |
 | `share` | HTTP DTO 与公开 JSON 结构 |
 | `frontend` | React 页面、Pane、本地状态与 API client |
 
@@ -72,11 +72,11 @@ flowchart LR
 ```text
 frontend -> web API / composition root
 web -> core
-web -> harness-runtime-spring -> harness-runtime -> harness-tool
+web -> harness-infra -> harness-runtime -> harness-tool
 web -> harness-runtime
-web -> plugins/* -> harness-plugin
+web -> harness/plugins/* -> harness-plugin-api
 core -> harness-runtime -> harness-tool
-core -> harness-plugin -> harness-runtime
+core -> harness-plugin-api -> harness-runtime
 core -> harness-tool
 web -> share
 harness-daemon -> harness-tool

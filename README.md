@@ -26,11 +26,11 @@
 
 ```text
 share / studio / core / web
-harness-tool / harness-runtime / harness-runtime-spring / harness-daemon
+harness-tool / harness-runtime / harness-infra / harness-daemon
 frontend
 ```
 
-`harness-runtime` 是纯 Java 领域状态机；`harness-runtime-spring` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配。
+`harness-runtime` 是纯 Java 领域状态机；`harness-infra` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配。
 
 ## 开发
 

@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.core.ai.runtime.plugin;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.plugin.BranchView;
+import fun.fengwk.kkstudio.harness.plugin.api.BranchView;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
 import java.util.Objects;

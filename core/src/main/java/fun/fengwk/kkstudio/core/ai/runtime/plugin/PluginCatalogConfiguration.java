@@ -4,8 +4,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.harness.plugin.HarnessPlugin;
-import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
+import fun.fengwk.kkstudio.harness.plugin.api.HarnessPlugin;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 
 /**
  * 收集 Spring 容器中的全部 {@link HarnessPlugin} bean，冻结为单一不可变 {@link PluginCatalog}；允许空插件列表。 catalog

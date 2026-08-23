@@ -31,7 +31,7 @@ class FlywayBootstrapArchitectureTest {
           "schema/src/main/resources/db/seed/e2e/V2__e2e_seed.sql",
           "schema/src/main/resources/db/seed/canvas-test/V3__canvas_test_system_settings.sql");
   private static final String OLD_HARNESS_SCHEMA =
-      "harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/"
+      "harness/infra/src/main/resources/fun/fengwk/kkstudio/harness/infra/"
           + "postgresql/harness-runtime-schema.sql";
   private static final List<String> BOOTSTRAP_CONFIGS =
       List.of(
@@ -61,7 +61,7 @@ class FlywayBootstrapArchitectureTest {
     }
     assertFalse(
         Files.exists(root.resolve(OLD_HARNESS_SCHEMA)),
-        "the old runtime-spring schema mirror must be gone: " + OLD_HARNESS_SCHEMA);
+        "the old infra schema mirror must be gone: " + OLD_HARNESS_SCHEMA);
   }
 
   @Test
@@ -123,12 +123,12 @@ class FlywayBootstrapArchitectureTest {
         corePom.contains(
             "<artifactId>flyway-database-postgresql</artifactId>\n            <scope>test</scope>"));
 
-    String runtimeSpringPom =
-        Files.readString(root.resolve("harness/runtime-spring/pom.xml"), StandardCharsets.UTF_8);
+    String harnessInfraPom =
+        Files.readString(root.resolve("harness/infra/pom.xml"), StandardCharsets.UTF_8);
     assertTrue(
-        runtimeSpringPom.contains(
+        harnessInfraPom.contains(
             "<artifactId>kk-studio-schema</artifactId>\n            <scope>test</scope>"),
-        "runtime-spring must depend on the schema module for infrastructure tests");
+        "harness infra must depend on the schema module for infrastructure tests");
 
     for (Path pom :
         repositoryFiles(root).stream()

@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import org.springframework.context.SmartLifecycle;
 
-import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
