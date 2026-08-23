@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -19,6 +19,8 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
@@ -26,10 +28,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionConfigCodec;
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunStateCodec;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
 import java.time.Instant;
 import java.util.List;
@@ -71,22 +69,13 @@ class CanvasFunctionWorkerTest {
     stateCodec = new CanvasFunctionRunStateCodec(new ObjectMapper(), configCodec);
     CanvasFunctionModelRegistry registry = mock(CanvasFunctionModelRegistry.class);
     when(registry.require(MODEL.key()))
-        .thenReturn(new CanvasFunctionModelRegistry.RegisteredModel(MODEL, adapter));
-    ObjectProvider<S3StorageService> storageServices = mock(ObjectProvider.class);
-    ObjectProvider<StorageBlobManager> blobManagers = mock(ObjectProvider.class);
+        .thenReturn(new CanvasFunctionCatalog.RegisteredModel(MODEL, adapter));
+    CanvasFunctionBlobAccess blobAccess = mock(CanvasFunctionBlobAccess.class);
     ObjectProvider<CanvasResourceMaterializer> materializers = mock(ObjectProvider.class);
-    when(storageServices.getIfAvailable()).thenReturn(mock(S3StorageService.class));
-    when(blobManagers.getIfAvailable()).thenReturn(mock(StorageBlobManager.class));
     when(materializers.getIfAvailable()).thenReturn(mock(CanvasResourceMaterializer.class));
     worker =
         new CanvasFunctionWorker(
-            repository,
-            registry,
-            stateCodec,
-            transactions,
-            storageServices,
-            blobManagers,
-            materializers);
+            repository, registry, stateCodec, transactions, blobAccess, materializers);
     frozen =
         new CanvasFunctionFrozenRun(
             NODE,

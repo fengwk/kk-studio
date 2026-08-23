@@ -469,9 +469,6 @@ public record SystemSettings(
       int dispatcherMaxDispatchTasks,
       int dispatcherWorkerConcurrency,
       int dispatcherWorkerQueueCapacity,
-      int canvasFunctionExecutorCoreSize,
-      int canvasFunctionExecutorMaxSize,
-      int canvasFunctionExecutorQueueCapacity,
       int applicationEventQueueCapacity,
       long applicationEventMaxBytes,
       long applicationEventSendTimeoutMillis,
@@ -493,9 +490,6 @@ public record SystemSettings(
             1_000L,
             64,
             16,
-            64,
-            2,
-            4,
             64,
             512,
             2L * 1024 * 1024,
@@ -535,15 +529,6 @@ public record SystemSettings(
           dispatcherWorkerConcurrency, 1, "advanced.dispatcherWorkerConcurrency");
       SystemSettingsValidation.requireAtLeast(
           dispatcherWorkerQueueCapacity, 1, "advanced.dispatcherWorkerQueueCapacity");
-      SystemSettingsValidation.requireAtLeast(
-          canvasFunctionExecutorCoreSize, 1, "advanced.canvasFunctionExecutorCoreSize");
-      if (canvasFunctionExecutorMaxSize < canvasFunctionExecutorCoreSize) {
-        throw new IllegalArgumentException(
-            "advanced.canvasFunctionExecutorMaxSize must not be less than"
-                + " canvasFunctionExecutorCoreSize");
-      }
-      SystemSettingsValidation.requireAtLeast(
-          canvasFunctionExecutorQueueCapacity, 1, "advanced.canvasFunctionExecutorQueueCapacity");
       SystemSettingsValidation.requireAtLeast(
           applicationEventQueueCapacity, 1, "advanced.applicationEventQueueCapacity");
       SystemSettingsValidation.requirePositiveMillis(

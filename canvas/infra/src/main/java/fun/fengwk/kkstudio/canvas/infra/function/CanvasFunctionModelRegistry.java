@@ -1,8 +1,9 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 
 import java.util.ArrayList;
@@ -14,7 +15,7 @@ import java.util.Objects;
 
 /** 启动即冻结并校验 model key 唯一性的 adapter registry。 */
 @Component
-public final class CanvasFunctionModelRegistry {
+public final class CanvasFunctionModelRegistry implements CanvasFunctionCatalog {
 
   private final Map<String, RegisteredModel> byKey;
   private final List<RegisteredModel> ordered;
@@ -48,10 +49,12 @@ public final class CanvasFunctionModelRegistry {
     ordered = List.copyOf(sorted);
   }
 
+  @Override
   public List<RegisteredModel> list() {
     return ordered;
   }
 
+  @Override
   public RegisteredModel require(String modelKey) {
     RegisteredModel registered = byKey.get(modelKey);
     if (registered == null) {
@@ -59,6 +62,4 @@ public final class CanvasFunctionModelRegistry {
     }
     return registered;
   }
-
-  public record RegisteredModel(CanvasFunctionModel model, CanvasFunctionAdapter adapter) {}
 }

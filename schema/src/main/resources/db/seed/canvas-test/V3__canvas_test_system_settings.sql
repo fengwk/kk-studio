@@ -5,15 +5,10 @@ set config =
         jsonb_set(
             jsonb_set(
                 jsonb_set(
-                    jsonb_set(
-                        config,
-                        '{storageMedia}',
-                        config -> 'storageMedia'
-                            || '{"s3Enabled":true,"uploadExpiresSeconds":900}'::jsonb
-                    ),
-                    '{advanced}',
-                    config -> 'advanced'
-                        || '{"canvasFunctionExecutorCoreSize":1,"canvasFunctionExecutorMaxSize":2,"canvasFunctionExecutorQueueCapacity":8}'::jsonb
+                    config,
+                    '{storageMedia}',
+                    config -> 'storageMedia'
+                        || '{"s3Enabled":true,"uploadExpiresSeconds":900}'::jsonb
                 ),
                 '{integrations,openCliHub}',
                 config #> '{integrations,openCliHub}'

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,9 +8,11 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -19,7 +21,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class CanvasFunctionRuntimeService {
+public class CanvasFunctionRuntimeService implements CanvasFunctionService {
 
   private static final String DISPATCH_FAILURE = "Function execution could not be scheduled";
 
@@ -27,9 +29,10 @@ public class CanvasFunctionRuntimeService {
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionRunTransactions transactions;
   private final CanvasFunctionDispatcher dispatcher;
-  private final CanvasFunctionModelRegistry registry;
+  private final CanvasFunctionCatalog registry;
   private final CanvasFunctionRunStateCodecPort stateCodec;
 
+  @Override
   public CanvasFunctionRun start(UUID canvasId, UUID nodeId, String requestId) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
@@ -55,6 +58,7 @@ public class CanvasFunctionRuntimeService {
     return run;
   }
 
+  @Override
   public CanvasFunctionRun get(UUID canvasId, UUID nodeId) {
     requireNode(canvasId, nodeId);
     return runRepository
@@ -62,6 +66,7 @@ public class CanvasFunctionRuntimeService {
         .orElseThrow(() -> notFound("Canvas Function run not found"));
   }
 
+  @Override
   public CanvasFunctionRun cancel(UUID canvasId, UUID nodeId, String requestId) {
     CanvasFunctionRun result = transactions.cancel(canvasId, nodeId, requestId);
     if (result.status() == CanvasFunctionRunStatus.CANCELLED) {
@@ -72,7 +77,7 @@ public class CanvasFunctionRuntimeService {
 
   private void bestEffortAdapterCancel(CanvasFunctionRun run) {
     try {
-      CanvasFunctionModelRegistry.RegisteredModel registered =
+      CanvasFunctionCatalog.RegisteredModel registered =
           registry.require(stateCodec.modelKey(run.stateJson()));
       CanvasFunctionFrozenRun frozen = stateCodec.decode(run.stateJson(), registered.model());
       registered.adapter().cancel(frozen);

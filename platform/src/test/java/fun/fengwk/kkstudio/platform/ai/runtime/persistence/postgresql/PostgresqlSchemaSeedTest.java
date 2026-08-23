@@ -154,9 +154,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
       assertTrue(settings.storageMedia().s3Enabled());
       assertEquals(900L, settings.storageMedia().uploadExpiresSeconds());
-      assertEquals(1, settings.advanced().canvasFunctionExecutorCoreSize());
-      assertEquals(2, settings.advanced().canvasFunctionExecutorMaxSize());
-      assertEquals(8, settings.advanced().canvasFunctionExecutorQueueCapacity());
       assertTrue(settings.integrations().openCliHub().enabled());
       assertEquals("http://opencli-hub:8080", settings.integrations().openCliHub().baseUrl());
       assertTrue(settings.integrations().gptImage2().paidEnabled());

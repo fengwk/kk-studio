@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import org.springframework.beans.factory.ObjectProvider;
 
@@ -6,16 +6,12 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
-import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.util.Map;
 import java.util.Objects;
@@ -23,7 +19,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 单个 frozen run 的受限执行上下文（blob 访问经全局 StorageBlobManager 的对象键）。
+ * 单个 frozen run 的受限执行上下文。
  *
  * <p>checkpoint 委托给 {@link CanvasFunctionRunTransactions} 的短事务入口：冻结 run 的 stage/adapterState 前进与
  * canvas version + node patch 在同一事务边界收敛；CAS/节点消失/取消抛 {@link CanvasFunctionInternalCancellation} 终止
@@ -33,27 +29,19 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
 
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionRunTransactions transactions;
-  private final S3StorageService storageService;
-  private final StorageBlobManager blobManager;
+  private final CanvasFunctionBlobAccess blobAccess;
   private final CanvasResourceMaterializer materializer;
   private final AtomicReference<CanvasFunctionFrozenRun> current;
 
   CanvasFunctionExecutionContextImpl(
       CanvasFunctionRunRepository runRepository,
       CanvasFunctionRunTransactions transactions,
-      ObjectProvider<S3StorageService> storageServices,
-      ObjectProvider<StorageBlobManager> blobManagers,
+      CanvasFunctionBlobAccess blobAccess,
       ObjectProvider<CanvasResourceMaterializer> materializers,
       CanvasFunctionFrozenRun frozen) {
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
-    storageService =
-        Objects.requireNonNull(
-            storageServices.getIfAvailable(), "S3 storage is required for Canvas Function runtime");
-    blobManager =
-        Objects.requireNonNull(
-            blobManagers.getIfAvailable(),
-            "StorageBlobManager is required for Canvas Function runtime");
+    this.blobAccess = Objects.requireNonNull(blobAccess, "blobAccess");
     materializer =
         Objects.requireNonNull(
             materializers.getIfAvailable(),
@@ -90,25 +78,14 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
   public CanvasFunctionResourceStream openOriginal(CanvasFunctionFrozenReference reference) {
     requireManifestReference(reference);
     ensureRunning();
-    S3ObjectStream object =
-        storageService.readObject(StorageObjectKeys.blobOriginal(reference.blobId()));
-    if (object.metadata().contentLength() != reference.sizeBytes()) {
-      try {
-        object.close();
-      } catch (IOException closeError) {
-        throw new IllegalStateException("failed to close mismatched S3 object stream", closeError);
-      }
-      throw new IllegalArgumentException("S3 original length does not match frozen blob size");
-    }
-    return new CanvasFunctionResourceStream(
-        object.inputStream(), object.metadata().contentLength(), object);
+    return blobAccess.openOriginal(reference.blobId(), reference.sizeBytes());
   }
 
   @Override
   public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
     requireManifestReference(reference);
     ensureRunning();
-    return blobManager.presignOriginalUrl(reference.blobId()).getUrl();
+    return blobAccess.originalUrl(reference.blobId(), expiresSeconds);
   }
 
   @Override

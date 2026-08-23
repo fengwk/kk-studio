@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 /** Function run requestId 的唯一公开校验。 */
 final class CanvasFunctionRequestIds {

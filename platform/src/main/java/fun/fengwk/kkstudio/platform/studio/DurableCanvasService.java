@@ -26,19 +26,19 @@ import fun.fengwk.kkstudio.canvas.CanvasLinkPatch;
 import fun.fengwk.kkstudio.canvas.CanvasNodePatch;
 import fun.fengwk.kkstudio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasStore.CommandDedup;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.platform.studio.function.CanvasFunctionModelRegistry;
 import fun.fengwk.kkstudio.platform.studio.resource.CanvasBlobPreviewService;
-import fun.fengwk.kkstudio.platform.studio.resource.CanvasResourceLifecycle;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -78,7 +78,7 @@ public class DurableCanvasService implements CanvasCommandService {
   private final ObjectProvider<StorageBlobManager> blobManagers;
   private final ObjectProvider<CanvasBlobPreviewService> previewServices;
   private final CanvasFunctionConfigCodecPort functionConfigCodec;
-  private final CanvasFunctionModelRegistry functionModelRegistry;
+  private final CanvasFunctionCatalog functionModelRegistry;
   private final ObjectMapper objectMapper;
   private final HarnessSessionDeletionService sessionDeletionService;
 
@@ -91,7 +91,7 @@ public class DurableCanvasService implements CanvasCommandService {
       ObjectProvider<StorageBlobManager> blobManagers,
       ObjectProvider<CanvasBlobPreviewService> previewServices,
       CanvasFunctionConfigCodecPort functionConfigCodec,
-      CanvasFunctionModelRegistry functionModelRegistry,
+      CanvasFunctionCatalog functionModelRegistry,
       ObjectMapper objectMapper,
       HarnessSessionDeletionService sessionDeletionService) {
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");

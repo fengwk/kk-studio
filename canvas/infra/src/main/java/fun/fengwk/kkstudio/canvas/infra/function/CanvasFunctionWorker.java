@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.studio.function;
+package fun.fengwk.kkstudio.canvas.infra.function;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -9,10 +9,10 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
-import fun.fengwk.kkstudio.platform.storage.S3StorageService;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
 import java.util.List;
 import java.util.UUID;
@@ -26,11 +26,10 @@ public class CanvasFunctionWorker {
   private static final String PUBLIC_FAILURE = "Function execution failed";
 
   private final CanvasFunctionRunRepository runRepository;
-  private final CanvasFunctionModelRegistry registry;
+  private final CanvasFunctionCatalog registry;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final CanvasFunctionRunTransactions transactions;
-  private final ObjectProvider<S3StorageService> storageServices;
-  private final ObjectProvider<StorageBlobManager> blobManagers;
+  private final CanvasFunctionBlobAccess blobAccess;
   private final ObjectProvider<CanvasResourceMaterializer> materializers;
 
   public void run(UUID nodeId, UUID requestId) {
@@ -41,7 +40,7 @@ public class CanvasFunctionWorker {
       return;
     }
     try {
-      CanvasFunctionModelRegistry.RegisteredModel registered =
+      CanvasFunctionCatalog.RegisteredModel registered =
           registry.require(stateCodec.modelKey(current.stateJson()));
       if (!registered.adapter().enabled()) {
         throw new IllegalStateException("Canvas Function adapter is unavailable");
@@ -49,7 +48,7 @@ public class CanvasFunctionWorker {
       CanvasFunctionFrozenRun frozen = stateCodec.decode(current.stateJson(), registered.model());
       CanvasFunctionExecutionContextImpl context =
           new CanvasFunctionExecutionContextImpl(
-              runRepository, transactions, storageServices, blobManagers, materializers, frozen);
+              runRepository, transactions, blobAccess, materializers, frozen);
       List<UUID> result = List.copyOf(registered.adapter().execute(context, frozen));
       if (!result.equals(List.of(frozen.targetResourceId()))) {
         throw new IllegalArgumentException(

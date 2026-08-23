@@ -107,9 +107,6 @@ class SystemSettingsTest {
     assertEquals(64, advanced.dispatcherMaxDispatchTasks());
     assertEquals(16, advanced.dispatcherWorkerConcurrency());
     assertEquals(64, advanced.dispatcherWorkerQueueCapacity());
-    assertEquals(2, advanced.canvasFunctionExecutorCoreSize());
-    assertEquals(4, advanced.canvasFunctionExecutorMaxSize());
-    assertEquals(64, advanced.canvasFunctionExecutorQueueCapacity());
     assertEquals(512, advanced.applicationEventQueueCapacity());
     assertEquals(2L * 1024 * 1024, advanced.applicationEventMaxBytes());
     assertEquals(10_000L, advanced.applicationEventSendTimeoutMillis());
@@ -229,7 +226,7 @@ class SystemSettingsTest {
   }
 
   @Test
-  void rejectsProcessorHeartbeatNotBelowLeaseAndExecutorMaxBelowCore() {
+  void rejectsProcessorHeartbeatNotBelowLease() {
     SystemSettings.Advanced base = SystemSettings.DEFAULT.advanced();
     assertThrows(
         IllegalArgumentException.class,
@@ -248,9 +245,6 @@ class SystemSettingsTest {
                 base.dispatcherMaxDispatchTasks(),
                 base.dispatcherWorkerConcurrency(),
                 base.dispatcherWorkerQueueCapacity(),
-                4,
-                2,
-                base.canvasFunctionExecutorQueueCapacity(),
                 base.applicationEventQueueCapacity(),
                 base.applicationEventMaxBytes(),
                 base.applicationEventSendTimeoutMillis(),
