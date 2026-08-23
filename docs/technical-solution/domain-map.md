@@ -6,8 +6,8 @@
 
 | 域 | 代码位置 | 职责 |
 | --- | --- | --- |
-| Harness / AI | `harness-tool`、`harness-runtime`、`harness-plugin-api`、`harness/plugins/*`、`harness-infra`、`harness-daemon`、`platform.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、插件 branch state、Work |
-| Studio / Canvas | `canvas/core`、`canvas/infra`、`platform.studio`、`features/canvas` | Canvas document、ResourceNode、Resource、Function、Group、Link、typed command |
+| Harness / AI | `harness-tool`、`harness-runtime`、`harness-plugin-api`、`harness/plugins/*`、`harness-infra`、`harness-daemon`、`platform.catalog`、`platform.chat`、`platform.environment`、`platform.harness`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、插件 branch state、Work |
+| Studio / Canvas | `canvas/core`、`canvas/infra`、`platform.canvas`、`platform.orchestration`、`features/canvas` | Canvas document、ResourceNode、Resource、Function、Group、Link、typed command |
 
 ```text
 frontend

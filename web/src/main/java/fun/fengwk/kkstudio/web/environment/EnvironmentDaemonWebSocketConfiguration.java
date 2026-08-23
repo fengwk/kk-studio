@@ -7,7 +7,7 @@ import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
-import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentGatewayProperties;
+import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentGatewayProperties;
 
 import java.util.Objects;
 

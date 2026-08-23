@@ -6,7 +6,7 @@ import fun.fengwk.convention4j.common.i18n.StringManager;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.ai.error.DomainErrorCode;
+import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
 
 import java.util.Collections;
 import java.util.Locale;

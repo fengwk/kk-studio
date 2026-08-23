@@ -26,8 +26,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.platform.studio.StudioOwner;
-import fun.fengwk.kkstudio.platform.studio.StudioOwnerType;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.share.ai.runtime.EnvironmentBindingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
@@ -99,16 +99,16 @@ public final class HarnessRuntimeRequestMapper {
   }
 
   /** 映射 owner，并只允许产品公开的 CHAT/CANVAS discriminator。 */
-  public static StudioOwner toOwner(HarnessCommandOwnerDTO dto) {
+  public static OwnerRef toOwner(HarnessCommandOwnerDTO dto) {
     requireNonNull(dto, "owner");
     String type = requireText(dto.getType(), "owner.type");
-    StudioOwnerType ownerType;
+    OwnerType ownerType;
     try {
-      ownerType = StudioOwnerType.valueOf(type);
+      ownerType = OwnerType.valueOf(type);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("owner.type must be CHAT or CANVAS: " + type, error);
     }
-    return new StudioOwner(ownerType, parseUuid(dto.getId(), "owner.id"));
+    return new OwnerRef(ownerType, parseUuid(dto.getId(), "owner.id"));
   }
 
   /** 将唯一产品 HTTP 写请求映射为 sealed target 与有序 commands。 */

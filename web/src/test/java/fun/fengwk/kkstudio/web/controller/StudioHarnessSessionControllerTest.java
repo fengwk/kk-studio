@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.platform.studio.StudioHarnessQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 
@@ -31,12 +31,12 @@ class StudioHarnessSessionControllerTest {
 
   private static final UUID SESSION_ID = new UUID(0L, 1L);
 
-  private StudioHarnessQueryService harnessQueryService;
+  private HarnessOwnerQueryService harnessQueryService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
-    harnessQueryService = mock(StudioHarnessQueryService.class);
+    harnessQueryService = mock(HarnessOwnerQueryService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new StudioHarnessSessionController(harnessQueryService))
             .setControllerAdvice(new ResultResponseBodyAdvice())

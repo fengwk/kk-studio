@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionModelDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunRequestDTO;
-import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
+import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.List;
 import java.util.Objects;
@@ -30,12 +30,10 @@ public class StudioCanvasFunctionController {
 
   private final CanvasFunctionCatalog registry;
   private final CanvasFunctionService runtimeService;
-  private final StudioWebMapper mapper;
+  private final WebDtoMapper mapper;
 
   public StudioCanvasFunctionController(
-      CanvasFunctionCatalog registry,
-      CanvasFunctionService runtimeService,
-      StudioWebMapper mapper) {
+      CanvasFunctionCatalog registry, CanvasFunctionService runtimeService, WebDtoMapper mapper) {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.runtimeService = Objects.requireNonNull(runtimeService, "runtimeService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
@@ -63,8 +61,8 @@ public class StudioCanvasFunctionController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
-      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
-      UUID nodeId = StudioWebMapper.parseUuid(nodeIdText, "nodeId");
+      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
       return Results.accepted(
           mapper.toDto(runtimeService.start(canvasId, nodeId, request.getRequestId())));
     } catch (CanvasFunctionRunException exception) {
@@ -78,8 +76,8 @@ public class StudioCanvasFunctionController {
   public Result<CanvasFunctionRunDTO> get(
       @PathVariable("canvasId") String canvasIdText, @PathVariable("nodeId") String nodeIdText) {
     try {
-      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
-      UUID nodeId = StudioWebMapper.parseUuid(nodeIdText, "nodeId");
+      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
       return Results.ok(mapper.toDto(runtimeService.get(canvasId, nodeId)));
     } catch (CanvasFunctionRunException exception) {
       throw map(exception);
@@ -97,8 +95,8 @@ public class StudioCanvasFunctionController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
-      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
-      UUID nodeId = StudioWebMapper.parseUuid(nodeIdText, "nodeId");
+      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
       return Results.ok(
           mapper.toDto(runtimeService.cancel(canvasId, nodeId, request.getRequestId())));
     } catch (CanvasFunctionRunException exception) {

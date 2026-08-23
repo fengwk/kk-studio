@@ -46,16 +46,16 @@ import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.platform.studio.StudioHarnessQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.canvas.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasTransformDTO;
 import fun.fengwk.kkstudio.share.canvas.CreateCanvasRequestDTO;
+import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
-import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 
 import java.time.Instant;
 import java.util.List;
@@ -79,7 +79,7 @@ class StudioCanvasControllerTest {
   private ObjectMapper objectMapper;
   private CanvasQueryService queryService;
   private CanvasCommandService commandService;
-  private StudioHarnessQueryService harnessQueryService;
+  private HarnessOwnerQueryService harnessQueryService;
   private StorageBlobManager blobManager;
 
   @BeforeEach
@@ -90,7 +90,7 @@ class StudioCanvasControllerTest {
     objectMapper = ObjectMapperHolder.getInstance();
     queryService = mock(CanvasQueryService.class);
     commandService = mock(CanvasCommandService.class);
-    harnessQueryService = mock(StudioHarnessQueryService.class);
+    harnessQueryService = mock(HarnessOwnerQueryService.class);
     blobManager = mock(StorageBlobManager.class);
     FixedObjectProvider<StorageBlobManager> blobManagers = new FixedObjectProvider<>(blobManager);
     StorageBlob blob = new StorageBlob();
@@ -106,7 +106,7 @@ class StudioCanvasControllerTest {
                     queryService,
                     commandService,
                     harnessQueryService,
-                    new StudioWebMapper(blobManagers)))
+                    new WebDtoMapper(blobManagers)))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
   }

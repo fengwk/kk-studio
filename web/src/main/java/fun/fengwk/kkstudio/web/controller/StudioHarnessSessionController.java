@@ -12,7 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.platform.studio.StudioHarnessQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
@@ -28,9 +28,9 @@ import java.util.function.Supplier;
 @RequestMapping("/api/ai/runtime/sessions")
 public class StudioHarnessSessionController {
 
-  private final StudioHarnessQueryService harnessQueryService;
+  private final HarnessOwnerQueryService harnessQueryService;
 
-  public StudioHarnessSessionController(StudioHarnessQueryService harnessQueryService) {
+  public StudioHarnessSessionController(HarnessOwnerQueryService harnessQueryService) {
     this.harnessQueryService = harnessQueryService;
   }
 

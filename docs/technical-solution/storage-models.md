@@ -168,7 +168,7 @@ Canvas 不持久化或缓存 Patch Stream；PostgreSQL trigger 只发 version NO
 - Canvas ownership FK 使用 RESTRICT；应用按
   `pins -> resources/runs -> links -> nodes -> groups -> dedup -> document` 显式删除。
 - Canvas/Chat 深删除在删除 Session 前逐行删除 `session_blob_ref` 并 release Blob。
-- 归属关系表 `chat_session` / `canvas_session` 的 `session_id` 主键 + owner FK（RESTRICT）；删除 Chat/Canvas 时应用先列 Session 深删（`HarnessSessionDeletionService`），再删 owner relation 与 owner 行。
+- 归属关系表 `chat_session` / `canvas_session` 的 `session_id` 主键 + owner FK（RESTRICT）；删除 Chat/Canvas 时应用先列 Session 深删（`SessionDeletionOrchestrator`），再删 owner relation 与 owner 行。
 
 ## 9. 时间与事务
 

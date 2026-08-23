@@ -332,7 +332,7 @@ TEXT(text)
 ATTACHMENT(uploadId)
 ```
 
-`ATTACHMENT` 只存在于请求与提交事务内；`StudioCommandAcceptanceService` 在 `acceptCommands` 事务内消费 READY Upload，写成 durable：
+`ATTACHMENT` 只存在于请求与提交事务内；`HarnessCommandAcceptanceOrchestrator` 在 `acceptCommands` 事务内消费 READY Upload，写成 durable：
 
 ```text
 RESOURCE(blobId, name, preview?)
@@ -380,7 +380,7 @@ lock document
 -> delete groups
 -> delete command dedup
 -> delete canvas_document
--> deep delete owned Harness Sessions（HarnessSessionDeletionService）
+-> deep delete owned Harness Sessions（SessionDeletionOrchestrator）
    -> per Session：delete work/invocations/commands/thread/entries
    -> release all session_blob_ref
    -> delete session

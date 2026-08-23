@@ -10,10 +10,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsDomainException;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsValidationException;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsVersionConflictException;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsDomainException;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsValidationException;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
 import fun.fengwk.kkstudio.web.controller.StudioSystemSettingsController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -24,8 +24,8 @@ import java.util.Map;
  * System settings 领域错误模型的 Web 层统一翻译器。
  *
  * <p>每个 handler 都返回项目 {@link Result} 信封，其中包含由 {@link
- * fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsErrorCode} 派生的稳定机器可读 {@code code}。HTTP
- * 状态： 校验失败 → 400，行缺失 → 404，expectedVersion CAS 竞争 → 409。
+ * fun.fengwk.kkstudio.platform.settings.SystemSettingsErrorCode} 派生的稳定机器可读 {@code code}。HTTP 状态：
+ * 校验失败 → 400，行缺失 → 404，expectedVersion CAS 竞争 → 409。
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = StudioSystemSettingsController.class)

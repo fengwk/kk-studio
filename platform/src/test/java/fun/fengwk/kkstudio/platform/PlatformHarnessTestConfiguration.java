@@ -4,7 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.platform.ai.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
 
 /**
  * Platform 测试上下文的 Harness 装配基座。

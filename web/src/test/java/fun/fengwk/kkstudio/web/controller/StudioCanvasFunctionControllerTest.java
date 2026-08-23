@@ -31,8 +31,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
-import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 
 import java.time.Instant;
 import java.util.List;
@@ -67,7 +67,7 @@ class StudioCanvasFunctionControllerTest {
     mockMvc =
         standaloneSetup(
                 new StudioCanvasFunctionController(
-                    registry, runtimeService, new StudioWebMapper(blobManagers)))
+                    registry, runtimeService, new WebDtoMapper(blobManagers)))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(mapper))
             .build();
   }

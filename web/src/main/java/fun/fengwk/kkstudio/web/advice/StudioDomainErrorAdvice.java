@@ -12,12 +12,12 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import fun.fengwk.kkstudio.platform.ai.error.AiDomainException;
-import fun.fengwk.kkstudio.platform.ai.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.ai.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.ai.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.ai.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.error.AiDomainException;
+import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
+import fun.fengwk.kkstudio.platform.error.AiInUseException;
+import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
@@ -31,7 +31,7 @@ import java.util.Map;
  * AI catalog domain 错误模型的 Web 层统一翻译器。
  *
  * <p>每个 handler 都返回项目 {@link Result} 信封，其中包含由类型化错误的 {@link
- * fun.fengwk.kkstudio.platform.ai.error.DomainErrorCode} 派生的稳定机器可读 {@code code}。HTTP 状态遵循以下语义：
+ * fun.fengwk.kkstudio.platform.error.DomainErrorCode} 派生的稳定机器可读 {@code code}。HTTP 状态遵循以下语义：
  *
  * <ul>
  *   <li>{@link AiValidationException}, {@link MissingServletRequestParameterException}, {@link

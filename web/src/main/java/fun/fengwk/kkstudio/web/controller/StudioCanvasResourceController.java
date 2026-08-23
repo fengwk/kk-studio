@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.canvas.CanvasPresignedUrlDTO;
-import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
+import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -57,8 +57,8 @@ public class StudioCanvasResourceController {
   private Result<CanvasPresignedUrlDTO> sign(
       String canvasIdText, String resourceIdText, boolean original) {
     try {
-      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
-      UUID resourceId = StudioWebMapper.parseUuid(resourceIdText, "resourceId");
+      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID resourceId = WebDtoMapper.parseUuid(resourceIdText, "resourceId");
       CanvasResource resource = findResource(canvasId, resourceId);
       if (resource.isText()) {
         throw new ResponseStatusException(
@@ -66,7 +66,7 @@ public class StudioCanvasResourceController {
       }
       StorageBlobManager blobManager = requireBlobManager();
       return Results.ok(
-          StudioWebMapper.toPresignedUrlDto(
+          WebDtoMapper.toPresignedUrlDto(
               original
                   ? blobManager.presignOriginalUrl(resource.blobId())
                   : blobManager.presignPreviewUrl(resource.blobId())));

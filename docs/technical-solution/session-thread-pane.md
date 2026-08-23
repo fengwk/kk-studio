@@ -968,7 +968,7 @@ Escape               有 detail 时关闭 detail，否则返回 Conversation
 用户请求由唯一应用服务承接：
 
 ```text
-StudioCommandAcceptanceService
+HarnessCommandAcceptanceOrchestrator
 └── one PostgreSQL transaction
     ├── authorize and KEY SHARE lock owner scope
     └── HarnessRuntime.acceptCommands(command, acceptancePreflight)
@@ -1003,7 +1003,7 @@ findThreadCommand
 
 Session/Thread 只由 `acceptCommands` materialization 创建（第一批 Command 被原子接受时）；head 仅由 Runtime 沿 descendant 推进（turn/compaction/stop 执行中）。
 
-手动压缩与 system-prompt 预览不在 `HarnessRuntime` facade：`compactThread` / `manualCompactionAvailability` 由 `ThreadProcessor` 提供，`getSystemPromptPreview` 由 Platform 的 `SystemPromptPreviewService` 提供；Thread 删除走 `HarnessStore.Transaction`（由 Platform `HarnessSessionDeletionService` 编排），Runtime facade 不暴露 delete。
+手动压缩与 system-prompt 预览不在 `HarnessRuntime` facade：`compactThread` / `manualCompactionAvailability` 由 `ThreadProcessor` 提供，`getSystemPromptPreview` 由 Platform 的 `SystemPromptPreviewService` 提供；Thread 删除走 `HarnessStore.Transaction`（由 Platform `SessionDeletionOrchestrator` 编排），Runtime facade 不暴露 delete。
 
 ### 11.3 用户写 API
 

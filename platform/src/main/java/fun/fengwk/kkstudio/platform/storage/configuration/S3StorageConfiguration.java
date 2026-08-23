@@ -15,8 +15,9 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
-import fun.fengwk.kkstudio.platform.ai.runtime.model.ProviderResourceMaterializer;
-import fun.fengwk.kkstudio.platform.ai.runtime.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
+import fun.fengwk.kkstudio.platform.harness.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.S3PresignServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
@@ -35,7 +36,6 @@ import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlSessionBlobRe
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobIngestService;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageUploadServiceImpl;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
 
 import java.net.URI;
 import java.time.Clock;

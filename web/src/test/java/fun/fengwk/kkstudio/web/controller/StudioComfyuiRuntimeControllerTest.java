@@ -24,7 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import fun.fengwk.kkstudio.platform.comfyui.ComfyuiFileDownload;
 import fun.fengwk.kkstudio.platform.comfyui.ComfyuiRuntimeService;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsProvider;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsProvider;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowCancelDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowJobDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowRunDTO;

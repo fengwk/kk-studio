@@ -12,8 +12,8 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettings;
 import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.time.Duration;

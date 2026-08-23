@@ -25,8 +25,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.platform.ai.chat.service.ChatService;
-import fun.fengwk.kkstudio.platform.studio.StudioHarnessQueryService;
+import fun.fengwk.kkstudio.platform.chat.service.ChatService;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
@@ -48,13 +48,13 @@ class StudioChatControllerTest {
   }
 
   private ChatService chatService;
-  private StudioHarnessQueryService harnessQueryService;
+  private HarnessOwnerQueryService harnessQueryService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     chatService = mock(ChatService.class);
-    harnessQueryService = mock(StudioHarnessQueryService.class);
+    harnessQueryService = mock(HarnessOwnerQueryService.class);
     StudioChatController controller = new StudioChatController(chatService, harnessQueryService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)

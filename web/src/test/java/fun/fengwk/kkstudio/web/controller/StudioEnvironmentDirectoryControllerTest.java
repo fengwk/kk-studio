@@ -17,11 +17,11 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.platform.ai.environment.service.EnvironmentDirectoryFailureCode;
-import fun.fengwk.kkstudio.platform.ai.environment.service.EnvironmentDirectoryListResult;
-import fun.fengwk.kkstudio.platform.ai.environment.service.EnvironmentDirectoryLister;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettings;
-import fun.fengwk.kkstudio.platform.systemsettings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryFailureCode;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryListResult;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentDirectoryLister;
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryEntryDTO;
 
