@@ -134,6 +134,36 @@ class ThreadVersionHubTest {
   }
 
   @Test
+  void notificationPayloadFanOutsVersionAndMalformedPayloadIsIgnored() throws Exception {
+    DataSource dataSource = mock(DataSource.class);
+    Connection connection = mock(Connection.class);
+    PreparedStatement statement = mock(PreparedStatement.class);
+    ResultSet result = mock(ResultSet.class);
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement("select version from harness_thread where id = ?"))
+        .thenReturn(statement);
+    when(statement.executeQuery()).thenReturn(result);
+    when(result.next()).thenReturn(true);
+    when(result.getLong(1)).thenReturn(5L);
+
+    ThreadVersionHub hub = new ThreadVersionHub(dataSource);
+    UUID threadId = new UUID(0L, 7L);
+    List<ThreadVersionEventSource.Event> received = new ArrayList<>();
+    hub.subscribe(threadId, received::add);
+
+    // handler 只解析 threadId:version 并 fan-out；畸形 payload 不触发订阅者，也不访问数据库。
+    hub.onNotification("00000000-0000-0000-0000-000000000007:6");
+    hub.onNotification("00000000-0000-0000-0000-000000000007");
+    hub.onNotification("00000000-0000-0000-0000-000000000007:06");
+    hub.onNotification("00000000-0000-0000-0000-000000000007:9223372036854775808");
+    hub.onNotification("not-a-uuid:7");
+    hub.onNotification(null);
+
+    assertEquals(List.of(new ThreadVersionEventSource.Event("6", false)), received);
+    verify(dataSource, times(1)).getConnection();
+  }
+
+  @Test
   void lastReleaseConcurrentWithSubscribeKeepsNewSubscriberLive() throws Exception {
     // 确定性交错：新订阅者已完成注册（compute 内 add 原子完成）但卡在 cursor 读取时，最后释放并发执行；
     // 修复后 remove-if-empty 在 computeIfPresent 内原子完成，存活订阅者必然留在 map 的集合中并继续收到事件。

@@ -2,15 +2,11 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.data.redis.RedisConnectionDetails;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.data.redis.connection.RedisPassword;
-import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
@@ -34,17 +30,15 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlWorkListener;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeConfig;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeEventSink;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeEventSource;
+import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlRealtimeEventSink;
+import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlRealtimeEventSource;
+import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.RealtimeNotificationCodec;
 import fun.fengwk.kkstudio.harness.runtime.spring.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
@@ -65,11 +59,11 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Web 组合根：把 core 的 gateway / resolver 与 runtime-spring 的持久化、调度、Redis 适配装配为完整的 Harness Runtime。
+ * Web 组合根：把 core 的 gateway / resolver 与 runtime-spring 的 PostgreSQL 持久化和调度适配装配为完整的 Harness Runtime。
  *
- * <p>进程内 worker（dispatcher + listener）只受 {@code workers-enabled} 控制；关闭时控制/查询平面（{@link
- * HarnessRuntime}、store、processor 与 realtime 适配）仍然可用，只是不启动调度。生命周期顺序：启动 dispatcher 后 listener，停止
- * listener 后 dispatcher；processor 关闭与 executor shutdown 由 Spring 按依赖逆序 destroy 保证。
+ * <p>进程内 worker dispatcher 只受 {@code workers-enabled} 控制；关闭时控制/查询平面（{@link
+ * HarnessRuntime}、store、processor 与 realtime 适配）仍然可用，只是不启动调度。PostgreSQL notification loop
+ * 由事件组合根独立持有；processor 关闭与 executor shutdown 由 Spring 按依赖逆序 destroy 保证。
  *
  * <p>Advanced/resource 等部署软策略从共享 {@link SystemSettingsSnapshot} 在装配期读取（DB 变更需重启）；aiRuntime 的 retry
  * 经 {@link InvocationRetryPolicyProvider} 每次判定点现读。本组合根不持有任何硬编码的重复默认值。
@@ -116,46 +110,20 @@ public class HarnessRuntimeConfiguration {
   }
 
   @Bean
-  public RedisRealtimeConfig redisRealtimeConfig(HarnessRuntimeProperties properties) {
-    return new RedisRealtimeConfig(properties.getRedisPrefix());
+  public RealtimeNotificationCodec realtimeNotificationCodec() {
+    return new RealtimeNotificationCodec();
   }
 
   @Bean
   public RealtimeEventSink realtimeEventSink(
-      StringRedisTemplate stringRedisTemplate, RedisRealtimeConfig config) {
-    return new RedisRealtimeEventSink(stringRedisTemplate, config, new RealtimeEventJsonCodec());
-  }
-
-  /**
-   * 事件通道 realtime listener 的专用（不共享 native connection）Lettuce 连接工厂：listener 需要独占一条订阅连接， 不能与 {@link
-   * StringRedisTemplate} 共用。工厂作为独立 destroy bean 交给 Spring 管理，避免泄漏。
-   */
-  @Bean(destroyMethod = "destroy")
-  public LettuceConnectionFactory redisRealtimeConnectionFactory(
-      RedisConnectionDetails connectionDetails) {
-    RedisConnectionDetails.Standalone standaloneDetails = connectionDetails.getStandalone();
-    RedisStandaloneConfiguration standalone = new RedisStandaloneConfiguration();
-    standalone.setHostName(standaloneDetails.getHost());
-    standalone.setPort(standaloneDetails.getPort());
-    standalone.setDatabase(standaloneDetails.getDatabase());
-    standalone.setUsername(connectionDetails.getUsername());
-    standalone.setPassword(RedisPassword.of(connectionDetails.getPassword()));
-    LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(standalone);
-    connectionFactory.setShareNativeConnection(false);
-    connectionFactory.afterPropertiesSet();
-    return connectionFactory;
+      DataSource dataSource, RealtimeNotificationCodec notificationCodec) {
+    return new PostgresqlRealtimeEventSink(new JdbcTemplate(dataSource), notificationCodec);
   }
 
   @Bean(destroyMethod = "close")
-  public RedisRealtimeEventSource redisRealtimeEventSource(
-      @Qualifier("redisRealtimeConnectionFactory") LettuceConnectionFactory connectionFactory,
-      RedisRealtimeConfig config,
-      SystemSettingsSnapshot systemSettingsSnapshot) {
-    // 连接失联时的重连间隔：读取共享启动快照的 SystemSettings.Advanced.redisRealtimeRetryDelayMillis。
-    Duration retryDelay =
-        Duration.ofMillis(systemSettingsSnapshot.get().advanced().redisRealtimeRetryDelayMillis());
-    return new RedisRealtimeEventSource(
-        connectionFactory, config, new RealtimeEventJsonCodec(), retryDelay);
+  public PostgresqlRealtimeEventSource realtimeEventSource(
+      RealtimeNotificationCodec notificationCodec) {
+    return new PostgresqlRealtimeEventSource(notificationCodec);
   }
 
   /** Model / Tool 调用的全局重试策略现读通道：每次 retry 判定点从 SystemSettings.AiRuntime 映射。 */
@@ -351,20 +319,6 @@ public class HarnessRuntimeConfiguration {
         toolProcessor);
   }
 
-  @Bean
-  public PostgresqlWorkListener postgresqlWorkListener(
-      DataSource dataSource,
-      HarnessWorkDispatcher dispatcher,
-      SystemSettingsSnapshot systemSettingsSnapshot) {
-    // LISTEN poll 间隔与重连退避：读取共享启动快照的 SystemSettings.Advanced。
-    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
-    return new PostgresqlWorkListener(
-        dataSource,
-        dispatcher::wake,
-        Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
-        Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
-  }
-
   /** READY 事件只唤醒 Work dispatcher；实际 Environment 事实由 {@link TurnResolver} 在 resolve 时读取。 */
   @Bean
   public EnvironmentReadyListener harnessEnvironmentReadyListener(
@@ -374,9 +328,7 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public SmartLifecycle harnessRuntimeLifecycle(
-      HarnessRuntimeProperties properties,
-      HarnessWorkDispatcher dispatcher,
-      PostgresqlWorkListener listener) {
-    return new HarnessRuntimeLifecycle(properties.isWorkersEnabled(), dispatcher, listener);
+      HarnessRuntimeProperties properties, HarnessWorkDispatcher dispatcher) {
+    return new HarnessRuntimeLifecycle(properties.isWorkersEnabled(), dispatcher);
   }
 }

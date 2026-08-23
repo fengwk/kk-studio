@@ -4,11 +4,20 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettings;
+import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.core.systemsettings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.spring.realtime.RealtimeEventSource;
+import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
+import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
+import javax.sql.DataSource;
+
+import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -44,6 +53,42 @@ public class ApplicationEventConfiguration {
   public HarnessThreadChangeSource harnessThreadChangeSource(
       ThreadVersionEventSource versionSource) {
     return new WebHarnessThreadChangeSource(versionSource);
+  }
+
+  /** 全应用共享一个专用 PostgreSQL connection，固定监听全部低延迟通知 channel。 */
+  @Bean(destroyMethod = "close")
+  public PostgresqlNotificationLoop postgresqlNotificationLoop(
+      DataSource dataSource,
+      HarnessWorkDispatcher dispatcher,
+      ThreadVersionHub threadVersionHub,
+      CanvasVersionHub canvasVersionHub,
+      SystemSettingsChangeHandler systemSettingsChangeHandler,
+      PostgresqlRealtimeEventSource realtimeEventSource,
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
+    return new PostgresqlNotificationLoop(
+        dataSource,
+        List.of(
+            new PostgresqlNotificationHandler(
+                "harness_runtime_work", ignored -> dispatcher.wake(), dispatcher::wake),
+            new PostgresqlNotificationHandler(
+                ThreadVersionHub.CHANNEL,
+                threadVersionHub::onNotification,
+                threadVersionHub::broadcastResync),
+            new PostgresqlNotificationHandler(
+                CanvasVersionHub.CHANNEL,
+                canvasVersionHub::onNotification,
+                canvasVersionHub::broadcastResync),
+            new PostgresqlNotificationHandler(
+                "system_settings_changed",
+                systemSettingsChangeHandler::onNotification,
+                systemSettingsChangeHandler::onResync),
+            new PostgresqlNotificationHandler(
+                PostgresqlRealtimeEventSource.CHANNEL,
+                realtimeEventSource::onNotification,
+                realtimeEventSource::onResync)),
+        Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
+        Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
   }
 
   @Bean(destroyMethod = "close")

@@ -24,8 +24,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
-import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlWorkListener;
 import fun.fengwk.kkstudio.web.WebTestApplication;
+import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -38,11 +38,9 @@ import java.util.function.BooleanSupplier;
 /**
  * Web 组合根的 worker 生命周期集成测试（Testcontainers PostgreSQL，{@code workers-enabled=true}）。
  *
- * <p>上下文启动时即注册 dispatcher 的 periodic poll 与 listener 的 LISTEN 循环；测试插入一条 due 的 THREAD Work （真实
- * Session/Entry/Thread 行）并发送 {@code harness_runtime_work} NOTIFY，验证 listener 启动 wake / 通知 wake
- * -&gt; dispatcher drain -&gt; claim -&gt; ThreadProcessor quiescent complete 的完整链路（work 行被删除）。
- * dispatcher -&gt; listener 的启动顺序与 listener -&gt; dispatcher 的停止顺序由 {@link
- * HarnessRuntimeLifecycleTest} 以 mock 精确验证。
+ * <p>上下文启动时注册 dispatcher periodic poll 与应用共享 PostgreSQL notification loop。测试分别验证 Work NOTIFY
+ * 立即唤醒以及无通知时 periodic poll 兜底，最终都经 dispatcher drain -&gt; claim -&gt; ThreadProcessor quiescent
+ * complete 删除 work 行。
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
@@ -86,7 +84,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
   private SmartLifecycle harnessRuntimeLifecycle;
 
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
-  @Autowired private PostgresqlWorkListener postgresqlWorkListener;
+  @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
@@ -101,26 +99,39 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
   @Order(1)
   void lifecycleStartsWorkersAndDueWorkIsProcessedToCompletion() throws Exception {
     assertTrue(harnessRuntimeLifecycle.isRunning(), "lifecycle must be running");
-    assertTrue(postgresqlWorkListener.isRunning(), "listener must be running");
+    assertTrue(postgresqlNotificationLoop.isRunning(), "notification loop must be running");
 
     seedDueThreadWork();
     jdbc.execute("select pg_notify('harness_runtime_work', '" + THREAD_ID + "')");
 
     awaitTrue(
         () -> workRowCount(THREAD_ID) == 0,
-        "dispatcher must claim and complete the due THREAD work within 15s");
+        5,
+        "NOTIFY must wake and complete due THREAD work before the 10s periodic poll");
   }
 
   @Test
   @Order(2)
-  void lifecycleStopStopsListenerAndDispatcher() {
+  void periodicPollStillProcessesWorkWithoutNotification() throws Exception {
     assertTrue(harnessRuntimeLifecycle.isRunning());
-    assertTrue(postgresqlWorkListener.isRunning());
+    seedDueThreadWork();
+
+    awaitTrue(
+        () -> workRowCount(THREAD_ID) == 0,
+        15,
+        "periodic poll must recover due THREAD work without a notification");
+  }
+
+  @Test
+  @Order(3)
+  void lifecycleStopStopsDispatcherButKeepsApplicationNotificationLoopRunning() {
+    assertTrue(harnessRuntimeLifecycle.isRunning());
+    assertTrue(postgresqlNotificationLoop.isRunning());
 
     harnessRuntimeLifecycle.stop();
 
     assertFalse(harnessRuntimeLifecycle.isRunning());
-    assertFalse(postgresqlWorkListener.isRunning());
+    assertTrue(postgresqlNotificationLoop.isRunning());
     assertNotNull(harnessWorkDispatcher, "dispatcher bean stays available after stop");
     harnessRuntimeLifecycle.stop();
   }
@@ -161,9 +172,9 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         threadId);
   }
 
-  private static void awaitTrue(BooleanSupplier condition, String message)
+  private static void awaitTrue(BooleanSupplier condition, int timeoutSeconds, String message)
       throws InterruptedException {
-    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
     while (System.nanoTime() < deadline) {
       if (condition.getAsBoolean()) {
         return;
@@ -190,5 +201,18 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         .validateMigrationNaming(true)
         .load()
         .migrate();
+    try (Statement statement = connection.createStatement()) {
+      statement.executeUpdate(
+          """
+          update system_setting
+          set config = jsonb_set(
+                  config,
+                  '{advanced,dispatcherPollIntervalMillis}',
+                  '10000'::jsonb),
+              version = version + 1,
+              updated_at = now()
+          where id = 1
+          """);
+    }
   }
 }

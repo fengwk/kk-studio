@@ -181,11 +181,33 @@ class CanvasVersionHubTest {
   }
 
   @Test
-  void parsesCanvasIdFromNotifyPayloadIgnoringGarbage() {
-    assertEquals(
-        new UUID(0L, 9L), CanvasVersionHub.parseCanvasId("00000000-0000-0000-0000-000000000009:7"));
-    assertEquals(null, CanvasVersionHub.parseCanvasId("not-a-uuid:7"));
-    assertEquals(null, CanvasVersionHub.parseCanvasId("00000000-0000-0000-0000-000000000009"));
-    assertEquals(null, CanvasVersionHub.parseCanvasId(null));
+  void notificationPayloadFanOutsVersionAndMalformedPayloadIsIgnored() throws Exception {
+    DataSource dataSource = mock(DataSource.class);
+    Connection connection = mock(Connection.class);
+    PreparedStatement statement = mock(PreparedStatement.class);
+    ResultSet result = mock(ResultSet.class);
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement("select version from canvas_document where id = ?"))
+        .thenReturn(statement);
+    when(statement.executeQuery()).thenReturn(result);
+    when(result.next()).thenReturn(true);
+    when(result.getLong(1)).thenReturn(5L);
+
+    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+    UUID canvasId = new UUID(0L, 9L);
+    List<CanvasVersionEventSource.Event> received = new ArrayList<>();
+    hub.subscribe(canvasId, received::add);
+
+    // handler 只解析 canvasId:version 并 fan-out；畸形 payload 不触发订阅者，也不访问数据库。
+    hub.onNotification("00000000-0000-0000-0000-000000000009:7");
+    hub.onNotification("not-a-uuid:7");
+    hub.onNotification("00000000-0000-0000-0000-000000000009");
+    hub.onNotification("00000000-0000-0000-0000-000000000009:07");
+    hub.onNotification("00000000-0000-0000-0000-000000000009:-1");
+    hub.onNotification("00000000-0000-0000-0000-000000000009:9223372036854775808");
+    hub.onNotification(null);
+
+    assertEquals(List.of(new CanvasVersionEventSource.Event(7L, false)), received);
+    verify(dataSource, times(1)).getConnection();
   }
 }

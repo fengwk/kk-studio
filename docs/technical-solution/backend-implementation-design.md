@@ -24,7 +24,7 @@ flowchart LR
 | 层 | 职责 |
 | --- | --- |
 | `share` | DTO、JSON 字段、分页与错误边界 |
-| `web` | 生产组合根、Runtime/dispatcher/listener 生命周期、路由、参数校验、HTTP 状态、浏览器事件 WebSocket adapter、Daemon WebSocket v2 adapter |
+| `web` | 生产组合根、Runtime/dispatcher 与 PostgreSQL notification loop 生命周期、路由、参数校验、HTTP 状态、浏览器事件 WebSocket adapter、Daemon WebSocket v2 adapter |
 | `core.ai.catalog` | Provider/Model/Agent 的名称身份、结构化 config 与版本并发 |
 | `core.ai.chat` | Chat CRUD、`agentName`/可空默认 `EnvironmentBinding{name, workspacePath}`/`yoloEnabled` 可见发送设置与 Chat↔Session 关系（`chat_session`） |
 | `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
@@ -52,8 +52,9 @@ Agent DTO 的 `model` 使用 Model ref，create 与 PUT 都必填；Model DTO �
 
 | 配置 | 装配 |
 | --- | --- |
-| `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、Redis sink/tail、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/listener/executor；注入 Core 的 TurnResolver/ModelGateway/ToolGateway ports |
-| `HarnessRuntimeLifecycle` | 启动/停止 dispatcher 与 processor；REST 与事件通道只经 `HarnessRuntime` 门面 |
+| `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、Redis sink/tail、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/executor；注入 Core 的 TurnResolver/ModelGateway/ToolGateway ports |
+| `ApplicationEventConfiguration` | 构造单连接 PostgreSQL notification loop，固定注册 Work、Thread version、Canvas version 三个 channel handler |
+| `HarnessRuntimeLifecycle` | 按 worker 开关启动/停止 dispatcher；REST 与事件通道只经 `HarnessRuntime` 门面 |
 | `ModelExecutionConfiguration` | `ObjectProvider<ProviderFactory>` 收集并索引；`CoreModelGateway`（serialized FIFO 单 drainer 回调桥） |
 | `web.runtime.BuiltInPluginConfiguration` | 在生产组合根注册随应用交付的受信任 `GoalPlugin` |
 | `PluginCatalogConfiguration` | 收集全部 `HarnessPlugin` beans，构造并冻结 `PluginCatalog`；Core 不依赖具体插件实现 |
