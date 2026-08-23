@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.systemsettings;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,10 +47,8 @@ class SystemSettingsServiceImplTest {
   private final SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
   private final SystemSettingsSnapshot snapshot =
       new SystemSettingsSnapshot(SystemSettings.DEFAULT);
-  private final SystemSettingsChangePublisher changePublisher =
-      mock(SystemSettingsChangePublisher.class);
   private final SystemSettingsServiceImpl service =
-      new SystemSettingsServiceImpl(repository, codec, snapshot, changePublisher);
+      new SystemSettingsServiceImpl(repository, codec, snapshot);
 
   @AfterEach
   void clearSynchronization() {
@@ -100,14 +97,12 @@ class SystemSettingsServiceImplTest {
 
     TransactionSynchronizationManager.initSynchronization();
     service.update(update("0"));
-    // 事务尚未提交：内存快照不得提前更新，也不得提前发布。
+    // 事务尚未提交：内存快照不得提前更新。
     assertEquals(SystemSettings.DEFAULT, snapshot.get());
-    verify(changePublisher, never()).publish();
     TransactionSynchronizationManager.getSynchronizations()
         .forEach(TransactionSynchronization::afterCommit);
-    // afterCommit 回读权威行并替换，再发布跨节点唤醒。
+    // afterCommit 回读权威行并替换。
     assertEquals(UPDATED_SETTINGS, snapshot.get());
-    verify(changePublisher).publish();
   }
 
   /** 事务回滚（只走 afterCompletion 且未提交）绝不更新内存快照。 */
@@ -124,7 +119,6 @@ class SystemSettingsServiceImplTest {
             synchronization ->
                 synchronization.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
     assertEquals(SystemSettings.DEFAULT, snapshot.get());
-    verify(changePublisher, never()).publish();
   }
 
   /** 无活跃事务同步的调用路径（纯单元测试）直接回读替换，保证快照与数据库一致。 */
@@ -136,7 +130,6 @@ class SystemSettingsServiceImplTest {
     service.update(update("0"));
 
     assertEquals(UPDATED_SETTINGS, snapshot.get());
-    verify(changePublisher).publish();
   }
 
   private SystemSettingsUpdateDTO update(String expectedVersion) {
