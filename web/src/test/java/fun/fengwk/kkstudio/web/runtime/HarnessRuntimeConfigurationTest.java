@@ -37,7 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.spring.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlWorkListener;
-import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventSource;
+import fun.fengwk.kkstudio.harness.runtime.spring.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeConfig;
 import fun.fengwk.kkstudio.harness.runtime.spring.redis.RedisRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.spring.resource.LocalFileResourceStore;

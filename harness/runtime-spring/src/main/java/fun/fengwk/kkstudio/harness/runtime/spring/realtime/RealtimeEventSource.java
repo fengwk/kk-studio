@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.spring.redis;
+package fun.fengwk.kkstudio.harness.runtime.spring.realtime;
 
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 
@@ -8,8 +8,8 @@ import java.util.function.Consumer;
 /**
  * Transport-facing realtime event source 端口：{@link #subscribe} 是唯一抽象方法，{@link #close()} 释放整个源。
  *
- * <p>实现是 live Pub/Sub：{@link #subscribe} 之后发布的事件才会到达 {@code onEvent}，不重放历史。订阅句柄 {@link
- * AutoCloseable#close()} 后不再回调。监听器失联/异常或消息无法解码时对当前本地订阅触发 {@code onResync}， 调用方必须让客户端整体快照恢复。
+ * <p>实现是 live notification overlay：{@link #subscribe} 之后发布的事件才会到达 {@code onEvent}，不重放历史。 订阅句柄
+ * {@link AutoCloseable#close()} 后不再回调。监听器失联或消息无法解码时对本地订阅触发 {@code onResync}， 调用方必须让客户端整体快照恢复。
  */
 public interface RealtimeEventSource extends AutoCloseable {
 
