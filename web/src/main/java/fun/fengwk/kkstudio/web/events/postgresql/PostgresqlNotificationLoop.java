@@ -114,7 +114,7 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
       connection = activeConnection;
       thread = loopThread;
     }
-    closeConnection(connection);
+    abortConnection(connection);
     if (thread != null) {
       thread.interrupt();
       join(thread);
@@ -130,13 +130,27 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
       synchronized (lifecycleLock) {
         running = false;
         loopThread = null;
-        activeConnection = null;
       }
     }
   }
 
   private void listenUntilDisconnected() {
-    try (Connection connection = dataSource.getConnection()) {
+    Connection connection = null;
+    try {
+      connection = dataSource.getConnection();
+      listenOnConnection(connection);
+    } catch (SQLException | RuntimeException error) {
+      if (running) {
+        log.warn("PostgreSQL notification connection lost; reconnecting", error);
+        sleepBeforeReconnect();
+      }
+    } finally {
+      clearConnection(connection);
+    }
+  }
+
+  private void listenOnConnection(Connection connection) throws SQLException {
+    try (connection) {
       connection.setAutoCommit(true);
       if (!installConnection(connection)) {
         return;
@@ -168,13 +182,6 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
           }
         }
       }
-    } catch (SQLException | RuntimeException error) {
-      if (running) {
-        log.warn("PostgreSQL notification connection lost; reconnecting", error);
-        sleepBeforeReconnect();
-      }
-    } finally {
-      clearConnection();
     }
   }
 
@@ -188,9 +195,14 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
     }
   }
 
-  private void clearConnection() {
+  private void clearConnection(Connection connection) {
+    if (connection == null) {
+      return;
+    }
     synchronized (lifecycleLock) {
-      activeConnection = null;
+      if (activeConnection == connection) {
+        activeConnection = null;
+      }
     }
   }
 
@@ -233,14 +245,16 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
     }
   }
 
-  private static void closeConnection(Connection connection) {
+  private static void abortConnection(Connection connection) {
     if (connection == null) {
       return;
     }
     try {
-      connection.close();
-    } catch (SQLException error) {
-      log.debug("cannot close PostgreSQL notification connection", error);
+      connection.abort(Runnable::run);
+    } catch (SQLException | RuntimeException error) {
+      log.warn(
+          "cannot abort PostgreSQL notification connection; continuing with interrupt and bounded join",
+          error);
     }
   }
 

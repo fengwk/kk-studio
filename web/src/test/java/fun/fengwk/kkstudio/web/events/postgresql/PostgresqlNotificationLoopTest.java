@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.events.postgresql;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -153,15 +154,48 @@ class PostgresqlNotificationLoopTest {
     assertTrue(connection.notificationPollEntered.await(5, TimeUnit.SECONDS));
     assertEquals(3, resyncs.get());
 
+    long closeStarted = System.nanoTime();
     loop.close();
     loop.close();
 
-    // close 先撤销 running，再关闭 connection/interrupt/join；poll 竞态返回的通知不得进入 callback。
+    long closeElapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - closeStarted);
+
+    // 该回归让 fake poll 只能由 abort 解除，证明 5 秒阻塞期间 close 不再并发调用普通 close。
+    assertTrue(closeElapsedMillis < 1_000, "close must not wait for the notification poll timeout");
+    assertTrue(connection.abortCalled.get());
     assertTrue(connection.closed.get());
     assertTrue(connection.notificationPollReturned.await(5, TimeUnit.SECONDS));
+    assertSame(connection.loopThread.get(), connection.closeThread.get());
     assertEquals(0, notifications.get());
     assertFalse(loop.isRunning());
     assertThrows(IllegalStateException.class, loop::start);
+  }
+
+  @Test
+  void abortFailureStillInterruptsPollAndReturnsWithinBoundedJoin() throws Exception {
+    FakeConnection connection = new FakeConnection();
+    connection.failAbort.set(true);
+    PostgresqlNotificationLoop loop =
+        new PostgresqlNotificationLoop(
+            new SequencedDataSource(connection::connection),
+            handlers(ignored -> {}, () -> {}),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(1));
+
+    loop.start();
+    assertTrue(connection.notificationPollEntered.await(5, TimeUnit.SECONDS));
+
+    long closeStarted = System.nanoTime();
+    loop.close();
+    long closeElapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - closeStarted);
+
+    // abort 失败时仍必须走 interrupt + bounded join；该测试同时覆盖 abort 警告分支。
+    assertTrue(connection.abortCalled.get());
+    assertTrue(closeElapsedMillis < 1_000, "interrupt must release the fake poll promptly");
+    assertTrue(connection.notificationPollReturned.await(5, TimeUnit.SECONDS));
+    assertTrue(connection.closed.get());
+    assertSame(connection.loopThread.get(), connection.closeThread.get());
+    assertFalse(loop.isRunning());
   }
 
   @Test
@@ -404,9 +438,12 @@ class PostgresqlNotificationLoopTest {
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean postgresql = new AtomicBoolean(true);
     private final AtomicBoolean failNotificationPoll = new AtomicBoolean();
+    private final AtomicBoolean failAbort = new AtomicBoolean();
+    private final AtomicBoolean abortCalled = new AtomicBoolean();
     private final AtomicBoolean notificationOnCloseReturned = new AtomicBoolean();
     private final AtomicInteger notificationPollMillis = new AtomicInteger();
     private final AtomicReference<Thread> loopThread = new AtomicReference<>();
+    private final AtomicReference<Thread> closeThread = new AtomicReference<>();
     private final CountDownLatch notificationDelivered = new CountDownLatch(1);
     private final CountDownLatch notificationPollEntered = new CountDownLatch(1);
     private final CountDownLatch notificationPollReturned = new CountDownLatch(1);
@@ -439,6 +476,7 @@ class PostgresqlNotificationLoopTest {
                       try {
                         closePoll.await();
                       } catch (InterruptedException error) {
+                        notificationPollReturned.countDown();
                         if (notificationOnClose == null) {
                           Thread.currentThread().interrupt();
                           throw new SQLException("notification poll interrupted", error);
@@ -484,10 +522,18 @@ class PostgresqlNotificationLoopTest {
                         throw new SQLException("not a PostgreSQL wrapper");
                       }
                       case "createStatement" -> statement;
+                      case "abort" -> {
+                        abortCalled.set(true);
+                        if (failAbort.get()) {
+                          throw new SQLException("injected abort failure");
+                        }
+                        closePoll.countDown();
+                        yield null;
+                      }
                       case "close" -> {
                         closed.set(true);
+                        closeThread.set(Thread.currentThread());
                         closedLatch.countDown();
-                        closePoll.countDown();
                         yield null;
                       }
                       case "isClosed" -> closed.get();
