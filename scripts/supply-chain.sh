@@ -10,6 +10,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 NVD_SETTINGS_SERVER_ID=kk-studio-supply-chain-nvd
+NVD_DATAFEED_URL=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz
 
 MODE=
 REPORT_ROOT=
@@ -259,6 +260,7 @@ run_npm_audit() {
 run_maven_audit() {
     local output_dir="$RUN_DIR/backend-audit"
     local maven_settings_args=()
+    local nvd_source_args=()
     local maven_env=(env -u NVD_API_KEY JAVA_HOME="$JAVA_HOME_FOR_BUILD")
 
     if [[ -n "${NVD_API_KEY:-}" ]]; then
@@ -272,8 +274,9 @@ run_maven_audit() {
         fi
         maven_settings_args=(-s "$TEMP_SETTINGS_FILE" "-DnvdApiServerId=$NVD_SETTINGS_SERVER_ID")
     else
+        nvd_source_args=("-DnvdDatafeedUrl=$NVD_DATAFEED_URL")
         printf '%s\n' \
-            "NVD_API_KEY is not set; using the official no-key NVD path, which is slower and may take a long time on the first update." \
+            "NVD_API_KEY is not set; using the official NVD JSON 2.0 data feed, which is slower and may take a long time on the first update." \
             | tee "$RUN_DIR/logs/nvd-mode.log"
     fi
 
@@ -284,6 +287,7 @@ run_maven_audit() {
         -Ddependency-check.skip=false \
         -DskipTests \
         "-Dsupply-chain.report.directory=$output_dir" \
+        "${nvd_source_args[@]}" \
         "${maven_settings_args[@]}" \
         verify >"$RUN_DIR/logs/maven-audit.log" 2>&1
     then
