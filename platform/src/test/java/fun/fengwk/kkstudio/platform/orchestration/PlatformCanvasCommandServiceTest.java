@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
@@ -45,6 +46,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -73,6 +75,7 @@ public class PlatformCanvasCommandServiceTest extends PostgresSpringTestSupport 
   @Autowired private CanvasQueryService queryService;
   @Autowired private CanvasResourceRepository resourceRepository;
   @Autowired private CanvasFunctionRunRepository runRepository;
+  @Autowired private CanvasFunctionWorkStore functionWorkStore;
 
   @Test
   void createListSnapshotAndTextUpdateKeepResourceIdentity() {
@@ -568,19 +571,24 @@ public class PlatformCanvasCommandServiceTest extends PostgresSpringTestSupport 
         0,
         uuid("fn"),
         new CanvasCommand.CreateFunctionNode(nodeId, "fn", "m", FUNCTION_CONFIG, T));
-    runRepository.insertRunning(
+    runRepository.insertReady(
         new CanvasFunctionRun(
             nodeId,
             UUID.randomUUID(),
-            CanvasFunctionRunStatus.RUNNING,
+            CanvasFunctionRunStatus.READY,
+            0,
+            Instant.now(),
+            null,
+            null,
             "QUEUED",
             "{\"stage\":\"QUEUED\"}",
             null,
+            Instant.now(),
             Instant.now()));
 
     CanvasSnapshot snapshot = snapshot(canvas);
     assertNotNull(node(snapshot, nodeId).run());
-    assertEquals(CanvasFunctionRunStatus.RUNNING, node(snapshot, nodeId).run().status());
+    assertEquals(CanvasFunctionRunStatus.READY, node(snapshot, nodeId).run().status());
     assertEquals(1L, snapshot.document().version());
   }
 
@@ -637,15 +645,23 @@ public class PlatformCanvasCommandServiceTest extends PostgresSpringTestSupport 
             Instant.now());
     resourceRepository.add(oldResource);
     resourceRepository.add(newResource);
-    runRepository.insertRunning(
+    runRepository.insertReady(
         new CanvasFunctionRun(
             nodeId,
             requestId,
-            CanvasFunctionRunStatus.RUNNING,
+            CanvasFunctionRunStatus.READY,
+            0,
+            Instant.now(),
+            null,
+            null,
             "QUEUED",
             "{\"stage\":\"QUEUED\"}",
             null,
+            Instant.now(),
             Instant.now()));
+    functionWorkStore
+        .claimNext(Instant.now(), Duration.ofSeconds(30), "snapshot-" + suffix)
+        .orElseThrow();
 
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try (Connection updater = PostgresSchemaSupport.newConnection()) {
@@ -709,6 +725,9 @@ public class PlatformCanvasCommandServiceTest extends PostgresSpringTestSupport 
             set status = 'SUCCEEDED',
                 state_json = cast(? as jsonb),
                 error = null,
+                available_at = null,
+                lease_token = null,
+                lease_until = null,
                 updated_at = clock_timestamp()
             where node_id = ? and request_id = ? and status = 'RUNNING'
             """)) {

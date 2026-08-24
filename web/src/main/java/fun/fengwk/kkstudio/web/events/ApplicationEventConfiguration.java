@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.events;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
@@ -60,6 +61,7 @@ public class ApplicationEventConfiguration {
   public PostgresqlNotificationLoop postgresqlNotificationLoop(
       DataSource dataSource,
       HarnessWorkDispatcher dispatcher,
+      CanvasFunctionDispatcher canvasFunctionDispatcher,
       ThreadVersionHub threadVersionHub,
       CanvasVersionHub canvasVersionHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
@@ -71,6 +73,10 @@ public class ApplicationEventConfiguration {
         List.of(
             new PostgresqlNotificationHandler(
                 "harness_runtime_work", ignored -> dispatcher.wake(), dispatcher::wake),
+            new PostgresqlNotificationHandler(
+                "canvas_function_work",
+                ignored -> canvasFunctionDispatcher.wake(),
+                canvasFunctionDispatcher::wake),
             new PostgresqlNotificationHandler(
                 ThreadVersionHub.CHANNEL,
                 threadVersionHub::onNotification,

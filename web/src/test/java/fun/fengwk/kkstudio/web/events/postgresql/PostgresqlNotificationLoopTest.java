@@ -33,6 +33,7 @@ import java.util.logging.Logger;
 class PostgresqlNotificationLoopTest {
 
   private static final String WORK_CHANNEL = "harness_runtime_work";
+  private static final String CANVAS_FUNCTION_WORK_CHANNEL = "canvas_function_work";
   private static final String THREAD_CHANNEL = "harness_thread_version";
   private static final String CANVAS_CHANNEL = "canvas_version";
 
@@ -43,11 +44,13 @@ class PostgresqlNotificationLoopTest {
     connection.notifications.add(
         new PGNotification[] {
           notification(WORK_CHANNEL, ""),
+          notification(CANVAS_FUNCTION_WORK_CHANNEL, ""),
           notification(THREAD_CHANNEL, "thread:1"),
           notification(CANVAS_CHANNEL, "canvas:1")
         });
     SequencedDataSource dataSource = new SequencedDataSource(connection::connection);
     AtomicInteger workNotifications = new AtomicInteger();
+    AtomicInteger canvasFunctionWorkNotifications = new AtomicInteger();
     AtomicInteger threadNotifications = new AtomicInteger();
     AtomicInteger canvasNotifications = new AtomicInteger();
     AtomicInteger threadResyncs = new AtomicInteger();
@@ -65,6 +68,10 @@ class PostgresqlNotificationLoopTest {
                     () -> {
                       throw new IllegalStateException("injected work resync failure");
                     }),
+                new PostgresqlNotificationHandler(
+                    CANVAS_FUNCTION_WORK_CHANNEL,
+                    ignored -> canvasFunctionWorkNotifications.incrementAndGet(),
+                    () -> {}),
                 new PostgresqlNotificationHandler(
                     THREAD_CHANNEL,
                     ignored -> threadNotifications.incrementAndGet(),
@@ -85,11 +92,16 @@ class PostgresqlNotificationLoopTest {
     // 三个 LISTEN 在同一个 connection 上完成；失败 handler 不阻断后续 resync 或通知。
     assertEquals(1, dataSource.connectionAttempts.get());
     assertEquals(
-        List.of("LISTEN " + WORK_CHANNEL, "LISTEN " + THREAD_CHANNEL, "LISTEN " + CANVAS_CHANNEL),
+        List.of(
+            "LISTEN " + WORK_CHANNEL,
+            "LISTEN " + CANVAS_FUNCTION_WORK_CHANNEL,
+            "LISTEN " + THREAD_CHANNEL,
+            "LISTEN " + CANVAS_CHANNEL),
         connection.executedSql);
     assertTrue(connection.autoCommit.get());
     assertEquals(10, connection.notificationPollMillis.get());
     assertEquals(1, workNotifications.get());
+    assertEquals(1, canvasFunctionWorkNotifications.get());
     assertEquals(1, threadNotifications.get());
     assertEquals(1, canvasNotifications.get());
     assertEquals(1, threadResyncs.get());

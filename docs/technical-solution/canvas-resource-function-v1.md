@@ -125,12 +125,13 @@ configJson
 每个 Function Node 只有一行当前/最后 Run：
 
 ```text
-nodeId, requestId, status, stateJson, error?, updatedAt
+nodeId, requestId, status, attempt, availableAt?, leaseToken?, leaseUntil?,
+stateJson, error?, updatedAt, createdAt
 ```
 
-状态为 `RUNNING | SUCCEEDED | FAILED | CANCELLED`。相同 requestId exact replay；不同 requestId 遇 RUNNING 冲突；终态可被新 request 覆盖。公开 DTO 只返回 `nodeId/requestId/status/stage/error/updatedAt`，不返回 `stateJson`。
+状态为 `READY | RUNNING | SUCCEEDED | FAILED | CANCELLED`。相同 requestId exact replay；不同 requestId 遇 READY/RUNNING 冲突；终态可被新 request 覆盖。公开 DTO 只返回 `nodeId/requestId/status/stage/error/updatedAt`，不返回 `stateJson`。
 
-`stateJson` 保存 versioned frozen plan、manifest、预分配 target Resource ID、stage 与 adapter checkpoint。Checkpoint 只按 `nodeId + requestId + RUNNING` CAS 更新，并在同一事务内前进 document version 与发布 node patch；任何 CAS/取消/节点消失都回滚且不发布。
+`stateJson` 保存 versioned frozen plan、manifest、预分配 target Resource ID、stage 与 adapter checkpoint。Checkpoint 与 terminal 只按 `nodeId + requestId + leaseToken + RUNNING` fencing 更新，并在同一事务内前进 document version 与发布 node patch；任何 lease/CAS/取消/节点消失都回滚且不发布。
 
 ### 2.5 INPUT/OUTPUT pin 与成功交换
 
@@ -147,7 +148,7 @@ PK `(canvas_id, node_id, request_id, role, resource_id)`。
 - 删除 source Node 时，被 pin 的 owned Resource 只 detach owner；无 pin Resource 删除并 release Blob。
 - adapter 先把 target 物化成无 owner Blob Resource。
 - success 事务先处理旧 owned Resource，再把 target attach 到 `resourceIndex=0`，最后 CAS Run 为 SUCCEEDED 并前进 version。
-- failure/cancel/迟到结果只删除仍无 owner 的 target；旧可见 Resource 保持不变。
+- failure/cancel 删除仍无 owner 的 target；旧 lease 的迟到结果不修改 Run、target 或可见 Resource。
 - 最后一个 pin 释放时，无 owner Resource 才删除并 release Blob。
 
 ### 2.6 Link 与 Group
@@ -206,7 +207,9 @@ canvas_resource
   blob_id?, name, text_content?, created_at
 
 canvas_function_run
-  node_id uuid PK, request_id uuid, status, state_json, error?, updated_at
+  node_id uuid PK, request_id uuid, status, attempt,
+  available_at?, lease_token?, lease_until?,
+  state_json, error?, updated_at, created_at
 
 canvas_function_resource_pin
   canvas_id, node_id, request_id, role, resource_id
@@ -358,6 +361,19 @@ Canvas 已绑定 Thread（同一 Session 的 THREAD target）时，只按 `clien
 
 PostgreSQL 实体与 `canvas_document.version` 是唯一事实源。
 
+- start 在锁定 document/node 的短事务中写 READY（或用新 request 替换 terminal）、创建
+  INPUT/OUTPUT pins 并前进 canvas version。`canvas_function_work` trigger 只在语句完成后仍存在
+  可立即领取的 READY 行时发送空 payload，不修改任何业务字段。
+- Canvas Function dispatcher 始终由 Spring 生命周期启动，采用 startup wake、共享
+  `PostgresqlNotificationLoop` 的 `canvas_function_work` wake/resync，以及 fixed-delay poll。
+  PostgreSQL 是唯一等待队列；进程内只有 single drain、容量令牌和固定 N 的
+  `SynchronousQueue + AbortPolicy` worker executor。
+- claim 使用 `FOR UPDATE SKIP LOCKED` 领取到期 READY 或 lease 已过期的 RUNNING，原子写
+  RUNNING、`attempt + 1` 与新 lease。worker 持有完整 ClaimedRun，并由 scheduled heartbeat
+  续租；checkpoint/terminal 必须同时匹配 requestId 与 leaseToken。续租失败、取消或 lease
+  被新实例接管后，旧 worker 只能内部取消，不能再写 checkpoint/terminal。
+- worker executor 拒绝 handoff 时，dispatcher 仅在仍持有 token 时把行延迟重排为 READY；
+  通知丢失、未来 availableAt 与过期 lease 都由 poll 恢复，不维护 in-memory task queue。
 - graph command 成功时直接在 HTTP 响应中返回 `baseVersion -> version` Patch，供发起命令的窗口即时应用。
 - Run start/cancel/checkpoint/success/failure 只推进 `canvas_document.version`，不生产或发布 Patch。
 - PostgreSQL trigger 只在 document insert/version 变化后 `NOTIFY canvas_version`，不修改 version。
@@ -433,7 +449,7 @@ MiniMax-H3 的 Prompt Agent 也使用 durable Blob Resource：Canvas manifest �
 - Attachment Pill、IME、光标/Backspace/Delete、同名/重复附件、失败重试；
 - Chat 与 Canvas ordered contents；
 - Patch projection、事件通道 Snapshot 恢复、Resource URL 渲染；
-- Function run 生命周期（start/cancel 即时投影、version 事件驱动的 Snapshot 收敛、start 失败 authoritative fallback）与 config debounce/flush；RUNNING node 无固定间隔轮询；
+- Function run 生命周期（READY/start/cancel 即时投影、version 事件驱动的 Snapshot 收敛、start 失败 authoritative fallback）与 config debounce/flush；READY/RUNNING node 无固定间隔轮询；
 - 节点尺寸、整卡拖拽、Chat 面板与窄屏布局。
 
 默认自动化不得访问付费模型；真实 GPT Image、Seedance 和 H3 提交必须显式人工开关。

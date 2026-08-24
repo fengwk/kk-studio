@@ -380,6 +380,19 @@ describe('Canvas generic generation panel', () => {
     expect(within(header as HTMLElement).getByText('Function')).toHaveClass('generation-node-kicker')
     view.unmount()
 
+    const ready = renderPanel({
+      nodeId: '9',
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999990',
+      status: 'READY',
+      stage: 'QUEUED',
+      error: null,
+      updatedAt: '2026-08-10T00:00:00Z',
+    })
+    expect(within(ready.container.querySelector('.generation-panel-head') as HTMLElement)
+      .getByText('就绪')).toHaveClass('generation-node-status', 'ready')
+    expect(screen.getByLabelText('模型')).toBeDisabled()
+    ready.unmount()
+
     const running = renderPanel({
       nodeId: '9',
       requestId: 'c9c9c9c9-9999-4999-8999-999999999991',

@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -73,7 +74,7 @@ public class CanvasFunctionRunTransactions {
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
     this.blobAccess = Objects.requireNonNull(blobAccess, "blobAccess");
-    this.clock = Objects.requireNonNull(clock, "clock");
+    this.clock = Clock.tick(Objects.requireNonNull(clock, "clock"), Duration.ofMillis(1));
   }
 
   @Transactional
@@ -93,8 +94,10 @@ public class CanvasFunctionRunTransactions {
     if (existing != null && existing.requestId().toString().equals(validatedRequestId)) {
       return new CanvasFunctionStartResult(existing, false);
     }
-    if (existing != null && existing.status() == CanvasFunctionRunStatus.RUNNING) {
-      throw conflict("another requestId is already RUNNING for this node");
+    if (existing != null
+        && (existing.status() == CanvasFunctionRunStatus.READY
+            || existing.status() == CanvasFunctionRunStatus.RUNNING)) {
+      throw conflict("another requestId is already active for this node");
     }
 
     CanvasFunctionCatalog.RegisteredModel registered = registry.require(node.modelKey());
@@ -124,30 +127,35 @@ public class CanvasFunctionRunTransactions {
     adapter.preflight(frozen);
     String stateJson = stateCodec.initial(frozen);
     Instant now = clock.instant();
-    CanvasFunctionRun running =
+    CanvasFunctionRun ready =
         new CanvasFunctionRun(
             nodeId,
             UUID.fromString(validatedRequestId),
-            CanvasFunctionRunStatus.RUNNING,
+            CanvasFunctionRunStatus.READY,
+            0,
+            now,
+            null,
+            null,
             frozen.stage(),
             stateJson,
             null,
+            now,
             now);
     if (existing != null) {
       resourceLifecycle.releaseRunPins(canvasId, nodeId, existing.requestId());
     }
-    refRepository.addAll(pins(canvasId, nodeId, running.requestId(), manifest, targetResourceId));
+    refRepository.addAll(pins(canvasId, nodeId, ready.requestId(), manifest, targetResourceId));
     boolean created;
     if (existing == null) {
-      runRepository.insertRunning(running);
+      runRepository.insertReady(ready);
       created = true;
-    } else if (runRepository.replaceTerminalWithRunning(running)) {
+    } else if (runRepository.replaceTerminalWithReady(ready)) {
       created = false;
     } else {
       throw conflict("terminal FunctionRun was replaced concurrently");
     }
     bumpVersion(document);
-    return new CanvasFunctionStartResult(running, created);
+    return new CanvasFunctionStartResult(ready, created);
   }
 
   @Transactional
@@ -166,7 +174,8 @@ public class CanvasFunctionRunTransactions {
     if (!current.requestId().toString().equals(validatedRequestId)) {
       throw conflict("requestId does not match the current FunctionRun");
     }
-    if (current.status() != CanvasFunctionRunStatus.RUNNING) {
+    if (current.status() != CanvasFunctionRunStatus.READY
+        && current.status() != CanvasFunctionRunStatus.RUNNING) {
       return current;
     }
     CanvasFunctionFrozenRun frozen = decode(current);
@@ -174,7 +183,7 @@ public class CanvasFunctionRunTransactions {
         stateCodec.checkpoint(frozen, "CANCELLED", frozen.adapterState());
     CanvasFunctionRun terminal =
         terminal(current, CanvasFunctionRunStatus.CANCELLED, cancelled, null);
-    if (!runRepository.transitionTerminal(terminal)) {
+    if (!runRepository.cancelActive(terminal)) {
       throw conflict("FunctionRun changed while cancelling");
     }
     resourceLifecycle.discardUnownedTarget(canvasId, frozen.targetResourceId());
@@ -184,19 +193,22 @@ public class CanvasFunctionRunTransactions {
 
   /**
    * Adapter checkpoint：基于当前 frozen run + stage/adapterState 生成 next state，锁定 document/node 并验证仍是同一
-   * RUNNING request，checkpoint CAS 后随 canvas version 与 node patch 在同一事务收敛。 document/node 消失、run 不再是
-   * 该请求的 RUNNING 或 CAS 失败一律以 {@link CanvasFunctionInternalCancellation} 终止 adapter，绝不把旧 run 写回。
+   * RUNNING request + leaseToken，checkpoint fencing 后随 canvas version 与 node patch 在同一事务收敛。
+   * document/node 消失、run 不再由该 claim 持有或 fencing 失败一律以 {@link CanvasFunctionInternalCancellation} 终止
+   * adapter，绝不把旧 run 写回。
    */
   @Transactional
   public CanvasFunctionFrozenRun checkpoint(
       UUID canvasId,
       UUID nodeId,
       String requestId,
+      String leaseToken,
       String stage,
       Map<String, Object> adapterState) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
     String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
+    Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(stage, "stage");
     Objects.requireNonNull(adapterState, "adapterState");
     CanvasDocument document = canvasStore.lockDocument(canvasId).orElse(null);
@@ -209,7 +221,7 @@ public class CanvasFunctionRunTransactions {
           "Canvas Function node disappeared during checkpoint");
     }
     CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
-    if (!matchesRunning(current, validatedRequestId)) {
+    if (!matchesClaim(current, validatedRequestId, leaseToken)) {
       throw new CanvasFunctionInternalCancellation(
           "FunctionRun checkpoint CAS failed because the run is no longer RUNNING");
     }
@@ -219,13 +231,19 @@ public class CanvasFunctionRunTransactions {
             current.nodeId(),
             current.requestId(),
             CanvasFunctionRunStatus.RUNNING,
+            current.attempt(),
+            null,
+            current.leaseToken(),
+            current.leaseUntil(),
             next.stage(),
             stateCodec.encode(next),
             null,
-            clock.instant());
+            clock.instant(),
+            current.createdAt());
     if (!runRepository.checkpoint(
         updated.nodeId(),
         updated.requestId(),
+        leaseToken,
         updated.stateJson(),
         updated.stage(),
         updated.updatedAt())) {
@@ -237,7 +255,8 @@ public class CanvasFunctionRunTransactions {
   }
 
   @Transactional
-  public boolean completeSuccess(CanvasFunctionFrozenRun frozen, List<UUID> orderedResourceIds) {
+  public boolean completeSuccess(
+      CanvasFunctionFrozenRun frozen, String leaseToken, List<UUID> orderedResourceIds) {
     Objects.requireNonNull(frozen, "frozen");
     if (!orderedResourceIds.equals(List.of(frozen.targetResourceId()))) {
       throw new IllegalArgumentException(
@@ -246,12 +265,10 @@ public class CanvasFunctionRunTransactions {
     CanvasDocument document = requireDocumentForUpdate(frozen.canvasId());
     NodeRecord node = canvasStore.lockNode(frozen.canvasId(), frozen.nodeId()).orElse(null);
     if (node == null || node.modelKey() == null) {
-      resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
       return false;
     }
     CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(frozen.nodeId()).orElse(null);
-    if (!matchesRunning(current, frozen.requestId().toString())) {
-      resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
+    if (!matchesClaim(current, frozen.requestId().toString(), leaseToken)) {
       return false;
     }
     CanvasResource output =
@@ -274,7 +291,7 @@ public class CanvasFunctionRunTransactions {
         stateCodec.checkpoint(frozen, "SUCCEEDED", frozen.adapterState());
     CanvasFunctionRun terminal =
         terminal(current, CanvasFunctionRunStatus.SUCCEEDED, succeeded, null);
-    if (!runRepository.transitionTerminal(terminal)) {
+    if (!runRepository.transitionTerminal(terminal, leaseToken)) {
       throw new IllegalStateException("FunctionRun success CAS failed after row lock");
     }
     bumpVersion(document);
@@ -282,11 +299,11 @@ public class CanvasFunctionRunTransactions {
   }
 
   @Transactional
-  public boolean failIfRunning(UUID nodeId, String requestId, String error) {
+  public boolean failIfRunning(UUID nodeId, String requestId, String leaseToken, String error) {
     Objects.requireNonNull(nodeId, "nodeId");
     Objects.requireNonNull(requestId, "requestId");
     CanvasFunctionRun observed = runRepository.findByNodeId(nodeId).orElse(null);
-    if (!matchesRunning(observed, requestId)) {
+    if (!matchesClaim(observed, requestId, leaseToken)) {
       return false;
     }
     CanvasFunctionFrozenRun observedFrozen = decode(observed);
@@ -296,13 +313,13 @@ public class CanvasFunctionRunTransactions {
       return false;
     }
     CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
-    if (!matchesRunning(current, requestId)) {
+    if (!matchesClaim(current, requestId, leaseToken)) {
       return false;
     }
     CanvasFunctionFrozenRun frozen = decode(current);
     CanvasFunctionFrozenRun failed = stateCodec.checkpoint(frozen, "FAILED", frozen.adapterState());
     CanvasFunctionRun terminal = terminal(current, CanvasFunctionRunStatus.FAILED, failed, error);
-    if (!runRepository.transitionTerminal(terminal)) {
+    if (!runRepository.transitionTerminal(terminal, leaseToken)) {
       throw new IllegalStateException("FunctionRun failure CAS failed after row lock");
     }
     resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
@@ -418,10 +435,15 @@ public class CanvasFunctionRunTransactions {
         current.nodeId(),
         current.requestId(),
         status,
+        current.attempt(),
+        null,
+        null,
+        null,
         frozen.stage(),
         stateCodec.encode(frozen),
         error,
-        clock.instant());
+        clock.instant(),
+        current.createdAt());
   }
 
   private CanvasDocument requireDocumentForUpdate(UUID canvasId) {
@@ -449,10 +471,11 @@ public class CanvasFunctionRunTransactions {
     throw new IllegalArgumentException("unsupported blob mediaType: " + mediaType);
   }
 
-  private static boolean matchesRunning(CanvasFunctionRun run, String requestId) {
+  private static boolean matchesClaim(CanvasFunctionRun run, String requestId, String leaseToken) {
     return run != null
         && run.status() == CanvasFunctionRunStatus.RUNNING
-        && run.requestId().toString().equals(requestId);
+        && run.requestId().toString().equals(requestId)
+        && Objects.equals(run.leaseToken(), leaseToken);
   }
 
   private static String outputName(String nodeName, CanvasResourceKind outputKind) {

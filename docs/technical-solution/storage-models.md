@@ -153,7 +153,7 @@ Provider attempt 才从 `storage_blob` 读取媒体事实并生成新鲜预签�
 | `canvas_node` | 唯一 Node 形态；name/transform/group；可选 `model_key + function_config_json` |
 | `canvas_link` | PK `(canvas_id, source_node_id, target_node_id)`；候选引用边，允许成环 |
 | `canvas_resource` | `id uuid`；nullable owner pair；`blob_id` 与 `text_content` 恰好互斥 |
-| `canvas_function_run` | PK `node_id`；当前/最后 Run，`request_id uuid` |
+| `canvas_function_run` | PK `node_id`；当前/最后 Run 与 durable work（READY/RUNNING/terminal、attempt、availableAt、lease fencing） |
 | `canvas_function_resource_pin` | PK `(canvas_id, node_id, request_id, role, resource_id)`；INPUT/OUTPUT pin；只保护 Resource 生命周期 |
 | `canvas_command_dedup` | PK `(canvas_id, command_id)`；仅 request hash（无 applied version、无 created_at） |
 

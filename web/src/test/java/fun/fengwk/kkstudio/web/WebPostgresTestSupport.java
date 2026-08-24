@@ -8,7 +8,10 @@ import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -29,6 +32,8 @@ public abstract class WebPostgresTestSupport {
 
   private static final String FLYWAY_DISABLED = "false";
   private static final String WORKERS_DISABLED = "false";
+
+  @MockitoBean private CanvasFunctionDispatcher canvasFunctionDispatcher;
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =

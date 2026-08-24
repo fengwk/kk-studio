@@ -13,17 +13,19 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 
 import java.io.InputStream;
+import java.time.Clock;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 单个 frozen run 的受限执行上下文。
  *
  * <p>checkpoint 委托给 {@link CanvasFunctionRunTransactions} 的短事务入口：冻结 run 的 stage/adapterState 前进与
- * canvas version + node patch 在同一事务边界收敛；CAS/节点消失/取消抛 {@link CanvasFunctionInternalCancellation} 终止
- * adapter，失败时不更新本地 current（绝不写回旧 run）。
+ * canvas version + node patch 在同一事务边界收敛；lease fencing/节点消失/取消抛 {@link
+ * CanvasFunctionInternalCancellation} 终止 adapter，失败时不更新本地 current（绝不写回旧 run）。
  */
 final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutionContext {
 
@@ -31,6 +33,9 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
   private final CanvasFunctionRunTransactions transactions;
   private final CanvasFunctionBlobAccess blobAccess;
   private final CanvasResourceMaterializer materializer;
+  private final Clock clock;
+  private final ClaimedRun claim;
+  private final AtomicBoolean ownershipLost;
   private final AtomicReference<CanvasFunctionFrozenRun> current;
 
   CanvasFunctionExecutionContextImpl(
@@ -38,10 +43,16 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
       CanvasFunctionRunTransactions transactions,
       CanvasFunctionBlobAccess blobAccess,
       ObjectProvider<CanvasResourceMaterializer> materializers,
+      Clock clock,
+      ClaimedRun claim,
+      AtomicBoolean ownershipLost,
       CanvasFunctionFrozenRun frozen) {
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.blobAccess = Objects.requireNonNull(blobAccess, "blobAccess");
+    this.clock = Objects.requireNonNull(clock, "clock");
+    this.claim = Objects.requireNonNull(claim, "claim");
+    this.ownershipLost = Objects.requireNonNull(ownershipLost, "ownershipLost");
     materializer =
         Objects.requireNonNull(
             materializers.getIfAvailable(),
@@ -57,6 +68,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
             frozen.canvasId(),
             frozen.nodeId(),
             frozen.requestId().toString(),
+            claim.leaseToken(),
             Objects.requireNonNull(stage, "stage"),
             Objects.requireNonNull(adapterState, "adapterState"));
     current.set(next);
@@ -64,13 +76,18 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
 
   @Override
   public boolean isRunning() {
+    if (ownershipLost.get()) {
+      return false;
+    }
     CanvasFunctionFrozenRun frozen = current.get();
     return runRepository
         .findByNodeId(frozen.nodeId())
         .filter(
             run ->
                 run.status() == CanvasFunctionRunStatus.RUNNING
-                    && run.requestId().equals(frozen.requestId()))
+                    && run.requestId().equals(frozen.requestId())
+                    && Objects.equals(run.leaseToken(), claim.leaseToken())
+                    && run.leaseUntil().isAfter(clock.instant()))
         .isPresent();
   }
 
