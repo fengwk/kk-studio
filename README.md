@@ -47,12 +47,31 @@ env JAVA_HOME=$JAVA_HOME_21 mvn test
 cd frontend && npm test && npm run lint && npm run build
 ```
 
-供应链质量门禁（显式在线扫描，报告见
-[技术方案](docs/technical-solution/supply-chain-quality-gate.md)）：
+普通 `mvn verify` 不启动联网供应链门禁，不调用 NVD、npm audit、Trivy
+或 ECR。供应链门禁是显式入口，报告见
+[技术方案](docs/technical-solution/supply-chain-quality-gate.md)：
 
 ```bash
+# 永久契约测试：不联网
+./scripts/supply-chain.sh test
+
+# 依赖 SBOM / audit：按命令需要在线源
+./scripts/supply-chain.sh sbom
+./scripts/supply-chain.sh audit
+
+# 构建并扫描当前 app / daemon 镜像：需要 Docker 和网络，或已有 Trivy DB cache
+./scripts/supply-chain.sh image
+
+# sbom + dependency audit + image：需要 Docker 和网络，或已有 Trivy DB cache
 ./scripts/supply-chain.sh all
 ```
+
+`image` / `all` 默认使用具名 Docker volume `kk-studio-trivy-cache` 保存
+Trivy 数据库；数据库已缓存时可设置
+`TRIVY_SKIP_DB_UPDATE=true` 离线复用。应用与 daemon 镜像标签可分别通过
+`SUPPLY_CHAIN_APP_IMAGE` 和 `SUPPLY_CHAIN_DAEMON_IMAGE` 覆盖。门禁只扫描
+漏洞，不上传密钥、不 push 镜像；失败报告保留在 gitignored 的
+`reports/supply-chain/` 下。
 
 完整应用 Fat JAR（包含 React 静态资源）：
 

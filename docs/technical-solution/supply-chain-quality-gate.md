@@ -1,28 +1,29 @@
 # 供应链质量门禁
 
-本文档描述 `kk-studio` 当前生效的后端、前端 SBOM 与已知漏洞扫描入口。普通构建与显式在线门禁分离，报告是每次执行的可复核事实。
+本文档描述 `kk-studio` 当前生效的后端、前端 SBOM、依赖审计和运行时镜像漏洞扫描入口。普通构建与显式在线门禁分离，报告是每次执行的可复核事实。
 
 ## 入口与边界
 
-普通构建保持离线安全边界：
+普通构建保持离线供应链门禁边界：
 
 ```bash
 env JAVA_HOME=$JAVA_HOME_21 mvn verify
 ```
 
-根 `pom.xml` 中的 `supply-chain` profile 没有自动激活，CycloneDX 与 Dependency-Check 只在显式选择该 profile 时解析和执行。因此普通 `mvn verify` 不依赖 NVD、OSS Index 或其他在线漏洞源。
+根 `pom.xml` 中的 `supply-chain` profile 没有自动激活，CycloneDX 与 Dependency-Check 只在显式选择该 profile 时解析和执行。因此普通 `mvn verify` 不调用 NVD、OSS Index、npm audit、Trivy 或 ECR；需要完整的本地构建依赖缓存才能完全不访问依赖仓库。
 
 质量门禁统一通过以下入口调用：
 
 ```bash
 ./scripts/supply-chain.sh sbom
 ./scripts/supply-chain.sh audit
+./scripts/supply-chain.sh image
 ./scripts/supply-chain.sh all
 ./scripts/supply-chain.sh test
 ./scripts/supply-chain.sh help
 ```
 
-`all` 总是先生成 SBOM，再执行审计；即使前一步失败，也会继续执行审计以保留更多诊断产物。`test` 只运行仓库内永久的脚本契约测试，不访问 NVD、npm audit 或 Maven 在线源。
+`all` 总是先生成 SBOM，再执行依赖审计，最后构建并扫描 app / daemon 镜像；即使前一步失败，也会继续执行后续步骤以保留更多诊断产物。`test` 只运行仓库内永久的脚本契约测试，不访问 NVD、npm audit、Maven 在线源、Docker registry 或 ECR。
 
 ## Maven profile
 
@@ -78,6 +79,45 @@ Dependency-Check 以 NVD 为主要漏洞数据源，首次更新可能需要较�
 
 未设置 `NVD_API_KEY` 时，脚本会明确提示使用官方 NVD data feed 的慢速路径。NVD、Maven Central 或 npm registry 等在线源不可用、超时、返回错误，或者工具未能生成完整报告时，门禁保持 `FAIL` 并保留本次报告；不得依据缺失数据生成 `PASS`。
 
+## 运行时镜像扫描
+
+`image` 命令从当前源码分别构建以下两个镜像，不执行 `docker push`：
+
+| 镜像 | Dockerfile | 默认标签 | 覆盖变量 |
+| --- | --- | --- | --- |
+| App | `deploy/local/Dockerfile` | `kk-studio-app:supply-chain` | `SUPPLY_CHAIN_APP_IMAGE` |
+| Daemon | `deploy/reliability/daemon.Dockerfile` | `kk-studio-daemon:supply-chain` | `SUPPLY_CHAIN_DAEMON_IMAGE` |
+
+镜像构建使用源码根目录作为 context，`.dockerignore` 排除密钥和凭证文件。运行时阶段每次构建都会先执行非交互 `apt-get upgrade --yes`，再安装运行时包并清理 apt lists，以吸收 Ubuntu security updates；builder 阶段不执行这项升级。Daemon 的 Node runtime stage 还固定刷新 npm 及其已知受影响的 bundled packages，保持 daemon 的 Node/npm 工具契约。
+
+扫描器固定为 Trivy `0.74.0` 的 immutable image：
+
+```text
+aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+```
+
+Trivy 使用具名 volume `kk-studio-trivy-cache`（可通过
+`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME` 覆盖），并固定从以下仓库更新数据库：
+
+```text
+public.ecr.aws/aquasecurity/trivy-db:2
+public.ecr.aws/aquasecurity/trivy-java-db:1
+```
+
+默认扫描会在线更新数据库。已有完整缓存时，设置
+`TRIVY_SKIP_DB_UPDATE=true`，脚本会同时传递
+`--skip-db-update --skip-java-db-update --offline-scan`；缓存不完整时仍然
+`FAIL`。如果 HTTP(S) proxy 的主机是 `127.0.0.1`、`localhost` 或 `::1`，
+扫描容器自动使用 `--network host`，并以只包含变量名的 `--env HTTP_PROXY`
+等参数传入代理环境，不把代理值写入命令输出或报告。
+
+扫描只启用 Trivy vulnerability scanner，过滤 `HIGH,CRITICAL` 且忽略无修复
+版本的结果；Trivy 非零退出、JSON 缺失/不可解析，或二次解析仍发现任何
+HIGH/CRITICAL，均保持 `FAIL`。即使 Trivy 工具退出码为零，报告中的漏洞也
+不能生成 `PASS`；由于命令已使用 `--ignore-unfixed`，报告中的 HIGH/CRITICAL
+即代表可修复项。App 与 Daemon 各自生成 JSON 报告，summary 同时记录扫描
+状态、image id、image digest 和 Trivy 版本。
+
 ## 报告
 
 默认报告根目录为 `reports/supply-chain`，也可以指定绝对路径或相对仓库根的路径：
@@ -97,6 +137,9 @@ reports/supply-chain/
 │   ├── backend-audit/dependency-check-report.html
 │   ├── backend-audit/dependency-check-report.json
 │   ├── backend-audit/dependency-check-report.sarif
+│   ├── image/app.json
+│   ├── image/daemon.json
+│   ├── image/trivy-version.json
 │   ├── logs/
 │   ├── summary.md
 │   └── summary.json
@@ -104,10 +147,13 @@ reports/supply-chain/
 └── LATEST_RUN.txt
 ```
 
-`summary.json` 记录模式、整体状态、各检查状态、产物和失败原因；`summary.md` 供人工阅读。`reports/supply-chain/` 已加入 `.gitignore`，SBOM、漏洞报告、本地缓存和临时凭证不会进入提交。
+`summary.json` 记录模式、整体状态、各检查状态、产物和失败原因；镜像检查
+额外记录 image id、image digest、扫描器 image 和版本；`summary.md` 供人工
+阅读。`reports/supply-chain/` 已加入 `.gitignore`，SBOM、漏洞报告、本地缓存
+和临时凭证不会进入提交。
 
 ## 结果语义
 
-- `PASS`：所有请求的工具都成功运行，JSON 产物可解析且非空，Dependency-Check 的三种报告均存在，且 JSON 中所有非 suppressed `vulnerabilities` 数组总数为零。
+- `PASS`：所有请求的工具都成功运行，JSON 产物可解析且非空，Dependency-Check 的三种报告均存在，且 JSON 中所有非 suppressed `vulnerabilities` 数组总数为零；镜像报告中没有 HIGH/CRITICAL。
 - `FAIL`：工具返回非零（包括任意已知漏洞命中）、在线数据源不可用、报告缺失/不可解析、报告仍包含漏洞、参数错误或报告发布失败。
 - `all` 以所有步骤的合取结果作为最终状态；`latest` 只复制真实执行结果，不把失败改写为成功。

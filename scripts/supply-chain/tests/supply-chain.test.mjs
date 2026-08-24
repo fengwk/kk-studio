@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    readdirSync,
+    rmSync,
+    writeFileSync,
+} from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -87,6 +95,83 @@ esac
     }
 }
 
+function createFakeDockerToolchain() {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-supply-chain-docker-test-'))
+    const bin = path.join(root, 'bin')
+    const callsFile = path.join(root, 'docker-calls.txt')
+    mkdirSync(bin, { recursive: true })
+
+    writeFileSync(
+        path.join(bin, 'docker'),
+        `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >>"\${FAKE_DOCKER_CALLS_FILE}"
+
+case "\${1:-}" in
+    build)
+        exit 0
+        ;;
+    image)
+        if [[ "\${2:-}" != inspect ]]; then
+            exit 2
+        fi
+        format=
+        previous=
+        for arg in "$@"; do
+            if [[ "$previous" == --format ]]; then
+                format="$arg"
+            fi
+            previous="$arg"
+        done
+        image="\${@: -1}"
+        if [[ "$format" == "{{.Id}}" ]]; then
+            if [[ "$image" == *daemon* ]]; then
+                printf '%s\\n' 'sha256:2222222222222222222222222222222222222222222222222222222222222222'
+            else
+                printf '%s\\n' 'sha256:1111111111111111111111111111111111111111111111111111111111111111'
+            fi
+        elif [[ "$image" == *daemon* ]]; then
+            printf '%s\\n' 'kk-studio-daemon@sha256:4444444444444444444444444444444444444444444444444444444444444444'
+        else
+            printf '%s\\n' 'kk-studio-app@sha256:3333333333333333333333333333333333333333333333333333333333333333'
+        fi
+        exit 0
+        ;;
+    run)
+        version=false
+        for arg in "$@"; do
+            if [[ "$arg" == version ]]; then
+                version=true
+            fi
+        done
+        if [[ "$version" == true ]]; then
+            printf '%s\\n' '{"Version":"0.74.0"}'
+        elif [[ "\${FAKE_DOCKER_REPORT_VULNERABILITY:-false}" == true ]]; then
+            printf '%s\\n' '{"SchemaVersion":2,"ArtifactName":"fake-image","Results":[{"Target":"ubuntu","Vulnerabilities":[{"VulnerabilityID":"CVE-2099-0002","PkgName":"fake-package","Severity":"HIGH","FixedVersion":"1.2.3"}]}]}'
+        else
+            printf '%s\\n' '{"SchemaVersion":2,"ArtifactName":"fake-image","Results":[]}'
+        fi
+        exit 0
+        ;;
+    *)
+        exit 2
+        ;;
+esac
+`,
+    )
+    chmodSync(path.join(bin, 'docker'), 0o755)
+
+    return {
+        root,
+        callsFile,
+        env: {
+            ...process.env,
+            PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+            FAKE_DOCKER_CALLS_FILE: callsFile,
+        },
+    }
+}
+
 function runScript(args, environment = {}) {
     return spawnSync('bash', [SCRIPT, ...args], {
         cwd: REPOSITORY_ROOT,
@@ -170,6 +255,8 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<failBuildOnCVSS>0<\/failBuildOnCVSS>/)
     assert.match(pom, /<ossIndexAnalyzerEnabled>false<\/ossIndexAnalyzerEnabled>/)
     assert.match(script, /audit --audit-level=low/)
+    assert.match(script, /sbom[\s\S]*--package-lock-only/)
+    assert.match(script, /all\)\s*\n\s*run_sbom\s*\n\s*run_audit\s*\n\s*run_image/)
     assert.doesNotMatch(pom, /nvdApiServerId|<nvdApiKey>|NVD_API_KEY/)
     const suppressionBlocks = [...suppressions.matchAll(/<suppress>([\s\S]*?)<\/suppress>/g)].map(
         match => match[1],
@@ -325,5 +412,166 @@ test('does not expose an NVD key while using the protected settings path', () =>
         assert.equal(files.some(file => readFileSync(file, 'utf8').includes(secret)), false)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+test('builds both current images and constructs a pinned proxy-aware Trivy scan', () => {
+    // Intent: the image gate must build source images, pin the scanner and keep loopback proxy values out of scanner argv.
+    const toolchain = createFakeDockerToolchain()
+    const reportRoot = path.join(toolchain.root, 'image-reports')
+    const appImage = 'example/kk-studio-app:test'
+    const daemonImage = 'example/kk-studio-daemon:test'
+    try {
+        const result = runScript(['image'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            SUPPLY_CHAIN_APP_IMAGE: appImage,
+            SUPPLY_CHAIN_DAEMON_IMAGE: daemonImage,
+            HTTP_PROXY: 'http://127.0.0.1:7890',
+            HTTPS_PROXY: '',
+            ALL_PROXY: '',
+            NO_PROXY: 'localhost,127.0.0.1',
+            http_proxy: '',
+            https_proxy: '',
+            all_proxy: '',
+            no_proxy: '',
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+        assert.doesNotMatch(result.stdout, /127\.0\.0\.1:7890/)
+        assert.doesNotMatch(result.stderr, /127\.0\.0\.1:7890/)
+
+        const calls = readFileSync(toolchain.callsFile, 'utf8')
+        assert.match(calls, /build .*deploy\/local\/Dockerfile/)
+        assert.match(calls, /build .*deploy\/reliability\/daemon\.Dockerfile/)
+        assert.match(calls, new RegExp(`--tag ${appImage}`))
+        assert.match(calls, new RegExp(`--tag ${daemonImage}`))
+        assert.doesNotMatch(calls, /docker push| push /)
+
+        const runCalls = calls
+            .split('\n')
+            .filter(line => line.startsWith('run '))
+            .join('\n')
+        assert.match(
+            runCalls,
+            /aquasec\/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969/,
+        )
+        assert.match(runCalls, /public\.ecr\.aws\/aquasecurity\/trivy-db:2/)
+        assert.match(runCalls, /public\.ecr\.aws\/aquasecurity\/trivy-java-db:1/)
+        assert.match(runCalls, /--volume \/var\/run\/docker\.sock:\/var\/run\/docker\.sock/)
+        assert.match(runCalls, /--volume kk-studio-trivy-cache:\/root\/\.cache\/trivy/)
+        assert.match(runCalls, /--network host/)
+        assert.match(runCalls, /--env HTTP_PROXY/)
+        assert.doesNotMatch(runCalls, /127\.0\.0\.1:7890/)
+        assert.match(runCalls, /--scanners vuln/)
+        assert.match(runCalls, /--ignore-unfixed/)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'PASS')
+        assert.equal(summary.checks.find(check => check.name === 'app-image-scan').status, 'PASS')
+        assert.equal(
+            summary.checks.find(check => check.name === 'daemon-image-scan').status,
+            'PASS',
+        )
+        const appScan = summary.checks.find(check => check.name === 'app-image-scan')
+        assert.equal(appScan.image, appImage)
+        assert.match(appScan.imageId, /^sha256:/)
+        assert.match(appScan.imageDigest, /@sha256:/)
+        assert.equal(appScan.scannerVersion, '0.74.0')
+        assert.equal(appScan.scannerVersionStatus, 'PASS')
+        assert.equal(existsSync(path.join(reportRoot, 'latest/image/app.json')), true)
+        assert.equal(existsSync(path.join(reportRoot, 'latest/image/daemon.json')), true)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('uses the named Trivy cache in offline mode when requested', () => {
+    // Intent: an existing cache must be usable without silently attempting a database update or network access.
+    const toolchain = createFakeDockerToolchain()
+    const reportRoot = path.join(toolchain.root, 'offline-reports')
+    try {
+        const result = runScript(['image'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            TRIVY_SKIP_DB_UPDATE: 'true',
+            HTTP_PROXY: '',
+            HTTPS_PROXY: '',
+            ALL_PROXY: '',
+            NO_PROXY: '',
+            http_proxy: '',
+            https_proxy: '',
+            all_proxy: '',
+            no_proxy: '',
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+
+        const runCalls = readFileSync(toolchain.callsFile, 'utf8')
+            .split('\n')
+            .filter(line => line.startsWith('run '))
+            .join('\n')
+        assert.match(runCalls, /--volume kk-studio-trivy-cache:\/root\/\.cache\/trivy/)
+        assert.match(runCalls, /--skip-db-update --skip-java-db-update --offline-scan/)
+        assert.doesNotMatch(runCalls, /--network host/)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('fails closed when Trivy exits zero but its JSON has a fixable vulnerability', () => {
+    // Intent: the report parser is a second independent gate and must reject findings even when the tool exit code is zero.
+    const toolchain = createFakeDockerToolchain()
+    const reportRoot = path.join(toolchain.root, 'vulnerability-image-reports')
+    try {
+        const result = runScript(['image'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_DOCKER_REPORT_VULNERABILITY: 'true',
+            HTTP_PROXY: '',
+            HTTPS_PROXY: '',
+            ALL_PROXY: '',
+            NO_PROXY: '',
+            http_proxy: '',
+            https_proxy: '',
+            all_proxy: '',
+            no_proxy: '',
+        })
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'FAIL')
+        assert.equal(
+            summary.checks.find(check => check.name === 'app-image-scan').status,
+            'FAIL',
+        )
+        assert.match(summary.failures.join('\n'), /HIGH\/CRITICAL vulnerabilities/)
+        assert.equal(existsSync(path.join(reportRoot, 'latest/image/app.json')), true)
+        assert.equal(existsSync(path.join(reportRoot, 'latest/image/daemon.json')), true)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('keeps runtime apt upgrade before install in both image Dockerfiles', () => {
+    // Intent: every runtime build must absorb Ubuntu security updates before adding runtime packages.
+    for (const dockerfile of [
+        path.join(REPOSITORY_ROOT, 'deploy/local/Dockerfile'),
+        path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile'),
+    ]) {
+        const source = readFileSync(dockerfile, 'utf8')
+        const runtime = source.slice(source.lastIndexOf('\nFROM '))
+        const updateIndex = runtime.indexOf('apt-get update')
+        const upgradeIndex = runtime.indexOf('DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes')
+        const installIndex = runtime.indexOf('apt-get install')
+        assert.notEqual(updateIndex, -1, dockerfile)
+        assert.notEqual(upgradeIndex, -1, dockerfile)
+        assert.notEqual(installIndex, -1, dockerfile)
+        assert.equal(upgradeIndex > updateIndex, true, dockerfile)
+        assert.equal(upgradeIndex < installIndex, true, dockerfile)
+        assert.match(runtime, /apt-get clean/)
+        assert.match(runtime, /rm -rf \/var\/lib\/apt\/lists\/\*/)
+        assert.match(runtime, /Ubuntu security updates/)
     }
 })

@@ -55,10 +55,13 @@ ENV LANG=C.UTF-8 \
     SERVER_PORT=8080 \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0"
 
-# Install Canvas media tools, then create a dedicated unprivileged user and
-# writable app directory. `curl` is already shipped by the JRE base image.
+# Refresh the Ubuntu base packages on every build so the runtime absorbs current
+# Ubuntu security updates before installing Canvas media tools. Then create a
+# dedicated unprivileged user and writable app directory. `curl` is already
+# shipped by the JRE base image.
 RUN set -eux; \
     apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes; \
     DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends ffmpeg; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*; \
