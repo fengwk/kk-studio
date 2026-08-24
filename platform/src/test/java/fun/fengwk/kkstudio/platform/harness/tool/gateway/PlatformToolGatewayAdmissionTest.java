@@ -2,16 +2,27 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
+import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** 验证 Tool admission 在路由副作用前拒绝，并覆盖 terminal/cancel/submit 异常释放。 */
 class PlatformToolGatewayAdmissionTest {
@@ -60,6 +71,121 @@ class PlatformToolGatewayAdmissionTest {
                     ToolGatewayTestSupport.platformRequest("call-3", descriptor)),
                 new ToolGatewayTestSupport.RecordingListener()));
     third.handle().cancel();
+  }
+
+  @Test
+  void fullCapacityRejectsBeforeFactoryPluginLookupAndRemoteInvoke() {
+    ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
+    ConcurrencyAdmission.Lease occupied = admission.tryAcquire().orElseThrow();
+    try {
+      ToolDescriptor platformDescriptor = ToolGatewayTestSupport.platformDescriptor("factory-tool");
+      AtomicInteger creates = new AtomicInteger();
+      ToolFactory factory =
+          new ToolFactory() {
+            @Override
+            public ToolDescriptor descriptor() {
+              return platformDescriptor;
+            }
+
+            @Override
+            public ToolGatewayTestSupport.FakeTool create() {
+              creates.incrementAndGet();
+              return new ToolGatewayTestSupport.FakeTool(platformDescriptor);
+            }
+          };
+      PluginCatalog pluginCatalog = Mockito.mock(PluginCatalog.class);
+      ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+      PlatformToolGateway gateway =
+          ToolGatewayTestSupport.gateway(
+              new ToolFactories(List.of(factory)),
+              pluginCatalog,
+              transport,
+              new ToolGatewayTestSupport.FakeResourceStore(),
+              new ToolGatewayTestSupport.ManualExecutor(),
+              ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+              ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
+              admission);
+
+      // 顶层容量已满：三种路由都必须在 factory/plugin/Environment/remote 副作用前确定性 Overloaded。
+      assertInstanceOf(
+          ToolGateway.Overloaded.class,
+          gateway.start(
+              ToolGatewayTestSupport.execution(
+                  ToolGatewayTestSupport.platformRequest("platform", platformDescriptor)),
+              new ToolGatewayTestSupport.RecordingListener()));
+      assertInstanceOf(
+          ToolGateway.Overloaded.class,
+          gateway.start(pluginExecution(), new ToolGatewayTestSupport.RecordingListener()));
+      assertInstanceOf(
+          ToolGateway.Overloaded.class,
+          gateway.start(
+              ToolGatewayTestSupport.execution(
+                  ToolGatewayTestSupport.environmentRequest(
+                      "environment", ToolGatewayTestSupport.ENV_A)),
+              new ToolGatewayTestSupport.RecordingListener()));
+
+      assertEquals(0, creates.get(), "full admission must not call ToolFactory.create");
+      Mockito.verifyNoInteractions(pluginCatalog);
+      assertTrue(
+          transport.invocations.isEmpty(), "full admission must not invoke remote transport");
+    } finally {
+      occupied.close();
+    }
+  }
+
+  @Test
+  void deterministicRejectReleasesTopLevelPermit() {
+    ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
+    PlatformToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            new ToolFactories(List.of()),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.ManualExecutor(),
+            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+            ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
+            admission);
+
+    ToolGateway.Rejected rejected =
+        assertInstanceOf(
+            ToolGateway.Rejected.class,
+            gateway.start(
+                ToolGatewayTestSupport.execution(
+                    ToolGatewayTestSupport.platformRequest(
+                        "missing", ToolGatewayTestSupport.platformDescriptor("missing"))),
+                new ToolGatewayTestSupport.RecordingListener()));
+
+    assertEquals(PlatformToolGateway.TOOL_NOT_FOUND_KIND, rejected.error().kind());
+    ConcurrencyAdmission.Lease recovered = admission.tryAcquire().orElseThrow();
+    recovered.close();
+  }
+
+  @Test
+  void unexpectedTopLevelFailureReleasesPermit() {
+    ToolDescriptor descriptor = ToolGatewayTestSupport.platformDescriptor("unexpected");
+    ToolFactories factories = Mockito.mock(ToolFactories.class);
+    Mockito.when(factories.find(descriptor.name(), descriptor.version()))
+        .thenThrow(new IllegalStateException("unexpected factory failure"));
+    ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
+    PlatformToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            factories,
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.ManualExecutor(),
+            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+            ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
+            admission);
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            gateway.start(
+                ToolGatewayTestSupport.execution(
+                    ToolGatewayTestSupport.platformRequest("unexpected", descriptor)),
+                new ToolGatewayTestSupport.RecordingListener()));
+    ConcurrencyAdmission.Lease recovered = admission.tryAcquire().orElseThrow();
+    recovered.close();
   }
 
   @Test
@@ -221,5 +347,18 @@ class PlatformToolGatewayAdmissionTest {
             new ToolGatewayTestSupport.RecordingListener()));
     ConcurrencyAdmission.Lease lease = admission.tryAcquire().orElseThrow();
     lease.close();
+  }
+
+  private static ToolGateway.Execution pluginExecution() {
+    ToolDescriptor descriptor = ToolGatewayTestSupport.platformDescriptor("plugin-tool");
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("plugin", descriptor.name(), "{}"),
+            new ToolBinding(
+                descriptor,
+                ToolType.PLATFORM,
+                null,
+                new PluginToolBinding("plugin", "tool", List.of())));
+    return ToolGatewayTestSupport.execution(request);
   }
 }

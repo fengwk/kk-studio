@@ -139,41 +139,9 @@ public final class PlatformToolGateway implements ToolGateway {
   /**
    * 生产与测试共用的唯一构造器。{@code busyRetryDelay} / {@code overloadRetryDelay} 在每次 Busy / Overloaded 判定时现读，
    * 由装配方决定来源——生产装配传入 SystemSettingsSnapshot 的 live suppliers（每次 start 从 {@code
-   * tool.toolGatewayBusyRetryMillis} / {@code tool.toolGatewayOverloadRetryMillis} 现读）。
+   * tool.toolGatewayBusyRetryMillis} / {@code tool.toolGatewayOverloadRetryMillis} 现读）。admission
+   * 必须由装配方或测试显式提供， 不允许以无界容量绕过执行上限。
    */
-  PlatformToolGateway(
-      ToolFactories toolFactories,
-      PluginCatalog pluginCatalog,
-      PluginBranchViewLoader pluginBranchViewLoader,
-      RemoteToolTransport remoteTransport,
-      PermissionEvaluator permissionEvaluator,
-      ToolSettingsProvider toolSettingsProvider,
-      ResourceStore resourceStore,
-      Path workdir,
-      Path environmentRoot,
-      int resourceMaxBytes,
-      ExecutorService executor,
-      Supplier<Duration> busyRetryDelay,
-      Supplier<Duration> overloadRetryDelay,
-      Clock clock) {
-    this(
-        toolFactories,
-        pluginCatalog,
-        pluginBranchViewLoader,
-        remoteTransport,
-        permissionEvaluator,
-        toolSettingsProvider,
-        resourceStore,
-        workdir,
-        environmentRoot,
-        resourceMaxBytes,
-        executor,
-        busyRetryDelay,
-        overloadRetryDelay,
-        clock,
-        new ConcurrencyAdmission(Integer.MAX_VALUE));
-  }
-
   PlatformToolGateway(
       ToolFactories toolFactories,
       PluginCatalog pluginCatalog,
@@ -250,16 +218,33 @@ public final class PlatformToolGateway implements ToolGateway {
   public StartResult start(Execution execution, Listener listener) {
     Objects.requireNonNull(execution, "execution");
     Objects.requireNonNull(listener, "listener");
-    return switch (execution.request().binding().type()) {
-      case PLATFORM -> startPlatform(execution, listener);
-      case ENVIRONMENT -> startEnvironment(execution, listener);
-    };
+    Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
+    if (acquired.isEmpty()) {
+      return new ToolGateway.Overloaded(overloadRetryDelay.get());
+    }
+    ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
+    try {
+      StartResult result =
+          switch (execution.request().binding().type()) {
+            case PLATFORM -> startPlatform(execution, listener, lease);
+            case ENVIRONMENT -> startEnvironment(execution, listener, lease);
+          };
+      if (!(result instanceof ToolGateway.Started)) {
+        lease.close();
+      }
+      return result;
+    } catch (RuntimeException | Error failure) {
+      // 顶层意外异常也必须释放本次 admission；Started 之前没有任何执行句柄可供调用方取消。
+      lease.close();
+      throw failure;
+    }
   }
 
   /** PLATFORM：ToolFactories 精确查找 + descriptor equality，然后提交 executor 执行（拒绝即 Overloaded）。 */
-  private StartResult startPlatform(Execution execution, Listener listener) {
+  private StartResult startPlatform(
+      Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
     if (execution.request().binding().plugin() != null) {
-      return startPlugin(execution, listener);
+      return startPlugin(execution, listener, lease);
     }
     ToolDescriptor bindingDescriptor = execution.request().binding().descriptor();
     Optional<Tool> found;
@@ -292,11 +277,6 @@ public final class PlatformToolGateway implements ToolGateway {
                   + bindingDescriptor.version()
                   + " no longer matches its frozen descriptor."));
     }
-    Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
-    if (acquired.isEmpty()) {
-      return new ToolGateway.Overloaded(overloadRetryDelay.get());
-    }
-    ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     ToolExecutionRequest request = request(execution, tool.descriptor());
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
@@ -351,7 +331,8 @@ public final class PlatformToolGateway implements ToolGateway {
   }
 
   /** 插件 PLATFORM Tool：按冻结 contribution owner 精确恢复，并在 externalize 前校验全部声明式 intents。 */
-  private StartResult startPlugin(Execution execution, Listener listener) {
+  private StartResult startPlugin(
+      Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
     PluginToolBinding binding = execution.request().binding().plugin();
     ContributionId id =
         new ContributionId(new PluginId(binding.pluginId()), binding.contributionLocalName());
@@ -375,11 +356,6 @@ public final class PlatformToolGateway implements ToolGateway {
               PLUGIN_BINDING_MISMATCH_KIND,
               "Plugin tool " + id + " no longer matches its frozen state access declaration."));
     }
-    Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
-    if (acquired.isEmpty()) {
-      return new ToolGateway.Overloaded(overloadRetryDelay.get());
-    }
-    ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
             listener, externalizer, descriptor.name(), execution.request().call().id(), lease);
@@ -474,7 +450,8 @@ public final class PlatformToolGateway implements ToolGateway {
    * workspacePath}）。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未 READY、心跳过期）都是确定性 Rejected；同 Environment
    * 的瞬时容量冲突是 Busy；发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
    */
-  private StartResult startEnvironment(Execution execution, Listener listener) {
+  private StartResult startEnvironment(
+      Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
     ToolDescriptor bindingDescriptor = execution.request().binding().descriptor();
     if (execution.request().binding().environment() == null) {
       // 冻结 binding 没有 Environment（分支最新 settings 未选中/被清空）：发送前确定性拒绝，
@@ -508,11 +485,6 @@ public final class PlatformToolGateway implements ToolGateway {
                   + bindingDescriptor.version()
                   + " no longer matches the daemon capability descriptor."));
     }
-    Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
-    if (acquired.isEmpty()) {
-      return new ToolGateway.Overloaded(overloadRetryDelay.get());
-    }
-    ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     ToolExecutionRequest request = request(execution, bindingDescriptor);
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(

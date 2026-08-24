@@ -75,15 +75,9 @@ public final class PlatformModelGateway implements ModelGateway {
 
   /**
    * 生产与测试共用的唯一构造器。{@code busyRetryDelay} 在每次 {@code Busy} 判定时现读，由装配方决定来源——生产装配传入
-   * SystemSettingsSnapshot 的 live supplier（每次 start 从 {@code tool.modelGatewayBusyRetryMillis} 现读）。
+   * SystemSettingsSnapshot 的 live supplier（每次 start 从 {@code tool.modelGatewayBusyRetryMillis}
+   * 现读）。admission 必须由装配方或测试显式提供， 不允许以无界容量绕过执行上限。
    */
-  PlatformModelGateway(
-      ProviderResolutionService providerResolution,
-      ExecutorService executor,
-      Supplier<Duration> busyRetryDelay) {
-    this(providerResolution, executor, busyRetryDelay, new ConcurrencyAdmission(Integer.MAX_VALUE));
-  }
-
   PlatformModelGateway(
       ProviderResolutionService providerResolution,
       ExecutorService executor,

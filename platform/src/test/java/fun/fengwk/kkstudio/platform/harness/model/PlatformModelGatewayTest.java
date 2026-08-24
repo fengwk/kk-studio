@@ -956,7 +956,10 @@ class PlatformModelGatewayTest {
         IllegalStateException.class,
         () ->
             new PlatformModelGateway(
-                new Resolution(ignored -> null), new InlineExecutor(), BUSY_RETRY_DELAY));
+                new Resolution(ignored -> null),
+                new InlineExecutor(),
+                BUSY_RETRY_DELAY,
+                new ConcurrencyAdmission(Integer.MAX_VALUE)));
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -969,7 +972,8 @@ class PlatformModelGatewayTest {
                     TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>(1),
                     new ThreadPoolExecutor.CallerRunsPolicy()),
-                BUSY_RETRY_DELAY));
+                BUSY_RETRY_DELAY,
+                new ConcurrencyAdmission(Integer.MAX_VALUE)));
   }
 
   @Test
@@ -986,7 +990,8 @@ class PlatformModelGatewayTest {
                     TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>(1),
                     new ThreadPoolExecutor.DiscardPolicy()),
-                BUSY_RETRY_DELAY));
+                BUSY_RETRY_DELAY,
+                new ConcurrencyAdmission(Integer.MAX_VALUE)));
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -999,7 +1004,8 @@ class PlatformModelGatewayTest {
                     TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>(1),
                     new ThreadPoolExecutor.DiscardOldestPolicy()),
-                BUSY_RETRY_DELAY));
+                BUSY_RETRY_DELAY,
+                new ConcurrencyAdmission(Integer.MAX_VALUE)));
   }
 
   @Test
