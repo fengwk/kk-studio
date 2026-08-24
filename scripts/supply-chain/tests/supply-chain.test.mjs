@@ -10,6 +10,13 @@ import { fileURLToPath } from 'node:url'
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/supply-chain.sh')
 const POM = path.join(REPOSITORY_ROOT, 'pom.xml')
+const WEB_POM = path.join(REPOSITORY_ROOT, 'web/pom.xml')
+const SUPPRESSIONS = path.join(
+    REPOSITORY_ROOT,
+    'config/supply-chain/dependency-check-suppressions.xml',
+)
+const NVD_DATAFEED_ARGUMENT =
+    '-DnvdDatafeedUrl=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz'
 
 function createFakeToolchain() {
     const root = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-supply-chain-test-'))
@@ -28,6 +35,9 @@ function createFakeToolchain() {
         path.join(bin, 'mvn'),
         `#!/usr/bin/env bash
 set -euo pipefail
+if [[ -n "\${FAKE_MVN_ARGS_FILE:-}" ]]; then
+    printf '%s\\n' "$@" >"$FAKE_MVN_ARGS_FILE"
+fi
 report_dir=
 for arg in "$@"; do
     case "$arg" in
@@ -113,7 +123,37 @@ test('keeps online plugins inside the explicitly activated root-only profile', (
 test('locks tool versions, policy thresholds, and secret indirection', () => {
     // Intent: policy changes must be reviewable as a small static diff and keys must stay out of POM/CLI text.
     const pom = readFileSync(POM, 'utf8')
+    const webPom = readFileSync(WEB_POM, 'utf8')
     const script = readFileSync(SCRIPT, 'utf8')
+    const suppressions = readFileSync(SUPPRESSIONS, 'utf8')
+    assert.match(pom, /<spring-boot\.version>3\.5\.16<\/spring-boot\.version>/)
+    assert.match(pom, /<jackson\.version>2\.22\.1<\/jackson\.version>/)
+    assert.match(pom, /<netty\.version>4\.1\.137\.Final<\/netty\.version>/)
+    assert.match(pom, /<log4j\.version>2\.26\.1<\/log4j\.version>/)
+    assert.match(pom, /<tomcat\.version>10\.1\.59<\/tomcat\.version>/)
+    assert.match(pom, /<postgresql\.version>42\.7\.13<\/postgresql\.version>/)
+    assert.match(pom, /<opennlp\.version>2\.5\.11<\/opennlp\.version>/)
+    assert.match(
+        pom,
+        /<artifactId>spring-boot-dependencies<\/artifactId>[\s\S]*<version>\$\{spring-boot\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
+    )
+    assert.match(
+        pom,
+        /<artifactId>jackson-bom<\/artifactId>[\s\S]*<version>\$\{jackson\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
+    )
+    assert.match(
+        pom,
+        /<artifactId>netty-bom<\/artifactId>[\s\S]*<version>\$\{netty\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
+    )
+    assert.match(
+        pom,
+        /<artifactId>log4j-bom<\/artifactId>[\s\S]*<version>\$\{log4j\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
+    )
+    assert.match(
+        webPom,
+        /<artifactId>spring-boot-maven-plugin<\/artifactId>[\s\S]*<version>\$\{spring-boot\.version\}<\/version>/,
+    )
+    assert.doesNotMatch(webPom, /<version>3\.5\.0<\/version>/)
     assert.match(pom, /<artifactId>cyclonedx-maven-plugin<\/artifactId>[\s\S]*<version>2\.9\.3<\/version>/)
     assert.match(pom, /<artifactId>dependency-check-maven<\/artifactId>[\s\S]*<version>13\.0\.0<\/version>/)
     assert.match(pom, /<schemaVersion>1\.6<\/schemaVersion>/)
@@ -121,8 +161,17 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<format>HTML<\/format>[\s\S]*<format>JSON<\/format>[\s\S]*<format>SARIF<\/format>/)
     assert.match(pom, /<failBuildOnCVSS>7<\/failBuildOnCVSS>/)
     assert.match(pom, /<ossIndexAnalyzerEnabled>false<\/ossIndexAnalyzerEnabled>/)
-    assert.match(pom, /<nvdApiServerId>kk-studio-supply-chain-nvd<\/nvdApiServerId>/)
-    assert.doesNotMatch(pom, /<nvdApiKey>|NVD_API_KEY/)
+    assert.doesNotMatch(pom, /nvdApiServerId|<nvdApiKey>|NVD_API_KEY/)
+    const suppressionBlocks = [...suppressions.matchAll(/<suppress>([\s\S]*?)<\/suppress>/g)].map(
+        match => match[1],
+    )
+    assert.equal(suppressionBlocks.length, 7)
+    for (const block of suppressionBlocks) {
+        assert.match(block, /<notes>[\s\S]+<\/notes>/)
+        assert.match(block, /<cve>CVE-\d{4}-\d+<\/cve>/)
+        assert.match(block, /<gav>[^<*?]+:[^<*?]+:[^<*?]+<\/gav>/)
+        assert.doesNotMatch(block, /<cpe>|<cvss>|regex\s*=/)
+    }
     assert.match(script, /chmod 600/)
     assert.match(script, /nvdApiServerId/)
     assert.match(script, /nvdDatafeedUrl/)
@@ -157,20 +206,46 @@ test('honors a custom report root and publishes timestamped and latest reports',
     }
 })
 
+test('uses the official NVD feed without a server id when no key is set', () => {
+    // Intent: the no-key path must not inherit a missing Maven server credential.
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'feed-reports')
+    const argsFile = path.join(toolchain.root, 'maven-args.txt')
+    try {
+        const result = runScript(['audit'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_MVN_ARGS_FILE: argsFile,
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+        const args = readFileSync(argsFile, 'utf8').split('\n').filter(Boolean)
+        assert.equal(args.includes(NVD_DATAFEED_ARGUMENT), true)
+        assert.equal(args.some(arg => arg.includes('nvdApiServerId')), false)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
 test('does not expose an NVD key while using the protected settings path', () => {
     // Intent: a provided key may authenticate the scan, but it must not enter CLI arguments, logs, or reports.
     const toolchain = createFakeToolchain()
     const reportRoot = path.join(toolchain.root, 'key-reports')
+    const argsFile = path.join(toolchain.root, 'maven-args.txt')
     const secret = 'test-nvd-key-must-not-leak'
     try {
         const result = runScript(['audit'], {
             ...toolchain.env,
             SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
             NVD_API_KEY: secret,
+            FAKE_MVN_ARGS_FILE: argsFile,
         })
         assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
         assert.equal(result.stdout.includes(secret), false)
         assert.equal(result.stderr.includes(secret), false)
+        const args = readFileSync(argsFile, 'utf8').split('\n').filter(Boolean)
+        assert.equal(args.includes('-DnvdApiServerId=kk-studio-supply-chain-nvd'), true)
+        assert.equal(args.includes('-s'), true)
+        assert.equal(args.some(arg => arg.includes(secret)), false)
 
         const files = []
         const visit = directory => {
