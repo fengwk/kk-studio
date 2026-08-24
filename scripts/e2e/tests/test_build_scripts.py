@@ -46,6 +46,21 @@ class TestBuildScripts(unittest.TestCase):
         self.assertIn("path.join(REPO_ROOT, 'runtime', 'e2e')", matrix)
         self.assertIn("path.join(REPO_ROOT, 'runtime', 'dev')", matrix)
 
+    def test_canvas_function_rebuild_loads_e2e_and_canvas_test_seeds(self):
+        """The documented free Function command must enable S3 on a fresh database."""
+        script = (REPOSITORY_ROOT / "scripts/e2e.sh").read_text()
+
+        self.assertIn('if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then', script)
+        self.assertIn(
+            "classpath:db/migration,classpath:db/seed/e2e,"
+            "classpath:db/seed/canvas-test",
+            script,
+        )
+        self.assertIn(
+            "SPRING_FLYWAY_LOCATIONS=${SPRING_FLYWAY_LOCATIONS:-",
+            script,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
