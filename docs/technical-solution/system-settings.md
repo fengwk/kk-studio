@@ -64,7 +64,7 @@ HTTP wire 上的 Java `Long` 使用非负十进制字符串，`Integer` 使用 J
 aiRuntime 的 compaction / retry / subagent 决策点经
 `CompactionConfigProvider` / `InvocationRetryPolicyProvider` / `SubagentConfigProvider` 每次现读快照，
 无需重启；同一 ModelInvocation 的 retry 仍重放冻结 spec，live 只影响新的 retry 判定、新的压缩规划与新的 task spawn。
-`tool.gateway`、`environment.runtime` 与 `storageMedia.canvasMedia` 同样在决策点现读快照：新的 Busy/Overloaded 延迟、新的 heartbeat/目录超时/资源上限、新的 ffmpeg/ffprobe 超时与缩略图预算。进行中的请求仍使用开始时的值。 Daemon WebSocket 单帧上限是部署配置 `kk-studio.harness.environment-gateway.max-message-bytes`（`${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES:16777216}`），不进 SystemSettings。
+`tool.gateway`、`environment.runtime` 与 `storageMedia.canvasMedia` 同样在决策点现读快照：新的 Busy/Overloaded 延迟、新的 heartbeat/目录超时/资源上限、新的 ffmpeg/ffprobe 超时与缩略图预算。进行中的请求仍使用开始时的值。Daemon WebSocket 的入站单帧上限、出站帧数/UTF-8 字节上限与发送超时是部署配置 `kk-studio.harness.environment-gateway.max-message-bytes/queue-capacity/max-bytes/send-timeout`，不进 SystemSettings。
 其余 restart-required 配置 bean 仍共享装配期读取的同一快照值，DB 变更需重启生效。
 `SystemSettingsToolSettingsProvider` 是运行期按调用现读通道：permission 在下一次权限预检时生效，
 defaultYolo 在下一次 Chat 创建读取默认值时生效。

@@ -61,6 +61,11 @@ kk-studio:
     environment-gateway:
       # Daemon WebSocket 单帧上限（字节）。协议安全边界，不进 SystemSettings。
       max-message-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES:16777216}
+      # 每连接出站待发送帧数与 UTF-8 总字节上限（均包含正在发送的帧）。
+      queue-capacity: ${KK_STUDIO_ENVIRONMENT_GATEWAY_QUEUE_CAPACITY:256}
+      max-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES:16777216}
+      # 单帧发送超时；慢连接按传输失败关闭，不阻塞 Gateway。
+      send-timeout: ${KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT:10s}
   canvas:
     function:
       runtime:

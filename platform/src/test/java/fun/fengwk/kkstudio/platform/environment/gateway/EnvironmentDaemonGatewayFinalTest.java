@@ -481,6 +481,90 @@ class EnvironmentDaemonGatewayFinalTest {
     assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
   }
 
+  /** 阻塞的单连接 enqueue 不持有 Gateway 全局 monitor；其它连接仍可完成 HELLO/READY 绑定。 */
+  @Test
+  void blockedConnectionSendDoesNotBlockOtherConnectionBind() throws Exception {
+    Fixture fixture = fixture();
+    FakeConnection blocked = fixture.connectReady("connection-blocked-send");
+    blocked.blockNextSend = true;
+    AtomicReference<Throwable> invokeError = new AtomicReference<>();
+    Thread invokeThread =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    fixture.gateway.invoke(
+                        ENVIRONMENT, request(fixture.descriptor), new RecordingListener());
+                  } catch (Throwable error) {
+                    invokeError.set(error);
+                  }
+                });
+    try {
+      assertTrue(blocked.sendEntered.await(5, TimeUnit.SECONDS));
+
+      FakeConnection other = new FakeConnection("connection-other-bind");
+      fixture.gateway.open(other);
+      fixture.gateway.receive(other.connectionId(), hello(0, OTHER_ENVIRONMENT_NAME));
+      fixture.gateway.receive(other.connectionId(), ready(1, OTHER_ENVIRONMENT_NAME));
+      assertTrue(
+          fixture.environmentRegistry.isReady(
+              OTHER_ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    } finally {
+      blocked.allowSend.countDown();
+      invokeThread.join(TimeUnit.SECONDS.toMillis(5));
+    }
+    assertFalse(invokeThread.isAlive());
+    assertNull(invokeError.get());
+  }
+
+  /** CANCEL 入队拒绝不能静默丢帧：连接关闭，active invocation 立即按 uncertain 失败。 */
+  @Test
+  void rejectedCancelClosesConnectionAndFailsActiveInvocation() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-cancel-rejected");
+    RecordingListener listener = new RecordingListener();
+    ToolExecutionHandle handle =
+        fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
+    connection.failNextSend = true;
+
+    handle.cancel();
+
+    assertTrue(connection.closed);
+    assertTrue(listener.error instanceof RemoteToolSendUncertainException);
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+  }
+
+  /** LIST_DIRECTORY 入队拒绝关闭连接，并立即以 ENVIRONMENT_UNAVAILABLE 完成 pending。 */
+  @Test
+  void rejectedDirectoryFrameClosesConnectionAndFailsPending() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-directory-rejected");
+    connection.failNextSend = true;
+
+    EnvironmentDirectoryListResult result =
+        fixture.gateway.listDirectory(ENVIRONMENT_NAME, ".", Duration.ofSeconds(5)).join();
+
+    assertTrue(connection.closed);
+    assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, result);
+    assertEquals(
+        EnvironmentDirectoryFailureCode.ENVIRONMENT_UNAVAILABLE,
+        ((EnvironmentDirectoryListResult.Failed) result).code());
+  }
+
+  /** WELCOME 入队拒绝同样使刚绑定的连接整体失败，不能留下 CONNECTING registry 条目。 */
+  @Test
+  void rejectedWelcomeClosesConnectionAndRemovesBinding() {
+    Fixture fixture = fixture();
+    FakeConnection connection = new FakeConnection("connection-welcome-rejected");
+    connection.failNextSend = true;
+    fixture.gateway.open(connection);
+
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+
+    assertTrue(connection.closed);
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+  }
+
   @Test
   void cancelIsIdempotentAndSkippedAfterTerminalComplete() {
     Fixture fixture = fixture();
@@ -740,6 +824,7 @@ class EnvironmentDaemonGatewayFinalTest {
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
         messageTypes(connection.envelopes()));
+    assertEquals(1, connection.closeAfterFlushCount);
     assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
   }
 
@@ -1506,7 +1591,11 @@ class EnvironmentDaemonGatewayFinalTest {
     private boolean open = true;
     private boolean closed;
     private int closeCount;
+    private int closeAfterFlushCount;
     private boolean failNextSend;
+    private boolean blockNextSend;
+    private final CountDownLatch sendEntered = new CountDownLatch(1);
+    private final CountDownLatch allowSend = new CountDownLatch(1);
 
     private FakeConnection(String connectionId) {
       this.connectionId = connectionId;
@@ -1518,15 +1607,26 @@ class EnvironmentDaemonGatewayFinalTest {
     }
 
     @Override
-    public void sendText(String text) {
+    public boolean sendText(String text) {
       if (!open) {
         throw new IllegalStateException("closed");
       }
       if (failNextSend) {
         failNextSend = false;
-        throw new IllegalStateException("send failed");
+        return false;
+      }
+      if (blockNextSend) {
+        blockNextSend = false;
+        sendEntered.countDown();
+        try {
+          allowSend.await();
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException(error);
+        }
       }
       envelopes.add(new DaemonEnvelopeCodec().decode(text));
+      return true;
     }
 
     @Override
@@ -1534,6 +1634,12 @@ class EnvironmentDaemonGatewayFinalTest {
       open = false;
       closed = true;
       closeCount += 1;
+    }
+
+    @Override
+    public void closeAfterFlush() {
+      closeAfterFlushCount += 1;
+      close();
     }
 
     @Override

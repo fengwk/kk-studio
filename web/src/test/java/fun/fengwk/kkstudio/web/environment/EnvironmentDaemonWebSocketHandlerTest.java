@@ -1,10 +1,7 @@
 package fun.fengwk.kkstudio.web.environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -22,9 +19,7 @@ import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnect
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonEndpoint;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentGatewayProperties;
 
-import java.io.IOException;
-
-/** 针对那些无法在 Tomcat 上确定性引发的传输异常的单元契约。 */
+/** Environment Daemon handler 的连接装配、入站桥接与幂等解绑契约。 */
 class EnvironmentDaemonWebSocketHandlerTest {
 
   @Test
@@ -32,30 +27,26 @@ class EnvironmentDaemonWebSocketHandlerTest {
     assertEquals("/api/ai/environment/daemon/v2", EnvironmentDaemonWebSocketHandler.PATH);
   }
 
-  /** Socket I/O 失败以 gateway 发送失败的形式呈现，传输错误会丢弃该句柄。 */
+  /** 关闭事件先且只向 Gateway 解绑一次；sender 随后独立关闭。 */
   @Test
-  void translatesSessionIoFailuresAndForwardsTransportErrors() throws Exception {
+  void forwardsInboundAndDisconnectsGatewayExactlyOnce() throws Exception {
     EnvironmentDaemonEndpoint endpoint = mock(EnvironmentDaemonEndpoint.class);
     EnvironmentDaemonWebSocketHandler handler =
         new EnvironmentDaemonWebSocketHandler(endpoint, gatewayProperties(16L * 1024 * 1024));
     WebSocketSession session = mock(WebSocketSession.class);
     when(session.getId()).thenReturn("connection-id");
+    when(session.isOpen()).thenReturn(true);
     handler.afterConnectionEstablished(session);
     ArgumentCaptor<EnvironmentDaemonConnection> connectionCaptor =
         ArgumentCaptor.forClass(EnvironmentDaemonConnection.class);
     verify(endpoint).open(connectionCaptor.capture());
-    EnvironmentDaemonConnection connection = connectionCaptor.getValue();
-
-    doThrow(new IOException("send failed")).when(session).sendMessage(any(TextMessage.class));
-    assertThrows(IllegalStateException.class, () -> connection.sendText("payload"));
-    doThrow(new IOException("close failed")).when(session).close();
-    assertThrows(IllegalStateException.class, connection::close);
+    assertEquals("connection-id", connectionCaptor.getValue().connectionId());
 
     handler.handleTextMessage(session, new TextMessage("inbound"));
     verify(endpoint).receive("connection-id", "inbound");
-    handler.handleTransportError(session, new IOException("transport failed"));
+    handler.handleTransportError(session, new IllegalStateException("transport failed"));
     handler.afterConnectionClosed(session, CloseStatus.NORMAL);
-    verify(endpoint, times(2)).close(eq("connection-id"));
+    verify(endpoint, times(1)).close(eq("connection-id"));
   }
 
   /** 新连接使用部署配置的单帧上限。 */
@@ -67,6 +58,7 @@ class EnvironmentDaemonWebSocketHandlerTest {
     NativeWebSocketSession session = mock(NativeWebSocketSession.class);
     Session jsrSession = mock(Session.class);
     when(session.getId()).thenReturn("connection-id");
+    when(session.isOpen()).thenReturn(true);
     when(session.getNativeSession(Session.class)).thenReturn(jsrSession);
 
     handler.afterConnectionEstablished(session);

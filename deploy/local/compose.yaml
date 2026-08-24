@@ -14,7 +14,10 @@ name: kk-studio-local
 #   KK_STUDIO_PG_HOST      (default 127.0.0.1) -- host bind address for PG
 #   KK_STUDIO_PG_DATABASE / KK_STUDIO_PG_USER / KK_STUDIO_PG_PASSWORD
 #   KK_STUDIO_SPRING_PROFILES_ACTIVE (default dev)
-#   KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES (default 16777216) -- Daemon WebSocket frame cap
+#   KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES (default 16777216) -- inbound frame cap
+#   KK_STUDIO_ENVIRONMENT_GATEWAY_QUEUE_CAPACITY (default 256) -- outbound frame queue cap
+#   KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES (default 16777216) -- outbound UTF-8 byte cap
+#   KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT (default 10s) -- outbound per-frame timeout
 
 services:
   postgres:
@@ -47,6 +50,10 @@ services:
       KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/${KK_STUDIO_PG_DATABASE:-kk_studio}
       KK_STUDIO_DB_USER: ${KK_STUDIO_PG_USER:-kk_studio}
       KK_STUDIO_DB_PASSWORD: ${KK_STUDIO_PG_PASSWORD:-kk_studio}
+      KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES:-16777216}
+      KK_STUDIO_ENVIRONMENT_GATEWAY_QUEUE_CAPACITY: ${KK_STUDIO_ENVIRONMENT_GATEWAY_QUEUE_CAPACITY:-256}
+      KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES:-16777216}
+      KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT: ${KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT:-10s}
     # Container-internal port is fixed at 8080 (server.port=8080 in
     # web/src/main/resources/application.yml; matching the Dockerfile
     # HEALTHCHECK). Only the host-side mapping is overridable.

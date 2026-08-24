@@ -57,7 +57,7 @@ class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
     socket.sendText("daemon-frame", true).get(10, TimeUnit.SECONDS);
     verify(endpoint, timeout(15_000)).receive(eq(connection.connectionId()), eq("daemon-frame"));
 
-    connection.sendText("gateway-frame");
+    assertTrue(connection.sendText("gateway-frame"));
     assertEquals("gateway-frame", received.poll(10, TimeUnit.SECONDS));
 
     socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(10, TimeUnit.SECONDS);

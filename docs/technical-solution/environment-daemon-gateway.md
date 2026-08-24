@@ -31,9 +31,14 @@ kk-studio:
     environment-gateway:
       daemon-token: ${KK_STUDIO_DAEMON_TOKEN}
       max-message-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES:16777216}
+      queue-capacity: ${KK_STUDIO_ENVIRONMENT_GATEWAY_QUEUE_CAPACITY:256}
+      max-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES:16777216}
+      send-timeout: ${KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT:10s}
 ```
 
-`daemon-token` 是部署范围的共享连接密钥；Gateway 在 HELLO 中以常量时间比较它；缺失、空白或不匹配的密钥会关闭连接。生产部署使用 TLS 终止后的 `wss://`。`max-message-bytes` 是 Daemon WebSocket 单帧上限（默认 16MiB），属于协议安全边界，不进 SystemSettings。
+`daemon-token` 是部署范围的共享连接密钥；Gateway 在 HELLO 中以常量时间比较它；缺失、空白或不匹配的密钥会关闭连接。生产部署使用 TLS 终止后的 `wss://`。`max-message-bytes` 是 Daemon WebSocket 入站单帧上限（默认 16MiB）；`queue-capacity` / `max-bytes` 分别限制每连接出站待发送帧数与 UTF-8 总字节（均含在途帧）；`send-timeout` 限制单帧底层发送时间。它们都是部署级传输安全边界，不进 SystemSettings。
+
+Web 为每个 Daemon WebSocket 创建独立 `DaemonOutboundSender`：Gateway 的 `sendText` 只做非阻塞有界入队，唯一 sender 虚拟线程按 envelope sequence 严格串行调用 Spring WebSocket `sendMessage`，并由 `ConcurrentWebSocketSessionDecorator` 施加 send time/buffer 上限。Gateway 的连接状态锁内不执行网络 I/O；慢连接不阻塞 receive、heartbeat 或其它连接的 bind。队列帧数/字节拒绝、底层发送异常或超时都使整条连接失败：先解绑 live registry，并以 uncertain/不可用结果完成 active invocation、pending skill load 与 pending directory list，再幂等关闭 sender；不得跳过 `WELCOME` / `INVOKE` / `CANCEL` / `LOAD_SKILL` / `LIST_DIRECTORY` 等任一已分配 sequence 的帧后继续使用连接。
 
 Daemon 以 CLI 参数启动（`harness-daemon`，只依赖 `harness-tool`）：
 
@@ -91,6 +96,7 @@ GET /api/ai/environments/{name}/directories?path=.
 - 响应 DTO：`path`（canonical 相对 wire 路径，root 为 `'.'`）/ `displayPath`（请求 `path` 的最后一段，root 为 `'.'`；只作展示、绝不暴露 daemon 本地绝对路径，codec 严格拒绝其它值）/ `parentPath`（必须等于请求 `path` 的 lexical 父路径：root 与单段路径均为 `'.'`）/ `truncated`（超过单层上限 1000 条被截断）/ `gitBranch`（可空，浏览目录所在 git 仓库的 symbolic HEAD 分支）/ `entries`（按名称稳定排序的直属子目录，至多 1000 条，`{name,path}`：`name` 是目录名且必须等于 `path` 最后一段，`path` 必须是请求目录的直接子路径；不含 symlink 与非目录；无法编码为合法 wire 子路径的本地目录名被跳过）。
 - symlink 语义：列表默认不暴露 symlink 目录；显式请求 root 内 symlink alias 时，成功响应的 `path`/`parentPath`/entry `path` 使用请求的 canonical wire 路径（回显 alias 本身），daemon 内部只用 real path 校验与读取，绝不越过 root；越出 root 的 symlink 穿越是 `INVALID_PATH`。
 - HTTP 错误映射（`errorCode.code` 与应用结果分类同名）：`ENVIRONMENT_NOT_FOUND`（registry 无该环境）/ `NOT_FOUND`（路径不存在）→ 404；`ENVIRONMENT_UNAVAILABLE`（环境已注册但未 READY，或连接/心跳不可用）→ 409；`INVALID_PATH` / `NOT_DIRECTORY` → 400；`TIMEOUT`（daemon 往返超时，默认 10 秒，来自 `system_setting.config.environment.directoryListTimeoutMillis`，每次请求现读）→ 504；`IO_ERROR`（daemon 本地 IO 失败）→ 502。
+- Controller 直接返回 `CompletionStage<Result<...>>` 交给 Spring MVC async dispatch，不在 servlet 请求线程 `join`；typed 结果仍按上表映射，异常完成的 timeout 映射 504，其它传输异常映射 502。
 
 wire 消息配对（目录控制面不属于 invocation：envelope `invocationId` 必须为 null，gateway/daemon 以 payload `requestId`（canonical UUID，响应原样回显）关联；sequence 是连接级连续计数，`LIST_DIRECTORY` 是出站消息不占入站序号）：
 

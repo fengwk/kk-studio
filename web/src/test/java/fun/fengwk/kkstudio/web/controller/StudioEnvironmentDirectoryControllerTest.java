@@ -5,15 +5,19 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -28,6 +32,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryEntryDTO;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeoutException;
 
 /**
  * {@link StudioEnvironmentDirectoryController} HTTP 契约（standalone MockMvc）：成功 DTO 形状、默认 root 路径与
@@ -76,8 +81,7 @@ class StudioEnvironmentDirectoryControllerTest {
         .thenReturn(
             CompletableFuture.completedFuture(new EnvironmentDirectoryListResult.Loaded(dto)));
 
-    mockMvc
-        .perform(get("/api/ai/environments/env-1/directories").param("path", "src"))
+    performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.path").value("src"))
         .andExpect(jsonPath("$.data.displayPath").value("src"))
@@ -109,8 +113,7 @@ class StudioEnvironmentDirectoryControllerTest {
             SystemSettings.StorageMedia.DEFAULT,
             SystemSettings.Advanced.DEFAULT));
 
-    mockMvc
-        .perform(get("/api/ai/environments/env-1/directories").param("path", "src"))
+    performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"))
         .andExpect(status().isOk());
 
     verify(directoryLister)
@@ -124,8 +127,7 @@ class StudioEnvironmentDirectoryControllerTest {
             CompletableFuture.completedFuture(
                 new EnvironmentDirectoryListResult.Loaded(emptyListing("."))));
 
-    mockMvc
-        .perform(get("/api/ai/environments/env-1/directories"))
+    performAsync(get("/api/ai/environments/env-1/directories"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.path").value("."));
 
@@ -183,10 +185,25 @@ class StudioEnvironmentDirectoryControllerTest {
         .andExpect(jsonPath("$.errorCode.code").value("IO_ERROR"));
   }
 
+  /** CompletionStage 异常完成也由 async dispatch 映射到既有 504/502 契约，而不是 servlet 线程 join 异常。 */
+  @Test
+  void mapsExceptionalCompletionAfterAsyncDispatch() throws Exception {
+    when(directoryLister.listDirectory(any(), any(), any()))
+        .thenReturn(CompletableFuture.failedFuture(new TimeoutException("daemon timed out")));
+    performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"))
+        .andExpect(status().isGatewayTimeout())
+        .andExpect(jsonPath("$.errorCode.code").value("TIMEOUT"));
+
+    when(directoryLister.listDirectory(any(), any(), any()))
+        .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("transport failed")));
+    performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"))
+        .andExpect(status().isBadGateway())
+        .andExpect(jsonPath("$.errorCode.code").value("IO_ERROR"));
+  }
+
   @Test
   void invalidEnvironmentNameMapsToBadRequestWithoutCallingLister() throws Exception {
-    mockMvc
-        .perform(get("/api/ai/environments/Not-Canonical/directories"))
+    performAsync(get("/api/ai/environments/Not-Canonical/directories"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.errorCode.code").value("INVALID_ENVIRONMENT_NAME"));
     verify(directoryLister, never()).listDirectory(any(), any(), any());
@@ -198,7 +215,14 @@ class StudioEnvironmentDirectoryControllerTest {
         .thenReturn(
             CompletableFuture.completedFuture(
                 new EnvironmentDirectoryListResult.Failed(code, message)));
-    return mockMvc.perform(get("/api/ai/environments/env-1/directories").param("path", "src"));
+    return performAsync(get("/api/ai/environments/env-1/directories").param("path", "src"));
+  }
+
+  private ResultActions performAsync(MockHttpServletRequestBuilder requestBuilder)
+      throws Exception {
+    MvcResult initial =
+        mockMvc.perform(requestBuilder).andExpect(request().asyncStarted()).andReturn();
+    return mockMvc.perform(asyncDispatch(initial));
   }
 
   private static EnvironmentDirectoryDTO emptyListing(String path) {
