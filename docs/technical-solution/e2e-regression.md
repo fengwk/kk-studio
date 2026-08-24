@@ -91,7 +91,9 @@ docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 
 该命令选择 68 个免费 API case 和 37 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
-rebuild；不得为这条回归追加 `--real`。
+rebuild；未显式设置 `SPRING_FLYWAY_LOCATIONS` 时，入口同时加载 `db/seed/e2e` 与
+`db/seed/canvas-test`，保证全新数据库既具备 E2E catalog/permission，又由 canvas-test
+seed 启用 S3。不得为这条回归追加 `--real`。
 
 ## 2. 分层
 

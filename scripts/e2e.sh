@@ -103,6 +103,12 @@ if [ "$DOCS_ONLY" = "true" ]; then
   exit 0
 fi
 
+# Free Canvas Function regression needs both the E2E catalog/permission seed and the
+# disposable canvas-test S3/integration seed. Preserve an explicit caller override.
+if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then
+  export SPRING_FLYWAY_LOCATIONS=${SPRING_FLYWAY_LOCATIONS:-classpath:db/migration,classpath:db/seed/e2e,classpath:db/seed/canvas-test}
+fi
+
 # 1) ensure stack
 ensure_stack "$REBUILD" "$WITH_TOOLS"
 
