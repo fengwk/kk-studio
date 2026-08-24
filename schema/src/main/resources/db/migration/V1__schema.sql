@@ -265,12 +265,30 @@ create table canvas_function_run (
     node_id uuid primary key,
     request_id uuid not null,
     status varchar(16) not null,
+    attempt int not null default 0,
+    available_at timestamptz(3),
+    lease_token varchar(128),
+    lease_until timestamptz(3),
     state_json jsonb not null,
     error text,
     updated_at timestamptz(3) not null default current_timestamp,
+    created_at timestamptz(3) not null default current_timestamp,
     constraint uk_canvas_function_run_request unique (node_id, request_id),
     constraint ck_canvas_function_run_status check (
-        status in ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')
+        status in ('READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')
+    ),
+    constraint ck_canvas_function_run_attempt_nonneg check (attempt >= 0),
+    constraint ck_canvas_function_run_lease_pair check (
+        (lease_token is null) = (lease_until is null)
+    ),
+    constraint ck_canvas_function_run_work_state check (
+        (status = 'READY' and available_at is not null and lease_token is null)
+        or (status = 'RUNNING' and available_at is null and lease_token is not null)
+        or (
+            status in ('SUCCEEDED', 'FAILED', 'CANCELLED')
+            and available_at is null
+            and lease_token is null
+        )
     ),
     constraint ck_canvas_function_run_state_object check (jsonb_typeof(state_json) = 'object')
 );
@@ -278,14 +296,19 @@ create table canvas_function_run (
 comment on table canvas_function_run is 'Function 节点当前/最后一次 Run：PK 为 node_id，request_id 全 UUID 且 (node_id, request_id) 唯一';
 comment on column canvas_function_run.node_id is 'Function 节点（一个节点同时至多一个 Run 行）';
 comment on column canvas_function_run.request_id is 'Run 请求 UUID（客户端生成，幂等键）';
-comment on column canvas_function_run.status is '生命周期：RUNNING / SUCCEEDED / FAILED / CANCELLED';
+comment on column canvas_function_run.status is '生命周期：READY / RUNNING / SUCCEEDED / FAILED / CANCELLED';
+comment on column canvas_function_run.attempt is '成功 claim 次数；首次 claim 从 0 增加为 1';
+comment on column canvas_function_run.available_at is 'READY 可领取时间（毫秒精度），其它状态为 null';
+comment on column canvas_function_run.lease_token is 'RUNNING ownership fencing token，其它状态为 null';
+comment on column canvas_function_run.lease_until is 'RUNNING lease 截止时间（毫秒精度），其它状态为 null';
 comment on column canvas_function_run.state_json is 'typed/versioned 冻结计划与 checkpoint（JSON object）';
 comment on column canvas_function_run.error is '公开错误信息（terminal 失败时非空）';
 comment on column canvas_function_run.updated_at is '最后更新时间（毫秒精度）';
+comment on column canvas_function_run.created_at is '当前 request 创建时间（毫秒精度）';
 
-create index idx_canvas_function_run_running
-    on canvas_function_run (node_id)
-    where status = 'RUNNING';
+create index idx_canvas_function_run_claim
+    on canvas_function_run (status, available_at, lease_until, created_at, node_id)
+    where status in ('READY', 'RUNNING');
 
 create table canvas_command_dedup (
     canvas_id uuid not null,
@@ -899,6 +922,27 @@ end $$;
 create trigger trg_canvas_document_version_notify
     after insert or update of version on canvas_document
     for each row execute function canvas_document_version_notify();
+
+-- Canvas Function durable work NOTIFY hint.
+--
+-- canvas_function_run remains the only queue fact. This trigger only hints when
+-- the row written by the current statement is immediately claimable READY work;
+-- future READY work and expired RUNNING leases are recovered by periodic poll.
+
+create or replace function canvas_function_work_notify()
+returns trigger language plpgsql as $$
+begin
+    if new.status = 'READY'
+        and new.lease_token is null
+        and new.available_at <= current_timestamp then
+        perform pg_notify('canvas_function_work', '');
+    end if;
+    return new;
+end $$;
+
+create trigger trg_canvas_function_work_notify
+    after insert or update on canvas_function_run
+    for each row execute function canvas_function_work_notify();
 
 -- 6. Global blob storage
 --

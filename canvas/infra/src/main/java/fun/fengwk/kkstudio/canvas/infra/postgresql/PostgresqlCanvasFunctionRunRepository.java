@@ -49,45 +49,52 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   }
 
   @Override
-  public List<CanvasFunctionRun> findRunning() {
-    List<CanvasFunctionRun> runs = new ArrayList<>();
-    for (CanvasFunctionRunDO run : runMapper.listRunning()) {
-      runs.add(toDomain(run));
-    }
-    return List.copyOf(runs);
-  }
-
-  @Override
-  public void insertRunning(CanvasFunctionRun run) {
-    requireStatus(run, CanvasFunctionRunStatus.RUNNING);
+  public void insertReady(CanvasFunctionRun run) {
+    requireStatus(run, CanvasFunctionRunStatus.READY);
     if (runMapper.insert(toData(run)) != 1) {
       throw new IllegalStateException("insert canvas function run failed: " + run.nodeId());
     }
   }
 
   @Override
-  public boolean replaceTerminalWithRunning(CanvasFunctionRun run) {
-    requireStatus(run, CanvasFunctionRunStatus.RUNNING);
-    return runMapper.replaceTerminalWithRunning(toData(run)) == 1;
+  public boolean replaceTerminalWithReady(CanvasFunctionRun run) {
+    requireStatus(run, CanvasFunctionRunStatus.READY);
+    return runMapper.replaceTerminalWithReady(toData(run)) == 1;
   }
 
   @Override
   public boolean checkpoint(
-      UUID nodeId, UUID requestId, String stateJson, String stage, Instant updatedAt) {
+      UUID nodeId,
+      UUID requestId,
+      String leaseToken,
+      String stateJson,
+      String stage,
+      Instant updatedAt) {
     if (!stage.equals(stateCodec.stage(stateJson))) {
       throw new IllegalArgumentException("checkpoint stage must match stateJson");
     }
     return runMapper.checkpoint(
-            nodeId, requestId, stateJson, OffsetDateTime.ofInstant(updatedAt, ZoneOffset.UTC))
+            nodeId,
+            requestId,
+            leaseToken,
+            stateJson,
+            OffsetDateTime.ofInstant(updatedAt, ZoneOffset.UTC))
         == 1;
   }
 
   @Override
-  public boolean transitionTerminal(CanvasFunctionRun run) {
-    if (run.status() == CanvasFunctionRunStatus.RUNNING) {
+  public boolean transitionTerminal(CanvasFunctionRun run, String leaseToken) {
+    if (run.status() == CanvasFunctionRunStatus.READY
+        || run.status() == CanvasFunctionRunStatus.RUNNING) {
       throw new IllegalArgumentException("terminal transition requires terminal status");
     }
-    return runMapper.transitionTerminal(toData(run)) == 1;
+    return runMapper.transitionTerminal(toData(run), leaseToken) == 1;
+  }
+
+  @Override
+  public boolean cancelActive(CanvasFunctionRun run) {
+    requireStatus(run, CanvasFunctionRunStatus.CANCELLED);
+    return runMapper.cancelActive(toData(run)) == 1;
   }
 
   @Override
@@ -105,10 +112,15 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
         run.getNodeId(),
         run.getRequestId(),
         CanvasFunctionRunStatus.valueOf(run.getStatus()),
+        run.getAttempt(),
+        toInstant(run.getAvailableAt()),
+        run.getLeaseToken(),
+        toInstant(run.getLeaseUntil()),
         stateCodec.stage(run.getStateJson()),
         run.getStateJson(),
         run.getError(),
-        run.getUpdatedAt().toInstant());
+        run.getUpdatedAt().toInstant(),
+        run.getCreatedAt().toInstant());
   }
 
   private static CanvasFunctionRunDO toData(CanvasFunctionRun run) {
@@ -116,10 +128,23 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
     data.setNodeId(run.nodeId());
     data.setRequestId(run.requestId());
     data.setStatus(run.status().name());
+    data.setAttempt(run.attempt());
+    data.setAvailableAt(toOffsetDateTime(run.availableAt()));
+    data.setLeaseToken(run.leaseToken());
+    data.setLeaseUntil(toOffsetDateTime(run.leaseUntil()));
     data.setStateJson(run.stateJson());
     data.setError(run.error());
     data.setUpdatedAt(OffsetDateTime.ofInstant(run.updatedAt(), ZoneOffset.UTC));
+    data.setCreatedAt(OffsetDateTime.ofInstant(run.createdAt(), ZoneOffset.UTC));
     return data;
+  }
+
+  private static Instant toInstant(OffsetDateTime value) {
+    return value == null ? null : value.toInstant();
+  }
+
+  private static OffsetDateTime toOffsetDateTime(Instant value) {
+    return value == null ? null : OffsetDateTime.ofInstant(value, ZoneOffset.UTC);
   }
 
   private static void requireStatus(CanvasFunctionRun run, CanvasFunctionRunStatus expectedStatus) {

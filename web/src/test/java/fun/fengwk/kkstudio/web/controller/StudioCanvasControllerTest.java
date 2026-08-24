@@ -462,9 +462,14 @@ class StudioCanvasControllerTest {
                 NODE_2,
                 REQUEST,
                 CanvasFunctionRunStatus.RUNNING,
+                1,
+                null,
+                "lease",
+                NOW.plusSeconds(30),
                 "QUEUED",
                 "{\"stage\":\"QUEUED\",\"secret\":\"must-not-leak\"}",
                 null,
+                NOW,
                 NOW));
     return new CanvasSnapshot(
         document(),

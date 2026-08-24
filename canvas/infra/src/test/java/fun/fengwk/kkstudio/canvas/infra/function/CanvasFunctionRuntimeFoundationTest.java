@@ -35,9 +35,11 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresCanvasInfraTestSupport;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -68,6 +70,8 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   @Autowired private CanvasFunctionRunTransactions runtimeTransactions;
   @Autowired private CanvasFunctionModelRegistry catalog;
   @Autowired private CanvasFunctionRunStateCodecPort stateCodec;
+  @Autowired private CanvasFunctionWorkStore workStore;
+  @Autowired private Clock clock;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private TestBlobAccess blobAccess;
 
@@ -78,7 +82,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
 
     CanvasFunctionRun first = runtimeTransactions.start(canvasId, nodeId, REQUEST_1).run();
-    assertEquals(CanvasFunctionRunStatus.RUNNING, first.status());
+    assertEquals(CanvasFunctionRunStatus.READY, first.status());
     assertEquals(1L, version(canvasId));
     assertEquals(
         1,
@@ -97,6 +101,9 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         () -> runtimeTransactions.start(canvasId, nodeId, REQUEST_2));
 
     runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1);
+    CanvasFunctionRun cancelledReplay = runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1);
+    assertEquals(CanvasFunctionRunStatus.CANCELLED, cancelledReplay.status());
+    assertEquals(2L, version(canvasId), "terminal cancel replay must not bump version");
     CanvasFunctionRun replacement = runtimeTransactions.start(canvasId, nodeId, REQUEST_2).run();
     assertNotEquals(first.requestId(), replacement.requestId());
     assertEquals(3L, version(canvasId));
@@ -111,13 +118,19 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     canvasStore.addLink(new CanvasLink(canvasId, sourceNodeId, targetNodeId));
     CanvasResource source = addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
-    CanvasFunctionRun running = runtimeTransactions.start(canvasId, targetNodeId, REQUEST_1).run();
-    CanvasFunctionFrozenRun frozen = decode(running);
+    runtimeTransactions.start(canvasId, targetNodeId, REQUEST_1);
+    ClaimedRun claim =
+        workStore
+            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-success")
+            .orElseThrow();
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
     assertEquals(source.blobId(), frozen.manifest().get(0).blobId());
     assertEquals(3L, frozen.manifest().get(0).sizeBytes());
 
     CanvasResource target = addBlobResource(canvasId, null, null, frozen.targetResourceId());
-    assertTrue(runtimeTransactions.completeSuccess(frozen, List.of(frozen.targetResourceId())));
+    assertTrue(
+        runtimeTransactions.completeSuccess(
+            frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
 
     CanvasResource attached = resourceRepository.findById(canvasId, target.id()).orElseThrow();
     assertEquals(targetNodeId, attached.ownerNodeId());
@@ -134,6 +147,10 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
     runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+    ClaimedRun claim =
+        workStore
+            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-rollback")
+            .orElseThrow();
     long versionAfterStart = version(canvasId);
 
     TransactionTemplate template = new TransactionTemplate(transactionManager);
@@ -143,7 +160,12 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             template.executeWithoutResult(
                 status -> {
                   runtimeTransactions.checkpoint(
-                      canvasId, nodeId, REQUEST_1, "SUBMITTED", Map.of("jobId", "job"));
+                      canvasId,
+                      nodeId,
+                      REQUEST_1,
+                      claim.leaseToken(),
+                      "SUBMITTED",
+                      Map.of("jobId", "job"));
                   throw new IllegalStateException("rollback");
                 }));
 
@@ -151,6 +173,117 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals("QUEUED", current.stage());
     assertFalse(current.stateJson().contains("jobId"));
+  }
+
+  /** checkpoint/failure 必须由当前 lease token fencing；旧 token 只产生内部取消或 no-op。 */
+  @Test
+  void checkpointAndFailureRequireTheCurrentLease() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+    ClaimedRun claim =
+        workStore
+            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-fencing")
+            .orElseThrow();
+
+    runtimeTransactions.checkpoint(
+        canvasId, nodeId, REQUEST_1, claim.leaseToken(), "SUBMITTED", Map.of("jobId", "job"));
+    assertEquals(2L, version(canvasId));
+    assertEquals("SUBMITTED", runRepository.findByNodeId(nodeId).orElseThrow().stage());
+    assertThrows(
+        CanvasFunctionInternalCancellation.class,
+        () ->
+            runtimeTransactions.checkpoint(canvasId, nodeId, REQUEST_1, "stale", "LATE", Map.of()));
+    assertFalse(runtimeTransactions.failIfRunning(nodeId, REQUEST_1, "stale", "ignored failure"));
+    assertTrue(
+        runtimeTransactions.failIfRunning(nodeId, REQUEST_1, claim.leaseToken(), "safe failure"));
+    CanvasFunctionRun failed = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.FAILED, failed.status());
+    assertEquals("safe failure", failed.error());
+    assertEquals(3L, version(canvasId));
+  }
+
+  /** completeSuccess 的旧 token 必须在读取/交换 target 前失效，不能污染可见资源。 */
+  @Test
+  void completeSuccessWithStaleLeaseIsANoOp() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+    ClaimedRun claim =
+        workStore
+            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-success-fence")
+            .orElseThrow();
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+    CanvasResource target = addBlobResource(canvasId, null, null, frozen.targetResourceId());
+
+    assertFalse(
+        runtimeTransactions.completeSuccess(frozen, "stale", List.of(frozen.targetResourceId())));
+    CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
+    assertEquals(claim.leaseToken(), current.leaseToken());
+    assertTrue(resourceRepository.findById(canvasId, target.id()).isPresent());
+    assertEquals(1L, version(canvasId));
+  }
+
+  /** success 必须拒绝错误结果列表与尚未物化的 target，并保持 RUNNING/版本不变。 */
+  @Test
+  void completeSuccessRejectsInvalidOrUnmaterializedTarget() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+    ClaimedRun claim =
+        workStore
+            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-invalid-success")
+            .orElseThrow();
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtimeTransactions.completeSuccess(frozen, claim.leaseToken(), List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtimeTransactions.completeSuccess(
+                frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
+    CanvasResource target = addBlobResource(canvasId, null, null, frozen.targetResourceId());
+    blobAccess.put(
+        new CanvasFunctionBlobAccess.BlobFacts(
+            target.blobId(), "video/mp4", 3L, null, null, 1_000L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtimeTransactions.completeSuccess(
+                frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
+    CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
+    assertEquals(1L, version(canvasId));
+  }
+
+  /** checkpoint 在 document 或 Function node 消失后必须内部取消，绝不重建已删除聚合。 */
+  @Test
+  void checkpointCancelsAfterAggregateDisappears() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+    ClaimedRun claim =
+        workStore
+            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-delete-fence")
+            .orElseThrow();
+    jdbc.update("delete from canvas_function_resource_pin where node_id = ?", nodeId);
+    jdbc.update("delete from canvas_function_run where node_id = ?", nodeId);
+    jdbc.update("delete from canvas_node where id = ?", nodeId);
+
+    assertThrows(
+        CanvasFunctionInternalCancellation.class,
+        () ->
+            runtimeTransactions.checkpoint(
+                canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
+    jdbc.update("delete from canvas_document where id = ?", canvasId);
+    assertThrows(
+        CanvasFunctionInternalCancellation.class,
+        () ->
+            runtimeTransactions.checkpoint(
+                canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
   }
 
   private UUID addFunctionNode(UUID canvasId, String name, String config) {

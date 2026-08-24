@@ -14,16 +14,21 @@ public interface CanvasFunctionRunRepository {
 
   List<CanvasFunctionRun> findByCanvasId(UUID canvasId);
 
-  List<CanvasFunctionRun> findRunning();
+  void insertReady(CanvasFunctionRun run);
 
-  void insertRunning(CanvasFunctionRun run);
-
-  boolean replaceTerminalWithRunning(CanvasFunctionRun run);
+  boolean replaceTerminalWithReady(CanvasFunctionRun run);
 
   boolean checkpoint(
-      UUID nodeId, UUID requestId, String stateJson, String stage, Instant updatedAt);
+      UUID nodeId,
+      UUID requestId,
+      String leaseToken,
+      String stateJson,
+      String stage,
+      Instant updatedAt);
 
-  boolean transitionTerminal(CanvasFunctionRun run);
+  boolean transitionTerminal(CanvasFunctionRun run, String leaseToken);
+
+  boolean cancelActive(CanvasFunctionRun run);
 
   boolean deleteByNodeId(UUID nodeId);
 

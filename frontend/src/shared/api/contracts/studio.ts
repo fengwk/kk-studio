@@ -9,7 +9,7 @@ export type UUIDString = `${string}-${string}-${string}-${string}-${string}`
 
 export type CanvasResourceKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'TEXT'
 export type CanvasFunctionOutputKind = 'IMAGE' | 'VIDEO'
-export type CanvasFunctionRunStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
+export type CanvasFunctionRunStatus = 'READY' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
 
 /**
  * Canvas 聚合的持久化头。version 是单调递增的 graph 版本，也是

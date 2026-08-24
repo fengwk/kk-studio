@@ -30,12 +30,15 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Execution context 只允许 frozen original/target，并验证对象长度与事务 checkpoint 委托。 */
 class CanvasFunctionExecutionContextImplTest {
@@ -47,12 +50,14 @@ class CanvasFunctionExecutionContextImplTest {
   private static final UUID BLOB = UUID.fromString("00000000-0000-0000-0000-000000000005");
   private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000006");
   private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000007");
+  private static final String LEASE = "lease";
 
   private CanvasFunctionRunRepository runs;
   private CanvasFunctionRunTransactions transactions;
   private CanvasFunctionBlobAccess blobAccess;
   private CanvasResourceMaterializer materializer;
   private CanvasFunctionFrozenRun frozen;
+  private ClaimedRun claim;
 
   @BeforeEach
   void setUp() {
@@ -93,17 +98,22 @@ class CanvasFunctionExecutionContextImplTest {
             TARGET,
             "QUEUED",
             Map.of());
-    when(runs.findByNodeId(NODE))
-        .thenReturn(
-            Optional.of(
-                new CanvasFunctionRun(
-                    NODE,
-                    REQUEST,
-                    CanvasFunctionRunStatus.RUNNING,
-                    "QUEUED",
-                    "{\"stage\":\"QUEUED\"}",
-                    null,
-                    Instant.EPOCH)));
+    CanvasFunctionRun running =
+        new CanvasFunctionRun(
+            NODE,
+            REQUEST,
+            CanvasFunctionRunStatus.RUNNING,
+            1,
+            null,
+            LEASE,
+            Instant.EPOCH.plusSeconds(60),
+            "QUEUED",
+            "{\"stage\":\"QUEUED\"}",
+            null,
+            Instant.EPOCH,
+            Instant.EPOCH);
+    claim = new ClaimedRun(running);
+    when(runs.findByNodeId(NODE)).thenReturn(Optional.of(running));
   }
 
   @Test
@@ -206,6 +216,7 @@ class CanvasFunctionExecutionContextImplTest {
             eq(CANVAS),
             eq(NODE),
             eq(REQUEST.toString()),
+            eq(LEASE),
             eq("SUBMITTING"),
             eq(Map.of("jobId", "job"))))
         .thenReturn(next);
@@ -218,7 +229,7 @@ class CanvasFunctionExecutionContextImplTest {
 
   @Test
   void checkpointCasCancellationPropagatesWithoutUpdatingCurrent() {
-    when(transactions.checkpoint(any(), any(), anyString(), anyString(), any()))
+    when(transactions.checkpoint(any(), any(), anyString(), anyString(), anyString(), any()))
         .thenThrow(new CanvasFunctionInternalCancellation("no longer RUNNING"));
     CanvasFunctionExecutionContextImpl context = context();
 
@@ -233,7 +244,14 @@ class CanvasFunctionExecutionContextImplTest {
   private CanvasFunctionExecutionContextImpl context() {
     ObjectProvider<CanvasResourceMaterializer> materializerProvider = provider(materializer);
     return new CanvasFunctionExecutionContextImpl(
-        runs, transactions, blobAccess, materializerProvider, frozen);
+        runs,
+        transactions,
+        blobAccess,
+        materializerProvider,
+        Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+        claim,
+        new AtomicBoolean(),
+        frozen);
   }
 
   @SuppressWarnings("unchecked")

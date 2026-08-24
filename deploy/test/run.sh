@@ -412,7 +412,7 @@ for _ in range(120):
         "GET",
         f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/run",
     )
-    if current["status"] != "RUNNING":
+    if current["status"] not in ("READY", "RUNNING"):
         break
     time.sleep(0.25)
 else:
@@ -494,7 +494,7 @@ def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
         {"requestId": request_id},
     )
     for _ in range(160):
-        if run["status"] != "RUNNING":
+        if run["status"] not in ("READY", "RUNNING"):
             break
         time.sleep(0.1)
         run = json_call(

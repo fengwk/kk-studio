@@ -74,14 +74,19 @@ class PostgresqlCanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTes
     CanvasLink link = new CanvasLink(canvasId, source.id(), function.id());
     canvasStore.addLink(link);
     UUID requestId = UUID.randomUUID();
-    runs.insertRunning(
+    runs.insertReady(
         new CanvasFunctionRun(
             function.id(),
             requestId,
-            CanvasFunctionRunStatus.RUNNING,
+            CanvasFunctionRunStatus.READY,
+            0,
+            FIXED_TIME,
+            null,
+            null,
             "QUEUED",
             "{\"stage\":\"QUEUED\"}",
             null,
+            FIXED_TIME,
             FIXED_TIME));
 
     CanvasSnapshot snapshot = query.findSnapshot(canvasId).orElseThrow();

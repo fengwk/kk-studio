@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -17,6 +18,7 @@ import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.infra.CanvasInfraTestApplication;
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -53,6 +55,7 @@ public abstract class PostgresCanvasInfraTestSupport {
   @Autowired protected JdbcTemplate jdbc;
   @Autowired protected TransactionTemplate transactions;
   @Autowired protected CanvasStore canvasStore;
+  @MockitoBean private CanvasFunctionDispatcher dispatcher;
 
   @DynamicPropertySource
   static void configurePostgres(DynamicPropertyRegistry registry) {

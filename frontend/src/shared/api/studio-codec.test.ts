@@ -230,6 +230,17 @@ describe('studio codec', () => {
     expect(() => decodeCanvasSnapshot(invalidStatus)).toThrow('node.run.status must be one of')
   })
 
+  it('accepts READY as the durable pre-claim function run status', () => {
+    const ready = {
+      ...snapshotPayload(),
+      nodes: [{
+        ...nodePayload(),
+        run: { ...nodePayload().run, status: 'READY' },
+      }],
+    }
+    expect(decodeCanvasSnapshot(ready).nodes[0]?.run?.status).toBe('READY')
+  })
+
   it('rejects unknown patch operations instead of defaulting to UPSERT', () => {
     const invalidGroupOp = {
       ...patchPayload(),

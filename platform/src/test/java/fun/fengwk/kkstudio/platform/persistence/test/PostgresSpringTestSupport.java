@@ -11,7 +11,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.platform.PlatformTestApplication;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 
@@ -40,6 +42,8 @@ public abstract class PostgresSpringTestSupport {
   @Autowired(required = false)
   private StorageMaintenance storageMaintenance;
 
+  @MockitoBean private CanvasFunctionDispatcher canvasFunctionDispatcher;
+
   static {
     // SystemSettingsSnapshot 作为共享启动快照，在上下文创建期读取一次 system_setting 默认行；任何 Spring 测试上下文加载前
     // 都必须先有 baseline 迁移，否则缺行上下文启动失败。@BeforeEach 仍负责每个测试前的 reset+baseline。
@@ -59,7 +63,6 @@ public abstract class PostgresSpringTestSupport {
     registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
     registry.add("spring.flyway.enabled", () -> FLYWAY_DISABLED);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> WORKERS_DISABLED);
-    registry.add("kk-studio.canvas.function.recovery-enabled", () -> WORKERS_DISABLED);
   }
 
   @BeforeEach

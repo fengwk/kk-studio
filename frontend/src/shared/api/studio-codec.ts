@@ -74,7 +74,7 @@ function requireResourceKind(value: unknown, path: string): CanvasResourceNodeDT
   return value as CanvasResourceNodeDTO['resources'][number]['kind']
 }
 
-const RUN_STATUSES = ['RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'] as const
+const RUN_STATUSES = ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'] as const
 
 function requireRunStatus(value: unknown, path: string): NonNullable<CanvasResourceNodeDTO['run']>['status'] {
   if (typeof value !== 'string' || !(RUN_STATUSES as readonly string[]).includes(value)) {

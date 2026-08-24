@@ -223,7 +223,7 @@ export function CanvasGenerationPanel({
   const activeModel = model
   const outputKind = sourceModel?.outputKind ?? activeModel.outputKind
   const modelOptions = runtime.models.filter((item) => item.outputKind === outputKind)
-  const running = node.run?.status === 'RUNNING'
+  const active = node.run?.status === 'READY' || node.run?.status === 'RUNNING'
 
   function updateConfig(next: CanvasFunctionConfigDTO, nextModelKey = modelKey) {
     setConfig(next)
@@ -451,7 +451,7 @@ export function CanvasGenerationPanel({
             <select
               aria-label={t('canvas.generation.modelLabel')}
               value={modelKey}
-              disabled={running}
+              disabled={active}
               onChange={(event) => {
                 const nextModel = runtime.models.find((item) => item.key === event.target.value)
                 if (!nextModel) {
@@ -488,7 +488,7 @@ export function CanvasGenerationPanel({
               <select
                 aria-label={parameter.label}
                 value={String(config.parameters[parameter.key] ?? '')}
-                disabled={running}
+                disabled={active}
                 onChange={(event) => updateConfig({
                   ...config,
                   parameters: {
@@ -509,7 +509,7 @@ export function CanvasGenerationPanel({
                 max={parameter.max ?? undefined}
                 step={1}
                 value={Number(config.parameters[parameter.key] ?? parameter.min ?? 0)}
-                disabled={running}
+                disabled={active}
                 onChange={(event) => {
                   const value = Number(event.target.value)
                   if (
@@ -563,6 +563,9 @@ function functionSourceIdentity(modelKey: string, config: CanvasFunctionConfigDT
 }
 
 function runStatusKey(status: NonNullable<ResourceNode['run']>['status']): string {
+  if (status === 'READY') {
+    return 'canvas.generation.status.ready'
+  }
   if (status === 'RUNNING') {
     return 'canvas.generation.status.running'
   }

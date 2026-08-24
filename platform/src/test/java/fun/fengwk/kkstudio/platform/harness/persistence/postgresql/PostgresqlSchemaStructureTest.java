@@ -206,9 +206,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "node_id",
         "request_id",
         "status",
+        "attempt",
+        "available_at",
+        "lease_token",
+        "lease_until",
         "state_json",
         "error",
-        "updated_at");
+        "updated_at",
+        "created_at");
     assertColumns(
         "canvas_resource",
         "id",
@@ -401,6 +406,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "agent_definition", "config");
     assertColumnType("jsonb", "canvas_node", "function_config_json");
     assertColumnType("jsonb", "canvas_function_run", "state_json");
+    assertColumnType("integer", "canvas_function_run", "attempt");
+    assertColumnType("character varying", "canvas_function_run", "lease_token");
   }
 
   @Test
@@ -436,6 +443,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "chat_session", "created_at");
     assertColumnType("timestamp with time zone", "canvas_session", "created_at");
     assertColumnType("timestamp with time zone", "canvas_function_run", "updated_at");
+    assertColumnType("timestamp with time zone", "canvas_function_run", "available_at");
+    assertColumnType("timestamp with time zone", "canvas_function_run", "lease_until");
+    assertColumnType("timestamp with time zone", "canvas_function_run", "created_at");
+    assertEquals(
+        128L,
+        singleLong(
+            "select character_maximum_length from information_schema.columns"
+                + " where table_schema = 'public' and table_name = 'canvas_function_run'"
+                + " and column_name = 'lease_token'"));
     assertColumnType("timestamp with time zone", "storage_blob", "created_at");
     assertColumnType("timestamp with time zone", "storage_blob", "updated_at");
     assertColumnType("timestamp with time zone", "storage_upload", "expires_at");
@@ -620,8 +636,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   @Test
   void versionNotifyTriggersAreExactAndNeverMutateVersions() throws SQLException {
-    // 整个 public schema 中仅有三个用户 trigger：system settings、harness thread 与 canvas document
-    // version hint。
+    // 整个 public schema 中仅有四个用户 trigger：三个 version hint 与 Canvas Function work hint。
     Set<String> triggers = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -637,7 +652,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         Set.of(
             "trg_system_setting_version_notify",
             "trg_harness_thread_version_notify",
-            "trg_canvas_document_version_notify"),
+            "trg_canvas_document_version_notify",
+            "trg_canvas_function_work_notify"),
         triggers,
         "no legacy trigger (version bump, activation notify, child version) may remain");
 
@@ -728,7 +744,16 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         canvasFunctionSource.contains("canvas_version"),
         () -> "canvas notify function must use the canvas_version channel");
 
-    // 除三个 notify 辅助函数外不存在其它 public 函数：version 自增函数已移除。
+    String canvasWorkFunctionSource =
+        singleString(
+            "select prosrc from pg_proc"
+                + " where pronamespace = 'public'::regnamespace"
+                + " and proname = 'canvas_function_work_notify'");
+    assertTrue(canvasWorkFunctionSource.contains("pg_notify"));
+    assertTrue(canvasWorkFunctionSource.contains("canvas_function_work"));
+    assertTrue(canvasWorkFunctionSource.contains("new.status = 'READY'"));
+
+    // 除四个 notify 辅助函数外不存在其它 public 函数：version 自增函数已移除。
     Set<String> functions = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -744,7 +769,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         Set.of(
             "system_setting_version_notify",
             "harness_thread_version_notify",
-            "canvas_document_version_notify"),
+            "canvas_document_version_notify",
+            "canvas_function_work_notify"),
         functions,
         "the database must never mutate version; only the notify helpers may exist");
 

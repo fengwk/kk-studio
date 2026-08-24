@@ -244,7 +244,7 @@ function ResourceMenuItems({
   const { t } = useI18n()
   const { node } = target
   const run = node.run
-  const running = run?.status === 'RUNNING'
+  const active = run?.status === 'READY' || run?.status === 'RUNNING'
   const primaryResource = node.resources[0]
   const binaryResource = primaryResource
     && primaryResource.kind !== 'TEXT'
@@ -264,7 +264,7 @@ function ResourceMenuItems({
           }}
         />
       ) : null}
-      {node.function && !running ? (
+      {node.function && !active ? (
         <MenuButton
           icon={<Play aria-hidden="true" />}
           label={t('canvas.menu.run')}
@@ -274,7 +274,7 @@ function ResourceMenuItems({
           }}
         />
       ) : null}
-      {node.function && running ? (
+      {node.function && active ? (
         <MenuButton
           icon={<Square aria-hidden="true" />}
           label={t('canvas.menu.cancelRun')}

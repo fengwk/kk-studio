@@ -7,7 +7,7 @@ registerCase({
   requires: ['canvas-function'],
   title: 'Canvas fake Function 完整免费运行链路',
   docs:
-    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；验证 create Function node（客户端 UUID nodeId）-> start -> checkpoint -> terminal -> snapshot Resource 替换 -> preview signed GET，且 document.version 按命令、Run start、checkpoint 与 terminal 状态前进、run 不泄漏 stateJson',
+    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；验证 create Function node（客户端 UUID nodeId）-> start READY -> durable claim RUNNING -> checkpoint -> terminal -> snapshot Resource 替换 -> preview signed GET，且 document.version 按命令、Run start、checkpoint 与 terminal 状态前进、run 不泄漏 stateJson',
   async run(ctx) {
     const { json: modelsJson } = await ctx.call('GET', '/api/canvas-function-models')
     const models = envelopeData(modelsJson)
@@ -62,7 +62,11 @@ registerCase({
       { requestId: cid() },
     )
     let run = envelopeData(startJson)
-    for (let attempt = 0; attempt < 120 && run.status === 'RUNNING'; attempt++) {
+    for (
+      let attempt = 0;
+      attempt < 120 && (run.status === 'READY' || run.status === 'RUNNING');
+      attempt++
+    ) {
       await sleep(250)
       const { json } = await ctx.call(
         'GET',

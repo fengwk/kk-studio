@@ -86,7 +86,7 @@ class StudioCanvasFunctionControllerTest {
 
   @Test
   void startGetCancelExposeOnlyPublicRunFields() throws Exception {
-    CanvasFunctionRun run = run(CanvasFunctionRunStatus.RUNNING, "QUEUED");
+    CanvasFunctionRun run = run(CanvasFunctionRunStatus.READY, "QUEUED");
     when(runtimeService.start(CANVAS, NODE, "request-1")).thenReturn(run);
     when(runtimeService.get(CANVAS, NODE)).thenReturn(run);
     when(runtimeService.cancel(CANVAS, NODE, "request-1"))
@@ -99,6 +99,7 @@ class StudioCanvasFunctionControllerTest {
                 .content("{\"requestId\":\"request-1\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value("ACCEPTED"))
+        .andExpect(jsonPath("$.data.status").value("READY"))
         .andExpect(jsonPath("$.data.stage").value("QUEUED"))
         .andExpect(jsonPath("$.data.stateJson").doesNotExist());
     mockMvc
@@ -163,9 +164,14 @@ class StudioCanvasFunctionControllerTest {
         NODE,
         REQUEST,
         status,
+        status == CanvasFunctionRunStatus.READY ? 0 : 1,
+        status == CanvasFunctionRunStatus.READY ? NOW : null,
+        status == CanvasFunctionRunStatus.RUNNING ? "lease" : null,
+        status == CanvasFunctionRunStatus.RUNNING ? NOW.plusSeconds(30) : null,
         stage,
         "{\"stage\":\"" + stage + "\",\"secret\":\"hidden\"}",
         null,
+        NOW,
         NOW);
   }
 

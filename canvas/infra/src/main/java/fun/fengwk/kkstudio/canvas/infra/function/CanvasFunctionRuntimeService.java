@@ -23,12 +23,9 @@ import java.util.UUID;
 @Slf4j
 public class CanvasFunctionRuntimeService implements CanvasFunctionService {
 
-  private static final String DISPATCH_FAILURE = "Function execution could not be scheduled";
-
   private final CanvasStore canvasStore;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionRunTransactions transactions;
-  private final CanvasFunctionDispatcher dispatcher;
   private final CanvasFunctionCatalog registry;
   private final CanvasFunctionRunStateCodecPort stateCodec;
 
@@ -37,25 +34,7 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
     CanvasFunctionStartResult result = transactions.start(canvasId, nodeId, requestId);
-    CanvasFunctionRun run = result.run();
-    if (run.status() == CanvasFunctionRunStatus.RUNNING
-        && !dispatcher.dispatch(run.nodeId(), run.requestId())) {
-      transactions.failIfRunning(run.nodeId(), run.requestId().toString(), DISPATCH_FAILURE);
-      CanvasFunctionRun terminal =
-          runRepository
-              .findByNodeId(run.nodeId())
-              .orElseThrow(
-                  () ->
-                      new IllegalStateException(
-                          "Canvas Function run disappeared after dispatch rejection"));
-      if (!terminal.requestId().equals(run.requestId())
-          || terminal.status() == CanvasFunctionRunStatus.RUNNING) {
-        throw new IllegalStateException(
-            "Canvas Function run did not become terminal after dispatch rejection");
-      }
-      return terminal;
-    }
-    return run;
+    return result.run();
   }
 
   @Override
