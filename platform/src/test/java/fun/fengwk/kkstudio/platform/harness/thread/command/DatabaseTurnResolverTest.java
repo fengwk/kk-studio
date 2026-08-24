@@ -99,7 +99,6 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -229,7 +228,7 @@ class DatabaseTurnResolverTest {
             List.of(),
             List.of(),
             Set.of(),
-            AgentProviderType.openai,
+            ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
             false);
@@ -629,7 +628,7 @@ class DatabaseTurnResolverTest {
             List.of("dev"),
             List.of(),
             Set.of(),
-            AgentProviderType.openai,
+            ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
             true);
@@ -650,7 +649,7 @@ class DatabaseTurnResolverTest {
             List.of(),
             List.of(platformDescriptor("load_skill")),
             Set.of("load_skill"),
-            AgentProviderType.openai,
+            ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
             true);
@@ -752,7 +751,7 @@ class DatabaseTurnResolverTest {
             List.of(),
             List.of(),
             Set.of(),
-            AgentProviderType.openai,
+            ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
             true);
@@ -860,7 +859,7 @@ class DatabaseTurnResolverTest {
             List.of(),
             List.of(),
             Set.of(),
-            AgentProviderType.openai,
+            ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
             true);
@@ -874,7 +873,7 @@ class DatabaseTurnResolverTest {
             List.of(),
             List.of(),
             Set.of(),
-            AgentProviderType.openai,
+            ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             true);
@@ -888,7 +887,7 @@ class DatabaseTurnResolverTest {
             List.of(),
             List.of(platformDescriptor("create_goal")),
             Set.of(),
-            AgentProviderType.openai,
+            ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.breakpoints(
                 Set.of(PromptCacheRetention.SHORT),
@@ -930,33 +929,24 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void mapsEveryPersistedProviderType() {
-    Map<AgentProviderType, ProviderType> mappings =
-        Map.of(
-            AgentProviderType.openai,
-            ProviderType.OPENAI,
-            AgentProviderType.openai_response,
-            ProviderType.OPENAI_RESPONSES,
-            AgentProviderType.anthropic,
-            ProviderType.ANTHROPIC,
-            AgentProviderType.google,
-            ProviderType.GOOGLE);
-    for (Map.Entry<AgentProviderType, ProviderType> mapping : mappings.entrySet()) {
+  void resolvesEveryProviderTypeDirectlyFromProvider() {
+    // ProviderType 是领域对象的唯一类型；每个 factory 必须直接使用同一个值。
+    for (ProviderType providerType : ProviderType.values()) {
       Fixture fixture =
           new Fixture(
               List.of(),
               List.of(),
               List.of(),
               Set.of(),
-              mapping.getKey(),
-              mapping.getValue(),
+              providerType,
+              providerType,
               PromptCacheCapability.unsupported(),
               true);
-      // 持久 providerType 只用于在解析时选择当前 ProviderFactory；descriptor 不再冻结类型。
+      // 持久 providerType 直接用于选择当前 ProviderFactory，并冻结到 spec。
       ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "default")));
       assertEquals("provider", request.model().providerName());
       assertEquals("model", request.model().modelName());
-      assertEquals(mapping.getValue(), request.providerType());
+      assertEquals(providerType, request.providerType());
     }
   }
 
@@ -1647,7 +1637,7 @@ class DatabaseTurnResolverTest {
         List.of(),
         List.of(platformDescriptor(TaskTool.NAME)),
         Set.of(TaskTool.NAME),
-        AgentProviderType.openai,
+        ProviderType.OPENAI,
         ProviderType.OPENAI,
         PromptCacheCapability.unsupported(),
         true);
@@ -1700,7 +1690,7 @@ class DatabaseTurnResolverTest {
           skills,
           platformDescriptors,
           Set.of(),
-          AgentProviderType.openai,
+          ProviderType.OPENAI,
           ProviderType.OPENAI,
           PromptCacheCapability.unsupported(),
           true,
@@ -1713,7 +1703,7 @@ class DatabaseTurnResolverTest {
         List<String> skills,
         List<ToolDescriptor> platformDescriptors,
         Set<String> internalPlatformToolNames,
-        AgentProviderType persistedProviderType,
+        ProviderType persistedProviderType,
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
         boolean includeProviderFactory) {
@@ -1734,7 +1724,7 @@ class DatabaseTurnResolverTest {
         List<String> skills,
         List<ToolDescriptor> platformDescriptors,
         Set<String> internalPlatformToolNames,
-        AgentProviderType persistedProviderType,
+        ProviderType persistedProviderType,
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
         boolean includeProviderFactory,
@@ -1757,7 +1747,7 @@ class DatabaseTurnResolverTest {
         List<String> skills,
         List<ToolDescriptor> platformDescriptors,
         Set<String> internalPlatformToolNames,
-        AgentProviderType persistedProviderType,
+        ProviderType persistedProviderType,
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
         boolean includeProviderFactory,
@@ -1826,7 +1816,7 @@ class DatabaseTurnResolverTest {
     private void addModel(ModelSelection selection, ParsedAgentModelConfig parsedModel) {
       AgentProvider fallbackProvider = new AgentProvider();
       fallbackProvider.setName(selection.providerName());
-      fallbackProvider.setProviderType(AgentProviderType.openai);
+      fallbackProvider.setProviderType(ProviderType.OPENAI);
       fallbackProvider.setVersion(0L);
       when(providers.getByName(selection.providerName())).thenReturn(fallbackProvider);
 

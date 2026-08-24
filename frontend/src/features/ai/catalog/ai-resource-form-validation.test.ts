@@ -168,5 +168,8 @@ describe('ai-resource-form-validation', () => {
       toUserFacingErrorMessage(new Error('variant medium temperature must not be negative')),
     ).toMatch(/Temperature/)
     expect(toUserFacingErrorMessage(new Error('variant must not be blank'))).toMatch(/Variant/)
+    expect(toUserFacingErrorMessage(new Error('unsupported provider type wire value: OPENAI'))).toMatch(
+      /Provider Type/,
+    )
   })
 })

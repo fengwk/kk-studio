@@ -59,6 +59,12 @@ public interface ProviderFactory {
 | `anthropicProviderFactory` | `ANTHROPIC` | BREAKPOINTS |
 | `googleProviderFactory` | `GOOGLE` | AUTOMATIC |
 
+`harness-runtime` 的 `ProviderType` 是 Provider 类型唯一事实源，同时持有四个稳定 Catalog wire 值：
+`OPENAI=openai`、`OPENAI_RESPONSES=openai_response`、`ANTHROPIC=anthropic`、`GOOGLE=google`。Catalog HTTP DTO
+与 `agent_provider.provider_type` 保持字符串边界，由 Platform 显式调用 `wireValue()` / `fromWireValue(String)` 转换；
+不接受 null、空白、大小写变化或未知值。`ModelRequestSpec` 的 durable JSON 仍由现有 codec 使用 Java enum 名
+（如 `OPENAI`）编码，不通过 `@JsonValue` 改变 Harness 持久化语义。
+
 `ProviderFactories` 按 ProviderType 建立不可变索引，重复注册在构造阶段失败。Provider 资源就是当前 `agent_provider` 行：每次 Model attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前行，以当前 providerType/baseUrl/credential/config 选择 `ProviderFactory` 并构造短生命周期 attempt-local adapter；Provider 更新后下一 attempt 立即使用新值，当前行缺失时确定性 not found，同名重建后解析到新行。credential 只在写入 DTO 反序列化与 attempt 时 adapter 构造使用，不进入 response 或 invocation JSON。
 
 `PlatformModelGateway` 是 `ModelGateway` 端口适配：admission 两阶段激活（`start` → Processor `markRunning` 后 `activate`），回调桥是 serialized FIFO 单 drainer 状态机，terminal-once；`Busy` 重试、`Rejected` 确定性终结、`Indeterminate` 收敛 `UNKNOWN`。已启动 attempt 的 retryable `TRANSIENT` 失败由 Runtime 保存完整 partial/error/retryAt 后重放冻结 `ModelRequestSpec`（每次 attempt 从相同 `basisHeadEntryId + spec` 重新 materialize 内存 ProviderRequest），不由 Gateway 拼接历史输出。

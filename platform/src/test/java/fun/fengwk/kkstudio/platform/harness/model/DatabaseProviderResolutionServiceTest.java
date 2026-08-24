@@ -41,13 +41,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.math.BigDecimal;
-import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -100,7 +97,7 @@ class DatabaseProviderResolutionServiceTest {
   @Test
   void resolveRejectsFrozenProviderTypeDrift() {
     when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.anthropic, ENDPOINT));
+        .thenReturn(provider(ProviderType.ANTHROPIC, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
@@ -116,8 +113,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveRejectsUnregisteredFactoryType() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     // 只注册了 ANTHROPIC factory，OPENAI 行没有对应 factory：resolve 必须确定性失败。
     DatabaseProviderResolutionService resolution =
         resolution(
@@ -134,7 +130,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveRejectsBlankBaseUrlAtAdmission() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(AgentProviderType.openai, "  "));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, "  "));
     DatabaseProviderResolutionService resolution =
         resolution(
             openAiFactory(PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT))));
@@ -147,8 +143,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveWrapsFactoryCreateFailure() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ProviderFactory factory =
         factory(
             ProviderType.OPENAI,
@@ -167,8 +162,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveRejectsNullAdapterFromFactory() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
@@ -185,8 +179,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveRejectsAdapterTypeMismatch() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     // OPENAI factory 返回 GOOGLE adapter：类型不一致必须确定性失败，不能静默使用错误协议。
     DatabaseProviderResolutionService resolution =
         resolution(
@@ -205,30 +198,24 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveAcceptsAllCatalogProviderTypes() {
-    // 四种目录类型到 ProviderType 的映射契约：每一类都能解析到对应 factory 并成功 open。
-    Map<AgentProviderType, ProviderType> mapping = new EnumMap<>(AgentProviderType.class);
-    mapping.put(AgentProviderType.openai, ProviderType.OPENAI);
-    mapping.put(AgentProviderType.openai_response, ProviderType.OPENAI_RESPONSES);
-    mapping.put(AgentProviderType.anthropic, ProviderType.ANTHROPIC);
-    mapping.put(AgentProviderType.google, ProviderType.GOOGLE);
-    for (Map.Entry<AgentProviderType, ProviderType> entry : mapping.entrySet()) {
-      when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(entry.getKey(), ENDPOINT));
+    // 四个 ProviderType 都必须直接从当前 catalog 领域对象解析并成功 open。
+    for (ProviderType providerType : ProviderType.values()) {
+      when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(providerType, ENDPOINT));
       DatabaseProviderResolutionService resolution =
           resolution(
               factory(
-                  entry.getValue(),
+                  providerType,
                   PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                  adapter(entry.getValue(), mock(ModelProvider.class))));
+                  adapter(providerType, mock(ModelProvider.class))));
       resolution
-          .resolve(entry.getValue(), request(ProviderCacheControl.none()))
+          .resolve(providerType, request(ProviderCacheControl.none()))
           .openProvider(ModelCallTimeoutPolicy.DEFAULT);
     }
   }
 
   @Test
   void resolveCarriesCurrentRowFactsIntoEffectiveRequestAndOpener() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ModelProvider modelProvider = mock(ModelProvider.class);
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, modelProvider);
     DatabaseProviderResolutionService resolution =
@@ -269,8 +256,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void openProviderRejectsNullModelProvider() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
@@ -289,8 +275,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void openProviderWrapsAdapterCreateFailure() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
     when(adapter.create(any(ProviderDescriptor.class)))
         .thenThrow(new IllegalStateException("adapter boom"));
@@ -311,8 +296,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void openProviderWrapsIllegalArgumentExceptionWithoutMessage() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
     when(adapter.create(any(ProviderDescriptor.class))).thenThrow(new IllegalArgumentException());
     DatabaseProviderResolutionService resolution =
@@ -334,8 +318,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void openProviderWrapsIllegalArgumentExceptionWithUnrelatedMessage() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
     // 消息不带约定前缀的 IllegalArgumentException 也必须包装：只有约定的前缀错误才原样透传。
     when(adapter.create(any(ProviderDescriptor.class)))
@@ -357,8 +340,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void openProviderPreservesCannotCreateModelProviderError() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
     // adapter 已按本服务约定抛出带前缀的错误：原样保留，避免丢失具体原因。
     IllegalArgumentException original =
@@ -385,8 +367,7 @@ class DatabaseProviderResolutionServiceTest {
       value = PromptCacheMode.class,
       names = {"UNKNOWN", "UNSUPPORTED", "AUTOMATIC"})
   void cacheHintDegradesToNoneForUnsupportedModes(PromptCacheMode mode) {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
@@ -405,8 +386,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void cacheHintWithNoneRetentionStaysNone() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
@@ -420,8 +400,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void affinityCapabilityKeepsPersistedKeyAndDropsBreakpoints() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     // 持久 control 是 BREAKPOINTS 形态，当前 capability 是 AFFINITY：丢弃 breakpoints、沿用 key 与
     // retention。
     ProviderCacheControl persisted =
@@ -444,8 +423,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void preferredRetentionDowngradesToShortWhenSupported() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     // 持久 retention 为 LONG 但当前 capability 只支持 SHORT：降级 SHORT 并沿用 key。
     DatabaseProviderResolutionService resolution =
         resolution(
@@ -464,8 +442,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void retentionDegradesToNoneWhenNothingSupported() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     // capability 只支持 LONG：持久 SHORT 与降级档 SHORT 都不支持，整体降级 none()。
     DatabaseProviderResolutionService resolution =
         resolution(
@@ -483,8 +460,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void breakpointsCapabilityResolvesSystemAndToolsIntersection() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
@@ -513,8 +489,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void breakpointsCapabilityKeepsOnlyToolsWhenLeadingIsNotSystem() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
@@ -541,8 +516,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void breakpointsCapabilityDegradesToNoneOnEmptyMessages() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
@@ -563,8 +537,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void breakpointsCapabilityDegradesToNoneWithoutIntersection() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     // capability 只支持 SYSTEM 断点，但请求首条是 USER 且无 tools：无交集 → none()。
     DatabaseProviderResolutionService resolution =
         resolution(
@@ -587,8 +560,7 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void breakpointsCapabilityDegradesToNoneWithSystemOnlyRequest() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     // capability 只支持 TOOLS 断点，但请求只有 leading SYSTEM 且无 tools：无交集 → none()。
     DatabaseProviderResolutionService resolution =
         resolution(
@@ -640,7 +612,7 @@ class DatabaseProviderResolutionServiceTest {
     return adapter;
   }
 
-  private static AgentProvider provider(AgentProviderType type, String baseUrl) {
+  private static AgentProvider provider(ProviderType type, String baseUrl) {
     AgentProvider provider = new AgentProvider();
     provider.setName(PROVIDER_NAME);
     provider.setProviderType(type);

@@ -2,6 +2,7 @@ import type {
   AgentProviderCreateDTO,
   AgentProviderDTO,
   AgentProviderEditablePropertiesDTO,
+  AgentProviderType,
 } from '@/shared/api/contracts/ai-catalog'
 import type { ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import { numberToNull, trimToNull } from '@/features/ai/catalog/ai-resource-draft-primitives'
@@ -34,7 +35,7 @@ export function toEditableProvider(draft: ProviderDraft): AgentProviderCreateDTO
   return {
     name: draft.name.trim(),
     description: trimToNull(draft.description),
-    providerType: draft.providerType.trim(),
+    providerType: draft.providerType.trim() as AgentProviderType,
     baseUrl: trimToNull(draft.baseUrl),
     credential: trimToNull(draft.credential),
     modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
@@ -45,7 +46,7 @@ export function toEditableProvider(draft: ProviderDraft): AgentProviderCreateDTO
 export function toEditableProviderUpdate(draft: ProviderDraft): AgentProviderEditablePropertiesDTO {
   return {
     description: trimToNull(draft.description),
-    providerType: draft.providerType.trim(),
+    providerType: draft.providerType.trim() as AgentProviderType,
     baseUrl: trimToNull(draft.baseUrl),
     credential: trimToNull(draft.credential),
     modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),

@@ -9,10 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -24,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 public class AgentProviderRepositoryTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderRepository agentProviderRepository;
+  @Autowired private JdbcTemplate jdbc;
 
   @Test
   public void shouldPersistQueryUpdateAndDeleteGlobalProvider() {
@@ -34,7 +36,12 @@ public class AgentProviderRepositoryTest extends PostgresSpringTestSupport {
     AgentProvider stored = agentProviderRepository.getByName(name);
     assertNotNull(stored);
     assertEquals(name, stored.getName());
-    assertEquals(AgentProviderType.openai, stored.getProviderType());
+    assertEquals(ProviderType.OPENAI, stored.getProviderType());
+    // Repository 必须显式写入稳定 wire 值，不能依赖 MyBatis enum name 转换。
+    assertEquals(
+        "openai",
+        jdbc.queryForObject(
+            "select provider_type from agent_provider where name = ?", String.class, name));
     assertEquals("{}", stored.getConfigJson());
     assertNotNull(stored.getCreateTime());
     assertNotNull(stored.getUpdateTime());
@@ -104,7 +111,7 @@ public class AgentProviderRepositoryTest extends PostgresSpringTestSupport {
   private AgentProvider provider(String name) {
     AgentProvider provider = new AgentProvider();
     provider.setName(name);
-    provider.setProviderType(AgentProviderType.openai);
+    provider.setProviderType(ProviderType.OPENAI);
     provider.setConfigJson("{}");
     return provider;
   }

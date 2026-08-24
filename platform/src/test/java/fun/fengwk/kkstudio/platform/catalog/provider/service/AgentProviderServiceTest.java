@@ -42,6 +42,7 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
     assertTrue(provider.isConfigured());
     assertFalse(hasProperty(provider, "credential"));
     assertEquals(name, provider.getName());
+    assertEquals("openai", provider.getProviderType());
     assertEquals("0", provider.getVersion());
     assertThrows(
         AiDuplicateException.class,
@@ -56,6 +57,7 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
     update.setExpectedVersion(provider.getVersion());
     AgentProviderDTO updated = agentProviderService.updateProvider(name, update);
     assertEquals(name, updated.getName());
+    assertEquals("openai", updated.getProviderType());
     assertTrue(updated.isConfigured());
     assertEquals("1", updated.getVersion());
     assertThrows(

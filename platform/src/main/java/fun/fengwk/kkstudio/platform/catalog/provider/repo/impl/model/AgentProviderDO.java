@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.platform.catalog.provider.repo.impl.model;
 
 import lombok.Data;
 
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
-
 import java.time.Instant;
 
 /** {@code agent_provider} 行映射：LLM Provider 连接配置。 */
@@ -16,8 +14,8 @@ public class AgentProviderDO {
   /** 描述，可选；varchar(512)，null 表示未填写。 */
   private String description;
 
-  /** Provider 协议类型（如 openai / anthropic / google），必填。 */
-  private AgentProviderType providerType;
+  /** Provider 协议类型稳定 wire 值，映射 varchar(64)，必填。 */
+  private String providerType;
 
   /** 服务 base URL，可选；varchar(512)。 */
   private String baseUrl;

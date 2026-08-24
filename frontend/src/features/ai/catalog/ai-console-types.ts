@@ -1,10 +1,13 @@
-import type { AgentModelInputModality } from '@/shared/api/contracts/ai-catalog'
+import type {
+  AgentModelInputModality,
+  AgentProviderType,
+} from '@/shared/api/contracts/ai-catalog'
 import type { CatalogVersion } from '@/shared/api/contracts/base'
 
 export interface ProviderDraft {
   name: string
   description: string
-  providerType: string
+  providerType: AgentProviderType
   baseUrl: string
   credential: string
   modelCallTimeoutMillis: string
@@ -97,4 +100,5 @@ export type ResourceModal =
       expectedVersion: CatalogVersion
     }
 
-export const providerTypes = ['openai', 'openai_response', 'anthropic', 'google']
+export const providerTypes = ['openai', 'openai_response', 'anthropic', 'google'] as const satisfies
+  readonly AgentProviderType[]

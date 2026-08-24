@@ -2,12 +2,12 @@ package fun.fengwk.kkstudio.platform.catalog.provider.service.impl;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 /** 规范化可变的 provider 配置，同时保证公开 DTO 不携带凭据。 */
 @Component
@@ -65,8 +65,8 @@ final class AgentProviderMutationFactory {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
     String name = requireName(fallbackName);
-    String providerType = editableSupport.trimToNull(properties.getProviderType());
-    if (providerType == null) {
+    String providerType = properties.getProviderType();
+    if (providerType == null || providerType.isBlank()) {
       throw new AiValidationException(RESOURCE, RESOURCE + " providerType must not be blank");
     }
     String credential = editableSupport.trimToNull(properties.getCredential());
@@ -88,7 +88,7 @@ final class AgentProviderMutationFactory {
       return new Mutation(
           name,
           description,
-          AgentProviderType.valueOf(providerType),
+          ProviderType.fromWireValue(providerType),
           baseUrl,
           credential,
           configJson);
@@ -119,7 +119,7 @@ final class AgentProviderMutationFactory {
   record Mutation(
       String name,
       String description,
-      AgentProviderType providerType,
+      ProviderType providerType,
       String baseUrl,
       String credential,
       String configJson) {}
