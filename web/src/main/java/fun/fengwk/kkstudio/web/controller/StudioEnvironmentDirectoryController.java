@@ -20,6 +20,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Environment Root 单层目录浏览 API（control-plane 只读，不走 Tool Invocation/Permission）。
@@ -46,21 +49,30 @@ public class StudioEnvironmentDirectoryController {
    * 相对路径。
    */
   @GetMapping("/api/ai/environments/{name}/directories")
-  public ResponseEntity<Result<?>> listDirectories(
+  public CompletionStage<ResponseEntity<Result<?>>> listDirectories(
       @PathVariable String name, @RequestParam(defaultValue = ".") String path) {
     EnvironmentName environmentName;
     try {
       environmentName = new EnvironmentName(name);
     } catch (IllegalArgumentException error) {
-      return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_ENVIRONMENT_NAME", error.getMessage());
+      return CompletableFuture.completedFuture(
+          errorResponse(HttpStatus.BAD_REQUEST, "INVALID_ENVIRONMENT_NAME", error.getMessage()));
     }
-    // gateway 的 orTimeout 保证 future 在配置超时内完成；blocking join 不会悬挂。
-    CompletableFuture<EnvironmentDirectoryListResult> future =
-        directoryLister.listDirectory(
-            environmentName,
-            path,
-            Duration.ofMillis(snapshot.get().environment().directoryListTimeoutMillis()));
-    EnvironmentDirectoryListResult result = future.join();
+    CompletionStage<EnvironmentDirectoryListResult> future;
+    try {
+      future =
+          directoryLister.listDirectory(
+              environmentName,
+              path,
+              Duration.ofMillis(snapshot.get().environment().directoryListTimeoutMillis()));
+    } catch (RuntimeException error) {
+      return CompletableFuture.completedFuture(mapAsyncFailure(error));
+    }
+    return future.handle(
+        (result, error) -> error == null ? mapResult(result) : mapAsyncFailure(error));
+  }
+
+  private static ResponseEntity<Result<?>> mapResult(EnvironmentDirectoryListResult result) {
     if (result instanceof EnvironmentDirectoryListResult.Loaded loaded) {
       return ResponseEntity.ok(Results.ok(loaded.listing()));
     }
@@ -77,6 +89,26 @@ public class StudioEnvironmentDirectoryController {
       case IO_ERROR -> errorResponse(
           HttpStatus.BAD_GATEWAY, failed.code().name(), failed.message());
     };
+  }
+
+  private static ResponseEntity<Result<?>> mapAsyncFailure(Throwable error) {
+    Throwable cause = unwrap(error);
+    String message =
+        cause.getMessage() == null || cause.getMessage().isBlank()
+            ? "environment directory request failed"
+            : cause.getMessage();
+    if (cause instanceof TimeoutException) {
+      return errorResponse(HttpStatus.GATEWAY_TIMEOUT, "TIMEOUT", message);
+    }
+    return errorResponse(HttpStatus.BAD_GATEWAY, "IO_ERROR", message);
+  }
+
+  private static Throwable unwrap(Throwable error) {
+    Throwable current = error;
+    while (current instanceof CompletionException && current.getCause() != null) {
+      current = current.getCause();
+    }
+    return current;
   }
 
   private static ResponseEntity<Result<?>> errorResponse(

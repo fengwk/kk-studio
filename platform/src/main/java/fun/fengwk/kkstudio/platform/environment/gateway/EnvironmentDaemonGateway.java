@@ -806,7 +806,11 @@ public class EnvironmentDaemonGateway
 
   private boolean send(
       ConnectionState state, DaemonMessageType type, String invocationId, String payloadJson) {
-    return sendWithOutcome(state, type, invocationId, payloadJson) == SendOutcome.SENT;
+    SendOutcome outcome = sendWithOutcome(state, type, invocationId, payloadJson);
+    if (outcome == SendOutcome.UNCERTAIN) {
+      close(state.connection.connectionId());
+    }
+    return outcome == SendOutcome.SENT;
   }
 
   private SendOutcome sendWithOutcome(
@@ -827,11 +831,14 @@ public class EnvironmentDaemonGateway
               state.outboundSequence++,
               payloadJson);
       try {
-        state.connection.sendText(envelopeCodec.encode(envelope));
-        return SendOutcome.SENT;
+        if (state.connection.sendText(envelopeCodec.encode(envelope))) {
+          return SendOutcome.SENT;
+        }
+        // 有界队列拒绝意味着该连接不能可靠传递当前帧；连接必须整体失败，不能跳过序号继续发送后续帧。
+        state.sendFailed = true;
+        return SendOutcome.UNCERTAIN;
       } catch (RuntimeException error) {
-        // transport 无法继续发送，但 registry/connection 清理尚未完成。
-        // 调用方必须调用 close()，让 closeConnectionState 恰好完成一次。
+        // transport enqueue 契约异常同样使连接整体不可用。
         state.sendFailed = true;
         return SendOutcome.UNCERTAIN;
       }
@@ -847,29 +854,40 @@ public class EnvironmentDaemonGateway
       // 终态名称冲突：daemon 必须据此停止重连并以非零状态退出。
       payload.put("code", DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT);
     }
-    if (state.environmentName == null && receivedEnvironmentName != null) {
-      // HELLO 前失败：回显收到的 envelope 身份，让 daemon 可以归因。
-      synchronized (state) {
-        if (!state.cleaned && !state.sendFailed && state.connection.isOpen()) {
-          DaemonEnvelope envelope =
-              new DaemonEnvelope(
-                  DaemonProtocol.VERSION_3,
-                  DaemonMessageType.ERROR,
-                  receivedEnvironmentName,
-                  null,
-                  state.outboundSequence++,
-                  envelopeCodec.writeJson(payload));
-          try {
-            state.connection.sendText(envelopeCodec.encode(envelope));
-          } catch (RuntimeException ignored) {
-            state.sendFailed = true;
-          }
-        }
-      }
-    } else {
-      send(state, DaemonMessageType.ERROR, null, envelopeCodec.writeJson(payload));
-    }
+    enqueueProtocolError(state, receivedEnvironmentName, envelopeCodec.writeJson(payload));
     close(state.connection.connectionId());
+  }
+
+  private void enqueueProtocolError(
+      ConnectionState state, EnvironmentName receivedEnvironmentName, String payloadJson) {
+    synchronized (state) {
+      EnvironmentName environmentName =
+          state.environmentName == null ? receivedEnvironmentName : state.environmentName;
+      if (state.cleaned
+          || state.sendFailed
+          || !state.connection.isOpen()
+          || environmentName == null) {
+        return;
+      }
+      DaemonEnvelope envelope =
+          new DaemonEnvelope(
+              DaemonProtocol.VERSION_3,
+              DaemonMessageType.ERROR,
+              environmentName,
+              null,
+              state.outboundSequence++,
+              payloadJson);
+      try {
+        if (state.connection.sendText(envelopeCodec.encode(envelope))) {
+          // ERROR 已被 transport 接受后必须先 drain 再 close，尤其名称冲突 code 要送达 daemon。
+          state.closeAfterFlush = true;
+        } else {
+          state.sendFailed = true;
+        }
+      } catch (RuntimeException ignored) {
+        state.sendFailed = true;
+      }
+    }
   }
 
   private void closeConnectionState(ConnectionState state) {
@@ -877,6 +895,7 @@ public class EnvironmentDaemonGateway
     List<PendingSkillLoad> doomedSkills = List.of();
     List<PendingDirectoryList> doomedDirectoryLists = List.of();
     EnvironmentName environmentName;
+    boolean closeAfterFlush;
     // 锁序固定为 state → this：先在 state 上立 cleaned/sendFailed，再清理 map/registry。
     // 这样 in-flight receive（含 HELLO tryBind）会先完成绑定，close 才能看见并摘掉条目；
     // 已 cleaned 的迟到 receive 直接忽略，不会留下幽灵 registry 占用。
@@ -888,6 +907,7 @@ public class EnvironmentDaemonGateway
       state.cleaned = true;
       state.sendFailed = true;
       environmentName = state.environmentName;
+      closeAfterFlush = state.closeAfterFlush;
     }
     synchronized (this) {
       if (environmentName != null) {
@@ -910,7 +930,11 @@ public class EnvironmentDaemonGateway
       connections.remove(state.connection.connectionId(), state);
     }
     try {
-      state.connection.close();
+      if (closeAfterFlush) {
+        state.connection.closeAfterFlush();
+      } else {
+        state.connection.close();
+      }
     } catch (RuntimeException ignored) {
       // transport 关闭失败不得触碰持久状态。
     }
@@ -1211,6 +1235,9 @@ public class EnvironmentDaemonGateway
 
     /** registry/connection 映射已恰好清理一次。 */
     private volatile boolean cleaned;
+
+    /** protocol ERROR 已成功入队，清理后需 drain 已接受帧再关闭。 */
+    private boolean closeAfterFlush;
 
     /** 已超时的目录请求 tombstone（FIFO，{@link #MAX_DIRECTORY_TOMBSTONES} 上限）；仅 gateway monitor 下访问。 */
     private final ArrayDeque<DirectoryTombstone> directoryTombstones = new ArrayDeque<>();

@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+
 /**
  * Environment Gateway 的部署级边界：{@code daemonToken} 与 WebSocket 单帧上限留在 bootstrap
  * properties（心跳/目录/资源预算仍由 SystemSettings.environment 承载）。
@@ -30,5 +32,28 @@ class EnvironmentGatewayPropertiesTest {
     assertThrows(IllegalArgumentException.class, properties::requireMaxMessageBytes);
     properties.setMaxMessageBytes(1024L);
     assertEquals(1024, properties.requireMaxMessageBytes());
+  }
+
+  /** 出站队列、字节与发送超时都是部署级正数边界，并提供可直接用于 WebSocket 的默认值。 */
+  @Test
+  void defaultsAndValidatesOutboundTransportBounds() {
+    EnvironmentGatewayProperties properties = new EnvironmentGatewayProperties();
+    assertEquals(256, properties.requireQueueCapacity());
+    assertEquals(16 * 1024 * 1024, properties.requireMaxBytes());
+    assertEquals(10_000, properties.requireSendTimeoutMillis());
+
+    properties.setQueueCapacity(0);
+    assertThrows(IllegalArgumentException.class, properties::requireQueueCapacity);
+    properties.setMaxBytes(Integer.MAX_VALUE + 1L);
+    assertThrows(IllegalArgumentException.class, properties::requireMaxBytes);
+    properties.setSendTimeout(Duration.ZERO);
+    assertThrows(IllegalArgumentException.class, properties::requireSendTimeoutMillis);
+
+    properties.setQueueCapacity(8);
+    properties.setMaxBytes(1024);
+    properties.setSendTimeout(Duration.ofMillis(250));
+    assertEquals(8, properties.requireQueueCapacity());
+    assertEquals(1024, properties.requireMaxBytes());
+    assertEquals(250, properties.requireSendTimeoutMillis());
   }
 }

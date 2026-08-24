@@ -12,8 +12,9 @@ import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnect
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonEndpoint;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentGatewayProperties;
 
-import java.io.IOException;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Spring WebSocket 适配器；持久协议语义仍封装在 {@link EnvironmentDaemonEndpoint} 中。 */
 @Component
@@ -23,33 +24,51 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
 
   private final EnvironmentDaemonEndpoint endpoint;
   private final int maxMessageBytes;
+  private final int queueCapacity;
+  private final int maxBytes;
+  private final int sendTimeoutMillis;
+  private final Map<String, SpringWebSocketConnection> connections = new ConcurrentHashMap<>();
 
   public EnvironmentDaemonWebSocketHandler(
       EnvironmentDaemonEndpoint endpoint, EnvironmentGatewayProperties gatewayProperties) {
     this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
     this.maxMessageBytes =
         Objects.requireNonNull(gatewayProperties, "gatewayProperties").requireMaxMessageBytes();
+    this.queueCapacity = gatewayProperties.requireQueueCapacity();
+    this.maxBytes = gatewayProperties.requireMaxBytes();
+    this.sendTimeoutMillis = gatewayProperties.requireSendTimeoutMillis();
   }
 
   @Override
   public void afterConnectionEstablished(WebSocketSession session) {
     applyMessageBuffer(session);
-    endpoint.open(new SpringWebSocketConnection(session));
+    SpringWebSocketConnection connection = new SpringWebSocketConnection(session);
+    connections.put(session.getId(), connection);
+    try {
+      endpoint.open(connection);
+    } catch (RuntimeException error) {
+      connections.remove(session.getId(), connection);
+      connection.close();
+      throw error;
+    }
   }
 
   @Override
   protected void handleTextMessage(WebSocketSession session, TextMessage message) {
-    endpoint.receive(session.getId(), message.getPayload());
+    SpringWebSocketConnection connection = connections.get(session.getId());
+    if (connection != null && connection.matches(session)) {
+      endpoint.receive(session.getId(), message.getPayload());
+    }
   }
 
   @Override
   public void handleTransportError(WebSocketSession session, Throwable exception) {
-    endpoint.close(session.getId());
+    disconnect(session);
   }
 
   @Override
   public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-    endpoint.close(session.getId());
+    disconnect(session);
   }
 
   private void applyMessageBuffer(WebSocketSession session) {
@@ -64,12 +83,35 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
     }
   }
 
-  private static final class SpringWebSocketConnection implements EnvironmentDaemonConnection {
+  private void disconnect(WebSocketSession session) {
+    SpringWebSocketConnection connection = connections.get(session.getId());
+    if (connection != null && connection.matches(session)) {
+      disconnect(connection);
+    }
+  }
+
+  private void disconnect(SpringWebSocketConnection connection) {
+    if (!connections.remove(connection.connectionId(), connection)) {
+      return;
+    }
+    try {
+      // Gateway 必须先解绑 registry/active/pending，再关闭 sender；二者都在 handler 锁外执行。
+      endpoint.close(connection.connectionId());
+    } finally {
+      connection.close();
+    }
+  }
+
+  private final class SpringWebSocketConnection implements EnvironmentDaemonConnection {
 
     private final WebSocketSession session;
+    private final DaemonOutboundSender sender;
 
     private SpringWebSocketConnection(WebSocketSession session) {
       this.session = Objects.requireNonNull(session, "session");
+      this.sender =
+          new DaemonOutboundSender(
+              session, queueCapacity, maxBytes, sendTimeoutMillis, error -> disconnect(this));
     }
 
     @Override
@@ -79,25 +121,26 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
 
     @Override
     public boolean isOpen() {
-      return session.isOpen();
+      return sender.isOpen();
     }
 
     @Override
-    public void sendText(String text) {
-      try {
-        session.sendMessage(new TextMessage(text));
-      } catch (IOException error) {
-        throw new IllegalStateException("cannot send daemon WebSocket message", error);
-      }
+    public boolean sendText(String text) {
+      return sender.enqueue(text);
+    }
+
+    @Override
+    public void closeAfterFlush() {
+      sender.closeAfterFlush();
     }
 
     @Override
     public void close() {
-      try {
-        session.close();
-      } catch (IOException error) {
-        throw new IllegalStateException("cannot close daemon WebSocket session", error);
-      }
+      sender.close();
+    }
+
+    private boolean matches(WebSocketSession candidate) {
+      return session == candidate;
     }
   }
 }

@@ -220,7 +220,9 @@ class LiveEnvironmentRegistryTest {
     }
 
     @Override
-    public void sendText(String text) {}
+    public boolean sendText(String text) {
+      return true;
+    }
 
     @Override
     public void close() {
