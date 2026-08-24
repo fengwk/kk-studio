@@ -35,7 +35,6 @@
         <tomcat.version>10.1.59</tomcat.version>
         <postgresql.version>42.7.13</postgresql.version>
         <opennlp.version>2.5.11</opennlp.version>
-        <kotlin.version>2.4.10</kotlin.version>
         <aws.sdk.version>2.29.52</aws.sdk.version>
         <convention4j-comfyui.version>1.2.2</convention4j-comfyui.version>
         <json-path.version>2.9.0</json-path.version>
@@ -96,30 +95,6 @@
                 <version>${log4j.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.jetbrains.kotlin</groupId>
-                <artifactId>kotlin-bom</artifactId>
-                <version>${kotlin.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>org.jetbrains.kotlin</groupId>
-                <artifactId>kotlin-stdlib-common</artifactId>
-                <version>${kotlin.version}</version>
-                <type>pom</type>
-            </dependency>
-            <dependency>
-                <groupId>com.squareup.okio</groupId>
-                <artifactId>okio-jvm</artifactId>
-                <version>3.6.0</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>org.jetbrains.kotlin</groupId>
-                        <artifactId>kotlin-stdlib-common</artifactId>
-                    </exclusion>
-                </exclusions>
             </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
