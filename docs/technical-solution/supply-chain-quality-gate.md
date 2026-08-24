@@ -42,6 +42,32 @@ mvn -P supply-chain -Dcyclonedx.skip=false -Ddependency-check.skip=true verify
 
 脚本通过 `supply-chain.report.directory` 将 Maven 产物写入本次报告目录，不把 API key 放入 Maven 参数。
 
+## 后端依赖版本策略
+
+根 POM 在本仓 `dependencyManagement` 中显式导入并按该顺序解析：
+
+| 依赖族 | 最终版本 |
+| --- | --- |
+| Spring Boot BOM / `spring-boot-maven-plugin` | `3.5.16` |
+| Spring Framework（由 Boot BOM 管理） | `6.2.19` |
+| Jackson BOM | `2.22.1` |
+| Netty BOM | `4.1.137.Final` |
+| Log4j BOM | `2.26.1` |
+| Tomcat embed core/el/jasper/websocket | `10.1.59` |
+| PostgreSQL JDBC | `42.7.13` |
+| OpenNLP | `2.5.11` |
+
+Jackson、Netty、Log4j 的显式 BOM 位于 Boot BOM 之前，避免被 Boot BOM 的旧版本管理覆盖；Tomcat、PostgreSQL、OpenNLP 使用本仓显式 dependencyManagement 条目。`web/pom.xml` 的 Spring Boot Maven Plugin 使用 `${spring-boot.version}`，不再硬编码旧版本。版本变更应通过 `help:effective-pom` 与 `dependency:tree` 同时核对最终解析结果。
+
+## 误报抑制
+
+抑制文件为 `config/supply-chain/dependency-check-suppressions.xml`。每条规则都同时限定一个精确 GAV 和一个 CVE，并在 `<notes>` 中保留官方事实与 URL；禁止使用通配 GAV、CPE、CVSS 阈值或整包抑制：
+
+- `fun.fengwk.auto-mapper:auto-mapper-processor:0.0.48` 与 `fun.fengwk.auto-mapper:auto-mapper-annotation:0.0.48` 的 `CVE-2020-7644`：官方记录对应 npm `fun-map`，不是这两个 Maven 构件。依据：[NVD CVE-2020-7644](https://nvd.nist.gov/vuln/detail/CVE-2020-7644)。
+- `org.jetbrains.kotlin:kotlin-stdlib:1.9.25`、`kotlin-reflect:1.9.25`、`kotlin-stdlib-jdk7:1.9.25`、`kotlin-stdlib-jdk8:1.9.25`、`kotlin-stdlib-common:1.9.25` 的 `CVE-2026-53914`：官方受影响对象为 `kotlin-gradle-plugin`，本仓库没有 Gradle 插件依赖。依据：[NVD CVE-2026-53914](https://nvd.nist.gov/vuln/detail/CVE-2026-53914) 与 [JetBrains security fixes](https://www.jetbrains.com/privacy-security/issues-fixed/)。
+
+`CVE-2020-29582` 在当前 Kotlin runtime 上仅为 CVSS 5.3，不触发 `7.0` 门禁，因此不以放宽阈值或无依据抑制处理。Log4j 升级到 `2.26.1` 后不再命中 `CVE-2026-34479`，没有添加 Log4j 抑制。
+
 ## NVD key、缓存与在线失败
 
 Dependency-Check 以 NVD 为主要漏洞数据源，首次更新可能需要较长时间。无 key 时脚本显式使用 NVD 官方 JSON 2.0 data feed（`https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz`）而不是被服务端拒绝的无 key REST API；有 key 时使用 NVD REST API。工具和 Maven 会复用本机已有的本地缓存；缓存不完整或过期时，显式 `audit`/`all` 会按官方路径更新，不把漏洞源绑定到普通构建。
