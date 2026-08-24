@@ -34,7 +34,7 @@ Environment 的选择在持久化与 wire 上都是**原子**的完整绑定 `{n
 `GET /api/ai/environments/{name}/directories?path=.` 是 control-plane 只读查询（不走 Tool Invocation/Permission，不占 active tool slot）：
 
 - `path` 缺省 `'.'`；响应 `path`/`parentPath`/entry `path` 都是 canonical wire 路径；`parentPath` 必须等于请求 `path` 的 lexical 父路径（root 与单段路径均为 `'.'`）；`displayPath` 固定为**请求 `path` 的最后一段**（root 为 `'.'`），只作展示，codec 层严格拒绝任何其它值或本地绝对路径泄漏；entry 只含 `{name,path}` 且 `name` 必须等于 `path` 最后一段，且 `entries` 不得超过 1000 条。
-- daemon 侧 `EnvironmentDirectoryBrowser`：`resolve().normalize()` 后 `toRealPath()` canonicalize，越出 root 即 `INVALID_PATH`；列表默认不暴露 symlink 目录；显式请求 root 内 symlink alias 时回显 alias 本身，内部只用 real path 校验与读取；只列真实目录、按名称稳定排序、最多 1000 条（超出置 `truncated`）；无法编码为合法 wire 子路径的本地目录名被跳过；不存在 → `NOT_FOUND`，非目录 → `NOT_DIRECTORY`，本地 IO 失败 → `IO_ERROR`。目录文件系统 IO 提交到 daemon 级共享有界单 worker。
+- daemon 侧 `EnvironmentDirectoryBrowser`：`resolve().normalize()` 后 `toRealPath()` canonicalize，越出 root 即 `INVALID_PATH`；列表默认不暴露 symlink 目录；显式请求 root 内 symlink alias 时回显 alias 本身，内部只用 real path 校验与读取；只列真实目录、按名称稳定排序、最多 1000 条（超出置 `truncated`）；无法编码为合法 wire 子路径的本地目录名被跳过；不存在 → `NOT_FOUND`，非目录 → `NOT_DIRECTORY`，本地 IO 失败 → `IO_ERROR`。目录文件系统 IO 提交到 `DaemonRuntime` 统一持有的 virtual-thread-per-task executor。
 - HTTP 映射：`ENVIRONMENT_NOT_FOUND`/`NOT_FOUND` → 404，`ENVIRONMENT_UNAVAILABLE` → 409，`INVALID_PATH`/`NOT_DIRECTORY` → 400，`TIMEOUT` → 504，`IO_ERROR` → 502。
 
 ## 7. 内联 picker

@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** MCP 固定桥接工具的通用异步执行：取消/中断不会产生重复终态回调。 */
@@ -21,10 +23,13 @@ abstract class AbstractMcpBridgeTool implements Tool {
   static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   final McpServerRegistry registry;
+  private final ExecutorService executor;
   private final ToolDescriptor descriptor;
 
-  AbstractMcpBridgeTool(McpServerRegistry registry, ToolDescriptor descriptor) {
+  AbstractMcpBridgeTool(
+      McpServerRegistry registry, ExecutorService executor, ToolDescriptor descriptor) {
     this.registry = Objects.requireNonNull(registry, "registry");
+    this.executor = Objects.requireNonNull(executor, "executor");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
   }
 
@@ -41,20 +46,18 @@ abstract class AbstractMcpBridgeTool implements Tool {
     Objects.requireNonNull(listener, "listener");
     Execution execution = new Execution(request.call().id(), listener);
     execution.worker =
-        Thread.ofVirtual()
-            .name("daemon-mcp-tool")
-            .start(
-                () -> {
-                  try {
-                    ToolResult result = run(request, execution);
-                    execution.complete(listener, result);
-                  } catch (InterruptedException error) {
-                    Thread.currentThread().interrupt();
-                    execution.complete(listener, error(request.call().id(), "Operation cancelled"));
-                  } catch (Exception error) {
-                    execution.complete(listener, error(request.call().id(), failureMessage(error)));
-                  }
-                });
+        executor.submit(
+            () -> {
+              try {
+                ToolResult result = run(request, execution);
+                execution.complete(result);
+              } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                execution.complete(error(request.call().id(), "Operation cancelled"));
+              } catch (Exception error) {
+                execution.complete(error(request.call().id(), failureMessage(error)));
+              }
+            });
     return execution;
   }
 
@@ -92,7 +95,7 @@ abstract class AbstractMcpBridgeTool implements Tool {
     private final ToolExecutionListener listener;
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
-    private volatile Thread worker;
+    private volatile Future<?> worker;
 
     private Execution(String callId, ToolExecutionListener listener) {
       this.callId = callId;
@@ -102,11 +105,11 @@ abstract class AbstractMcpBridgeTool implements Tool {
     @Override
     public void cancel() {
       if (cancelled.compareAndSet(false, true)) {
-        Thread current = worker;
+        Future<?> current = worker;
         if (current != null) {
-          current.interrupt();
+          current.cancel(true);
         }
-        complete(listener, error(callId, "Operation cancelled"));
+        complete(error(callId, "Operation cancelled"));
       }
     }
 
@@ -115,7 +118,7 @@ abstract class AbstractMcpBridgeTool implements Tool {
       return cancelled.get();
     }
 
-    void complete(ToolExecutionListener listener, ToolResult result) {
+    void complete(ToolResult result) {
       if (terminal.compareAndSet(false, true)) {
         listener.onComplete(result);
       }

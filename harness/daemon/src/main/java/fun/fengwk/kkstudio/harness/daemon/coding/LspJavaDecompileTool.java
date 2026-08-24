@@ -7,14 +7,15 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.nio.file.Path;
+import java.util.concurrent.ExecutorService;
 
 /** 通过 LSP bridge 反编译或反汇编 Java class（可用时），否则对可解析的目标回退到 {@code javap}。 */
 public final class LspJavaDecompileTool extends AbstractCodingTool {
 
   private final LspBridge bridge;
 
-  public LspJavaDecompileTool(CodingToolsConfig config) {
-    super(config, EnvironmentToolCatalog.require("lsp_java_decompile"));
+  public LspJavaDecompileTool(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentToolCatalog.require("lsp_java_decompile"));
     this.bridge = new LspBridge(config);
   }
 

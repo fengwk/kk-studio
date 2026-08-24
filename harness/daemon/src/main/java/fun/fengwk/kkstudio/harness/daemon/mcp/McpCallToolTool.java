@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /**
  * 固定 {@code mcp_call_tool} 桥接工具：按精确 server/tool 查找并执行 MCP 调用，保留上游 isError 与 文本/结构化 JSON 结果；未知/未
@@ -16,8 +17,8 @@ import java.util.List;
  */
 public final class McpCallToolTool extends AbstractMcpBridgeTool {
 
-  public McpCallToolTool(McpServerRegistry registry) {
-    super(registry, EnvironmentToolCatalog.require("mcp_call_tool"));
+  public McpCallToolTool(McpServerRegistry registry, ExecutorService executor) {
+    super(registry, executor, EnvironmentToolCatalog.require("mcp_call_tool"));
   }
 
   @Override

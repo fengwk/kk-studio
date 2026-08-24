@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -30,8 +31,8 @@ public final class GrepTool extends AbstractCodingTool {
   static final int DEFAULT_TIMEOUT_SECONDS = 15;
   static final int MAX_TIMEOUT_SECONDS = 3600;
 
-  public GrepTool(CodingToolsConfig config) {
-    super(config, EnvironmentToolCatalog.require("grep"));
+  public GrepTool(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentToolCatalog.require("grep"));
   }
 
   @Override

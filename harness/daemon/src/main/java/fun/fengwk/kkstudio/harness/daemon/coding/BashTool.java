@@ -19,30 +19,36 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 在强制校验显式 environment workdir 后执行 Platform 授权的 shell 命令。
  *
- * <p>静态解析无法沙箱化 shell 内部行为；命令授权属于 Platform permission。但 Daemon 仍会校验 workdir，并在超时或取消时终止完整 process
- * tree。
+ * <p>静态解析无法沙箱化 shell 内部行为；命令授权属于 Platform permission。但 Daemon 仍会校验 workdir，并使用运行时注入的共享 scheduler
+ * 在超时或取消时终止完整 process tree。
  */
 public final class BashTool implements Tool {
 
   static final int DEFAULT_TIMEOUT_SECONDS = 120;
   static final int MAX_TIMEOUT_SECONDS = 3600;
-  private static final ScheduledThreadPoolExecutor SCHEDULER = createScheduler();
   private final CodingToolsConfig config;
   private final EnvironmentPathBoundary boundary;
+  private final ExecutorService executor;
+  private final ScheduledExecutorService scheduler;
   private final ToolDescriptor descriptor;
 
-  public BashTool(CodingToolsConfig config) {
+  public BashTool(
+      CodingToolsConfig config, ExecutorService executor, ScheduledExecutorService scheduler) {
     this.config = Objects.requireNonNull(config, "config");
     boundary = new EnvironmentPathBoundary(config);
+    this.executor = Objects.requireNonNull(executor, "executor");
+    this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     descriptor = EnvironmentToolCatalog.require("bash");
   }
 
@@ -58,7 +64,7 @@ public final class BashTool implements Tool {
     }
     Objects.requireNonNull(listener, "listener");
     BashHandle handle = new BashHandle(request.call().id(), listener);
-    Thread.ofVirtual().name("daemon-bash").start(() -> run(request, listener, handle));
+    handle.worker = executor.submit(() -> run(request, listener, handle));
     return handle;
   }
 
@@ -82,10 +88,14 @@ public final class BashTool implements Tool {
         handle.stopProcessTree();
       }
       handle.timeoutFuture =
-          SCHEDULER.schedule(
+          scheduler.schedule(
               () -> {
                 if (handle.timedOut.compareAndSet(false, true)) {
-                  handle.stopProcessTree();
+                  try {
+                    executor.execute(handle::stopProcessTree);
+                  } catch (RejectedExecutionException ignored) {
+                    // runtime shutdown 会同步 cancel handle 并终止进程；scheduler 不执行阻塞等待。
+                  }
                 }
               },
               processTimeout.toMillis(),
@@ -146,21 +156,6 @@ public final class BashTool implements Tool {
     }
   }
 
-  private static ScheduledThreadPoolExecutor createScheduler() {
-    ScheduledThreadPoolExecutor scheduler =
-        new ScheduledThreadPoolExecutor(1, threadFactory("daemon-bash-timeout"));
-    scheduler.setRemoveOnCancelPolicy(true);
-    return scheduler;
-  }
-
-  private static ThreadFactory threadFactory(String name) {
-    return runnable -> {
-      Thread thread = new Thread(runnable, name);
-      thread.setDaemon(true);
-      return thread;
-    };
-  }
-
   private static final class BashHandle implements ToolExecutionHandle {
     private final String callId;
     private final ToolExecutionListener listener;
@@ -168,6 +163,7 @@ public final class BashTool implements Tool {
     private final AtomicBoolean timedOut = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
     private volatile Process process;
+    private volatile Future<?> worker;
     private volatile ScheduledFuture<?> timeoutFuture;
 
     private BashHandle(String callId, ToolExecutionListener listener) {
@@ -178,6 +174,10 @@ public final class BashTool implements Tool {
     @Override
     public void cancel() {
       if (cancelled.compareAndSet(false, true)) {
+        Future<?> current = worker;
+        if (current != null) {
+          current.cancel(true);
+        }
         stopProcessTree();
         complete(listener, AbstractCodingTool.error(callId, "Operation cancelled"));
       }

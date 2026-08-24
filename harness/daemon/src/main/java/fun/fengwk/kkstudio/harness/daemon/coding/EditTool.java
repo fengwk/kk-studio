@@ -11,13 +11,14 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** 在保留文件表示形式（编码/BOM/未修改区域的行尾分隔符）的前提下执行确定性的精确文本替换。 */
 public final class EditTool extends AbstractCodingTool {
 
-  public EditTool(CodingToolsConfig config) {
-    super(config, EnvironmentToolCatalog.require("edit"));
+  public EditTool(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentToolCatalog.require("edit"));
   }
 
   @Override

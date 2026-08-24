@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /** 读取有界文本窗口或确定性的目录清单。 */
 public final class ReadTool extends AbstractCodingTool {
@@ -20,8 +21,8 @@ public final class ReadTool extends AbstractCodingTool {
   private static final int DEFAULT_LIMIT = 200;
   private static final int MAX_LIMIT = 2000;
 
-  public ReadTool(CodingToolsConfig config) {
-    super(config, EnvironmentToolCatalog.require("read"));
+  public ReadTool(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentToolCatalog.require("read"));
   }
 
   @Override

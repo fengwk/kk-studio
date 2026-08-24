@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -24,6 +25,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -32,12 +35,18 @@ import java.util.concurrent.atomic.AtomicReference;
 class McpBridgeToolsTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+  @AfterEach
+  void closeExecutor() {
+    executor.shutdownNow();
+  }
 
   @Test
   void listToolsReportsAllServerStatusesAndReadySchemas() throws Exception {
     ToolExecutionRequest request = request("mcp_list_tools", "{}");
     FakeClient client = new FakeClient("fs");
-    McpListToolsTool tool = new McpListToolsTool(registry(client));
+    McpListToolsTool tool = new McpListToolsTool(registry(client), executor);
     client.tools = List.of(new McpToolSpec("late_tool", "Late tool", "{\"name\":\"late_tool\"}"));
 
     ToolResult result = new RecordingListener().execute(tool, request);
@@ -62,7 +71,7 @@ class McpBridgeToolsTest {
 
   @Test
   void listToolsFiltersByExactServerAndFailsUnknown() throws Exception {
-    McpListToolsTool tool = new McpListToolsTool(registry(new FakeClient("fs")));
+    McpListToolsTool tool = new McpListToolsTool(registry(new FakeClient("fs")), executor);
 
     ToolResult requested =
         new RecordingListener().execute(tool, request("mcp_list_tools", "{\"server\":\"fs\"}"));
@@ -85,7 +94,7 @@ class McpBridgeToolsTest {
   void listToolsDoesNotExposeFrozenSchemaRenderingFailures() throws Exception {
     FakeClient client = new FakeClient("fs");
     client.tools = List.of(new McpToolSpec("read_file", "Read a file", "credential=secret-value"));
-    McpListToolsTool tool = new McpListToolsTool(registry(client));
+    McpListToolsTool tool = new McpListToolsTool(registry(client), executor);
 
     ToolResult result = new RecordingListener().execute(tool, request("mcp_list_tools", "{}"));
 
@@ -102,7 +111,7 @@ class McpBridgeToolsTest {
     FakeClient client = new FakeClient("fs");
     client.outcomes.put("echo", new McpCallOutcome(false, "plain text"));
     client.outcomes.put("sum", new McpCallOutcome(false, "{\"total\":3}"));
-    McpCallToolTool tool = new McpCallToolTool(registry(client));
+    McpCallToolTool tool = new McpCallToolTool(registry(client), executor);
 
     ToolResult textResult =
         new RecordingListener()
@@ -130,7 +139,7 @@ class McpBridgeToolsTest {
   void callToolPreservesUpstreamIsError() throws Exception {
     FakeClient client = new FakeClient("fs");
     client.outcomes.put("boom", new McpCallOutcome(true, "upstream failure text"));
-    McpCallToolTool tool = new McpCallToolTool(registry(client));
+    McpCallToolTool tool = new McpCallToolTool(registry(client), executor);
 
     ToolResult result =
         new RecordingListener()
@@ -145,7 +154,7 @@ class McpBridgeToolsTest {
   @Test
   void callToolFailsDeterministicallyForUnknownServerAndTool() throws Exception {
     FakeClient client = new FakeClient("fs");
-    McpCallToolTool tool = new McpCallToolTool(registry(client));
+    McpCallToolTool tool = new McpCallToolTool(registry(client), executor);
 
     ToolResult unknownServer =
         new RecordingListener()
@@ -195,7 +204,7 @@ class McpBridgeToolsTest {
 
   @Test
   void cancelProducesExactlyOneTerminalCallback() throws Exception {
-    McpCallToolTool tool = new McpCallToolTool(registry(new FakeClient("fs")));
+    McpCallToolTool tool = new McpCallToolTool(registry(new FakeClient("fs")), executor);
     ToolExecutionRequest request =
         request("mcp_call_tool", "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{}}");
     RecordingListener listener = new RecordingListener();
@@ -206,6 +215,61 @@ class McpBridgeToolsTest {
     assertTrue(result.error());
     assertTrue(((TextToolContent) result.contents().get(0)).text().contains("Operation cancelled"));
     assertEquals(1, listener.terminalCount.get());
+  }
+
+  /** MCP 基座必须把共享 executor 上的阻塞任务中断为单一取消终态，并在提交前校验 descriptor。 */
+  @Test
+  void abstractBridgeExecutionUsesInjectedExecutorAndInterruptsOnCancel() throws Exception {
+    CountDownLatch started = new CountDownLatch(1);
+    AbstractMcpBridgeTool blocking =
+        new AbstractMcpBridgeTool(
+            registry(new FakeClient("fs")),
+            executor,
+            EnvironmentToolCatalog.require("mcp_list_tools")) {
+          @Override
+          ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+            started.countDown();
+            new CountDownLatch(1).await();
+            throw new IllegalStateException("unreachable");
+          }
+        };
+    RecordingListener listener = new RecordingListener();
+    ToolExecutionHandle handle = blocking.execute(request("mcp_list_tools", "{}"), listener);
+    assertTrue(started.await(5, TimeUnit.SECONDS));
+
+    handle.cancel();
+    handle.cancel();
+
+    ToolResult result = listener.awaitComplete();
+    assertTrue(result.error());
+    assertTrue(((TextToolContent) result.contents().get(0)).text().contains("Operation cancelled"));
+    assertEquals(1, listener.terminalCount.get());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            blocking.execute(
+                request("mcp_call_tool", "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{}}"),
+                new RecordingListener()));
+  }
+
+  /** 未覆盖 failureMessage 的桥接基座异常仍必须转为不抛出的 Tool error。 */
+  @Test
+  void abstractBridgeConvertsUnhandledExceptionToToolError() {
+    AbstractMcpBridgeTool failing =
+        new AbstractMcpBridgeTool(
+            registry(new FakeClient("fs")),
+            executor,
+            EnvironmentToolCatalog.require("mcp_list_tools")) {
+          @Override
+          ToolResult run(ToolExecutionRequest request, Execution execution) {
+            throw new IllegalStateException("bridge failed");
+          }
+        };
+
+    ToolResult result = new RecordingListener().execute(failing, request("mcp_list_tools", "{}"));
+
+    assertTrue(result.error());
+    assertTrue(((TextToolContent) result.contents().get(0)).text().contains("bridge failed"));
   }
 
   private static McpServerRegistry registry(FakeClient readyClient) {

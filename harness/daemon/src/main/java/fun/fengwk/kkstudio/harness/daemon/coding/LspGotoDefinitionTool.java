@@ -8,14 +8,15 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.ExecutorService;
 
 /** 通过可选的本机 LSP bridge 解析符号定义。 */
 public final class LspGotoDefinitionTool extends AbstractCodingTool {
 
   private final LspBridge bridge;
 
-  public LspGotoDefinitionTool(CodingToolsConfig config) {
-    super(config, EnvironmentToolCatalog.require("lsp_goto_definition"));
+  public LspGotoDefinitionTool(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentToolCatalog.require("lsp_goto_definition"));
     this.bridge = new LspBridge(config);
   }
 
