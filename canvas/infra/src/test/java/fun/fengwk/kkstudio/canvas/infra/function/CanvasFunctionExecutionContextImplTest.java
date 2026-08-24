@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -241,7 +242,22 @@ class CanvasFunctionExecutionContextImplTest {
         frozen, context.currentRun(), "failed checkpoint must not write back the old frozen run");
   }
 
+  @Test
+  void checkpointRejectsLocallyLostOwnershipBeforeCallingTransactions() {
+    CanvasFunctionExecutionContextImpl context = context(new AtomicBoolean(true));
+
+    assertThrows(
+        CanvasFunctionInternalCancellation.class,
+        () -> context.checkpoint("SUBMITTING", Map.of("jobId", "job")));
+    verify(transactions, never())
+        .checkpoint(any(), any(), anyString(), anyString(), anyString(), any());
+  }
+
   private CanvasFunctionExecutionContextImpl context() {
+    return context(new AtomicBoolean());
+  }
+
+  private CanvasFunctionExecutionContextImpl context(AtomicBoolean ownershipLost) {
     ObjectProvider<CanvasResourceMaterializer> materializerProvider = provider(materializer);
     return new CanvasFunctionExecutionContextImpl(
         runs,
@@ -250,7 +266,7 @@ class CanvasFunctionExecutionContextImplTest {
         materializerProvider,
         Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
         claim,
-        new AtomicBoolean(),
+        ownershipLost,
         frozen);
   }
 
