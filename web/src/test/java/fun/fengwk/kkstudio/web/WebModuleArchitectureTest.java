@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -85,6 +86,20 @@ class WebModuleArchitectureTest {
     assertTrue(
         pomViolations.isEmpty(),
         () -> "web pom harness dependency violations:\n" + String.join("\n", pomViolations));
+  }
+
+  @Test
+  void trustedJarLoaderStaysInWebCompositionRootWithoutTransportOrFlyway() throws IOException {
+    Path loader =
+        locateWebMainJava()
+            .resolve("fun/fengwk/kkstudio/web/runtime/plugin/TrustedJarPluginLoader.java")
+            .normalize();
+    assertTrue(Files.isRegularFile(loader), "trusted JAR loader must live under web runtime");
+    String source = Files.readString(loader, StandardCharsets.UTF_8);
+    for (String forbidden :
+        List.of("org.springframework", "org.flywaydb", "HttpClient", "WebClient")) {
+      assertFalse(source.contains(forbidden), "trusted JAR loader must not reference " + forbidden);
+    }
   }
 
   private static List<String> scanViolations(Path main) throws IOException {

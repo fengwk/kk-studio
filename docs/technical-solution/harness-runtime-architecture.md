@@ -9,7 +9,7 @@
 - Processor 每次处理都是短事务，不在事务内等待外部 I/O（Provider/Tool 执行在事务外）。
 - `harness-runtime` 是纯 Java 模块：不依赖 Spring、数据库驱动、HTTP、WebSocket、Provider SDK 或业务 Tool 实现。
 - `harness-infra` 只做持久化与调度适配：`HarnessStore`（PostgreSQL）、Work dispatcher（claim/NOTIFY/poll）、PostgreSQL realtime notification、本地 Resource store。
-- `platform` 只提供 Catalog/TurnResolver/ModelGateway/ToolGateway/Environment gateway 适配，不写 `harness_*` 表。
+- `platform` 只提供 Catalog/TurnResolver/ModelGateway/ToolGateway/Environment gateway 适配和窄 `HarnessPluginSource` port，不读取插件目录或管理 classloader，不写 `harness_*` 表。
 
 ## 2. 模块
 
@@ -32,6 +32,7 @@ web composition root -> harness-infra -> harness-runtime -> harness-tool
 web composition root -> harness-runtime
 web composition root -> harness/plugins/goal -> harness-plugin-api
 web composition root -> harness-plugin-api（内建与 trusted JAR 插件组合契约）
+web runtime plugin -> platform `HarnessPluginSource` port（trusted JAR snapshot）
 platform -> harness-plugin-api -> harness-runtime -> harness-tool
 platform -> harness-runtime -> harness-tool
 platform -> harness-tool

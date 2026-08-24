@@ -131,8 +131,12 @@ class RuntimeToolsConfigurationTest {
     ToolDescriptor task = descriptor("task");
     ToolFactory loadSkillFactory = mock(ToolFactory.class);
     when(loadSkillFactory.descriptor()).thenReturn(loadSkill);
+    when(loadSkillFactory.visibility()).thenReturn(ToolVisibility.INTERNAL);
+    when(loadSkillFactory.priority()).thenReturn(0);
     ToolFactory taskFactory = mock(ToolFactory.class);
     when(taskFactory.descriptor()).thenReturn(task);
+    when(taskFactory.visibility()).thenReturn(ToolVisibility.INTERNAL);
+    when(taskFactory.priority()).thenReturn(0);
 
     ToolDescriptor pluginDescriptor = descriptor("plugin-internal");
     PluginTool pluginTool =

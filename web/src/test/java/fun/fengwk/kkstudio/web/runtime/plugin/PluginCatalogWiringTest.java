@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.plugin;
+package fun.fengwk.kkstudio.web.runtime.plugin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,8 +19,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.platform.harness.plugin.HarnessPluginSource;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -69,6 +71,23 @@ class PluginCatalogWiringTest {
       assertTrue(catalog.tools().isEmpty());
       assertTrue(catalog.customEntryTypes().isEmpty());
       assertTrue(catalog.contextProjectors().isEmpty());
+    }
+  }
+
+  @Test
+  void mergesHarnessPluginSourceSnapshots() {
+    HarnessPlugin sourcedPlugin =
+        HarnessPlugin.of(
+            new PluginDescriptor(new PluginId("sourced"), "sourced", "1", Set.of()),
+            registrar -> registrar.registerCustomEntryType("state", "sourced.state"));
+    try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+      context.register(PluginCatalogConfiguration.class);
+      context.registerBean(
+          "pluginSource", HarnessPluginSource.class, () -> () -> List.of(sourcedPlugin));
+      context.refresh();
+
+      PluginCatalog catalog = context.getBean(PluginCatalog.class);
+      assertTrue(catalog.findCustomEntryType(new PluginId("sourced"), "sourced.state").isPresent());
     }
   }
 

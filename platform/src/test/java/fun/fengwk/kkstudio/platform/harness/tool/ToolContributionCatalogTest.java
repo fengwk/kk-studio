@@ -86,6 +86,40 @@ class ToolContributionCatalogTest {
   }
 
   @Test
+  void ordersToolsThroughEmptyIntermediatePluginUsingTransitiveRequirements() {
+    PluginDescriptor base = descriptor("base", Set.of());
+    PluginDescriptor middle = descriptor("middle", Set.of(new PluginId("base")));
+    PluginDescriptor top = descriptor("top", Set.of(new PluginId("middle")));
+    HarnessPlugin basePlugin =
+        plugin(
+            base,
+            registrar ->
+                registrar.registerTool(
+                    "base",
+                    pluginTool(descriptor("plugin_base", "1")),
+                    ToolVisibility.SELECTABLE,
+                    -100));
+    HarnessPlugin middlePlugin = plugin(middle, registrar -> {});
+    HarnessPlugin topPlugin =
+        plugin(
+            top,
+            registrar ->
+                registrar.registerTool(
+                    "top",
+                    pluginTool(descriptor("plugin_top", "1")),
+                    ToolVisibility.SELECTABLE,
+                    100));
+
+    ToolContributionCatalog catalog =
+        new ToolContributionCatalog(
+            List.of(), PluginCatalog.from(List.of(topPlugin, middlePlugin, basePlugin)));
+
+    assertEquals(
+        List.of("plugin:base:base", "plugin:top:top"),
+        catalog.entries().stream().map(ToolContributionCatalog.Entry::identity).toList());
+  }
+
+  @Test
   void createsLocalToolAndRejectsDescriptorDriftOrPluginEntry() {
     ToolDescriptor descriptor = descriptor("local", "1");
     Tool expected = tool(descriptor);

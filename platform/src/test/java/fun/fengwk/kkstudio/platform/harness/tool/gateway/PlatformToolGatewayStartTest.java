@@ -480,9 +480,9 @@ class PlatformToolGatewayStartTest {
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
-    // create() 产物与注册 key 不匹配：find 抛确定性 IAE，映射为 Rejected(INVALID_REQUEST)。
+    // create() 产物与注册 key 不匹配：catalog 统一映射为 descriptor mismatch。
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals("INVALID_REQUEST", rejected.error().kind());
+    assertEquals("TOOL_DESCRIPTOR_MISMATCH", rejected.error().kind());
   }
 
   @Test

@@ -259,6 +259,16 @@ public final class PlatformToolGateway implements ToolGateway {
                   + bindingDescriptor.version()
                   + " is not registered."));
     }
+    if (!entry.descriptor().equals(bindingDescriptor)) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              TOOL_DESCRIPTOR_MISMATCH_KIND,
+              "Frozen tool "
+                  + bindingDescriptor.name()
+                  + "@"
+                  + bindingDescriptor.version()
+                  + " does not match its catalog descriptor."));
+    }
     if (execution.request().binding().plugin() != null) {
       return startPlugin(execution, listener, lease, entry);
     }

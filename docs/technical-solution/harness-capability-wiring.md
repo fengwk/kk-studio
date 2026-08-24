@@ -1,6 +1,6 @@
 # Harness 能力装配
 
-Platform 通过 Spring `ObjectProvider` 直接收集 ProviderFactory、ToolFactory、Tool interceptor 与受信任 `HarnessPlugin`，并在启动时冻结为不可变集合、`PluginCatalog`、统一 `ToolContributionCatalog`/`ToolCatalog` 和 gateway。`platform` 只做 Catalog/TurnResolver/ModelGateway/ToolGateway/插件 host 适配，不写 `harness_*` 表；领域状态机全部在 `harness-runtime`。
+Web 组合根通过 Spring `ObjectProvider` 收集内建 `HarnessPlugin` bean 与 `HarnessPluginSource` 快照，启动时冻结为 `PluginCatalog`；Platform 只依赖窄插件源接口并消费冻结目录。Platform 同时通过 Spring `ObjectProvider` 收集 ProviderFactory、ToolFactory、Tool interceptor，冻结为不可变集合、统一 `ToolContributionCatalog`/`ToolCatalog` 和 gateway。`platform` 只做 Catalog/TurnResolver/ModelGateway/ToolGateway/插件 host 适配，不写 `harness_*` 表；领域状态机全部在 `harness-runtime`。
 
 ## 1. 装配图
 
@@ -14,7 +14,7 @@ ModelExecutionConfiguration
 HarnessToolGatewayConfiguration
   -> ToolFactory beans
   -> ToolContributionCatalog（本地 ToolFactory + plugin tools，按 requires/priority/identity 冻结）
-  -> PluginCatalog（classpath HarnessPlugin + trusted JAR services，启动时冻结）
+  -> PluginCatalog（Web 组合根提供的已冻结 HarnessPlugin snapshot）
   -> ToolCatalog（统一 Platform contributions + ENVIRONMENT 两类 + 内部 load_skill/task）
   -> toolExecutionAdmission（Runtime ConcurrencyAdmission，默认 64）
   -> PlatformToolGateway（普通 Tool / plugin Tool + preflight + 两阶段激活 + FIFO 回调桥）
@@ -133,9 +133,11 @@ Goal 插件只实现上述模型工具的 durable snapshot 协议，不实现 pi
 
 ### Trusted plugin
 
-- 内建插件从应用 classpath 的 `HarnessPlugin` beans 收集；外部插件只从配置的本地目录扫描 `.jar`，使用 `ServiceLoader<HarnessPlugin>` 启动期一次性加载。配置项为 `kk-studio.harness.plugins.directory`，部署环境可用 `KK_STUDIO_TRUSTED_PLUGIN_DIRECTORY` 覆盖；空目录配置表示不加载外部插件。
-- 外部插件使用 parent-first child `URLClassLoader`，parent 为宿主 plugin-api classloader；loader 不设置线程 context classloader，不把 JAR 作为 Spring configuration/component 扫描，也不参与 Flyway。JAR 文件名按稳定字典序扫描，加载完成后插件列表不可变，不提供热加载、卸载或运行时安装。
-- `PluginCatalog.from(...)` 在启动时把内建 bean 与 trusted JAR services 合并，执行一次注册与 freeze。任何 descriptor、requires、贡献 owner 或依赖 cycle 错误都 fail closed，中止启动。
+- Web 组合根的 `PluginCatalogConfiguration` 收集 Spring `HarnessPlugin` beans 和 Platform 提供的窄 `HarnessPluginSource` 快照；`TrustedJarPluginLoader` 是 Web 的一个 source bean。配置项为 `kk-studio.harness.plugins.directory`，部署环境可用 `KK_STUDIO_TRUSTED_PLUGIN_DIRECTORY` 覆盖；空白配置不创建 classloader。
+- 外部插件目录先用 `Path.toRealPath()` canonical 化并要求为目录，只扫描直接子级、文件名字典序排列的非 symlink `.jar`。外部插件使用 parent-first child `URLClassLoader`，parent 为宿主 plugin-api classloader；loader 不设置线程 context classloader，不把 JAR 作为 Spring configuration/component 扫描，也不参与 HTTP install 或 Flyway。
+- `ServiceLoader<HarnessPlugin>` 只接受由该 child classloader 实际加载的 provider；宿主 classpath 或 parent 提供的 service、以及被 parent-first 遮蔽的同名 provider 都 fail-fast。插件列表在启动时冻结，loader 实现 `AutoCloseable`，Spring bean 显式以 `destroyMethod = "close"` 关闭 child classloader，close 幂等。
+- `PluginCatalog.from(...)` 先读取每个 descriptor 一次，完成 duplicate/missing/self/cycle 检查和 `PluginId` 字典序拓扑排序；验证成功后才按拓扑顺序调用 `contribute`，因此非法依赖图不会调用任何 contributor。之后按每个扩展点的 requires 传递闭包、priority 降序和 ContributionId 字典序冻结贡献。
+- `PluginCatalog.transitiveRequires(pluginId)` 暴露不可变传递依赖集合；`ToolContributionCatalog` 复用该闭包。因此 A requires B、B requires C 时，即使 B 没有某个扩展点的贡献，A 贡献仍排在 C 贡献之后。
 - `PluginTool` 是同步纯函数：输入冻结到 Assistant Entry 的 `BranchView`、执行时间与 `ToolCall`，输出 `ToolResult + List<AppendCustomEntry>`；插件不能访问 `HarnessStore`，也不能推进 Thread/Invocation/Work。
 - `ToolContribution` 冻结 `(pluginId, contributionLocalName)`、descriptor、visibility 与声明的 `(customType, READ|WRITE)`；注册阶段校验该 customType 已由同一插件注册，重复或漂移 fail closed。
 - `PlatformToolGateway` 执行前按 binding 中的 contribution id 恢复贡献，descriptor/state accesses 漂移分别确定性拒绝；当前 intent 只接受同 owner、已注册且声明 WRITE 的 `AppendCustomEntry`。
