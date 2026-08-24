@@ -25,6 +25,7 @@ flowchart TD
     B --> Q[comfyui-workflow-api.md]
     B --> R[environment-daemon-gateway.md]
     B --> V[canvas-resource-function-v1.md]
+    B --> W[supply-chain-quality-gate.md]
     M --> G
 ```
 
@@ -43,6 +44,7 @@ flowchart TD
 | [technical-solution/storage-models.md](technical-solution/storage-models.md) | 关系存储摘要 | Chat、Harness（精确 7 表）、Canvas 当前持久化表；最终 schema 为 V1 |
 | [technical-solution/canvas-resource-function-v1.md](technical-solution/canvas-resource-function-v1.md) | Canvas v1 事实源 | ResourceNode、Resource、Function、Group、Link、typed commands 与八表持久化 |
 | [technical-solution/prompt-to-resource.md](technical-solution/prompt-to-resource.md) | 数据流 | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
+| [technical-solution/supply-chain-quality-gate.md](technical-solution/supply-chain-quality-gate.md) | 供应链质量门禁 | 普通 verify、显式在线扫描、SBOM、报告与失败语义 |
 
 ## 维护规则
 
