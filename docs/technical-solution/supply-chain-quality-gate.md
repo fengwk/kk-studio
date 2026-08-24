@@ -23,7 +23,7 @@ env JAVA_HOME=$JAVA_HOME_21 mvn verify
 ./scripts/supply-chain.sh help
 ```
 
-`all` 总是先生成 SBOM，再执行依赖审计，最后构建并扫描 app / daemon 镜像；即使前一步失败，也会继续执行后续步骤以保留更多诊断产物。`test` 只运行仓库内永久的脚本契约测试，不访问 NVD、npm audit、Maven 在线源、Docker registry 或 ECR。
+`all` 总是先生成 SBOM，再执行依赖审计，最后构建 app / daemon 镜像；每个镜像构建成功后立即运行功能 smoke，两个 smoke 都完成后才启动 Trivy 版本检查和镜像扫描。即使前一步失败，也会继续执行后续步骤以保留更多诊断产物。`test` 只运行仓库内永久的脚本契约测试，不访问 NVD、npm audit、Maven 在线源、Docker registry 或 ECR。
 
 ## Maven profile
 
@@ -90,6 +90,15 @@ Dependency-Check 以 NVD 为主要漏洞数据源，首次更新可能需要较�
 
 镜像构建使用源码根目录作为 context，`.dockerignore` 排除密钥和凭证文件。运行时阶段每次构建都会先执行非交互 `apt-get upgrade --yes`，再安装运行时包并清理 apt lists，以吸收 Ubuntu security updates；builder 阶段不执行这项升级。Daemon 的 Node runtime stage 还固定刷新 npm 及其已知受影响的 bundled packages，保持 daemon 的 Node/npm 工具契约。
 
+每个镜像 build 成功后，脚本不覆盖镜像的默认 `USER`，而是通过临时 entrypoint 在该默认用户下执行功能 smoke。App smoke 验证用户不是 root、`java -version` 成功且 `ffmpeg`、`ffprobe`、`curl` 存在。Daemon smoke 额外验证 `java -version`、Node 版本匹配 `v22.19.x`、npm 精确为 `11.19.0`、`bash` 与 `git` 存在，并在镜像内的临时可写目录执行：
+
+```bash
+npm init --yes
+npm install --package-lock-only --ignore-scripts --no-audit --no-fund lodash@4.17.21
+```
+
+随后脚本解析 `package-lock.json`，确认其中包含 `lodash@4.17.21`。该安装只生成 lockfile，且显式关闭 lifecycle scripts；因此 npm bundled package 的修补必须与这项功能 smoke 配套，不能只依赖 Trivy 的静态漏洞结果。任一命令失败、版本不符、默认用户为 root、临时目录不可写或 lockfile 缺少 lodash，均保持 `FAIL`，并在报告中保留经过代理值脱敏的 smoke 日志。
+
 扫描器固定为 Trivy `0.74.0` 的 immutable image：
 
 ```text
@@ -116,7 +125,8 @@ public.ecr.aws/aquasecurity/trivy-java-db:1
 HIGH/CRITICAL，均保持 `FAIL`。即使 Trivy 工具退出码为零，报告中的漏洞也
 不能生成 `PASS`；由于命令已使用 `--ignore-unfixed`，报告中的 HIGH/CRITICAL
 即代表可修复项。App 与 Daemon 各自生成 JSON 报告，summary 同时记录扫描
-状态、image id、image digest 和 Trivy 版本。
+状态、image id、image digest 和 Trivy 版本；两个 image smoke 的状态和日志也
+单独记录。
 
 ## 报告
 
@@ -141,6 +151,8 @@ reports/supply-chain/
 │   ├── image/daemon.json
 │   ├── image/trivy-version.json
 │   ├── logs/
+│   │   ├── app-image-smoke.log
+│   │   └── daemon-image-smoke.log
 │   ├── summary.md
 │   └── summary.json
 ├── latest/
@@ -148,12 +160,13 @@ reports/supply-chain/
 ```
 
 `summary.json` 记录模式、整体状态、各检查状态、产物和失败原因；镜像检查
-额外记录 image id、image digest、扫描器 image 和版本；`summary.md` 供人工
-阅读。`reports/supply-chain/` 已加入 `.gitignore`，SBOM、漏洞报告、本地缓存
-和临时凭证不会进入提交。
+额外记录 image id、image digest、扫描器 image 和版本，并分别记录 App/Daemon
+image build、功能 smoke、Trivy scan 及其日志；`summary.md` 供人工阅读。
+`reports/supply-chain/` 已加入 `.gitignore`，SBOM、漏洞报告、本地缓存和临时
+凭证不会进入提交。
 
 ## 结果语义
 
-- `PASS`：所有请求的工具都成功运行，JSON 产物可解析且非空，Dependency-Check 的三种报告均存在，且 JSON 中所有非 suppressed `vulnerabilities` 数组总数为零；镜像报告中没有 HIGH/CRITICAL。
-- `FAIL`：工具返回非零（包括任意已知漏洞命中）、在线数据源不可用、报告缺失/不可解析、报告仍包含漏洞、参数错误或报告发布失败。
+- `PASS`：所有请求的工具都成功运行，JSON 产物可解析且非空，Dependency-Check 的三种报告均存在，且 JSON 中所有非 suppressed `vulnerabilities` 数组总数为零；两个镜像功能 smoke 均通过，镜像报告中没有 HIGH/CRITICAL。
+- `FAIL`：工具或镜像功能 smoke 返回非零（包括任意已知漏洞命中）、在线数据源不可用、报告缺失/不可解析、报告仍包含漏洞、参数错误或报告发布失败。
 - `all` 以所有步骤的合取结果作为最终状态；`latest` 只复制真实执行结果，不把失败改写为成功。
