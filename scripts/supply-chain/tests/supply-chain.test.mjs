@@ -124,6 +124,8 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.doesNotMatch(pom, /<nvdApiKey>|NVD_API_KEY/)
     assert.match(script, /chmod 600/)
     assert.match(script, /nvdApiServerId/)
+    assert.match(script, /nvdDatafeedUrl/)
+    assert.match(script, /nvd\.nist\.gov\/feeds\/json\/cve\/2\.0\/nvdcve-2\.0-\{0\}\.json\.gz/)
     assert.doesNotMatch(script, /-DnvdApiKey(?:=|\s)/)
     assert.doesNotMatch(script, /echo\s+["']?\$NVD_API_KEY/)
 })

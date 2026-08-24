@@ -44,11 +44,11 @@ mvn -P supply-chain -Dcyclonedx.skip=false -Ddependency-check.skip=true verify
 
 ## NVD key、缓存与在线失败
 
-Dependency-Check 以 NVD 为主要漏洞数据源，首次更新可能需要较长时间。工具和 Maven 会复用本机已有的本地缓存；缓存不完整或过期时，显式 `audit`/`all` 会按官方路径更新，不把漏洞源绑定到普通构建。
+Dependency-Check 以 NVD 为主要漏洞数据源，首次更新可能需要较长时间。无 key 时脚本显式使用 NVD 官方 JSON 2.0 data feed（`https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz`）而不是被服务端拒绝的无 key REST API；有 key 时使用 NVD REST API。工具和 Maven 会复用本机已有的本地缓存；缓存不完整或过期时，显式 `audit`/`all` 会按官方路径更新，不把漏洞源绑定到普通构建。
 
 当 `NVD_API_KEY` 非空时，脚本会在系统临时目录创建仅当前用户可读写的 `settings.xml`（权限 `600`），将 key 放到固定 server id `kk-studio-supply-chain-nvd` 的 `<password>`，并以 `nvdApiServerId` 指向该 server。Maven 进程不会继承 `NVD_API_KEY`，临时文件在退出时由 `trap` 删除。key 不写入 POM、命令行参数、summary 或日志。
 
-未设置 `NVD_API_KEY` 时，脚本会明确提示使用官方无 key 的慢速路径。NVD、Maven Central 或 npm registry 等在线源不可用、超时、返回错误，或者工具未能生成完整报告时，门禁保持 `FAIL` 并保留本次报告；不得依据缺失数据生成 `PASS`。
+未设置 `NVD_API_KEY` 时，脚本会明确提示使用官方 NVD data feed 的慢速路径。NVD、Maven Central 或 npm registry 等在线源不可用、超时、返回错误，或者工具未能生成完整报告时，门禁保持 `FAIL` 并保留本次报告；不得依据缺失数据生成 `PASS`。
 
 ## 报告
 
