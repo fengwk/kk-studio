@@ -63,6 +63,11 @@ kk-studio:
       poll-delay: ${KK_STUDIO_STORAGE_MAINTENANCE_POLL_DELAY:30s}
       cleanup-lease: ${KK_STUDIO_STORAGE_MAINTENANCE_CLEANUP_LEASE:5m}
   harness:
+    execution-admission:
+      # 进程级执行容量；不进入 SystemSettings/DTO/frontend。
+      model: ${KK_STUDIO_MODEL_MAX_CONCURRENCY:16}
+      tool: ${KK_STUDIO_TOOL_MAX_CONCURRENCY:64}
+      subagent: ${KK_STUDIO_SUBAGENT_MAX_CONCURRENCY:10}
     environment-gateway:
       # Daemon WebSocket 单帧上限（字节）。协议安全边界，不进 SystemSettings。
       max-message-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES:16777216}

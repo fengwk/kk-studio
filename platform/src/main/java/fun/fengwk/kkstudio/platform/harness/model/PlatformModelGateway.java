@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.model;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -16,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
@@ -69,6 +71,7 @@ public final class PlatformModelGateway implements ModelGateway {
   private final ProviderResolutionService providerResolution;
   private final ExecutorService executor;
   private final Supplier<Duration> busyRetryDelay;
+  private final ConcurrencyAdmission admission;
 
   /**
    * 生产与测试共用的唯一构造器。{@code busyRetryDelay} 在每次 {@code Busy} 判定时现读，由装配方决定来源——生产装配传入
@@ -78,9 +81,18 @@ public final class PlatformModelGateway implements ModelGateway {
       ProviderResolutionService providerResolution,
       ExecutorService executor,
       Supplier<Duration> busyRetryDelay) {
+    this(providerResolution, executor, busyRetryDelay, new ConcurrencyAdmission(Integer.MAX_VALUE));
+  }
+
+  PlatformModelGateway(
+      ProviderResolutionService providerResolution,
+      ExecutorService executor,
+      Supplier<Duration> busyRetryDelay,
+      ConcurrencyAdmission admission) {
     this.providerResolution = Objects.requireNonNull(providerResolution, "providerResolution");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
+    this.admission = Objects.requireNonNull(admission, "admission");
     rejectUnsafeExecutorPolicies(executor);
     rejectInlineExecutor(executor);
   }
@@ -99,20 +111,28 @@ public final class PlatformModelGateway implements ModelGateway {
               ProviderErrorKind.INVALID_REQUEST,
               message(setupFailure, "cannot resolve provider for model invocation")));
     }
+    Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
+    if (acquired.isEmpty()) {
+      return new Busy(busyRetryDelay.get());
+    }
+    ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
+    Listener admittedListener = new ReleasingListener(listener, lease);
     StartGate gate = new StartGate();
-    GatewayHandle handle = new GatewayHandle(gate, listener);
-    TransportTask task =
-        new TransportTask(resolved, resolved.effectiveRequest(), listener, handle, gate);
+    GatewayHandle handle = new GatewayHandle(gate, admittedListener, lease);
     try {
+      TransportTask task =
+          new TransportTask(resolved, resolved.effectiveRequest(), admittedListener, handle, gate);
       executor.execute(task);
     } catch (RejectedExecutionException rejected) {
       // 任务可证明从未被接受：按配置的延迟返回 Busy。cancel 会唤醒 broken executor 可能已启动的任务，
       // 使其中止且绝不触碰 Provider。
       gate.cancel();
+      lease.close();
       return new Busy(busyRetryDelay.get());
     } catch (RuntimeException ambiguous) {
       // broken executor 可能在抛异常前已启动任务：结果未知。
       gate.cancel();
+      lease.close();
       return new Indeterminate(
           new ModelInvocationError(
               ProviderErrorKind.TRANSIENT,
@@ -210,6 +230,7 @@ public final class PlatformModelGateway implements ModelGateway {
 
     private final Listener listener;
     private final StartGate gate;
+    private final ConcurrencyAdmission.Lease lease;
     private boolean activated;
     private boolean cancelled;
     private boolean cancellationDelivered;
@@ -218,8 +239,13 @@ public final class PlatformModelGateway implements ModelGateway {
     private ModelInvocationError deferredFailure;
 
     GatewayHandle(StartGate gate, Listener listener) {
+      this(gate, listener, () -> {});
+    }
+
+    GatewayHandle(StartGate gate, Listener listener, ConcurrencyAdmission.Lease lease) {
       this.gate = Objects.requireNonNull(gate, "gate");
       this.listener = Objects.requireNonNull(listener, "listener");
+      this.lease = Objects.requireNonNull(lease, "lease");
     }
 
     /**
@@ -286,12 +312,16 @@ public final class PlatformModelGateway implements ModelGateway {
         deferredFailure = null;
         target = cancellationTarget();
       }
-      if (cancelGate) {
-        // 激活前取消：唤醒等待的 transport task 使其中止，绝不启动 Provider、不泄漏等待线程。
-        gate.cancel();
-      }
-      if (target != null) {
-        target.cancel();
+      try {
+        if (cancelGate) {
+          // 激活前取消：唤醒等待的 transport task 使其中止，绝不启动 Provider、不泄漏等待线程。
+          gate.cancel();
+        }
+        if (target != null) {
+          target.cancel();
+        }
+      } finally {
+        lease.close();
       }
     }
 
@@ -327,6 +357,50 @@ public final class PlatformModelGateway implements ModelGateway {
       }
       cancellationDelivered = true;
       return boundStream;
+    }
+  }
+
+  /** terminal 回调与 handle cancel 共用同一个幂等 lease，避免 listener 异常造成容量泄漏。 */
+  private static final class ReleasingListener implements Listener {
+
+    private final Listener delegate;
+    private final ConcurrencyAdmission.Lease lease;
+
+    private ReleasingListener(Listener delegate, ConcurrencyAdmission.Lease lease) {
+      this.delegate = Objects.requireNonNull(delegate, "delegate");
+      this.lease = Objects.requireNonNull(lease, "lease");
+    }
+
+    @Override
+    public void onEvent(ProviderStreamEvent event) {
+      delegate.onEvent(event);
+    }
+
+    @Override
+    public void onSucceeded(ProviderResponse response) {
+      try {
+        delegate.onSucceeded(response);
+      } finally {
+        lease.close();
+      }
+    }
+
+    @Override
+    public void onFailed(ModelInvocationError error) {
+      try {
+        delegate.onFailed(error);
+      } finally {
+        lease.close();
+      }
+    }
+
+    @Override
+    public void onUnknown(ModelInvocationError error) {
+      try {
+        delegate.onUnknown(error);
+      } finally {
+        lease.close();
+      }
     }
   }
 

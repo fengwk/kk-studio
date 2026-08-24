@@ -143,6 +143,8 @@ ENTRY_DRAFT / Bound Thread 的每次发送:
 
 `ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 command acceptance/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread version、维护 Work，并发布 PostgreSQL realtime notification。Model terminal apply 与 Stop 会先把普通 invocation 的 `failedAttempts` 物化为透明 `MODEL_ATTEMPT_FAILURE` Entry，再写唯一 Assistant 结果。插件 Tool terminal success 先由 `PlatformToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
 
+Model 与 Tool Gateway 在确定性路由完成后分别通过 Runtime 的无等待 `ConcurrencyAdmission` 获取进程内 permit；容量耗尽返回既有 `Busy`/`Overloaded`，不会打开 Provider、执行 Tool 或发送 Environment 请求。permit 覆盖整个 invocation，从两阶段激活前到首个 terminal、取消、提交拒绝或异常收敛，lease 关闭幂等且不会以 executor 任务时长代替 invocation 容量。Subagent 使用部署容量驱动的固定 N 虚拟线程 executor、零队列与 `AbortPolicy`；TaskTool 在创建 child Session/Thread 前把拒绝转换为既有 task ERROR ToolResult。容量是部署级进程边界，不进入 durable DB、SystemSettings、DTO 或 API wire。
+
 ## 6. Canvas
 
 Canvas 使用 `CanvasDocument` 聚合：所有业务节点都是 `ResourceNode`，当前内容通过直接 owner 的有序

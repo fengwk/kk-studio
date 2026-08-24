@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -69,6 +70,58 @@ class PlatformModelGatewayTest {
   private static final UUID INVOCATION_ID = new UUID(0L, 42L);
   private static final ModelGateway.Execution EXECUTION =
       new ModelGateway.Execution(INVOCATION_ID, 1, ProviderType.OPENAI, PROVIDER_REQUEST);
+
+  @Test
+  void capacityExhaustionReturnsBusyBeforeProviderAndCancelReleasesPermit() throws Exception {
+    ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
+    ControlledProvider provider = new ControlledProvider();
+    try (Fixture fixture = new Fixture(provider, admission)) {
+      ModelGateway.Started first = assertInstanceOf(ModelGateway.Started.class, fixture.start());
+      ModelGateway.Busy second = assertInstanceOf(ModelGateway.Busy.class, fixture.start());
+
+      // 第 N+1 次在 provider resolve 后立即 Busy，Provider 既未打开也未提交第二次调用。
+      assertEquals(BUSY_DELAY, second.retryAfter());
+      assertNull(provider.request.get());
+
+      first.handle().cancel();
+      fixture.awaitIdle();
+      ModelGateway.Started third = assertInstanceOf(ModelGateway.Started.class, fixture.start());
+      third.handle().cancel();
+      fixture.awaitIdle();
+      ConcurrencyAdmission.Lease lease = admission.tryAcquire().orElseThrow();
+      lease.close();
+    }
+  }
+
+  @Test
+  void terminalAndThrowingListenerReleasePermitForNextInvocation() throws Exception {
+    ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
+    ControlledProvider provider = new ControlledProvider();
+    try (Fixture fixture = new Fixture(provider, admission)) {
+      provider.syncCompleteOnStart = true;
+      fixture.listener.throwOnSucceeded = true;
+      fixture.startAndActivate();
+      provider.awaitStarted();
+      fixture.listener.awaitTerminal();
+      fixture.awaitIdle();
+
+      // terminal listener 抛异常也只能影响回调，不得泄漏第一条 invocation 的容量。
+      ModelGateway.Started next = assertInstanceOf(ModelGateway.Started.class, fixture.start());
+      next.handle().cancel();
+      fixture.awaitIdle();
+    }
+  }
+
+  @Test
+  void rejectedSubmissionReleasesPermit() {
+    ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
+    try (Fixture fixture =
+        new Fixture(new ControlledProvider(), new RejectingExecutor(), admission)) {
+      assertInstanceOf(ModelGateway.Busy.class, fixture.start());
+      ConcurrencyAdmission.Lease lease = admission.tryAcquire().orElseThrow();
+      lease.close();
+    }
+  }
 
   @Test
   void startReturnsStartedImmediatelyAndBridgesStreamCallbacks() throws Exception {
@@ -1024,8 +1077,25 @@ class PlatformModelGatewayTest {
       this(provider, Executors.newSingleThreadExecutor());
     }
 
+    private Fixture(ControlledProvider provider, ConcurrencyAdmission admission) {
+      this(
+          new Resolution(ignored -> provider),
+          provider,
+          Executors.newSingleThreadExecutor(),
+          admission);
+    }
+
     private Fixture(ControlledProvider provider, ExecutorService executor) {
-      this(new Resolution(ignored -> provider), provider, executor);
+      this(
+          new Resolution(ignored -> provider),
+          provider,
+          executor,
+          new ConcurrencyAdmission(Integer.MAX_VALUE));
+    }
+
+    private Fixture(
+        ControlledProvider provider, ExecutorService executor, ConcurrencyAdmission admission) {
+      this(new Resolution(ignored -> provider), provider, executor, admission);
     }
 
     private Fixture(Resolution resolution) {
@@ -1033,10 +1103,18 @@ class PlatformModelGatewayTest {
     }
 
     private Fixture(Resolution resolution, ControlledProvider provider, ExecutorService executor) {
+      this(resolution, provider, executor, new ConcurrencyAdmission(Integer.MAX_VALUE));
+    }
+
+    private Fixture(
+        Resolution resolution,
+        ControlledProvider provider,
+        ExecutorService executor,
+        ConcurrencyAdmission admission) {
       this.resolution = resolution;
       this.provider = provider == null ? new ControlledProvider() : provider;
       this.executor = executor;
-      this.subject = new PlatformModelGateway(resolution, executor, BUSY_RETRY_DELAY);
+      this.subject = new PlatformModelGateway(resolution, executor, BUSY_RETRY_DELAY, admission);
     }
 
     private ModelGateway.StartResult start() {

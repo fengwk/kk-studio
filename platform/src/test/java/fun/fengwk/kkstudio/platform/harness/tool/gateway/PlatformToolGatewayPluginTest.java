@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginTool;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
 import fun.fengwk.kkstudio.harness.plugin.api.ToolVisibility;
+import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
@@ -80,6 +81,34 @@ class PlatformToolGatewayPluginTest {
         fixture.gateway.preflight(fixture.execution("write").request());
 
     assertInstanceOf(ToolGateway.Allow.class, result);
+  }
+
+  @Test
+  void pluginCapacityRejectsBeforePluginExecutionAndCancelReleasesPermit() {
+    Fixture fixture =
+        fixture(
+            pluginTool(PluginToolResult.withoutIntents(result(List.of()))),
+            new ConcurrencyAdmission(1));
+
+    ToolGateway.Started first =
+        assertInstanceOf(
+            ToolGateway.Started.class,
+            fixture.gateway.start(fixture.execution("write"), fixture.listener));
+    ToolGateway.Overloaded second =
+        assertInstanceOf(
+            ToolGateway.Overloaded.class,
+            fixture.gateway.start(fixture.execution("write"), fixture.listener));
+
+    // plugin.execute 尚未运行，第二次 admission 不能穿透到任何插件副作用。
+    assertTrue(fixture.listener.events.isEmpty());
+    assertTrue(fixture.loadedAssistantId.get() == null);
+    first.handle().cancel();
+    ToolGateway.Started third =
+        assertInstanceOf(
+            ToolGateway.Started.class,
+            fixture.gateway.start(fixture.execution("write"), fixture.listener));
+    third.handle().cancel();
+    assertEquals(ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY.get(), second.retryAfter());
   }
 
   @Test
@@ -173,6 +202,10 @@ class PlatformToolGatewayPluginTest {
   }
 
   private static Fixture fixture(PluginTool tool) {
+    return fixture(tool, new ConcurrencyAdmission(Integer.MAX_VALUE));
+  }
+
+  private static Fixture fixture(PluginTool tool, ConcurrencyAdmission admission) {
     HarnessPlugin plugin =
         HarnessPlugin.of(
             new PluginDescriptor(PLUGIN_ID, "Goal", "1"),
@@ -206,7 +239,8 @@ class PlatformToolGatewayPluginTest {
             executor,
             ToolGatewayTestSupport.BUSY_RETRY_DELAY,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            admission);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     listener.store = resourceStore;

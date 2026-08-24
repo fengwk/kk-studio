@@ -74,6 +74,9 @@ docker compose -f deploy/local/compose.yaml down -v
 | `KK_STUDIO_PG_USER` | `kk_studio` | 初始用户名 |
 | `KK_STUDIO_PG_PASSWORD` | `kk_studio` | 初始密码 |
 | `KK_STUDIO_SPRING_PROFILES_ACTIVE` | `dev` | 传递给 `SPRING_PROFILES_ACTIVE` |
+| `KK_STUDIO_MODEL_MAX_CONCURRENCY` | `16` | 单进程 Model invocation admission 上限；启动配置，不进入 SystemSettings |
+| `KK_STUDIO_TOOL_MAX_CONCURRENCY` | `64` | 单进程 Tool invocation admission 上限；启动配置，不进入 SystemSettings |
+| `KK_STUDIO_SUBAGENT_MAX_CONCURRENCY` | `10` | Subagent 固定虚拟线程执行器容量；启动配置，不进入 SystemSettings |
 | `KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES` | `16777216` | Daemon WebSocket 单帧上限（字节），默认 16MiB |
 | `KK_STUDIO_ENVIRONMENT_GATEWAY_QUEUE_CAPACITY` | `256` | 每个 Daemon 连接的出站待发送帧数上限（含在途帧） |
 | `KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES` | `16777216` | 每个 Daemon 连接的出站待发送 UTF-8 总字节上限（含在途帧） |

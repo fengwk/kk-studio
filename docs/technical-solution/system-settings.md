@@ -69,6 +69,11 @@ aiRuntime 的 compaction / retry / subagent 决策点经
 `SystemSettingsToolSettingsProvider` 是运行期按调用现读通道：permission 在下一次权限预检时生效，
 defaultYolo 在下一次 Chat 创建读取默认值时生效。
 
+Model/Tool/Subagent 的进程内执行容量不属于上述 live SystemSettings：它们由部署配置
+`kk-studio.harness.execution-admission.model/tool/subagent` 在启动时绑定，默认分别为 `16/64/10`，
+对应环境变量为 `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、
+`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`。修改后重启应用生效，进行中的 invocation 不迁移容量。
+
 ## 4. Settings UI
 
 General 只管理当前浏览器的 `BrowserPreferences`，保存在
@@ -93,6 +98,7 @@ model selection 使用 custom renderer。permission 的 tool 名与 compaction f
 - daemon token、API key、access key/secret key、bearer token；
 - Provider/Model/Agent、Chat、Canvas function 等资源自身属性；
 - 协议帧、标识长度、持久化 payload、Tool result 与 Daemon WebSocket 单帧上限等安全不变量；
+- Model/Tool/Subagent 进程内并发 admission（`kk-studio.harness.execution-admission.*`）；
 - Locale、Pane、Composer、Canvas viewport 等浏览器本地偏好。
 
 这条边界避免把秘密写入普通 JSONB，也避免让运行中的进程通过数据库改变文件系统、连接身份或协议安全边界。

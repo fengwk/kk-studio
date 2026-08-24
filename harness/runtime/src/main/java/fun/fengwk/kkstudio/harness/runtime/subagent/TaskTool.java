@@ -60,6 +60,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -127,7 +128,13 @@ public final class TaskTool implements Tool {
       throw new IllegalArgumentException("task requires durable ToolExecutionContext");
     }
     TaskExecution execution = new TaskExecution(request, listener);
-    executor.execute(execution::run);
+    try {
+      executor.execute(execution::run);
+    } catch (RejectedExecutionException rejected) {
+      // 固定容量已耗尽：尚未创建 child Session/Thread，必须返回 task 自身的确定性 ERROR 结果，
+      // 不能把 executor 拒绝冒泡给已启动的 Platform Tool 并误收敛为 UNKNOWN。
+      execution.completeRejected();
+    }
     return execution;
   }
 
@@ -264,6 +271,20 @@ public final class TaskTool implements Tool {
     private void complete(
         ToolCall call, String subagentType, UUID threadId, RunState state, String report) {
       TaskTool.this.complete(listener, call, subagentType, threadId, state, report);
+    }
+
+    private void completeRejected() {
+      try {
+        complete(
+            request.call(),
+            safeSubagentType(request.call()),
+            null,
+            RunState.ERROR,
+            "Subagent execution capacity is exhausted; retry later.");
+      } catch (RuntimeException ignored) {
+        // PlatformToolGateway 的 terminal bridge 会隔离 listener 异常；直接 SPI listener 也不得把
+        // 一个确定性 rejection 重新变成 executor/Tool UNKNOWN。
+      }
     }
 
     private void publishStatus(

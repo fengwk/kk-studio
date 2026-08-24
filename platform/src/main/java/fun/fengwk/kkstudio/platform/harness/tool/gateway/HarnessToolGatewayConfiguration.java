@@ -3,16 +3,19 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
+import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
+import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -25,6 +28,7 @@ import java.util.concurrent.Executors;
 
 /** {@link PlatformToolGateway} 的 executor 与配置 bean 装配。 */
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(HarnessExecutionAdmissionProperties.class)
 public class HarnessToolGatewayConfiguration {
 
   /**
@@ -35,6 +39,13 @@ public class HarnessToolGatewayConfiguration {
   @ConditionalOnMissingBean(name = "toolGatewayExecutor")
   public ExecutorService toolGatewayExecutor() {
     return Executors.newVirtualThreadPerTaskExecutor();
+  }
+
+  @Bean(name = "toolExecutionAdmission")
+  @ConditionalOnMissingBean(name = "toolExecutionAdmission")
+  public ConcurrencyAdmission toolExecutionAdmission(
+      HarnessExecutionAdmissionProperties properties) {
+    return new ConcurrencyAdmission(properties.getTool());
   }
 
   /**
@@ -57,6 +68,7 @@ public class HarnessToolGatewayConfiguration {
       HarnessRuntimeProperties runtimeProperties,
       SystemSettingsSnapshot systemSettingsSnapshot,
       @Qualifier("toolGatewayExecutor") ExecutorService toolGatewayExecutor,
+      @Qualifier("toolExecutionAdmission") ConcurrencyAdmission admission,
       Clock clock) {
     HarnessRuntimeProperties properties =
         Objects.requireNonNull(runtimeProperties, "runtimeProperties");
@@ -78,6 +90,7 @@ public class HarnessToolGatewayConfiguration {
         () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().toolGatewayBusyRetryMillis()),
         () ->
             Duration.ofMillis(systemSettingsSnapshot.get().tool().toolGatewayOverloadRetryMillis()),
-        clock);
+        clock,
+        admission);
   }
 }
