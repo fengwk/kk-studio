@@ -33,6 +33,8 @@ NPM_AUDIT_STATUS=SKIPPED
 MAVEN_AUDIT_STATUS=SKIPPED
 APP_IMAGE_BUILD_STATUS=SKIPPED
 DAEMON_IMAGE_BUILD_STATUS=SKIPPED
+APP_IMAGE_SMOKE_STATUS=SKIPPED
+DAEMON_IMAGE_SMOKE_STATUS=SKIPPED
 APP_IMAGE_SCAN_STATUS=SKIPPED
 DAEMON_IMAGE_SCAN_STATUS=SKIPPED
 APP_IMAGE_ID=
@@ -47,7 +49,7 @@ TRIVY_DOCKER_RUN_ARGS=()
 IMAGE_BUILD_PROXY_ARGS=()
 IMAGE_BUILD_STANDARD_PROXY_ARGS=()
 IMAGE_BUILD_NETWORK=default
-BUILD_LOG_TEMP=
+RAW_LOG_TEMP=
 
 usage() {
     cat <<'EOF'
@@ -598,6 +600,22 @@ set_image_scan_status() {
     esac
 }
 
+set_image_smoke_status() {
+    local name=$1
+    local status=$2
+    case "$name" in
+        app)
+            APP_IMAGE_SMOKE_STATUS=$status
+            ;;
+        daemon)
+            DAEMON_IMAGE_SMOKE_STATUS=$status
+            ;;
+        *)
+            record_failure "unknown image smoke name: $name"
+            ;;
+    esac
+}
+
 read_image_metadata() {
     local name=$1
     local image=$2
@@ -651,13 +669,13 @@ run_image_build() {
     fi
 
     echo "==> Building $name image from the current source"
-    BUILD_LOG_TEMP=$raw_log
+    RAW_LOG_TEMP=$raw_log
     local rc=0
     docker "${docker_args[@]}" "$REPO_ROOT" >"$raw_log" 2>&1 || rc=$?
     local redact_rc=0
     redact_proxy_values "$raw_log" "$log" || redact_rc=$?
     rm -f -- "$raw_log"
-    BUILD_LOG_TEMP=
+    RAW_LOG_TEMP=
 
     if ((redact_rc != 0)); then
         set_image_build_status "$name" FAIL
@@ -671,6 +689,115 @@ run_image_build() {
     else
         set_image_build_status "$name" FAIL
         record_failure "$name image build failed (exit $rc); inspect $log"
+    fi
+}
+
+run_image_smoke() {
+    local name=$1
+    local image=$2
+    local build_status
+    local log="$RUN_DIR/logs/${name}-image-smoke.log"
+    local raw_log="$RUN_DIR/logs/.${name}-image-smoke.log.$$"
+    local smoke_script
+
+    if [[ "$name" == app ]]; then
+        build_status=$APP_IMAGE_BUILD_STATUS
+        smoke_script=$(cat <<'EOF'
+set -eu
+uid="$(id -u)"
+user="$(id -un)"
+printf 'uid=%s user=%s\n' "$uid" "$user"
+test "$uid" -ne 0
+java -version
+command -v ffmpeg
+command -v ffprobe
+command -v curl
+EOF
+)
+    else
+        build_status=$DAEMON_IMAGE_BUILD_STATUS
+        smoke_script=$(cat <<'EOF'
+set -euo pipefail
+uid="$(id -u)"
+user="$(id -un)"
+printf 'uid=%s user=%s\n' "$uid" "$user"
+test "$uid" -ne 0
+java -version
+node_version="$(node --version)"
+printf 'node=%s\n' "$node_version"
+if [[ ! "$node_version" =~ ^v22\.19\.[0-9]+$ ]]; then
+    printf 'unexpected Node version: %s\n' "$node_version" >&2
+    exit 1
+fi
+npm_version="$(npm --version)"
+printf 'npm=%s\n' "$npm_version"
+if [[ "$npm_version" != 11.19.0 ]]; then
+    printf 'unexpected npm version: %s\n' "$npm_version" >&2
+    exit 1
+fi
+command -v bash
+command -v git
+bash --version
+git --version
+smoke_dir="$(mktemp -d /workspace/kk-studio-supply-chain-smoke.XXXXXX)"
+trap 'rm -rf -- "$smoke_dir"' EXIT
+cd "$smoke_dir"
+npm init --yes
+export npm_config_ignore_scripts=true
+npm install --package-lock-only --ignore-scripts --no-audit --no-fund lodash@4.17.21
+test -s package-lock.json
+node --input-type=module <<'NODE'
+import { readFileSync } from 'node:fs'
+
+const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
+const lodash = lock.packages?.['node_modules/lodash'] ?? lock.dependencies?.lodash
+if (!lodash || lodash.version !== '4.17.21') {
+    console.error('package-lock.json does not contain lodash@4.17.21')
+    process.exit(1)
+}
+NODE
+printf '%s\n' 'package-lock.json contains lodash@4.17.21'
+EOF
+)
+    fi
+
+    if [[ "$build_status" != PASS ]]; then
+        set_image_smoke_status "$name" FAIL
+        printf '%s\n' \
+            "$name image smoke was not run because its image build did not pass" \
+            >"$log"
+        record_failure "$name image smoke was not run because its image build did not pass"
+        return 0
+    fi
+
+    echo "==> Running $name image functional smoke"
+    RAW_LOG_TEMP=$raw_log
+    local rc=0
+    if [[ "$name" == app ]]; then
+        docker run --rm --entrypoint /bin/sh "$image" -ceu "$smoke_script" \
+            >"$raw_log" 2>&1 || rc=$?
+    else
+        docker run --rm --entrypoint /bin/bash "$image" -ceu "$smoke_script" \
+            >"$raw_log" 2>&1 || rc=$?
+    fi
+    local redact_rc=0
+    redact_proxy_values "$raw_log" "$log" || redact_rc=$?
+    if ((redact_rc != 0)); then
+        printf '%s\n' \
+            'image smoke log redaction failed; command output was discarded' \
+            >"$log"
+    fi
+    rm -f -- "$raw_log"
+    RAW_LOG_TEMP=
+
+    if ((redact_rc != 0)); then
+        set_image_smoke_status "$name" FAIL
+        record_failure "$name image smoke log could not be redacted"
+    elif ((rc != 0)); then
+        set_image_smoke_status "$name" FAIL
+        record_failure "$name image smoke failed (exit $rc); inspect $log"
+    else
+        set_image_smoke_status "$name" PASS
     fi
 }
 
@@ -807,7 +934,9 @@ run_image_scan() {
 run_image() {
     prepare_image_build
     run_image_build app deploy/local/Dockerfile "$APP_IMAGE"
+    run_image_smoke app "$APP_IMAGE"
     run_image_build daemon deploy/reliability/daemon.Dockerfile "$DAEMON_IMAGE"
+    run_image_smoke daemon "$DAEMON_IMAGE"
     run_trivy_version
     run_image_scan app "$APP_IMAGE"
     run_image_scan daemon "$DAEMON_IMAGE"
@@ -833,6 +962,8 @@ write_summary() {
         SUPPLY_CHAIN_MAVEN_AUDIT_STATUS="$MAVEN_AUDIT_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE_BUILD_STATUS="$APP_IMAGE_BUILD_STATUS" \
         SUPPLY_CHAIN_DAEMON_IMAGE_BUILD_STATUS="$DAEMON_IMAGE_BUILD_STATUS" \
+        SUPPLY_CHAIN_APP_IMAGE_SMOKE_STATUS="$APP_IMAGE_SMOKE_STATUS" \
+        SUPPLY_CHAIN_DAEMON_IMAGE_SMOKE_STATUS="$DAEMON_IMAGE_SMOKE_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE_SCAN_STATUS="$APP_IMAGE_SCAN_STATUS" \
         SUPPLY_CHAIN_DAEMON_IMAGE_SCAN_STATUS="$DAEMON_IMAGE_SCAN_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE="$APP_IMAGE" \
@@ -894,6 +1025,12 @@ const report = {
             log: 'logs/app-image-build.log',
         },
         {
+            name: 'app-image-smoke',
+            status: env.SUPPLY_CHAIN_APP_IMAGE_SMOKE_STATUS,
+            image: env.SUPPLY_CHAIN_APP_IMAGE,
+            log: 'logs/app-image-smoke.log',
+        },
+        {
             name: 'app-image-scan',
             status: env.SUPPLY_CHAIN_APP_IMAGE_SCAN_STATUS,
             image: env.SUPPLY_CHAIN_APP_IMAGE,
@@ -910,6 +1047,12 @@ const report = {
             status: env.SUPPLY_CHAIN_DAEMON_IMAGE_BUILD_STATUS,
             image: env.SUPPLY_CHAIN_DAEMON_IMAGE,
             log: 'logs/daemon-image-build.log',
+        },
+        {
+            name: 'daemon-image-smoke',
+            status: env.SUPPLY_CHAIN_DAEMON_IMAGE_SMOKE_STATUS,
+            image: env.SUPPLY_CHAIN_DAEMON_IMAGE,
+            log: 'logs/daemon-image-smoke.log',
         },
         {
             name: 'daemon-image-scan',
@@ -948,8 +1091,10 @@ NODE
 | npm audit (low) | $NPM_AUDIT_STATUS | [frontend-audit/audit.json](frontend-audit/audit.json) | [logs/npm-audit.log](logs/npm-audit.log) |
 | Maven Dependency-Check | $MAVEN_AUDIT_STATUS | [HTML](backend-audit/dependency-check-report.html), [JSON](backend-audit/dependency-check-report.json), [SARIF](backend-audit/dependency-check-report.sarif) | [logs/maven-audit.log](logs/maven-audit.log) |
 | App image build | $APP_IMAGE_BUILD_STATUS | \`$APP_IMAGE\` | [logs/app-image-build.log](logs/app-image-build.log) |
+| App image smoke | $APP_IMAGE_SMOKE_STATUS | \`$APP_IMAGE\` | [logs/app-image-smoke.log](logs/app-image-smoke.log) |
 | App image scan | $APP_IMAGE_SCAN_STATUS | [image/app.json](image/app.json) (id: \`$APP_IMAGE_ID\`, digest: \`$APP_IMAGE_DIGEST\`, Trivy: \`$TRIVY_VERSION\`) | [logs/app-image-scan.log](logs/app-image-scan.log) |
 | Daemon image build | $DAEMON_IMAGE_BUILD_STATUS | \`$DAEMON_IMAGE\` | [logs/daemon-image-build.log](logs/daemon-image-build.log) |
+| Daemon image smoke | $DAEMON_IMAGE_SMOKE_STATUS | \`$DAEMON_IMAGE\` | [logs/daemon-image-smoke.log](logs/daemon-image-smoke.log) |
 | Daemon image scan | $DAEMON_IMAGE_SCAN_STATUS | [image/daemon.json](image/daemon.json) (id: \`$DAEMON_IMAGE_ID\`, digest: \`$DAEMON_IMAGE_DIGEST\`, Trivy: \`$TRIVY_VERSION\`) | [logs/daemon-image-scan.log](logs/daemon-image-scan.log) |
 
 EOF
@@ -958,7 +1103,7 @@ EOF
         cat >>"$RUN_DIR/summary.md" <<'EOF'
 ## Notes
 
-All requested checks completed successfully. Dependency-Check JSON contains zero non-suppressed vulnerabilities, and each image report contains zero fixable HIGH/CRITICAL vulnerabilities.
+All requested checks completed successfully. Dependency-Check JSON contains zero non-suppressed vulnerabilities, both image functional smokes passed, and each image report contains zero fixable HIGH/CRITICAL vulnerabilities.
 EOF
     else
         cat >>"$RUN_DIR/summary.md" <<'EOF'
@@ -1009,8 +1154,8 @@ finalize_report() {
 }
 
 cleanup() {
-    if [[ -n "$BUILD_LOG_TEMP" ]]; then
-        rm -f -- "$BUILD_LOG_TEMP"
+    if [[ -n "$RAW_LOG_TEMP" ]]; then
+        rm -f -- "$RAW_LOG_TEMP"
     fi
     if [[ -n "$TEMP_SETTINGS_FILE" ]]; then
         rm -f -- "$TEMP_SETTINGS_FILE"

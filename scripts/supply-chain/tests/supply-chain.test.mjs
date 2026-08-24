@@ -139,13 +139,34 @@ case "\${1:-}" in
         ;;
     run)
         version=false
+        smoke=false
         for arg in "$@"; do
             if [[ "$arg" == version ]]; then
                 version=true
             fi
+            if [[ "$arg" == /bin/sh || "$arg" == /bin/bash ]]; then
+                smoke=true
+            fi
         done
         if [[ "$version" == true ]]; then
             printf '%s\\n' '{"Version":"0.74.0"}'
+        elif [[ "$smoke" == true ]]; then
+            smoke_failure="\${FAKE_DOCKER_SMOKE_FAILURE:-}"
+            if [[ "$smoke_failure" == true || "$smoke_failure" == all ]] || \
+                [[ -n "$smoke_failure" && "$*" == *"$smoke_failure"* ]]; then
+                printf '%s\\n' 'simulated image smoke failure' >&2
+                exit 17
+            fi
+            if [[ -n "\${HTTP_PROXY:-}" ]]; then
+                printf 'proxy=%s\\n' "\$HTTP_PROXY"
+            fi
+            printf '%s\\n' \
+                'uid=10001 user=kkdaemon' \
+                'v22.19.0' \
+                '11.19.0' \
+                '/usr/bin/bash' \
+                '/usr/bin/git' \
+                'package-lock.json contains lodash@4.17.21'
         elif [[ "\${FAKE_DOCKER_REPORT_VULNERABILITY:-false}" == true ]]; then
             printf '%s\\n' '{"SchemaVersion":2,"ArtifactName":"fake-image","Results":[{"Target":"ubuntu","Vulnerabilities":[{"VulnerabilityID":"CVE-2099-0002","PkgName":"fake-package","Severity":"HIGH","FixedVersion":"1.2.3"}]}]}'
         else
@@ -445,6 +466,26 @@ test('builds both current images and constructs a pinned proxy-aware Trivy scan'
         assert.match(calls, new RegExp(`--tag ${appImage}`))
         assert.match(calls, new RegExp(`--tag ${daemonImage}`))
         assert.doesNotMatch(calls, /docker push| push /)
+        assert.match(calls, /--entrypoint \/bin\/sh/)
+        assert.match(calls, /--entrypoint \/bin\/bash/)
+        assert.match(calls, /test "\$uid" -ne 0/)
+        assert.match(calls, /java -version/)
+        assert.match(calls, /node --version/)
+        assert.match(calls, /npm --version/)
+        assert.match(calls, /command -v ffmpeg/)
+        assert.match(calls, /command -v ffprobe/)
+        assert.match(calls, /command -v curl/)
+        assert.match(calls, /command -v bash/)
+        assert.match(calls, /command -v git/)
+        assert.match(
+            calls,
+            /npm install --package-lock-only --ignore-scripts --no-audit --no-fund lodash@4\.17\.21/,
+        )
+        assert.equal(
+            calls.indexOf('--entrypoint /bin/bash') <
+                calls.indexOf('aquasec/trivy@sha256:'),
+            true,
+        )
 
         const runCalls = calls
             .split('\n')
@@ -468,6 +509,11 @@ test('builds both current images and constructs a pinned proxy-aware Trivy scan'
             readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
         )
         assert.equal(summary.status, 'PASS')
+        assert.equal(summary.checks.find(check => check.name === 'app-image-smoke').status, 'PASS')
+        assert.equal(
+            summary.checks.find(check => check.name === 'daemon-image-smoke').status,
+            'PASS',
+        )
         assert.equal(summary.checks.find(check => check.name === 'app-image-scan').status, 'PASS')
         assert.equal(
             summary.checks.find(check => check.name === 'daemon-image-scan').status,
@@ -481,6 +527,63 @@ test('builds both current images and constructs a pinned proxy-aware Trivy scan'
         assert.equal(appScan.scannerVersionStatus, 'PASS')
         assert.equal(existsSync(path.join(reportRoot, 'latest/image/app.json')), true)
         assert.equal(existsSync(path.join(reportRoot, 'latest/image/daemon.json')), true)
+        assert.equal(
+            existsSync(path.join(reportRoot, 'latest/logs/app-image-smoke.log')),
+            true,
+        )
+        assert.equal(
+            existsSync(path.join(reportRoot, 'latest/logs/daemon-image-smoke.log')),
+            true,
+        )
+        for (const smokeLog of ['app-image-smoke.log', 'daemon-image-smoke.log']) {
+            const content = readFileSync(path.join(reportRoot, 'latest/logs', smokeLog), 'utf8')
+            assert.doesNotMatch(content, /127\.0\.0\.1:7890/)
+            assert.match(content, /\[redacted-proxy\]/)
+        }
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('fails closed when the daemon smoke fails even though Trivy exits zero', () => {
+    // Intent: runtime contract failures must block the image gate independently of a clean vulnerability report.
+    const toolchain = createFakeDockerToolchain()
+    const reportRoot = path.join(toolchain.root, 'smoke-failure-reports')
+    try {
+        const result = runScript(['image'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_DOCKER_SMOKE_FAILURE: 'daemon',
+            HTTP_PROXY: '',
+            HTTPS_PROXY: '',
+            ALL_PROXY: '',
+            NO_PROXY: '',
+            http_proxy: '',
+            https_proxy: '',
+            all_proxy: '',
+            no_proxy: '',
+        })
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'FAIL')
+        assert.equal(summary.checks.find(check => check.name === 'app-image-smoke').status, 'PASS')
+        assert.equal(
+            summary.checks.find(check => check.name === 'daemon-image-smoke').status,
+            'FAIL',
+        )
+        assert.equal(summary.checks.find(check => check.name === 'app-image-scan').status, 'PASS')
+        assert.equal(
+            summary.checks.find(check => check.name === 'daemon-image-scan').status,
+            'PASS',
+        )
+        assert.match(summary.failures.join('\n'), /daemon image smoke failed/)
+        assert.match(
+            readFileSync(path.join(reportRoot, 'latest/logs/daemon-image-smoke.log'), 'utf8'),
+            /simulated image smoke failure/,
+        )
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }
