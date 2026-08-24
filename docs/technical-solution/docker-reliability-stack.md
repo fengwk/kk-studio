@@ -109,6 +109,10 @@ backend、frontend、daemon 或 Compose 栈；选中的 JUnit 测试自行管理
 ./scripts/reliability/regression.sh --iterations 3 --report-root reports/reliability
 ```
 
+`--report-root` 会先规范化为绝对路径；空值、文件系统根、仓库根、已有符号链接以及
+会使 `latest-regression` 越出该专用目录的路径都会被拒绝。`latest-regression` 不是符号链接，
+发布时只替换报告根目录下的专用目录内容。
+
 冻结测试集按模块分为：
 
 - Web：`PostgresqlNotificationLoopTest`、`PostgresqlNotificationLoopPostgresqlIntegrationTest`、
@@ -124,9 +128,10 @@ backend、frontend、daemon 或 Compose 栈；选中的 JUnit 测试自行管理
 
 Runner 使用 `-Dsurefire.failIfNoSpecifiedTests=false` 允许上游 reactor 模块没有同名测试时
 正常通过，但随后逐模块检查四个目标模块的 `target/surefire-reports`。每一轮的每个冻结
-类都必须有实际 Surefire XML 证据；Maven 非零、目标类缺失、`Surefire is going to kill`
-或 Maven `[ERROR]` 都 fail closed。每轮独立保存 `iterations/NNN/maven.log` 和 Surefire
-报告副本。
+类都必须有实际 Surefire XML 证据，且 XML 必须证明 `tests > 0`、`failures = 0`、
+`errors = 0`，并且不能全部 skipped；只有类名但没有这些执行结果的 XML 会被记为
+invalid。Maven 非零、目标类缺失、invalid、`Surefire is going to kill` 或 Maven `[ERROR]`
+都 fail closed。每轮独立保存 `iterations/NNN/maven.log` 和 Surefire 报告副本。
 
 报告写入 Git 忽略的 `reports/reliability/`：
 

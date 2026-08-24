@@ -30,42 +30,9 @@ CURRENT_ITERATION_SIGNAL=
 
 TARGET_MODULES=(
   web
-  web
-  web
-  web
-  web
   canvas/infra
-  canvas/infra
-  canvas/infra
-  canvas/infra
-  harness/infra
-  harness/infra
-  harness/infra
-  harness/infra
   harness/infra
   platform
-  platform
-  platform
-)
-
-TARGET_AREAS=(
-  Web
-  Web
-  Web
-  Web
-  Web
-  Canvas
-  Canvas
-  Canvas
-  Canvas
-  "Harness Infra"
-  "Harness Infra"
-  "Harness Infra"
-  "Harness Infra"
-  "Harness Infra"
-  "Platform Storage"
-  "Platform Storage"
-  "Platform Storage"
 )
 
 TARGET_FQCNS=(
@@ -99,6 +66,7 @@ declare -a ITERATION_MAVEN_SIGNAL=()
 declare -a ITERATION_LOG=()
 declare -a ITERATION_MATCHED=()
 declare -a ITERATION_MISSING=()
+declare -a ITERATION_INVALID=()
 declare -a ITERATION_MARKERS=()
 declare -a ITERATION_REASON=()
 
@@ -137,6 +105,46 @@ one_line() {
   tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//'
 }
 
+target_module() {
+  case "$1" in
+    fun.fengwk.kkstudio.web.*)
+      printf 'web\n'
+      ;;
+    fun.fengwk.kkstudio.canvas.*)
+      printf 'canvas/infra\n'
+      ;;
+    fun.fengwk.kkstudio.harness.*)
+      printf 'harness/infra\n'
+      ;;
+    fun.fengwk.kkstudio.platform.*)
+      printf 'platform\n'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+target_area() {
+  case "$1" in
+    web)
+      printf 'Web\n'
+      ;;
+    canvas/infra)
+      printf 'Canvas\n'
+      ;;
+    harness/infra)
+      printf 'Harness Infra\n'
+      ;;
+    platform)
+      printf 'Platform Storage\n'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 json_escape() {
   local value=${1-}
   value=${value//\\/\\\\}
@@ -172,12 +180,16 @@ json_delimited_array() {
 
 json_targets() {
   local index
+  local module
+  local area
   printf '['
   for index in "${!TARGET_FQCNS[@]}"; do
     [ "$index" -gt 0 ] && printf ','
+    module=$(target_module "${TARGET_FQCNS[$index]}")
+    area=$(target_area "$module")
     printf '{"area":%s,"module":%s,"class":%s}' \
-      "$(json_quote "${TARGET_AREAS[$index]}")" \
-      "$(json_quote "${TARGET_MODULES[$index]}")" \
+      "$(json_quote "$area")" \
+      "$(json_quote "$module")" \
       "$(json_quote "${TARGET_FQCNS[$index]}")"
   done
   printf ']'
@@ -205,6 +217,9 @@ json_iterations() {
     printf '"missingClasses":'
     json_delimited_array "${ITERATION_MISSING[$index]:-}" ','
     printf ','
+    printf '"invalidClasses":'
+    json_delimited_array "${ITERATION_INVALID[$index]:-}" ','
+    printf ','
     printf '"markers":'
     json_delimited_array "${ITERATION_MARKERS[$index]:-}" '|'
     printf ','
@@ -218,27 +233,119 @@ json_iterations() {
   printf ']'
 }
 
-report_class_file() {
-  local module=$1
-  local fqcn=$2
-  local report_dir="$REPO_ROOT/$module/target/surefire-reports"
-  local exact="$report_dir/TEST-$fqcn.xml"
-  local candidate
+surefire_report_status() {
+  local fqcn=$1
+  local report_file=$2
 
-  if [ -f "$exact" ] \
-    && (grep -Fq "name=\"$fqcn\"" "$exact" || grep -Fq "classname=\"$fqcn\"" "$exact"); then
-    printf '%s\n' "$exact"
-    return 0
+  [ -f "$report_file" ] && [ ! -L "$report_file" ] || return 2
+  awk -v target="$fqcn" '
+    function attribute(tag, key, pattern, value) {
+      pattern = "[[:space:]]" key "=\"[^\"]*\""
+      if (match(tag, pattern)) {
+        value = substr(tag, RSTART, RLENGTH)
+        sub("^[[:space:]]" key "=\"", "", value)
+        sub("\"$", "", value)
+        return value
+      }
+      return ""
+    }
+
+    {
+      if (!capturing) {
+        if (match($0, /<testsuite[[:space:]>]/)) {
+          tag = substr($0, RSTART)
+          capturing = 1
+        } else {
+          next
+        }
+      } else {
+        tag = tag $0
+      }
+
+      if (capturing && index(tag, ">") > 0) {
+        tag = substr(tag, 1, index(tag, ">"))
+        name = attribute(tag, "name")
+        classname = attribute(tag, "classname")
+        if (name == target || classname == target) {
+          identity_found = 1
+          tests = attribute(tag, "tests")
+          failures = attribute(tag, "failures")
+          errors = attribute(tag, "errors")
+          skipped = attribute(tag, "skipped")
+          if (tests ~ /^[0-9]+$/ && failures == "0" && errors == "0" \
+              && skipped ~ /^[0-9]+$/ && tests + 0 > 0 \
+              && skipped + 0 < tests + 0) {
+            valid_found = 1
+          }
+        }
+        tag = ""
+        capturing = 0
+      }
+    }
+
+    END {
+      if (valid_found) {
+        exit 0
+      }
+      if (identity_found) {
+        exit 2
+      }
+      exit 1
+    }
+  ' "$report_file"
+}
+
+report_class_file() {
+  local fqcn=$1
+  local module
+  local report_dir
+  local exact
+  local candidate
+  local status
+  local invalid=false
+
+  module=$(target_module "$fqcn") || return 1
+  report_dir="$REPO_ROOT/$module/target/surefire-reports"
+  exact="$report_dir/TEST-$fqcn.xml"
+
+  if [ -e "$exact" ] || [ -L "$exact" ]; then
+    if surefire_report_status "$fqcn" "$exact"; then
+      printf '%s\n' "$exact"
+      return 0
+    fi
+    return 2
+  fi
+  if [ -L "$report_dir" ]; then
+    return 2
   fi
   [ -d "$report_dir" ] || return 1
   while IFS= read -r -d '' candidate; do
-    if grep -Fq "name=\"$fqcn\"" "$candidate" \
-      || grep -Fq "classname=\"$fqcn\"" "$candidate"; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
+    surefire_report_status "$fqcn" "$candidate"
+    status=$?
+    case "$status" in
+      0)
+        printf '%s\n' "$candidate"
+        return 0
+        ;;
+      2)
+        invalid=true
+        ;;
+    esac
   done < <(find "$report_dir" -maxdepth 1 -type f -name '*.xml' -print0 2>/dev/null)
+  [ "$invalid" = true ] && return 2
   return 1
+}
+
+remove_path() {
+  local path=$1
+  if [ -L "$path" ] || [ -f "$path" ]; then
+    rm -f -- "$path"
+  elif [ -d "$path" ]; then
+    find "$path" -depth -mindepth 1 -delete || return 1
+    rmdir -- "$path"
+  elif [ -e "$path" ]; then
+    rm -f -- "$path"
+  fi
 }
 
 clear_target_reports() {
@@ -247,7 +354,7 @@ clear_target_reports() {
   for module in "${TARGET_MODULES[@]}"; do
     report_dir="$REPO_ROOT/$module/target/surefire-reports"
     if [ -e "$report_dir" ] || [ -L "$report_dir" ]; then
-      rm -rf -- "$report_dir" || return 1
+      remove_path "$report_dir" || return 1
     fi
   done
 }
@@ -261,7 +368,7 @@ copy_target_reports() {
     report_dir="$REPO_ROOT/$module/target/surefire-reports"
     destination="$iteration_dir/surefire-reports/$module"
     mkdir -p "$destination" || return 1
-    if [ -d "$report_dir" ]; then
+    if [ -d "$report_dir" ] && [ ! -L "$report_dir" ]; then
       cp -a "$report_dir/." "$destination/" || return 1
     fi
   done
@@ -271,10 +378,16 @@ copy_target_reports() {
 collect_iteration_classes() {
   local matched=()
   local missing=()
+  local invalid=()
   local index
+  local status
   for index in "${!TARGET_FQCNS[@]}"; do
-    if report_class_file "${TARGET_MODULES[$index]}" "${TARGET_FQCNS[$index]}" >/dev/null; then
+    report_class_file "${TARGET_FQCNS[$index]}" >/dev/null
+    status=$?
+    if [ "$status" -eq 0 ]; then
       matched+=("${TARGET_FQCNS[$index]}")
+    elif [ "$status" -eq 2 ]; then
+      invalid+=("${TARGET_FQCNS[$index]}")
     else
       missing+=("${TARGET_FQCNS[$index]}")
     fi
@@ -288,6 +401,11 @@ collect_iteration_classes() {
     ITERATION_MISSING[$CURRENT_ITERATION_INDEX]=$(IFS=,; printf '%s' "${missing[*]}")
   else
     ITERATION_MISSING[$CURRENT_ITERATION_INDEX]=
+  fi
+  if [ "${#invalid[@]}" -gt 0 ]; then
+    ITERATION_INVALID[$CURRENT_ITERATION_INDEX]=$(IFS=,; printf '%s' "${invalid[*]}")
+  else
+    ITERATION_INVALID[$CURRENT_ITERATION_INDEX]=
   fi
 }
 
@@ -347,6 +465,7 @@ finish_iteration() {
   local reasons=()
   local marker
   local missing
+  local invalid
 
   CURRENT_ITERATION_INDEX=$index
   iteration_end=$(now_epoch)
@@ -376,6 +495,10 @@ finish_iteration() {
   missing=${ITERATION_MISSING[$index]:-}
   if [ -n "$missing" ]; then
     reasons+=("missing-target:$missing")
+  fi
+  invalid=${ITERATION_INVALID[$index]:-}
+  if [ -n "$invalid" ]; then
+    reasons+=("invalid-target:$invalid")
   fi
   if [ -n "$forced_status" ]; then
     ITERATION_STATUS[$index]=$forced_status
@@ -452,6 +575,7 @@ run_iteration() {
     ITERATION_DURATION_SECONDS[$index]=0
     ITERATION_MATCHED[$index]=
     ITERATION_MISSING[$index]=
+    ITERATION_INVALID[$index]=
     ITERATION_MARKERS[$index]=
     ITERATION_REASON[$index]=cannot-create-iteration-directory
     return 1
@@ -531,6 +655,8 @@ write_report_md() {
   local matched_count
   local target_count=${#TARGET_FQCNS[@]}
   local result_upper
+  local module
+  local area
 
   result_upper=$(printf '%s' "$OVERALL_STATUS" | tr '[:lower:]' '[:upper:]')
   {
@@ -554,9 +680,11 @@ write_report_md() {
     printf '| Area | Module | Class |\n'
     printf '| --- | --- | --- |\n'
     for index in "${!TARGET_FQCNS[@]}"; do
+      module=$(target_module "${TARGET_FQCNS[$index]}")
+      area=$(target_area "$module")
       printf '| %s | `%s` | `%s` |\n' \
-        "${TARGET_AREAS[$index]}" \
-        "${TARGET_MODULES[$index]}" \
+        "$area" \
+        "$module" \
         "${TARGET_FQCNS[$index]}"
     done
     printf '\n'
@@ -578,6 +706,7 @@ write_report_md() {
         printf -- '- **Target classes hit:** `%d/%d`\n' "$matched_count" "$target_count"
         printf -- '- **Matched:** %s\n' "$(markdown_list "${ITERATION_MATCHED[$index]}")"
         printf -- '- **Missing:** %s\n' "$(markdown_list "${ITERATION_MISSING[$index]}")"
+        printf -- '- **Invalid:** %s\n' "$(markdown_list "${ITERATION_INVALID[$index]}")"
         printf -- '- **Fail-closed markers:** %s\n' "$(markdown_list "${ITERATION_MARKERS[$index]//|/,}")"
         printf -- '- **Reason:** %s\n' "${ITERATION_REASON[$index]:-none}"
         printf -- '- **Log:** [`%s`](%s)\n' "${ITERATION_LOG[$index]}" "${ITERATION_LOG[$index]}"
@@ -589,12 +718,23 @@ write_report_md() {
 
 publish_latest() {
   local latest="$REPORT_ROOT/latest-regression"
-  local staging="$REPORT_ROOT/.latest-regression.$$"
-  rm -rf -- "$staging"
-  mkdir -p "$staging" || return 1
-  cp -a "$RUN_DIR/." "$staging/" || return 1
-  rm -rf -- "$latest" || return 1
-  mv "$staging" "$latest" || return 1
+  local staging
+
+  [ ! -L "$REPORT_ROOT" ] || return 1
+  [ ! -L "$latest" ] || return 1
+  staging=$(mktemp -d -- "$REPORT_ROOT/.latest-regression.XXXXXX") || return 1
+  if ! cp -a "$RUN_DIR/." "$staging/"; then
+    remove_path "$staging"
+    return 1
+  fi
+  if ! remove_path "$latest"; then
+    remove_path "$staging"
+    return 1
+  fi
+  if ! mv -- "$staging" "$latest"; then
+    remove_path "$staging"
+    return 1
+  fi
   printf '%s\n' "$RUN_ID" >"$REPORT_ROOT/LATEST_REGRESSION_RUN.txt" || return 1
   return 0
 }
@@ -641,6 +781,57 @@ cleanup_on_exit() {
   return "$exit_code"
 }
 
+has_symlink_component() {
+  local path=$1
+  while :; do
+    path=${path%/}
+    [ -n "$path" ] || path=/
+    [ -L "$path" ] && return 0
+    [ "$path" = "/" ] && return 1
+    path=$(dirname -- "$path")
+  done
+}
+
+normalize_report_root() {
+  local value=$1
+  local candidate
+  local normalized
+  local latest
+  local latest_normalized
+
+  [ -n "$value" ] || die '--report-root requires a value'
+  command -v realpath >/dev/null 2>&1 || die 'missing command: realpath'
+  if [[ "$value" = /* ]]; then
+    candidate=$value
+  else
+    candidate="$REPO_ROOT/$value"
+  fi
+  if has_symlink_component "$candidate"; then
+    die '--report-root must not contain an existing symlink'
+  fi
+  normalized=$(realpath -m -- "$candidate") \
+    || die "cannot normalize report root: $value"
+  [ "$normalized" != "/" ] \
+    || die '--report-root must not be the filesystem root'
+  [ "$normalized" != "$REPO_ROOT" ] \
+    || die '--report-root must not be the repository root'
+  if has_symlink_component "$normalized"; then
+    die '--report-root must not contain an existing symlink'
+  fi
+  latest="$normalized/latest-regression"
+  [ "$(dirname -- "$latest")" = "$normalized" ] \
+    || die 'latest-regression must stay inside the report root'
+  latest_normalized=$(realpath -m -- "$latest") \
+    || die 'cannot normalize latest-regression'
+  case "$latest_normalized" in
+    "$normalized"/latest-regression) ;;
+    *) die 'latest-regression must stay inside the report root' ;;
+  esac
+  [ ! -L "$latest" ] \
+    || die 'latest-regression must not be an existing symlink'
+  REPORT_ROOT=$normalized
+}
+
 parse_args() {
   local value
   while [ "$#" -gt 0 ]; do
@@ -678,6 +869,7 @@ parse_args() {
 }
 
 parse_args "$@"
+normalize_report_root "$REPORT_ROOT"
 
 MAVEN_TEST_FILTER=$(IFS=,; printf '%s' "${TARGET_FQCNS[*]}")
 MAVEN_ARGS=(
@@ -692,6 +884,9 @@ MAVEN_ARGS=(
 )
 
 mkdir -p "$REPORT_ROOT" || die "cannot create report root: $REPORT_ROOT"
+[ ! -L "$REPORT_ROOT" ] || die '--report-root must not be a symlink'
+[ ! -L "$REPORT_ROOT/latest-regression" ] \
+  || die 'latest-regression must not be an existing symlink'
 RUN_STARTED_AT=$(now_iso)
 RUN_STARTED_EPOCH=$(now_epoch)
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-regression-$$"
