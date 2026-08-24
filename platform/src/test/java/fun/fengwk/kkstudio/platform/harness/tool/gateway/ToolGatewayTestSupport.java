@@ -208,9 +208,29 @@ final class ToolGatewayTestSupport {
       int resourceMaxBytes,
       ToolSettings settings,
       ConcurrencyAdmission admission) {
-    return new PlatformToolGateway(
+    return gateway(
         toolFactories,
         EMPTY_PLUGIN_CATALOG,
+        transport,
+        store,
+        executor,
+        resourceMaxBytes,
+        settings,
+        admission);
+  }
+
+  static PlatformToolGateway gateway(
+      ToolFactories toolFactories,
+      PluginCatalog pluginCatalog,
+      FakeTransport transport,
+      FakeResourceStore store,
+      ExecutorService executor,
+      int resourceMaxBytes,
+      ToolSettings settings,
+      ConcurrencyAdmission admission) {
+    return new PlatformToolGateway(
+        toolFactories,
+        pluginCatalog,
         FAILING_PLUGIN_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
@@ -248,7 +268,8 @@ final class ToolGatewayTestSupport {
         executor,
         BUSY_RETRY_DELAY,
         OVERLOAD_RETRY_DELAY,
-        TEST_CLOCK);
+        TEST_CLOCK,
+        new ConcurrencyAdmission(Integer.MAX_VALUE));
   }
 
   static PlatformToolGateway gateway(
@@ -272,7 +293,8 @@ final class ToolGatewayTestSupport {
         executor,
         BUSY_RETRY_DELAY,
         OVERLOAD_RETRY_DELAY,
-        TEST_CLOCK);
+        TEST_CLOCK,
+        new ConcurrencyAdmission(Integer.MAX_VALUE));
   }
 
   static ToolSettings settings(PermissionAction action) {
