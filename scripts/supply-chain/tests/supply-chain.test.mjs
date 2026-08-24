@@ -121,6 +121,7 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<format>HTML<\/format>[\s\S]*<format>JSON<\/format>[\s\S]*<format>SARIF<\/format>/)
     assert.match(pom, /<failBuildOnCVSS>7<\/failBuildOnCVSS>/)
     assert.match(pom, /<ossIndexAnalyzerEnabled>false<\/ossIndexAnalyzerEnabled>/)
+    assert.match(pom, /<nvdApiServerId>kk-studio-supply-chain-nvd<\/nvdApiServerId>/)
     assert.doesNotMatch(pom, /<nvdApiKey>|NVD_API_KEY/)
     assert.match(script, /chmod 600/)
     assert.match(script, /nvdApiServerId/)
