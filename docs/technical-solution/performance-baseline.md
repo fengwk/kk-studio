@@ -15,7 +15,8 @@
 默认每个场景测量 10 秒；`--duration-seconds` 允许 `1..120`，`--skip-build` 复用
 `kk-studio-app:performance-baseline` 镜像。每个场景先进行 1 秒 warmup，测量期间由固定
 并发 worker 持续发请求，测量结束后等待所有 inflight 请求完成。每个 HTTP 请求的超时为
-5 秒。
+5 秒。报告保留配置的测量时长，并记录每个场景从测量开始到所有 worker 和 inflight
+请求 settle 的实际测量秒数。
 
 Shell 入口负责：
 
@@ -25,6 +26,11 @@ Shell 入口负责：
 3. 等待 Compose 健康检查和 `/actuator/health` 就绪；
 4. 调用 Node 原生 `fetch` runner；
 5. 无论成功、失败、INT 还是 TERM，执行 `down --volumes --remove-orphans`。
+
+构建时沿用 `deploy/test` 的代理环境变量优先级。HTTP/HTTPS 代理 authority 为
+`127.0.0.1`、`localhost` 或 `[::1]` 且未显式设置 `CANVAS_TEST_BUILD_NETWORK` 时，
+Docker build 使用 `host` network；非 loopback 代理和无代理保持 `default`，显式
+`CANVAS_TEST_BUILD_NETWORK` 始终优先。代理值不会打印。
 
 该入口只使用 `deploy/test` 内置的离线 mock，不读取或同步真实 Provider 凭证，也不启动
 daemon。应用固定使用 `http://127.0.0.1:18088`；PostgreSQL、MinIO 和 HTTP mock 分别
@@ -46,6 +52,7 @@ create 已提交但响应中断造成残留。
 
 每个场景报告：
 
+- 配置的测量时长和实际测量秒数；
 - `requests`、`success`、`error`、`errorRate`；
 - `requestsPerSecond`（全部尝试）和 `throughputRps`（成功请求/完整 cycle）；
 - `p50Ms`、`p95Ms`、`p99Ms`、`maxMs`；
@@ -77,9 +84,10 @@ reports/performance/LATEST_RUN.txt
 ```
 
 报告包含 commit、JDK/Node/Docker、宿主 CPU/内存、应用镜像 ID、参数、固定并发与
-warmup、阈值、每场景样本/结果、隔离服务和清理状态。`--report-root` 拒绝文件系统根、
-仓库根、非目录和 symlink 路径。
+warmup、阈值、每场景配置时长/实际测量秒数/样本/结果、隔离服务和清理状态。
+`--report-root` 拒绝文件系统根、仓库根、非目录和 symlink 路径。
 
 Node runner 没有第三方压测包，永久测试位于
-`scripts/performance/runner.test.mjs`，覆盖 percentile、统计、阈值失败、响应契约、
-CLI 非法值、报告路径和一秒本地 HTTP fake 集成；fake 集成不需要 Docker。
+`scripts/performance/runner.test.mjs` 和 `scripts/performance/entrypoint.test.mjs`，
+覆盖 percentile、实际 elapsed 统计、阈值失败、响应契约、CLI 非法值、报告路径、
+入口代理/network 选择、cleanup 和一秒本地 HTTP fake 集成；fake 测试不需要 Docker。
