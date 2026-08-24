@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -18,6 +20,7 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
@@ -27,6 +30,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -49,6 +53,12 @@ class CanvasFunctionWorkerHeartbeatTest {
               fixture.renewed.countDown();
               return true;
             });
+    when(fixture.adapter.execute(any(), any()))
+        .thenAnswer(
+            ignored -> {
+              assertTrue(fixture.renewed.await(5, TimeUnit.SECONDS));
+              return List.of(fixture.targetResourceId);
+            });
 
     try {
       fixture.worker.run(fixture.claim);
@@ -63,7 +73,7 @@ class CanvasFunctionWorkerHeartbeatTest {
 
   /** heartbeat 返回 false 表示 ownership 已丢失；adapter 即使随后返回也不能 checkpoint/terminal。 */
   @Test
-  void heartbeatLossCancelsTerminalWrite() throws Exception {
+  void heartbeatLossCancelsCheckpointAndTerminalWrite() throws Exception {
     Fixture fixture = new Fixture();
     when(fixture.workStore.renew(any(), any(), any()))
         .thenAnswer(
@@ -71,10 +81,26 @@ class CanvasFunctionWorkerHeartbeatTest {
               fixture.renewed.countDown();
               return false;
             });
+    when(fixture.adapter.execute(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              CanvasFunctionExecutionContext context = invocation.getArgument(0);
+              assertTrue(fixture.ownershipLost.await(5, TimeUnit.SECONDS));
+              assertThrows(
+                  CanvasFunctionInternalCancellation.class,
+                  () -> context.checkpoint("LATE", Map.of("jobId", "late")));
+              return List.of(fixture.targetResourceId);
+            });
 
     try {
-      fixture.worker.run(fixture.claim);
-      assertTrue(fixture.renewed.await(5, TimeUnit.SECONDS));
+      try (var workerExecutor = Executors.newSingleThreadExecutor()) {
+        var future = workerExecutor.submit(() -> fixture.worker.run(fixture.claim));
+        assertTrue(fixture.renewed.await(5, TimeUnit.SECONDS));
+        fixture.scheduler.execute(fixture.ownershipLost::countDown);
+        future.get(5, TimeUnit.SECONDS);
+      }
+      verify(fixture.transactions, never())
+          .checkpoint(any(), any(), anyString(), anyString(), anyString(), any());
       verify(fixture.transactions, never()).completeSuccess(any(), any(), any());
       verify(fixture.transactions, never()).failIfRunning(any(), any(), any(), any());
     } finally {
@@ -92,10 +118,26 @@ class CanvasFunctionWorkerHeartbeatTest {
               fixture.renewed.countDown();
               throw new IllegalStateException("database unavailable");
             });
+    when(fixture.adapter.execute(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              CanvasFunctionExecutionContext context = invocation.getArgument(0);
+              assertTrue(fixture.ownershipLost.await(5, TimeUnit.SECONDS));
+              assertThrows(
+                  CanvasFunctionInternalCancellation.class,
+                  () -> context.checkpoint("LATE", Map.of("jobId", "late")));
+              return List.of(fixture.targetResourceId);
+            });
 
     try {
-      fixture.worker.run(fixture.claim);
-      assertTrue(fixture.renewed.await(5, TimeUnit.SECONDS));
+      try (var workerExecutor = Executors.newSingleThreadExecutor()) {
+        var future = workerExecutor.submit(() -> fixture.worker.run(fixture.claim));
+        assertTrue(fixture.renewed.await(5, TimeUnit.SECONDS));
+        fixture.scheduler.execute(fixture.ownershipLost::countDown);
+        future.get(5, TimeUnit.SECONDS);
+      }
+      verify(fixture.transactions, never())
+          .checkpoint(any(), any(), anyString(), anyString(), anyString(), any());
       verify(fixture.transactions, never()).completeSuccess(any(), any(), any());
       verify(fixture.transactions, never()).failIfRunning(any(), any(), any(), any());
     } finally {
@@ -107,6 +149,7 @@ class CanvasFunctionWorkerHeartbeatTest {
   @Test
   void adapterFailureUsesFencedPublicFailureTransition() throws Exception {
     Fixture fixture = new Fixture();
+    when(fixture.workStore.renew(any(), any(), any())).thenReturn(true);
     doThrow(new IllegalStateException("provider")).when(fixture.adapter).execute(any(), any());
 
     try {
@@ -127,6 +170,7 @@ class CanvasFunctionWorkerHeartbeatTest {
 
     private final UUID targetResourceId = UUID.randomUUID();
     private final CountDownLatch renewed = new CountDownLatch(1);
+    private final CountDownLatch ownershipLost = new CountDownLatch(1);
     private final CanvasFunctionRunRepository runRepository =
         mock(CanvasFunctionRunRepository.class);
     private final CanvasFunctionCatalog catalog = mock(CanvasFunctionCatalog.class);
@@ -165,12 +209,6 @@ class CanvasFunctionWorkerHeartbeatTest {
       when(frozen.requestId()).thenReturn(run.requestId());
       when(frozen.targetResourceId()).thenReturn(targetResourceId);
       when(adapter.enabled()).thenReturn(true);
-      when(adapter.execute(any(), any()))
-          .thenAnswer(
-              ignored -> {
-                assertTrue(renewed.await(5, TimeUnit.SECONDS));
-                return List.of(targetResourceId);
-              });
       CanvasFunctionCatalog.RegisteredModel registered =
           new CanvasFunctionCatalog.RegisteredModel(mock(CanvasFunctionModel.class), adapter);
       when(catalog.require("model")).thenReturn(registered);

@@ -62,6 +62,8 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
 
   @Override
   public void checkpoint(String stage, Map<String, Object> adapterState) {
+    // Calls that pass this local fence remain protected by the database token/lease CAS.
+    requireOwnership();
     CanvasFunctionFrozenRun frozen = current.get();
     CanvasFunctionFrozenRun next =
         transactions.checkpoint(
@@ -132,6 +134,12 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
   private void ensureRunning() {
     if (!isRunning()) {
       throw new CanvasFunctionInternalCancellation("FunctionRun is no longer RUNNING");
+    }
+  }
+
+  private void requireOwnership() {
+    if (ownershipLost.get()) {
+      throw new CanvasFunctionInternalCancellation("Canvas Function lease was lost");
     }
   }
 
