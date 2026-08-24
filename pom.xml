@@ -246,6 +246,7 @@
                             <failOnError>true</failOnError>
                             <ossIndexAnalyzerEnabled>false</ossIndexAnalyzerEnabled>
                             <autoUpdate>true</autoUpdate>
+                            <nvdApiServerId>kk-studio-supply-chain-nvd</nvdApiServerId>
                             <skip>${dependency-check.skip}</skip>
                         </configuration>
                         <executions>
