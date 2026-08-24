@@ -718,10 +718,12 @@ write_report_md() {
 
 publish_latest() {
   local latest="$REPORT_ROOT/latest-regression"
+  local latest_marker="$REPORT_ROOT/LATEST_REGRESSION_RUN.txt"
   local staging
 
   [ ! -L "$REPORT_ROOT" ] || return 1
   [ ! -L "$latest" ] || return 1
+  [ ! -L "$latest_marker" ] || return 1
   staging=$(mktemp -d -- "$REPORT_ROOT/.latest-regression.XXXXXX") || return 1
   if ! cp -a "$RUN_DIR/." "$staging/"; then
     remove_path "$staging"
@@ -735,7 +737,7 @@ publish_latest() {
     remove_path "$staging"
     return 1
   fi
-  printf '%s\n' "$RUN_ID" >"$REPORT_ROOT/LATEST_REGRESSION_RUN.txt" || return 1
+  printf '%s\n' "$RUN_ID" >"$latest_marker" || return 1
   return 0
 }
 
@@ -798,6 +800,7 @@ normalize_report_root() {
   local normalized
   local latest
   local latest_normalized
+  local latest_marker
 
   [ -n "$value" ] || die '--report-root requires a value'
   command -v realpath >/dev/null 2>&1 || die 'missing command: realpath'
@@ -829,6 +832,9 @@ normalize_report_root() {
   esac
   [ ! -L "$latest" ] \
     || die 'latest-regression must not be an existing symlink'
+  latest_marker="$normalized/LATEST_REGRESSION_RUN.txt"
+  [ ! -L "$latest_marker" ] \
+    || die 'LATEST_REGRESSION_RUN.txt must not be an existing symlink'
   REPORT_ROOT=$normalized
 }
 
@@ -887,11 +893,17 @@ mkdir -p "$REPORT_ROOT" || die "cannot create report root: $REPORT_ROOT"
 [ ! -L "$REPORT_ROOT" ] || die '--report-root must not be a symlink'
 [ ! -L "$REPORT_ROOT/latest-regression" ] \
   || die 'latest-regression must not be an existing symlink'
+[ ! -L "$REPORT_ROOT/LATEST_REGRESSION_RUN.txt" ] \
+  || die 'LATEST_REGRESSION_RUN.txt must not be an existing symlink'
 RUN_STARTED_AT=$(now_iso)
 RUN_STARTED_EPOCH=$(now_epoch)
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-regression-$$"
 RUN_DIR="$REPORT_ROOT/$RUN_ID"
-mkdir -p "$RUN_DIR/iterations" || die "cannot create run directory: $RUN_DIR"
+if [ -e "$RUN_DIR" ] || [ -L "$RUN_DIR" ]; then
+  die "run directory already exists: $RUN_DIR"
+fi
+mkdir "$RUN_DIR" || die "cannot create run directory: $RUN_DIR"
+mkdir "$RUN_DIR/iterations" || die "cannot create iteration directory: $RUN_DIR/iterations"
 GIT_COMMIT=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')
 
 trap 'handle_signal INT' INT
