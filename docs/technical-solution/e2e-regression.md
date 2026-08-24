@@ -221,7 +221,7 @@ L1 的关键语义断言：
 - `settings.system_contract_cas` 免费 L1：GET 必须返回六个完整 section，`version` 与 Long 字段为 canonical decimal string，已删除的无消费者字段不得残留；完整聚合 PUT 以 `expectedVersion` CAS 推进版本并回读新值；权限 tool name 首尾空白返回 400，stale version 返回 409，两类失败都不得推进版本；`finally` 以最新版本重试恢复原值并再次回读断言，不能污染后续 case。
 - `canvas.api_version_contract` 免费 L1：create/list/get/commands 使用 canonical UUID id 与
   十进制字符串 graph `version`（数据库 `canvas_document.version` 仍是 bigint，wire 是 canonical
-  非负十进制字符串，`graphVersion` 字段不存在）；`expectedVersion` CAS stale 409；
+  非负十进制字符串，`graphVersion` 与 `threadId` 字段均不存在）；`expectedVersion` CAS stale 409；
   同 `commandId` 精确回放返回当前版本的确定性空 patch（version 不前进），同 id 不同内容
   409；`changes?afterVersion=0` 在缓存完整时返回连续 `0→1` patch，缓存缺失/gap 时回退
   权威 snapshot，尾部版本返回空 delta；`RENAME_GROUP` 更新标题只发 group UPSERT patch

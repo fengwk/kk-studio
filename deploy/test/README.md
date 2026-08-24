@@ -43,13 +43,15 @@ original 字节不变、URL DTO 不暴露 bucket/key，以及标准 Canvas Snaps
 `version=1` 与新建 Resource。随后显式开启
 `kk-studio.canvas.function.fake-enabled`，执行
 `create fake-image Function node -> start -> poll -> snapshot Resource 替换 -> preview signed GET`，
-并验证 `document.version` 按 resource command、Function start 与 terminal success 前进到 4
-（checkpoint 不前进；HTTP wire 为非负十进制字符串，不存在 `graphVersion`）且公开 DTO
+并验证 `document.version` 按 resource command、Function node command、start、checkpoint 与 terminal
+success 前进到 5（HTTP wire 为非负十进制字符串，不存在 `graphVersion` 或 `threadId`）且公开 DTO
 不包含 `stateJson`。最后启用仅指向
 容器内 HTTP mock 的 OpenCLI Hub/GPT Image/Seedance 开关，执行
 `gpt-image-2 -> fake Hub PNG -> materialize` 与
 `seedance2.0fast -> fake submit/status -> fake Hub MP4 -> materialize` 两条完整 adapter
-闭环。这里没有浏览器登录、真实 provider 或付费请求。
+闭环，并锁定包含共享 `INPUTS_UPLOADED` 阶段在内的 GPT Image 四个、Seedance 六个 durable
+checkpoint 均独立前进 Canvas
+version。这里没有浏览器登录、真实 provider 或付费请求。
 
 应用以 `dev` profile + dev seed 启动：`default-assistant` 指向 `stub/acceptance-stub`，
 stub provider 的 `base_url` 为 `http://stub.local:8080/v1`；本栈将 `stub.local` 配置为

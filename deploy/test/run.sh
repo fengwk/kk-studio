@@ -249,7 +249,7 @@ def upserted_node(patch: dict, node_id: str) -> dict:
 canvas = json_call("POST", "/api/canvases", {"title": "container-resource-smoke"})
 assert uuid.UUID(canvas["id"]).version == 4
 assert decimal_version(canvas["version"]) == 0
-assert canvas["threadId"] is None
+assert "threadId" not in canvas
 sha256 = hashlib.sha256(image).hexdigest()
 reservation = json_call(
     "POST",
@@ -424,7 +424,7 @@ generated_snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
 generated_node = next(
     node for node in generated_snapshot["nodes"] if node["id"] == function_node["id"]
 )
-assert decimal_version(generated_snapshot["document"]["version"]) == 4
+assert decimal_version(generated_snapshot["document"]["version"]) == 5
 assert len(generated_node["resources"]) == 1
 generated_resource = generated_node["resources"][0]
 assert generated_resource["kind"] == "IMAGE"
@@ -451,7 +451,9 @@ for model_key in (
 assert all(item["key"] != "seedance2.0mini" for item in models)
 
 
-def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
+def create_and_run(
+    model_key: str, name: str, parameters: dict, expected_checkpoint_count: int
+) -> dict:
     current = json_call("GET", f"/api/canvases/{canvas['id']}")
     current_version = decimal_version(current["document"]["version"])
     node_id = new_id()
@@ -502,16 +504,23 @@ def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
         )
     assert run["status"] == "SUCCEEDED", run
     snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
-    assert decimal_version(snapshot["document"]["version"]) == patch_version + 2
+    # start、每个 durable checkpoint 与 terminal success 都独立前进 Canvas version。
+    actual_version = decimal_version(snapshot["document"]["version"])
+    expected_version = patch_version + expected_checkpoint_count + 2
+    assert actual_version == expected_version, {
+        "modelKey": model_key,
+        "actualVersion": actual_version,
+        "expectedVersion": expected_version,
+    }
     return next(item for item in snapshot["nodes"] if item["id"] == node["id"])
 
 
-gpt_node = create_and_run("gpt-image-2", "mock-gpt", {"ratio": "1:1"})
+gpt_node = create_and_run("gpt-image-2", "mock-gpt", {"ratio": "1:1"}, 4)
 assert len(gpt_node["resources"]) == 1
 assert gpt_node["resources"][0]["kind"] == "IMAGE"
 
 seedance_node = create_and_run(
-    "seedance2.0fast", "mock-seedance", {"ratio": "16:9", "duration": 4}
+    "seedance2.0fast", "mock-seedance", {"ratio": "16:9", "duration": 4}, 6
 )
 assert len(seedance_node["resources"]) == 1
 assert seedance_node["resources"][0]["kind"] == "VIDEO"
