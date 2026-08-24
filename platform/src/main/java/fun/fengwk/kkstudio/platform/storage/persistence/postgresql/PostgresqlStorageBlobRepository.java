@@ -35,6 +35,11 @@ public class PostgresqlStorageBlobRepository implements StorageBlobRepository {
   }
 
   @Override
+  public boolean insertDeletingCandidate(StorageBlob blob) {
+    return blobMapper.insertDeletingCandidate(toDO(blob)) == 1;
+  }
+
+  @Override
   public boolean incrementRefCount(UUID id) {
     return blobMapper.incrementRefCount(id) == 1;
   }

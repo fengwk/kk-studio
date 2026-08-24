@@ -75,7 +75,7 @@ SET_ACTIVE_TOOLS
 | 表 | 身份与职责 |
 | --- | --- |
 | `storage_blob` | `id uuid`；不可变内容与媒体事实；`ACTIVE/DELETING`；唯一 ACTIVE `(sha256,size_bytes)`；唯一一级 `ref_count` |
-| `storage_upload` | `id uuid` 一次性 Handle；`blob_id IS NULL` 为 PENDING，非空为 READY；保存权威 filename/声明/checksum/expiry |
+| `storage_upload` | `id uuid` 一次性 Handle；`blob_id IS NULL` 为 PENDING，非空为 READY；保存权威 filename/声明/checksum/expiry 与成对 cleanup lease |
 | `session_blob_ref` | PK `(session_id, blob_id)`；Session 对 Blob 的显式引用边，每行贡献一次 Blob retain |
 
 对象键不落库：
@@ -95,10 +95,12 @@ Reserve 请求为 `{filename, mediaType, sizeBytes, sha256}`：
    `x-amz-checksum-sha256` 的预签名 PUT。
 3. complete 使用 checksum-mode HEAD 校验真实大小与 SHA-256，执行媒体探针，复制到候选 Blob
    key，再在短事务内解决去重并绑定 READY。
-4. READY Handle 持有一个 Blob 引用；delete/expiry/消费删行并 release。
+4. READY Handle 持有一个 Blob 引用；delete/expiry 先短事务 claim cleanup lease，事务外幂等删除
+   temp/candidate 对象，再 token-fenced 短事务删行并按需 release；失败保留 lease，过期后可由任意节点重试。
 
 `StorageUploadService.lockReady` 使用 `PROPAGATION_MANDATORY`，返回锁定行中的权威
-`blobId + filename`。消费方必须在同一外层事务完成 retain 新 owner、删除 Upload 与写入 owner 行。
+`blobId + filename`。已过期或已被 cleanup claim 的行 fail closed。消费方必须在同一外层事务完成 retain
+新 owner、删除 Upload 与写入 owner 行，不能抢回 cleanup 所有权。
 
 ### 5.2 Blob 生命周期
 
@@ -111,9 +113,11 @@ Reserve 请求为 `{filename, mediaType, sizeBytes, sha256}`：
 Function INPUT/OUTPUT pin 不修改 ref_count，只决定无 owner Canvas Resource 是否保留。
 
 `retain/release` 都要求调用方事务。release 减到 0 时同一 SQL 将行从
-`ACTIVE(ref_count>0)` 切换为 `DELETING(ref_count=0)`；DELETING 不可复活。提交后当前线程按
-`preview -> original -> row` 清理。机会式小批次与应用启动恢复处理过期 Upload 和崩溃留下的
-DELETING 行；没有独立 GC worker。
+`ACTIVE(ref_count>0)` 切换为 `DELETING(ref_count=0)`；DELETING 不可复活。提交后的同步回调只快速
+调用本地 `StorageMaintenance.wake()`，失败不向已提交 API 冒泡。Storage Maintenance 由单一 daemon
+scheduled executor 生命周期拥有，以 startup wake、合并 wake 与 fixed-delay poll 恢复过期 Upload 和
+DELETING 行；对象 I/O 始终在数据库事务、行锁与 HTTP afterCommit 提交线程外执行。Blob 清扫顺序固定为
+`preview -> original -> conditional row delete`，多节点执行保持幂等。
 
 ## 6. Durable Harness Resource
 

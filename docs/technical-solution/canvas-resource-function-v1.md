@@ -388,7 +388,7 @@ lock document
 
 先删 `canvas_document` 再删 Session，是因为 `canvas_session.canvas_id -> canvas_document` 使用 RESTRICT FK；整个顺序仍在同一外层事务中，任一步失败整体回滚。
 
-Blob `release` 减到 0 时在事务内转为 `DELETING`，提交后当前线程按 `preview -> original -> row` 删除。应用启动恢复与机会式小批量清扫处理崩溃窗口；不运行独立 GC worker。
+Blob `release` 减到 0 时在事务内转为 `DELETING`，提交后只快速唤醒本地 Storage Maintenance。后台以 startup wake、合并 wake 与 fixed-delay poll 按 `preview -> original -> conditional row delete` 清扫，S3 I/O 不进入数据库事务、行锁或 HTTP 提交线程。
 
 ## 9. Function adapters
 

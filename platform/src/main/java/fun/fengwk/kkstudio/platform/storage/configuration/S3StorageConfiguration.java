@@ -22,7 +22,8 @@ import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.S3PresignServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.S3StorageServiceImpl;
-import fun.fengwk.kkstudio.platform.storage.StorageStartupRecovery;
+import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
+import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionBlobRefRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
@@ -52,7 +53,7 @@ import java.util.Objects;
  *
  * @author fengwk
  */
-@EnableConfigurationProperties(S3StorageProperties.class)
+@EnableConfigurationProperties({S3StorageProperties.class, StorageMaintenanceProperties.class})
 @Configuration
 public class S3StorageConfiguration {
 
@@ -135,13 +136,14 @@ public class S3StorageConfiguration {
     return new HeadOnlyStorageMediaProbe();
   }
 
-  /** blob 生命周期管理器：retain/release 为 MANDATORY 事务方法，零引用后 afterCommit 回收 S3 对象。 */
+  /** blob 生命周期管理器：retain/release 为 MANDATORY 事务方法，零引用后 afterCommit 只唤醒后台维护。 */
   @Bean
   @ConditionalOnMissingBean(StorageBlobManager.class)
   public StorageBlobManager storageBlobManager(
       StorageBlobRepository blobRepository,
       ObjectProvider<S3StorageService> s3StorageService,
       ObjectProvider<S3PresignService> s3PresignService,
+      ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeup,
       SystemSettingsSnapshot snapshot) {
     if (!s3Enabled(snapshot)) {
       return null;
@@ -149,10 +151,11 @@ public class S3StorageConfiguration {
     return new PostgresqlStorageBlobManager(
         blobRepository,
         Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"),
-        Objects.requireNonNull(s3PresignService.getIfAvailable(), "s3PresignService"));
+        Objects.requireNonNull(s3PresignService.getIfAvailable(), "s3PresignService"),
+        maintenanceWakeup);
   }
 
-  /** 上传契约服务：reserve/complete/delete 与机会式过期回收。 */
+  /** 上传契约服务：reserve/complete/delete 与 cleanup-lease 过期回收。 */
   @Bean
   @ConditionalOnMissingBean(StorageUploadService.class)
   public StorageUploadService storageUploadService(
@@ -163,6 +166,7 @@ public class S3StorageConfiguration {
       ObjectProvider<S3PresignService> s3PresignService,
       ObjectProvider<StorageMediaProbe> mediaProbe,
       S3StorageProperties s3Properties,
+      StorageMaintenanceProperties maintenanceProperties,
       SystemSettingsSnapshot snapshot,
       Clock clock,
       PlatformTransactionManager transactionManager) {
@@ -178,16 +182,18 @@ public class S3StorageConfiguration {
         Objects.requireNonNull(mediaProbe.getIfAvailable(), "mediaProbe"),
         s3Properties,
         snapshot.get().storageMedia(),
+        maintenanceProperties,
         clock,
         transactionManager);
   }
 
-  /** 启动一次性恢复：过期上传回收 + DELETING blob 清扫，无周期性后台线程。始终注册；S3 未启用时内部感知服务缺失并跳过。 */
+  /** 耐久 Storage Maintenance：startup wake + 合并 wake + fixed-delay poll。S3 未启用时服务缺失并安全跳过。 */
   @Bean
-  public StorageStartupRecovery storageStartupRecovery(
+  public StorageMaintenance storageMaintenance(
       ObjectProvider<StorageUploadService> storageUploadService,
-      ObjectProvider<StorageBlobManager> storageBlobManager) {
-    return new StorageStartupRecovery(storageUploadService, storageBlobManager);
+      ObjectProvider<StorageBlobManager> storageBlobManager,
+      StorageMaintenanceProperties properties) {
+    return new StorageMaintenance(storageUploadService, storageBlobManager, properties);
   }
 
   /** Session blob 引用边的显式 owner：insert/delete 与 blob retain/release 成对维护（MANDATORY 事务）。 */
@@ -212,6 +218,8 @@ public class S3StorageConfiguration {
       ObjectProvider<StorageBlobManager> blobManager,
       ObjectProvider<SessionBlobRefManager> refManager,
       ObjectProvider<S3StorageService> s3StorageService,
+      ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeup,
+      PlatformTransactionManager transactionManager,
       SystemSettingsSnapshot snapshot) {
     if (!s3Enabled(snapshot)) {
       return null;
@@ -220,7 +228,9 @@ public class S3StorageConfiguration {
         blobRepository,
         Objects.requireNonNull(blobManager.getIfAvailable(), "blobManager"),
         Objects.requireNonNull(refManager.getIfAvailable(), "refManager"),
-        Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"));
+        Objects.requireNonNull(s3StorageService.getIfAvailable(), "s3StorageService"),
+        maintenanceWakeup,
+        transactionManager);
   }
 
   /** Provider attempt 的 Resource 物化端口（图片内联、其它媒体按需签名，瞬时 source 绝不持久化）。 */

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobIngestService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.nio.charset.StandardCharsets;
@@ -28,8 +30,8 @@ import java.util.UUID;
 /**
  * 服务端字节摄入（Tool/Daemon 外部化）的 PostgreSQL + 内存 S3 集成测试。
  *
- * <p>覆盖新行路径（ACTIVE + ref_count=1 + 同事务 ref 配对 + 对象存在）、同 Session 与跨 Session 去重计数、事务回滚后
- * 行/ref/候选对象一并清理，以及 MANDATORY 传播与输入校验。
+ * <p>覆盖新行路径（ACTIVE + ref_count=1 + 同事务 ref 配对 + 对象存在）、同 Session 与跨 Session 去重计数、事务回滚后以 DELETING
+ * 事实交给后台清理，以及 MANDATORY 传播、事务外 S3 与输入校验。
  */
 @Import({StorageS3TestConfiguration.class})
 @TestPropertySource(
@@ -48,6 +50,7 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
 
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private StorageBlobIngestService ingestService;
+  @Autowired private StorageBlobManager blobManager;
   @Autowired private SessionBlobRefManager refManager;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
@@ -63,6 +66,14 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
     tx = new TransactionTemplate(transactionManager);
     seedSession(SESSION_A);
     seedSession(SESSION_B);
+  }
+
+  @AfterEach
+  void everyS3CallRunsOutsideDatabaseTransactions() {
+    assertTrue(
+        s3Storage.networkCalls().stream()
+            .noneMatch(InMemoryS3StorageService.NetworkCall::transactionActive),
+        "S3 calls must run outside database transactions: " + s3Storage.networkCalls());
   }
 
   /** session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。 */
@@ -113,14 +124,17 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
   @Test
   void failureAfterPutStillCleansUpCandidateObject() {
     // putObject 成功之后、ref 配对之前失败（未知 session 触发 session_blob_ref 的 RESTRICT FK 拒绝）：
-    // 候选对象清理必须在 put 后立即注册，任何后续 DB 失败都会回收对象，绝不留孤儿。
+    // 完成回调只写 DELETING 清理事实，后台再回收对象。
     byte[] content = "cleanup me".getBytes(StandardCharsets.UTF_8);
     UUID unknownSession = new UUID(0L, 99L);
     assertThrows(
         DataIntegrityViolationException.class,
         () -> tx.execute(status -> ingestService.ingest(unknownSession, content, "text/plain")));
-    assertEquals(0, storage.blobRowCount(), "failed ingest must leave no blob row");
+    assertEquals(
+        1, storage.blobRowCount(), "failed ingest must leave one durable DELETING cleanup fact");
     assertEquals(0, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
+    blobManager.sweepDeleting();
+    assertEquals(0, storage.blobRowCount());
     assertEquals(
         0,
         s3Storage.objectCount(),
@@ -138,7 +152,7 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
               UUID blobId = ingestService.ingest(SESSION_A, content, "text/plain");
               assertTrue(
                   s3Storage.hasObject(StorageObjectKeys.blobOriginal(blobId)),
-                  "candidate object must be written inside the transaction");
+                  "candidate object must be visible while the outer transaction is active");
               throw new IllegalStateException("force rollback");
             }
           });
@@ -146,8 +160,12 @@ class StorageBlobIngestServiceIntegrationTest extends S3PostgresSpringTestSuppor
     } catch (IllegalStateException expected) {
       // 预期回滚。
     }
-    assertEquals(0, storage.blobRowCount(), "rolled-back ingest must leave no blob row");
+    assertEquals(
+        1,
+        storage.blobRowCount(),
+        "rolled-back ingest must leave one durable DELETING cleanup fact");
     assertEquals(0, jdbc.queryForObject("select count(*) from session_blob_ref", Integer.class));
+    blobManager.sweepDeleting();
     assertEquals(
         0, s3Storage.objectCount(), "rolled-back candidate object must be cleaned after rollback");
   }

@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.mapper.Storag
 import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.model.StorageUploadDO;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -35,13 +36,8 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
   }
 
   @Override
-  public boolean setBlobIdIfNull(UUID id, UUID blobId) {
-    return uploadMapper.setBlobIdIfNull(id, blobId) == 1;
-  }
-
-  @Override
-  public boolean deletePendingById(UUID id) {
-    return uploadMapper.deletePendingById(id) == 1;
+  public boolean setBlobIdIfNull(UUID id, UUID blobId, Instant now) {
+    return uploadMapper.setBlobIdIfNull(id, blobId, now) == 1;
   }
 
   @Override
@@ -50,8 +46,31 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
   }
 
   @Override
-  public List<StorageUpload> listExpired(int limit) {
-    return uploadMapper.listExpired(limit).stream().map(this::toModel).collect(Collectors.toList());
+  public List<StorageUpload> claimExpired(
+      int limit, Instant now, Instant leaseUntil, String cleanupToken) {
+    return uploadMapper.claimExpired(limit, now, leaseUntil, cleanupToken).stream()
+        .map(this::toModel)
+        .collect(Collectors.toList());
+  }
+
+  @Override
+  public StorageUpload claimById(UUID id, Instant now, Instant leaseUntil, String cleanupToken) {
+    return toModel(uploadMapper.claimById(id, now, leaseUntil, cleanupToken));
+  }
+
+  @Override
+  public boolean finalizePending(UUID id, String cleanupToken) {
+    return uploadMapper.finalizePending(id, cleanupToken) == 1;
+  }
+
+  @Override
+  public boolean finalizeReady(UUID id, UUID blobId, String cleanupToken) {
+    return uploadMapper.finalizeReady(id, blobId, cleanupToken) == 1;
+  }
+
+  @Override
+  public boolean releaseCleanupClaim(UUID id, String cleanupToken) {
+    return uploadMapper.releaseCleanupClaim(id, cleanupToken) == 1;
   }
 
   private StorageUploadDO toDO(StorageUpload upload) {
@@ -67,6 +86,8 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
     target.setDeclaredSize(upload.getDeclaredSize());
     target.setDeclaredSha256(upload.getDeclaredSha256());
     target.setExpiresAt(upload.getExpiresAt());
+    target.setCleanupToken(upload.getCleanupToken());
+    target.setCleanupUntil(upload.getCleanupUntil());
     return target;
   }
 
@@ -83,6 +104,8 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
     target.setDeclaredSize(row.getDeclaredSize());
     target.setDeclaredSha256(row.getDeclaredSha256());
     target.setExpiresAt(row.getExpiresAt());
+    target.setCleanupToken(row.getCleanupToken());
+    target.setCleanupUntil(row.getCleanupUntil());
     target.setCreateTime(row.getCreateTime());
     return target;
   }

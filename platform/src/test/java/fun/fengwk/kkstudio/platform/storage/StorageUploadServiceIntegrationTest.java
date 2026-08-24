@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -77,6 +78,14 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
     s3Storage.clear();
     s3Presigner.clear();
     tx = new TransactionTemplate(transactionManager);
+  }
+
+  @AfterEach
+  void everyS3CallRunsOutsideDatabaseTransactions() {
+    assertTrue(
+        s3Storage.networkCalls().stream()
+            .noneMatch(InMemoryS3StorageService.NetworkCall::transactionActive),
+        "S3 calls must run outside database transactions: " + s3Storage.networkCalls());
   }
 
   // ------------------------------------------------------------------
@@ -426,7 +435,7 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
           reserve("sweep-r-" + i + ".bin", "application/octet-stream", content.length, sha);
       uploadIds.add(hit.getId());
     }
-    // 全部建好后统一回拨过期时间，避免建行过程中的机会式过期提前回收。
+    // 全部建好后统一回拨过期时间，避免准备数据时提前进入过期状态。
     for (String id : uploadIds) {
       backdateUpload(id);
     }
@@ -462,6 +471,7 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
         processedA + processedB,
         "SKIP LOCKED batch-in-one-tx must give each expired row to exactly one sweeper");
     assertEquals(0, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
+    storageBlobManager.sweepDeleting();
     assertEquals(
         0,
         jdbc.queryForObject("select count(*) from storage_blob", Integer.class),
@@ -564,6 +574,11 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
 
     // 生产顺序：owner（upload 行）先删除，再释放最后一个引用；FK RESTRICT 禁止反向顺序。
     storageUploadService.delete(UUID.fromString(ready.getId()));
+    assertEquals(
+        StorageBlobState.DELETING,
+        blobRow(ready.getBlobId()).state(),
+        "commit must only persist DELETING and wake background maintenance");
+    storageBlobManager.sweepDeleting();
 
     assertEquals(
         0,
@@ -611,6 +626,36 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
         jdbc.queryForObject(
             "select count(*) from storage_blob where id = ?", Integer.class, blobUuid));
     assertFalse(s3Storage.hasObject(StorageObjectKeys.blobOriginal(blobUuid)));
+  }
+
+  @Test
+  void sweepDeletingRetriesAfterObjectDeleteFailure() {
+    byte[] content = "object-retry".getBytes(StandardCharsets.UTF_8);
+    StorageUploadDTO pending =
+        reserve("object-retry.bin", "application/octet-stream", content.length, sha256Hex(content));
+    putUploadContent(pending.getId(), content, "application/octet-stream");
+    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    UUID blobId = UUID.fromString(ready.getBlobId());
+    storageUploadService.delete(UUID.fromString(ready.getId()));
+    String originalKey = StorageObjectKeys.blobOriginal(blobId);
+    s3Storage.failNextDelete(originalKey, new IllegalStateException("temporary delete failure"));
+
+    assertEquals(0, storageBlobManager.sweepDeleting());
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_blob where id = ? and state = 'DELETING'",
+            Integer.class,
+            blobId),
+        "object failure must keep the durable DELETING fact");
+    assertTrue(s3Storage.hasObject(originalKey));
+
+    assertEquals(1, storageBlobManager.sweepDeleting());
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from storage_blob where id = ?", Integer.class, blobId));
+    assertFalse(s3Storage.hasObject(originalKey));
   }
 
   @Test
@@ -784,6 +829,7 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
         StorageObjectKeys.uploadOriginal(UUID.fromString(ready.getId())), content, "text/plain");
 
     storageUploadService.delete(UUID.fromString(ready.getId()));
+    storageBlobManager.sweepDeleting();
 
     assertEquals(
         0,

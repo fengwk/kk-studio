@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.storage.service.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.Assert;
 import org.springframework.util.MimeTypeUtils;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageConflictException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
@@ -34,6 +36,7 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
@@ -45,9 +48,8 @@ import java.util.UUID;
 /**
  * 全局 Blob 存储上传契约服务的默认实现。
  *
- * <p>事务边界全部由 {@link TransactionTemplate} 显式控制：S3 的读取（HEAD/探针）、最终对象物化（复制）与 blob 对象回收绝不发生在 DB
- * 事务内；无引用的临时/候选对象清理允许在上传行锁内进行（delete/过期路径），由行锁与 complete 的绑定串行化。blob 计数变更（retain/release/去重插入）
- * 与上传行变更在短事务内完成。
+ * <p>事务边界全部由 {@link TransactionTemplate} 显式控制：S3 的 HEAD/探针/复制/删除绝不发生在数据库事务或上传行锁内。过期与显式删除先在短事务内
+ * claim cleanup lease，事务外幂等删除临时/候选对象，再以 token-fenced 短事务删除上传事实并按需 release blob。
  *
  * <p>complete 先校验并探针临时对象，再复制候选 blob 的最终对象，最后才在事务内去重插入/并发消解并绑定上传 —— DB 绝不引用缺失的最终对象； 同一上传的并发 complete
  * 通过 {@code setBlobIdIfNull} 只成功一次。READY 重试路径幂等并自愈（最终对象缺失时从临时对象补复制），并清理残留的临时/未使用候选对象。
@@ -68,6 +70,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private final S3StorageProperties s3Properties;
   private final SystemSettings.StorageMedia storageMedia;
   private final Clock clock;
+  private final Duration cleanupLease;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate mandatoryTransactionTemplate;
 
@@ -80,6 +83,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       StorageMediaProbe mediaProbe,
       S3StorageProperties s3Properties,
       SystemSettings.StorageMedia storageMedia,
+      StorageMaintenanceProperties maintenanceProperties,
       Clock clock,
       PlatformTransactionManager transactionManager) {
     this.uploadRepository = Objects.requireNonNull(uploadRepository, "uploadRepository");
@@ -90,6 +94,11 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
     this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
     this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
+    this.cleanupLease =
+        requirePositiveDuration(
+            Objects.requireNonNull(maintenanceProperties, "maintenanceProperties")
+                .getCleanupLease(),
+            "cleanupLease");
     this.clock = Objects.requireNonNull(clock, "clock");
     PlatformTransactionManager requiredTransactionManager =
         Objects.requireNonNull(transactionManager, "transactionManager");
@@ -106,7 +115,6 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     String mediaType = normalizeMediaType(request.getMediaType());
     long sizeBytes = validateSize(request.getSizeBytes());
     String sha256 = validateSha256(request.getSha256());
-    expireOnceBestEffort();
 
     UUID uploadId = UUID.randomUUID();
     UUID candidateBlobId = UUID.randomUUID();
@@ -157,12 +165,12 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   @Override
   public StorageUploadDTO complete(UUID uploadId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
-    expireOnceBestEffort();
 
     StorageUpload upload = uploadRepository.getById(uploadId);
     if (upload == null) {
       throw new StorageResourceNotFoundException("upload", uploadId.toString());
     }
+    requireCleanupAvailable(upload);
     if (upload.getBlobId() != null) {
       // READY 重试：幂等并自愈最终对象，随后清理残留的临时对象与未使用的候选对象。
       ensureBlobOriginal(upload.getBlobId(), uploadId);
@@ -193,28 +201,28 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   @Override
   public void delete(UUID uploadId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
-    transactionTemplate.executeWithoutResult(
-        status -> {
-          StorageUpload locked = uploadRepository.getByIdForUpdate(uploadId);
-          if (locked == null) {
-            throw new StorageResourceNotFoundException("upload", uploadId.toString());
-          }
-          if (locked.getBlobId() == null) {
-            // PENDING：上传行锁跨无引用的临时/候选对象删除与行删除，与 complete 的绑定
-            // （setBlobIdIfNull 隐式行锁）串行化，消除删除与 complete 之间的竞态。
-            s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(uploadId));
-            cleanupUnusedCandidate(locked);
-            uploadRepository.deletePendingById(uploadId);
-            return;
-          }
-          // READY：行锁内清理残留的临时/未使用候选对象（均无引用），删行并 release；
-          // ACTIVE blob 对象由 release 的 afterCommit 回收，行锁不跨 ACTIVE 对象删除。
-          s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(uploadId));
-          cleanupUnusedCandidate(locked);
-          if (uploadRepository.deleteById(uploadId)) {
-            blobManager.release(locked.getBlobId());
-          }
-        });
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      deleteConsumedInCurrentTransaction(uploadId);
+      return;
+    }
+
+    String cleanupToken = UUID.randomUUID().toString();
+    Instant now = clock.instant();
+    StorageUpload claimed =
+        transactionTemplate.execute(
+            status ->
+                uploadRepository.claimById(uploadId, now, now.plus(cleanupLease), cleanupToken));
+    if (claimed == null) {
+      StorageUpload current = uploadRepository.getById(uploadId);
+      if (current == null) {
+        throw new StorageResourceNotFoundException("upload", uploadId.toString());
+      }
+      throw new StorageVerificationException("upload " + uploadId + " cleanup is already claimed");
+    }
+    cleanupUploadObjects(claimed);
+    if (!finalizeClaimed(claimed, cleanupToken)) {
+      throw new StorageVerificationException("upload " + uploadId + " cleanup ownership was lost");
+    }
   }
 
   @Override
@@ -230,64 +238,36 @@ public class StorageUploadServiceImpl implements StorageUploadService {
             throw new StorageVerificationException(
                 "upload " + uploadId + " is PENDING; complete it before consuming");
           }
-          if (!locked.getExpiresAt().isAfter(clock.instant())) {
-            throw new StorageVerificationException("upload " + uploadId + " expired");
-          }
+          requireCleanupAvailable(locked);
           return new ReadyUpload(locked.getBlobId(), locked.getFilename());
         });
   }
 
   @Override
   public int expireOnce() {
-    Integer processed =
+    String cleanupToken = UUID.randomUUID().toString();
+    Instant now = clock.instant();
+    List<StorageUpload> expired =
         transactionTemplate.execute(
-            status -> {
-              // SKIP LOCKED 批次选择与逐行处理在同一事务内：批次行锁全程持有，
-              // 并发 sweeper 的批次选择会跳过本批锁定行，每行恰好由一个批次处理。
-              List<StorageUpload> expired =
-                  uploadRepository.listExpired(StorageUploadService.MAX_EXPIRY_BATCH);
-              int count = 0;
-              for (StorageUpload row : expired) {
-                try {
-                  if (row.getBlobId() == null) {
-                    expirePendingUpload(row.getId());
-                  } else {
-                    expireReadyUpload(row);
-                  }
-                  count++;
-                } catch (RuntimeException e) {
-                  log.warn("storage expiry failed for upload {}: {}", row.getId(), e.getMessage());
-                }
-              }
-              return count;
-            });
-    return processed == null ? 0 : processed;
-  }
-
-  /** 必须在调用方事务内执行（批次 SELECT ... FOR UPDATE SKIP LOCKED 已持有该行锁）。 */
-  private void expirePendingUpload(UUID uploadId) {
-    StorageUpload locked = uploadRepository.getByIdForUpdate(uploadId);
-    if (locked == null || locked.getBlobId() != null) {
-      // 行已删除或并发 complete 已绑定：交由 READY 路径或其它请求处理。
-      return;
+            status ->
+                uploadRepository.claimExpired(
+                    StorageUploadService.MAX_EXPIRY_BATCH,
+                    now,
+                    now.plus(cleanupLease),
+                    cleanupToken));
+    int finalized = 0;
+    for (StorageUpload row : expired) {
+      try {
+        cleanupUploadObjects(row);
+        if (finalizeClaimed(row, cleanupToken)) {
+          finalized++;
+        }
+      } catch (RuntimeException error) {
+        // 对象或 finalize 失败时保留 lease；过期后由任意节点幂等重试。
+        log.warn("storage expiry failed for upload {}: {}", row.getId(), error.getMessage());
+      }
     }
-    s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(uploadId));
-    cleanupUnusedCandidate(locked);
-    uploadRepository.deletePendingById(uploadId);
-  }
-
-  /** 必须在调用方事务内执行；ACTIVE blob 对象由 release 的 afterCommit 回收，不跨批次事务删除。 */
-  private void expireReadyUpload(StorageUpload row) {
-    StorageUpload locked = uploadRepository.getByIdForUpdate(row.getId());
-    if (locked == null || locked.getBlobId() == null) {
-      // 并发 complete/delete 已改变状态或行已删除：交由其它路径处理。
-      return;
-    }
-    s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(row.getId()));
-    cleanupUnusedCandidate(locked);
-    if (uploadRepository.deleteById(row.getId())) {
-      blobManager.release(locked.getBlobId());
-    }
+    return finalized;
   }
 
   private UUID resolveBlobAndBindUpload(StorageUpload upload, StorageMediaFacts facts) {
@@ -298,6 +278,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       // 并发 delete/过期已删除行：上传不存在，事务回滚（含任何 blob 写入）。
       throw new StorageResourceNotFoundException("upload", upload.getId().toString());
     }
+    requireCleanupAvailable(locked);
     if (locked.getBlobId() != null) {
       // 并发 complete 已绑定：直接取其结果，不重复 retain。
       return locked.getBlobId();
@@ -326,7 +307,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
         continue;
       }
       // 行锁在手：setBlobIdIfNull 不可能被并发 complete 抢走，失败即上传行状态异常。
-      if (!uploadRepository.setBlobIdIfNull(upload.getId(), active.getId())) {
+      if (!uploadRepository.setBlobIdIfNull(upload.getId(), active.getId(), clock.instant())) {
         throw new IllegalStateException("upload " + upload.getId() + " changed while completing");
       }
       return active.getId();
@@ -350,6 +331,53 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private void cleanupCandidateObjects(UUID candidateBlobId) {
     s3StorageService.deleteObjectIfExists(StorageObjectKeys.blobPreview(candidateBlobId));
     s3StorageService.deleteObjectIfExists(StorageObjectKeys.blobOriginal(candidateBlobId));
+  }
+
+  private void cleanupUploadObjects(StorageUpload upload) {
+    s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(upload.getId()));
+    cleanupUnusedCandidate(upload);
+  }
+
+  private boolean finalizeClaimed(StorageUpload upload, String cleanupToken) {
+    Boolean finalized =
+        transactionTemplate.execute(
+            status -> {
+              if (upload.getBlobId() == null) {
+                return uploadRepository.finalizePending(upload.getId(), cleanupToken);
+              }
+              if (!uploadRepository.finalizeReady(
+                  upload.getId(), upload.getBlobId(), cleanupToken)) {
+                return false;
+              }
+              blobManager.release(upload.getBlobId());
+              return true;
+            });
+    return Boolean.TRUE.equals(finalized);
+  }
+
+  private void deleteConsumedInCurrentTransaction(UUID uploadId) {
+    StorageUpload locked = uploadRepository.getByIdForUpdate(uploadId);
+    if (locked == null) {
+      throw new StorageResourceNotFoundException("upload", uploadId.toString());
+    }
+    requireCleanupAvailable(locked);
+    if (locked.getBlobId() == null) {
+      throw new StorageVerificationException(
+          "PENDING upload deletion requires transaction-free cleanup");
+    }
+    if (uploadRepository.deleteById(uploadId)) {
+      blobManager.release(locked.getBlobId());
+    }
+  }
+
+  private void requireCleanupAvailable(StorageUpload upload) {
+    if (upload.getCleanupToken() != null) {
+      throw new StorageVerificationException(
+          "upload " + upload.getId() + " cleanup is already claimed");
+    }
+    if (!upload.getExpiresAt().isAfter(clock.instant())) {
+      throw new StorageVerificationException("upload " + upload.getId() + " expired");
+    }
   }
 
   private void ensureBlobOriginal(UUID blobId, UUID uploadId) {
@@ -394,14 +422,6 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     }
     if (!Arrays.equals(expected, actual)) {
       throw new StorageVerificationException("upload " + upload.getId() + " checksum mismatch");
-    }
-  }
-
-  private void expireOnceBestEffort() {
-    try {
-      expireOnce();
-    } catch (RuntimeException e) {
-      log.warn("opportunistic storage expiry failed: {}", e.getMessage());
     }
   }
 
@@ -499,6 +519,14 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       bytes[i] = (byte) ((high << 4) | low);
     }
     return bytes;
+  }
+
+  private static Duration requirePositiveDuration(Duration value, String name) {
+    Objects.requireNonNull(value, name);
+    if (value.isZero() || value.isNegative()) {
+      throw new IllegalArgumentException(name + " must be positive");
+    }
+    return value;
   }
 
   private record ReserveOutcome(StorageUpload upload, UUID blobId) {}

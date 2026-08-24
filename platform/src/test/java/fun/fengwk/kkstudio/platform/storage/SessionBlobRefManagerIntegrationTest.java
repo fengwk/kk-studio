@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 
@@ -47,6 +49,7 @@ class SessionBlobRefManagerIntegrationTest extends S3PostgresSpringTestSupport {
   private static final UUID SESSION_B = new UUID(0L, 2L);
 
   @Autowired private StorageUploadService storageUploadService;
+  @Autowired private StorageBlobManager storageBlobManager;
   @Autowired private SessionBlobRefManager refManager;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
@@ -62,6 +65,14 @@ class SessionBlobRefManagerIntegrationTest extends S3PostgresSpringTestSupport {
     tx = new TransactionTemplate(transactionManager);
     seedSession(SESSION_A);
     seedSession(SESSION_B);
+  }
+
+  @AfterEach
+  void everyS3CallRunsOutsideDatabaseTransactions() {
+    assertTrue(
+        s3Storage.networkCalls().stream()
+            .noneMatch(InMemoryS3StorageService.NetworkCall::transactionActive),
+        "S3 calls must run outside database transactions: " + s3Storage.networkCalls());
   }
 
   /** session_blob_ref.session_id 是 RESTRICT FK：先建真实 session 行。 */
@@ -154,6 +165,7 @@ class SessionBlobRefManagerIntegrationTest extends S3PostgresSpringTestSupport {
           refManager.releaseRef(SESSION_A, blobUuid);
           return null;
         });
+    storageBlobManager.sweepDeleting();
 
     assertEquals(
         0,

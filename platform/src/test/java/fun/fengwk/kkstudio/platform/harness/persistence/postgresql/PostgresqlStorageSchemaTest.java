@@ -137,6 +137,24 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
           conn,
           "ck_storage_upload_expiry",
           () -> insertUpload(conn, UUID.randomUUID(), "a.png", "image/png", 1L, sha256, true));
+      insertUpload(conn, UUID.randomUUID(), "lease.png", "image/png", 1L, sha256);
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_storage_upload_cleanup_pair",
+          () ->
+              execute(
+                  conn,
+                  "update storage_upload set cleanup_token = 'token'"
+                      + " where filename = 'lease.png'"));
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_storage_upload_cleanup_token",
+          () ->
+              execute(
+                  conn,
+                  "update storage_upload set cleanup_token = ' bad ',"
+                      + " cleanup_until = current_timestamp + interval '1 minute'"
+                      + " where filename = 'lease.png'"));
     }
   }
 
@@ -181,13 +199,15 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
           queryLong(conn, commentCount("storage_upload", 0)),
           "storage_upload table comment is missing");
       assertEquals(
-          9L,
+          11L,
           queryLong(conn, commentCount("storage_upload", 1)),
           "every storage_upload column must be commented");
     }
     for (String index :
         new String[] {
-          "uk_storage_blob_active_hash", "uk_storage_upload_candidate", "idx_storage_upload_expiry"
+          "uk_storage_blob_active_hash",
+          "uk_storage_upload_candidate",
+          "idx_storage_upload_cleanup_claim"
         }) {
       try (Connection conn = newConnection()) {
         assertEquals(
@@ -369,6 +389,12 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
     try (PreparedStatement ps = conn.prepareStatement("delete from storage_blob where id = ?")) {
       ps.setObject(1, id);
       ps.executeUpdate();
+    }
+  }
+
+  private static void execute(Connection conn, String sql) throws SQLException {
+    try (Statement statement = conn.createStatement()) {
+      statement.executeUpdate(sql);
     }
   }
 

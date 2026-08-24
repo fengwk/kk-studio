@@ -33,6 +33,12 @@ public class StorageUpload {
   /** 清理截止时刻：过期后由过期批次回收。 */
   private Instant expiresAt;
 
+  /** 后台对象清理所有权 token；未 claim 时为 null。 */
+  private String cleanupToken;
+
+  /** cleanupToken 的 lease 截止时刻；与 cleanupToken 成对为空或非空。 */
+  private Instant cleanupUntil;
+
   /** 创建时间（映射 {@code created_at} timestamptz，毫秒精度）。 */
   private Instant createTime;
 }
