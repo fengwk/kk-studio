@@ -53,21 +53,22 @@ mvn -P supply-chain -Dcyclonedx.skip=false -Ddependency-check.skip=true verify
 | Jackson BOM | `2.22.1` |
 | Netty BOM | `4.1.137.Final` |
 | Log4j BOM | `2.26.1` |
-| Kotlin BOM | `2.4.10` |
+| Kotlin runtime（由 Spring Boot BOM 管理） | `1.9.25` |
 | Tomcat embed core/el/jasper/websocket | `10.1.59` |
 | PostgreSQL JDBC | `42.7.13` |
 | OpenNLP | `2.5.11` |
 
-Jackson、Netty、Log4j、Kotlin 的显式 BOM 位于 Boot BOM 之前，避免被 Boot BOM 的旧版本管理覆盖；Tomcat、PostgreSQL、OpenNLP 使用本仓显式 dependencyManagement 条目。Kotlin 的 stdlib、reflect、jdk7、jdk8 和 common 坐标最终统一为 `2.4.10`；Kotlin 2.4.10 在 Maven Central 将 `kotlin-stdlib-common` 发布为 POM，仓库同时排除旧版 `okio-jvm` 带入的 legacy common JAR。`web/pom.xml` 的 Spring Boot Maven Plugin 使用 `${spring-boot.version}`，不再硬编码旧版本。版本变更应通过 `help:effective-pom` 与 `dependency:tree` 同时核对最终解析结果。
+Jackson、Netty、Log4j 的显式 BOM 位于 Boot BOM 之前，避免被 Boot BOM 的旧版本管理覆盖；Tomcat、PostgreSQL、OpenNLP 使用本仓显式 dependencyManagement 条目。Kotlin 不额外导入 BOM、不新增直接依赖，使用 Spring Boot BOM 的自然运行时图（stdlib、reflect、jdk7、jdk8、common 均为 `1.9.25`）。`web/pom.xml` 的 Spring Boot Maven Plugin 使用 `${spring-boot.version}`，不再硬编码旧版本。版本变更应通过 `help:effective-pom` 与 `dependency:tree` 同时核对最终解析结果。
 
 ## 误报抑制
 
 抑制文件为 `config/supply-chain/dependency-check-suppressions.xml`。每条规则都同时限定一个精确 GAV 和一个 CVE，并在 `<notes>` 中保留官方事实与 URL；禁止使用通配 GAV、CPE、CVSS 阈值或整包抑制：
 
 - `fun.fengwk.auto-mapper:auto-mapper-processor:0.0.48` 与 `fun.fengwk.auto-mapper:auto-mapper-annotation:0.0.48` 的 `CVE-2020-7644`：官方记录对应 npm `fun-map`，不是这两个 Maven 构件。依据：[NVD CVE-2020-7644](https://nvd.nist.gov/vuln/detail/CVE-2020-7644)。
-- `org.jetbrains.kotlin:kotlin-stdlib:2.4.10`、`kotlin-reflect:2.4.10`、`kotlin-stdlib-jdk7:2.4.10`、`kotlin-stdlib-jdk8:2.4.10`、`kotlin-stdlib-common:2.4.10` 的 `CVE-2026-53914`：官方受影响对象为 `kotlin-gradle-plugin`，本仓库没有 Gradle 插件依赖。依据：[NVD CVE-2026-53914](https://nvd.nist.gov/vuln/detail/CVE-2026-53914) 与 [JetBrains security fixes](https://www.jetbrains.com/privacy-security/issues-fixed/)。
+- `org.jetbrains.kotlin:kotlin-stdlib:1.9.25`、`kotlin-reflect:1.9.25`、`kotlin-stdlib-jdk7:1.9.25`、`kotlin-stdlib-jdk8:1.9.25`、`kotlin-stdlib-common:1.9.25` 的 `CVE-2020-29582`：JetBrains 公告说明漏洞影响 Kotlin `before 1.4.21`，而 `1.9.25` 已高于修复版本；NVD CPE 使用 `versionEndExcluding=2.1.0` 将该 CVE 错配到这些运行时构件。依据：[JetBrains security bulletin](https://blog.jetbrains.com/blog/2021/02/03/jetbrains-security-bulletin-q4-2020/) 与 [NVD CVE-2020-29582](https://nvd.nist.gov/vuln/detail/CVE-2020-29582)。
+- 同一组 Kotlin 运行时 GAV 的 `CVE-2026-53914`：本次扫描实际报告这些坐标，但官方受影响对象为 `kotlin-gradle-plugin`；本仓库没有 Gradle 插件依赖。依据：[NVD CVE-2026-53914](https://nvd.nist.gov/vuln/detail/CVE-2026-53914) 与 [JetBrains security fixes](https://www.jetbrains.com/privacy-security/issues-fixed/)。
 
-Kotlin 升级到 `2.4.10` 后不再包含 `CVE-2020-29582`；该 CVE 不以放宽阈值或无依据抑制处理。Log4j 升级到 `2.26.1` 后不再命中 `CVE-2026-34479`，没有添加 Log4j 抑制。CVE 抑制只保留实际解析坐标 `2.4.10` 的 Kotlin 变体规则，旧版 `1.9.25` GAV 已删除。
+这些 suppression 是当前扫描实际报告坐标的最小精确规则；不抑制其他 Kotlin GAV。Log4j 升级到 `2.26.1` 后不再命中 `CVE-2026-34479`，没有添加 Log4j 抑制。
 
 ## NVD key、缓存与在线失败
 

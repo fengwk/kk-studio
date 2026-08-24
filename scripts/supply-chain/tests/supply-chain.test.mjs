@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/supply-chain.sh')
 const POM = path.join(REPOSITORY_ROOT, 'pom.xml')
+const PLATFORM_POM = path.join(REPOSITORY_ROOT, 'platform/pom.xml')
 const WEB_POM = path.join(REPOSITORY_ROOT, 'web/pom.xml')
 const SUPPRESSIONS = path.join(
     REPOSITORY_ROOT,
@@ -127,6 +128,7 @@ test('keeps online plugins inside the explicitly activated root-only profile', (
 test('locks tool versions, policy thresholds, and secret indirection', () => {
     // Intent: policy changes must be reviewable as a small static diff and keys must stay out of POM/CLI text.
     const pom = readFileSync(POM, 'utf8')
+    const platformPom = readFileSync(PLATFORM_POM, 'utf8')
     const webPom = readFileSync(WEB_POM, 'utf8')
     const script = readFileSync(SCRIPT, 'utf8')
     const suppressions = readFileSync(SUPPRESSIONS, 'utf8')
@@ -137,7 +139,8 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<tomcat\.version>10\.1\.59<\/tomcat\.version>/)
     assert.match(pom, /<postgresql\.version>42\.7\.13<\/postgresql\.version>/)
     assert.match(pom, /<opennlp\.version>2\.5\.11<\/opennlp\.version>/)
-    assert.match(pom, /<kotlin\.version>2\.4\.10<\/kotlin\.version>/)
+    assert.doesNotMatch(pom, /<kotlin\.version>|kotlin-bom|okio-jvm/)
+    assert.doesNotMatch(platformPom, /org\.jetbrains\.kotlin|kotlin-stdlib-common/)
     assert.match(
         pom,
         /<artifactId>spring-boot-dependencies<\/artifactId>[\s\S]*<version>\$\{spring-boot\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
@@ -153,10 +156,6 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(
         pom,
         /<artifactId>log4j-bom<\/artifactId>[\s\S]*<version>\$\{log4j\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
-    )
-    assert.match(
-        pom,
-        /<artifactId>kotlin-bom<\/artifactId>[\s\S]*<version>\$\{kotlin\.version\}<\/version>[\s\S]*<scope>import<\/scope>[\s\S]*<artifactId>spring-boot-dependencies<\/artifactId>/,
     )
     assert.match(
         webPom,
@@ -175,20 +174,41 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     const suppressionBlocks = [...suppressions.matchAll(/<suppress>([\s\S]*?)<\/suppress>/g)].map(
         match => match[1],
     )
-    assert.equal(suppressionBlocks.length, 7)
-    assert.doesNotMatch(suppressions, /:1\.9\.25<\/gav>/)
-    assert.equal(
-        suppressionBlocks.filter(block => block.includes('org.jetbrains.kotlin:')).length,
-        5,
+    assert.equal(suppressionBlocks.length, 12)
+    assert.match(
+        suppressions,
+        /<gav>org\.jetbrains\.kotlin:kotlin-stdlib:1\.9\.25<\/gav>[\s\S]*<cve>CVE-2020-29582<\/cve>/,
     )
+    assert.match(suppressions, /Kotlin before 1\.4\.21/)
+    assert.match(suppressions, /versionEndExcluding 2\.1\.0/)
+    assert.match(
+        suppressions,
+        /https:\/\/blog\.jetbrains\.com\/blog\/2021\/02\/03\/jetbrains-security-bulletin-q4-2020\//,
+    )
+    const kotlinSuppressionPairs = suppressionBlocks
+        .filter(block => block.includes('org.jetbrains.kotlin:'))
+        .map(
+            block =>
+                `${block.match(/<gav>([^<]+)<\/gav>/)[1]}|${block.match(/<cve>([^<]+)<\/cve>/)[1]}`,
+        )
+        .sort()
+    assert.deepEqual(kotlinSuppressionPairs, [
+        'org.jetbrains.kotlin:kotlin-reflect:1.9.25|CVE-2020-29582',
+        'org.jetbrains.kotlin:kotlin-reflect:1.9.25|CVE-2026-53914',
+        'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25|CVE-2020-29582',
+        'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.25|CVE-2026-53914',
+        'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25|CVE-2020-29582',
+        'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.25|CVE-2026-53914',
+        'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25|CVE-2020-29582',
+        'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.25|CVE-2026-53914',
+        'org.jetbrains.kotlin:kotlin-stdlib:1.9.25|CVE-2020-29582',
+        'org.jetbrains.kotlin:kotlin-stdlib:1.9.25|CVE-2026-53914',
+    ])
     for (const block of suppressionBlocks) {
         assert.match(block, /<notes>[\s\S]+<\/notes>/)
         assert.match(block, /<cve>CVE-\d{4}-\d+<\/cve>/)
         assert.match(block, /<gav>[^<*?]+:[^<*?]+:[^<*?]+<\/gav>/)
         assert.doesNotMatch(block, /<cpe>|<cvss>|regex\s*=/)
-    }
-    for (const block of suppressionBlocks.filter(block => block.includes('org.jetbrains.kotlin:'))) {
-        assert.match(block, /<gav>org\.jetbrains\.kotlin:[^<]+:2\.4\.10<\/gav>/)
     }
     assert.match(script, /chmod 600/)
     assert.match(script, /nvdApiServerId/)
