@@ -26,6 +26,7 @@ flowchart TD
     A --> V[application-event-channel.md<br/>应用事件通道 /api/events/v1]
     A --> M[prompt-to-resource.md<br/>Prompt 到 Resource 数据流]
     A --> P[e2e-regression.md<br/>E2E 回归矩阵与报告]
+    A --> PB[performance-baseline.md<br/>免费机器内性能基线]
     A --> R[docker-reliability-stack.md<br/>Docker Reliability 隔离栈]
     A --> U[supply-chain-quality-gate.md<br/>供应链质量门禁]
 ```
@@ -52,9 +53,10 @@ flowchart TD
 | 16 | [application-event-channel.md](application-event-channel.md) | `/api/events/v1` WebSocket 事件通道帧协议与恢复 |
 | 17 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
 | 18 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
-| 19 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
-| 20 | [session-thread-pane.md](session-thread-pane.md) | Session Tree、三态 PaneTarget、lazy Thread materialization、Stop 恢复与上传回收 |
-| 21 | [supply-chain-quality-gate.md](supply-chain-quality-gate.md) | 普通构建与显式 SBOM/漏洞在线门禁、报告与失败语义 |
+| 19 | [performance-baseline.md](performance-baseline.md) | 免费机器内 HTTP 性能基线、阈值与报告 |
+| 20 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
+| 21 | [session-thread-pane.md](session-thread-pane.md) | Session Tree、三态 PaneTarget、lazy Thread materialization、Stop 恢复与上传回收 |
+| 22 | [supply-chain-quality-gate.md](supply-chain-quality-gate.md) | 普通构建与显式 SBOM/漏洞在线门禁、报告与失败语义 |
 
 ## 贯穿约束
 
