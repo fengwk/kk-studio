@@ -22,10 +22,14 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.RecordingS3PresignService;
@@ -64,6 +68,9 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private RecordingS3PresignService s3Presigner;
+  @Autowired private StorageUploadService storageUploadService;
+  @Autowired private StorageBlobManager storageBlobManager;
+  @MockitoBean private StorageMaintenance storageMaintenance;
 
   @BeforeEach
   void resetS3Fakes() {
@@ -161,16 +168,26 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
     mockMvc.perform(delete("/api/storage/uploads/" + uploadId)).andExpect(status().isNoContent());
 
     assertEquals(
-        0,
-        jdbc.queryForObject("select count(*) from storage_upload", Integer.class),
-        "READY delete must remove the upload row");
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where cleanup_requested_at is not null",
+            Integer.class),
+        "READY delete must first persist a durable cleanup request");
     assertEquals(
-        0,
-        jdbc.queryForObject("select count(*) from storage_blob", Integer.class),
-        "last reference release must clean up the blob row");
+        "DELETING",
+        jdbc.queryForObject("select state from storage_blob", String.class),
+        "last upload reference must be released in the delete transaction");
+    assertTrue(
+        s3Storage.hasObject(StorageObjectKeys.blobOriginal(UUID.fromString(blobId))),
+        "HTTP delete must not perform physical S3 cleanup on the request thread");
+
+    assertEquals(1, storageUploadService.expireOnce());
+    assertEquals(1, storageBlobManager.sweepDeleting());
+    assertEquals(0, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
+    assertEquals(0, jdbc.queryForObject("select count(*) from storage_blob", Integer.class));
     assertFalse(
         s3Storage.hasObject(StorageObjectKeys.blobOriginal(UUID.fromString(blobId))),
-        "original object must be deleted with the blob");
+        "maintenance must delete the original object after finalizing the upload row");
 
     mockMvc
         .perform(delete("/api/storage/uploads/" + uploadId))
@@ -305,7 +322,8 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
   }
 
   @Test
-  public void deletePendingRemovesObjectThenRow() throws Exception {
+  public void deletePendingPersistsCleanupRequestBeforeMaintenanceRemovesObjectAndRow()
+      throws Exception {
     String uploadId =
         reserveUpload("abort.bin", "application/octet-stream", 1, sha256Hex(new byte[] {1}));
     s3Storage.putDirect(
@@ -315,9 +333,20 @@ public class StudioStorageControllerTest extends S3WebPostgresTestSupport {
 
     mockMvc.perform(delete("/api/storage/uploads/" + uploadId)).andExpect(status().isNoContent());
 
+    assertTrue(
+        s3Storage.hasObject(StorageObjectKeys.uploadOriginal(UUID.fromString(uploadId))),
+        "HTTP delete must not remove the temp object on the request thread");
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where cleanup_requested_at is not null",
+            Integer.class),
+        "PENDING delete must persist a durable cleanup request");
+
+    assertEquals(1, storageUploadService.expireOnce());
     assertFalse(
         s3Storage.hasObject(StorageObjectKeys.uploadOriginal(UUID.fromString(uploadId))),
-        "PENDING delete must remove the temp object first");
+        "maintenance must remove the temp object before finalizing the row");
     assertEquals(0, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
   }
 

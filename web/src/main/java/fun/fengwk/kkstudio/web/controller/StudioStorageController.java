@@ -57,7 +57,7 @@ public class StudioStorageController {
     return Results.ok(requireUploadService().complete(parseUuid(uploadIdText, "uploadId")));
   }
 
-  /** 删除上传：PENDING 先删临时对象再删行；READY 同事务删行并 release blob（重复删除返回 404）。 */
+  /** 逻辑删除上传：事务内持久化 cleanup request，READY 同事务 release upload 引用；对象与行由 Storage Maintenance 异步回收。 */
   @DeleteMapping("/uploads/{uploadId}")
   public Result<Void> delete(@PathVariable("uploadId") String uploadIdText) {
     requireUploadService().delete(parseUuid(uploadIdText, "uploadId"));
