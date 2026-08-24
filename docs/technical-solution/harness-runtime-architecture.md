@@ -17,7 +17,7 @@
 harness/
 ├── tool/                # Tool API、descriptor、ResourceRef、RemoteTool、Daemon v3 wire
 ├── runtime/             # 纯 Java：Session/Entry/Thread/Command/Invocation/Work/processor
-├── plugin-api/          # 纯 Java trusted build-time 插件 API：Catalog/BranchView/Tool/intents/projector
+├── plugin-api/          # 纯 Java trusted 插件 API：Catalog/BranchView/Tool/intents/projector
 ├── infra/               # Store/Work/notification/Resource 适配（PostgreSQL、dispatcher）
 ├── daemon/              # 独立 Environment 进程，只依赖 tool
 └── plugins/
@@ -31,6 +31,7 @@ web composition root -> platform application API / share DTO
 web composition root -> harness-infra -> harness-runtime -> harness-tool
 web composition root -> harness-runtime
 web composition root -> harness/plugins/goal -> harness-plugin-api
+web composition root -> harness-plugin-api（内建与 trusted JAR 插件组合契约）
 platform -> harness-plugin-api -> harness-runtime -> harness-tool
 platform -> harness-runtime -> harness-tool
 platform -> harness-tool

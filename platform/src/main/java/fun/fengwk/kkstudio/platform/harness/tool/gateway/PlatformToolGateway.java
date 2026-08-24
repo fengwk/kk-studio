@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -48,6 +47,7 @@ import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -74,7 +74,7 @@ import java.util.function.Supplier;
  * <p>{@link #preflight} 是纯判定：用 {@link PermissionEvaluator} + 部署 {@link ToolSettings} + 配置的
  * workdir/environmentRoot 评估冻结的 call/binding，绝不改写 binding/arguments；YOLO 短路由由 Runtime 决定，本类 不感知
  * YOLO 也不查询 HarnessStore。{@link #start} 按冻结 binding 的 {@link ToolType} 路由：PLATFORM 走 {@link
- * ToolFactories} 精确 name/version + descriptor equality 后提交注入的 {@link ExecutorService}
+ * ToolContributionCatalog} 精确 name/version + descriptor equality 后提交注入的 {@link ExecutorService}
  * 执行；ENVIRONMENT 只按冻结的完整 binding 经 {@link RemoteToolTransport} 发送。missing capability /
  * 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active remote invocation 映射
  * Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定 / 提交结果不确定映射
@@ -121,7 +121,7 @@ public final class PlatformToolGateway implements ToolGateway {
 
   private static final String PERMISSION_DENIED_MESSAGE = "Tool permission was denied.";
 
-  private final ToolFactories toolFactories;
+  private final ToolContributionCatalog toolContributionCatalog;
   private final PluginCatalog pluginCatalog;
   private final PluginBranchViewLoader pluginBranchViewLoader;
   private final RemoteToolTransport remoteTransport;
@@ -143,7 +143,7 @@ public final class PlatformToolGateway implements ToolGateway {
    * 必须由装配方或测试显式提供， 不允许以无界容量绕过执行上限。
    */
   PlatformToolGateway(
-      ToolFactories toolFactories,
+      ToolContributionCatalog toolContributionCatalog,
       PluginCatalog pluginCatalog,
       PluginBranchViewLoader pluginBranchViewLoader,
       RemoteToolTransport remoteTransport,
@@ -158,7 +158,8 @@ public final class PlatformToolGateway implements ToolGateway {
       Supplier<Duration> overloadRetryDelay,
       Clock clock,
       ConcurrencyAdmission admission) {
-    this.toolFactories = Objects.requireNonNull(toolFactories, "toolFactories");
+    this.toolContributionCatalog =
+        Objects.requireNonNull(toolContributionCatalog, "toolContributionCatalog");
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.pluginBranchViewLoader =
         Objects.requireNonNull(pluginBranchViewLoader, "pluginBranchViewLoader");
@@ -240,23 +241,15 @@ public final class PlatformToolGateway implements ToolGateway {
     }
   }
 
-  /** PLATFORM：ToolFactories 精确查找 + descriptor equality，然后提交 executor 执行（拒绝即 Overloaded）。 */
+  /** PLATFORM：统一 catalog 精确查找 + descriptor equality，然后提交 executor 执行（拒绝即 Overloaded）。 */
   private StartResult startPlatform(
       Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
-    if (execution.request().binding().plugin() != null) {
-      return startPlugin(execution, listener, lease);
-    }
     ToolDescriptor bindingDescriptor = execution.request().binding().descriptor();
-    Optional<Tool> found;
-    try {
-      found = toolFactories.find(bindingDescriptor.name(), bindingDescriptor.version());
-    } catch (IllegalArgumentException invalid) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              INVALID_REQUEST_KIND,
-              failureMessage(invalid, "Frozen platform tool binding is invalid.")));
-    }
-    if (found.isEmpty()) {
+    ToolContributionCatalog.Entry entry =
+        toolContributionCatalog
+            .find(bindingDescriptor.name(), bindingDescriptor.version())
+            .orElse(null);
+    if (entry == null) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_NOT_FOUND_KIND,
@@ -266,8 +259,19 @@ public final class PlatformToolGateway implements ToolGateway {
                   + bindingDescriptor.version()
                   + " is not registered."));
     }
-    Tool tool = found.orElseThrow();
-    if (!bindingDescriptor.equals(tool.descriptor())) {
+    if (execution.request().binding().plugin() != null) {
+      return startPlugin(execution, listener, lease, entry);
+    }
+    if (entry.isPlugin()) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              PLUGIN_BINDING_MISMATCH_KIND,
+              "Frozen local tool binding resolves to a plugin contribution."));
+    }
+    Tool tool;
+    try {
+      tool = toolContributionCatalog.createLocalTool(entry);
+    } catch (IllegalArgumentException invalid) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_DESCRIPTOR_MISMATCH_KIND,
@@ -275,7 +279,8 @@ public final class PlatformToolGateway implements ToolGateway {
                   + bindingDescriptor.name()
                   + "@"
                   + bindingDescriptor.version()
-                  + " no longer matches its frozen descriptor."));
+                  + " no longer matches its frozen descriptor: "
+                  + failureMessage(invalid, "descriptor mismatch")));
     }
     ToolExecutionRequest request = request(execution, tool.descriptor());
     GatedToolExecutionListener bridge =
@@ -332,10 +337,19 @@ public final class PlatformToolGateway implements ToolGateway {
 
   /** 插件 PLATFORM Tool：按冻结 contribution owner 精确恢复，并在 externalize 前校验全部声明式 intents。 */
   private StartResult startPlugin(
-      Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
+      Execution execution,
+      Listener listener,
+      ConcurrencyAdmission.Lease lease,
+      ToolContributionCatalog.Entry entry) {
     PluginToolBinding binding = execution.request().binding().plugin();
     ContributionId id =
         new ContributionId(new PluginId(binding.pluginId()), binding.contributionLocalName());
+    if (!entry.isPlugin() || !id.equals(entry.contributionId())) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              PLUGIN_BINDING_MISMATCH_KIND,
+              "Frozen plugin tool binding does not match the catalog contribution."));
+    }
     ToolContribution contribution = pluginCatalog.findTool(id).orElse(null);
     if (contribution == null) {
       return new ToolGateway.Rejected(

@@ -22,12 +22,17 @@ class WebModuleArchitectureTest {
 
   private static final String HARNESS_RUNTIME_PREFIX = "fun.fengwk.kkstudio.harness.runtime.";
   private static final String HARNESS_INFRA_PREFIX = "fun.fengwk.kkstudio.harness.infra.";
+  private static final String HARNESS_PLUGIN_API_PREFIX = "fun.fengwk.kkstudio.harness.plugin.api.";
   private static final String GOAL_PLUGIN_PREFIX = "fun.fengwk.kkstudio.harness.plugins.goal.";
   private static final String HARNESS_TOOL_PREFIX = "fun.fengwk.kkstudio.harness.tool.";
   private static final String PLATFORM_ENVIRONMENT_PREFIX =
       "fun.fengwk.kkstudio.platform.environment.";
   private static final List<String> ALLOWED_HARNESS_PACKAGE_PREFIXES =
-      List.of(HARNESS_RUNTIME_PREFIX, HARNESS_INFRA_PREFIX, GOAL_PLUGIN_PREFIX);
+      List.of(
+          HARNESS_RUNTIME_PREFIX,
+          HARNESS_INFRA_PREFIX,
+          HARNESS_PLUGIN_API_PREFIX,
+          GOAL_PLUGIN_PREFIX);
 
   /**
    * Web mapper 直接使用的 canonical tool types (EnvironmentBinding, EnvironmentName,
@@ -47,7 +52,11 @@ class WebModuleArchitectureTest {
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
       List.of("kk-studio-harness-tool", "kk-studio-harness-daemon");
   private static final List<String> REQUIRED_POM_ARTIFACTS =
-      List.of("kk-studio-canvas-infra", "kk-studio-harness-infra", "kk-studio-harness-plugin-goal");
+      List.of(
+          "kk-studio-canvas-infra",
+          "kk-studio-harness-infra",
+          "kk-studio-harness-plugin-api",
+          "kk-studio-harness-plugin-goal");
 
   @Test
   void webMainSourcesUseCoreBoundariesAndAvoidDirectHarnessDependencies() throws IOException {

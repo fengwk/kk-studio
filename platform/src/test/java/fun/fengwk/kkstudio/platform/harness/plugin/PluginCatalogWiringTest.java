@@ -13,11 +13,11 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginTool;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
-import fun.fengwk.kkstudio.harness.plugin.api.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
@@ -36,7 +36,7 @@ class PluginCatalogWiringTest {
           HarnessPlugin.class,
           () ->
               HarnessPlugin.of(
-                  new PluginDescriptor(new PluginId("first"), "first", "1"),
+                  new PluginDescriptor(new PluginId("first"), "first", "1", Set.of()),
                   registrar ->
                       registrar.registerTool(
                           "goal-tool",
@@ -47,7 +47,7 @@ class PluginCatalogWiringTest {
           HarnessPlugin.class,
           () ->
               HarnessPlugin.of(
-                  new PluginDescriptor(new PluginId("second"), "second", "1"),
+                  new PluginDescriptor(new PluginId("second"), "second", "1", Set.of()),
                   registrar -> registrar.registerCustomEntryType("goal-type", "goal")));
       context.refresh();
 

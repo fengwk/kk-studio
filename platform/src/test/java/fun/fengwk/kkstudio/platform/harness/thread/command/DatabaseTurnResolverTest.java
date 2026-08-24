@@ -72,12 +72,14 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
@@ -95,6 +97,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
+import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
@@ -1803,6 +1806,19 @@ class DatabaseTurnResolverTest {
               modelConfigParser,
               new ProviderFactories(factories),
               new ToolCatalog(platformDescriptors, internalPlatformToolNames),
+              new ToolContributionCatalog(
+                  platformDescriptors.stream()
+                      .filter(descriptor -> pluginCatalog.findTool(descriptor.name()).isEmpty())
+                      .map(
+                          descriptor -> {
+                            ToolFactory factory = mock(ToolFactory.class);
+                            when(factory.descriptor()).thenReturn(descriptor);
+                            when(factory.visibility()).thenReturn(ToolVisibility.SELECTABLE);
+                            when(factory.priority()).thenReturn(0);
+                            return factory;
+                          })
+                      .toList(),
+                  pluginCatalog),
               pluginCatalog,
               environmentRegistry,
               new SystemSettingsSnapshot(SystemSettings.DEFAULT),

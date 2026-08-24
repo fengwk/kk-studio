@@ -61,6 +61,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
+import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
@@ -100,6 +101,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final ProviderFactories providerFactories;
   private final ToolCatalog toolCatalog;
+  private final ToolContributionCatalog toolContributionCatalog;
   private final PluginCatalog pluginCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
   private final SystemSettingsSnapshot snapshot;
@@ -120,6 +122,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentModelRuntimeConfigParser modelConfigParser,
       ProviderFactories providerFactories,
       ToolCatalog toolCatalog,
+      ToolContributionCatalog toolContributionCatalog,
       PluginCatalog pluginCatalog,
       LiveEnvironmentRegistry environmentRegistry,
       SystemSettingsSnapshot snapshot,
@@ -136,6 +139,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
     this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
+    this.toolContributionCatalog =
+        Objects.requireNonNull(toolContributionCatalog, "toolContributionCatalog");
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
@@ -435,10 +440,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   private ToolBinding platformBinding(ToolDescriptor descriptor) {
-    ToolContribution contribution = pluginCatalog.findTool(descriptor.name()).orElse(null);
-    if (contribution == null) {
+    if (descriptor.name().equals(TaskTool.NAME)) {
       return new ToolBinding(descriptor, ToolType.PLATFORM, null, null);
     }
+    ToolContributionCatalog.Entry entry =
+        toolContributionCatalog.find(descriptor.name(), descriptor.version()).orElse(null);
+    if (entry == null) {
+      throw rejection("platform tool not found: " + descriptor.name() + "@" + descriptor.version());
+    }
+    if (!entry.isPlugin()) {
+      return new ToolBinding(descriptor, ToolType.PLATFORM, null, null);
+    }
+    ToolContribution contribution = entry.pluginContribution();
     List<PluginStateAccess> stateAccesses = new ArrayList<>(contribution.stateAccesses().size());
     for (var access : contribution.stateAccesses()) {
       stateAccesses.add(

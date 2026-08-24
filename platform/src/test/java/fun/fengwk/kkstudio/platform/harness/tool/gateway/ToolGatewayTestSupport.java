@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
@@ -41,6 +40,7 @@ import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 
 import java.nio.file.Path;
@@ -137,21 +137,21 @@ final class ToolGatewayTestSupport {
         INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, PROPOSED_ATTEMPT, request);
   }
 
-  static ToolFactories factories(Tool... tools) {
+  static ToolContributionCatalog factories(Tool... tools) {
     List<ToolFactory> factories = new ArrayList<>(tools.length);
     for (Tool tool : tools) {
       factories.add(ToolFactory.singleton(tool));
     }
-    return new ToolFactories(factories);
+    return new ToolContributionCatalog(factories, EMPTY_PLUGIN_CATALOG);
   }
 
   static PlatformToolGateway gateway(
-      ToolFactories toolFactories,
+      ToolContributionCatalog toolContributionCatalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor) {
     return gateway(
-        toolFactories,
+        toolContributionCatalog,
         transport,
         store,
         executor,
@@ -160,13 +160,13 @@ final class ToolGatewayTestSupport {
   }
 
   static PlatformToolGateway gateway(
-      ToolFactories toolFactories,
+      ToolContributionCatalog toolContributionCatalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
       int resourceMaxBytes) {
     return gateway(
-        toolFactories,
+        toolContributionCatalog,
         transport,
         store,
         executor,
@@ -175,23 +175,24 @@ final class ToolGatewayTestSupport {
   }
 
   static PlatformToolGateway gateway(
-      ToolFactories toolFactories,
+      ToolContributionCatalog toolContributionCatalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
       ToolSettings settings) {
-    return gateway(toolFactories, transport, store, executor, RESOURCE_MAX_BYTES, settings);
+    return gateway(
+        toolContributionCatalog, transport, store, executor, RESOURCE_MAX_BYTES, settings);
   }
 
   static PlatformToolGateway gateway(
-      ToolFactories toolFactories,
+      ToolContributionCatalog toolContributionCatalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings) {
     return gateway(
-        toolFactories,
+        toolContributionCatalog,
         transport,
         store,
         executor,
@@ -201,7 +202,7 @@ final class ToolGatewayTestSupport {
   }
 
   static PlatformToolGateway gateway(
-      ToolFactories toolFactories,
+      ToolContributionCatalog toolContributionCatalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
@@ -209,7 +210,7 @@ final class ToolGatewayTestSupport {
       ToolSettings settings,
       ConcurrencyAdmission admission) {
     return gateway(
-        toolFactories,
+        toolContributionCatalog,
         EMPTY_PLUGIN_CATALOG,
         transport,
         store,
@@ -220,7 +221,7 @@ final class ToolGatewayTestSupport {
   }
 
   static PlatformToolGateway gateway(
-      ToolFactories toolFactories,
+      ToolContributionCatalog toolContributionCatalog,
       PluginCatalog pluginCatalog,
       FakeTransport transport,
       FakeResourceStore store,
@@ -228,8 +229,13 @@ final class ToolGatewayTestSupport {
       int resourceMaxBytes,
       ToolSettings settings,
       ConcurrencyAdmission admission) {
+    List<ToolFactory> localFactories =
+        toolContributionCatalog.entries().stream()
+            .filter(ToolContributionCatalog.Entry::isLocal)
+            .map(ToolContributionCatalog.Entry::localFactory)
+            .toList();
     return new PlatformToolGateway(
-        toolFactories,
+        new ToolContributionCatalog(localFactories, pluginCatalog),
         pluginCatalog,
         FAILING_PLUGIN_BRANCH_LOADER,
         transport,
@@ -247,7 +253,7 @@ final class ToolGatewayTestSupport {
   }
 
   static PlatformToolGateway gateway(
-      ToolFactories toolFactories,
+      ToolContributionCatalog toolContributionCatalog,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
@@ -255,7 +261,7 @@ final class ToolGatewayTestSupport {
       Path workdir,
       Path environmentRoot) {
     return new PlatformToolGateway(
-        toolFactories,
+        toolContributionCatalog,
         EMPTY_PLUGIN_CATALOG,
         FAILING_PLUGIN_BRANCH_LOADER,
         transport,
@@ -273,14 +279,14 @@ final class ToolGatewayTestSupport {
   }
 
   static PlatformToolGateway gateway(
-      ToolFactories toolFactories,
+      ToolContributionCatalog toolContributionCatalog,
       FakeTransport transport,
       FakeResourceStore store,
       HarnessRuntimeProperties properties,
       ExecutorService executor,
       ToolSettings settings) {
     return new PlatformToolGateway(
-        toolFactories,
+        toolContributionCatalog,
         EMPTY_PLUGIN_CATALOG,
         FAILING_PLUGIN_BRANCH_LOADER,
         transport,

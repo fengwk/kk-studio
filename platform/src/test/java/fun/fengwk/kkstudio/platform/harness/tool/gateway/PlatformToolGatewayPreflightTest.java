@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -104,7 +103,7 @@ class PlatformToolGatewayPreflightTest {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    ToolFactories factories = ToolGatewayTestSupport.factories(tool);
+    var factories = ToolGatewayTestSupport.factories(tool);
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
       PlatformToolGateway gateway =

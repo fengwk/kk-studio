@@ -8,7 +8,8 @@ import java.util.Objects;
  * <p>{@code localName} 是 canonical 小写 dotted/dashed 标识符，只在所属插件内唯一；不同插件可以使用相同 localName（如 {@code
  * state}）。贡献身份由 scoped registrar 在注册时构造，插件无法伪造其它插件的身份。
  */
-public record ContributionId(PluginId pluginId, String localName) {
+public record ContributionId(PluginId pluginId, String localName)
+    implements Comparable<ContributionId> {
 
   public ContributionId {
     pluginId = Objects.requireNonNull(pluginId, "pluginId");
@@ -18,5 +19,12 @@ public record ContributionId(PluginId pluginId, String localName) {
   @Override
   public String toString() {
     return pluginId + ":" + localName;
+  }
+
+  @Override
+  public int compareTo(ContributionId other) {
+    Objects.requireNonNull(other, "other");
+    int pluginComparison = pluginId.value().compareTo(other.pluginId.value());
+    return pluginComparison != 0 ? pluginComparison : localName.compareTo(other.localName);
   }
 }

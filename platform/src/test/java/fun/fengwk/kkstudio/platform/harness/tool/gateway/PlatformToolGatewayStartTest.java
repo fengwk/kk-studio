@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
@@ -453,8 +454,8 @@ class PlatformToolGatewayStartTest {
   @Test
   void factoryCreatingMismatchedToolIsRejectedAsInvalidRequest() {
     ToolDescriptor drifted = platformDriftedDescriptor("2");
-    ToolFactories factories =
-        new ToolFactories(
+    var factories =
+        new ToolContributionCatalog(
             List.of(
                 new ToolFactory() {
                   @Override
@@ -466,7 +467,8 @@ class PlatformToolGatewayStartTest {
                   public Tool create() {
                     return new ToolGatewayTestSupport.FakeTool(drifted);
                   }
-                }));
+                }),
+            PluginCatalog.from(List.of()));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
             factories,

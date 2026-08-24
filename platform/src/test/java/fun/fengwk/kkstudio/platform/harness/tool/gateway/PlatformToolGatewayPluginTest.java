@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginStateMode;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginTool;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
-import fun.fengwk.kkstudio.harness.plugin.api.ToolVisibility;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -35,7 +34,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -44,8 +42,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -74,7 +74,7 @@ class PlatformToolGatewayPluginTest {
           Duration.ZERO);
 
   @Test
-  void pluginToolPassesPermissionPreflightWithoutToolFactoriesRegistration() {
+  void pluginToolPassesPermissionPreflightWithoutLocalToolRegistration() {
     Fixture fixture = fixture(pluginTool(PluginToolResult.withoutIntents(result(List.of()))));
 
     ToolGateway.PreflightResult result =
@@ -208,7 +208,7 @@ class PlatformToolGatewayPluginTest {
   private static Fixture fixture(PluginTool tool, ConcurrencyAdmission admission) {
     HarnessPlugin plugin =
         HarnessPlugin.of(
-            new PluginDescriptor(PLUGIN_ID, "Goal", "1"),
+            new PluginDescriptor(PLUGIN_ID, "Goal", "1", Set.of()),
             registrar -> {
               registrar.registerCustomEntryType("state-type", "state");
               registrar.registerTool("write", tool, ToolVisibility.SELECTABLE);
@@ -225,7 +225,7 @@ class PlatformToolGatewayPluginTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         new PlatformToolGateway(
-            new ToolFactories(List.of()),
+            new ToolContributionCatalog(List.of(), catalog),
             catalog,
             loader,
             new ToolGatewayTestSupport.FakeTransport(),

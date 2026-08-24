@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.plugin.api;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 import java.util.List;
 import java.util.Objects;
@@ -11,7 +12,8 @@ public record ToolContribution(
     PluginTool tool,
     ToolDescriptor descriptor,
     List<PluginStateDeclaration> stateAccesses,
-    ToolVisibility visibility) {
+    ToolVisibility visibility,
+    int priority) {
 
   public ToolContribution {
     id = Objects.requireNonNull(id, "id");
