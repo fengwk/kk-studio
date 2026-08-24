@@ -199,7 +199,7 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
           queryLong(conn, commentCount("storage_upload", 0)),
           "storage_upload table comment is missing");
       assertEquals(
-          11L,
+          12L,
           queryLong(conn, commentCount("storage_upload", 1)),
           "every storage_upload column must be commented");
     }

@@ -19,13 +19,13 @@ public interface StorageUploadRepository {
   /** 仅当仍为未过期、未被清理 claim 的 PENDING 时绑定 blob。 */
   boolean setBlobIdIfNull(UUID id, UUID blobId, Instant now);
 
-  /** 删除未被清理 claim 的行（READY 消费路径，调用方负责 release blob）。 */
-  boolean deleteById(UUID id);
+  /** CAS 标记显式清理请求；调用方必须在同一事务内按 READY 状态恰好 release 一次。 */
+  boolean markCleanupRequested(UUID id, Instant requestedAt);
 
-  /** 原子 claim 一批可清理过期行；数据库事务只持有到 UPDATE RETURNING 完成。 */
+  /** 原子 claim 一批可清理的请求/过期行；数据库事务只持有到 UPDATE RETURNING 完成。 */
   List<StorageUpload> claimExpired(int limit, Instant now, Instant leaseUntil, String cleanupToken);
 
-  /** 用户显式删除时原子 claim 指定行；允许未过期行，但不能抢占有效 lease。 */
+  /** 按 id 原子 claim 指定清理事实；允许未过期行，但不能抢占有效 lease。 */
   StorageUpload claimById(UUID id, Instant now, Instant leaseUntil, String cleanupToken);
 
   /** token-fenced 删除 PENDING 清理事实。 */

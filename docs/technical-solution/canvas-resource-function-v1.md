@@ -310,18 +310,21 @@ POST /api/storage/uploads
 -> 按 (sha256,sizeBytes) 去重并返回 READY(blobId)
 ```
 
-`storage_upload.blob_id IS NULL` 表示 PENDING，非空表示 READY。READY Upload 持有一个 Blob 引用，直到被删除、过期或消费。
+`storage_upload.blob_id IS NULL` 表示 PENDING，非空表示 READY。READY Upload 持有一个 Blob 引用，直到被删除、过期或消费；
+显式删除/消费先持久化 `cleanup_requested_at`，行与 candidate 证据保留到 Storage Maintenance 完成对象清理。
 
 `CREATE_RESOURCE_NODE` 在同一事务中逐个：
 
 ```text
 lockReady(uploadId)
 -> retain(blobId) 为 Resource 取得引用
--> delete(uploadId) 释放 Upload 引用
+-> delete(uploadId) CAS cleanup_requested_at 并释放 Upload 引用
 -> insert canvas_resource(ownerNodeId, resourceIndex, blobId, authoritative filename)
 ```
 
 `lockReady` 使用 `PROPAGATION_MANDATORY`；调用方没有外层事务时直接失败，保证 upload 行锁覆盖 retain + delete。客户端文件名不进入消费决策，Resource name 取上传行的权威 filename。
+delete 不在请求线程执行 S3 清理；事务提交后只唤醒后台，后台先删除 upload-scoped temp/unused candidate，
+再由 Maintenance 删除 upload 行，最后按顺序 sweep DELETING Blob。
 
 ## 6. Canvas Chat 与附件
 

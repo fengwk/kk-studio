@@ -958,6 +958,7 @@ create table storage_upload (
     declared_size       bigint         not null,
     declared_sha256     char(64)       not null,
     expires_at          timestamptz(3) not null,
+    cleanup_requested_at timestamptz(3),
     cleanup_token       varchar(128),
     cleanup_until       timestamptz(3),
     created_at          timestamptz(3) not null default current_timestamp,
@@ -982,7 +983,7 @@ create table storage_upload (
 );
 
 create index idx_storage_upload_cleanup_claim
-    on storage_upload (expires_at, cleanup_until, id);
+    on storage_upload (cleanup_requested_at, expires_at, cleanup_until, id);
 
 comment on table storage_blob is
     'Deduplicated immutable content address of the global blob storage: one'
@@ -1033,6 +1034,9 @@ comment on column storage_upload.declared_sha256 is 'Client-declared lowercase h
 comment on column storage_upload.expires_at is
     'Cleanup deadline: PENDING temp objects and rows, or READY rows plus the'
     ' upload reference, are removed after this instant.';
+comment on column storage_upload.cleanup_requested_at is
+    'Durable explicit cleanup request; NULL for active uploads and retained until'
+    ' maintenance removes the upload row.';
 comment on column storage_upload.cleanup_token is
     'Opaque cleanup ownership token; NULL when unclaimed and fenced on finalize/release.';
 comment on column storage_upload.cleanup_until is
@@ -1043,7 +1047,8 @@ comment on index uk_storage_upload_candidate is
     'Every upload pre-assigns a distinct candidate blob id so PENDING rows can'
     ' never collide on the future blob identity.';
 comment on index idx_storage_upload_cleanup_claim is
-    'Storage Maintenance claim scan: expired uploads with absent/expired leases oldest-first.';
+    'Storage Maintenance claim scan: requested or expired uploads with absent/expired'
+    ' leases, ordered by request/deadline time.';
 
 -- Session 级 Blob 引用：Session 的持久化 message（USER/RESOURCE 与 TOOL 结果）通过本表持有 storage_blob 的
 -- 活跃引用。ref_count 维护完全由应用层 SessionBlobRefManager 显式执行（insert+retain / delete+release 成对），

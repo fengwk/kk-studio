@@ -520,6 +520,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     UUID blobId = upload.blobId();
     StorageBlobManager blobManager = requireBlobManager();
     blobManager.retain(blobId);
+    // delete 在当前事务内只标记 cleanup request 并 release upload owner；对象清理由提交后的 Maintenance 完成。
     uploadService.delete(uploadId);
     String filename = upload.filename();
     return new CanvasResource(

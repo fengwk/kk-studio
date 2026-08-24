@@ -263,6 +263,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "declared_size",
         "declared_sha256",
         "expires_at",
+        "cleanup_requested_at",
         "cleanup_token",
         "cleanup_until",
         "created_at");
@@ -438,6 +439,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "storage_blob", "created_at");
     assertColumnType("timestamp with time zone", "storage_blob", "updated_at");
     assertColumnType("timestamp with time zone", "storage_upload", "expires_at");
+    assertColumnType("timestamp with time zone", "storage_upload", "cleanup_requested_at");
     assertColumnType("timestamp with time zone", "storage_upload", "created_at");
   }
 

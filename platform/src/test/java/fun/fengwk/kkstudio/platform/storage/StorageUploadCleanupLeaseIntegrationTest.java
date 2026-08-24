@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -242,6 +243,72 @@ class StorageUploadCleanupLeaseIntegrationTest extends S3PostgresSpringTestSuppo
     UUID readyId = UUID.fromString(ready.getId());
     tx.execute(
         status -> uploadRepository.claimById(readyId, now, now.plusSeconds(30), "ready-cleanup"));
+
+    assertThrows(
+        StorageVerificationException.class,
+        () -> tx.execute(status -> uploadService.lockReady(readyId)));
+  }
+
+  @Test
+  void explicitCleanupRequestIsClaimedBeforeExpiry() {
+    StorageUploadDTO pending =
+        storage.reserve(
+            "requested.bin", "application/octet-stream", 1, storage.sha256Hex(new byte[] {4}));
+    UUID uploadId = UUID.fromString(pending.getId());
+
+    s3Storage.clearNetworkCalls();
+    uploadService.delete(uploadId);
+    assertNotNull(
+        jdbc.queryForObject(
+            "select cleanup_requested_at from storage_upload where id = ?",
+            Timestamp.class,
+            uploadId));
+    assertTrue(
+        s3Storage.networkCalls().isEmpty(),
+        "explicit delete must only persist a durable request before maintenance");
+
+    StorageUpload claimed =
+        tx.execute(
+            status ->
+                uploadRepository
+                    .claimExpired(1, Instant.now(), Instant.now().plusSeconds(30), "requested-node")
+                    .getFirst());
+    assertEquals(uploadId, claimed.getId());
+    assertNotNull(claimed.getCleanupRequestedAt());
+    assertTrue(
+        Boolean.TRUE.equals(
+            tx.execute(status -> uploadRepository.finalizePending(uploadId, "requested-node"))));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ?", Integer.class, uploadId));
+  }
+
+  @Test
+  void explicitCleanupRequestFailsClosedForCompleteAndLockReady() {
+    byte[] content = new byte[] {5};
+    StorageUploadDTO pending =
+        storage.reserve(
+            "requested-pending.bin",
+            "application/octet-stream",
+            content.length,
+            storage.sha256Hex(content));
+    UUID pendingId = UUID.fromString(pending.getId());
+    uploadService.delete(pendingId);
+    s3Storage.clearNetworkCalls();
+    assertThrows(StorageVerificationException.class, () -> uploadService.complete(pendingId));
+    assertTrue(s3Storage.networkCalls().isEmpty(), "complete must fail before any S3 call");
+
+    StorageUploadDTO readyPending =
+        storage.reserve(
+            "requested-ready.bin",
+            "application/octet-stream",
+            content.length,
+            storage.sha256Hex(content));
+    storage.putUploadContent(readyPending.getId(), content, "application/octet-stream");
+    StorageUploadDTO ready = uploadService.complete(UUID.fromString(readyPending.getId()));
+    UUID readyId = UUID.fromString(ready.getId());
+    uploadService.delete(readyId);
 
     assertThrows(
         StorageVerificationException.class,

@@ -40,6 +40,10 @@ public class InMemoryS3StorageService implements S3StorageService {
     deleteFailures.clear();
   }
 
+  public void clearNetworkCalls() {
+    networkCalls.clear();
+  }
+
   public boolean hasObject(String key) {
     return objects.containsKey(key);
   }

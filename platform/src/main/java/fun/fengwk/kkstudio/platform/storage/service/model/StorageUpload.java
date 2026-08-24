@@ -33,6 +33,9 @@ public class StorageUpload {
   /** 清理截止时刻：过期后由过期批次回收。 */
   private Instant expiresAt;
 
+  /** 显式删除/消费的耐久请求时刻；非 null 后由后台清理并最终删除整行。 */
+  private Instant cleanupRequestedAt;
+
   /** 后台对象清理所有权 token；未 claim 时为 null。 */
   private String cleanupToken;
 
