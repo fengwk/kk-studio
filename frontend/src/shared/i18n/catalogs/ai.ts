@@ -670,6 +670,10 @@ export const aiCatalog = {
     'en-US': 'Select a Provider',
     'zh-CN': '请选择 Provider',
   },
+  'ai.catalog.validation.providerType': {
+    'en-US': 'Select a valid Provider Type',
+    'zh-CN': '请选择有效的 Provider Type',
+  },
   'ai.catalog.validation.model': {
     'en-US': 'Select a Default Model',
     'zh-CN': '请选择 Default Model',

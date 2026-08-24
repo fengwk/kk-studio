@@ -75,6 +75,25 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
+  void providerTypeCheckAllowsOnlyStableWireValues() throws SQLException {
+    // 真实 PostgreSQL schema 必须接受四个稳定 wire 值，并在数据库边界拒绝大小写、空白和未知值。
+    for (String providerType : new String[] {"openai", "openai_response", "anthropic", "google"}) {
+      try (Connection conn = newConnection()) {
+        insertProvider(conn, "provider-" + FIXTURE_IDS.incrementAndGet(), providerType);
+      }
+    }
+    for (String invalid : new String[] {"OPENAI", "openai ", "OpenAI", "missing"}) {
+      try (Connection conn = newConnection()) {
+        assertTransactionConstraintViolation(
+            conn,
+            "ck_agent_provider_provider_type",
+            () ->
+                insertProvider(conn, "invalid-provider-" + FIXTURE_IDS.incrementAndGet(), invalid));
+      }
+    }
+  }
+
+  @Test
   void chatAgentNameContractIsCanonicalAndThreadVersionStaysAppOwned() throws SQLException {
     try (Connection conn = newConnection()) {
       insertChat(conn, uuid());
@@ -364,11 +383,17 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   }
 
   private void insertProvider(Connection conn, String name) throws SQLException {
+    insertProvider(conn, name, "openai");
+  }
+
+  private void insertProvider(Connection conn, String name, String providerType)
+      throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
             "insert into agent_provider (name, provider_type, config)"
-                + " values (?, 'openai', '{}'::jsonb)")) {
+                + " values (?, ?, '{}'::jsonb)")) {
       ps.setString(1, name);
+      ps.setString(2, providerType);
       assertEquals(1, ps.executeUpdate());
     }
   }

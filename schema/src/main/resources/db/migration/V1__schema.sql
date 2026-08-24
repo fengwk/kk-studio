@@ -48,6 +48,9 @@ create table agent_provider (
         and char_length(name) > 0
         and position('/' in name) = 0
     ),
+    constraint ck_agent_provider_provider_type check (
+        provider_type in ('openai', 'openai_response', 'anthropic', 'google')
+    ),
     constraint ck_agent_provider_version_nonneg check (version >= 0)
 );
 

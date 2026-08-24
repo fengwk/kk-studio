@@ -63,7 +63,6 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -181,7 +180,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             providerRepository.getByName(selection.providerName()),
             "provider not found: " + selection.providerName());
-    ProviderType providerType = toProviderType(provider);
+    ProviderType providerType = provider.getProviderType();
+    if (providerType == null) {
+      throw rejection("provider type must not be null");
+    }
     AgentModel model =
         require(
             modelRepository.getByProviderNameAndName(
@@ -270,7 +272,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             providerRepository.getByName(selection.providerName()),
             "provider not found: " + selection.providerName());
-    ProviderType providerType = toProviderType(provider);
+    ProviderType providerType = provider.getProviderType();
+    if (providerType == null) {
+      throw rejection("provider type must not be null");
+    }
     AgentModel model =
         require(
             modelRepository.getByProviderNameAndName(
@@ -602,19 +607,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory)
         .apply(stub, cachePolicy)
         .cacheControl();
-  }
-
-  private static ProviderType toProviderType(AgentProvider provider) {
-    AgentProviderType type = provider.getProviderType();
-    if (type == null) {
-      throw rejection("provider type must not be null");
-    }
-    return switch (type) {
-      case openai -> ProviderType.OPENAI;
-      case openai_response -> ProviderType.OPENAI_RESPONSES;
-      case anthropic -> ProviderType.ANTHROPIC;
-      case google -> ProviderType.GOOGLE;
-    };
   }
 
   private static <T> T require(T value, String message) {

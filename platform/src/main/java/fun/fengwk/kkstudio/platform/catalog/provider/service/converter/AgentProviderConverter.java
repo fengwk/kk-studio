@@ -24,7 +24,7 @@ public class AgentProviderConverter {
     AgentProviderDTO dto = new AgentProviderDTO();
     dto.setName(provider.getName());
     dto.setDescription(provider.getDescription());
-    dto.setProviderType(provider.getProviderType().name());
+    dto.setProviderType(provider.getProviderType().wireValue());
     dto.setBaseUrl(provider.getBaseUrl());
     dto.setConfigured(provider.getCredential() != null && !provider.getCredential().isBlank());
     var timeoutPolicy = configurationCodec.readTimeoutPolicy(provider.getConfigJson());

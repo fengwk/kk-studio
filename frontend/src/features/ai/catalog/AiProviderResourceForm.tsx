@@ -1,6 +1,7 @@
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { Select } from '@/shared/ui/console/Select'
 import { providerTypes } from '@/features/ai/catalog/ai-console-types'
+import type { AgentProviderType } from '@/shared/api/contracts/ai-catalog'
 import type { ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
 import { useI18n } from '@/shared/i18n'
@@ -64,7 +65,9 @@ export function ProviderForm({
           value={draft.providerType}
           required
           options={providerTypes.map((providerType) => ({ value: providerType, label: providerType }))}
-          onChange={(providerType) => onChange({ ...draft, providerType })}
+          onChange={(providerType) =>
+            onChange({ ...draft, providerType: providerType as AgentProviderType })
+          }
         />
       </label>
       <label className={`form-group${fieldErrors.baseUrl ? ' is-error' : ''}`}>

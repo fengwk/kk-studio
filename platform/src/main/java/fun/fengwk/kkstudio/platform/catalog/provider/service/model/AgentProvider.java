@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.provider.service.model;
 
 import lombok.Data;
 
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.time.Instant;
 
@@ -16,8 +16,8 @@ public class AgentProvider {
   /** 描述，可选；映射 varchar(512)，null 表示未填写。 */
   private String description;
 
-  /** Provider 协议类型（如 openai / anthropic / google），必填。 */
-  private AgentProviderType providerType;
+  /** Provider 协议类型，必填。 */
+  private ProviderType providerType;
 
   /** 服务 base URL，可选；映射 varchar(512)。 */
   private String baseUrl;

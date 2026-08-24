@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 import java.time.Duration;
@@ -69,6 +69,14 @@ public class AgentProviderMutationFactoryTest {
     assertThrows(
         AiValidationException.class, () -> factory.newProvider(unsupported.getName(), unsupported));
 
+    // Provider wire 值不接受大小写变化或首尾空白，避免本地规范化掩盖非法 catalog 数据。
+    unsupported.setProviderType("OPENAI");
+    assertThrows(
+        AiValidationException.class, () -> factory.newProvider(unsupported.getName(), unsupported));
+    unsupported.setProviderType("openai ");
+    assertThrows(
+        AiValidationException.class, () -> factory.newProvider(unsupported.getName(), unsupported));
+
     AgentProviderCreateDTO invalidTimeout = provider("provider", null);
     invalidTimeout.setModelCallIdleTimeoutMillis(0L);
     assertThrows(
@@ -114,7 +122,7 @@ public class AgentProviderMutationFactoryTest {
   private AgentProvider existingProvider(String credential, String configJson) {
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
-    provider.setProviderType(AgentProviderType.openai);
+    provider.setProviderType(ProviderType.OPENAI);
     provider.setCredential(credential);
     provider.setConfigJson(configJson);
     return provider;

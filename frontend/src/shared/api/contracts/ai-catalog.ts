@@ -1,9 +1,12 @@
 import type { BackendLong, CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
 
+/** Provider Catalog / HTTP 使用的稳定 wire 值。 */
+export type AgentProviderType = 'openai' | 'openai_response' | 'anthropic' | 'google'
+
 export interface AgentProviderDTO {
   name: string
   description: string | null
-  providerType: string
+  providerType: AgentProviderType
   baseUrl: string | null
   configured: boolean
   modelCallTimeoutMillis: BackendLong
@@ -16,7 +19,7 @@ export interface AgentProviderDTO {
 export interface AgentProviderEditablePropertiesDTO {
   name?: string | null
   description?: string | null
-  providerType: string
+  providerType: AgentProviderType
   baseUrl?: string | null
   credential?: string | null
   modelCallTimeoutMillis?: BackendLong | null

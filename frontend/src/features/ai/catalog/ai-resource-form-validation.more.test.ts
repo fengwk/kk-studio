@@ -74,6 +74,7 @@ describe('ai-resource-form-validation additional branches', () => {
     ['topK must be positive', /Top K/],
     ['frequencyPenalty must be a number', /Penalty/],
     ['providerName is required', /Provider/],
+    ['providerType is invalid', /Provider Type/],
     ['pricing.inputPerMillionTokens must not be negative', /价格/],
     ['modelName is required', /Model/],
     ['baseUrl is invalid', /Base URL/],

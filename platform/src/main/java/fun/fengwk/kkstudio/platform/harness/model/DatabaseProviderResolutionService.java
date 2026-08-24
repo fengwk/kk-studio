@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.util.EnumSet;
 import java.util.Objects;
@@ -70,7 +69,10 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     if (provider == null) {
       throw new IllegalArgumentException("provider not found: " + providerName);
     }
-    ProviderType providerType = toProviderType(provider.getProviderType());
+    ProviderType providerType = provider.getProviderType();
+    if (providerType == null) {
+      throw new IllegalArgumentException("provider type must not be null");
+    }
     if (providerType != frozenType) {
       throw new IllegalArgumentException(
           "provider type drift: frozen=" + frozenType + " current=" + providerType);
@@ -204,17 +206,5 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     }
     ProviderMessage first = request.messages().get(0);
     return first.role() == ProviderMessageRole.SYSTEM;
-  }
-
-  private static ProviderType toProviderType(AgentProviderType type) {
-    if (type == null) {
-      throw new IllegalArgumentException("provider type must not be null");
-    }
-    return switch (type) {
-      case openai -> ProviderType.OPENAI;
-      case openai_response -> ProviderType.OPENAI_RESPONSES;
-      case anthropic -> ProviderType.ANTHROPIC;
-      case google -> ProviderType.GOOGLE;
-    };
   }
 }

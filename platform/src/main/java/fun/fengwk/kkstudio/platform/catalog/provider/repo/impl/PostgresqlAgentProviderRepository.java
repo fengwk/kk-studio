@@ -6,6 +6,7 @@ import fun.fengwk.convention4j.common.page.Pages;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.impl.mapper.AgentProviderMapper;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.impl.model.AgentProviderDO;
@@ -65,7 +66,7 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
     AgentProviderDO result = new AgentProviderDO();
     result.setName(provider.getName());
     result.setDescription(provider.getDescription());
-    result.setProviderType(provider.getProviderType());
+    result.setProviderType(provider.getProviderType().wireValue());
     result.setBaseUrl(provider.getBaseUrl());
     result.setCredential(provider.getCredential());
     result.setConfigJson(provider.getConfigJson());
@@ -79,7 +80,7 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
     AgentProvider result = new AgentProvider();
     result.setName(provider.getName());
     result.setDescription(provider.getDescription());
-    result.setProviderType(provider.getProviderType());
+    result.setProviderType(ProviderType.fromWireValue(provider.getProviderType()));
     result.setBaseUrl(provider.getBaseUrl());
     result.setCredential(provider.getCredential());
     result.setConfigJson(provider.getConfigJson());

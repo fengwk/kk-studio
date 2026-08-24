@@ -14,9 +14,7 @@ public class AgentProviderDTO {
   /** 可空描述（≤512 字符）。 */
   private String description;
 
-  /**
-   * 供应商类型，取 {@link AgentProviderType} 枚举名（openai/openai_response/anthropic/google，wire 值即小写枚举名）。
-   */
+  /** 供应商类型，稳定 wire 值之一：{@code openai}、{@code openai_response}、{@code anthropic}、{@code google}。 */
   private String providerType;
 
   /** 可空模型 API base URL（≤512 字符）。 */
