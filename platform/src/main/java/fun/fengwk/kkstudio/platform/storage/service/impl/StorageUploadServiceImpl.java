@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.platform.storage.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.Assert;
@@ -13,6 +15,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
@@ -48,8 +51,9 @@ import java.util.UUID;
 /**
  * 全局 Blob 存储上传契约服务的默认实现。
  *
- * <p>事务边界全部由 {@link TransactionTemplate} 显式控制：S3 的 HEAD/探针/复制/删除绝不发生在数据库事务或上传行锁内。过期与显式删除先在短事务内
- * claim cleanup lease，事务外幂等删除临时/候选对象，再以 token-fenced 短事务删除上传事实并按需 release blob。
+ * <p>事务边界全部由 {@link TransactionTemplate} 显式控制：S3 的 HEAD/探针/复制/删除绝不发生在数据库事务或上传行锁内。显式删除/消费先在短事务内持久化
+ * cleanup request，READY 恰好 release 上传引用并提交后唤醒后台；过期与请求清理再 claim cleanup lease，事务外幂等删除临时/候选对象，最后以
+ * token-fenced 短事务删除上传事实，显式请求 READY 不重复 release。
  *
  * <p>complete 先校验并探针临时对象，再复制候选 blob 的最终对象，最后才在事务内去重插入/并发消解并绑定上传 —— DB 绝不引用缺失的最终对象； 同一上传的并发 complete
  * 通过 {@code setBlobIdIfNull} 只成功一次。READY 重试路径幂等并自愈（最终对象缺失时从临时对象补复制），并清理残留的临时/未使用候选对象。
@@ -67,6 +71,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private final S3StorageService s3StorageService;
   private final S3PresignService s3PresignService;
   private final StorageMediaProbe mediaProbe;
+  private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
   private final S3StorageProperties s3Properties;
   private final SystemSettings.StorageMedia storageMedia;
   private final Clock clock;
@@ -81,6 +86,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       S3StorageService s3StorageService,
       S3PresignService s3PresignService,
       StorageMediaProbe mediaProbe,
+      ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups,
       S3StorageProperties s3Properties,
       SystemSettings.StorageMedia storageMedia,
       StorageMaintenanceProperties maintenanceProperties,
@@ -92,6 +98,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     this.s3StorageService = Objects.requireNonNull(s3StorageService, "s3StorageService");
     this.s3PresignService = Objects.requireNonNull(s3PresignService, "s3PresignService");
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
+    this.maintenanceWakeups = Objects.requireNonNull(maintenanceWakeups, "maintenanceWakeups");
     this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
     this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
     this.cleanupLease =
@@ -202,27 +209,14 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   public void delete(UUID uploadId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
     if (TransactionSynchronizationManager.isActualTransactionActive()) {
-      deleteConsumedInCurrentTransaction(uploadId);
+      requestCleanupInCurrentTransaction(uploadId);
       return;
     }
-
-    String cleanupToken = UUID.randomUUID().toString();
-    Instant now = clock.instant();
-    StorageUpload claimed =
-        transactionTemplate.execute(
-            status ->
-                uploadRepository.claimById(uploadId, now, now.plus(cleanupLease), cleanupToken));
-    if (claimed == null) {
-      StorageUpload current = uploadRepository.getById(uploadId);
-      if (current == null) {
-        throw new StorageResourceNotFoundException("upload", uploadId.toString());
-      }
-      throw new StorageVerificationException("upload " + uploadId + " cleanup is already claimed");
-    }
-    cleanupUploadObjects(claimed);
-    if (!finalizeClaimed(claimed, cleanupToken)) {
-      throw new StorageVerificationException("upload " + uploadId + " cleanup ownership was lost");
-    }
+    transactionTemplate.execute(
+        status -> {
+          requestCleanupInCurrentTransaction(uploadId);
+          return null;
+        });
   }
 
   @Override
@@ -247,7 +241,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   public int expireOnce() {
     String cleanupToken = UUID.randomUUID().toString();
     Instant now = clock.instant();
-    List<StorageUpload> expired =
+    List<StorageUpload> claimable =
         transactionTemplate.execute(
             status ->
                 uploadRepository.claimExpired(
@@ -256,7 +250,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
                     now.plus(cleanupLease),
                     cleanupToken));
     int finalized = 0;
-    for (StorageUpload row : expired) {
+    for (StorageUpload row : claimable) {
       try {
         cleanupUploadObjects(row);
         if (finalizeClaimed(row, cleanupToken)) {
@@ -349,28 +343,38 @@ public class StorageUploadServiceImpl implements StorageUploadService {
                   upload.getId(), upload.getBlobId(), cleanupToken)) {
                 return false;
               }
-              blobManager.release(upload.getBlobId());
+              if (upload.getCleanupRequestedAt() == null) {
+                blobManager.release(upload.getBlobId());
+              }
               return true;
             });
     return Boolean.TRUE.equals(finalized);
   }
 
-  private void deleteConsumedInCurrentTransaction(UUID uploadId) {
+  private void requestCleanupInCurrentTransaction(UUID uploadId) {
     StorageUpload locked = uploadRepository.getByIdForUpdate(uploadId);
     if (locked == null) {
       throw new StorageResourceNotFoundException("upload", uploadId.toString());
     }
-    requireCleanupAvailable(locked);
-    if (locked.getBlobId() == null) {
-      throw new StorageVerificationException(
-          "PENDING upload deletion requires transaction-free cleanup");
+    if (locked.getCleanupToken() != null) {
+      throw new StorageVerificationException("upload " + uploadId + " cleanup is already claimed");
     }
-    if (uploadRepository.deleteById(uploadId)) {
+    if (locked.getCleanupRequestedAt() != null) {
+      return;
+    }
+    if (!uploadRepository.markCleanupRequested(uploadId, clock.instant())) {
+      throw new IllegalStateException("upload " + uploadId + " cleanup request was lost");
+    }
+    if (locked.getBlobId() != null) {
       blobManager.release(locked.getBlobId());
     }
+    registerMaintenanceWakeup();
   }
 
   private void requireCleanupAvailable(StorageUpload upload) {
+    if (upload.getCleanupRequestedAt() != null) {
+      throw new StorageVerificationException("upload " + upload.getId() + " cleanup was requested");
+    }
     if (upload.getCleanupToken() != null) {
       throw new StorageVerificationException(
           "upload " + upload.getId() + " cleanup is already claimed");
@@ -378,6 +382,24 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     if (!upload.getExpiresAt().isAfter(clock.instant())) {
       throw new StorageVerificationException("upload " + upload.getId() + " expired");
     }
+  }
+
+  private void registerMaintenanceWakeup() {
+    TransactionSynchronizationManager.registerSynchronization(
+        new TransactionSynchronization() {
+          @Override
+          public void afterCommit() {
+            try {
+              StorageMaintenanceWakeup wakeup = maintenanceWakeups.getIfAvailable();
+              if (wakeup != null) {
+                wakeup.wake();
+              }
+            } catch (RuntimeException error) {
+              // API 事务已经提交：本地唤醒只是低延迟提示，失败由 periodic poll 恢复且绝不向调用方冒泡。
+              log.warn("storage upload maintenance wake failed", error);
+            }
+          }
+        });
   }
 
   private void ensureBlobOriginal(UUID blobId, UUID uploadId) {

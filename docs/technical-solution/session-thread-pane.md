@@ -734,12 +734,14 @@ lock READY upload
 -> require not expired
 -> materialize USER_MESSAGE attachment as durable RESOURCE(blobId, name, preview)
 -> establish session_blob_ref
--> idempotently delete upload-scoped temp object
--> delete storage_upload
--> transfer or release upload-owned Blob reference
+-> CAS cleanup_requested_at in storage_upload
+-> release upload-owned Blob reference exactly once
+-> commit and wake Storage Maintenance
 ```
 
-若 Session 尚未引用 Blob，upload 的一份 retain 直接转移给 SessionBlobRef；若 Session 已引用该 Blob，删除 upload 后 release 多余 retain。
+若 Session 尚未引用 Blob，upload 的一份 retain 直接转移给 SessionBlobRef；若 Session 已引用该 Blob，
+标记 cleanup 后 release 多余 retain。上传行与 `candidate_blob_id` 保留到后台清理完成，事务提交前不做
+任何 S3 I/O。
 
 Command payload 和 Stop 恢复结果只保存 durable Resource，不再依赖 upload handle。
 
@@ -765,8 +767,9 @@ startup wake 排空历史积压；日常 reserve/complete API 不再承担机会
 并发规则：
 
 - consume 在外层事务锁定未过期且未 claim 的 READY 行；
-- client DELETE 与 GC 先以短事务写成对 `cleanup_token/cleanup_until`，随后释放行锁并在事务外删除对象；
-- complete/consume 对已过期或已 claim 行 fail closed，不能抢回 cleanup 所有权；
+- client DELETE/consume 先以短事务 CAS 写 `cleanup_requested_at`；READY 首次标记时 release 上传引用，
+  随后提交并仅 wake。GC 再写成对 `cleanup_token/cleanup_until`，释放行锁后在事务外删除对象；
+- complete/consume 对已过期、已请求 cleanup 或已 claim 行 fail closed，不能抢回 cleanup 所有权；
 - finalize/release 以 cleanup token fence，lease 过期后任意实例可通过 `FOR UPDATE SKIP LOCKED` 重新 claim。
 
 物理对象删除分两类：
@@ -774,9 +777,9 @@ startup wake 排空历史积压；日常 reserve/complete API 不再承担机会
 ```text
 upload-scoped temp object
   唯一 durable locator 是 storage_upload.id
-  -> 必须先幂等删除 temp object，再删除 upload 行
+  -> 必须先幂等删除 temp object 与未使用 candidate，再 token-fenced 删除 upload 行
   -> 对象删除失败则保留行与 cleanup lease，lease 过期后重试
-  -> 对象删除成功但数据库回滚时，后续重试仍可幂等收敛
+  -> cleanup request 提交后即使 complete/消费事务之后崩溃，行仍是 durable locator，后续重试仍可幂等收敛
 
 durable Blob object
   storage_blob(DELETING) 是 durable locator
@@ -784,7 +787,8 @@ durable Blob object
   -> afterCommit 只本地 wake；Storage Maintenance 删除对象和 Blob 行
 ```
 
-因此进程崩溃不会在丢失唯一数据库 locator 后留下永久 PENDING 临时对象。
+Maintenance 每轮固定先 finalize upload，再 sweep Blob；因此 upload FK 会暂时阻止 DELETING Blob
+行删除，直到 upload 证据消失。进程崩溃不会在丢失唯一数据库 locator 后留下永久 PENDING 临时对象。
 
 ## 9. Chat、Canvas、Session 与 Thread 查询
 

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.storage;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -46,8 +47,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * 全局 Blob 存储上传契约的 PostgreSQL 集成测试（内存 S3 假件）。
  *
- * <p>覆盖 reserve 命中/未命中、checksum/size 校验、并发去重、retain/release 原语、过期 PENDING/READY 回收、DELETE 幂等
- * 404，以及响应不泄露 bucket/key。
+ * <p>覆盖 reserve 命中/未命中、checksum/size 校验、并发去重、retain/release 原语、过期 PENDING/READY 回收、DELETE durable
+ * request 幂等，以及响应不泄露 bucket/key。
  *
  * @author fengwk
  */
@@ -578,6 +579,7 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
         StorageBlobState.DELETING,
         blobRow(ready.getBlobId()).state(),
         "commit must only persist DELETING and wake background maintenance");
+    assertEquals(1, storageUploadService.expireOnce(), "upload cleanup must precede blob sweep");
     storageBlobManager.sweepDeleting();
 
     assertEquals(
@@ -619,6 +621,7 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
 
     // owner 删除后重试成功：对象与行一并清理。
     storageUploadService.delete(UUID.fromString(ready.getId()));
+    assertEquals(1, storageUploadService.expireOnce(), "upload cleanup must precede blob sweep");
     assertEquals(
         1, storageBlobManager.sweepDeleting(), "sweep must clean up once the owner is gone");
     assertEquals(
@@ -637,6 +640,7 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
     StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
     UUID blobId = UUID.fromString(ready.getBlobId());
     storageUploadService.delete(UUID.fromString(ready.getId()));
+    assertEquals(1, storageUploadService.expireOnce(), "upload cleanup must precede blob sweep");
     String originalKey = StorageObjectKeys.blobOriginal(blobId);
     s3Storage.failNextDelete(originalKey, new IllegalStateException("temporary delete failure"));
 
@@ -794,7 +798,7 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
   // ------------------------------------------------------------------
 
   @Test
-  void deletePendingRemovesObjectThenRow() {
+  void deletePendingRequestsDurableCleanupWithoutS3() {
     StorageUploadDTO pending =
         reserve("abort.bin", "application/octet-stream", 1, sha256Hex(new byte[] {1}));
     putUploadContent(pending.getId(), new byte[] {1}, "application/octet-stream");
@@ -804,8 +808,22 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
         StorageObjectKeys.blobOriginal(candidateUuid), new byte[] {1}, "application/octet-stream");
     s3Storage.putDirect(StorageObjectKeys.blobPreview(candidateUuid), new byte[] {1}, "image/webp");
 
+    s3Storage.clearNetworkCalls();
     storageUploadService.delete(UUID.fromString(pending.getId()));
 
+    assertFalse(
+        s3Storage.networkCalls().stream().anyMatch(call -> call.operation().startsWith("delete")),
+        "explicit delete must return without S3 cleanup");
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ? and cleanup_requested_at is not null",
+            Integer.class,
+            UUID.fromString(pending.getId())));
+    assertTrue(
+        s3Storage.hasObject(StorageObjectKeys.uploadOriginal(UUID.fromString(pending.getId()))),
+        "durable request must retain temp evidence until maintenance");
+    assertEquals(1, storageUploadService.expireOnce());
     assertFalse(
         s3Storage.hasObject(StorageObjectKeys.uploadOriginal(UUID.fromString(pending.getId()))));
     assertFalse(
@@ -818,26 +836,60 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
   }
 
   @Test
-  void deleteReadyRemovesUploadAndReleasesBlob() {
+  void deleteReadyRequestsCleanupAndReleasesBlobOnce() {
     byte[] content = "ready-delete".getBytes(StandardCharsets.UTF_8);
-    StorageUploadDTO pending =
-        reserve("ready-delete.bin", "application/octet-stream", content.length, sha256Hex(content));
-    putUploadContent(pending.getId(), content, "application/octet-stream");
-    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    StorageUploadDTO firstPending =
+        reserve(
+            "ready-delete-first.bin",
+            "application/octet-stream",
+            content.length,
+            sha256Hex(content));
+    putUploadContent(firstPending.getId(), content, "application/octet-stream");
+    StorageUploadDTO firstReady =
+        storageUploadService.complete(UUID.fromString(firstPending.getId()));
+    StorageUploadDTO ready =
+        reserve(
+            "ready-delete-hit.bin", "application/octet-stream", content.length, sha256Hex(content));
+    assertEquals(firstReady.getBlobId(), ready.getBlobId());
     // 模拟 complete 在 DB 提交后、删除临时对象前崩溃：临时对象残留。
     s3Storage.putDirect(
         StorageObjectKeys.uploadOriginal(UUID.fromString(ready.getId())), content, "text/plain");
+    UUID candidateUuid = candidateBlobIdOf(ready.getId());
+    s3Storage.putDirect(
+        StorageObjectKeys.blobOriginal(candidateUuid), content, "application/octet-stream");
+    s3Storage.putDirect(StorageObjectKeys.blobPreview(candidateUuid), content, "image/webp");
 
+    s3Storage.clearNetworkCalls();
     storageUploadService.delete(UUID.fromString(ready.getId()));
-    storageBlobManager.sweepDeleting();
 
     assertEquals(
-        0,
+        2,
         jdbc.queryForObject("select count(*) from storage_upload", Integer.class),
-        "READY delete must remove the upload row");
+        "READY delete must retain the cleanup evidence row");
+    assertEquals(
+        1L,
+        blobRefCount(ready.getBlobId()),
+        "READY delete must release the upload reference exactly once");
+    assertFalse(
+        s3Storage.networkCalls().stream().anyMatch(call -> call.operation().startsWith("delete")),
+        "READY delete must return without S3 cleanup");
+    assertEquals(1, storageUploadService.expireOnce());
     assertFalse(
         s3Storage.hasObject(StorageObjectKeys.uploadOriginal(UUID.fromString(ready.getId()))),
-        "READY delete must also clean the leftover temp object");
+        "maintenance must clean the leftover temp object");
+    assertFalse(s3Storage.hasObject(StorageObjectKeys.blobOriginal(candidateUuid)));
+    assertFalse(s3Storage.hasObject(StorageObjectKeys.blobPreview(candidateUuid)));
+    assertEquals(
+        1,
+        jdbc.queryForObject("select count(*) from storage_upload", Integer.class),
+        "the other upload must remain after the requested row is finalized");
+    assertEquals(
+        1L,
+        blobRefCount(ready.getBlobId()),
+        "finalizing an explicit request must not release its blob a second time");
+    storageUploadService.delete(UUID.fromString(firstReady.getId()));
+    assertEquals(1, storageUploadService.expireOnce());
+    storageBlobManager.sweepDeleting();
     assertEquals(
         0,
         jdbc.queryForObject("select count(*) from storage_blob", Integer.class),
@@ -854,10 +906,9 @@ class StorageUploadServiceIntegrationTest extends S3PostgresSpringTestSupport {
     StorageUploadDTO pending =
         reserve("gone.bin", "application/octet-stream", 1, sha256Hex(new byte[] {1}));
     storageUploadService.delete(UUID.fromString(pending.getId()));
-    assertThrows(
-        StorageResourceNotFoundException.class,
+    assertDoesNotThrow(
         () -> storageUploadService.delete(UUID.fromString(pending.getId())),
-        "repeat delete must surface the idempotent 404");
+        "repeat delete must not release or clean twice");
   }
 
   // ------------------------------------------------------------------

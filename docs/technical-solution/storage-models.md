@@ -75,7 +75,7 @@ SET_ACTIVE_TOOLS
 | 表 | 身份与职责 |
 | --- | --- |
 | `storage_blob` | `id uuid`；不可变内容与媒体事实；`ACTIVE/DELETING`；唯一 ACTIVE `(sha256,size_bytes)`；唯一一级 `ref_count` |
-| `storage_upload` | `id uuid` 一次性 Handle；`blob_id IS NULL` 为 PENDING，非空为 READY；保存权威 filename/声明/checksum/expiry 与成对 cleanup lease |
+| `storage_upload` | `id uuid` 一次性 Handle；`blob_id IS NULL` 为 PENDING，非空为 READY；保存权威 filename/声明/checksum/expiry、durable cleanup request 与成对 cleanup lease |
 | `session_blob_ref` | PK `(session_id, blob_id)`；Session 对 Blob 的显式引用边，每行贡献一次 Blob retain |
 
 对象键不落库：
@@ -95,12 +95,17 @@ Reserve 请求为 `{filename, mediaType, sizeBytes, sha256}`：
    `x-amz-checksum-sha256` 的预签名 PUT。
 3. complete 使用 checksum-mode HEAD 校验真实大小与 SHA-256，执行媒体探针，复制到候选 Blob
    key，再在短事务内解决去重并绑定 READY。
-4. READY Handle 持有一个 Blob 引用；delete/expiry 先短事务 claim cleanup lease，事务外幂等删除
-   temp/candidate 对象，再 token-fenced 短事务删行并按需 release；失败保留 lease，过期后可由任意节点重试。
+4. READY Handle 持有一个 Blob 引用。显式 delete/消费只在短事务内 CAS 写入
+   `cleanup_requested_at`，并在首次成功标记时 release 这一份上传引用；PENDING 不 release。提交后只唤醒
+   Storage Maintenance，上传行、`blob_id` 与 `candidate_blob_id` 都保留为恢复证据。
+5. Maintenance claim `cleanup_requested_at IS NOT NULL OR expires_at <= now` 的行，事务外幂等删除
+   temp/candidate 对象，再 token-fenced 短事务删行。显式请求的 READY 行不二次 release；普通过期 READY
+   行在 finalize 中 release。失败保留 lease，过期后可由任意节点重试。
 
 `StorageUploadService.lockReady` 使用 `PROPAGATION_MANDATORY`，返回锁定行中的权威
-`blobId + filename`。已过期或已被 cleanup claim 的行 fail closed。消费方必须在同一外层事务完成 retain
-新 owner、删除 Upload 与写入 owner 行，不能抢回 cleanup 所有权。
+`blobId + filename`。已过期、已请求 cleanup 或已被 cleanup claim 的行 fail closed。消费方必须在同一外层
+事务完成 retain 新 owner、标记 Upload cleanup 与写入 owner 行；上传行保留到后台清理完成，不能抢回 cleanup
+所有权。
 
 ### 5.2 Blob 生命周期
 

@@ -221,7 +221,8 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /**
    * 消费一个 READY upload：锁定上传行（PENDING / 过期 / 不存在确定性拒绝）、以上传行权威文件名构造 RESOURCE、写 session blob ref
-   * （retain 先于 release）、删除已消费上传行（release 其引用）。全部在同一外事务内，失败整体回滚。
+   * （retain 先于 release）、标记已消费上传 cleanup（release 其引用）。全部在同一外事务内，失败整体回滚；S3 清理由提交后的 Storage
+   * Maintenance 完成。
    */
   private ResourceMessageContent consumeAttachment(
       UUID sessionId, AttachmentMessageContent attachment) {

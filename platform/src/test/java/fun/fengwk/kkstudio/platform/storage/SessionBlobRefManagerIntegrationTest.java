@@ -165,6 +165,7 @@ class SessionBlobRefManagerIntegrationTest extends S3PostgresSpringTestSupport {
           refManager.releaseRef(SESSION_A, blobUuid);
           return null;
         });
+    assertEquals(1, storageUploadService.expireOnce(), "upload cleanup must precede blob sweep");
     storageBlobManager.sweepDeleting();
 
     assertEquals(

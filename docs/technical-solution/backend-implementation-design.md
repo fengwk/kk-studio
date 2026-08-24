@@ -95,7 +95,7 @@ Agent DTO 的 `model` 使用 Model ref，create 与 PUT 都必填；Model DTO �
 | POST | `/api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval` | `{decision: ALLOW|DENY, decisionId, actor, reason}` |
 | WebSocket | `/api/events/v1` | 浏览器事件通道（thread/canvas 订阅；协议见 [application-event-channel.md](application-event-channel.md)） |
 | GET | `/api/ai/runtime/resources/{sha256}` | 瞬时/Invocation `ResourceRef` 下载：Platform `ManagedResourceDownloadService` 按 `mediaType`/`size`/可选 `name` 重建引用，Web 只负责 attachment + `X-Content-Type-Options: nosniff`；Entry history 的 Blob Resource 不走该端点 |
-| POST/DELETE | `/api/storage/uploads[/{uploadId}]` | 全局 Upload reserve、complete 与释放；READY Handle 供 `ATTACHMENT(uploadId)` 原子消费 |
+ | POST/DELETE | `/api/storage/uploads[/{uploadId}]` | 全局 Upload reserve、complete 与 durable cleanup request；READY Handle 供 `ATTACHMENT(uploadId)` 原子消费，S3 清理由 Maintenance 延后执行 |
 | GET | `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` | durable Blob Resource 的渲染期短期 URL；原件响应额外携带权威 `mediaType/sizeBytes` |
 
 公开 API 仅限表中列出的 current endpoints；消息写入统一 `command-batches`（`USER_MESSAGE` 命令表达，无独立 `/messages` 端点）；Thread head 由 Runtime 推进（ENTRY target materialization 创建新 Thread，现有 Thread 不 relocation）。

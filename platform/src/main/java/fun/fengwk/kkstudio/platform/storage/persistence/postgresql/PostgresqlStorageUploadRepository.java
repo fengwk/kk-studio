@@ -41,8 +41,8 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
   }
 
   @Override
-  public boolean deleteById(UUID id) {
-    return uploadMapper.deleteById(id) == 1;
+  public boolean markCleanupRequested(UUID id, Instant requestedAt) {
+    return uploadMapper.markCleanupRequested(id, requestedAt) == 1;
   }
 
   @Override
@@ -86,6 +86,7 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
     target.setDeclaredSize(upload.getDeclaredSize());
     target.setDeclaredSha256(upload.getDeclaredSha256());
     target.setExpiresAt(upload.getExpiresAt());
+    target.setCleanupRequestedAt(upload.getCleanupRequestedAt());
     target.setCleanupToken(upload.getCleanupToken());
     target.setCleanupUntil(upload.getCleanupUntil());
     return target;
@@ -104,6 +105,7 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
     target.setDeclaredSize(row.getDeclaredSize());
     target.setDeclaredSha256(row.getDeclaredSha256());
     target.setExpiresAt(row.getExpiresAt());
+    target.setCleanupRequestedAt(row.getCleanupRequestedAt());
     target.setCleanupToken(row.getCleanupToken());
     target.setCleanupUntil(row.getCleanupUntil());
     target.setCreateTime(row.getCreateTime());

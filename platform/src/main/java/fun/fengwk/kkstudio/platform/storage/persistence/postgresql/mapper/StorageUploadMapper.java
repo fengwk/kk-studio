@@ -20,15 +20,15 @@ import java.util.UUID;
 /**
  * {@code storage_upload} 的原子 SQL 入口。
  *
- * <p>状态由 {@code blob_id} 表达：null = PENDING，非 null = READY；{@code setBlobIdIfNull} 保证同一上传只被 complete
- * 一次；过期清理通过 CTE + {@code for update skip locked} 在短事务内写入 cleanup lease，再把对象 I/O 移到事务外。
+ * <p>状态由 {@code blob_id} 表达：null = PENDING，非 null = READY；显式清理先以 {@code cleanup_requested_at}
+ * 持久化请求，过期或请求清理通过 CTE + {@code for update skip locked} 在短事务内写入 cleanup lease，再把对象 I/O 移到事务外。
  */
 @Mapper
 public interface StorageUploadMapper extends BaseMapper {
 
   String COLUMNS =
       "id, candidate_blob_id, blob_id, filename, declared_media_type, declared_size, "
-          + "declared_sha256, expires_at, cleanup_token, cleanup_until, "
+          + "declared_sha256, expires_at, cleanup_requested_at, cleanup_token, cleanup_until, "
           + "created_at as create_time";
 
   @Results(
@@ -42,6 +42,7 @@ public interface StorageUploadMapper extends BaseMapper {
         @Result(column = "declared_size", property = "declaredSize"),
         @Result(column = "declared_sha256", property = "declaredSha256"),
         @Result(column = "expires_at", property = "expiresAt"),
+        @Result(column = "cleanup_requested_at", property = "cleanupRequestedAt"),
         @Result(column = "cleanup_token", property = "cleanupToken"),
         @Result(column = "cleanup_until", property = "cleanupUntil"),
         @Result(column = "create_time", property = "createTime"),
@@ -68,17 +69,25 @@ public interface StorageUploadMapper extends BaseMapper {
   @Update(
       """
       update storage_upload
+      set cleanup_requested_at = #{requestedAt}
+      where id = #{id}
+        and cleanup_requested_at is null
+        and cleanup_token is null
+      """)
+  int markCleanupRequested(@Param("id") UUID id, @Param("requestedAt") Instant requestedAt);
+
+  @Update(
+      """
+      update storage_upload
       set blob_id = #{blobId}
       where id = #{id}
         and blob_id is null
+        and cleanup_requested_at is null
         and cleanup_token is null
         and expires_at > #{now}
       """)
   int setBlobIdIfNull(
       @Param("id") UUID id, @Param("blobId") UUID blobId, @Param("now") Instant now);
-
-  @Delete("delete from storage_upload where id = #{id} and cleanup_token is null")
-  int deleteById(@Param("id") UUID id);
 
   @ResultMap("storageUploadResultMap")
   @Select(
@@ -86,9 +95,9 @@ public interface StorageUploadMapper extends BaseMapper {
       with claimable as (
           select id
           from storage_upload
-          where expires_at <= #{now}
+          where (cleanup_requested_at is not null or expires_at <= #{now})
             and (cleanup_token is null or cleanup_until <= #{now})
-          order by expires_at, id
+          order by coalesce(cleanup_requested_at, expires_at), id
           limit #{limit}
           for update skip locked
       )
@@ -99,7 +108,7 @@ public interface StorageUploadMapper extends BaseMapper {
       returning
           upload.id, upload.candidate_blob_id, upload.blob_id, upload.filename,
           upload.declared_media_type, upload.declared_size, upload.declared_sha256,
-          upload.expires_at, upload.cleanup_token, upload.cleanup_until,
+          upload.expires_at, upload.cleanup_requested_at, upload.cleanup_token, upload.cleanup_until,
           upload.created_at as create_time
       """)
   List<StorageUploadDO> claimExpired(
@@ -117,7 +126,7 @@ public interface StorageUploadMapper extends BaseMapper {
         and (cleanup_token is null or cleanup_until <= #{now})
       returning
           id, candidate_blob_id, blob_id, filename, declared_media_type,
-          declared_size, declared_sha256, expires_at, cleanup_token, cleanup_until,
+          declared_size, declared_sha256, expires_at, cleanup_requested_at, cleanup_token, cleanup_until,
           created_at as create_time
       """)
   StorageUploadDO claimById(
