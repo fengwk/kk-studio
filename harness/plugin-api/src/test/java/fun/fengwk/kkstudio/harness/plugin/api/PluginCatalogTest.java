@@ -15,10 +15,12 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 class PluginCatalogTest {
 
@@ -112,6 +114,90 @@ class PluginCatalogTest {
         assertThrows(
             IllegalArgumentException.class, () -> PluginCatalog.from(List.of(first, second)));
     assertTrue(error.getMessage().contains("requires graph contains a cycle"));
+  }
+
+  @Test
+  void validatesGraphBeforeCallingAnyContributor() {
+    AtomicInteger contributions = new AtomicInteger();
+    HarnessPlugin first =
+        HarnessPlugin.of(
+            new PluginDescriptor(
+                new PluginId("first"), "first", "1", Set.of(new PluginId("second"))),
+            registrar -> contributions.incrementAndGet());
+    HarnessPlugin second =
+        HarnessPlugin.of(
+            new PluginDescriptor(
+                new PluginId("second"), "second", "1", Set.of(new PluginId("first"))),
+            registrar -> contributions.incrementAndGet());
+
+    assertThrows(IllegalArgumentException.class, () -> PluginCatalog.from(List.of(first, second)));
+    assertEquals(0, contributions.get());
+  }
+
+  @Test
+  void readsEachDescriptorOnceAndContributesInTopologicalPluginIdOrder() {
+    AtomicInteger descriptorReads = new AtomicInteger();
+    List<String> contributions = new ArrayList<>();
+    HarnessPlugin plugin =
+        new HarnessPlugin() {
+          @Override
+          public PluginDescriptor descriptor() {
+            descriptorReads.incrementAndGet();
+            return FIRST;
+          }
+
+          @Override
+          public void contribute(PluginRegistrar registrar) {
+            contributions.add("first");
+          }
+        };
+    PluginCatalog.from(List.of(plugin));
+    assertEquals(1, descriptorReads.get());
+    assertEquals(List.of("first"), contributions);
+
+    PluginDescriptor base = descriptor("base", "1");
+    PluginDescriptor middle =
+        new PluginDescriptor(new PluginId("middle"), "middle", "1", Set.of(new PluginId("base")));
+    PluginDescriptor top =
+        new PluginDescriptor(new PluginId("top"), "top", "1", Set.of(new PluginId("middle")));
+    List<String> orderedContributions = new ArrayList<>();
+    HarnessPlugin basePlugin =
+        HarnessPlugin.of(base, registrar -> orderedContributions.add("base"));
+    HarnessPlugin middlePlugin =
+        HarnessPlugin.of(middle, registrar -> orderedContributions.add("middle"));
+    HarnessPlugin topPlugin = HarnessPlugin.of(top, registrar -> orderedContributions.add("top"));
+
+    PluginCatalog.from(List.of(topPlugin, basePlugin, middlePlugin));
+    assertEquals(List.of("base", "middle", "top"), orderedContributions);
+  }
+
+  @Test
+  void usesTransitiveRequirementsWhenOrderingContributionsThroughEmptyPlugin() {
+    PluginDescriptor base = descriptor("base", "1");
+    PluginDescriptor middle =
+        new PluginDescriptor(new PluginId("middle"), "middle", "1", Set.of(new PluginId("base")));
+    PluginDescriptor top =
+        new PluginDescriptor(new PluginId("top"), "top", "1", Set.of(new PluginId("middle")));
+    HarnessPlugin basePlugin =
+        HarnessPlugin.of(base, registrar -> registrar.registerCustomEntryType("base", "base.type"));
+    HarnessPlugin middlePlugin = HarnessPlugin.of(middle, registrar -> {});
+    HarnessPlugin topPlugin =
+        HarnessPlugin.of(
+            top, registrar -> registrar.registerCustomEntryType("top", "top.type", 100));
+
+    PluginCatalog catalog = PluginCatalog.from(List.of(topPlugin, middlePlugin, basePlugin));
+
+    assertEquals(
+        Set.of(new PluginId("base"), new PluginId("middle")),
+        catalog.transitiveRequires(new PluginId("top")));
+    assertThrows(
+        UnsupportedOperationException.class,
+        () -> catalog.transitiveRequires(new PluginId("top")).clear());
+    assertEquals(
+        List.of("base", "top"),
+        catalog.customEntryTypes().stream()
+            .map(contribution -> contribution.id().pluginId().value())
+            .toList());
   }
 
   @Test

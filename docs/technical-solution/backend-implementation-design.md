@@ -57,7 +57,7 @@ Agent DTO 的 `model` 使用 Model ref，create 与 PUT 都必填；Model DTO �
 | `HarnessRuntimeLifecycle` | 按 worker 开关启动/停止 dispatcher；REST 与事件通道只经 `HarnessRuntime` 门面 |
 | `ModelExecutionConfiguration` | `ObjectProvider<ProviderFactory>` 收集并索引；`PlatformModelGateway`（serialized FIFO 单 drainer 回调桥） |
 | `web.runtime.BuiltInPluginConfiguration` | 在生产组合根注册随应用交付的受信任 `GoalPlugin` |
-| `PluginCatalogConfiguration` | 收集全部 `HarnessPlugin` beans，构造并冻结 `PluginCatalog`；Platform 不依赖具体插件实现 |
+| `web.runtime.plugin.PluginCatalogConfiguration` | 收集 `HarnessPlugin` beans 与 `HarnessPluginSource` 快照，构造并冻结 `PluginCatalog`；trusted JAR loader 由 Web 组合根管理生命周期 |
 | `HarnessToolGatewayConfiguration` | `ObjectProvider<ToolFactory>` + `PluginCatalog` + `PluginBranchViewLoader`；`PlatformToolGateway`（preflight + 两阶段激活 + FIFO 回调桥 + intent 校验 + `ToolResultExternalizer`） |
 | `RuntimeToolsConfiguration` | 装配两个内部 Platform Tool `load_skill` 与 `task`（含 `SubagentConfig`、并发 reservation/活动 descendant relay 共用的 `SubagentRunRegistry`、子 Agent 执行线程池）；把本地 `ToolFactory` descriptor 与冻结插件贡献合并为 `ToolCatalog`，按插件 visibility 维护 selectable/internal 名称 |
 | `HarnessRuntimeRequestMapper` | 严格校验 canonical UUID、decimal cursor 与 sealed DTO union，并映射为领域命令 |

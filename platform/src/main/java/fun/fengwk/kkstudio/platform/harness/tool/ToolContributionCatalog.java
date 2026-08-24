@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -164,9 +163,9 @@ public final class ToolContributionCatalog {
     List<Entry> sorted = new ArrayList<>(candidates.size());
     Comparator<Entry> readyOrder =
         Comparator.comparingInt(Entry::priority).reversed().thenComparing(Entry::identity);
-    Map<PluginId, Set<PluginId>> requirements = new HashMap<>();
+    Map<PluginId, Set<PluginId>> requirements = new LinkedHashMap<>();
     for (PluginDescriptor descriptor : pluginCatalog.descriptors()) {
-      requirements.put(descriptor.id(), descriptor.requires());
+      requirements.put(descriptor.id(), pluginCatalog.transitiveRequires(descriptor.id()));
     }
     while (!remaining.isEmpty()) {
       List<Entry> ready = new ArrayList<>();

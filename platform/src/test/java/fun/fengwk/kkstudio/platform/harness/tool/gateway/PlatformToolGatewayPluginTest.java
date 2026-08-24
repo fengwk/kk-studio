@@ -143,7 +143,7 @@ class PlatformToolGatewayPluginTest {
     ToolGateway.StartResult result =
         fixture.gateway.start(fixture.execution("other"), fixture.listener);
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals(PlatformToolGateway.TOOL_NOT_FOUND_KIND, rejected.error().kind());
+    assertEquals(PlatformToolGateway.PLUGIN_BINDING_MISMATCH_KIND, rejected.error().kind());
     assertTrue(fixture.listener.events.isEmpty());
   }
 

@@ -3,8 +3,11 @@ package fun.fengwk.kkstudio.platform;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentReadyListener;
+
+import java.util.List;
 
 /**
  * Platform 测试上下文的 Harness 装配基座。
@@ -24,5 +27,10 @@ public class PlatformHarnessTestConfiguration {
   @Bean
   public HarnessThreadChangeSource harnessThreadChangeSource() {
     return (threadId, onChange) -> () -> {};
+  }
+
+  @Bean
+  public PluginCatalog pluginCatalog() {
+    return PluginCatalog.from(List.of());
   }
 }

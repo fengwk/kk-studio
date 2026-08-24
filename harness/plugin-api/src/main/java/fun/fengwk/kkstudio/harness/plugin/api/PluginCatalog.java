@@ -6,10 +6,12 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -19,7 +21,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * 冻结的不可变插件目录：从一个插件集合构建，先收集全部贡献再做唯一性校验（fail-fast）。
+ * 冻结的不可变插件目录：从一个插件集合构建，先冻结并验证全部 descriptor，再按确定性拓扑顺序收集贡献。
  *
  * <p>唯一性维度：plugin id（全局）；贡献 localName（仅插件内，跨三种贡献类型）；Tool name（全局，model-visible 调用只携带名称）；custom
  * entry type ownership（结构化键 {@code (pluginId, customType)}，不同插件可各自拥有同名 customType）。允许空插件列表。catalog
@@ -35,12 +37,14 @@ public final class PluginCatalog {
   private final List<CustomEntryTypeContribution> customEntryTypes;
   private final List<ContextProjectorContribution> contextProjectors;
   private final Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypesByKey;
+  private final Map<PluginId, Set<PluginId>> transitiveRequirementsById;
 
   private PluginCatalog(
       List<PluginDescriptor> descriptors,
       List<ToolContribution> tools,
       List<CustomEntryTypeContribution> customEntryTypes,
-      List<ContextProjectorContribution> contextProjectors) {
+      List<ContextProjectorContribution> contextProjectors,
+      Map<PluginId, Set<PluginId>> transitiveRequirementsById) {
     this.descriptors = List.copyOf(descriptors);
     Map<PluginId, PluginDescriptor> descriptorIndex = new LinkedHashMap<>();
     for (PluginDescriptor descriptor : descriptors) {
@@ -66,6 +70,12 @@ public final class PluginCatalog {
     }
     this.customEntryTypesByKey = Map.copyOf(customEntryTypeIndex);
     this.contextProjectors = List.copyOf(contextProjectors);
+    Map<PluginId, Set<PluginId>> immutableRequirements = new LinkedHashMap<>();
+    transitiveRequirementsById.forEach(
+        (pluginId, requirements) ->
+            immutableRequirements.put(
+                pluginId, Collections.unmodifiableSet(new LinkedHashSet<>(requirements))));
+    this.transitiveRequirementsById = Map.copyOf(immutableRequirements);
   }
 
   /** 从插件集合构建冻结 catalog；输入顺序不会影响最终顺序。 */
@@ -73,9 +83,11 @@ public final class PluginCatalog {
     Objects.requireNonNull(plugins, "plugins");
     Collector collector = new Collector();
     for (HarnessPlugin plugin : plugins) {
-      collector.begin(Objects.requireNonNull(plugin, "plugin"));
+      collector.collect(Objects.requireNonNull(plugin, "plugin"));
     }
-    return collector.freeze();
+    List<PluginRegistration> orderedPlugins = collector.validateAndOrderPlugins();
+    collector.contributeInOrder(orderedPlugins);
+    return collector.freeze(orderedPlugins);
   }
 
   /** 按 requires 拓扑和 PluginId 字典序冻结的插件 descriptor 列表。 */
@@ -83,7 +95,7 @@ public final class PluginCatalog {
     return descriptors;
   }
 
-  /** 按 requires 偏序、priority 降序和 ContributionId 字典序冻结的 Tool 列表。 */
+  /** 按 requires 传递闭包偏序、priority 降序和 ContributionId 字典序冻结的 Tool 列表。 */
   public List<ToolContribution> tools() {
     return tools;
   }
@@ -91,6 +103,12 @@ public final class PluginCatalog {
   /** 按 plugin id 查找冻结 descriptor。 */
   public Optional<PluginDescriptor> findDescriptor(PluginId pluginId) {
     return Optional.ofNullable(descriptorsById.get(Objects.requireNonNull(pluginId, "pluginId")));
+  }
+
+  /** 按 plugin id 返回已冻结的全部传递 requires；未知 plugin 返回空集合。 */
+  public Set<PluginId> transitiveRequires(PluginId pluginId) {
+    return transitiveRequirementsById.getOrDefault(
+        Objects.requireNonNull(pluginId, "pluginId"), Set.of());
   }
 
   /** 按 model-visible Tool name 查找插件贡献。 */
@@ -104,12 +122,12 @@ public final class PluginCatalog {
     return Optional.ofNullable(toolsById.get(Objects.requireNonNull(id, "id")));
   }
 
-  /** 按 requires 偏序、priority 降序和 ContributionId 字典序冻结的 custom entry 列表。 */
+  /** 按 requires 传递闭包偏序、priority 降序和 ContributionId 字典序冻结的 custom entry 列表。 */
   public List<CustomEntryTypeContribution> customEntryTypes() {
     return customEntryTypes;
   }
 
-  /** 按 requires 偏序、priority 降序和 ContributionId 字典序冻结的 projector 列表。 */
+  /** 按 requires 传递闭包偏序、priority 降序和 ContributionId 字典序冻结的 projector 列表。 */
   public List<ContextProjectorContribution> contextProjectors() {
     return contextProjectors;
   }
@@ -122,10 +140,10 @@ public final class PluginCatalog {
     return Optional.ofNullable(customEntryTypesByKey.get(new CustomTypeKey(pluginId, customType)));
   }
 
-  /** 构建期收集器：实现 {@link PluginRegistrar}，边收集边校验唯一性。 */
+  /** 构建期收集器：先验证静态 descriptor，再实现 {@link PluginRegistrar} 收集贡献。 */
   private static final class Collector implements PluginRegistrar {
 
-    private final List<PluginDescriptor> descriptors = new ArrayList<>();
+    private final List<PluginRegistration> registrations = new ArrayList<>();
     private final List<ToolContribution> tools = new ArrayList<>();
     private final Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypes =
         new LinkedHashMap<>();
@@ -135,23 +153,34 @@ public final class PluginCatalog {
     private final Map<String, ContributionId> toolOwners = new HashMap<>();
     private PluginId currentPluginId;
 
-    void begin(HarnessPlugin plugin) {
+    void collect(HarnessPlugin plugin) {
       PluginDescriptor descriptor =
           Objects.requireNonNull(plugin.descriptor(), "plugin.descriptor");
       if (!pluginIds.add(descriptor.id())) {
         throw new IllegalArgumentException("duplicate plugin id: " + descriptor.id());
       }
-      descriptors.add(descriptor);
-      currentPluginId = descriptor.id();
-      try {
-        plugin.contribute(this);
-      } finally {
-        currentPluginId = null;
+      registrations.add(new PluginRegistration(plugin, descriptor));
+    }
+
+    List<PluginRegistration> validateAndOrderPlugins() {
+      validateRequirements();
+      return sortRegistrations(registrations);
+    }
+
+    void contributeInOrder(List<PluginRegistration> orderedPlugins) {
+      for (PluginRegistration registration : orderedPlugins) {
+        currentPluginId = registration.descriptor().id();
+        try {
+          registration.plugin().contribute(this);
+        } finally {
+          currentPluginId = null;
+        }
       }
     }
 
-    PluginCatalog freeze() {
-      validateRequirements();
+    PluginCatalog freeze(List<PluginRegistration> orderedPlugins) {
+      List<PluginDescriptor> descriptors =
+          orderedPlugins.stream().map(PluginRegistration::descriptor).toList();
       for (ToolContribution tool : tools) {
         for (PluginStateDeclaration access : tool.stateAccesses()) {
           CustomTypeKey key = new CustomTypeKey(tool.id().pluginId(), access.customType());
@@ -161,23 +190,23 @@ public final class PluginCatalog {
           }
         }
       }
-      Map<PluginId, Set<PluginId>> requirements = new HashMap<>();
-      for (PluginDescriptor descriptor : descriptors) {
-        requirements.put(descriptor.id(), descriptor.requires());
-      }
+      Map<PluginId, Set<PluginId>> transitiveRequirements =
+          buildTransitiveRequirements(descriptors);
       return new PluginCatalog(
-          sortDescriptors(descriptors),
-          sortContributions(tools, ToolContribution::id, ToolContribution::priority, requirements),
+          descriptors,
+          sortContributions(
+              tools, ToolContribution::id, ToolContribution::priority, transitiveRequirements),
           sortContributions(
               new ArrayList<>(customEntryTypes.values()),
               CustomEntryTypeContribution::id,
               CustomEntryTypeContribution::priority,
-              requirements),
+              transitiveRequirements),
           sortContributions(
               contextProjectors,
               ContextProjectorContribution::id,
               ContextProjectorContribution::priority,
-              requirements));
+              transitiveRequirements),
+          transitiveRequirements);
     }
 
     @Override
@@ -231,10 +260,11 @@ public final class PluginCatalog {
 
     private void validateRequirements() {
       Map<PluginId, PluginDescriptor> byId = new HashMap<>();
-      for (PluginDescriptor descriptor : descriptors) {
-        byId.put(descriptor.id(), descriptor);
+      for (PluginRegistration registration : registrations) {
+        byId.put(registration.descriptor().id(), registration.descriptor());
       }
-      for (PluginDescriptor descriptor : descriptors) {
+      for (PluginRegistration registration : registrations) {
+        PluginDescriptor descriptor = registration.descriptor();
         for (PluginId required : descriptor.requires()) {
           if (!byId.containsKey(required)) {
             throw new IllegalArgumentException(
@@ -242,6 +272,20 @@ public final class PluginCatalog {
           }
         }
       }
+    }
+
+    private static List<PluginRegistration> sortRegistrations(
+        List<PluginRegistration> registrations) {
+      List<PluginDescriptor> descriptors =
+          registrations.stream().map(PluginRegistration::descriptor).toList();
+      List<PluginDescriptor> sortedDescriptors = sortDescriptors(descriptors);
+      Map<PluginId, PluginRegistration> registrationsById = new HashMap<>();
+      for (PluginRegistration registration : registrations) {
+        registrationsById.put(registration.descriptor().id(), registration);
+      }
+      return sortedDescriptors.stream()
+          .map(descriptor -> registrationsById.get(descriptor.id()))
+          .toList();
     }
 
     private ContributionId requireNewContributionId(String localName) {
@@ -254,6 +298,13 @@ public final class PluginCatalog {
             "duplicate contribution local name " + localName + " in plugin " + currentPluginId);
       }
       return id;
+    }
+  }
+
+  private record PluginRegistration(HarnessPlugin plugin, PluginDescriptor descriptor) {
+    private PluginRegistration {
+      plugin = Objects.requireNonNull(plugin, "plugin");
+      descriptor = Objects.requireNonNull(descriptor, "descriptor");
     }
   }
 
@@ -336,6 +387,31 @@ public final class PluginCatalog {
       }
     }
     return false;
+  }
+
+  private static Map<PluginId, Set<PluginId>> buildTransitiveRequirements(
+      List<PluginDescriptor> descriptors) {
+    Map<PluginId, Set<PluginId>> directRequirements = new HashMap<>();
+    for (PluginDescriptor descriptor : descriptors) {
+      directRequirements.put(descriptor.id(), descriptor.requires());
+    }
+    Map<PluginId, Set<PluginId>> transitiveRequirements = new LinkedHashMap<>();
+    for (PluginDescriptor descriptor : descriptors) {
+      Set<PluginId> closure = new LinkedHashSet<>();
+      collectRequirements(descriptor.id(), directRequirements, closure);
+      transitiveRequirements.put(
+          descriptor.id(), Collections.unmodifiableSet(new LinkedHashSet<>(closure)));
+    }
+    return Map.copyOf(transitiveRequirements);
+  }
+
+  private static void collectRequirements(
+      PluginId pluginId, Map<PluginId, Set<PluginId>> directRequirements, Set<PluginId> closure) {
+    for (PluginId required : directRequirements.getOrDefault(pluginId, Set.of())) {
+      if (closure.add(required)) {
+        collectRequirements(required, directRequirements, closure);
+      }
+    }
   }
 
   /** Custom entry type ownership 的结构化主键 {@code (pluginId, customType)}。 */

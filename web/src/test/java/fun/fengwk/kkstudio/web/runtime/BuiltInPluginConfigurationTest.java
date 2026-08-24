@@ -8,7 +8,7 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 
 import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
-import fun.fengwk.kkstudio.platform.harness.plugin.PluginCatalogConfiguration;
+import fun.fengwk.kkstudio.web.runtime.plugin.PluginCatalogConfiguration;
 
 import java.util.List;
 

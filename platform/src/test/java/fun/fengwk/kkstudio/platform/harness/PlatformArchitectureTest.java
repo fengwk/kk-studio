@@ -33,6 +33,15 @@ class PlatformArchitectureTest {
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
       List.of("kk-studio-harness-infra", "kk-studio-web", "kk-studio-harness-daemon");
 
+  /** trusted JAR 发现和 classloader 生命周期只属于 web 组合根。 */
+  private static final List<String> FORBIDDEN_TRUSTED_PLUGIN_REFERENCES =
+      List.of(
+          "TrustedJarPluginLoader",
+          "URLClassLoader",
+          "ServiceLoader",
+          "kk-studio.harness.plugins.directory",
+          "KK_STUDIO_TRUSTED_PLUGIN_DIRECTORY");
+
   /** platform 不是组合根：main 源码禁止 import framework 基础设施与 web/daemon；pom 不得声明对应的下游模块 artifactId。 */
   @Test
   void platformNeverDependsOnInfraOrWebOrDaemon() throws IOException {
@@ -49,12 +58,23 @@ class PlatformArchitectureTest {
             bootMainViolations.add(relative(main, path) + ": " + trimmed);
           }
           if (!trimmed.startsWith("import ")) {
+            for (String forbidden : FORBIDDEN_TRUSTED_PLUGIN_REFERENCES) {
+              if (line.contains(forbidden)) {
+                violations.add(
+                    relative(main, path) + ": forbidden trusted plugin reference " + line);
+              }
+            }
             continue;
           }
           String imported = normalizeImport(trimmed);
           for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
             if (imported.startsWith(prefix)) {
               violations.add(relative(main, path) + ": " + trimmed);
+            }
+          }
+          for (String forbidden : FORBIDDEN_TRUSTED_PLUGIN_REFERENCES) {
+            if (line.contains(forbidden)) {
+              violations.add(relative(main, path) + ": forbidden trusted plugin reference " + line);
             }
           }
         }
