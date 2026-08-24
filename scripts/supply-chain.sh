@@ -82,6 +82,49 @@ if (
 NODE
 }
 
+dependency_check_report_has_no_vulnerabilities() {
+    local file=$1
+    node --input-type=module - "$file" <<'NODE'
+import { readFileSync } from 'node:fs'
+
+const report = JSON.parse(readFileSync(process.argv[2], 'utf8'))
+if (!Array.isArray(report.dependencies)) {
+    console.error('Dependency-Check JSON has no dependencies array')
+    process.exit(1)
+}
+
+const findings = []
+for (const dependency of report.dependencies) {
+    if (dependency.vulnerabilities === undefined) {
+        continue
+    }
+    if (!Array.isArray(dependency.vulnerabilities)) {
+        console.error('Dependency-Check JSON has an invalid vulnerabilities array')
+        process.exit(1)
+    }
+    const packageId = dependency.packages?.[0]?.id ?? dependency.fileName ?? '<unknown>'
+    for (const vulnerability of dependency.vulnerabilities) {
+        const score =
+            vulnerability.cvssv4?.baseScore ??
+            vulnerability.cvssv3?.baseScore ??
+            vulnerability.cvssv2?.score
+        const scoreText = score === undefined ? '' : ` (${score})`
+        findings.push(`${packageId}: ${vulnerability.name ?? '<unknown>'}${scoreText}`)
+    }
+}
+
+if (findings.length > 0) {
+    console.error(
+        `Dependency-Check JSON contains ${findings.length} non-suppressed vulnerabilities:`,
+    )
+    for (const finding of findings) {
+        console.error(`- ${finding}`)
+    }
+    process.exit(1)
+}
+NODE
+}
+
 resolve_report_root() {
     local configured=${SUPPLY_CHAIN_REPORT_ROOT:-reports/supply-chain}
     if [[ "$configured" = /* ]]; then
@@ -237,7 +280,7 @@ run_npm_audit() {
     local output_file="$RUN_DIR/frontend-audit/audit.json"
     echo "==> Running npm audit (dev dependencies are included by default)"
 
-    if npm --prefix "$REPO_ROOT/frontend" audit --audit-level=high --json \
+    if npm --prefix "$REPO_ROOT/frontend" audit --audit-level=low --json \
         >"$output_file" 2>"$RUN_DIR/logs/npm-audit.log"
     then
         if json_object_file_is_non_empty "$output_file"; then
@@ -250,7 +293,7 @@ run_npm_audit() {
         local rc=$?
         NPM_AUDIT_STATUS=FAIL
         if json_object_file_is_non_empty "$output_file"; then
-            record_failure "npm audit found high-severity issues or failed the online audit (exit $rc)"
+            record_failure "npm audit found vulnerabilities or failed the online audit (exit $rc)"
         else
             record_failure "npm audit did not produce valid JSON (exit $rc)"
         fi
@@ -291,11 +334,13 @@ run_maven_audit() {
         "${maven_settings_args[@]}" \
         verify >"$RUN_DIR/logs/maven-audit.log" 2>&1
     then
-        if validate_dependency_check_reports; then
+        if validate_dependency_check_reports && \
+            dependency_check_report_has_no_vulnerabilities \
+                "$output_dir/dependency-check-report.json"; then
             MAVEN_AUDIT_STATUS=PASS
         else
             MAVEN_AUDIT_STATUS=FAIL
-            record_failure "Dependency-Check did not produce valid HTML, JSON, and SARIF reports"
+            record_failure "Dependency-Check did not produce valid reports or has non-suppressed vulnerabilities"
         fi
     else
         local rc=$?
@@ -392,7 +437,7 @@ NODE
 | --- | --- | --- | --- |
 | Backend CycloneDX aggregate | $BACKEND_SBOM_STATUS | [backend-sbom/bom.json](backend-sbom/bom.json) | [logs/maven-sbom.log](logs/maven-sbom.log) |
 | Frontend CycloneDX | $FRONTEND_SBOM_STATUS | [frontend-sbom/bom.json](frontend-sbom/bom.json) | [logs/npm-sbom.log](logs/npm-sbom.log) |
-| npm audit (high) | $NPM_AUDIT_STATUS | [frontend-audit/audit.json](frontend-audit/audit.json) | [logs/npm-audit.log](logs/npm-audit.log) |
+| npm audit (low) | $NPM_AUDIT_STATUS | [frontend-audit/audit.json](frontend-audit/audit.json) | [logs/npm-audit.log](logs/npm-audit.log) |
 | Maven Dependency-Check | $MAVEN_AUDIT_STATUS | [HTML](backend-audit/dependency-check-report.html), [JSON](backend-audit/dependency-check-report.json), [SARIF](backend-audit/dependency-check-report.sarif) | [logs/maven-audit.log](logs/maven-audit.log) |
 
 EOF
@@ -401,13 +446,13 @@ EOF
         cat >>"$RUN_DIR/summary.md" <<'EOF'
 ## Notes
 
-All requested checks completed successfully.
+All requested checks completed successfully. Dependency-Check JSON contains zero non-suppressed vulnerabilities.
 EOF
     else
         cat >>"$RUN_DIR/summary.md" <<'EOF'
 ## Failures
 
-The gate is fail-closed. A non-zero tool result, unavailable online source, or invalid/missing report keeps this run failed.
+The gate is fail-closed. A non-zero tool result, unavailable online source, invalid/missing report, or non-suppressed vulnerability keeps this run failed.
 EOF
         local failure
         for failure in "${FAILURES[@]}"; do

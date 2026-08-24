@@ -50,7 +50,11 @@ if [[ " $* " == *" -Ddependency-check.skip=true "* ]]; then
     printf '%s\\n' '{"bom-ref":"fake-backend"}' >"$report_dir/bom.json"
 else
     printf '%s\\n' '<html>fake dependency-check report</html>' >"$report_dir/dependency-check-report.html"
-    printf '%s\\n' '{"dependencies":[]}' >"$report_dir/dependency-check-report.json"
+    if [[ "\${FAKE_MVN_REPORT_VULNERABILITY:-}" == true ]]; then
+        printf '%s\\n' '{"dependencies":[{"fileName":"fake-vulnerable.jar","packages":[{"id":"pkg:maven/example:fake-vulnerable@1.0.0"}],"vulnerabilities":[{"name":"CVE-2099-0001","cvssv3":{"baseScore":5.3}}]}]}' >"$report_dir/dependency-check-report.json"
+    else
+        printf '%s\\n' '{"dependencies":[]}' >"$report_dir/dependency-check-report.json"
+    fi
     printf '%s\\n' '{"version":"2.1.0","runs":[]}' >"$report_dir/dependency-check-report.sarif"
 fi
 `,
@@ -133,6 +137,7 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<tomcat\.version>10\.1\.59<\/tomcat\.version>/)
     assert.match(pom, /<postgresql\.version>42\.7\.13<\/postgresql\.version>/)
     assert.match(pom, /<opennlp\.version>2\.5\.11<\/opennlp\.version>/)
+    assert.match(pom, /<kotlin\.version>2\.4\.10<\/kotlin\.version>/)
     assert.match(
         pom,
         /<artifactId>spring-boot-dependencies<\/artifactId>[\s\S]*<version>\$\{spring-boot\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
@@ -150,6 +155,10 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
         /<artifactId>log4j-bom<\/artifactId>[\s\S]*<version>\$\{log4j\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
     )
     assert.match(
+        pom,
+        /<artifactId>kotlin-bom<\/artifactId>[\s\S]*<version>\$\{kotlin\.version\}<\/version>[\s\S]*<scope>import<\/scope>[\s\S]*<artifactId>spring-boot-dependencies<\/artifactId>/,
+    )
+    assert.match(
         webPom,
         /<artifactId>spring-boot-maven-plugin<\/artifactId>[\s\S]*<version>\$\{spring-boot\.version\}<\/version>/,
     )
@@ -159,18 +168,27 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<schemaVersion>1\.6<\/schemaVersion>/)
     assert.match(pom, /<includeTestScope>false<\/includeTestScope>/)
     assert.match(pom, /<format>HTML<\/format>[\s\S]*<format>JSON<\/format>[\s\S]*<format>SARIF<\/format>/)
-    assert.match(pom, /<failBuildOnCVSS>7<\/failBuildOnCVSS>/)
+    assert.match(pom, /<failBuildOnCVSS>0<\/failBuildOnCVSS>/)
     assert.match(pom, /<ossIndexAnalyzerEnabled>false<\/ossIndexAnalyzerEnabled>/)
+    assert.match(script, /audit --audit-level=low/)
     assert.doesNotMatch(pom, /nvdApiServerId|<nvdApiKey>|NVD_API_KEY/)
     const suppressionBlocks = [...suppressions.matchAll(/<suppress>([\s\S]*?)<\/suppress>/g)].map(
         match => match[1],
     )
     assert.equal(suppressionBlocks.length, 7)
+    assert.doesNotMatch(suppressions, /:1\.9\.25<\/gav>/)
+    assert.equal(
+        suppressionBlocks.filter(block => block.includes('org.jetbrains.kotlin:')).length,
+        5,
+    )
     for (const block of suppressionBlocks) {
         assert.match(block, /<notes>[\s\S]+<\/notes>/)
         assert.match(block, /<cve>CVE-\d{4}-\d+<\/cve>/)
         assert.match(block, /<gav>[^<*?]+:[^<*?]+:[^<*?]+<\/gav>/)
         assert.doesNotMatch(block, /<cpe>|<cvss>|regex\s*=/)
+    }
+    for (const block of suppressionBlocks.filter(block => block.includes('org.jetbrains.kotlin:'))) {
+        assert.match(block, /<gav>org\.jetbrains\.kotlin:[^<]+:2\.4\.10<\/gav>/)
     }
     assert.match(script, /chmod 600/)
     assert.match(script, /nvdApiServerId/)
@@ -221,6 +239,31 @@ test('uses the official NVD feed without a server id when no key is set', () => 
         const args = readFileSync(argsFile, 'utf8').split('\n').filter(Boolean)
         assert.equal(args.includes(NVD_DATAFEED_ARGUMENT), true)
         assert.equal(args.some(arg => arg.includes('nvdApiServerId')), false)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('fails closed when a successful Maven scan reports a vulnerability', () => {
+    // Intent: a zero Maven exit code must not turn a report containing findings into PASS.
+    const toolchain = createFakeToolchain()
+    const reportRoot = path.join(toolchain.root, 'vulnerability-reports')
+    try {
+        const result = runScript(['audit'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_MVN_REPORT_VULNERABILITY: 'true',
+        })
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+        const summary = JSON.parse(
+            readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
+        )
+        assert.equal(summary.status, 'FAIL')
+        assert.equal(
+            summary.checks.find(check => check.name === 'maven-dependency-check').status,
+            'FAIL',
+        )
+        assert.match(summary.failures.join('\n'), /non-suppressed vulnerabilities/)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }
