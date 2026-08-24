@@ -14,8 +14,22 @@ RUN mvn -pl harness/daemon -am -DskipTests -B -ntp clean install \
     && cp harness/daemon/target/kk-studio-harness-daemon-*.jar /build/runtime/daemon.jar
 
 # Supply a fixed Node/npm distribution without adding a package repository to
-# the runtime image.
+# the runtime image. Refresh npm's bundled packages that have newer security
+# fixes while retaining the Node 22.19 runtime expected by the daemon.
 FROM node:22.19.0-bookworm-slim AS node-runtime
+
+RUN npm install --global npm@11.19.0 --no-fund --no-audit \
+    && cd /usr/local/lib/node_modules/npm/node_modules \
+    && npm pack brace-expansion@5.0.9 --pack-destination /tmp \
+    && npm pack ip-address@10.3.1 --pack-destination /tmp \
+    && npm pack tar@7.5.21 --pack-destination /tmp \
+    && rm -rf brace-expansion ip-address tar \
+    && mkdir brace-expansion ip-address tar \
+    && tar -xzf /tmp/brace-expansion-5.0.9.tgz -C brace-expansion --strip-components=1 \
+    && tar -xzf /tmp/ip-address-10.3.1.tgz -C ip-address --strip-components=1 \
+    && tar -xzf /tmp/tar-7.5.21.tgz -C tar --strip-components=1 \
+    && rm -f /tmp/*.tgz \
+    && npm cache clean --force
 
 FROM eclipse-temurin:21.0.8_9-jdk-jammy
 
@@ -23,9 +37,13 @@ ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0"
 
+# Refresh the Ubuntu base packages on every build so the runtime absorbs current
+# Ubuntu security updates before installing daemon tools.
 RUN set -eux; \
     apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes; \
     apt-get install -y --no-install-recommends bash ca-certificates git; \
+    apt-get clean; \
     rm -rf /var/lib/apt/lists/*; \
     groupadd --gid 10001 kkdaemon; \
     useradd --uid 10001 \

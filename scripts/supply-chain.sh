@@ -11,6 +11,13 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 NVD_SETTINGS_SERVER_ID=kk-studio-supply-chain-nvd
 NVD_DATAFEED_URL=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz
+TRIVY_IMAGE=aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+TRIVY_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-db:2
+TRIVY_JAVA_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-java-db:1
+TRIVY_CACHE_VOLUME=${SUPPLY_CHAIN_TRIVY_CACHE_VOLUME:-kk-studio-trivy-cache}
+APP_IMAGE=${SUPPLY_CHAIN_APP_IMAGE:-kk-studio-app:supply-chain}
+DAEMON_IMAGE=${SUPPLY_CHAIN_DAEMON_IMAGE:-kk-studio-daemon:supply-chain}
+TRIVY_SKIP_DB_UPDATE=${TRIVY_SKIP_DB_UPDATE:-false}
 
 MODE=
 REPORT_ROOT=
@@ -24,8 +31,23 @@ BACKEND_SBOM_STATUS=SKIPPED
 FRONTEND_SBOM_STATUS=SKIPPED
 NPM_AUDIT_STATUS=SKIPPED
 MAVEN_AUDIT_STATUS=SKIPPED
+APP_IMAGE_BUILD_STATUS=SKIPPED
+DAEMON_IMAGE_BUILD_STATUS=SKIPPED
+APP_IMAGE_SCAN_STATUS=SKIPPED
+DAEMON_IMAGE_SCAN_STATUS=SKIPPED
+APP_IMAGE_ID=
+APP_IMAGE_DIGEST=
+DAEMON_IMAGE_ID=
+DAEMON_IMAGE_DIGEST=
+TRIVY_VERSION=UNKNOWN
+TRIVY_VERSION_STATUS=SKIPPED
 OVERALL_STATUS=FAIL
 FAILURES=()
+TRIVY_DOCKER_RUN_ARGS=()
+IMAGE_BUILD_PROXY_ARGS=()
+IMAGE_BUILD_STANDARD_PROXY_ARGS=()
+IMAGE_BUILD_NETWORK=default
+BUILD_LOG_TEMP=
 
 usage() {
     cat <<'EOF'
@@ -34,7 +56,8 @@ Usage: ./scripts/supply-chain.sh <command>
 Commands:
   sbom    Generate and validate backend and frontend CycloneDX SBOMs
   audit   Run npm audit and the Maven Dependency-Check gate
-  all     Run sbom followed by audit and retain one combined report
+  image   Build and scan the current app and daemon images with pinned Trivy
+  all     Run sbom, dependency audit, and image scan in one report
   test    Run permanent supply-chain script tests only
   help    Show this help
 
@@ -44,6 +67,11 @@ Environment:
   NVD_API_KEY               Optional NVD API key; never printed or passed on the
                             Maven command line
   JAVA_HOME_21               JDK 21 used for Maven (JAVA_HOME is a fallback)
+  SUPPLY_CHAIN_APP_IMAGE    App image tag (default: kk-studio-app:supply-chain)
+  SUPPLY_CHAIN_DAEMON_IMAGE Daemon image tag (default: kk-studio-daemon:supply-chain)
+  SUPPLY_CHAIN_TRIVY_CACHE_VOLUME
+                            Named Trivy cache volume (default: kk-studio-trivy-cache)
+  TRIVY_SKIP_DB_UPDATE      Use the existing named cache in offline mode when true
 EOF
 }
 
@@ -77,6 +105,52 @@ if (
     Array.isArray(document) ||
     Object.keys(document).length === 0
 ) {
+    process.exit(1)
+}
+NODE
+}
+
+trivy_report_has_no_high_critical() {
+    local file=$1
+    node --input-type=module - "$file" <<'NODE'
+import { readFileSync } from 'node:fs'
+
+const report = JSON.parse(readFileSync(process.argv[2], 'utf8'))
+if (!Array.isArray(report.Results)) {
+    console.error('Trivy JSON has no Results array')
+    process.exit(1)
+}
+
+const findings = []
+for (const result of report.Results) {
+    const vulnerabilities = result.Vulnerabilities ?? []
+    if (!Array.isArray(vulnerabilities)) {
+        console.error('Trivy JSON has an invalid Vulnerabilities array')
+        process.exit(1)
+    }
+    for (const vulnerability of vulnerabilities) {
+        const severity = String(vulnerability.Severity ?? '').toUpperCase()
+        if (severity === 'HIGH' || severity === 'CRITICAL') {
+            const fixedVersion =
+                typeof vulnerability.FixedVersion === 'string'
+                    ? vulnerability.FixedVersion.trim()
+                    : 'no fixed version'
+            findings.push(
+                `${vulnerability.PkgName ?? '<unknown>'}: ${
+                    vulnerability.VulnerabilityID ?? '<unknown>'
+                } (${fixedVersion})`,
+            )
+        }
+    }
+}
+
+if (findings.length > 0) {
+    console.error(
+        `Trivy JSON contains ${findings.length} HIGH/CRITICAL vulnerabilities:`,
+    )
+    for (const finding of findings) {
+        console.error(`- ${finding}`)
+    }
     process.exit(1)
 }
 NODE
@@ -157,6 +231,7 @@ init_report() {
         "$RUN_DIR/frontend-sbom" \
         "$RUN_DIR/frontend-audit" \
         "$RUN_DIR/backend-audit" \
+        "$RUN_DIR/image" \
         "$RUN_DIR/logs"
     STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -194,7 +269,9 @@ run_frontend_sbom() {
     local output_file="$RUN_DIR/frontend-sbom/bom.json"
     echo "==> Generating frontend CycloneDX SBOM"
 
-    if npm --prefix "$REPO_ROOT/frontend" sbom --sbom-format=cyclonedx \
+    if npm --prefix "$REPO_ROOT/frontend" sbom \
+        --package-lock-only \
+        --sbom-format=cyclonedx \
         >"$output_file" 2>"$RUN_DIR/logs/npm-sbom.log"
     then
         if json_object_file_is_non_empty "$output_file"; then
@@ -354,6 +431,388 @@ run_audit() {
     run_maven_audit
 }
 
+proxy_uses_loopback() {
+    local proxy=$1
+    local authority=${proxy#*://}
+    local host
+
+    authority=${authority##*@}
+    if [[ "$authority" == \[* ]]; then
+        host=${authority#\[}
+        host=${host%%\]*}
+    else
+        host=${authority%%:*}
+    fi
+
+    case "$host" in
+        127.*|localhost|::1)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+has_loopback_proxy() {
+    local proxy
+    for proxy in \
+        "${HTTP_PROXY:-}" \
+        "${HTTPS_PROXY:-}" \
+        "${ALL_PROXY:-}" \
+        "${http_proxy:-}" \
+        "${https_proxy:-}" \
+        "${all_proxy:-}"
+    do
+        if [[ -n "$proxy" ]] && proxy_uses_loopback "$proxy"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+prepare_image_build() {
+    local http_proxy_value=${HTTP_PROXY:-${http_proxy:-}}
+    local https_proxy_value=${HTTPS_PROXY:-${https_proxy:-}}
+    local all_proxy_value=${ALL_PROXY:-${all_proxy:-}}
+    local no_proxy_value=${NO_PROXY:-${no_proxy:-}}
+
+    IMAGE_BUILD_PROXY_ARGS=()
+    IMAGE_BUILD_STANDARD_PROXY_ARGS=()
+    if [[ -n "$http_proxy_value" ]]; then
+        IMAGE_BUILD_STANDARD_PROXY_ARGS+=(--build-arg "HTTP_PROXY=$http_proxy_value")
+    fi
+    if [[ -n "$https_proxy_value" ]]; then
+        IMAGE_BUILD_STANDARD_PROXY_ARGS+=(--build-arg "HTTPS_PROXY=$https_proxy_value")
+    fi
+    if [[ -n "$all_proxy_value" ]]; then
+        IMAGE_BUILD_STANDARD_PROXY_ARGS+=(--build-arg "ALL_PROXY=$all_proxy_value")
+    fi
+    if [[ -n "$no_proxy_value" ]]; then
+        IMAGE_BUILD_STANDARD_PROXY_ARGS+=(--build-arg "NO_PROXY=$no_proxy_value")
+    fi
+    IMAGE_BUILD_PROXY_ARGS+=(--build-arg "KK_STUDIO_BUILD_HTTP_PROXY=$http_proxy_value")
+    IMAGE_BUILD_PROXY_ARGS+=(--build-arg "KK_STUDIO_BUILD_HTTPS_PROXY=$https_proxy_value")
+    IMAGE_BUILD_PROXY_ARGS+=(--build-arg "KK_STUDIO_BUILD_NO_PROXY=$no_proxy_value")
+    if [[ -n "${SUPPLY_CHAIN_MAVEN_BUILD_OPTS:-}" ]]; then
+        IMAGE_BUILD_PROXY_ARGS+=(
+            --build-arg
+            "KK_STUDIO_MAVEN_BUILD_OPTS=$SUPPLY_CHAIN_MAVEN_BUILD_OPTS"
+        )
+    fi
+
+    if has_loopback_proxy; then
+        IMAGE_BUILD_NETWORK=host
+    else
+        IMAGE_BUILD_NETWORK=default
+    fi
+}
+
+redact_proxy_values() {
+    local source=$1
+    local target=$2
+    HTTP_PROXY_VALUE="${HTTP_PROXY:-}" \
+        HTTPS_PROXY_VALUE="${HTTPS_PROXY:-}" \
+        ALL_PROXY_VALUE="${ALL_PROXY:-}" \
+        NO_PROXY_VALUE="${NO_PROXY:-}" \
+        MAVEN_BUILD_OPTS_VALUE="${SUPPLY_CHAIN_MAVEN_BUILD_OPTS:-}" \
+        http_proxy_value="${http_proxy:-}" \
+        https_proxy_value="${https_proxy:-}" \
+        all_proxy_value="${all_proxy:-}" \
+        no_proxy_value="${no_proxy:-}" \
+        node --input-type=module - "$source" "$target" <<'NODE'
+import { readFileSync, writeFileSync } from 'node:fs'
+
+const source = process.argv[2]
+const target = process.argv[3]
+const values = [
+    process.env.HTTP_PROXY_VALUE,
+    process.env.HTTPS_PROXY_VALUE,
+    process.env.ALL_PROXY_VALUE,
+    process.env.NO_PROXY_VALUE,
+    process.env.MAVEN_BUILD_OPTS_VALUE,
+    process.env.http_proxy_value,
+    process.env.https_proxy_value,
+    process.env.all_proxy_value,
+    process.env.no_proxy_value,
+]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+
+let content = readFileSync(source, 'utf8')
+for (const value of values) {
+    content = content.split(value).join('[redacted-proxy]')
+}
+writeFileSync(target, content)
+NODE
+}
+
+set_image_build_status() {
+    local name=$1
+    local status=$2
+    case "$name" in
+        app)
+            APP_IMAGE_BUILD_STATUS=$status
+            ;;
+        daemon)
+            DAEMON_IMAGE_BUILD_STATUS=$status
+            ;;
+        *)
+            record_failure "unknown image build name: $name"
+            ;;
+    esac
+}
+
+set_image_metadata() {
+    local name=$1
+    local image_id=$2
+    local image_digest=$3
+    case "$name" in
+        app)
+            APP_IMAGE_ID=$image_id
+            APP_IMAGE_DIGEST=$image_digest
+            ;;
+        daemon)
+            DAEMON_IMAGE_ID=$image_id
+            DAEMON_IMAGE_DIGEST=$image_digest
+            ;;
+        *)
+            record_failure "unknown image metadata name: $name"
+            ;;
+    esac
+}
+
+set_image_scan_status() {
+    local name=$1
+    local status=$2
+    case "$name" in
+        app)
+            APP_IMAGE_SCAN_STATUS=$status
+            ;;
+        daemon)
+            DAEMON_IMAGE_SCAN_STATUS=$status
+            ;;
+        *)
+            record_failure "unknown image scan name: $name"
+            ;;
+    esac
+}
+
+read_image_metadata() {
+    local name=$1
+    local image=$2
+    local inspect_log="$RUN_DIR/logs/${name}-image-inspect.log"
+    local image_id
+    local repo_digests
+    local image_digest
+
+    if ! image_id=$(docker image inspect --format '{{.Id}}' "$image" 2>"$inspect_log"); then
+        record_failure "$name image metadata lookup failed; inspect $inspect_log"
+        return 1
+    fi
+    image_id=$(printf '%s' "$image_id" | tr -d '\r\n')
+    if [[ -z "$image_id" ]]; then
+        record_failure "$name image metadata did not contain an image id"
+        return 1
+    fi
+
+    if ! repo_digests=$(
+        docker image inspect \
+            --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+            "$image" 2>>"$inspect_log"
+    ); then
+        record_failure "$name image digest lookup failed; inspect $inspect_log"
+        return 1
+    fi
+    image_digest=$(printf '%s\n' "$repo_digests" | sed -n '/./{p;q;}')
+    if [[ -z "$image_digest" ]]; then
+        image_digest=$image_id
+    fi
+
+    set_image_metadata "$name" "$image_id" "$image_digest"
+}
+
+run_image_build() {
+    local name=$1
+    local dockerfile=$2
+    local image=$3
+    local log="$RUN_DIR/logs/${name}-image-build.log"
+    local raw_log="$RUN_DIR/logs/.${name}-image-build.log.$$"
+    local docker_args=(
+        build
+        --file "$REPO_ROOT/$dockerfile"
+        --tag "$image"
+        --network "$IMAGE_BUILD_NETWORK"
+    )
+
+    docker_args+=("${IMAGE_BUILD_STANDARD_PROXY_ARGS[@]}")
+    if [[ "$name" == app ]]; then
+        docker_args+=("${IMAGE_BUILD_PROXY_ARGS[@]}")
+    fi
+
+    echo "==> Building $name image from the current source"
+    BUILD_LOG_TEMP=$raw_log
+    local rc=0
+    docker "${docker_args[@]}" "$REPO_ROOT" >"$raw_log" 2>&1 || rc=$?
+    local redact_rc=0
+    redact_proxy_values "$raw_log" "$log" || redact_rc=$?
+    rm -f -- "$raw_log"
+    BUILD_LOG_TEMP=
+
+    if ((redact_rc != 0)); then
+        set_image_build_status "$name" FAIL
+        record_failure "$name image build log could not be redacted"
+    elif ((rc == 0)); then
+        if read_image_metadata "$name" "$image"; then
+            set_image_build_status "$name" PASS
+        else
+            set_image_build_status "$name" FAIL
+        fi
+    else
+        set_image_build_status "$name" FAIL
+        record_failure "$name image build failed (exit $rc); inspect $log"
+    fi
+}
+
+prepare_trivy_docker_run() {
+    TRIVY_DOCKER_RUN_ARGS=(
+        run
+        --rm
+        --volume /var/run/docker.sock:/var/run/docker.sock
+        --volume "$TRIVY_CACHE_VOLUME:/root/.cache/trivy"
+    )
+    if has_loopback_proxy; then
+        TRIVY_DOCKER_RUN_ARGS+=(--network host)
+    fi
+
+    local name
+    for name in HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy; do
+        if [[ -n "${!name:-}" ]]; then
+            # Pass the variable name only so proxy credentials never enter the
+            # scanner command line or the supply-chain report.
+            TRIVY_DOCKER_RUN_ARGS+=(--env "$name")
+        fi
+    done
+}
+
+run_trivy_version() {
+    local version_file="$RUN_DIR/image/trivy-version.json"
+    local log="$RUN_DIR/logs/trivy-version.log"
+    local version
+
+    prepare_trivy_docker_run
+    echo "==> Reading the pinned Trivy scanner version"
+    local rc=0
+    docker "${TRIVY_DOCKER_RUN_ARGS[@]}" "$TRIVY_IMAGE" version --format json \
+        >"$version_file" 2>"$log" || rc=$?
+    if ((rc != 0)); then
+        TRIVY_VERSION_STATUS=FAIL
+        record_failure "Trivy version check failed (exit $rc); inspect $log"
+        return 0
+    fi
+
+    if ! json_object_file_is_non_empty "$version_file"; then
+        TRIVY_VERSION_STATUS=FAIL
+        record_failure "Trivy version output is missing, empty, or invalid"
+        return 0
+    fi
+
+    if ! version=$(
+        node --input-type=module - "$version_file" <<'NODE'
+import { readFileSync } from 'node:fs'
+
+const document = JSON.parse(readFileSync(process.argv[2], 'utf8'))
+const version = document.Version ?? document.version
+if (typeof version !== 'string' || version.trim() === '') {
+    process.exit(1)
+}
+process.stdout.write(version.trim())
+NODE
+    ); then
+        TRIVY_VERSION_STATUS=FAIL
+        record_failure "Trivy version output has no version field"
+        return 0
+    fi
+
+    TRIVY_VERSION=$version
+    if [[ "$TRIVY_VERSION" != 0.74.0 ]]; then
+        TRIVY_VERSION_STATUS=FAIL
+        record_failure "pinned Trivy image reported unexpected version $TRIVY_VERSION"
+        return 0
+    fi
+    TRIVY_VERSION_STATUS=PASS
+}
+
+run_image_scan() {
+    local name=$1
+    local image=$2
+    local build_status
+    local report="$RUN_DIR/image/$name.json"
+    local log="$RUN_DIR/logs/${name}-image-scan.log"
+    local trivy_args=(
+        --cache-dir /root/.cache/trivy
+        image
+        --db-repository "$TRIVY_DB_REPOSITORY"
+        --java-db-repository "$TRIVY_JAVA_DB_REPOSITORY"
+        --exit-code 1
+        --scanners vuln
+    )
+
+    if [[ "$name" == app ]]; then
+        build_status=$APP_IMAGE_BUILD_STATUS
+    else
+        build_status=$DAEMON_IMAGE_BUILD_STATUS
+    fi
+
+    if [[ "$build_status" != PASS ]]; then
+        set_image_scan_status "$name" FAIL
+        record_failure "$name image scan was not run because its image build did not pass"
+        return 0
+    fi
+
+    if [[ "$TRIVY_SKIP_DB_UPDATE" == true ]]; then
+        trivy_args+=(--skip-db-update --skip-java-db-update --offline-scan)
+    fi
+    trivy_args+=(
+        --format json
+        --severity HIGH,CRITICAL
+        --ignore-unfixed
+        "$image"
+    )
+
+    prepare_trivy_docker_run
+    echo "==> Scanning $name image with pinned Trivy"
+    local rc=0
+    docker "${TRIVY_DOCKER_RUN_ARGS[@]}" "$TRIVY_IMAGE" "${trivy_args[@]}" \
+        >"$report" 2>"$log" || rc=$?
+
+    if ((rc != 0)); then
+        set_image_scan_status "$name" FAIL
+        record_failure "$name Trivy scan failed (exit $rc); inspect $report and $log"
+        return 0
+    fi
+    if ! json_object_file_is_non_empty "$report"; then
+        set_image_scan_status "$name" FAIL
+        record_failure "$name Trivy JSON report is missing, empty, or invalid"
+        return 0
+    fi
+    if ! trivy_report_has_no_high_critical "$report" >>"$log" 2>&1; then
+        set_image_scan_status "$name" FAIL
+        record_failure "$name Trivy report contains HIGH/CRITICAL vulnerabilities"
+        return 0
+    fi
+    set_image_scan_status "$name" PASS
+}
+
+run_image() {
+    prepare_image_build
+    run_image_build app deploy/local/Dockerfile "$APP_IMAGE"
+    run_image_build daemon deploy/reliability/daemon.Dockerfile "$DAEMON_IMAGE"
+    run_trivy_version
+    run_image_scan app "$APP_IMAGE"
+    run_image_scan daemon "$DAEMON_IMAGE"
+}
+
 write_summary() {
     local status=$1
     local finished_at=$2
@@ -372,6 +831,19 @@ write_summary() {
         SUPPLY_CHAIN_FRONTEND_SBOM_STATUS="$FRONTEND_SBOM_STATUS" \
         SUPPLY_CHAIN_NPM_AUDIT_STATUS="$NPM_AUDIT_STATUS" \
         SUPPLY_CHAIN_MAVEN_AUDIT_STATUS="$MAVEN_AUDIT_STATUS" \
+        SUPPLY_CHAIN_APP_IMAGE_BUILD_STATUS="$APP_IMAGE_BUILD_STATUS" \
+        SUPPLY_CHAIN_DAEMON_IMAGE_BUILD_STATUS="$DAEMON_IMAGE_BUILD_STATUS" \
+        SUPPLY_CHAIN_APP_IMAGE_SCAN_STATUS="$APP_IMAGE_SCAN_STATUS" \
+        SUPPLY_CHAIN_DAEMON_IMAGE_SCAN_STATUS="$DAEMON_IMAGE_SCAN_STATUS" \
+        SUPPLY_CHAIN_APP_IMAGE="$APP_IMAGE" \
+        SUPPLY_CHAIN_DAEMON_IMAGE="$DAEMON_IMAGE" \
+        SUPPLY_CHAIN_APP_IMAGE_ID="$APP_IMAGE_ID" \
+        SUPPLY_CHAIN_APP_IMAGE_DIGEST="$APP_IMAGE_DIGEST" \
+        SUPPLY_CHAIN_DAEMON_IMAGE_ID="$DAEMON_IMAGE_ID" \
+        SUPPLY_CHAIN_DAEMON_IMAGE_DIGEST="$DAEMON_IMAGE_DIGEST" \
+        SUPPLY_CHAIN_TRIVY_IMAGE="$TRIVY_IMAGE" \
+        SUPPLY_CHAIN_TRIVY_VERSION="$TRIVY_VERSION" \
+        SUPPLY_CHAIN_TRIVY_VERSION_STATUS="$TRIVY_VERSION_STATUS" \
         SUPPLY_CHAIN_FAILURES="$failure_lines" \
         node --input-type=module <<'NODE'
 import { writeFileSync } from 'node:fs'
@@ -415,6 +887,42 @@ const report = {
             ],
             log: 'logs/maven-audit.log',
         },
+        {
+            name: 'app-image-build',
+            status: env.SUPPLY_CHAIN_APP_IMAGE_BUILD_STATUS,
+            image: env.SUPPLY_CHAIN_APP_IMAGE,
+            log: 'logs/app-image-build.log',
+        },
+        {
+            name: 'app-image-scan',
+            status: env.SUPPLY_CHAIN_APP_IMAGE_SCAN_STATUS,
+            image: env.SUPPLY_CHAIN_APP_IMAGE,
+            imageId: env.SUPPLY_CHAIN_APP_IMAGE_ID || null,
+            imageDigest: env.SUPPLY_CHAIN_APP_IMAGE_DIGEST || null,
+            scannerImage: env.SUPPLY_CHAIN_TRIVY_IMAGE,
+            scannerVersion: env.SUPPLY_CHAIN_TRIVY_VERSION,
+            scannerVersionStatus: env.SUPPLY_CHAIN_TRIVY_VERSION_STATUS,
+            artifact: 'image/app.json',
+            log: 'logs/app-image-scan.log',
+        },
+        {
+            name: 'daemon-image-build',
+            status: env.SUPPLY_CHAIN_DAEMON_IMAGE_BUILD_STATUS,
+            image: env.SUPPLY_CHAIN_DAEMON_IMAGE,
+            log: 'logs/daemon-image-build.log',
+        },
+        {
+            name: 'daemon-image-scan',
+            status: env.SUPPLY_CHAIN_DAEMON_IMAGE_SCAN_STATUS,
+            image: env.SUPPLY_CHAIN_DAEMON_IMAGE,
+            imageId: env.SUPPLY_CHAIN_DAEMON_IMAGE_ID || null,
+            imageDigest: env.SUPPLY_CHAIN_DAEMON_IMAGE_DIGEST || null,
+            scannerImage: env.SUPPLY_CHAIN_TRIVY_IMAGE,
+            scannerVersion: env.SUPPLY_CHAIN_TRIVY_VERSION,
+            scannerVersionStatus: env.SUPPLY_CHAIN_TRIVY_VERSION_STATUS,
+            artifact: 'image/daemon.json',
+            log: 'logs/daemon-image-scan.log',
+        },
     ],
     failures,
 }
@@ -439,6 +947,10 @@ NODE
 | Frontend CycloneDX | $FRONTEND_SBOM_STATUS | [frontend-sbom/bom.json](frontend-sbom/bom.json) | [logs/npm-sbom.log](logs/npm-sbom.log) |
 | npm audit (low) | $NPM_AUDIT_STATUS | [frontend-audit/audit.json](frontend-audit/audit.json) | [logs/npm-audit.log](logs/npm-audit.log) |
 | Maven Dependency-Check | $MAVEN_AUDIT_STATUS | [HTML](backend-audit/dependency-check-report.html), [JSON](backend-audit/dependency-check-report.json), [SARIF](backend-audit/dependency-check-report.sarif) | [logs/maven-audit.log](logs/maven-audit.log) |
+| App image build | $APP_IMAGE_BUILD_STATUS | \`$APP_IMAGE\` | [logs/app-image-build.log](logs/app-image-build.log) |
+| App image scan | $APP_IMAGE_SCAN_STATUS | [image/app.json](image/app.json) (id: \`$APP_IMAGE_ID\`, digest: \`$APP_IMAGE_DIGEST\`, Trivy: \`$TRIVY_VERSION\`) | [logs/app-image-scan.log](logs/app-image-scan.log) |
+| Daemon image build | $DAEMON_IMAGE_BUILD_STATUS | \`$DAEMON_IMAGE\` | [logs/daemon-image-build.log](logs/daemon-image-build.log) |
+| Daemon image scan | $DAEMON_IMAGE_SCAN_STATUS | [image/daemon.json](image/daemon.json) (id: \`$DAEMON_IMAGE_ID\`, digest: \`$DAEMON_IMAGE_DIGEST\`, Trivy: \`$TRIVY_VERSION\`) | [logs/daemon-image-scan.log](logs/daemon-image-scan.log) |
 
 EOF
 
@@ -446,7 +958,7 @@ EOF
         cat >>"$RUN_DIR/summary.md" <<'EOF'
 ## Notes
 
-All requested checks completed successfully. Dependency-Check JSON contains zero non-suppressed vulnerabilities.
+All requested checks completed successfully. Dependency-Check JSON contains zero non-suppressed vulnerabilities, and each image report contains zero fixable HIGH/CRITICAL vulnerabilities.
 EOF
     else
         cat >>"$RUN_DIR/summary.md" <<'EOF'
@@ -497,6 +1009,9 @@ finalize_report() {
 }
 
 cleanup() {
+    if [[ -n "$BUILD_LOG_TEMP" ]]; then
+        rm -f -- "$BUILD_LOG_TEMP"
+    fi
     if [[ -n "$TEMP_SETTINGS_FILE" ]]; then
         rm -f -- "$TEMP_SETTINGS_FILE"
     fi
@@ -519,7 +1034,7 @@ main() {
             require_cmd node
             exec node --test "$SCRIPT_DIR/supply-chain/tests"/*.test.mjs
             ;;
-        sbom|audit|all)
+        sbom|audit|image|all)
             MODE=$1
             ;;
         *)
@@ -529,10 +1044,14 @@ main() {
             ;;
     esac
 
-    require_cmd mvn
-    require_cmd npm
     require_cmd node
-    JAVA_HOME_FOR_BUILD="$(resolve_java_home)"
+    if [[ "$MODE" == image ]]; then
+        require_cmd docker
+    else
+        require_cmd mvn
+        require_cmd npm
+        JAVA_HOME_FOR_BUILD="$(resolve_java_home)"
+    fi
 
     cd "$REPO_ROOT"
     init_report
@@ -547,6 +1066,10 @@ main() {
         all)
             run_sbom
             run_audit
+            run_image
+            ;;
+        image)
+            run_image
             ;;
     esac
 
