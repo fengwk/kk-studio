@@ -1,6 +1,6 @@
 # Harness 能力装配
 
-Platform 通过 Spring `ObjectProvider` 直接收集 ProviderFactory、ToolFactory、Tool interceptor 与受信任 `HarnessPlugin`，并在启动时冻结为不可变集合、`PluginCatalog`、统一 `ToolCatalog` 和 gateway。`platform` 只做 Catalog/TurnResolver/ModelGateway/ToolGateway/插件 host 适配，不写 `harness_*` 表；领域状态机全部在 `harness-runtime`。
+Platform 通过 Spring `ObjectProvider` 直接收集 ProviderFactory、ToolFactory、Tool interceptor 与受信任 `HarnessPlugin`，并在启动时冻结为不可变集合、`PluginCatalog`、统一 `ToolContributionCatalog`/`ToolCatalog` 和 gateway。`platform` 只做 Catalog/TurnResolver/ModelGateway/ToolGateway/插件 host 适配，不写 `harness_*` 表；领域状态机全部在 `harness-runtime`。
 
 ## 1. 装配图
 
@@ -13,9 +13,9 @@ ModelExecutionConfiguration
 
 HarnessToolGatewayConfiguration
   -> ToolFactory beans
-  -> ToolFactories（按 (name, version) 索引）
-  -> PluginCatalog（受信任 build-time contributions，启动时冻结）
-  -> ToolCatalog（ToolFactory + plugin tools + ENVIRONMENT 两类 + 内部 load_skill/task）
+  -> ToolContributionCatalog（本地 ToolFactory + plugin tools，按 requires/priority/identity 冻结）
+  -> PluginCatalog（classpath HarnessPlugin + trusted JAR services，启动时冻结）
+  -> ToolCatalog（统一 Platform contributions + ENVIRONMENT 两类 + 内部 load_skill/task）
   -> toolExecutionAdmission（Runtime ConcurrencyAdmission，默认 64）
   -> PlatformToolGateway（普通 Tool / plugin Tool + preflight + 两阶段激活 + FIFO 回调桥）
 
@@ -74,10 +74,10 @@ public interface ProviderFactory {
 
 ## 3. ToolCatalog
 
-`ToolCatalog` 只使用两类产品级 Tool，并维护 Agent 可选择目录与内部 Platform Tool 目录的分离：
+`ToolContributionCatalog` 是 Platform 唯一的 Platform Tool contribution 目录：它把普通 `ToolFactory` 与 `PluginCatalog` 中的 plugin Tool 合并，按 plugin requires 偏序、priority 降序、stable identity 字典序冻结，并按 `(name, version)` 拒绝歧义。`ToolCatalog` 从这份统一目录派生，只维护 Agent 可选择目录与内部 Platform Tool 目录的分离：
 
 - selectable Platform：
-  - 冻结 `PluginCatalog` 的 SELECTABLE contributions；当前包括 Goal 插件 `create_goal` / `get_goal` / `update_goal` v2；
+  - 统一目录中的 SELECTABLE contributions；当前包括 Goal 插件 `create_goal` / `get_goal` / `update_goal` v2；
   - Platform 提供的其他 Platform `ToolFactory`；
 - 固定的十一个 `ENVIRONMENT` Tool descriptor：9 个 pi-base coding 能力的本地 Java 实现
   `read, write, edit, bash, grep, find, lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile`，
@@ -133,7 +133,9 @@ Goal 插件只实现上述模型工具的 durable snapshot 协议，不实现 pi
 
 ### Trusted plugin
 
-- 插件只从应用 classpath 的 `HarnessPlugin` beans 收集；`PluginCatalog.from(...)` 在启动时执行一次注册与 freeze。不存在动态 JAR、远程脚本、安装表、依赖解析、热加载或卸载。
+- 内建插件从应用 classpath 的 `HarnessPlugin` beans 收集；外部插件只从配置的本地目录扫描 `.jar`，使用 `ServiceLoader<HarnessPlugin>` 启动期一次性加载。配置项为 `kk-studio.harness.plugins.directory`，部署环境可用 `KK_STUDIO_TRUSTED_PLUGIN_DIRECTORY` 覆盖；空目录配置表示不加载外部插件。
+- 外部插件使用 parent-first child `URLClassLoader`，parent 为宿主 plugin-api classloader；loader 不设置线程 context classloader，不把 JAR 作为 Spring configuration/component 扫描，也不参与 Flyway。JAR 文件名按稳定字典序扫描，加载完成后插件列表不可变，不提供热加载、卸载或运行时安装。
+- `PluginCatalog.from(...)` 在启动时把内建 bean 与 trusted JAR services 合并，执行一次注册与 freeze。任何 descriptor、requires、贡献 owner 或依赖 cycle 错误都 fail closed，中止启动。
 - `PluginTool` 是同步纯函数：输入冻结到 Assistant Entry 的 `BranchView`、执行时间与 `ToolCall`，输出 `ToolResult + List<AppendCustomEntry>`；插件不能访问 `HarnessStore`，也不能推进 Thread/Invocation/Work。
 - `ToolContribution` 冻结 `(pluginId, contributionLocalName)`、descriptor、visibility 与声明的 `(customType, READ|WRITE)`；注册阶段校验该 customType 已由同一插件注册，重复或漂移 fail closed。
 - `PlatformToolGateway` 执行前按 binding 中的 contribution id 恢复贡献，descriptor/state accesses 漂移分别确定性拒绝；当前 intent 只接受同 owner、已注册且声明 WRITE 的 `AppendCustomEntry`。
@@ -224,6 +226,7 @@ Allow 写入 `READY + approval.required=false` 后进入实际 Tool dispatch；A
 | --- | --- |
 | ProviderFactory 装配 | [`ModelExecutionConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model/ModelExecutionConfiguration.java) |
 | ToolFactory 装配 | [`HarnessToolGatewayConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/HarnessToolGatewayConfiguration.java) |
+| Tool contribution 目录 | [`ToolContributionCatalog`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/ToolContributionCatalog.java) |
 | Tool 目录 | [`EnvironmentToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java) |
 | Resolver | [`DatabaseTurnResolver`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java) |
 | TurnResolver 端口 | [`TurnResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/TurnResolver.java) |

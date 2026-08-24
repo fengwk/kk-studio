@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
@@ -15,11 +14,11 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -93,11 +92,11 @@ class PlatformToolGatewayAdmissionTest {
               return new ToolGatewayTestSupport.FakeTool(platformDescriptor);
             }
           };
-      PluginCatalog pluginCatalog = Mockito.mock(PluginCatalog.class);
+      PluginCatalog pluginCatalog = PluginCatalog.from(List.of());
       ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
       PlatformToolGateway gateway =
           ToolGatewayTestSupport.gateway(
-              new ToolFactories(List.of(factory)),
+              new ToolContributionCatalog(List.of(factory), PluginCatalog.from(List.of())),
               pluginCatalog,
               transport,
               new ToolGatewayTestSupport.FakeResourceStore(),
@@ -125,7 +124,6 @@ class PlatformToolGatewayAdmissionTest {
               new ToolGatewayTestSupport.RecordingListener()));
 
       assertEquals(0, creates.get(), "full admission must not call ToolFactory.create");
-      Mockito.verifyNoInteractions(pluginCatalog);
       assertTrue(
           transport.invocations.isEmpty(), "full admission must not invoke remote transport");
     } finally {
@@ -138,7 +136,7 @@ class PlatformToolGatewayAdmissionTest {
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            new ToolFactories(List.of()),
+            new ToolContributionCatalog(List.of(), PluginCatalog.from(List.of())),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),
@@ -163,13 +161,24 @@ class PlatformToolGatewayAdmissionTest {
   @Test
   void unexpectedTopLevelFailureReleasesPermit() {
     ToolDescriptor descriptor = ToolGatewayTestSupport.platformDescriptor("unexpected");
-    ToolFactories factories = Mockito.mock(ToolFactories.class);
-    Mockito.when(factories.find(descriptor.name(), descriptor.version()))
-        .thenThrow(new IllegalStateException("unexpected factory failure"));
+    ToolFactory factory =
+        new ToolFactory() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return descriptor;
+          }
+
+          @Override
+          public ToolGatewayTestSupport.FakeTool create() {
+            throw new IllegalStateException("unexpected factory failure");
+          }
+        };
+    ToolContributionCatalog contributions =
+        new ToolContributionCatalog(List.of(factory), PluginCatalog.from(List.of()));
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            factories,
+            contributions,
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),
@@ -238,7 +247,7 @@ class PlatformToolGatewayAdmissionTest {
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            new ToolFactories(List.of()),
+            new ToolContributionCatalog(List.of(), PluginCatalog.from(List.of())),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),
@@ -283,7 +292,7 @@ class PlatformToolGatewayAdmissionTest {
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            new ToolFactories(List.of()),
+            new ToolContributionCatalog(List.of(), PluginCatalog.from(List.of())),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),

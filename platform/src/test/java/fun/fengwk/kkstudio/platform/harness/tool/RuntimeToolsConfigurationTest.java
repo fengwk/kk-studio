@@ -16,14 +16,14 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginTool;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
-import fun.fengwk.kkstudio.harness.plugin.api.ToolVisibility;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -129,8 +129,10 @@ class RuntimeToolsConfigurationTest {
   void toolCatalogKeepsInternalPluginContributionInternal() {
     ToolDescriptor loadSkill = descriptor("load_skill");
     ToolDescriptor task = descriptor("task");
-    ToolFactories factories = mock(ToolFactories.class);
-    when(factories.descriptors()).thenReturn(List.of(loadSkill, task));
+    ToolFactory loadSkillFactory = mock(ToolFactory.class);
+    when(loadSkillFactory.descriptor()).thenReturn(loadSkill);
+    ToolFactory taskFactory = mock(ToolFactory.class);
+    when(taskFactory.descriptor()).thenReturn(task);
 
     ToolDescriptor pluginDescriptor = descriptor("plugin-internal");
     PluginTool pluginTool =
@@ -147,12 +149,14 @@ class RuntimeToolsConfigurationTest {
         };
     HarnessPlugin plugin =
         HarnessPlugin.of(
-            new PluginDescriptor(new PluginId("admission"), "Admission", "1"),
+            new PluginDescriptor(new PluginId("admission"), "Admission", "1", Set.of()),
             registrar ->
                 registrar.registerTool("plugin-internal", pluginTool, ToolVisibility.INTERNAL));
 
-    ToolCatalog catalog =
-        new RuntimeToolsConfiguration().toolCatalog(factories, PluginCatalog.from(List.of(plugin)));
+    ToolContributionCatalog contributions =
+        new ToolContributionCatalog(
+            List.of(loadSkillFactory, taskFactory), PluginCatalog.from(List.of(plugin)));
+    ToolCatalog catalog = new RuntimeToolsConfiguration().toolCatalog(contributions);
 
     assertTrue(catalog.findInternal("plugin-internal").isPresent());
     assertTrue(catalog.findSelectable("plugin-internal").isEmpty());

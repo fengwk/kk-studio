@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
@@ -59,12 +60,71 @@ class PluginCatalogTest {
     assertEquals(ToolVisibility.SELECTABLE, tool.visibility());
     assertEquals(
         new CustomEntryTypeContribution(
-            new ContributionId(new PluginId("first"), "goal-type"), "goal"),
+            new ContributionId(new PluginId("first"), "goal-type"), "goal", 0),
         catalog.customEntryTypes().get(0));
     assertEquals(
         new ContextProjectorContribution(
-            new ContributionId(new PluginId("second"), "goal-projection"), projector),
+            new ContributionId(new PluginId("second"), "goal-projection"), projector, 0),
         catalog.contextProjectors().get(0));
+  }
+
+  @Test
+  void sortsDescriptorsAndContributionsByRequiresThenPriorityThenIdentity() {
+    PluginDescriptor base = new PluginDescriptor(new PluginId("base"), "base", "1", Set.of());
+    PluginDescriptor peer = new PluginDescriptor(new PluginId("peer"), "peer", "1", Set.of());
+    PluginDescriptor dependent =
+        new PluginDescriptor(
+            new PluginId("dependent"), "dependent", "1", Set.of(new PluginId("base")));
+    HarnessPlugin basePlugin =
+        HarnessPlugin.of(
+            base, registrar -> registrar.registerCustomEntryType("z", "base.type", -100));
+    HarnessPlugin peerPlugin =
+        HarnessPlugin.of(
+            peer, registrar -> registrar.registerCustomEntryType("a", "peer.type", 100));
+    HarnessPlugin dependentPlugin =
+        HarnessPlugin.of(
+            dependent, registrar -> registrar.registerCustomEntryType("a", "dependent.type", 1000));
+
+    PluginCatalog catalog = PluginCatalog.from(List.of(dependentPlugin, peerPlugin, basePlugin));
+
+    assertEquals(List.of(base, dependent, peer), catalog.descriptors());
+    assertEquals(
+        List.of("peer", "base", "dependent"),
+        catalog.customEntryTypes().stream()
+            .map(contribution -> contribution.id().pluginId().value())
+            .toList());
+  }
+
+  @Test
+  void rejectsDependencyCycles() {
+    HarnessPlugin first =
+        HarnessPlugin.of(
+            new PluginDescriptor(
+                new PluginId("first"), "first", "1", Set.of(new PluginId("second"))),
+            registrar -> {});
+    HarnessPlugin second =
+        HarnessPlugin.of(
+            new PluginDescriptor(
+                new PluginId("second"), "second", "1", Set.of(new PluginId("first"))),
+            registrar -> {});
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class, () -> PluginCatalog.from(List.of(first, second)));
+    assertTrue(error.getMessage().contains("requires graph contains a cycle"));
+  }
+
+  @Test
+  void rejectsMissingRequiredPlugin() {
+    HarnessPlugin plugin =
+        HarnessPlugin.of(
+            new PluginDescriptor(
+                new PluginId("dependent"), "dependent", "1", Set.of(new PluginId("missing"))),
+            registrar -> {});
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> PluginCatalog.from(List.of(plugin)));
+    assertTrue(error.getMessage().contains("requires missing plugin"));
   }
 
   @Test
@@ -252,7 +312,7 @@ class PluginCatalogTest {
     Optional<CustomEntryTypeContribution> found =
         catalog.findCustomEntryType(new PluginId("first"), "state");
     assertEquals(
-        new CustomEntryTypeContribution(new ContributionId(new PluginId("first"), "a"), "state"),
+        new CustomEntryTypeContribution(new ContributionId(new PluginId("first"), "a"), "state", 0),
         found.orElseThrow());
     assertEquals(
         "second",
@@ -321,7 +381,7 @@ class PluginCatalogTest {
   }
 
   private static PluginDescriptor descriptor(String id, String version) {
-    return new PluginDescriptor(new PluginId(id), "plugin " + id, version);
+    return new PluginDescriptor(new PluginId(id), "plugin " + id, version, Set.of());
   }
 
   private static ToolDescriptor toolDescriptor(String name, String version) {

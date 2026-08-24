@@ -10,8 +10,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
-import fun.fengwk.kkstudio.harness.plugin.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.plugin.api.ToolVisibility;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
@@ -21,20 +19,15 @@ import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentRunRegistry;
 import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -42,7 +35,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 把普通 runtime 工具（当前为 {@code load_skill} 与 {@code task}）装配为 Spring {@code Tool} bean，并为 {@code
- * ToolFactories} 暴露为 {@link ToolFactory} bean；插件 Tool 由冻结 {@link PluginCatalog} 独立贡献。
+ * {@link ToolFactory} bean；普通 Tool 与插件 Tool 随后统一进入 {@link ToolContributionCatalog}。
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessExecutionAdmissionProperties.class)
@@ -66,7 +59,7 @@ public class RuntimeToolsConfiguration {
   @ConditionalOnBean(LoadSkillTool.class)
   @ConditionalOnMissingBean(name = "loadSkillToolFactory")
   public ToolFactory loadSkillToolFactory(LoadSkillTool loadSkillTool) {
-    return ToolFactory.singleton(loadSkillTool);
+    return ToolFactory.singleton(loadSkillTool, ToolVisibility.INTERNAL, 0);
   }
 
   /**
@@ -125,24 +118,17 @@ public class RuntimeToolsConfiguration {
 
   @Bean
   public ToolFactory taskToolFactory(TaskTool taskTool) {
-    return ToolFactory.singleton(taskTool);
+    return ToolFactory.singleton(taskTool, ToolVisibility.INTERNAL, 0);
   }
 
   @Bean
-  public ToolFactories toolFactories(ObjectProvider<ToolFactory> toolFactoryBeans) {
-    return new ToolFactories(toolFactoryBeans.orderedStream().toList());
+  public ToolContributionCatalog toolContributionCatalog(
+      ObjectProvider<ToolFactory> toolFactoryBeans, PluginCatalog pluginCatalog) {
+    return new ToolContributionCatalog(toolFactoryBeans.orderedStream().toList(), pluginCatalog);
   }
 
   @Bean
-  public ToolCatalog toolCatalog(ToolFactories toolFactories, PluginCatalog pluginCatalog) {
-    List<ToolDescriptor> descriptors = new ArrayList<>(toolFactories.descriptors());
-    Set<String> internalNames = new HashSet<>(Set.of(LoadSkillTool.NAME, TaskTool.NAME));
-    for (ToolContribution contribution : pluginCatalog.tools()) {
-      descriptors.add(contribution.descriptor());
-      if (contribution.visibility() == ToolVisibility.INTERNAL) {
-        internalNames.add(contribution.descriptor().name());
-      }
-    }
-    return new ToolCatalog(descriptors, internalNames);
+  public ToolCatalog toolCatalog(ToolContributionCatalog toolContributionCatalog) {
+    return toolContributionCatalog.toToolCatalog();
   }
 }

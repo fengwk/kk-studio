@@ -6,18 +6,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Duration;
@@ -27,7 +28,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Agent 配置的静态校验：工具名必须来自本地 ToolFactories 或固定的 {@link EnvironmentToolCatalog}，且 skill 名必须遵守有界长度规则。
+ * Agent 配置的静态校验：工具名必须来自本地 ToolContributionCatalog 或固定的 {@link EnvironmentToolCatalog}，且 skill
+ * 名必须遵守有界长度规则。
  */
 class AgentDefinitionConfigValidatorTest {
 
@@ -103,17 +105,18 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void rejectsDuplicatePlatformToolRegistration() {
-    // 两个不同工厂声明相同 (name, version) 会在 ToolFactories 构造边界被拒绝——校验器永远不会看到歧义的工具名。
+    // 两个不同工厂声明相同 (name, version) 会在统一 Tool contribution catalog 构造边界被拒绝。
     ToolDescriptor descriptor = platformDescriptor("dup", "1");
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                new ToolFactories(
+                new ToolContributionCatalog(
                     List.of(
                         ToolFactory.singleton(tool(descriptor)),
-                        ToolFactory.singleton(tool(descriptor)))));
-    assertTrue(error.getMessage().contains("duplicate ToolFactory"));
+                        ToolFactory.singleton(tool(descriptor))),
+                    PluginCatalog.from(List.of())));
+    assertTrue(error.getMessage().contains("duplicate Platform tool name"));
   }
 
   private static Tool platformTool(String name, String version) {
@@ -148,17 +151,23 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   private static final class Fixture implements AutoCloseable {
-    private final ToolFactories toolFactories;
+    private final ToolContributionCatalog toolContributions;
     private final AgentDefinitionConfigValidator validator;
 
     private Fixture(List<Tool> tools) {
       List<Tool> registeredTools = new ArrayList<>(tools);
       registeredTools.add(platformTool("load_skill", "1"));
-      this.toolFactories =
-          new ToolFactories(registeredTools.stream().map(ToolFactory::singleton).toList());
-      this.validator =
-          new AgentDefinitionConfigValidator(
-              new ToolCatalog(toolFactories.descriptors(), Set.of("load_skill")));
+      this.toolContributions =
+          new ToolContributionCatalog(
+              registeredTools.stream()
+                  .map(
+                      tool ->
+                          tool.descriptor().name().equals("load_skill")
+                              ? ToolFactory.singleton(tool, ToolVisibility.INTERNAL)
+                              : ToolFactory.singleton(tool))
+                  .toList(),
+              PluginCatalog.from(List.of()));
+      this.validator = new AgentDefinitionConfigValidator(toolContributions.toToolCatalog());
     }
 
     @Override

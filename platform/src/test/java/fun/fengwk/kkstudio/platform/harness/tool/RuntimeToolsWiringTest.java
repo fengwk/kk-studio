@@ -9,7 +9,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
@@ -22,7 +21,7 @@ import java.util.stream.Collectors;
 class RuntimeToolsWiringTest extends PostgresSpringTestSupport {
 
   @Autowired private List<Tool> tools;
-  @Autowired private ToolFactories toolFactories;
+  @Autowired private ToolContributionCatalog toolContributionCatalog;
   @Autowired private PluginCatalog pluginCatalog;
   @Autowired private ToolCatalog toolCatalog;
   @Autowired private LoadSkillTool loadSkillTool;
@@ -35,9 +34,9 @@ class RuntimeToolsWiringTest extends PostgresSpringTestSupport {
     assertEquals(Set.of("load_skill", "task"), beanNames);
     assertEquals("1", loadSkillTool.descriptor().version());
     assertEquals("1", taskTool.descriptor().version());
-    assertTrue(toolFactories.find("load_skill", "1").isPresent());
-    assertTrue(toolFactories.find("task", "1").isPresent());
-    assertTrue(toolFactories.find("create_goal", "2").isEmpty());
+    assertTrue(toolContributionCatalog.find("load_skill", "1").isPresent());
+    assertTrue(toolContributionCatalog.find("task", "1").isPresent());
+    assertTrue(toolContributionCatalog.find("create_goal", "2").isEmpty());
     assertTrue(pluginCatalog.tools().isEmpty());
     assertTrue(toolCatalog.findSelectable("create_goal").isEmpty());
   }

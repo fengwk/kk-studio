@@ -66,7 +66,10 @@ class PluginApiModuleArchitectureTest {
       }
       String coordinate =
           requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId");
-      if (!Set.of("fun.fengwk.kk-studio:kk-studio-harness-runtime").contains(coordinate)) {
+      if (!Set.of(
+              "fun.fengwk.kk-studio:kk-studio-harness-runtime",
+              "fun.fengwk.kk-studio:kk-studio-harness-tool")
+          .contains(coordinate)) {
         violations.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
       }
     }
