@@ -93,6 +93,56 @@ PI_BASE_ANCHOR=$HOME/proj/pi-base
 长期运行的 Daemon 始终只连接 `internal: true` 网络，没有外网出口。依赖安装只修改指定的
 disposable case，不修改 anchor 或宿主仓库。
 
+## 确定性 Java 重复回归门禁
+
+`scripts/reliability/regression.sh` 是与真实 Agent reliability matrix 分开的确定性
+Java/Surefire 重复回归入口。它不调用 Provider、不创建付费 Agent/Chat/Thread，也不启动
+backend、frontend、daemon 或 Compose 栈；选中的 JUnit 测试自行管理所需的 Testcontainers。
+每轮都从仓库根目录使用 `JAVA_HOME_21` 执行同一个 Maven reactor 定向命令，失败即停止后续
+轮次，不使用随机等待。
+
+默认重复三轮，可将轮次限定为 `1..100`，也可指定报告根目录：
+
+```bash
+./scripts/reliability/regression.sh --help
+./scripts/reliability/regression.sh --iterations 1
+./scripts/reliability/regression.sh --iterations 3 --report-root reports/reliability
+```
+
+冻结测试集按模块分为：
+
+- Web：`PostgresqlNotificationLoopTest`、`PostgresqlNotificationLoopPostgresqlIntegrationTest`、
+  `DaemonOutboundSenderTest`、`ApplicationEventHubTest`、
+  `ApplicationEventWebSocketHandlerTest`；
+- Canvas：`CanvasFunctionWorkStoreIntegrationTest`、`CanvasFunctionDispatcherTest`、
+  `CanvasFunctionExecutionContextImplTest`、`CanvasFunctionWorkerHeartbeatTest`；
+- Harness Infra：`HarnessWorkDispatcherHandoffTest`、`HarnessWorkDispatcherLifecycleTest`、
+  `PostgresqlWorkTest`、`PostgresqlWorkNotificationTest`、
+  `PostgresqlRealtimeEventSourceConcurrencyTest`；
+- Platform Storage：`StorageUploadCleanupLeaseIntegrationTest`、`StorageMaintenanceTest`、
+  `StorageUploadServiceIntegrationTest`。
+
+Runner 使用 `-Dsurefire.failIfNoSpecifiedTests=false` 允许上游 reactor 模块没有同名测试时
+正常通过，但随后逐模块检查四个目标模块的 `target/surefire-reports`。每一轮的每个冻结
+类都必须有实际 Surefire XML 证据；Maven 非零、目标类缺失、`Surefire is going to kill`
+或 Maven `[ERROR]` 都 fail closed。每轮独立保存 `iterations/NNN/maven.log` 和 Surefire
+报告副本。
+
+报告写入 Git 忽略的 `reports/reliability/`：
+
+```text
+reports/reliability/<timestamp>-regression-<pid>/
+  report.md
+  summary.json
+  iterations/001/maven.log
+  iterations/001/surefire-reports/<module>/
+reports/reliability/latest-regression/
+```
+
+`report.md` 和 `summary.json` 记录 commit、JDK、Maven、请求/完成轮次、冻结目标类、每轮
+命中数、时长、结果和失败证据。收到 `INT`/`TERM` 时 runner 会终止并等待当前 Maven
+进程组，再保留当前报告；runner 自身不负责清理外部启动的服务或容器。
+
 ## 真实 Agent reliability matrix
 
 `scripts/reliability/run-agent-matrix.mjs` 是零第三方 Node 依赖的真实 Agent runner。它只在
