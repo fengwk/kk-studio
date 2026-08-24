@@ -16,14 +16,15 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
 
 /** 使用 Java NIO 查找遵守分层 {@code .gitignore} 的 environment 文件。 */
 public final class FindTool extends AbstractCodingTool {
 
   static final int MAX_TIMEOUT_SECONDS = 3600;
 
-  public FindTool(CodingToolsConfig config) {
-    super(config, EnvironmentToolCatalog.require("find"));
+  public FindTool(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentToolCatalog.require("find"));
   }
 
   @Override

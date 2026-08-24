@@ -8,9 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
@@ -30,21 +32,28 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 class CodingToolsEdgeTest {
 
   @TempDir Path environmentRoot;
+  private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+  @AfterEach
+  void closeExecutors() {
+    scheduler.shutdownNow();
+    executor.shutdownNow();
+  }
 
   /** 错误类型与未知字段必须在执行前拒绝；integer 数字字符串会被归一化，因此 grep 用非数字文本证明类型失败。 */
   @Test
   void everyDescriptorRejectsWrongTypedAndUnknownArguments() {
     Tool[] tools = {
-      new WriteTool(config()),
-      new EditTool(config()),
-      new BashTool(config()),
-      new GrepTool(config()),
-      new FindTool(config())
+      write(config()), edit(config()), bash(config()), grep(config()), find(config())
     };
     String[] wrong = {
       "{\"path\":\"x\",\"content\":1}",
@@ -81,6 +90,9 @@ class CodingToolsEdgeTest {
     assertNull(AbstractCodingTool.optionalString(values, "missing"));
     assertEquals(7, AbstractCodingTool.optionalPositiveInt(values, "missing", 7, 9));
     assertEquals(2, AbstractCodingTool.optionalPositiveInt(values, "number", 7, 9));
+    assertEquals(2, AbstractCodingTool.requiredPositiveInt(values, "number"));
+    assertEquals(7, AbstractCodingTool.optionalNonNegativeInt(values, "missing", 7));
+    assertEquals(2, AbstractCodingTool.optionalNonNegativeInt(values, "number", 7));
     assertTrue(AbstractCodingTool.optionalBoolean(values, "truth"));
     assertFalse(AbstractCodingTool.optionalBoolean(values, "missing"));
     assertThrows(IllegalArgumentException.class, () -> AbstractCodingTool.string(values, "number"));
@@ -92,8 +104,55 @@ class CodingToolsEdgeTest {
         () ->
             AbstractCodingTool.optionalPositiveInt(
                 AbstractCodingTool.OBJECT_MAPPER.readTree("{\"number\":0}"), "number", 1, 9));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AbstractCodingTool.requiredPositiveInt(values, "missing"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AbstractCodingTool.requiredPositiveInt(values, "text"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            AbstractCodingTool.optionalNonNegativeInt(
+                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"number\":-1}"), "number", 1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AbstractCodingTool.optionalNonNegativeInt(values, "text", 1));
     assertTrue(AbstractCodingTool.error("id", "failure").error());
     assertFalse(AbstractCodingTool.success("id", "ok").error());
+  }
+
+  /** 共享 executor 上的 coding 任务收到 cancel 后必须被中断，并且只产生一次取消终态。 */
+  @Test
+  void abstractCodingExecutionUsesInjectedExecutorAndInterruptsOnCancel() throws Exception {
+    CountDownLatch started = new CountDownLatch(1);
+    AbstractCodingTool blocking =
+        new AbstractCodingTool(config(), executor, EnvironmentToolCatalog.require("read")) {
+          @Override
+          ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+            started.countDown();
+            new CountDownLatch(1).await();
+            return success(request.call().id(), "unexpected");
+          }
+        };
+    RecordingListener listener = invokeAsync(blocking, "{\"path\":\"x\"}", Duration.ZERO);
+    assertTrue(started.await(5, TimeUnit.SECONDS));
+
+    listener.handle.cancel();
+    listener.handle.cancel();
+
+    assertTrue(listener.await());
+    assertTrue(listener.result.error());
+    assertTrue(text(listener.result).contains("Operation cancelled"));
+    assertEquals(1, listener.completions);
+    ToolExecutionRequest wrong =
+        new ToolExecutionRequest(
+            EnvironmentToolCatalog.require("bash"),
+            new ToolCall("wrong", "bash", "{\"command\":\"true\"}"),
+            Duration.ofSeconds(1),
+            null,
+            environmentRoot);
+    assertThrows(IllegalArgumentException.class, () -> blocking.execute(wrong, listener));
   }
 
   @Test
@@ -202,7 +261,7 @@ class CodingToolsEdgeTest {
         environmentRoot.resolve("utf16.txt"),
         TextFileCodec.encode("alpha\nbeta\n", StandardCharsets.UTF_16LE, 2));
 
-    ToolResult result = invoke(new ReadTool(config()), "{\"path\":\"utf16.txt\"}");
+    ToolResult result = invoke(read(config()), "{\"path\":\"utf16.txt\"}");
 
     assertFalse(result.error());
     assertTrue(text(result).contains("1|alpha"));
@@ -273,8 +332,8 @@ class CodingToolsEdgeTest {
 
   @Test
   void writeAndEditHandleCreateBinaryAndNoMatchErrors() throws Exception {
-    WriteTool write = new WriteTool(config());
-    EditTool edit = new EditTool(config());
+    WriteTool write = write(config());
+    EditTool edit = edit(config());
     ToolResult created = invoke(write, "{\"path\":\"new/created.txt\",\"content\":\"one\"}");
     ToolResult unchanged =
         invoke(
@@ -302,11 +361,11 @@ class CodingToolsEdgeTest {
   @Test
   void bashReportsStartupAndNonZeroFailuresWithoutDuplicateTerminalCallbacks() throws Exception {
     BashTool missing =
-        new BashTool(
+        bash(
             new CodingToolsConfig(
                 environmentRoot, 10, 100, "missing-bash", new InMemoryResourceStore()));
     assertTrue(text(invoke(missing, "{\"command\":\"echo x\"}")).contains("missing-bash"));
-    BashTool bash = new BashTool(config());
+    BashTool bash = bash(config());
     ToolResult nonZero = invoke(bash, "{\"command\":\"echo failure; exit 7\"}");
     assertTrue(nonZero.error());
     assertTrue(text(nonZero).contains("Command exited with code 7"));
@@ -329,7 +388,7 @@ class CodingToolsEdgeTest {
   void bashStreamsSplitUtf8CodePointWithoutReplacementCharacters() throws Exception {
     RecordingListener listener =
         invokeAsync(
-            new BashTool(config()),
+            bash(config()),
             "{\"command\":\"printf '\\\\360\\\\237'; sleep 0.05; printf '\\\\230\\\\200'\"}",
             Duration.ofSeconds(2));
 
@@ -343,6 +402,30 @@ class CodingToolsEdgeTest {
 
   private CodingToolsConfig config() {
     return config(2000, 50 * 1024, new InMemoryResourceStore());
+  }
+
+  private ReadTool read(CodingToolsConfig config) {
+    return new ReadTool(config, executor);
+  }
+
+  private WriteTool write(CodingToolsConfig config) {
+    return new WriteTool(config, executor);
+  }
+
+  private EditTool edit(CodingToolsConfig config) {
+    return new EditTool(config, executor);
+  }
+
+  private GrepTool grep(CodingToolsConfig config) {
+    return new GrepTool(config, executor);
+  }
+
+  private FindTool find(CodingToolsConfig config) {
+    return new FindTool(config, executor);
+  }
+
+  private BashTool bash(CodingToolsConfig config) {
+    return new BashTool(config, executor, scheduler);
   }
 
   private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {

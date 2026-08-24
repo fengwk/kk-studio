@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -47,6 +48,16 @@ class DaemonModuleArchitectureTest {
 
   private static final String SKILL_ADAPTER_PACKAGE = "/skill/";
   private static final String MCP_LANGCHAIN_ADAPTER_PACKAGE = "/mcp/langchain/";
+  private static final Pattern STATIC_EXECUTOR_FIELD =
+      Pattern.compile(
+          "\\bstatic\\s+(?:final\\s+)?(?:[\\w.]*Executor(?:Service)?|"
+              + "ScheduledThreadPoolExecutor|ThreadPoolExecutor|ForkJoinPool)\\s+\\w+\\s*(?:=|;)");
+  private static final Pattern DIRECT_VIRTUAL_THREAD_START =
+      Pattern.compile(
+          "Thread\\s*\\.\\s*ofVirtual\\s*\\(\\s*\\)(?:(?!;).)*?\\.start\\s*\\(", Pattern.DOTALL);
+  private static final Pattern EXECUTOR_CREATION =
+      Pattern.compile(
+          "\\bExecutors\\s*\\.|new\\s+(?:ScheduledThreadPoolExecutor|ThreadPoolExecutor)\\s*\\(");
 
   @Test
   void daemonMainSourcesStayOnJdkJacksonToolAndOwnPackages() throws IOException {
@@ -56,6 +67,40 @@ class DaemonModuleArchitectureTest {
     List<String> violations = scanViolations(main);
     assertTrue(
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
+  }
+
+  /** Daemon main 源码不得持有 static executor，也不得绕过 runtime 统一 executor 直接启动虚拟线程。 */
+  @Test
+  void daemonMainSourcesKeepExecutorOwnershipInsideRuntimeInstances() throws IOException {
+    Path main = locateDaemonMainJava();
+    List<String> violations = new ArrayList<>();
+    try (Stream<Path> stream = Files.walk(main)) {
+      stream
+          .filter(path -> path.toString().endsWith(".java"))
+          .filter(path -> !isGeneratedOrTarget(path))
+          .forEach(
+              path -> {
+                try {
+                  String source = Files.readString(path, StandardCharsets.UTF_8);
+                  String relativePath = relative(main, path).replace('\\', '/');
+                  if (STATIC_EXECUTOR_FIELD.matcher(source).find()) {
+                    violations.add(relativePath + ": static executor field");
+                  }
+                  if (DIRECT_VIRTUAL_THREAD_START.matcher(source).find()) {
+                    violations.add(relativePath + ": direct virtual thread start");
+                  }
+                  if (!relativePath.equals("fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java")
+                      && EXECUTOR_CREATION.matcher(source).find()) {
+                    violations.add(relativePath + ": executor creation outside DaemonRuntime");
+                  }
+                } catch (IOException error) {
+                  throw new IllegalStateException(error);
+                }
+              });
+    }
+    assertTrue(
+        violations.isEmpty(),
+        () -> "executor lifecycle violations:\n" + String.join("\n", violations));
   }
 
   private static List<String> scanViolations(Path main) throws IOException {

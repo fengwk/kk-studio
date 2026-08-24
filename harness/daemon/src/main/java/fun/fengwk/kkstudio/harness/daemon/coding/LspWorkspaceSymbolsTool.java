@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.nio.file.Path;
+import java.util.concurrent.ExecutorService;
 
 /** 通过可选的本机 LSP bridge 搜索 workspace symbols。 */
 public final class LspWorkspaceSymbolsTool extends AbstractCodingTool {
@@ -16,8 +17,8 @@ public final class LspWorkspaceSymbolsTool extends AbstractCodingTool {
 
   private final LspBridge bridge;
 
-  public LspWorkspaceSymbolsTool(CodingToolsConfig config) {
-    super(config, EnvironmentToolCatalog.require("lsp_workspace_symbols"));
+  public LspWorkspaceSymbolsTool(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentToolCatalog.require("lsp_workspace_symbols"));
     this.bridge = new LspBridge(config);
   }
 

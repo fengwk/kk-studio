@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /**
  * 固定 {@code mcp_list_tools} 桥接工具：确定性 JSON 报告请求的 server 状态与 READY server 的工具 （name/description/完整输入
@@ -19,8 +20,8 @@ import java.util.List;
  */
 public final class McpListToolsTool extends AbstractMcpBridgeTool {
 
-  public McpListToolsTool(McpServerRegistry registry) {
-    super(registry, EnvironmentToolCatalog.require("mcp_list_tools"));
+  public McpListToolsTool(McpServerRegistry registry, ExecutorService executor) {
+    super(registry, executor, EnvironmentToolCatalog.require("mcp_list_tools"));
   }
 
   @Override

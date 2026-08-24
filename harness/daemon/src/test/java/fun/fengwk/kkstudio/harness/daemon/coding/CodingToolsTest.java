@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -28,17 +29,28 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 class CodingToolsTest {
 
   @TempDir Path environmentRoot;
+  private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+  @AfterEach
+  void closeExecutors() {
+    scheduler.shutdownNow();
+    executor.shutdownNow();
+  }
 
   @Test
   void registersEnvironmentDescriptorsAndRejectsMalformedArguments() {
     CodingToolsConfig config = config();
     DaemonToolRegistry registry = new DaemonToolRegistry();
-    CodingTools.registerAll(registry, config);
+    CodingTools.registerAll(registry, config, executor, scheduler);
 
     assertEquals(
         List.of(
@@ -63,8 +75,8 @@ class CodingToolsTest {
     Path outside = Files.createTempDirectory("coding-outside");
     Files.writeString(outside.resolve("secret.txt"), "secret");
     Files.createSymbolicLink(environmentRoot.resolve("escape"), outside);
-    ReadTool read = new ReadTool(config());
-    WriteTool write = new WriteTool(config());
+    ReadTool read = read(config());
+    WriteTool write = write(config());
 
     ToolResult traversal = invoke(read, "{\"path\":\"../secret.txt\"}");
     ToolResult symlink = invoke(read, "{\"path\":\"escape/secret.txt\"}");
@@ -81,7 +93,7 @@ class CodingToolsTest {
     Path file = environmentRoot.resolve("sample.txt");
     Files.write(
         file, new byte[] {(byte) 0xef, (byte) 0xbb, (byte) 0xbf, 'a', '\r', '\n', 'a', '\r', '\n'});
-    EditTool edit = new EditTool(config());
+    EditTool edit = edit(config());
 
     ToolResult duplicate =
         invoke(edit, "{\"path\":\"sample.txt\",\"old_string\":\"a\\n\",\"new_string\":\"b\\n\"}");
@@ -106,8 +118,8 @@ class CodingToolsTest {
         new CodingToolsConfig(
             environmentRoot, 2000, 50 * 1024, "bash", new InMemoryResourceStore(), "echo", "javap");
 
-    ToolResult disabled = invoke(new ReadTool(config()), "{\"path\":\"lsp-status.txt\"}");
-    ToolResult enabled = invoke(new ReadTool(bridged), "{\"path\":\"lsp-status.txt\"}");
+    ToolResult disabled = invoke(read(config()), "{\"path\":\"lsp-status.txt\"}");
+    ToolResult enabled = invoke(read(bridged), "{\"path\":\"lsp-status.txt\"}");
 
     assertTrue(text(disabled).contains("lsp: unsupported"));
     assertTrue(text(enabled).contains("lsp: supported"));
@@ -119,7 +131,7 @@ class CodingToolsTest {
     Files.writeString(overlap, "aaa\n");
     Path replaced = environmentRoot.resolve("replace-all.txt");
     Files.writeString(replaced, "abab\n");
-    EditTool edit = new EditTool(config());
+    EditTool edit = edit(config());
 
     ToolResult overlapping =
         invoke(edit, "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\"}");
@@ -147,7 +159,7 @@ class CodingToolsTest {
     byte[] originalLf = "alpha\n".getBytes(StandardCharsets.UTF_8);
     Files.write(crlf, originalCrlf);
     Files.write(lf, originalLf);
-    EditTool edit = new EditTool(config());
+    EditTool edit = edit(config());
 
     ToolResult crlfSpelled =
         invoke(
@@ -175,7 +187,7 @@ class CodingToolsTest {
     Path mixed = environmentRoot.resolve("mixed.txt");
     byte[] originalMixed = "alpha\r\nbeta\rgamma".getBytes(StandardCharsets.UTF_8);
     Files.write(mixed, originalMixed);
-    EditTool edit = new EditTool(config());
+    EditTool edit = edit(config());
 
     ToolResult crResult =
         invoke(
@@ -212,8 +224,8 @@ class CodingToolsTest {
     Files.write(environmentRoot.resolve("binary.bin"), new byte[] {1, 0, 2});
     Files.createDirectory(environmentRoot.resolve("directory"));
     Files.writeString(environmentRoot.resolve("directory/a.txt"), "a");
-    ReadTool read = new ReadTool(config());
-    ReadTool constrainedRead = new ReadTool(config(1, 16));
+    ReadTool read = read(config());
+    ReadTool constrainedRead = read(config(1, 16));
 
     ToolResult window = invoke(read, "{\"path\":\"many.txt\",\"limit\":1}");
     ToolResult directory = invoke(read, "{\"path\":\"directory\"}");
@@ -226,7 +238,7 @@ class CodingToolsTest {
 
   @Test
   void serializesConcurrentMutationsOfTheSameFile() throws Exception {
-    WriteTool write = new WriteTool(config());
+    WriteTool write = write(config());
 
     RecordingListener first =
         invokeAsync(write, "{\"path\":\"shared.txt\",\"content\":\"first\"}", Duration.ZERO);
@@ -246,8 +258,8 @@ class CodingToolsTest {
     Files.writeString(environmentRoot.resolve("visible.txt"), "needle\nneedle\n");
     Files.writeString(environmentRoot.resolve(".gitignore"), "ignored.txt\n");
     Files.writeString(environmentRoot.resolve("ignored.txt"), "needle\n");
-    GrepTool grep = new GrepTool(config());
-    FindTool find = new FindTool(config());
+    GrepTool grep = grep(config());
+    FindTool find = find(config());
 
     ToolResult grepResult = invoke(grep, "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":1}");
     ToolResult findResult = invoke(find, "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10}");
@@ -259,7 +271,7 @@ class CodingToolsTest {
 
   @Test
   void bashStreamsAndReportsTimeoutAndIdempotentCancellation() throws Exception {
-    BashTool bash = new BashTool(config());
+    BashTool bash = bash(config());
     RecordingListener streaming =
         invokeAsync(
             bash,
@@ -322,7 +334,7 @@ class CodingToolsTest {
     // 显式的短 timeout 必须在外部 request deadline 到来之前终止命令。
     RecordingListener timed =
         invokeAsync(
-            new BashTool(config()),
+            bash(config()),
             "{\"command\":\"sleep 2\",\"timeout_seconds\":1}",
             Duration.ofSeconds(5));
     assertTrue(timed.await());
@@ -335,8 +347,8 @@ class CodingToolsTest {
     var absent = AbstractCodingTool.OBJECT_MAPPER.readTree("{}");
     var explicit = AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":7}");
 
-    assertEquals(Duration.ofHours(1), new GrepTool(config()).descriptor().timeout());
-    assertEquals(Duration.ofHours(1), new FindTool(config()).descriptor().timeout());
+    assertEquals(Duration.ofHours(1), grep(config()).descriptor().timeout());
+    assertEquals(Duration.ofHours(1), find(config()).descriptor().timeout());
     assertEquals(15, GrepTool.requestedTimeoutSeconds(absent));
     assertEquals(7, GrepTool.requestedTimeoutSeconds(explicit));
     assertEquals(
@@ -374,6 +386,30 @@ class CodingToolsTest {
 
   private CodingToolsConfig config() {
     return config(2000, 50 * 1024);
+  }
+
+  private ReadTool read(CodingToolsConfig config) {
+    return new ReadTool(config, executor);
+  }
+
+  private WriteTool write(CodingToolsConfig config) {
+    return new WriteTool(config, executor);
+  }
+
+  private EditTool edit(CodingToolsConfig config) {
+    return new EditTool(config, executor);
+  }
+
+  private GrepTool grep(CodingToolsConfig config) {
+    return new GrepTool(config, executor);
+  }
+
+  private FindTool find(CodingToolsConfig config) {
+    return new FindTool(config, executor);
+  }
+
+  private BashTool bash(CodingToolsConfig config) {
+    return new BashTool(config, executor, scheduler);
   }
 
   private CodingToolsConfig config(int lines, int bytes) {

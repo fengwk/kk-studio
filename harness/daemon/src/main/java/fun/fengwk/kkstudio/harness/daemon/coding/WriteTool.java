@@ -10,13 +10,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** 在 environment root 下按意图创建或替换单个文本文件。 */
 public final class WriteTool extends AbstractCodingTool {
 
-  public WriteTool(CodingToolsConfig config) {
-    super(config, EnvironmentToolCatalog.require("write"));
+  public WriteTool(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentToolCatalog.require("write"));
   }
 
   @Override

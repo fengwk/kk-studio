@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import fun.fengwk.kkstudio.harness.daemon.coding.CodingTools;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpBridgeTools;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpConfig;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpConfigParser;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerRegistry;
@@ -26,8 +24,6 @@ public final class DaemonMain {
     DaemonConfig daemonConfig = DaemonConfig.fromArgs(args);
     CodingToolsConfig toolsConfig =
         CodingToolsConfig.fromSystemProperties(daemonConfig.environmentRoot());
-    DaemonToolRegistry toolRegistry = new DaemonToolRegistry();
-    CodingTools.registerAll(toolRegistry, toolsConfig);
     DaemonSkillRegistry skillRegistry = DaemonSkillRegistry.discover(daemonConfig.skillDirs());
     McpConfig mcpConfig =
         daemonConfig.mcpConfigPath() == null
@@ -38,10 +34,8 @@ public final class DaemonMain {
         new McpServerRegistry(
             mcpConfig, new LangChainMcpClientFactory(), daemonConfig.defaultToolTimeout());
     mcpRegistry.start();
-    McpBridgeTools.registerAll(toolRegistry, mcpRegistry);
     DaemonRuntime runtime =
-        new DaemonRuntime(
-            daemonConfig, toolRegistry, skillRegistry, toolsConfig.resourceStore(), mcpRegistry);
+        DaemonRuntime.create(daemonConfig, toolsConfig, skillRegistry, mcpRegistry);
     Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "daemon-shutdown"));
     runtime.start();
     DaemonRuntimeState finalState = runtime.awaitTermination();

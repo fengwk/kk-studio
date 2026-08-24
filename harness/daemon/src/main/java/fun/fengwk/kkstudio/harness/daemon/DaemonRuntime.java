@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.daemon;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.daemon.coding.CodingTools;
+import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalEntry;
@@ -10,6 +12,7 @@ import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpBridgeTools;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerRegistry;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkill;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
@@ -56,16 +59,14 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -77,14 +78,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>Invocation journal 是进程内去重事实源；WebSocket 仅传递消息。连接断开后 Daemon 会重新握手；若 gateway 再次发送相同
  * invocationId，RUNNING/terminal journal 条目分别重放 STARTED/terminal。
  *
- * <p>目录浏览在 inbound 回调里只做解析、校验与 ACK；阻塞的文件系统 IO 提交到 daemon 级共享的有界单 worker（队列容量 {@link
- * #DIRECTORY_WORKER_QUEUE_CAPACITY}）。队列满或 worker 已关闭时立即回 {@link
- * DaemonMessageType#DIRECTORY_LIST_FAILED}（{@code IO_ERROR}），不悬挂请求。
+ * <p>Daemon 只拥有两个执行生命周期资源：单线程 scheduler 处理 heartbeat、reconnect 与 timeout，共享的
+ * virtual-thread-per-task executor 处理 Coding/MCP 及目录浏览等阻塞调用。transport/JDK 内部线程不在该生命周期内。
  */
 public final class DaemonRuntime implements AutoCloseable {
 
-  /** 共享目录 worker 的有界队列容量；超出时拒绝并回 typed DIRECTORY_LIST_FAILED。 */
-  static final int DIRECTORY_WORKER_QUEUE_CAPACITY = 32;
+  private static final Duration EXECUTOR_TERMINATION_TIMEOUT = Duration.ofSeconds(5);
 
   private final DaemonConfig config;
   private final EnvironmentName environmentName;
@@ -94,8 +93,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private final McpServerRegistry mcpRegistry;
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
-  private final Executor directoryWorker;
-  private final boolean ownsDirectoryWorker;
+  private final ExecutorService taskExecutor;
   private final ResourceStore resourceStore;
   private final DaemonEnvironmentInfo environmentInfo;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
@@ -121,91 +119,70 @@ public final class DaemonRuntime implements AutoCloseable {
   private Duration nextReconnectDelay;
 
   /**
-   * 使用 JDK WebSocket transport 和内存 journal 创建生产运行时，无 resource store；遇到 resource/binary 工具结果将确定性收敛为
-   * FAILED。
+   * 创建完整生产运行时。scheduler 与 virtual-thread-per-task executor 在注册 Tool 前创建并注入，成功后由 runtime 独占生命周期；
+   * 任一步构造失败都会释放 transport、MCP registry 和已创建的执行资源。
    */
-  public DaemonRuntime(
-      DaemonConfig config, DaemonToolRegistry toolRegistry, DaemonSkillRegistry skillRegistry) {
-    this(
-        config,
-        new JdkWebSocketTransport(config.gatewayUri()),
-        toolRegistry,
-        skillRegistry,
-        McpServerRegistry.empty(),
-        new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor(),
-        null,
-        null,
-        true);
-  }
-
-  /**
-   * 使用 JDK WebSocket transport、内存 journal 和指定 resource store 创建生产运行时。
-   *
-   * <p>resource store 用于在发端读取/写入本地 resource 字节：{@code ResourceToolContent} 经其读取复核后写 wire， {@code
-   * BinaryToolContent} 先落盘再编码。通常与 coding 工具的 {@link ResourceStore} 共享同一实例。当 {@code resourceStore} 为
-   * {@code null} 时，遇到 resource/binary 工具结果会确定性收敛为 FAILED 而不会发送无法被接收端 解析的内容。
-   */
-  public DaemonRuntime(
+  public static DaemonRuntime create(
       DaemonConfig config,
-      DaemonToolRegistry toolRegistry,
+      CodingToolsConfig toolsConfig,
       DaemonSkillRegistry skillRegistry,
-      ResourceStore resourceStore) {
-    this(
-        config,
-        new JdkWebSocketTransport(config.gatewayUri()),
-        toolRegistry,
-        skillRegistry,
-        McpServerRegistry.empty(),
-        new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor(),
-        resourceStore,
-        null,
-        true);
-  }
-
-  /** 生产装配：额外持有 daemon 本地 MCP registry，shutdown 时恰好关闭一次。 */
-  public DaemonRuntime(
-      DaemonConfig config,
-      DaemonToolRegistry toolRegistry,
-      DaemonSkillRegistry skillRegistry,
-      ResourceStore resourceStore,
       McpServerRegistry mcpRegistry) {
-    this(
+    Objects.requireNonNull(toolsConfig, "toolsConfig");
+    Objects.requireNonNull(mcpRegistry, "mcpRegistry");
+    return create(
         config,
-        new JdkWebSocketTransport(config.gatewayUri()),
-        toolRegistry,
         skillRegistry,
-        Objects.requireNonNull(mcpRegistry, "mcpRegistry"),
-        new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor(),
-        resourceStore,
-        null,
-        true);
+        mcpRegistry,
+        toolsConfig.resourceStore(),
+        (registry, executor, scheduler) -> {
+          CodingTools.registerAll(registry, toolsConfig, executor, scheduler);
+          McpBridgeTools.registerAll(registry, mcpRegistry, executor);
+        });
   }
 
-  /** 使用可替换 transport 和 journal 创建运行时，便于协议集成测试或持久化替换。 */
-  DaemonRuntime(
+  static DaemonRuntime create(
       DaemonConfig config,
-      DaemonTransport transport,
-      DaemonToolRegistry toolRegistry,
       DaemonSkillRegistry skillRegistry,
-      DaemonInvocationJournal journal,
-      ScheduledExecutorService scheduler) {
-    this(
-        config,
-        transport,
-        toolRegistry,
-        skillRegistry,
-        McpServerRegistry.empty(),
-        journal,
-        scheduler,
-        null,
-        null,
-        false);
+      McpServerRegistry mcpRegistry,
+      ResourceStore resourceStore,
+      ToolRegistrar registrar) {
+    Objects.requireNonNull(config, "config");
+    Objects.requireNonNull(skillRegistry, "skillRegistry");
+    Objects.requireNonNull(mcpRegistry, "mcpRegistry");
+    Objects.requireNonNull(registrar, "registrar");
+    ScheduledThreadPoolExecutor scheduler = newScheduler();
+    ExecutorService taskExecutor = null;
+    DaemonTransport transport = null;
+    boolean completed = false;
+    try {
+      taskExecutor = newTaskExecutor();
+      transport = new JdkWebSocketTransport(config.gatewayUri());
+      DaemonToolRegistry toolRegistry = new DaemonToolRegistry();
+      registrar.register(toolRegistry, taskExecutor, scheduler);
+      DaemonRuntime runtime =
+          new DaemonRuntime(
+              config,
+              transport,
+              toolRegistry,
+              skillRegistry,
+              mcpRegistry,
+              new InMemoryDaemonInvocationJournal(),
+              scheduler,
+              taskExecutor,
+              resourceStore,
+              true);
+      completed = true;
+      return runtime;
+    } finally {
+      if (!completed) {
+        closeQuietly(transport);
+        closeQuietly(mcpRegistry);
+        shutdownExecutors(scheduler, taskExecutor);
+      }
+    }
   }
 
-  /** 全参数运行时；{@code resourceStore} 可为 {@code null} 以强制对所有 resource/binary 工具结果返回 FAILED。 */
+  /** 使用可替换 transport、journal 与执行资源创建运行时；注入资源的生命周期移交给 runtime。 */
   DaemonRuntime(
       DaemonConfig config,
       DaemonTransport transport,
@@ -213,6 +190,29 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
+      ExecutorService taskExecutor) {
+    this(
+        config,
+        transport,
+        toolRegistry,
+        skillRegistry,
+        McpServerRegistry.empty(),
+        journal,
+        scheduler,
+        taskExecutor,
+        null,
+        false);
+  }
+
+  /** 全参数运行时；{@code resourceStore} 可为 {@code null} 以强制对 resource/binary 结果返回 FAILED。 */
+  DaemonRuntime(
+      DaemonConfig config,
+      DaemonTransport transport,
+      DaemonToolRegistry toolRegistry,
+      DaemonSkillRegistry skillRegistry,
+      DaemonInvocationJournal journal,
+      ScheduledExecutorService scheduler,
+      ExecutorService taskExecutor,
       ResourceStore resourceStore) {
     this(
         config,
@@ -222,12 +222,12 @@ public final class DaemonRuntime implements AutoCloseable {
         McpServerRegistry.empty(),
         journal,
         scheduler,
+        taskExecutor,
         resourceStore,
-        null,
         false);
   }
 
-  /** 全参数运行时（含 MCP registry），供集成测试注入 registry 生命周期。 */
+  /** 全参数运行时（含 MCP registry），供集成测试注入完整生命周期。 */
   DaemonRuntime(
       DaemonConfig config,
       DaemonTransport transport,
@@ -236,6 +236,7 @@ public final class DaemonRuntime implements AutoCloseable {
       McpServerRegistry mcpRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
+      ExecutorService taskExecutor,
       ResourceStore resourceStore) {
     this(
         config,
@@ -245,30 +246,8 @@ public final class DaemonRuntime implements AutoCloseable {
         mcpRegistry,
         journal,
         scheduler,
+        taskExecutor,
         resourceStore,
-        null,
-        false);
-  }
-
-  /** 测试注入可控目录 worker；生产路径传入 {@code null} 使用默认有界单线程池。 */
-  DaemonRuntime(
-      DaemonConfig config,
-      DaemonTransport transport,
-      DaemonToolRegistry toolRegistry,
-      DaemonSkillRegistry skillRegistry,
-      DaemonInvocationJournal journal,
-      ScheduledExecutorService scheduler,
-      Executor directoryWorker) {
-    this(
-        config,
-        transport,
-        toolRegistry,
-        skillRegistry,
-        McpServerRegistry.empty(),
-        journal,
-        scheduler,
-        null,
-        directoryWorker,
         false);
   }
 
@@ -280,8 +259,8 @@ public final class DaemonRuntime implements AutoCloseable {
       McpServerRegistry mcpRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
+      ExecutorService taskExecutor,
       ResourceStore resourceStore,
-      Executor directoryWorker,
       boolean requireFixedToolCatalog) {
     this.config = Objects.requireNonNull(config, "config");
     this.environmentName = Objects.requireNonNull(config.environmentName(), "environmentName");
@@ -291,8 +270,7 @@ public final class DaemonRuntime implements AutoCloseable {
     this.mcpRegistry = Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
-    this.ownsDirectoryWorker = directoryWorker == null;
-    this.directoryWorker = directoryWorker != null ? directoryWorker : newBoundedDirectoryWorker();
+    this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
     this.resourceStore = resourceStore;
     DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
     this.environmentInfo =
@@ -310,19 +288,15 @@ public final class DaemonRuntime implements AutoCloseable {
     toolRegistry.freeze();
   }
 
-  private static ExecutorService newBoundedDirectoryWorker() {
-    return new ThreadPoolExecutor(
-        1,
-        1,
-        0L,
-        TimeUnit.MILLISECONDS,
-        new ArrayBlockingQueue<>(DIRECTORY_WORKER_QUEUE_CAPACITY),
-        runnable -> {
-          Thread thread = new Thread(runnable, "daemon-directory-worker");
-          thread.setDaemon(true);
-          return thread;
-        },
-        new ThreadPoolExecutor.AbortPolicy());
+  private static ScheduledThreadPoolExecutor newScheduler() {
+    ScheduledThreadPoolExecutor scheduler =
+        new ScheduledThreadPoolExecutor(1, runnable -> new Thread(runnable, "daemon-scheduler"));
+    scheduler.setRemoveOnCancelPolicy(true);
+    return scheduler;
+  }
+
+  private static ExecutorService newTaskExecutor() {
+    return Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("daemon-task-", 0).factory());
   }
 
   /** 启动连接生命周期并立即尝试建立 WebSocket。重复调用无副作用。 */
@@ -679,7 +653,7 @@ public final class DaemonRuntime implements AutoCloseable {
       return;
     }
     try {
-      directoryWorker.execute(() -> listDirectoryOnWorker(connection, envelope, request));
+      taskExecutor.execute(() -> listDirectoryOnWorker(connection, envelope, request));
     } catch (RejectedExecutionException error) {
       sendDirectoryListFailed(
           connection,
@@ -688,7 +662,7 @@ public final class DaemonRuntime implements AutoCloseable {
               request.requestId(),
               request.path(),
               DaemonDirectoryFailureCode.IO_ERROR,
-              "directory listing queue is full"));
+              "directory listing executor is unavailable"));
     }
   }
 
@@ -1032,7 +1006,7 @@ public final class DaemonRuntime implements AutoCloseable {
       failureReason = reason;
       connection = activeConnection.getAndSet(null);
     }
-    // shutdown 必须收敛：终止闩在 finally 中释放，每一步清理独立 try/catch，单个 close 失败不得跳过后续清理或悬挂 shutdown。
+    // shutdown 必须收敛：先停止 transport 接入，再取消任务并停止两个执行资源；单步失败不得跳过后续清理或悬挂 shutdown。
     try {
       if (connection != null) {
         try {
@@ -1041,6 +1015,7 @@ public final class DaemonRuntime implements AutoCloseable {
           // 连接关闭失败不影响其余清理。
         }
       }
+      closeQuietly(transport);
       running
           .values()
           .forEach(
@@ -1056,31 +1031,76 @@ public final class DaemonRuntime implements AutoCloseable {
                 }
               });
       running.clear();
-      try {
-        scheduler.shutdownNow();
-      } catch (RuntimeException ignored) {
-        // scheduler 清理失败不影响 transport/MCP 清理。
-      }
-      if (ownsDirectoryWorker && directoryWorker instanceof ExecutorService ownedWorker) {
-        try {
-          ownedWorker.shutdownNow();
-        } catch (RuntimeException ignored) {
-          // 目录 worker 清理失败不得跳过 transport/MCP 清理。
-        }
-      }
-      try {
-        transport.close();
-      } catch (RuntimeException ignored) {
-        // transport 关闭失败仍必须继续关闭 MCP client。
-      }
-      try {
-        mcpRegistry.close();
-      } catch (RuntimeException ignored) {
-        // MCP 关闭失败仍必须释放终止闩，shutdown 永不悬挂。
-      }
+      shutdownExecutors(scheduler, taskExecutor);
+      closeQuietly(mcpRegistry);
     } finally {
       termination.countDown();
     }
+  }
+
+  private static void shutdownExecutors(ExecutorService scheduler, ExecutorService taskExecutor) {
+    shutdownNowQuietly(scheduler);
+    shutdownNowQuietly(taskExecutor);
+    long deadline = System.nanoTime() + EXECUTOR_TERMINATION_TIMEOUT.toNanos();
+    boolean interrupted = awaitTermination(scheduler, deadline);
+    interrupted |= awaitTermination(taskExecutor, deadline);
+    if (interrupted) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  private static void shutdownNowQuietly(ExecutorService executor) {
+    if (executor == null) {
+      return;
+    }
+    try {
+      executor.shutdownNow();
+    } catch (RuntimeException ignored) {
+      // 继续停止和等待另一个生命周期资源。
+    }
+  }
+
+  private static boolean awaitTermination(ExecutorService executor, long deadline) {
+    if (executor == null) {
+      return false;
+    }
+    boolean interrupted = false;
+    while (!executor.isTerminated()) {
+      long remaining = deadline - System.nanoTime();
+      if (remaining <= 0) {
+        break;
+      }
+      try {
+        if (executor.awaitTermination(remaining, TimeUnit.NANOSECONDS)) {
+          break;
+        }
+      } catch (InterruptedException ignored) {
+        interrupted = true;
+      } catch (RuntimeException ignored) {
+        break;
+      }
+    }
+    return interrupted;
+  }
+
+  private static void closeQuietly(AutoCloseable closeable) {
+    if (closeable == null) {
+      return;
+    }
+    try {
+      closeable.close();
+    } catch (Exception ignored) {
+      // 生命周期清理必须继续收敛。
+    }
+  }
+
+  @FunctionalInterface
+  interface ToolRegistrar {
+
+    void register(
+        DaemonToolRegistry registry,
+        ExecutorService taskExecutor,
+        ScheduledExecutorService scheduler);
   }
 
   private final class InvocationListener implements ToolExecutionListener {

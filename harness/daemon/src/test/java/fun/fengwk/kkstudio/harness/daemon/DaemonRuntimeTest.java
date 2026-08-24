@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
@@ -84,7 +85,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -96,6 +96,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Daemon 生命周期及本地 Tool SPI 的协议集成测试。 */
 class DaemonRuntimeTest {
@@ -190,8 +191,6 @@ class DaemonRuntimeTest {
   /** 生产构造器不能为不完整的 registry 公布固定的 catalog。 */
   @Test
   void productionRuntimeRejectsRegistryThatDoesNotMatchFixedCatalog() {
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(new TestTool());
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
@@ -209,7 +208,93 @@ class DaemonRuntimeTest {
 
     assertThrows(
         IllegalStateException.class,
-        () -> new DaemonRuntime(config, registry, DaemonSkillRegistry.empty()));
+        () ->
+            DaemonRuntime.create(
+                config,
+                DaemonSkillRegistry.empty(),
+                McpServerRegistry.empty(),
+                null,
+                (registry, executor, scheduler) -> registry.register(new TestTool())));
+  }
+
+  /** 生产工厂必须在同一装配点创建资源、注入完整固定 Tool 目录，并把生命周期移交给可关闭 runtime。 */
+  @Test
+  void productionFactoryCreatesCompleteClosableRuntime() {
+    DaemonConfig config =
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            new EnvironmentName("environment"),
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            null,
+            ENVIRONMENT_ROOT,
+            List.of(),
+            null);
+    CodingToolsConfig toolsConfig =
+        new CodingToolsConfig(
+            ENVIRONMENT_ROOT, 2000, 50 * 1024, "bash", new InMemoryResourceStore());
+
+    runtime =
+        DaemonRuntime.create(
+            config, toolsConfig, DaemonSkillRegistry.empty(), McpServerRegistry.empty());
+
+    assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
+    runtime.close();
+    assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
+  }
+
+  /** 生产装配在 Tool 注册失败时必须释放已经创建的 scheduler/executor，并关闭已启动的 MCP registry。 */
+  @Test
+  void productionConstructionFailureReleasesCreatedLifecycleResources() throws Exception {
+    DaemonConfig config =
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            new EnvironmentName("environment"),
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            null,
+            ENVIRONMENT_ROOT,
+            List.of(),
+            null);
+    FakeMcpServerClient mcpClient =
+        new FakeMcpServerClient(
+            "fs", new McpToolSpec("read_file", "Read a file", "{\"name\":\"read_file\"}"));
+    McpServerRegistry mcpRegistry =
+        new McpServerRegistry(
+            new McpConfig(List.of(serverConfig("fs"))),
+            (server, timeout) -> mcpClient,
+            Duration.ofSeconds(10));
+    mcpRegistry.start();
+    AtomicReference<ExecutorService> executorRef = new AtomicReference<>();
+    AtomicReference<ScheduledExecutorService> schedulerRef = new AtomicReference<>();
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            DaemonRuntime.create(
+                config,
+                DaemonSkillRegistry.empty(),
+                mcpRegistry,
+                null,
+                (registry, executor, scheduler) -> {
+                  executorRef.set(executor);
+                  schedulerRef.set(scheduler);
+                  throw new IllegalStateException("registration failed");
+                }));
+
+    assertTrue(executorRef.get().isShutdown());
+    assertTrue(schedulerRef.get().isShutdown());
+    assertTrue(executorRef.get().awaitTermination(1, TimeUnit.SECONDS));
+    assertTrue(schedulerRef.get().awaitTermination(1, TimeUnit.SECONDS));
+    assertTrue(mcpClient.closed.get());
   }
 
   /**
@@ -723,25 +808,21 @@ class DaemonRuntimeTest {
     CountDownLatch started = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     ExecutorService directoryWorker = Executors.newSingleThreadExecutor();
-    Executor holdingWorker =
-        command ->
-            directoryWorker.execute(
-                () -> {
-                  started.countDown();
-                  try {
-                    if (!release.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                      throw new IllegalStateException("test did not release directory worker");
-                    }
-                  } catch (InterruptedException error) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException(error);
-                  }
-                  command.run();
-                });
+    directoryWorker.execute(
+        () -> {
+          started.countDown();
+          try {
+            if (!release.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+              throw new IllegalStateException("test did not release directory worker");
+            }
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+          }
+        });
     try {
       FakeTransport transport = new FakeTransport();
       TestTool tool = new TestTool();
-      runtime = runtime(transport, tool, envRoot, holdingWorker);
+      runtime = runtime(transport, tool, envRoot, directoryWorker);
 
       runtime.start();
       transport.awaitConnections(1);
@@ -774,15 +855,13 @@ class DaemonRuntimeTest {
     }
   }
 
-  /** 目录 worker 队列拒绝时立即回 correlated DIRECTORY_LIST_FAILED，不悬挂请求。 */
+  /** 统一阻塞 executor 已停止时立即回 correlated DIRECTORY_LIST_FAILED，不悬挂目录请求。 */
   @Test
   void listDirectoryQueueRejectionReturnsTypedFailure() throws Exception {
     Path envRoot = Files.createTempDirectory("daemon-dir-reject");
     Files.createDirectories(envRoot.resolve("docs"));
-    Executor directoryWorker =
-        command -> {
-          throw new RejectedExecutionException("directory queue full");
-        };
+    ExecutorService directoryWorker = Executors.newSingleThreadExecutor();
+    directoryWorker.shutdownNow();
     try {
       FakeTransport transport = new FakeTransport();
       runtime = runtime(transport, new TestTool(), envRoot, directoryWorker);
@@ -1596,6 +1675,98 @@ class DaemonRuntimeTest {
     assertFalse(transport.awaitConnection(Duration.ofMillis(100)));
   }
 
+  /** close 的两个执行资源必须恰好归 runtime 所有：重复关闭后均 shutdownNow 且在有界时间内终止。 */
+  @Test
+  void closeTerminatesSchedulerAndSharedTaskExecutorIdempotently() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    DaemonToolRegistry registry = new DaemonToolRegistry();
+    registry.register(new TestTool());
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    ExecutorService taskExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    runtime =
+        new DaemonRuntime(
+            new DaemonConfig(
+                URI.create("ws://localhost/gateway"),
+                new EnvironmentName("environment"),
+                "daemon",
+                Duration.ofMinutes(1),
+                Duration.ZERO,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(10),
+                "test-gateway-token",
+                null,
+                ENVIRONMENT_ROOT,
+                List.of(),
+                null),
+            transport,
+            registry,
+            DaemonSkillRegistry.empty(),
+            new InMemoryDaemonInvocationJournal(),
+            scheduler,
+            taskExecutor);
+
+    runtime.close();
+    runtime.close();
+
+    assertTrue(scheduler.isShutdown());
+    assertTrue(taskExecutor.isShutdown());
+    assertTrue(scheduler.awaitTermination(1, TimeUnit.SECONDS));
+    assertTrue(taskExecutor.awaitTermination(1, TimeUnit.SECONDS));
+    assertEquals(DaemonRuntimeState.STOPPED, runtime.awaitTermination());
+  }
+
+  /** 阻塞 executor 被占满时，独立 scheduler 仍必须发送 heartbeat，证明阻塞 Tool/IO 不会饿死连接保活。 */
+  @Test
+  void blockingTaskExecutorDoesNotDelayHeartbeatScheduler() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    handshakeTransport = transport;
+    DaemonToolRegistry registry = new DaemonToolRegistry();
+    registry.register(new TestTool());
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    ExecutorService taskExecutor = Executors.newSingleThreadExecutor();
+    CountDownLatch release = new CountDownLatch(1);
+    taskExecutor.execute(
+        () -> {
+          try {
+            release.await();
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+          }
+        });
+    runtime =
+        new DaemonRuntime(
+            new DaemonConfig(
+                URI.create("ws://localhost/gateway"),
+                new EnvironmentName("environment"),
+                "daemon",
+                Duration.ofMillis(20),
+                Duration.ZERO,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(10),
+                "test-gateway-token",
+                null,
+                ENVIRONMENT_ROOT,
+                List.of(),
+                null),
+            transport,
+            registry,
+            DaemonSkillRegistry.empty(),
+            new InMemoryDaemonInvocationJournal(),
+            scheduler,
+            taskExecutor);
+
+    try {
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+
+      transport.awaitNextMessageType(DaemonMessageType.HEARTBEAT);
+    } finally {
+      release.countDown();
+    }
+  }
+
   /** transport close 抛错不得悬挂 shutdown：终止闩释放，MCP client 仍被关闭，且 close 幂等。 */
   @Test
   void shutdownConvergesWhenTransportCloseThrows() throws Exception {
@@ -1695,7 +1866,8 @@ class DaemonRuntimeTest {
         registry,
         DaemonSkillRegistry.empty(),
         new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor());
+        Executors.newSingleThreadScheduledExecutor(),
+        Executors.newVirtualThreadPerTaskExecutor());
   }
 
   private DaemonRuntime runtime(FakeTransport transport, Tool tool, Path environmentRoot) {
@@ -1720,11 +1892,12 @@ class DaemonRuntimeTest {
         registry,
         DaemonSkillRegistry.empty(),
         new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor());
+        Executors.newSingleThreadScheduledExecutor(),
+        Executors.newVirtualThreadPerTaskExecutor());
   }
 
   private DaemonRuntime runtime(
-      FakeTransport transport, Tool tool, Path environmentRoot, Executor directoryWorker) {
+      FakeTransport transport, Tool tool, Path environmentRoot, ExecutorService directoryWorker) {
     handshakeTransport = transport;
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
@@ -1777,7 +1950,8 @@ class DaemonRuntimeTest {
         registry,
         DaemonSkillRegistry.empty(),
         journal,
-        Executors.newSingleThreadScheduledExecutor());
+        Executors.newSingleThreadScheduledExecutor(),
+        Executors.newVirtualThreadPerTaskExecutor());
   }
 
   private DaemonRuntime runtime(
@@ -1803,7 +1977,8 @@ class DaemonRuntimeTest {
         registry,
         DaemonSkillRegistry.empty(),
         new InMemoryDaemonInvocationJournal(),
-        scheduler);
+        scheduler,
+        Executors.newVirtualThreadPerTaskExecutor());
   }
 
   private DaemonRuntime runtime(
@@ -1880,6 +2055,7 @@ class DaemonRuntimeTest {
         mcpRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
+        Executors.newVirtualThreadPerTaskExecutor(),
         resourceStore);
   }
 
