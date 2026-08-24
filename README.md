@@ -47,6 +47,13 @@ env JAVA_HOME=$JAVA_HOME_21 mvn test
 cd frontend && npm test && npm run lint && npm run build
 ```
 
+供应链质量门禁（显式在线扫描，报告见
+[技术方案](docs/technical-solution/supply-chain-quality-gate.md)）：
+
+```bash
+./scripts/supply-chain.sh all
+```
+
 完整应用 Fat JAR（包含 React 静态资源）：
 
 ```bash

@@ -119,6 +119,9 @@ __pycache__/
 # E2E reports/artifacts (screenshots, logs, summary)
 reports/
 
+# Supply-chain SBOM and vulnerability reports
+/reports/supply-chain/
+
 # Local secrets / credentials (prevent accidental commit before public release)
 .env
 .env.*
