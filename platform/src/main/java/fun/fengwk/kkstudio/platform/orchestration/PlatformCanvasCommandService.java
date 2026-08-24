@@ -78,7 +78,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
   private final ObjectProvider<StorageBlobManager> blobManagers;
   private final ObjectProvider<CanvasBlobPreviewService> previewServices;
   private final CanvasFunctionConfigCodecPort functionConfigCodec;
-  private final CanvasFunctionCatalog functionModelRegistry;
+  private final CanvasFunctionCatalog functionCatalog;
   private final ObjectMapper objectMapper;
   private final SessionDeletionOrchestrator sessionDeletionService;
 
@@ -91,7 +91,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
       ObjectProvider<StorageBlobManager> blobManagers,
       ObjectProvider<CanvasBlobPreviewService> previewServices,
       CanvasFunctionConfigCodecPort functionConfigCodec,
-      CanvasFunctionCatalog functionModelRegistry,
+      CanvasFunctionCatalog functionCatalog,
       ObjectMapper objectMapper,
       SessionDeletionOrchestrator sessionDeletionService) {
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
@@ -102,8 +102,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
     this.previewServices = Objects.requireNonNull(previewServices, "previewServices");
     this.functionConfigCodec = Objects.requireNonNull(functionConfigCodec, "functionConfigCodec");
-    this.functionModelRegistry =
-        Objects.requireNonNull(functionModelRegistry, "functionModelRegistry");
+    this.functionCatalog = Objects.requireNonNull(functionCatalog, "functionCatalog");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     this.sessionDeletionService =
         Objects.requireNonNull(sessionDeletionService, "sessionDeletionService");
@@ -611,7 +610,7 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
 
   private String canonicalFunctionConfig(String modelKey, String configJson) {
     return functionConfigCodec.encode(
-        functionConfigCodec.decode(configJson, functionModelRegistry.require(modelKey).model()));
+        functionConfigCodec.decode(configJson, functionCatalog.require(modelKey).model()));
   }
 
   private String requestHash(List<CanvasCommand> commands) {

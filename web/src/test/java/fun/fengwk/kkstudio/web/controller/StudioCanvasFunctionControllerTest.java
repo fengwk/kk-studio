@@ -56,10 +56,7 @@ class StudioCanvasFunctionControllerTest {
   void setUp() {
     runtimeService = mock(CanvasFunctionService.class);
     CanvasFunctionAdapter adapter = adapter("fake-image");
-    CanvasFunctionCatalog registry = mock(CanvasFunctionCatalog.class);
-    when(registry.list())
-        .thenReturn(
-            List.of(new CanvasFunctionCatalog.RegisteredModel(adapter.models().get(0), adapter)));
+    CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
     FixedObjectProvider<StorageBlobManager> blobManagers =
         new FixedObjectProvider<>(mock(StorageBlobManager.class));
     ObjectMapper mapper = new ObjectMapper();
@@ -67,7 +64,7 @@ class StudioCanvasFunctionControllerTest {
     mockMvc =
         standaloneSetup(
                 new StudioCanvasFunctionController(
-                    registry, runtimeService, new WebDtoMapper(blobManagers)))
+                    catalog, runtimeService, new WebDtoMapper(blobManagers)))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(mapper))
             .build();
   }

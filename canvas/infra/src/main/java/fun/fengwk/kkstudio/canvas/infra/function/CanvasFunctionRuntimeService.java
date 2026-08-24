@@ -26,7 +26,7 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
   private final CanvasStore canvasStore;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionRunTransactions transactions;
-  private final CanvasFunctionCatalog registry;
+  private final CanvasFunctionCatalog catalog;
   private final CanvasFunctionRunStateCodecPort stateCodec;
 
   @Override
@@ -57,7 +57,7 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
   private void bestEffortAdapterCancel(CanvasFunctionRun run) {
     try {
       CanvasFunctionCatalog.RegisteredModel registered =
-          registry.require(stateCodec.modelKey(run.stateJson()));
+          catalog.require(stateCodec.modelKey(run.stateJson()));
       CanvasFunctionFrozenRun frozen = stateCodec.decode(run.stateJson(), registered.model());
       registered.adapter().cancel(frozen);
     } catch (RuntimeException error) {

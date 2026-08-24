@@ -173,7 +173,6 @@ class CanvasFunctionWorkerHeartbeatTest {
     private final CountDownLatch ownershipLost = new CountDownLatch(1);
     private final CanvasFunctionRunRepository runRepository =
         mock(CanvasFunctionRunRepository.class);
-    private final CanvasFunctionCatalog catalog = mock(CanvasFunctionCatalog.class);
     private final CanvasFunctionRunStateCodecPort stateCodec =
         mock(CanvasFunctionRunStateCodecPort.class);
     private final CanvasFunctionRunTransactions transactions =
@@ -182,8 +181,10 @@ class CanvasFunctionWorkerHeartbeatTest {
     private final CanvasFunctionWorkStore workStore = mock(CanvasFunctionWorkStore.class);
     private final CanvasFunctionFrozenRun frozen = mock(CanvasFunctionFrozenRun.class);
     private final CanvasFunctionAdapter adapter = mock(CanvasFunctionAdapter.class);
+    private final CanvasFunctionModel model = mock(CanvasFunctionModel.class);
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final ClaimedRun claim;
+    private final CanvasFunctionCatalog catalog;
     private final CanvasFunctionWorker worker;
 
     @SuppressWarnings("unchecked")
@@ -208,10 +209,12 @@ class CanvasFunctionWorkerHeartbeatTest {
       when(frozen.nodeId()).thenReturn(run.nodeId());
       when(frozen.requestId()).thenReturn(run.requestId());
       when(frozen.targetResourceId()).thenReturn(targetResourceId);
+      when(model.key()).thenReturn("model");
+      when(adapter.models()).thenReturn(List.of(model));
       when(adapter.enabled()).thenReturn(true);
-      CanvasFunctionCatalog.RegisteredModel registered =
-          new CanvasFunctionCatalog.RegisteredModel(mock(CanvasFunctionModel.class), adapter);
-      when(catalog.require("model")).thenReturn(registered);
+      when(adapter.unavailableReason()).thenReturn(null);
+      catalog = CanvasFunctionCatalog.from(List.of(adapter));
+      CanvasFunctionCatalog.RegisteredModel registered = catalog.require("model");
       when(stateCodec.decode(run.stateJson(), registered.model())).thenReturn(frozen);
       ObjectProvider<CanvasResourceMaterializer> materializers = mock(ObjectProvider.class);
       when(materializers.getIfAvailable()).thenReturn(mock(CanvasResourceMaterializer.class));

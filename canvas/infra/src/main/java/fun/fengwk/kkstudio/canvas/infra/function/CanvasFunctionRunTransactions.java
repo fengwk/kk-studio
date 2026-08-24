@@ -47,7 +47,7 @@ public class CanvasFunctionRunTransactions {
   private final CanvasResourceRepository resourceRepository;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionResourcePinRepository refRepository;
-  private final CanvasFunctionCatalog registry;
+  private final CanvasFunctionCatalog catalog;
   private final CanvasFunctionConfigCodecPort configCodec;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final CanvasResourceLifecycle resourceLifecycle;
@@ -59,7 +59,7 @@ public class CanvasFunctionRunTransactions {
       CanvasResourceRepository resourceRepository,
       CanvasFunctionRunRepository runRepository,
       CanvasFunctionResourcePinRepository refRepository,
-      CanvasFunctionCatalog registry,
+      CanvasFunctionCatalog catalog,
       CanvasFunctionConfigCodecPort configCodec,
       CanvasFunctionRunStateCodecPort stateCodec,
       CanvasResourceLifecycle resourceLifecycle,
@@ -69,7 +69,7 @@ public class CanvasFunctionRunTransactions {
     this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.refRepository = Objects.requireNonNull(refRepository, "refRepository");
-    this.registry = Objects.requireNonNull(registry, "registry");
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
     this.configCodec = Objects.requireNonNull(configCodec, "configCodec");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
@@ -100,12 +100,9 @@ public class CanvasFunctionRunTransactions {
       throw conflict("another requestId is already active for this node");
     }
 
-    CanvasFunctionCatalog.RegisteredModel registered = registry.require(node.modelKey());
+    CanvasFunctionCatalog.RegisteredModel registered = catalog.require(node.modelKey());
+    registered.requireAvailable();
     CanvasFunctionAdapter adapter = registered.adapter();
-    if (!adapter.enabled()) {
-      throw new IllegalArgumentException(
-          "Canvas Function model is unavailable: " + adapter.unavailableReason());
-    }
     CanvasFunctionModel model = registered.model();
     CanvasFunctionConfig config = configCodec.decode(node.functionConfigJson(), model);
     List<CanvasFunctionFrozenReference> manifest =
@@ -422,7 +419,7 @@ public class CanvasFunctionRunTransactions {
   }
 
   private CanvasFunctionFrozenRun decode(CanvasFunctionRun run) {
-    CanvasFunctionModel model = registry.require(stateCodec.modelKey(run.stateJson())).model();
+    CanvasFunctionModel model = catalog.require(stateCodec.modelKey(run.stateJson())).model();
     return stateCodec.decode(run.stateJson(), model);
   }
 
