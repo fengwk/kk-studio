@@ -25,5 +25,9 @@ public class StorageUploadDO {
 
   private Instant expiresAt;
 
+  private String cleanupToken;
+
+  private Instant cleanupUntil;
+
   private Instant createTime;
 }

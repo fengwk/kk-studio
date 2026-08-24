@@ -13,6 +13,7 @@ import org.apache.ibatis.annotations.Update;
 
 import fun.fengwk.kkstudio.platform.storage.persistence.postgresql.model.StorageUploadDO;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,14 +21,15 @@ import java.util.UUID;
  * {@code storage_upload} 的原子 SQL 入口。
  *
  * <p>状态由 {@code blob_id} 表达：null = PENDING，非 null = READY；{@code setBlobIdIfNull} 保证同一上传只被 complete
- * 一次，过期批次使用 {@code for update skip locked} 抢占不超过 16 行。
+ * 一次；过期清理通过 CTE + {@code for update skip locked} 在短事务内写入 cleanup lease，再把对象 I/O 移到事务外。
  */
 @Mapper
 public interface StorageUploadMapper extends BaseMapper {
 
   String COLUMNS =
       "id, candidate_blob_id, blob_id, filename, declared_media_type, declared_size, "
-          + "declared_sha256, expires_at, created_at as create_time";
+          + "declared_sha256, expires_at, cleanup_token, cleanup_until, "
+          + "created_at as create_time";
 
   @Results(
       id = "storageUploadResultMap",
@@ -40,6 +42,8 @@ public interface StorageUploadMapper extends BaseMapper {
         @Result(column = "declared_size", property = "declaredSize"),
         @Result(column = "declared_sha256", property = "declaredSha256"),
         @Result(column = "expires_at", property = "expiresAt"),
+        @Result(column = "cleanup_token", property = "cleanupToken"),
+        @Result(column = "cleanup_until", property = "cleanupUntil"),
         @Result(column = "create_time", property = "createTime"),
       })
   @Select("select " + COLUMNS + " from storage_upload where id = #{id}")
@@ -61,23 +65,89 @@ public interface StorageUploadMapper extends BaseMapper {
   @Select("select " + COLUMNS + " from storage_upload where id = #{id} for update")
   StorageUploadDO getByIdForUpdate(@Param("id") UUID id);
 
-  @Update("update storage_upload set blob_id = #{blobId} where id = #{id} and blob_id is null")
-  int setBlobIdIfNull(@Param("id") UUID id, @Param("blobId") UUID blobId);
+  @Update(
+      """
+      update storage_upload
+      set blob_id = #{blobId}
+      where id = #{id}
+        and blob_id is null
+        and cleanup_token is null
+        and expires_at > #{now}
+      """)
+  int setBlobIdIfNull(
+      @Param("id") UUID id, @Param("blobId") UUID blobId, @Param("now") Instant now);
 
-  @Delete("delete from storage_upload where id = #{id} and blob_id is null")
-  int deletePendingById(@Param("id") UUID id);
-
-  @Delete("delete from storage_upload where id = #{id}")
+  @Delete("delete from storage_upload where id = #{id} and cleanup_token is null")
   int deleteById(@Param("id") UUID id);
 
   @ResultMap("storageUploadResultMap")
   @Select(
       """
-      select id, blob_id from storage_upload
-      where expires_at < current_timestamp
-      order by expires_at, id
-      limit #{limit}
-      for update skip locked
+      with claimable as (
+          select id
+          from storage_upload
+          where expires_at <= #{now}
+            and (cleanup_token is null or cleanup_until <= #{now})
+          order by expires_at, id
+          limit #{limit}
+          for update skip locked
+      )
+      update storage_upload upload
+      set cleanup_token = #{cleanupToken}, cleanup_until = #{leaseUntil}
+      from claimable
+      where upload.id = claimable.id
+      returning
+          upload.id, upload.candidate_blob_id, upload.blob_id, upload.filename,
+          upload.declared_media_type, upload.declared_size, upload.declared_sha256,
+          upload.expires_at, upload.cleanup_token, upload.cleanup_until,
+          upload.created_at as create_time
       """)
-  List<StorageUploadDO> listExpired(@Param("limit") int limit);
+  List<StorageUploadDO> claimExpired(
+      @Param("limit") int limit,
+      @Param("now") Instant now,
+      @Param("leaseUntil") Instant leaseUntil,
+      @Param("cleanupToken") String cleanupToken);
+
+  @ResultMap("storageUploadResultMap")
+  @Select(
+      """
+      update storage_upload
+      set cleanup_token = #{cleanupToken}, cleanup_until = #{leaseUntil}
+      where id = #{id}
+        and (cleanup_token is null or cleanup_until <= #{now})
+      returning
+          id, candidate_blob_id, blob_id, filename, declared_media_type,
+          declared_size, declared_sha256, expires_at, cleanup_token, cleanup_until,
+          created_at as create_time
+      """)
+  StorageUploadDO claimById(
+      @Param("id") UUID id,
+      @Param("now") Instant now,
+      @Param("leaseUntil") Instant leaseUntil,
+      @Param("cleanupToken") String cleanupToken);
+
+  @Delete(
+      """
+      delete from storage_upload
+      where id = #{id} and blob_id is null and cleanup_token = #{cleanupToken}
+      """)
+  int finalizePending(@Param("id") UUID id, @Param("cleanupToken") String cleanupToken);
+
+  @Delete(
+      """
+      delete from storage_upload
+      where id = #{id} and blob_id = #{blobId} and cleanup_token = #{cleanupToken}
+      """)
+  int finalizeReady(
+      @Param("id") UUID id,
+      @Param("blobId") UUID blobId,
+      @Param("cleanupToken") String cleanupToken);
+
+  @Update(
+      """
+      update storage_upload
+      set cleanup_token = null, cleanup_until = null
+      where id = #{id} and cleanup_token = #{cleanupToken}
+      """)
+  int releaseCleanupClaim(@Param("id") UUID id, @Param("cleanupToken") String cleanupToken);
 }

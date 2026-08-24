@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.http.AbortableInputStream;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
@@ -13,8 +14,10 @@ import java.io.UncheckedIOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * 测试用内存 S3 实现：对象按 key 存字节与 content type，HEAD（含 checksum mode）如实报告存储内容的大小与 SHA-256， 使 complete
@@ -26,11 +29,15 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   private final Map<String, byte[]> objects = new ConcurrentHashMap<>();
   private final Map<String, String> contentTypes = new ConcurrentHashMap<>();
+  private final List<NetworkCall> networkCalls = new CopyOnWriteArrayList<>();
+  private final Map<String, RuntimeException> deleteFailures = new ConcurrentHashMap<>();
 
   /** 清空全部对象（每个测试前调用）。 */
   public void clear() {
     objects.clear();
     contentTypes.clear();
+    networkCalls.clear();
+    deleteFailures.clear();
   }
 
   public boolean hasObject(String key) {
@@ -47,6 +54,14 @@ public class InMemoryS3StorageService implements S3StorageService {
     return bytes == null ? null : bytes.clone();
   }
 
+  public List<NetworkCall> networkCalls() {
+    return List.copyOf(networkCalls);
+  }
+
+  public void failNextDelete(String key, RuntimeException error) {
+    deleteFailures.put(key, error);
+  }
+
   /** 模拟浏览器直传：直接写入 uploads/{uploadId}/original 对象。 */
   public void putDirect(String key, byte[] content, String contentType) {
     objects.put(key, content.clone());
@@ -56,6 +71,7 @@ public class InMemoryS3StorageService implements S3StorageService {
   @Override
   public PutObjectResponse putObject(
       String key, InputStream content, long contentLength, String contentType) {
+    record("putObject", key);
     try {
       objects.put(key, content.readAllBytes());
       contentTypes.put(key, contentType);
@@ -67,16 +83,19 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   @Override
   public boolean exists(String key) {
+    record("exists", key);
     return objects.containsKey(key);
   }
 
   @Override
   public S3ObjectMetadata headObject(String key) {
+    record("headObject", key);
     return metadata(key, false);
   }
 
   @Override
   public S3ObjectMetadata headObjectWithChecksum(String key) {
+    record("headObjectWithChecksum", key);
     return metadata(key, true);
   }
 
@@ -94,6 +113,7 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   @Override
   public S3ObjectStream readObject(String key) {
+    record("readObject", key);
     byte[] bytes = objects.get(key);
     if (bytes == null) {
       throw NoSuchKeyException.builder().message("missing: " + key).build();
@@ -111,12 +131,18 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   @Override
   public void deleteObject(String key) {
+    record("deleteObject", key);
+    RuntimeException failure = deleteFailures.remove(key);
+    if (failure != null) {
+      throw failure;
+    }
     objects.remove(key);
     contentTypes.remove(key);
   }
 
   @Override
   public void copyObject(String sourceKey, String targetKey) {
+    record("copyObject", sourceKey + " -> " + targetKey);
     byte[] bytes = objects.get(sourceKey);
     if (bytes == null) {
       throw NoSuchKeyException.builder().message("missing source: " + sourceKey).build();
@@ -127,11 +153,13 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   @Override
   public String getPublicUrl(String key) {
+    record("getPublicUrl", key);
     return "http://fake.invalid/" + key;
   }
 
   @Override
   public byte[] download(String key) {
+    record("download", key);
     byte[] bytes = objects.get(key);
     if (bytes == null) {
       throw NoSuchKeyException.builder().message("missing: " + key).build();
@@ -148,6 +176,12 @@ public class InMemoryS3StorageService implements S3StorageService {
     return new S3ObjectContent(bytes, contentTypes.get(key));
   }
 
+  private void record(String operation, String key) {
+    networkCalls.add(
+        new NetworkCall(
+            operation, key, TransactionSynchronizationManager.isActualTransactionActive()));
+  }
+
   static byte[] sha256(byte[] content) {
     try {
       return MessageDigest.getInstance("SHA-256").digest(content);
@@ -155,4 +189,6 @@ public class InMemoryS3StorageService implements S3StorageService {
       throw new IllegalStateException(e);
     }
   }
+
+  public record NetworkCall(String operation, String key, boolean transactionActive) {}
 }

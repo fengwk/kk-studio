@@ -263,6 +263,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "declared_size",
         "declared_sha256",
         "expires_at",
+        "cleanup_token",
+        "cleanup_until",
         "created_at");
   }
 

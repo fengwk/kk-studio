@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.storage.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -8,6 +9,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
@@ -24,8 +26,8 @@ import java.util.UUID;
  * 基于 PostgreSQL 的 {@link StorageBlobManager}。
  *
  * <p>retain/release 为 MANDATORY 事务方法：调用方必须处于事务中（服务层用 {@code TransactionTemplate} 包裹）， 所有状态切换由条件
- * UPDATE 在数据库行锁上串行化。release 将引用减到 0 时在同一事务内切换到 DELETING， 并在事务提交后由提交线程（afterCommit）按 预览→原始→行的顺序先删 S3
- * 对象，再条件删除行（{@code state = 'DELETING' and ref_count = 0} 兜底并发）。
+ * UPDATE 在数据库行锁上串行化。release 将引用减到 0 时在同一事务内切换到 DELETING，提交后只快速唤醒本地 Storage Maintenance；S3
+ * 对象与行由后台按预览→原始→条件删行处理。
  *
  * @author fengwk
  */
@@ -35,14 +37,17 @@ public class PostgresqlStorageBlobManager implements StorageBlobManager {
   private final StorageBlobRepository blobRepository;
   private final S3StorageService s3StorageService;
   private final S3PresignService s3PresignService;
+  private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
 
   public PostgresqlStorageBlobManager(
       StorageBlobRepository blobRepository,
       S3StorageService s3StorageService,
-      S3PresignService s3PresignService) {
+      S3PresignService s3PresignService,
+      ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups) {
     this.blobRepository = Objects.requireNonNull(blobRepository, "blobRepository");
     this.s3StorageService = Objects.requireNonNull(s3StorageService, "s3StorageService");
     this.s3PresignService = Objects.requireNonNull(s3PresignService, "s3PresignService");
+    this.maintenanceWakeups = Objects.requireNonNull(maintenanceWakeups, "maintenanceWakeups");
   }
 
   @Override
@@ -75,7 +80,15 @@ public class PostgresqlStorageBlobManager implements StorageBlobManager {
           new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-              deleteObjectsAndRow(blobId);
+              try {
+                StorageMaintenanceWakeup wakeup = maintenanceWakeups.getIfAvailable();
+                if (wakeup != null) {
+                  wakeup.wake();
+                }
+              } catch (RuntimeException error) {
+                // API 事务已经提交：本地唤醒只是低延迟提示，失败由 periodic poll 恢复且绝不向调用方冒泡。
+                log.warn("storage maintenance wake failed for deleting blob {}", blobId, error);
+              }
             }
           });
     }
@@ -113,8 +126,8 @@ public class PostgresqlStorageBlobManager implements StorageBlobManager {
       try {
         deleteObjectsAndRow(blobId);
         swept++;
-      } catch (RuntimeException e) {
-        log.warn("storage blob sweep failed for blob {}: {}", blobId, e.getMessage());
+      } catch (RuntimeException error) {
+        log.warn("storage blob sweep failed for blob {}: {}", blobId, error.getMessage());
       }
     }
     return swept;

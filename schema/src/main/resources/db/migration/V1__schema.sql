@@ -958,6 +958,8 @@ create table storage_upload (
     declared_size       bigint         not null,
     declared_sha256     char(64)       not null,
     expires_at          timestamptz(3) not null,
+    cleanup_token       varchar(128),
+    cleanup_until       timestamptz(3),
     created_at          timestamptz(3) not null default current_timestamp,
     constraint uk_storage_upload_candidate unique (candidate_blob_id),
     constraint ck_storage_upload_filename_nonblank check (btrim(filename) <> ''),
@@ -965,12 +967,22 @@ create table storage_upload (
     constraint ck_storage_upload_size_nonneg check (declared_size >= 0),
     constraint ck_storage_upload_sha256 check (declared_sha256 ~ '^[0-9a-f]{64}$'),
     constraint ck_storage_upload_expiry check (expires_at > created_at),
+    constraint ck_storage_upload_cleanup_pair check (
+        (cleanup_token is null) = (cleanup_until is null)
+    ),
+    constraint ck_storage_upload_cleanup_token check (
+        cleanup_token is null or (
+            btrim(cleanup_token) <> ''
+            and cleanup_token = btrim(cleanup_token)
+            and char_length(cleanup_token) <= 128
+        )
+    ),
     constraint fk_storage_upload_blob foreign key (blob_id)
         references storage_blob (id) on delete restrict
 );
 
-create index idx_storage_upload_expiry
-    on storage_upload (expires_at, id);
+create index idx_storage_upload_cleanup_claim
+    on storage_upload (expires_at, cleanup_until, id);
 
 comment on table storage_blob is
     'Deduplicated immutable content address of the global blob storage: one'
@@ -1021,14 +1033,17 @@ comment on column storage_upload.declared_sha256 is 'Client-declared lowercase h
 comment on column storage_upload.expires_at is
     'Cleanup deadline: PENDING temp objects and rows, or READY rows plus the'
     ' upload reference, are removed after this instant.';
+comment on column storage_upload.cleanup_token is
+    'Opaque cleanup ownership token; NULL when unclaimed and fenced on finalize/release.';
+comment on column storage_upload.cleanup_until is
+    'Cleanup lease deadline paired with cleanup_token; an expired lease is reclaimable.';
 comment on column storage_upload.created_at is 'Row creation time (timestamptz, millisecond precision).';
 
 comment on index uk_storage_upload_candidate is
     'Every upload pre-assigns a distinct candidate blob id so PENDING rows can'
     ' never collide on the future blob identity.';
-comment on index idx_storage_upload_expiry is
-    'Expiry sweep: opportunistic SKIP LOCKED batches and startup recovery scan'
-    ' expired uploads oldest-first in bounded batches.';
+comment on index idx_storage_upload_cleanup_claim is
+    'Storage Maintenance claim scan: expired uploads with absent/expired leases oldest-first.';
 
 -- Session 级 Blob 引用：Session 的持久化 message（USER/RESOURCE 与 TOOL 结果）通过本表持有 storage_blob 的
 -- 活跃引用。ref_count 维护完全由应用层 SessionBlobRefManager 显式执行（insert+retain / delete+release 成对），

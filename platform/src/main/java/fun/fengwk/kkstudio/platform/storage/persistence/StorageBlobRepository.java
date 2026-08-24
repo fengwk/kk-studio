@@ -18,6 +18,9 @@ public interface StorageBlobRepository {
    */
   boolean insertActiveCandidate(StorageBlob blob);
 
+  /** 为事务失败/去重落败后已存在的候选对象记录 DELETING 清理事实。 */
+  boolean insertDeletingCandidate(StorageBlob blob);
+
   /** 原子 retain：仅当行仍为 ACTIVE 时 {@code ref_count + 1}，否则返回 false。 */
   boolean incrementRefCount(UUID id);
 

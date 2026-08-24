@@ -745,12 +745,11 @@ Command payload 和 Stop 恢复结果只保存 durable Resource，不再依赖 u
 
 ### 8.3 回收
 
-回收只保留三个入口：
+回收只保留两个入口：
 
 ```text
 client best-effort DELETE（pill 删除、Draft 明确丢弃、owner 销毁）
-periodic server recovery
-startup recovery
+Storage Maintenance（startup wake + coalesced wake + fixed-delay poll）
 ```
 
 服务端周期任务是权威回收路径：
@@ -761,14 +760,14 @@ fixed delay
 -> sweep one DELETING blob batch
 ```
 
-启动恢复循环排空历史积压；日常 API 不再承担机会式 GC，避免上传请求耦合清理延迟。
+startup wake 排空历史积压；日常 reserve/complete API 不再承担机会式 GC，避免上传请求耦合清理延迟。
 
 并发规则：
 
-- consume、client DELETE 和 GC 都先锁同一 `storage_upload` 行；
-- 谁先持锁谁完成唯一一次 delete/release；
-- missing row 对 DELETE/GC 视为成功；
-- 多实例通过 `FOR UPDATE SKIP LOCKED` 安全并行。
+- consume 在外层事务锁定未过期且未 claim 的 READY 行；
+- client DELETE 与 GC 先以短事务写成对 `cleanup_token/cleanup_until`，随后释放行锁并在事务外删除对象；
+- complete/consume 对已过期或已 claim 行 fail closed，不能抢回 cleanup 所有权；
+- finalize/release 以 cleanup token fence，lease 过期后任意实例可通过 `FOR UPDATE SKIP LOCKED` 重新 claim。
 
 物理对象删除分两类：
 
@@ -776,13 +775,13 @@ fixed delay
 upload-scoped temp object
   唯一 durable locator 是 storage_upload.id
   -> 必须先幂等删除 temp object，再删除 upload 行
-  -> 对象删除失败则保留行供周期/启动恢复重试
+  -> 对象删除失败则保留行与 cleanup lease，lease 过期后重试
   -> 对象删除成功但数据库回滚时，后续重试仍可幂等收敛
 
 durable Blob object
   storage_blob(DELETING) 是 durable locator
   -> 数据库先提交 DELETING
-  -> afterCommit / periodic sweep 删除对象和 Blob 行
+  -> afterCommit 只本地 wake；Storage Maintenance 删除对象和 Blob 行
 ```
 
 因此进程崩溃不会在丢失唯一数据库 locator 后留下永久 PENDING 临时对象。

@@ -70,6 +70,19 @@ public interface StorageBlobMapper extends BaseMapper {
       """)
   int insertActiveCandidate(StorageBlobDO blob);
 
+  @Insert(
+      """
+      insert into storage_blob (
+          id, sha256, size_bytes, media_type, width, height, duration_ms,
+          ref_count, state, created_at, updated_at
+      ) values (
+          #{id}, #{sha256}, #{sizeBytes}, #{mediaType}, #{width}, #{height}, #{durationMs},
+          0, 'DELETING', current_timestamp, current_timestamp
+      )
+      on conflict (id) do nothing
+      """)
+  int insertDeletingCandidate(StorageBlobDO blob);
+
   @Update(
       """
       update storage_blob

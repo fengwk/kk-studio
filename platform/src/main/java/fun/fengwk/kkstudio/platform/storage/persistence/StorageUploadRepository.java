@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.storage.persistence;
 
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -12,18 +13,27 @@ public interface StorageUploadRepository {
 
   StorageUpload getById(UUID id);
 
-  /** 行级锁定读取（{@code for update}），用于 delete/expire 时固定 PENDING/READY 状态。 */
+  /** 行级锁定读取（{@code for update}），用于 complete 绑定与 READY 消费。 */
   StorageUpload getByIdForUpdate(UUID id);
 
-  /** 仅当仍为 PENDING 时绑定 blob，返回是否发生绑定（保证同一上传只 complete 成功一次）。 */
-  boolean setBlobIdIfNull(UUID id, UUID blobId);
+  /** 仅当仍为未过期、未被清理 claim 的 PENDING 时绑定 blob。 */
+  boolean setBlobIdIfNull(UUID id, UUID blobId, Instant now);
 
-  /** 删除 PENDING 行（临时对象必须先删除）。 */
-  boolean deletePendingById(UUID id);
-
-  /** 删除行（READY 路径，调用方已持有行锁并负责 release blob）。 */
+  /** 删除未被清理 claim 的行（READY 消费路径，调用方负责 release blob）。 */
   boolean deleteById(UUID id);
 
-  /** 过期批次：按过期时间取不超过 {@code limit} 行并加锁（{@code for update skip locked}）。 */
-  List<StorageUpload> listExpired(int limit);
+  /** 原子 claim 一批可清理过期行；数据库事务只持有到 UPDATE RETURNING 完成。 */
+  List<StorageUpload> claimExpired(int limit, Instant now, Instant leaseUntil, String cleanupToken);
+
+  /** 用户显式删除时原子 claim 指定行；允许未过期行，但不能抢占有效 lease。 */
+  StorageUpload claimById(UUID id, Instant now, Instant leaseUntil, String cleanupToken);
+
+  /** token-fenced 删除 PENDING 清理事实。 */
+  boolean finalizePending(UUID id, String cleanupToken);
+
+  /** token/blob-fenced 删除 READY 清理事实；成功后调用方在同一短事务 release blob。 */
+  boolean finalizeReady(UUID id, UUID blobId, String cleanupToken);
+
+  /** token-fenced 主动释放 cleanup lease。 */
+  boolean releaseCleanupClaim(UUID id, String cleanupToken);
 }

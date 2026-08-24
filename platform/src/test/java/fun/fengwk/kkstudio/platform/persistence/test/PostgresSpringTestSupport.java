@@ -7,11 +7,13 @@ import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.Postgr
 
 import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.Driver;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import fun.fengwk.kkstudio.platform.PlatformTestApplication;
+import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -34,6 +36,9 @@ public abstract class PostgresSpringTestSupport {
 
   private static final String FLYWAY_DISABLED = "false";
   private static final String WORKERS_DISABLED = "false";
+
+  @Autowired(required = false)
+  private StorageMaintenance storageMaintenance;
 
   static {
     // SystemSettingsSnapshot 作为共享启动快照，在上下文创建期读取一次 system_setting 默认行；任何 Spring 测试上下文加载前
@@ -59,6 +64,10 @@ public abstract class PostgresSpringTestSupport {
 
   @BeforeEach
   final void resetAndApplySchema() throws Exception {
+    // 共享测试容器会在测试间重建 public schema；先停掉真实后台维护，避免 reset 期间访问半迁移结构。
+    if (storageMaintenance != null) {
+      storageMaintenance.stop();
+    }
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
       migrateDatabase(conn);
