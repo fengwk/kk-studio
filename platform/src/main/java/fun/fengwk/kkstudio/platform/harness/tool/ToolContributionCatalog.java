@@ -140,10 +140,6 @@ public final class ToolContributionCatalog {
     return new ToolCatalog(descriptors, internalNames);
   }
 
-  public PluginCatalog pluginCatalog() {
-    return pluginCatalog;
-  }
-
   private static void putUnique(Map<String, Entry> byName, Entry entry) {
     Entry previous = byName.putIfAbsent(entry.descriptor().name(), entry);
     if (previous != null) {
