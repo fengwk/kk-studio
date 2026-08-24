@@ -30,7 +30,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class TrustedJarPluginLoader implements HarnessPluginSource, AutoCloseable {
 
   public static final String DIRECTORY_PROPERTY = "kk-studio.harness.plugins.directory";
-  public static final String DIRECTORY_ENVIRONMENT_VARIABLE = "KK_STUDIO_TRUSTED_PLUGIN_DIRECTORY";
 
   private final Optional<URLClassLoader> classLoader;
   private final List<HarnessPlugin> plugins;

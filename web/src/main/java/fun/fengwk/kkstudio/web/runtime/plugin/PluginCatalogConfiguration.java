@@ -22,14 +22,8 @@ public class PluginCatalogConfiguration {
 
   @Bean(destroyMethod = "close")
   public TrustedJarPluginLoader trustedJarPluginLoader(Environment environment) {
-    String directory = environment.getProperty(TrustedJarPluginLoader.DIRECTORY_PROPERTY);
-    if (directory == null || directory.isBlank()) {
-      directory = environment.getProperty(TrustedJarPluginLoader.DIRECTORY_ENVIRONMENT_VARIABLE);
-    }
-    if (directory == null || directory.isBlank()) {
-      directory = System.getenv(TrustedJarPluginLoader.DIRECTORY_ENVIRONMENT_VARIABLE);
-    }
-    return TrustedJarPluginLoader.fromConfiguredDirectory(directory);
+    return TrustedJarPluginLoader.fromConfiguredDirectory(
+        environment.getProperty(TrustedJarPluginLoader.DIRECTORY_PROPERTY));
   }
 
   @Bean
