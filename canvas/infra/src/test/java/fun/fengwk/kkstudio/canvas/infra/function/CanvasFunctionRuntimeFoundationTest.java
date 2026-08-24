@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
@@ -68,7 +69,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   @Autowired private CanvasFunctionRunRepository runRepository;
   @Autowired private CanvasFunctionResourcePinRepository pinRepository;
   @Autowired private CanvasFunctionRunTransactions runtimeTransactions;
-  @Autowired private CanvasFunctionModelRegistry catalog;
+  @Autowired private CanvasFunctionCatalog catalog;
   @Autowired private CanvasFunctionRunStateCodecPort stateCodec;
   @Autowired private CanvasFunctionWorkStore workStore;
   @Autowired private Clock clock;

@@ -30,7 +30,7 @@ public class CanvasFunctionWorker {
   private static final String PUBLIC_FAILURE = "Function execution failed";
 
   private final CanvasFunctionRunRepository runRepository;
-  private final CanvasFunctionCatalog registry;
+  private final CanvasFunctionCatalog catalog;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final CanvasFunctionRunTransactions transactions;
   private final CanvasFunctionBlobAccess blobAccess;
@@ -42,7 +42,7 @@ public class CanvasFunctionWorker {
 
   public CanvasFunctionWorker(
       CanvasFunctionRunRepository runRepository,
-      CanvasFunctionCatalog registry,
+      CanvasFunctionCatalog catalog,
       CanvasFunctionRunStateCodecPort stateCodec,
       CanvasFunctionRunTransactions transactions,
       CanvasFunctionBlobAccess blobAccess,
@@ -52,7 +52,7 @@ public class CanvasFunctionWorker {
       Clock clock,
       @Qualifier("canvasFunctionHeartbeatScheduler") ScheduledExecutorService heartbeatScheduler) {
     this.runRepository = runRepository;
-    this.registry = registry;
+    this.catalog = catalog;
     this.stateCodec = stateCodec;
     this.transactions = transactions;
     this.blobAccess = blobAccess;
@@ -74,10 +74,8 @@ public class CanvasFunctionWorker {
             TimeUnit.MILLISECONDS);
     try {
       CanvasFunctionCatalog.RegisteredModel registered =
-          registry.require(stateCodec.modelKey(claim.run().stateJson()));
-      if (!registered.adapter().enabled()) {
-        throw new IllegalStateException("Canvas Function adapter is unavailable");
-      }
+          catalog.require(stateCodec.modelKey(claim.run().stateJson()));
+      registered.requireAvailable();
       CanvasFunctionFrozenRun frozen =
           stateCodec.decode(claim.run().stateJson(), registered.model());
       CanvasFunctionExecutionContextImpl context =

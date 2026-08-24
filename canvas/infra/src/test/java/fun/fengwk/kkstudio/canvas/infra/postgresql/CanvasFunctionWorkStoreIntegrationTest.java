@@ -227,7 +227,11 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     when(frozen.requestId()).thenReturn(requestId);
     when(frozen.targetResourceId()).thenReturn(targetResourceId);
     CanvasFunctionAdapter adapter = mock(CanvasFunctionAdapter.class);
+    CanvasFunctionModel model = mock(CanvasFunctionModel.class);
+    when(model.key()).thenReturn("model");
+    when(adapter.models()).thenReturn(List.of(model));
     when(adapter.enabled()).thenReturn(true);
+    when(adapter.unavailableReason()).thenReturn(null);
     when(adapter.execute(any(), any()))
         .thenAnswer(
             ignored -> {
@@ -243,10 +247,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
               }
               return List.of(targetResourceId);
             });
-    CanvasFunctionCatalog catalog = mock(CanvasFunctionCatalog.class);
-    CanvasFunctionModel model = mock(CanvasFunctionModel.class);
-    when(catalog.require("model"))
-        .thenReturn(new CanvasFunctionCatalog.RegisteredModel(model, adapter));
+    CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
     when(stateCodec.modelKey(claim.run().stateJson())).thenReturn("model");
     when(stateCodec.decode(claim.run().stateJson(), model)).thenReturn(frozen);

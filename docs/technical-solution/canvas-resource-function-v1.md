@@ -120,7 +120,7 @@ configJson
 - `nodeId` 是 canonical UUID string；`index` 是非负整数。
 - 未知字段、`null`、错误类型和未声明参数一律拒绝。
 - canonical freeze 删除空 TEXT、合并相邻 TEXT，并按 REFERENCE 首次出现顺序去重 manifest。
-- model descriptor 由服务端 Registry 声明 output kind、引用策略和参数，不建能力表。
+- model descriptor 由服务端 Canvas Function Catalog 声明 output kind、引用策略和参数，不建能力表。
 
 每个 Function Node 只有一行当前/最后 Run：
 
@@ -411,13 +411,17 @@ Blob `release` 减到 0 时在事务内转为 `DELETING`，提交后只快速唤
 
 ## 9. Function adapters
 
-Registry 当前包含：
+Canvas Function Catalog 当前包含：
 
 - `fake-image` / `fake-video`：仅启动快照 `storageMedia.s3Enabled=true` 且部署测试开关
   `kk-studio.canvas.function.fake-enabled=true` 时注册，用于免费回归；
 - `gpt-image-2`；
 - `seedance2.0`、`seedance2.0fast`、`seedance2.0_vip`、`seedance2.0fast_vip`；
 - `minimax-h3-ref2va`。
+
+Catalog 在服务启动时收集全部 adapter，以 model key 去重并按字典序冻结。每个 adapter 的
+`models()`、`enabled()` 与 `unavailableReason()` 只采样一次；availability 也随 Catalog
+冻结到本次进程生命周期，配置或 provider 状态变化要到下一次重启才生效。
 
 Foundation 只向 adapter 暴露 checkpoint、RUNNING 检查、frozen Resource 原件流/短期签名和唯一 target 物化。付费提交前必须 checkpoint `SUBMITTING`；处于“已可能提交但没有 durable provider id”的崩溃窗口时确定性失败，禁止自动重提。
 

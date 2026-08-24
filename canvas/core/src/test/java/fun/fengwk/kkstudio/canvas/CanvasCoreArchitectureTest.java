@@ -70,6 +70,24 @@ class CanvasCoreArchitectureTest {
     assertEquals(List.of(), productionDependencies, "canvas core production dependencies");
   }
 
+  @Test
+  void canvasFunctionCatalogHasOneFinalFactSourceAndNoRegistryImplementation() throws IOException {
+    Path repositoryRoot = locateModuleRoot().resolve("../..").normalize();
+    List<Path> catalogSources = mainJavaSources(repositoryRoot, "CanvasFunctionCatalog.java");
+    assertEquals(
+        List.of(
+            repositoryRoot.resolve(
+                "canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/"
+                    + "CanvasFunctionCatalog.java")),
+        catalogSources);
+    assertTrue(
+        mainJavaSources(repositoryRoot, "CanvasFunction" + "ModelRegistry.java").isEmpty(),
+        "Canvas Function model registry source must not exist");
+    assertTrue(
+        implementationSources(repositoryRoot).isEmpty(),
+        "Canvas Function Catalog must not have a second implementation");
+  }
+
   private static List<String> scanViolations(Path main) throws IOException {
     List<String> violations = new ArrayList<>();
     try (Stream<Path> stream = Files.walk(main)) {
@@ -105,6 +123,34 @@ class CanvasCoreArchitectureTest {
               });
     }
     return violations;
+  }
+
+  private static List<Path> mainJavaSources(Path repositoryRoot, String fileName)
+      throws IOException {
+    try (Stream<Path> stream = Files.walk(repositoryRoot)) {
+      return stream
+          .filter(path -> path.toString().replace('\\', '/').contains("/src/main/java/"))
+          .filter(path -> path.getFileName().toString().equals(fileName))
+          .toList();
+    }
+  }
+
+  private static List<Path> implementationSources(Path repositoryRoot) throws IOException {
+    try (Stream<Path> stream = Files.walk(repositoryRoot)) {
+      return stream
+          .filter(path -> path.toString().replace('\\', '/').contains("/src/main/java/"))
+          .filter(path -> path.toString().endsWith(".java"))
+          .filter(
+              path -> {
+                try {
+                  return Files.readString(path, StandardCharsets.UTF_8)
+                      .contains("implements CanvasFunctionCatalog");
+                } catch (IOException error) {
+                  throw new IllegalStateException(error);
+                }
+              })
+          .toList();
+    }
   }
 
   private static boolean isAllowedImport(String imported) {

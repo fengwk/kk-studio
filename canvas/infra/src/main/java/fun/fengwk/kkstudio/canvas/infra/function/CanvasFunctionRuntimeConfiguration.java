@@ -1,12 +1,16 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 
 import java.time.Clock;
+import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -22,6 +26,12 @@ import java.util.concurrent.TimeUnit;
  */
 @Configuration(proxyBeanMethods = false)
 public class CanvasFunctionRuntimeConfiguration {
+
+  @Bean
+  @ConditionalOnMissingBean(CanvasFunctionCatalog.class)
+  public CanvasFunctionCatalog canvasFunctionCatalog(List<CanvasFunctionAdapter> adapters) {
+    return CanvasFunctionCatalog.from(adapters);
+  }
 
   @Bean(name = "canvasFunctionDrainExecutor", destroyMethod = "shutdownNow")
   public ExecutorService canvasFunctionDrainExecutor() {

@@ -23,18 +23,18 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Canvas Function model registry 与 run 生命周期 HTTP 边界。 */
+/** Canvas Function model catalog 与 run 生命周期 HTTP 边界。 */
 @RestController
 @RequestMapping("/api")
 public class StudioCanvasFunctionController {
 
-  private final CanvasFunctionCatalog registry;
+  private final CanvasFunctionCatalog catalog;
   private final CanvasFunctionService runtimeService;
   private final WebDtoMapper mapper;
 
   public StudioCanvasFunctionController(
-      CanvasFunctionCatalog registry, CanvasFunctionService runtimeService, WebDtoMapper mapper) {
-    this.registry = Objects.requireNonNull(registry, "registry");
+      CanvasFunctionCatalog catalog, CanvasFunctionService runtimeService, WebDtoMapper mapper) {
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
     this.runtimeService = Objects.requireNonNull(runtimeService, "runtimeService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
   }
@@ -42,13 +42,11 @@ public class StudioCanvasFunctionController {
   @GetMapping("/canvas-function-models")
   public Result<List<CanvasFunctionModelDTO>> listModels() {
     return Results.ok(
-        registry.list().stream()
+        catalog.list().stream()
             .map(
                 registered ->
                     mapper.toDto(
-                        registered.model(),
-                        registered.adapter().enabled(),
-                        registered.adapter().unavailableReason()))
+                        registered.model(), registered.enabled(), registered.unavailableReason()))
             .toList());
   }
 
