@@ -61,6 +61,29 @@ class TestBuildScripts(unittest.TestCase):
             script,
         )
 
+    def test_container_canvas_smoke_rejects_legacy_thread_id(self):
+        """The Docker smoke must enforce the current Canvas DTO instead of accepting a null legacy field."""
+        script = (REPOSITORY_ROOT / "deploy/test/run.sh").read_text()
+        readme = (REPOSITORY_ROOT / "deploy/test/README.md").read_text()
+
+        self.assertIn('assert "threadId" not in canvas', script)
+        self.assertNotIn('canvas["threadId"] is None', script)
+        self.assertIn(
+            'assert decimal_version(generated_snapshot["document"]["version"]) == 5',
+            script,
+        )
+        self.assertIn(
+            'create_and_run("gpt-image-2", "mock-gpt", {"ratio": "1:1"}, 4)',
+            script,
+        )
+        self.assertIn(
+            '"seedance2.0fast", "mock-seedance", {"ratio": "16:9", "duration": 4}, 6',
+            script,
+        )
+        self.assertIn("patch_version + expected_checkpoint_count + 2", script)
+        self.assertIn("start、checkpoint 与 terminal", readme)
+        self.assertNotIn("checkpoint 不前进", readme)
+
 
 if __name__ == "__main__":
     unittest.main()
