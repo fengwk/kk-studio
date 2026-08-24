@@ -198,9 +198,9 @@ export function nearestRankPercentile(values, percentile) {
 
 export const percentile = nearestRankPercentile
 
-export function summarizeSamples(samples, durationSeconds) {
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-    throw new Error(`durationSeconds must be positive: ${durationSeconds}`)
+export function summarizeSamples(samples, elapsedSeconds) {
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) {
+    throw new Error(`elapsedSeconds must be positive: ${elapsedSeconds}`)
   }
   if (!Array.isArray(samples)) {
     throw new Error('samples must be an array')
@@ -217,11 +217,12 @@ export function summarizeSamples(samples, durationSeconds) {
   const success = samples.filter((sample) => sample?.ok === true || sample?.success === true).length
   const error = requests - success
   const errorRate = requests === 0 ? 1 : error / requests
-  const seconds = durationSeconds
+  const seconds = elapsedSeconds
 
   return {
     sampleCount: requests,
-    durationSeconds,
+    durationSeconds: elapsedSeconds,
+    elapsedSeconds,
     requests,
     success,
     error,
@@ -626,7 +627,7 @@ export function renderReport(summary) {
     '## Parameters',
     '',
     `- Base URL: \`${summary.parameters.baseUrl}\``,
-    `- Measurement duration per scenario: ${summary.parameters.durationSeconds}s`,
+    `- Configured measurement duration per scenario: ${summary.parameters.durationSeconds}s`,
     `- Warmup per scenario: ${summary.parameters.warmupSeconds}s`,
     `- Per-request timeout: ${summary.parameters.requestTimeoutMs}ms`,
     `- Report root: \`${summary.parameters.reportRoot}\``,
@@ -648,11 +649,11 @@ export function renderReport(summary) {
     '',
     '## Scenario results',
     '',
-    '| Scenario | Requests | Success | Error | Error rate | Requests/s | Throughput RPS | p50 (ms) | p95 (ms) | p99 (ms) | Max (ms) | Samples | Gate |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
+    '| Scenario | Configured (s) | Actual measurement (s) | Requests | Success | Error | Error rate | Requests/s | Throughput RPS | p50 (ms) | p95 (ms) | p99 (ms) | Max (ms) | Samples | Gate |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |',
     ...summary.scenarios.map((scenario) => {
       const metrics = scenario.metrics
-      return `| ${scenario.id} | ${metrics.requests} | ${metrics.success} | ${metrics.error} | ${formatPercentage(metrics.errorRate)} | ${formatMetric(metrics.requestsPerSecond)} | ${formatMetric(metrics.throughputRps)} | ${formatMetric(metrics.p50Ms)} | ${formatMetric(metrics.p95Ms)} | ${formatMetric(metrics.p99Ms)} | ${formatMetric(metrics.maxMs)} | ${metrics.sampleCount} | **${scenario.status.toUpperCase()}**${formatFailures(scenario.gate.failures)} |`
+      return `| ${scenario.id} | ${formatMetric(scenario.durationSeconds)} | ${formatMetric(scenario.actualMeasurementSeconds)} | ${metrics.requests} | ${metrics.success} | ${metrics.error} | ${formatPercentage(metrics.errorRate)} | ${formatMetric(metrics.requestsPerSecond)} | ${formatMetric(metrics.throughputRps)} | ${formatMetric(metrics.p50Ms)} | ${formatMetric(metrics.p95Ms)} | ${formatMetric(metrics.p99Ms)} | ${formatMetric(metrics.maxMs)} | ${metrics.sampleCount} | **${scenario.status.toUpperCase()}**${formatFailures(scenario.gate.failures)} |`
     }),
     '',
     '## Isolation and cleanup',
@@ -777,7 +778,8 @@ async function runScenario({ scenario, manager, stopState, state, durationSecond
     stopState,
     collectSamples: true,
   })
-  const metrics = summarizeSamples(measurement.samples, durationSeconds)
+  const actualMeasurementSeconds = measurement.elapsedMs / 1_000
+  const metrics = summarizeSamples(measurement.samples, actualMeasurementSeconds)
   const gate = evaluateScenario(scenario.id, metrics)
   return {
     id: scenario.id,
@@ -785,6 +787,7 @@ async function runScenario({ scenario, manager, stopState, state, durationSecond
     path: scenario.path,
     concurrency: scenario.concurrency,
     durationSeconds,
+    actualMeasurementSeconds,
     warmup: {
       durationSeconds: WARMUP_SECONDS,
       requests: warmup.requestsStarted,
@@ -801,8 +804,9 @@ async function runScenario({ scenario, manager, stopState, state, durationSecond
   }
 }
 
-async function runPhase({ operation, concurrency, durationMs, stopState, collectSamples }) {
-  const deadline = performance.now() + durationMs
+export async function runPhase({ operation, concurrency, durationMs, stopState, collectSamples }) {
+  const startedAt = performance.now()
+  const deadline = startedAt + durationMs
   const samples = []
   let requestsStarted = 0
   let success = 0
@@ -850,6 +854,7 @@ async function runPhase({ operation, concurrency, durationMs, stopState, collect
     requestsStarted,
     success,
     errors,
+    elapsedMs: performance.now() - startedAt,
   }
 }
 
@@ -931,7 +936,7 @@ async function cleanupCanvases({ manager, state, scan }) {
 }
 
 function failedScenarioResult(scenario, durationSeconds, error) {
-  const metrics = emptyMetrics(durationSeconds)
+  const metrics = emptyMetrics(0)
   const message = serializeError(error).message
   return {
     id: scenario.id,
@@ -939,6 +944,7 @@ function failedScenarioResult(scenario, durationSeconds, error) {
     path: scenario.path,
     concurrency: scenario.concurrency,
     durationSeconds,
+    actualMeasurementSeconds: 0,
     warmup: {
       durationSeconds: WARMUP_SECONDS,
       requests: 0,
@@ -955,7 +961,7 @@ function failedScenarioResult(scenario, durationSeconds, error) {
   }
 }
 
-function emptyMetrics(durationSeconds) {
+function emptyMetrics(elapsedSeconds) {
   return {
     sampleCount: 0,
     requests: 0,
@@ -968,7 +974,8 @@ function emptyMetrics(durationSeconds) {
     p95Ms: null,
     p99Ms: null,
     maxMs: null,
-    durationSeconds,
+    durationSeconds: elapsedSeconds,
+    elapsedSeconds,
   }
 }
 

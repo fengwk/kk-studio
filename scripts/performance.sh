@@ -51,6 +51,35 @@ try {
 NODE
 }
 
+proxy_host() {
+  local proxy=$1
+  local authority
+
+  [[ -n "$proxy" ]] || return 1
+  authority=${proxy#*://}
+  authority=${authority%%/*}
+  authority=${authority##*@}
+  if [[ "$authority" == \[* ]]; then
+    authority=${authority#\[}
+    printf '%s' "${authority%%\]*}"
+  else
+    printf '%s' "${authority%%:*}"
+  fi
+}
+
+is_loopback_proxy() {
+  local host
+  host=$(proxy_host "$1") || return 1
+  case "${host,,}" in
+    127.0.0.1 | localhost | ::1)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 while (($#)); do
   case "$1" in
     --duration-seconds)
@@ -129,11 +158,18 @@ if [[ "$SKIP_BUILD" != "true" ]]; then
   BUILD_HTTPS_PROXY=${CANVAS_TEST_BUILD_HTTPS_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}
   BUILD_NO_PROXY=${CANVAS_TEST_BUILD_NO_PROXY:-${NO_PROXY:-${no_proxy:-}}}
   BUILD_NETWORK=${CANVAS_TEST_BUILD_NETWORK:-default}
+  if [[ -z "${CANVAS_TEST_BUILD_NETWORK+x}" ]] && (
+    is_loopback_proxy "$BUILD_HTTP_PROXY" ||
+      is_loopback_proxy "$BUILD_HTTPS_PROXY"
+  ); then
+    BUILD_NETWORK=host
+  fi
 
   printf '\n==> Building current deploy/local/Dockerfile image\n'
   docker build \
     --file "$REPO_ROOT/deploy/local/Dockerfile" \
     --tag "$APP_IMAGE" \
+    --quiet \
     --network "$BUILD_NETWORK" \
     --build-arg "KK_STUDIO_BUILD_HTTP_PROXY=$BUILD_HTTP_PROXY" \
     --build-arg "KK_STUDIO_BUILD_HTTPS_PROXY=$BUILD_HTTPS_PROXY" \

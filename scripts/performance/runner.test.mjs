@@ -21,6 +21,7 @@ import {
   nearestRankPercentile,
   parseArgs,
   runBenchmark,
+  runPhase,
   summarizeSamples,
   validateCanvasCreateResponse,
   validateCanvasDeleteResponse,
@@ -55,10 +56,34 @@ test('sample statistics distinguish attempted request rate from successful throu
   assert.equal(metrics.errorRate, 0.25)
   assert.equal(metrics.requestsPerSecond, 2)
   assert.equal(metrics.throughputRps, 1.5)
+  assert.equal(metrics.elapsedSeconds, 2)
   assert.equal(metrics.p50Ms, 20)
   assert.equal(metrics.p95Ms, 40)
   assert.equal(metrics.p99Ms, 40)
   assert.equal(metrics.maxMs, 40)
+})
+
+test('measurement rates use elapsed time after inflight workers settle', async () => {
+  // Intent: an inflight request beyond the configured window must lower RPS rather than be hidden.
+  const configuredDurationMs = 1
+  const phase = await runPhase({
+    operation: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    },
+    concurrency: 1,
+    durationMs: configuredDurationMs,
+    stopState: { requested: false, signal: null },
+    collectSamples: true,
+  })
+
+  assert.equal(phase.requestsStarted, 1)
+  assert.ok(phase.elapsedMs > configuredDurationMs)
+  const elapsedSeconds = phase.elapsedMs / 1_000
+  const metrics = summarizeSamples(phase.samples, elapsedSeconds)
+  const configuredRate = 1 / (configuredDurationMs / 1_000)
+  assert.equal(metrics.elapsedSeconds, elapsedSeconds)
+  assert.ok(metrics.requestsPerSecond < configuredRate)
+  assert.ok(metrics.throughputRps < configuredRate)
 })
 
 test('frozen threshold values fail closed for errors, latency, throughput, and small samples', () => {
@@ -228,6 +253,7 @@ test('report writer creates timestamped and latest summary/report files', () => 
     scenarios: SCENARIOS.map((scenario) => ({
       ...scenario,
       durationSeconds: 1,
+      actualMeasurementSeconds: 1.25,
       metrics: {
         sampleCount: MIN_SAMPLES,
         requests: MIN_SAMPLES,
@@ -240,6 +266,8 @@ test('report writer creates timestamped and latest summary/report files', () => 
         p95Ms: 1,
         p99Ms: 1,
         maxMs: 1,
+        durationSeconds: 1.25,
+        elapsedSeconds: 1.25,
       },
       gate: { passed: true, failures: [] },
       status: 'pass',
@@ -254,6 +282,10 @@ test('report writer creates timestamped and latest summary/report files', () => 
     assert.ok(existsSync(path.join(report.runDir, 'report.md')))
     assert.ok(existsSync(path.join(report.latestDir, 'summary.json')))
     assert.equal(readFileSync(path.join(report.latestDir, 'summary.json'), 'utf8').includes('"status": "pass"'), true)
+    assert.match(
+      readFileSync(path.join(report.runDir, 'report.md'), 'utf8'),
+      /Configured \(s\).*Actual measurement \(s\)/,
+    )
   } finally {
     rmSync(reportRoot, { recursive: true, force: true })
   }
@@ -344,6 +376,11 @@ test(
         assert.ok(scenario.metrics.requests >= MIN_SAMPLES, scenario.id)
         assert.equal(scenario.metrics.error, 0, scenario.id)
         assert.equal(scenario.status, 'pass', scenario.id)
+        assert.equal(scenario.metrics.elapsedSeconds, scenario.actualMeasurementSeconds, scenario.id)
+        assert.ok(
+          scenario.actualMeasurementSeconds >= scenario.durationSeconds,
+          scenario.id,
+        )
       }
       assert.ok(existsSync(path.join(reportRoot, 'latest', 'report.md')))
     } finally {
