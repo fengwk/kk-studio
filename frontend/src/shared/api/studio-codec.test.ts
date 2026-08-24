@@ -227,7 +227,8 @@ describe('studio codec', () => {
         run: { ...nodePayload().run, status: 'PENDING' },
       }],
     }
-    expect(() => decodeCanvasSnapshot(invalidStatus)).toThrow('node.run.status must be one of')
+    expect(() => decodeCanvasSnapshot(invalidStatus))
+      .toThrow('node.run.status must be one of READY, RUNNING, SUCCEEDED, FAILED, CANCELLED')
   })
 
   it('accepts READY as the durable pre-claim function run status', () => {

@@ -78,7 +78,7 @@ const RUN_STATUSES = ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'] as
 
 function requireRunStatus(value: unknown, path: string): NonNullable<CanvasResourceNodeDTO['run']>['status'] {
   if (typeof value !== 'string' || !(RUN_STATUSES as readonly string[]).includes(value)) {
-    throw invalidPayload(`${path} must be one of RUNNING, SUCCEEDED, FAILED, CANCELLED`)
+    throw invalidPayload(`${path} must be one of READY, RUNNING, SUCCEEDED, FAILED, CANCELLED`)
   }
   return value as NonNullable<CanvasResourceNodeDTO['run']>['status']
 }
