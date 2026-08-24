@@ -1,14 +1,43 @@
 package fun.fengwk.kkstudio.platform.harness.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.plugin.api.HarnessPlugin;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginDescriptor;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginTool;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
+import fun.fengwk.kkstudio.harness.plugin.api.ToolVisibility;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 验证 {@link RuntimeToolsConfiguration#subagentConfigProvider} 把 {@code SystemSettings.AiRuntime}
@@ -43,6 +72,102 @@ class RuntimeToolsConfigurationTest {
     assertEquals(13, config.maxTotalConcurrency());
     assertEquals(Duration.ofMillis(1234L), config.idleTimeout());
     assertEquals(89, config.maxTurns());
+  }
+
+  @Test
+  void subagentExecutorUsesFixedVirtualThreadsAndZeroQueue() throws Exception {
+    HarnessExecutionAdmissionProperties properties = new HarnessExecutionAdmissionProperties();
+    properties.setSubagent(2);
+    ExecutorService executor = new RuntimeToolsConfiguration().subagentTaskExecutor(properties);
+    ThreadPoolExecutor pool = assertInstanceOf(ThreadPoolExecutor.class, executor);
+    CountDownLatch entered = new CountDownLatch(2);
+    CountDownLatch release = new CountDownLatch(1);
+    try {
+      assertEquals(2, pool.getCorePoolSize());
+      assertEquals(2, pool.getMaximumPoolSize());
+      assertEquals(0, pool.getQueue().remainingCapacity());
+
+      for (int i = 0; i < 2; i++) {
+        executor.execute(
+            () -> {
+              assertTrue(Thread.currentThread().isVirtual());
+              entered.countDown();
+              try {
+                release.await();
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+              }
+            });
+      }
+      assertTrue(entered.await(5, TimeUnit.SECONDS));
+      // 固定 N + SynchronousQueue：第 N+1 个 Task 在创建 child 前确定性拒绝。
+      assertThrows(RejectedExecutionException.class, () -> executor.execute(() -> {}));
+    } finally {
+      release.countDown();
+      executor.close();
+    }
+  }
+
+  @Test
+  void executionAdmissionPropertiesRejectNonPositiveValues() {
+    HarnessExecutionAdmissionProperties properties = new HarnessExecutionAdmissionProperties();
+    assertEquals(16, properties.getModel());
+    assertEquals(64, properties.getTool());
+    assertEquals(10, properties.getSubagent());
+    properties.setModel(3);
+    properties.setTool(4);
+    properties.setSubagent(5);
+    assertEquals(3, properties.getModel());
+    assertEquals(4, properties.getTool());
+    assertEquals(5, properties.getSubagent());
+    assertThrows(IllegalArgumentException.class, () -> properties.setModel(0));
+    assertThrows(IllegalArgumentException.class, () -> properties.setTool(-1));
+    assertThrows(IllegalArgumentException.class, () -> properties.setSubagent(0));
+  }
+
+  @Test
+  void toolCatalogKeepsInternalPluginContributionInternal() {
+    ToolDescriptor loadSkill = descriptor("load_skill");
+    ToolDescriptor task = descriptor("task");
+    ToolFactories factories = mock(ToolFactories.class);
+    when(factories.descriptors()).thenReturn(List.of(loadSkill, task));
+
+    ToolDescriptor pluginDescriptor = descriptor("plugin-internal");
+    PluginTool pluginTool =
+        new PluginTool() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return pluginDescriptor;
+          }
+
+          @Override
+          public PluginToolResult execute(PluginToolContext context, ToolCall call) {
+            return null;
+          }
+        };
+    HarnessPlugin plugin =
+        HarnessPlugin.of(
+            new PluginDescriptor(new PluginId("admission"), "Admission", "1"),
+            registrar ->
+                registrar.registerTool("plugin-internal", pluginTool, ToolVisibility.INTERNAL));
+
+    ToolCatalog catalog =
+        new RuntimeToolsConfiguration().toolCatalog(factories, PluginCatalog.from(List.of(plugin)));
+
+    assertTrue(catalog.findInternal("plugin-internal").isPresent());
+    assertTrue(catalog.findSelectable("plugin-internal").isEmpty());
+  }
+
+  private static ToolDescriptor descriptor(String name) {
+    return new ToolDescriptor(
+        name,
+        "1",
+        ToolType.PLATFORM,
+        name + " description",
+        name,
+        new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+        ToolSideEffect.READ_ONLY,
+        Duration.ZERO);
   }
 
   private static SystemSettings customSettings(SystemSettings.AiRuntime aiRuntime) {

@@ -3,9 +3,11 @@ package fun.fengwk.kkstudio.platform.harness.model;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -13,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
+import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.model.provider.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.platform.harness.model.provider.GoogleProviderAdapter;
 import fun.fengwk.kkstudio.platform.harness.model.provider.OpenAiProviderAdapter;
@@ -35,7 +38,15 @@ import java.util.concurrent.Executors;
  * <p>每个 {@link ProviderFactory} bean 都有稳定的唯一名称，可以独立替换而不影响其余 Provider 类型。
  */
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(HarnessExecutionAdmissionProperties.class)
 public class ModelExecutionConfiguration {
+
+  @Bean(name = "modelExecutionAdmission")
+  @ConditionalOnMissingBean(name = "modelExecutionAdmission")
+  public ConcurrencyAdmission modelExecutionAdmission(
+      HarnessExecutionAdmissionProperties properties) {
+    return new ConcurrencyAdmission(properties.getModel());
+  }
 
   /** 阻塞 Provider I/O 使用的虚拟线程 executor。 */
   @Bean(name = "modelExecutionExecutor", destroyMethod = "close")
@@ -61,11 +72,13 @@ public class ModelExecutionConfiguration {
   public PlatformModelGateway platformModelGateway(
       ProviderResolutionService providerResolution,
       @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor,
-      SystemSettingsSnapshot systemSettingsSnapshot) {
+      SystemSettingsSnapshot systemSettingsSnapshot,
+      @Qualifier("modelExecutionAdmission") ConcurrencyAdmission admission) {
     return new PlatformModelGateway(
         providerResolution,
         modelExecutionExecutor,
-        () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().modelGatewayBusyRetryMillis()));
+        () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().modelGatewayBusyRetryMillis()),
+        admission);
   }
 
   @Bean(name = "openaiProviderFactory")

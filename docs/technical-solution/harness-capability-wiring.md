@@ -8,6 +8,7 @@ Platform 通过 Spring `ObjectProvider` 直接收集 ProviderFactory、ToolFacto
 ModelExecutionConfiguration
   -> ProviderFactory beans
   -> ProviderFactories（按 ProviderType 不可变索引）
+  -> modelExecutionAdmission（Runtime ConcurrencyAdmission，默认 16）
   -> PlatformModelGateway（serialized FIFO 回调桥）
 
 HarnessToolGatewayConfiguration
@@ -15,11 +16,13 @@ HarnessToolGatewayConfiguration
   -> ToolFactories（按 (name, version) 索引）
   -> PluginCatalog（受信任 build-time contributions，启动时冻结）
   -> ToolCatalog（ToolFactory + plugin tools + ENVIRONMENT 两类 + 内部 load_skill/task）
+  -> toolExecutionAdmission（Runtime ConcurrencyAdmission，默认 64）
   -> PlatformToolGateway（普通 Tool / plugin Tool + preflight + 两阶段激活 + FIFO 回调桥）
 
 RuntimeToolsConfiguration
   -> loadSkillTool / TaskTool（内部 PLATFORM Tool beans；TaskTool 位于 harness.runtime.subagent，依赖 HarnessThreadChangeSource，由 web 组合根适配 ThreadVersionEventSource 提供）
   -> SubagentConfigProvider（每次决策点现读 maxDepth/并发/idle/maxTurns）+ SubagentRunRegistry（进程内并发 reservation + descendant 订阅）
+  -> subagentTaskExecutor（固定 N 虚拟线程、SynchronousQueue、AbortPolicy；默认 N=10）
 
 DatabaseTurnResolver
   -> Agent/Provider/Model/Variant Catalog 查询（按名称读最新行）
@@ -67,7 +70,7 @@ public interface ProviderFactory {
 
 `ProviderFactories` 按 ProviderType 建立不可变索引，重复注册在构造阶段失败。Provider 资源就是当前 `agent_provider` 行：每次 Model attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前行，以当前 providerType/baseUrl/credential/config 选择 `ProviderFactory` 并构造短生命周期 attempt-local adapter；Provider 更新后下一 attempt 立即使用新值，当前行缺失时确定性 not found，同名重建后解析到新行。credential 只在写入 DTO 反序列化与 attempt 时 adapter 构造使用，不进入 response 或 invocation JSON。
 
-`PlatformModelGateway` 是 `ModelGateway` 端口适配：admission 两阶段激活（`start` → Processor `markRunning` 后 `activate`），回调桥是 serialized FIFO 单 drainer 状态机，terminal-once；`Busy` 重试、`Rejected` 确定性终结、`Indeterminate` 收敛 `UNKNOWN`。已启动 attempt 的 retryable `TRANSIENT` 失败由 Runtime 保存完整 partial/error/retryAt 后重放冻结 `ModelRequestSpec`（每次 attempt 从相同 `basisHeadEntryId + spec` 重新 materialize 内存 ProviderRequest），不由 Gateway 拼接历史输出。
+`PlatformModelGateway` 是 `ModelGateway` 端口适配：确定性 provider resolve 完成后获取部署级 permit；admission 两阶段激活（`start` → Processor `markRunning` 后 `activate`），回调桥是 serialized FIFO 单 drainer 状态机，terminal-once。permit 覆盖整个 Model invocation，首个 terminal、handle cancel、激活前中断收敛、提交拒绝与 listener 异常都会恰好释放；容量耗尽返回 `Busy`，不会创建或启动 Provider。`Busy` 重试、`Rejected` 确定性终结、`Indeterminate` 收敛 `UNKNOWN`。已启动 attempt 的 retryable `TRANSIENT` 失败由 Runtime 保存完整 partial/error/retryAt 后重放冻结 `ModelRequestSpec`（每次 attempt 从相同 `basisHeadEntryId + spec` 重新 materialize 内存 ProviderRequest），不由 Gateway 拼接历史输出。
 
 ## 3. ToolCatalog
 
@@ -126,7 +129,7 @@ Goal 插件只实现上述模型工具的 durable snapshot 协议，不实现 pi
 - `harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/skill/LoadSkillToolTest.java`
 - `harness/plugins/goal/src/test/java/fun/fengwk/kkstudio/harness/plugins/goal/GoalPluginTest.java`
 
-`PlatformToolGateway` 是 `ToolGateway` 端口适配：`preflight` 同步无副作用（`Allow` / `Ask(reason)` / `Deny(error)`），外部 I/O 前完成权限判定与机械校验；两阶段激活与 Model 同构；普通 `PLATFORM` binding 走本地 registry，`ENVIRONMENT` binding 经 `RemoteToolTransport`（`EnvironmentDaemonGateway`）发往冻结 route；带 plugin binding 的 `PLATFORM` Tool 按冻结 contribution 精确恢复并同步执行。terminal success 在回调桥内先校验插件 intents，再经 `ToolResultExternalizer` 做瞬时 Resource 外部化（reference plan → put → exact ref check），最后把 `ToolSuccess(result, effects)` 交给 ToolProcessor 原子落 terminal 事实。Tool outcome Entry 写入前，`ToolResultHistoryMaterializer` 再在同一 Store 事务把 Resource 摄入全局 Blob 并转换为 `resource(blobId,name,preview)`。
+`PlatformToolGateway` 是 `ToolGateway` 端口适配：`preflight` 同步无副作用且不占 permit（`Allow` / `Ask(reason)` / `Deny(error)`），外部 I/O 前完成权限判定、机械校验与部署级 Tool admission；容量耗尽返回 `Overloaded`，不会执行 Platform/plugin Tool 或调用 remote transport。lease 覆盖 local/plugin/remote 的完整 invocation，首个 terminal、handle cancel、Busy/Rejected/Indeterminate、executor submit 拒绝与回调异常都恰好释放。两阶段激活与 Model 同构；普通 `PLATFORM` binding 走本地 registry，`ENVIRONMENT` binding 经 `RemoteToolTransport`（`EnvironmentDaemonGateway`）发往冻结 route；带 plugin binding 的 `PLATFORM` Tool 按冻结 contribution 精确恢复并同步执行。terminal success 在回调桥内先校验插件 intents，再经 `ToolResultExternalizer` 做瞬时 Resource 外部化（reference plan → put → exact ref check），最后把 `ToolSuccess(result, effects)` 交给 ToolProcessor 原子落 terminal 事实。Tool outcome Entry 写入前，`ToolResultHistoryMaterializer` 再在同一 Store 事务把 Resource 摄入全局 Blob 并转换为 `resource(blobId,name,preview)`。
 
 ### Trusted plugin
 

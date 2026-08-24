@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
+import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -189,6 +190,24 @@ final class ToolGatewayTestSupport {
       ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings) {
+    return gateway(
+        toolFactories,
+        transport,
+        store,
+        executor,
+        resourceMaxBytes,
+        settings,
+        new ConcurrencyAdmission(Integer.MAX_VALUE));
+  }
+
+  static PlatformToolGateway gateway(
+      ToolFactories toolFactories,
+      FakeTransport transport,
+      FakeResourceStore store,
+      ExecutorService executor,
+      int resourceMaxBytes,
+      ToolSettings settings,
+      ConcurrencyAdmission admission) {
     return new PlatformToolGateway(
         toolFactories,
         EMPTY_PLUGIN_CATALOG,
@@ -203,7 +222,8 @@ final class ToolGatewayTestSupport {
         executor,
         BUSY_RETRY_DELAY,
         OVERLOAD_RETRY_DELAY,
-        TEST_CLOCK);
+        TEST_CLOCK,
+        admission);
   }
 
   static PlatformToolGateway gateway(

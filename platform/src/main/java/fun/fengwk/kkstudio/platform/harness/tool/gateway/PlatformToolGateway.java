@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginStateMode;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
 import fun.fengwk.kkstudio.harness.plugin.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
@@ -133,6 +134,7 @@ public final class PlatformToolGateway implements ToolGateway {
   private final Supplier<Duration> busyRetryDelay;
   private final Supplier<Duration> overloadRetryDelay;
   private final Clock clock;
+  private final ConcurrencyAdmission admission;
 
   /**
    * 生产与测试共用的唯一构造器。{@code busyRetryDelay} / {@code overloadRetryDelay} 在每次 Busy / Overloaded 判定时现读，
@@ -154,6 +156,40 @@ public final class PlatformToolGateway implements ToolGateway {
       Supplier<Duration> busyRetryDelay,
       Supplier<Duration> overloadRetryDelay,
       Clock clock) {
+    this(
+        toolFactories,
+        pluginCatalog,
+        pluginBranchViewLoader,
+        remoteTransport,
+        permissionEvaluator,
+        toolSettingsProvider,
+        resourceStore,
+        workdir,
+        environmentRoot,
+        resourceMaxBytes,
+        executor,
+        busyRetryDelay,
+        overloadRetryDelay,
+        clock,
+        new ConcurrencyAdmission(Integer.MAX_VALUE));
+  }
+
+  PlatformToolGateway(
+      ToolFactories toolFactories,
+      PluginCatalog pluginCatalog,
+      PluginBranchViewLoader pluginBranchViewLoader,
+      RemoteToolTransport remoteTransport,
+      PermissionEvaluator permissionEvaluator,
+      ToolSettingsProvider toolSettingsProvider,
+      ResourceStore resourceStore,
+      Path workdir,
+      Path environmentRoot,
+      int resourceMaxBytes,
+      ExecutorService executor,
+      Supplier<Duration> busyRetryDelay,
+      Supplier<Duration> overloadRetryDelay,
+      Clock clock,
+      ConcurrencyAdmission admission) {
     this.toolFactories = Objects.requireNonNull(toolFactories, "toolFactories");
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.pluginBranchViewLoader =
@@ -172,6 +208,7 @@ public final class PlatformToolGateway implements ToolGateway {
     this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
     this.overloadRetryDelay = Objects.requireNonNull(overloadRetryDelay, "overloadRetryDelay");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.admission = Objects.requireNonNull(admission, "admission");
     rejectUnsafeExecutorPolicies(executor);
     rejectInlineExecutor(executor);
   }
@@ -255,12 +292,17 @@ public final class PlatformToolGateway implements ToolGateway {
                   + bindingDescriptor.version()
                   + " no longer matches its frozen descriptor."));
     }
+    Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
+    if (acquired.isEmpty()) {
+      return new ToolGateway.Overloaded(overloadRetryDelay.get());
+    }
+    ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     ToolExecutionRequest request = request(execution, tool.descriptor());
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
-            listener, externalizer, tool.descriptor().name(), request.call().id());
+            listener, externalizer, tool.descriptor().name(), request.call().id(), lease);
     // 两阶段激活：executor 任务在 activate() 前只等待 release，绝不提前打开 gate / 触碰 Tool。
-    GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel);
+    GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel, lease);
     return submitLocalExecution(
         execution, bridge, handle, () -> runTool(tool, request, bridge, handle));
   }
@@ -333,10 +375,15 @@ public final class PlatformToolGateway implements ToolGateway {
               PLUGIN_BINDING_MISMATCH_KIND,
               "Plugin tool " + id + " no longer matches its frozen state access declaration."));
     }
+    Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
+    if (acquired.isEmpty()) {
+      return new ToolGateway.Overloaded(overloadRetryDelay.get());
+    }
+    ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
-            listener, externalizer, descriptor.name(), execution.request().call().id());
-    GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel);
+            listener, externalizer, descriptor.name(), execution.request().call().id(), lease);
+    GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel, lease);
     return submitLocalExecution(
         execution, bridge, handle, () -> runPlugin(execution, contribution, bridge));
   }
@@ -461,12 +508,17 @@ public final class PlatformToolGateway implements ToolGateway {
                   + bindingDescriptor.version()
                   + " no longer matches the daemon capability descriptor."));
     }
+    Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
+    if (acquired.isEmpty()) {
+      return new ToolGateway.Overloaded(overloadRetryDelay.get());
+    }
+    ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     ToolExecutionRequest request = request(execution, bindingDescriptor);
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
-            listener, externalizer, bindingDescriptor.name(), request.call().id());
+            listener, externalizer, bindingDescriptor.name(), request.call().id(), lease);
     // 两阶段激活：activate() 之前 gate 保持关闭（同步回调只进缓冲）；activate() 直接打开 gate 并串行重放（不提交独立重放任务）。
-    GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel);
+    GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel, lease);
     ToolExecutionHandle transportHandle;
     try {
       transportHandle =
@@ -474,10 +526,12 @@ public final class PlatformToolGateway implements ToolGateway {
     } catch (RemoteToolBusyException busy) {
       // 同 Environment 已有 active remote invocation：INVOKE 肯定未发送，由 Harness 按固定延迟重新 admission，
       // 不创建 durable error。
+      bridge.cancel();
       return new ToolGateway.Busy(busyRetryDelay.get());
     } catch (RemoteToolUnavailableException unavailable) {
       // 发送前目标不可用（路由缺失/未注册/未 READY/心跳过期）：肯定未开始，且当前分支配置下重试不会改变结论——
       // 确定性拒绝，让模型看到 durable 错误结果并继续收敛。
+      bridge.cancel();
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               UNAVAILABLE_KIND, failureMessage(unavailable, "Tool is unavailable.")));
@@ -490,6 +544,7 @@ public final class PlatformToolGateway implements ToolGateway {
               failureMessage(
                   uncertain, "Remote tool send outcome is uncertain; result is unknown.")));
     } catch (IllegalArgumentException invalid) {
+      bridge.cancel();
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               INVALID_REQUEST_KIND, failureMessage(invalid, "Remote tool request is invalid.")));
@@ -622,10 +677,12 @@ public final class PlatformToolGateway implements ToolGateway {
     private final AtomicReference<ToolExecutionHandle> toolHandle = new AtomicReference<>();
     private final Runnable activation;
     private final Runnable abort;
+    private final ConcurrencyAdmission.Lease lease;
 
-    GatewayHandle(Runnable activation, Runnable abort) {
+    GatewayHandle(Runnable activation, Runnable abort, ConcurrencyAdmission.Lease lease) {
       this.activation = Objects.requireNonNull(activation, "activation");
       this.abort = Objects.requireNonNull(abort, "abort");
+      this.lease = Objects.requireNonNull(lease, "lease");
     }
 
     void attach(ToolExecutionHandle handle) {
@@ -645,18 +702,27 @@ public final class PlatformToolGateway implements ToolGateway {
     @Override
     public void activate() {
       if (activated.compareAndSet(false, true) && !cancelled.get()) {
-        activation.run();
+        try {
+          activation.run();
+        } catch (RuntimeException failure) {
+          lease.close();
+          throw failure;
+        }
       }
     }
 
     @Override
     public void cancel() {
       if (cancelled.compareAndSet(false, true)) {
-        // 与 activate 在桥 monitor 内原子互斥：cancel 先到则 activate no-op；activate 先到则此后所有信号被丢弃。
-        abort.run();
-        ToolExecutionHandle handle = toolHandle.get();
-        if (handle != null) {
-          handle.cancel();
+        try {
+          // 与 activate 在桥 monitor 内原子互斥：cancel 先到则 activate no-op；activate 先到则此后所有信号被丢弃。
+          abort.run();
+          ToolExecutionHandle handle = toolHandle.get();
+          if (handle != null) {
+            handle.cancel();
+          }
+        } finally {
+          lease.close();
         }
       }
     }
@@ -685,6 +751,7 @@ public final class PlatformToolGateway implements ToolGateway {
     private final ToolResultExternalizer externalizer;
     private final String toolName;
     private final String expectedCallId;
+    private final ConcurrencyAdmission.Lease lease;
     private final Object monitor = new Object();
     private final ArrayDeque<Signal> queue = new ArrayDeque<>();
     private boolean released;
@@ -698,11 +765,13 @@ public final class PlatformToolGateway implements ToolGateway {
         ToolGateway.Listener listener,
         ToolResultExternalizer externalizer,
         String toolName,
-        String expectedCallId) {
+        String expectedCallId,
+        ConcurrencyAdmission.Lease lease) {
       this.listener = Objects.requireNonNull(listener, "listener");
       this.externalizer = Objects.requireNonNull(externalizer, "externalizer");
       this.toolName = Objects.requireNonNull(toolName, "toolName");
       this.expectedCallId = Objects.requireNonNull(expectedCallId, "expectedCallId");
+      this.lease = Objects.requireNonNull(lease, "lease");
     }
 
     /**
@@ -741,6 +810,7 @@ public final class PlatformToolGateway implements ToolGateway {
         queue.clear();
         monitor.notifyAll();
       }
+      lease.close();
     }
 
     /**
@@ -1051,6 +1121,8 @@ public final class PlatformToolGateway implements ToolGateway {
         } catch (RuntimeException ignored) {
           // 状态已 terminal；日志失败不得改变协议结果。
         }
+      } finally {
+        lease.close();
       }
     }
 

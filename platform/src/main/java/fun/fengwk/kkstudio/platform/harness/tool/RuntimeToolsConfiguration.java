@@ -5,6 +5,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -24,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -34,13 +36,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 把普通 runtime 工具（当前为 {@code load_skill} 与 {@code task}）装配为 Spring {@code Tool} bean，并为 {@code
  * ToolFactories} 暴露为 {@link ToolFactory} bean；插件 Tool 由冻结 {@link PluginCatalog} 独立贡献。
  */
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(HarnessExecutionAdmissionProperties.class)
 public class RuntimeToolsConfiguration {
 
   @Bean
@@ -87,8 +92,16 @@ public class RuntimeToolsConfiguration {
   }
 
   @Bean(name = "subagentTaskExecutor", destroyMethod = "close")
-  public ExecutorService subagentTaskExecutor() {
-    return Executors.newVirtualThreadPerTaskExecutor();
+  public ExecutorService subagentTaskExecutor(HarnessExecutionAdmissionProperties properties) {
+    int concurrency = properties.getSubagent();
+    return new ThreadPoolExecutor(
+        concurrency,
+        concurrency,
+        0L,
+        TimeUnit.MILLISECONDS,
+        new SynchronousQueue<>(),
+        Thread.ofVirtual().name("subagent-task-", 0L).factory(),
+        new ThreadPoolExecutor.AbortPolicy());
   }
 
   @Bean
