@@ -86,8 +86,8 @@ docker compose -f deploy/local/compose.yaml down -v
 
 Compose 和 app 不注入、传递或读取任何真实 Provider 凭证。真实 E2E 必须从宿主执行
 `./scripts/e2e.sh --real`；runner 在 backend ready 后调用唯一的
-`scripts/e2e/sync_provider_credentials.py`，通过 backend API 更新 E2E seed 中的
-MiniMax Provider。
+`scripts/e2e/sync_provider_credentials.py`，通过 backend API 更新 E2E database
+中由 seed 创建的 MiniMax Provider row；credential 不进入 seed SQL/resource。
 
 唯一允许的 credential pair 是 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`，必须
 同时提供；Base URL 会去除尾部斜杠并补为 `/v1`。真实用例和默认 E2E Agent 固定使用

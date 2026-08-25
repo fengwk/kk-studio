@@ -17,7 +17,7 @@ const COMPOSE_FILES = [
   'deploy/test/compose.yaml',
 ]
 
-test('deployment compose files contain neither the unsupported PostgreSQL-only external cache service nor its app environment', () => {
+test('PostgreSQL-only compose files do not declare an external cache service or URL', () => {
   const serviceDeclaration = new RegExp(`^\\s{2}${FORBIDDEN_EXTERNAL_CACHE_SERVICE}:\\s*$`, 'im')
   for (const relativePath of COMPOSE_FILES) {
     const source = readFileSync(path.join(REPOSITORY_ROOT, relativePath), 'utf8')
@@ -26,7 +26,7 @@ test('deployment compose files contain neither the unsupported PostgreSQL-only e
   }
 })
 
-test('deployment, scripts, and current documentation contain no unsupported PostgreSQL-only external cache references', () => {
+test('deployment, scripts, and current documentation contain no external cache references', () => {
   const forbidden = new RegExp(FORBIDDEN_EXTERNAL_CACHE_SERVICE, 'i')
   const files = [
     ...walkFiles(path.join(REPOSITORY_ROOT, 'deploy')),
