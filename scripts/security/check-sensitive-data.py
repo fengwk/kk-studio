@@ -12,14 +12,53 @@ import sys
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-ALLOWED_ABSOLUTE_USER_PATHS = frozenset({"/home/dev", "/home/kkdaemon"})
+ALLOWED_USER_NAMES = frozenset({"dev", "test", "user", "kkdaemon"})
+
+UNIX_PERSONAL_PATH_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9._-])/(?:home|Users)/"
+    r"(?P<user>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"(?![A-Za-z0-9._-])"
+)
+WINDOWS_PERSONAL_PATH_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9._-])[A-Za-z]:[\\/]+Users[\\/]+"
+    r"(?P<user>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"(?![A-Za-z0-9._-])",
+    re.IGNORECASE,
+)
+WSL_MOUNT_PERSONAL_PATH_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9._-])/mnt/[A-Za-z]:?[\\/]+Users[\\/]+"
+    r"(?P<user>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"(?![A-Za-z0-9._-])",
+    re.IGNORECASE,
+)
+WSL_UNC_PERSONAL_PATH_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9._-])\\\\wsl\.localhost[\\/]+"
+    r"[^\\/]+[\\/]+home[\\/]+"
+    r"(?P<user>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"(?![A-Za-z0-9._-])",
+    re.IGNORECASE,
+)
 
 RULES = (
     (
         "private-key",
-        re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"),
+        re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"),
     ),
     ("aws-access-key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    (
+        "google-api-key",
+        re.compile(
+            r"(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])"
+        ),
+    ),
+    (
+        "gitlab-token",
+        re.compile(
+            r"(?<![A-Za-z0-9_-])"
+            r"(?:glpat|gldt|glrt|glft|gloas|glsoat)-[A-Za-z0-9_-]{20,}"
+            r"(?![A-Za-z0-9_-])"
+        ),
+    ),
     (
         "github-token",
         re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
@@ -47,12 +86,30 @@ RULES = (
         ),
     ),
     (
-        "personal-path",
+        "dingtalk-webhook",
         re.compile(
-            r"(?<![A-Za-z0-9._-])/(?:home|Users)/"
-            r"[A-Za-z0-9][A-Za-z0-9._-]*(?![A-Za-z0-9._-])"
+            r"https?://oapi\.dingtalk\.com/robot/send\?access_token="
+            r"[A-Za-z0-9_-]{20,}"
         ),
     ),
+    (
+        "feishu-webhook",
+        re.compile(
+            r"https?://(?:open\.feishu\.cn|open\.larksuite\.com)/"
+            r"open-apis/bot/v2/hook/[A-Za-z0-9_-]{20,}"
+        ),
+    ),
+    (
+        "wecom-webhook",
+        re.compile(
+            r"https?://qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?key="
+            r"[A-Za-z0-9_-]{20,}"
+        ),
+    ),
+    ("personal-path", UNIX_PERSONAL_PATH_PATTERN),
+    ("personal-path", WINDOWS_PERSONAL_PATH_PATTERN),
+    ("personal-path", WSL_MOUNT_PERSONAL_PATH_PATTERN),
+    ("personal-path", WSL_UNC_PERSONAL_PATH_PATTERN),
 )
 
 
@@ -80,16 +137,21 @@ class Finding:
 
 
 def _is_allowlisted(rule_name, match):
-    return rule_name == "personal-path" and match.group(0) in ALLOWED_ABSOLUTE_USER_PATHS
+    return rule_name == "personal-path" and match.group("user") in ALLOWED_USER_NAMES
 
 
 def findings_in_line(line, path, line_number):
     """Return only rule and location data; matched values never leave this function."""
     findings = []
+    reported_rules = set()
     for rule_name, pattern in RULES:
-        match = pattern.search(line)
-        if match is not None and not _is_allowlisted(rule_name, match):
+        if rule_name in reported_rules:
+            continue
+        if any(
+            not _is_allowlisted(rule_name, match) for match in pattern.finditer(line)
+        ):
             findings.append(Finding(rule_name, path, line_number))
+            reported_rules.add(rule_name)
     return findings
 
 

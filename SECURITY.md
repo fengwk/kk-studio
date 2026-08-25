@@ -18,6 +18,3 @@ Please include the following information in the private report:
 - clear reproduction steps or a minimal proof of concept;
 - the affected version, commit, or deployment context; and
 - a suggested mitigation or fix, if available.
-
-Do not include personal email addresses or local-machine information in the
-report. Use the private GitHub reporting workflow for any follow-up details.
