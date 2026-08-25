@@ -69,7 +69,8 @@ flowchart TD
 `start` 会停止受管进程、检查端口、用 Maven clean package backend、按需执行
 `npm install`，等待 backend API ready 后启动 Vite。`e2e` profile 启用时，
 宿主同步器将 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY` 的完整 pair
-写入 seed Provider；密钥不打印。
+经 backend API 写入 E2E database 中由 seed 创建的 Provider row；credential
+不进入 seed SQL/resource，密钥不打印。
 
 ### 4.2 JDK 21 命令
 
@@ -154,9 +155,10 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test
 find . -path '*/target/site/jacoco/index.html' -print
 ```
 
-JaCoCo `>=90%` 是变更核心路径的人工质量目标、非统一自动 gate。Java
-报告 surface 是各 module 的 `target/site/jacoco/index.html`；覆盖率检查应
-结合对应测试证据进行。
+JaCoCo `>=90%` 是新增或实质重构关键逻辑类的 line coverage 人工质量目标，
+branch coverage 作为参考，不是统一自动 gate。验收时在发生变更的 module
+`target/site/jacoco/index.html` 中列明目标类并核对 line coverage，同时关联对应
+单元/集成测试证据。
 
 ## 6. Frontend lint、test、coverage、build
 
@@ -321,15 +323,11 @@ L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function�
 因此 `--with-canvas-function` 会同时打开 storage、fake Function、rebuild，
 让 L1 的 68 个 case 都可选择；它不等于真实 Provider。
 
-### 8.3 API categories 与 gates
+### 8.3 API categories 与精确 inventory
 
 L1 的 categories 是 seed/catalog、Thread command、CRUD、i18n、settings/events、
-model attempt 和 Canvas API。注册 68 个，默认执行 64 个；storage、attachment
-和 fake Function 需要 `--with-canvas-storage` 或 `--with-canvas-function`。
-`--with-canvas-function` 同时打开 storage、fake Function 和 rebuild，不等于真实
-Provider。
-
-L2 的 categories 是真实文本 turn、task delegation 和 stop/partial/replay；
+model attempt 和 Canvas API；storage、attachment 和 fake Function 由显式开关
+启用。L2 的 categories 是真实文本 turn、task delegation 和 stop/partial/replay；
 L3 是同一 Session 的 `ENTRY` 分支；L4 是 Environment READY、directory、
 approval 和 Resource externalization。对应 gates 分别是 `--real`、
 `--real --with-branch`、`--with-tools`，需要真实 Tool history 时再加
@@ -341,8 +339,8 @@ approval 和 Resource externalization。对应 gates 分别是 `--real`、
 ### 8.4 UI matrix：注册 39，默认 37
 
 UI 由 `scripts/e2e/ui-smoke.mjs`、`scripts/e2e/ui/composer-matrix.mjs` 和
-`scripts/e2e/ui/refactor-contracts.mjs` 注册；它不是 75 个 API case 的一部分。
-UI categories 是页面/runtime、Composer/debug 和 refactor contract；`--ui` 是
+`scripts/e2e/ui/workspace-contracts.mjs` 注册；它不是 75 个 API case 的一部分。
+UI categories 是页面/runtime、Composer/debug 和 Workspace contract；`--ui` 是
 总 gate，`--with-tools` 与 `--real` 分别增加 Environment 和真实 Provider
 覆盖。精确 UI inventory 以这些脚本中的注册表为准。
 
@@ -363,7 +361,8 @@ node scripts/e2e/ui-smoke.mjs \
 - 真实 E2E 只接受完整 pair：`TEST_MINIMAX_BASE_URL` +
   `TEST_MINIMAX_API_KEY`。Base URL 去除尾部斜杠并补为 `/v1`；真实 case
   固定校验 `minimax/MiniMax-M2.7`，不会静默换 provider/model。
-- pair 只由宿主同步器通过 backend API 写入 E2E seed；Compose、Dockerfile、
+- pair 只由宿主同步器通过 backend API 写入 E2E database 中由 seed 创建的
+  Provider row；credential 不进入 seed SQL/resource。Compose、Dockerfile、
   image layer 和 container environment 不接收这两个值。不要把 `docker
   inspect`、完整 endpoint 或数据库 credential 内容放进报告。
 - 默认 L1、性能 baseline、`deploy/test/run.sh` 和

@@ -204,7 +204,8 @@ Daemon disconnect 后保留 journal 和 running execution 的进程内事实，�
 
 ## 配置 / 扩展
 
-- 新 Environment Tool 必须实现 `harness-tool` 的 `Tool`，通过 `DaemonToolRegistry` 注册，并与固定 Environment catalog descriptor/version 对齐。
+- Environment Tool 通过 `harness-tool` 的 `Tool` SPI 和 `DaemonToolRegistry`
+  注册，并与固定 Environment catalog descriptor/version 对齐。
 - Coding tools 的 executor、scheduler、ResourceStore 由 `DaemonRuntime` 注入；不得建立 static executor 或绕过 runtime 直接启动 virtual thread。
 - Skill 只能通过 CLI 本地目录加入；MCP 只能通过启动时 `--mcp-config` 加入，server state 在 `start()` 后冻结。
 - 测试可注入内存 `DaemonTransport`、journal、executor 和 ResourceStore；生产使用 JDK WebSocket、InMemory journal 和 runtime-owned executors。

@@ -27,13 +27,10 @@
 
 - 项目文档按当前风格维护到 `./docs/`，与最新代码保持一致，不另设文档版本。
 - 技术方案文档必须自洽可读：只描述当前生效的职责、结构、协议、约束与实现；不写否决项、会话过程或依赖历史上下文才能理解的内容。
+- 文档质量入口：`node scripts/docs/check.mjs`。
 
 ## E2E
 
 - 端到端回归入口：`./scripts/e2e.sh` 或 `npm --prefix frontend run e2e`；矩阵实现为 Node：`scripts/e2e/run-matrix.mjs`。
 - 事实源文档：`docs/operations/development-and-testing.md`。精确 inventory 以 matrix 的 `--list` / `--docs` 输出为准；前端/API 契约变化时同步矩阵 case 与该文档的分类和入口说明。
 - 默认只跑无成本 L1 API 矩阵；真模型/tool/branch/UI 需显式开关（`--real` / `--with-tools` / `--ui`）。报告与截图写入 `reports/e2e/`（已 gitignore），以 `reports/e2e/latest/report.md` 为最近一次可读结论。
-
-## Docs
-
-- 文档质量入口：`node scripts/docs/check.mjs`。

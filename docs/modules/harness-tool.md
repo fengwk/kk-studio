@@ -202,7 +202,8 @@ RemoteTool
 ## 配置 / 扩展
 
 - 新的 Platform Tool 通过 `ToolDescriptor` + `Tool` 实现加入 Platform catalog；内部工具由 `ToolCatalog` 的 `internalToolNames` 标记。
-- 新的 Environment Tool 必须同步 descriptor、schema、prompt 资源和 `EnvironmentToolCatalog` 固定目录，并保持 catalog version 与 Daemon 注册一致。
+- Environment Tool contract 要求 descriptor、schema、prompt 资源、
+  `EnvironmentToolCatalog` 固定目录和 Daemon 注册保持同一 version。
 - RemoteTool 只需提供 `RemoteToolTransport`；WebSocket 或其它连接实现留在边界模块。
 - Daemon capabilities 只允许增加当前协议版本内明确定义的安全摘要字段；wire version 与 capabilities version 是独立版本。
 

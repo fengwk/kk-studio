@@ -29,8 +29,9 @@ composition root。Web 不实现 Catalog、Canvas、Harness、Storage 或 Enviro
 
 ### Non-goals
 
-- 不直接引用 `harness-tool`、`harness-daemon` 或 Platform 的 `EnvironmentDaemonGateway` /
-  `LiveEnvironmentRegistry` implementation；这些由 Platform API 和 WebSocket adapter 隔离。
+- 不直接声明 `harness-tool` Maven dependency，也不使用 Tool execution、Daemon
+  implementation 或 Platform 的 Environment gateway/registry implementation；
+  DTO mapping 只使用架构守卫允许的 canonical Tool value/codec。
 - 不在 Controller 内实现事务、owner authorization、Blob 引用计数、Provider admission 或 Harness reducer。
 - 不创建第二份 schema、第二个 Flyway baseline 或第二套 durable realtime store。
 - 不提供 trusted JAR 的运行时安装、刷新或不受控 classloader；插件只在启动阶段按显式目录加载。
@@ -86,7 +87,8 @@ composition 子根：
 
 Platform 由 `PlatformAutoConfiguration`自动扫描，提供 Catalog、Chat、SystemSettings、Model/Tool gateway、Storage、
 Environment 和 Canvas application services。Canvas infra 通过 web 的直接依赖提供 PostgreSQL/MyBatis repository、
-Canvas query projection 和 Function dispatcher；Web main 不直接 import 这些 implementation 的内部 port。
+Canvas query projection 和 Function dispatcher。Web 的业务适配主要面向
+Platform/Core 接口；Canvas dispatcher 只在下述 composition seam 被直接引用。
 
 `PluginCatalogConfiguration`收集 Spring bean 形式的 built-in `HarnessPlugin`和 Platform
 `HarnessPluginSource`，形成唯一不可变 `PluginCatalog`。`BuiltInPluginConfiguration`提供 Goal plugin；trusted JAR loader
