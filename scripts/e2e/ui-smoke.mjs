@@ -608,7 +608,7 @@ async function main(argv) {
     const initialPanelBox = await panel.boundingBox()
     assert(
       initialPanelBox?.width >= 440,
-      `Chat panel must default wider than the legacy 360px: ${initialPanelBox?.width}`,
+      `Chat panel must default wider than the minimum supported width of 360px: ${initialPanelBox?.width}`,
     )
     const resizeHandle = page.getByRole('separator', {
       name: /^(Resize the Chat panel|调整对话面板宽度)$/,

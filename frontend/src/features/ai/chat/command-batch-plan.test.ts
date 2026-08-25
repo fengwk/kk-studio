@@ -125,7 +125,7 @@ describe('ordered USER_MESSAGE contents serialization', () => {
     expect(() => plan({ parts: [] })).toThrow('message content')
   })
 
-  it('serializes text, attachment, and text in order without legacy fields', () => {
+  it('serializes text, attachment, and text in order without non-contract fields', () => {
     const batch = plan({
       parts: partsOf(
         createTextPart('before'),

@@ -61,8 +61,8 @@ class TestBuildScripts(unittest.TestCase):
             script,
         )
 
-    def test_container_canvas_smoke_rejects_legacy_thread_id(self):
-        """The Docker smoke must enforce the current Canvas DTO instead of accepting a null legacy field."""
+    def test_container_canvas_smoke_requires_current_dto_without_thread_id(self):
+        """The Docker smoke must enforce the current Canvas DTO, which omits threadId."""
         script = (REPOSITORY_ROOT / "deploy/test/run.sh").read_text()
         readme = (REPOSITORY_ROOT / "deploy/test/README.md").read_text()
 

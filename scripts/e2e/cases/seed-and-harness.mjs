@@ -79,8 +79,8 @@ registerCase({
       assert(model.providerName && model.name, JSON.stringify(model))
       assert(!('id' in model) && !('providerId' in model), JSON.stringify(model))
       assert('config' in model, `missing config keys=${Object.keys(model)}`)
-      assert(!('configJson' in model), 'legacy configJson must not be public')
-      assert(!('capabilitiesJson' in model), 'legacy capabilitiesJson must not be public')
+      assert(!('configJson' in model), 'forbidden internal configJson field must not be public')
+      assert(!('capabilitiesJson' in model), 'forbidden internal capabilitiesJson field must not be public')
       assert(model.config?.defaultVariant, JSON.stringify(model.config))
       assert(
         Array.isArray(model.config?.variants) && model.config.variants.length > 0,

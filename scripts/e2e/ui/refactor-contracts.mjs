@@ -521,7 +521,7 @@ export async function runRefactorContractMatrix(ui) {
             await panel.locator('.thread-status-footer button').count() === 0,
             'Thread Footer exposed an interactive notification control',
           )
-          assert(!(await panel.innerText()).includes('notify:'), 'legacy notification Footer label remains')
+          assert(!(await panel.innerText()).includes('notify:'), 'unsupported notification Footer label remains')
           await shot(caseArt, 'settings-notification-single-entry')
           expectNoFatal(pageErrors, consoleErrors)
         },
