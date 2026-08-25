@@ -52,6 +52,7 @@ npm --prefix frontend run test
 npm --prefix frontend run lint
 npm --prefix frontend run build
 node scripts/docs/check.mjs
+python3 scripts/security/check-sensitive-data.py
 python3 -m unittest discover -s scripts/e2e/tests -p 'test_*.py'
 node scripts/e2e/run-matrix.mjs --docs
 ```
@@ -72,3 +73,9 @@ operations 文档；建议先读[系统设计](docs/system-design.md)。
   获得短期签名 URL。
 - Trusted plugin JAR 只从显式部署目录在启动时加载；HTTP 认证、TLS 和 ingress
   策略属于部署边界。
+
+## 协议与安全报告
+
+本项目采用 [Apache License 2.0](LICENSE)。安全漏洞请按
+[Security Policy](SECURITY.md) 通过 GitHub 私密渠道报告，不要在公开 Issue
+中披露。

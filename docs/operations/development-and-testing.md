@@ -72,6 +72,9 @@ flowchart TD
 经 backend API 写入 E2E database 中由 seed 创建的 Provider row；credential
 不进入 seed SQL/resource，密钥不打印。
 
+Vite 配置默认只监听 `127.0.0.1`，并使用 Vite 自带的 Host allowlist。需要容器
+或远程开发时由调用方通过命令行 `--host` 显式覆盖，仓库默认不向全部网卡开放。
+
 ### 4.2 JDK 21 命令
 
 仓库根 POM 的 `maven.compiler.release` 是 `21`。所有 Maven 命令显式使用
@@ -228,7 +231,7 @@ PostgreSQL、MinIO bucket 和 HTTP mock smoke 组合为一个可清理的入口�
 容器内 OpenCLI fake Hub 和离线 Chat；成功或失败都会执行
 `down --volumes --remove-orphans`。
 
-### 7.2 Static 和文档检查
+### 7.2 Static、敏感数据和文档检查
 
 Fat JAR 的 static 资源检查由 `-Pdistribution` 的
 `frontend-maven-plugin + maven-resources-plugin + spring-boot-maven-plugin`
@@ -239,12 +242,15 @@ Fat JAR 的 static 资源检查由 `-Pdistribution` 的
 ```bash
 node scripts/e2e/run-matrix.mjs --docs
 node scripts/docs/check.mjs
+python3 scripts/security/check-sensitive-data.py
 git diff --check
 ```
 
 `--docs` 必须以 `Total registered: 75` 结束；精确 case inventory、标题和
 requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局、Markdown
-链接、H1、源码路径和旧词守卫。
+链接、H1、源码路径和旧词守卫。敏感数据门禁扫描当前 tracked 文件和非 ignored
+未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；命中时
+只输出规则与 `path:line`。该入口不扫描 Git 历史，历史审计是公开策略中的独立步骤。
 
 ## 8. E2E：API levels、flags 和当前 75-case matrix
 
@@ -306,6 +312,12 @@ requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局
 
 当前默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是
 `http://127.0.0.1:5173`；`scripts/e2e.sh` 会把两者传给 runner。
+
+`--rebuild` 默认允许 Maven 在线解析依赖；只有显式设置
+`E2E_MAVEN_OFFLINE=true` 时 backend、Daemon 和 Daemon runtime classpath
+三条 Maven 路径才增加 `-o`。`E2E_WORK_DIR` 默认是 `runtime/e2e`，
+Daemon environment root 默认是其下的 `environment`，可由
+`DAEMON_ENV_ROOT` 覆盖，并由入口导出给 Node matrix。
 
 ### 8.2 Level 统计和开关
 
@@ -372,11 +384,13 @@ node scripts/e2e/ui-smoke.mjs \
   ```bash
   RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
   SEEDANCE_WORKSPACE_ID=... \
+  OPENCLI_HUB_BASE_URL=https://your-opencli-hub.example \
     ./scripts/seedance-prepare-smoke.sh --confirm-prepare-only
   ```
 
   当前固定 `seedance2.0fast`、`duration=4`、`submit=0`、`retry=0`，不创建
-  Canvas FunctionRun、不生成或导入视频。
+  Canvas FunctionRun、不生成或导入视频。Hub URL 没有默认值，必须是无
+  userinfo、path、query 和 fragment 的 HTTP(S) origin。
 
 ## 9. Reliability：确定性回归和 Agent matrix
 
@@ -419,7 +433,9 @@ Surefire XML 证明 `tests > 0`、`failures = 0`、`errors = 0` 且不是全 ski
 
 ```bash
 ./scripts/reliability/stack.sh up
-./scripts/reliability/stack.sh snapshot
+PI_ANCHOR=/path/to/pi \
+PI_BASE_ANCHOR=/path/to/pi-base \
+  ./scripts/reliability/stack.sh snapshot
 ./scripts/reliability/stack.sh inspect
 ./scripts/reliability/stack.sh tool-smoke
 ./scripts/reliability/stack.sh status
@@ -432,7 +448,8 @@ Surefire XML 证明 `tests > 0`、`failures = 0`、`errors = 0` 且不是全 ski
 `case-deps <id>`、`inspect`、`tool-smoke`、`logs [services...]`、`status`、
 `down [--volumes]`、`help`。`up` 等待 app health 和 Environment `READY`；
 `inspect` 检查 non-root、单一 named volume、工具可用性、`rg`/`fd` 不存在、
-workspace 可写和 credential/config 隔离。
+workspace 可写和 credential/config 隔离。`snapshot` 不猜测宿主目录；
+`PI_ANCHOR` 和 `PI_BASE_ANCHOR` 都必须显式指向 clean Git worktree。
 
 真实 Agent runner 只在显式执行时调用 Provider：
 
@@ -634,13 +651,14 @@ docker compose -f deploy/test/compose.yaml --profile app down --volumes --remove
 | E2E 只跑少数 case | `node scripts/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
 | 真实 Provider 不可用 | `test -n "$TEST_MINIMAX_BASE_URL"`；`test -n "$TEST_MINIMAX_API_KEY"` | 只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/reliability/stack.sh status`；`./scripts/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
+| 敏感数据门禁失败 | `python3 scripts/security/check-sensitive-data.py` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
 | performance/supply-chain 失败 | 阅读 `reports/performance/latest/report.md` 或 `reports/supply-chain/latest/summary.md` | 阈值、在线源、JSON 完整性和 zero-vulnerability 都不能放宽 |
 | loopback proxy 下 build 失败 | 检查 `HTTP_PROXY`/`HTTPS_PROXY`、`CANVAS_TEST_BUILD_NETWORK`；再执行 `./deploy/test/run.sh --with-app` | loopback proxy 使用 host build network，代理值不进入镜像 |
 
 ## 14. 测试层级总览
 
 ```text
-L0  validate / Spotless / Checkstyle / type-check
+L0  validate / Spotless / Checkstyle / type-check / sensitive-data gate
     ├─ Java unit + integration + JaCoCo
     └─ Frontend Vitest + ESLint + Vite build + v8 coverage
 L1  free API contract matrix (default 64 / registered 68)

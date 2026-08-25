@@ -65,6 +65,14 @@ def sample_values():
             "wecom-webhook",
             "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + "a" * 32,
         ),
+        "private-opencli-host": (
+            "private-environment",
+            "vps-" + "opencli-hub",
+        ),
+        "private-maven-host": (
+            "private-environment",
+            "mvn." + "hz." + "netease.com",
+        ),
         "unix-personal-path": ("personal-path", "/home/" + "alice/project"),
         "mac-personal-path": ("personal-path", "/Users/" + "alice/project"),
         "windows-personal-path": (

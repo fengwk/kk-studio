@@ -41,6 +41,13 @@
 | [development-and-testing.md](operations/development-and-testing.md) | 开发、质量、E2E、可靠性、性能和供应链入口 |
 | [deployment.md](operations/deployment.md) | Fat JAR、Compose stacks、运行配置和清理 |
 
+## 仓库策略
+
+| 文件 | 内容 |
+| --- | --- |
+| [LICENSE](../LICENSE) | Apache License 2.0 |
+| [SECURITY.md](../SECURITY.md) | 支持范围和私密漏洞报告入口 |
+
 ## 维护规则
 
 - 文档路径和源码路径必须与仓库当前布局一致；变更入口或协议时同步更新相关
