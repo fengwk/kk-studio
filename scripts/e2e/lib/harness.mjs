@@ -653,8 +653,48 @@ export async function waitForModelTextDeltaAfterEventSubscribed(
   startWork,
   { timeoutMs = 90_000 } = {},
 ) {
+  return waitForModelDeltaAfterEventSubscribed(
+    ctx,
+    threadId,
+    startWork,
+    timeoutMs,
+    parseModelTextDelta,
+    'MODEL_DELTA/TEXT_DELTA',
+  )
+}
+
+/**
+ * 等待第一条非空模型内容增量。模型可能先流出 thinking，再流出 text；stop/partial
+ * 契约允许两者进入 durable ASSISTANT_ABORTED，因此取消时机不应绑定到 text。
+ */
+export async function waitForModelContentDeltaAfterEventSubscribed(
+  ctx,
+  threadId,
+  startWork,
+  { timeoutMs = 90_000 } = {},
+) {
+  return waitForModelDeltaAfterEventSubscribed(
+    ctx,
+    threadId,
+    startWork,
+    timeoutMs,
+    parseModelContentDelta,
+    'MODEL_DELTA/TEXT_DELTA or THINKING_DELTA',
+  )
+}
+
+async function waitForModelDeltaAfterEventSubscribed(
+  ctx,
+  threadId,
+  startWork,
+  timeoutMs,
+  parseDelta,
+  description,
+) {
   const expectedThreadId = canonicalUuid(threadId, 'threadId')
   assert(typeof startWork === 'function', 'startWork must be a function')
+  assert(typeof parseDelta === 'function', 'parseDelta must be a function')
+  assert(typeof description === 'string' && description, 'description must be non-blank')
   assert(
     typeof ctx?.baseUrl === 'string' && ctx.baseUrl.trim(),
     'E2E context must expose a non-blank baseUrl',
@@ -701,14 +741,14 @@ export async function waitForModelTextDeltaAfterEventSubscribed(
           && frame.name === 'realtime'
           && sameThreadResource(frame.resource, expectedThreadId)
         ) {
-          const signal = parseModelTextDelta(frame.data, expectedThreadId)
+          const signal = parseDelta(frame.data, expectedThreadId)
           if (signal != null) {
             return { matched: true, value: signal }
           }
         }
         return { matched: false }
       },
-      `MODEL_DELTA/TEXT_DELTA on thread ${expectedThreadId}`,
+      `${description} on thread ${expectedThreadId}`,
     )
     let startResult
     try {
@@ -831,6 +871,18 @@ function sameThreadResource(resource, expectedThreadId) {
 }
 
 function parseModelTextDelta(envelope, expectedThreadId) {
+  const signal = parseModelContentDelta(envelope, expectedThreadId)
+  if (signal?.kind !== 'TEXT_DELTA') return null
+  return {
+    threadId: signal.threadId,
+    invocationId: signal.invocationId,
+    attempt: signal.attempt,
+    text: signal.text,
+    createdAt: signal.createdAt,
+  }
+}
+
+function parseModelContentDelta(envelope, expectedThreadId) {
   if (!isRecord(envelope) || !isRecord(envelope.payload)) return null
   if (
     envelope.type !== 'MODEL_DELTA'
@@ -844,7 +896,7 @@ function parseModelTextDelta(envelope, expectedThreadId) {
     || typeof envelope.createdAt !== 'string'
     || !envelope.createdAt.trim()
     || !Number.isFinite(Date.parse(envelope.createdAt))
-    || envelope.payload.kind !== 'TEXT_DELTA'
+    || (envelope.payload.kind !== 'TEXT_DELTA' && envelope.payload.kind !== 'THINKING_DELTA')
     || typeof envelope.payload.text !== 'string'
     || !envelope.payload.text.trim()
   ) {
@@ -854,6 +906,7 @@ function parseModelTextDelta(envelope, expectedThreadId) {
     threadId: envelope.threadId,
     invocationId: envelope.subjectId,
     attempt: envelope.attempt,
+    kind: envelope.payload.kind,
     text: envelope.payload.text,
     createdAt: envelope.createdAt,
   }
