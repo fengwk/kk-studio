@@ -197,7 +197,7 @@ class TestSyncMiniMax(unittest.TestCase):
         self.assertNotIn(secret, "\n".join(lines))
 
     def test_old_openai_environment_has_no_effect_or_http(self):
-        """Legacy provider variables are intentionally ignored."""
+        """Unsupported provider variables do not affect the current synchronization contract."""
         calls = []
 
         lines = sync_minimax(

@@ -32,7 +32,7 @@ public class ComfyuiWorkflowApiLookupService {
 
   /**
    * 仅当配置存在且 enabled=true 时返回绑定模型；否则返回 {@link Optional#empty()}，便于 runtime 直接抛 404 / 403
-   * 而不是回落到已禁用的旧配置。
+   * 而不会回落到未启用配置。
    */
   public Optional<ComfyuiWorkflowApiBindings> findEnabledBindings(String apiName) {
     if (apiName == null || apiName.isBlank()) {

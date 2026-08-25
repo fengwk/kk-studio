@@ -42,7 +42,7 @@ class CanvasCoreArchitectureTest {
     assertTrue(Files.isDirectory(main), "canvas core main sources must exist: " + main);
     assertFalse(
         Files.exists(main.resolve("fun/fengwk/kkstudio/studio")),
-        "legacy studio package tree must not exist");
+        "forbidden studio package tree must not exist");
 
     List<String> violations = scanViolations(main);
     assertTrue(
