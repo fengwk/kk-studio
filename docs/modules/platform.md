@@ -442,7 +442,7 @@ Function dispatcher claim + RUNNING lease
 | `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s；compaction keep 20000；subagent depth 2、per-parent concurrency 10、maxTurns 50 | retry、resolver、subagent 配置读取点 |
 | `environment` | resource 8 MiB、heartbeat 60s、directory list 10s | Environment gateway 查询/超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |
-| `integrations.openCliHub` | disabled；request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
+| `integrations.openCliHub` | disabled、base URL 未配置；request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
 | `integrations.seedance/gptImage2/minimaxH3` | 各自 enabled/paid 开关、workspace、prompt/ComfyUI timeout 和 polling 约束 | adapter 的启动快照与执行读取点 |
 | `storageMedia` | S3 disabled；upload 3600s；presign 600s/3600s；media process 30s；thumbnail 512/quality 80 | S3 bean topology 和媒体处理 |
 | `advanced` | resource 16 MiB；processor lease/heartbeat 30s/10s；dispatcher worker 16、queue 64；event queue 512、2 MiB、10s、heartbeat 20s；notification poll/reconnect 20s/5s | 组合根装配的 restart-required 软策略 |

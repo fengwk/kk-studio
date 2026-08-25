@@ -309,6 +309,15 @@ curl -fsS http://127.0.0.1:${RELIABILITY_APP_PORT:-18091}/actuator/health
 ./scripts/reliability/stack.sh down --volumes
 ```
 
+向 Daemon named volume 写入跨仓基线是独立的显式操作，不使用任何宿主目录
+默认值：
+
+```bash
+PI_ANCHOR=/path/to/pi \
+PI_BASE_ANCHOR=/path/to/pi-base \
+  ./scripts/reliability/stack.sh snapshot
+```
+
 `up` 等待 PostgreSQL health、App `/actuator/health` 和公共
 `GET /api/ai/environment` 的 `status=READY`。`inspect` fail closed 检查：
 
@@ -371,13 +380,19 @@ Daemon 负责 workspace 内的工具执行和目录访问；reliability stack �
 | reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_ENV_NAME` |
 | supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
 | explicit real E2E | host-only credential sync | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
+| explicit Seedance prepare-only | external Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` |
 
 ### 10.2 Secrets
 
 - `.dockerignore` 和 `.gitignore` 排除 `.env`、key/cert/credential 文件、
   `credentials*`、service account JSON 和 `secrets/`。
 - local/test 的固定 `kk_studio`、`canvas_test` 和 MinIO test password 只属于
-  disposable local/test compose，不代表生产 credential。
+  disposable local/test compose，不代表生产 credential；宿主绑定地址一旦
+  改为非 loopback，就必须显式覆盖这些默认值。
+- `integrations.openCliHub` 默认 disabled 且 `baseUrl=null`；`deploy/test`
+  仅由 `canvas-test` seed 将其启用并指向隔离网络内的
+  `http://opencli-hub:8080` fake Hub。真实 prepare-only smoke 必须显式提供
+  外部 Hub origin。
 - `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY` 只能由宿主同步器经 HTTP
   写入 E2E/reliability 专用 database；不放入 Compose environment、Dockerfile、
   image layer、Daemon command 或报告。

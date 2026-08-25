@@ -97,6 +97,8 @@ flowchart LR
   `mermaid`、`katex`。
 - Toolchain：TypeScript `~5.7.3`、Vite `6`、Vitest `4`、jsdom、
   ESLint `10`、Playwright、`@vitest/coverage-v8`。
+- Vite dev server 默认只监听 `127.0.0.1` 并保留默认 Host allowlist；容器或
+  远程开发必须显式覆盖 host。
 - TypeScript 使用 strict、`ES2022`、bundler module resolution、`@/*` 到
   `src/*` 的 alias；应用代码禁止 unused locals/parameters 和未处理的
   fall-through。

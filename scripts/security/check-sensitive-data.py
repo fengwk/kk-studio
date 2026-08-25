@@ -13,6 +13,14 @@ import sys
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ALLOWED_USER_NAMES = frozenset({"dev", "test", "user", "kkdaemon"})
+PRIVATE_ENVIRONMENT_MARKERS = (
+    "vps-" + "opencli-hub",
+    "mvn." + "hz." + "netease.com",
+)
+PRIVATE_ENVIRONMENT_PATTERN = re.compile(
+    "|".join(re.escape(marker) for marker in PRIVATE_ENVIRONMENT_MARKERS),
+    re.IGNORECASE,
+)
 
 UNIX_PERSONAL_PATH_PATTERN = re.compile(
     r"(?<![A-Za-z0-9._-])/(?:home|Users)/"
@@ -106,6 +114,7 @@ RULES = (
             r"[A-Za-z0-9_-]{20,}"
         ),
     ),
+    ("private-environment", PRIVATE_ENVIRONMENT_PATTERN),
     ("personal-path", UNIX_PERSONAL_PATH_PATTERN),
     ("personal-path", WINDOWS_PERSONAL_PATH_PATTERN),
     ("personal-path", WSL_MOUNT_PERSONAL_PATH_PATTERN),
