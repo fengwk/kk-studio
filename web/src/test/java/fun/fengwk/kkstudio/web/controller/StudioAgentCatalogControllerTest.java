@@ -37,9 +37,9 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import java.math.BigDecimal;
 import java.util.List;
 
-/** 按全局名称标识的目录资源 HTTP 契约。 */
+/** Provider、Model、Agent Catalog Controller 的 HTTP 契约。 */
 @AutoConfigureMockMvc
-public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
+public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
