@@ -46,7 +46,8 @@ Commands:
       Build and start the isolated stack, wait for app health and daemon READY,
       then synchronize the optional TEST_MINIMAX credential pair from the host.
   snapshot
-      Copy clean snapshots of PI_ANCHOR and PI_BASE_ANCHOR into the named volume.
+      Copy clean snapshots from the non-empty PI_ANCHOR and PI_BASE_ANCHOR
+      Git worktrees into the named volume.
   case-reset <case-id> <pi|pi-base>
       Replace one writable case clone from the selected volume snapshot.
   case-deps <case-id>
@@ -63,6 +64,10 @@ Commands:
       Stop this Compose project. Add --volumes for complete project data cleanup.
   help
       Show this help without contacting Docker.
+
+Snapshot environment:
+  PI_ANCHOR=/path/to/pi
+  PI_BASE_ANCHOR=/path/to/pi-base
 EOF
 }
 
@@ -161,6 +166,13 @@ require_clean_anchor() {
   fi
 }
 
+require_snapshot_anchors() {
+  [ -n "${PI_ANCHOR-}" ] \
+    || die "snapshot requires non-empty PI_ANCHOR (set it to the pi Git worktree path)"
+  [ -n "${PI_BASE_ANCHOR-}" ] \
+    || die "snapshot requires non-empty PI_BASE_ANCHOR (set it to the pi-base Git worktree path)"
+}
+
 remove_remotes() {
   local repository=$1
   local remote
@@ -188,14 +200,15 @@ clone_anchor() {
 }
 
 snapshot_anchors() {
+  require_snapshot_anchors
   require_cmd docker
   require_cmd git
   require_cmd mktemp
   require_cmd tar
   daemon_container_id >/dev/null
 
-  local pi_source=${PI_ANCHOR:-"$HOME/proj/pi"}
-  local pi_base_source=${PI_BASE_ANCHOR:-"$HOME/proj/pi-base"}
+  local pi_source="$PI_ANCHOR"
+  local pi_base_source="$PI_BASE_ANCHOR"
   local pi_sha_before pi_base_sha_before
 
   require_clean_anchor "$pi_source" pi

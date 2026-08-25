@@ -67,6 +67,9 @@ Env:
   # the complete MiniMax pair is synchronized to seed provider name=minimax after backend readiness
   # the base URL is normalized to end with /v1
   JAVA_HOME_21=...
+  E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
+  E2E_WORK_DIR=...        # default: $REPO_ROOT/runtime/e2e
+  DAEMON_ENV_ROOT=...     # optional override; default: $WORK_DIR/environment
 EOF
 }
 

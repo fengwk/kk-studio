@@ -11,8 +11,7 @@ export default defineConfig({
     },
   },
   server: {
-    host: '0.0.0.0',
-    allowedHosts: true,
+    host: '127.0.0.1',
     // 等文件写完再触发 HMR，避免读到半截/空文件
     watch: {
       awaitWriteFinish: {
