@@ -235,6 +235,43 @@ class TaskToolTest {
     verifyNoInteractions(listener);
   }
 
+  /** Executor 在 TaskExecution 启动前拒绝时返回既有容量错误，且不得创建 durable 子 Thread。 */
+  @Test
+  void executorRejectionReturnsDeterministicErrorWithoutCreatingChild() throws Exception {
+    runtime = mock(HarnessRuntime.class);
+    ExecutorService rejectingExecutor = Executors.newSingleThreadExecutor();
+    rejectingExecutor.shutdown();
+    TaskTool rejectingTool =
+        new TaskTool(
+            () -> runtime,
+            settingsMaterializer,
+            () -> config(2, 10, Duration.ZERO, DEFAULT_MAX_TURNS),
+            new SubagentRunRegistry(),
+            changeSource,
+            rejectingExecutor,
+            new ObjectMapper());
+    RecordingListener listener = new RecordingListener();
+
+    ToolExecutionHandle handle =
+        rejectingTool.execute(
+            request(
+                "call-capacity",
+                "{\"subagent_type\":\"researcher\",\"prompt\":\"must not spawn\"}"),
+            listener);
+    ToolResult result = listener.completed.get(5, TimeUnit.SECONDS);
+
+    // 固定 executor 的第 N+1 次拒绝发生在 TaskExecution.run 前，因此没有 NEW_SESSION/Thread durable 写入，
+    // 但模型仍收到 task 自己既有的 ERROR envelope，而不是 Platform Tool UNKNOWN。
+    assertTrue(result.error(), result.toString());
+    assertFalse(handle.isCancelled());
+    assertTrue(
+        ((TextToolContent) result.contents().getFirst())
+            .text()
+            .contains("Subagent execution capacity is exhausted"),
+        result.toString());
+    verifyNoInteractions(runtime);
+  }
+
   /** 参数语义非法（通过 schema 但被 parseArguments 拒绝）时，异步以错误 ToolResult 完成。 */
   @Test
   void completesRejectedArgumentsAsynchronously() throws Exception {
