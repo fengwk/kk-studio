@@ -58,8 +58,8 @@ import java.util.UUID;
       "kk-studio.storage.s3.public-endpoint=https://cdn.example.com",
       "kk-studio.storage.s3.region=us-east-1",
       "kk-studio.storage.s3.bucket=test-bucket",
-      "kk-studio.storage.s3.access-key=AKIAIOSFODNN7EXAMPLE",
-      "kk-studio.storage.s3.secret-key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      "kk-studio.storage.s3.access-key=local-test-access-key",
+      "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
 class HarnessCommandAcceptanceOrchestratorIntegrationTest extends S3WebPostgresTestSupport {
 

@@ -337,8 +337,8 @@ public class S3PresignServiceTest {
     }
     properties.setRegion(REGION);
     properties.setBucket(BUCKET);
-    properties.setAccessKey("AKIAIOSFODNN7EXAMPLE");
-    properties.setSecretKey("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+    properties.setAccessKey("local-test-access-key");
+    properties.setSecretKey("local-test-secret-key");
     return properties;
   }
 
