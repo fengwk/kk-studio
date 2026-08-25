@@ -6,6 +6,7 @@ usage() {
 Usage:
   RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
   SEEDANCE_WORKSPACE_ID=... \
+  OPENCLI_HUB_BASE_URL=... \
   scripts/seedance-prepare-smoke.sh --confirm-prepare-only
 
 This script calls OpenCLI Hub directly. It is hard-coded to:
@@ -29,8 +30,12 @@ if [[ -z "${SEEDANCE_WORKSPACE_ID:-}" ]]; then
   echo "SEEDANCE_WORKSPACE_ID is required" >&2
   exit 2
 fi
+if [[ -z "${OPENCLI_HUB_BASE_URL:-}" ]]; then
+  echo "OPENCLI_HUB_BASE_URL is required; set it to the OpenCLI Hub HTTP(S) origin" >&2
+  exit 2
+fi
 
-HUB_URL=${OPENCLI_HUB_BASE_URL:-http://vps-opencli-hub:8080}
+HUB_URL="${OPENCLI_HUB_BASE_URL%/}"
 PROMPT=${SEEDANCE_PREPARE_SMOKE_PROMPT:-Prepare-only smoke. Do not submit generation.}
 
 request_body=$(

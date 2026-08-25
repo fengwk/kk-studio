@@ -150,7 +150,7 @@ route 文件格式：
 ```bash
 RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
 SEEDANCE_WORKSPACE_ID=... \
-OPENCLI_HUB_BASE_URL=http://vps-opencli-hub:8080 \
+OPENCLI_HUB_BASE_URL=https://your-opencli-hub.example \
   ./scripts/seedance-prepare-smoke.sh --confirm-prepare-only
 ```
 

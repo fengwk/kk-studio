@@ -250,15 +250,7 @@ public record SystemSettings(
 
     public static final OpenCliHub DEFAULT =
         new OpenCliHub(
-            false,
-            "http://vps-opencli-hub:8080",
-            5_000L,
-            120_000L,
-            130_000L,
-            16 * 1024,
-            512 * 1024,
-            4096,
-            65_535);
+            false, null, 5_000L, 120_000L, 130_000L, 16 * 1024, 512 * 1024, 4096, 65_535);
 
     public OpenCliHub {
       baseUrl =
