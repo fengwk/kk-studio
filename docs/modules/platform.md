@@ -481,7 +481,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - `schema/src/main/resources/db/seed/e2e/V2__e2e_seed.sql`
 - `schema/src/main/resources/db/seed/canvas-test/V3__canvas_test_system_settings.sql`
 - Schema 重点表：`agent_provider`、`agent_model`、`agent_definition`、`comfyui_workflow_api`、`chat`、
-  `chat_session`、`system_setting`、Canvas 六张 graph/function/resource 表、Harness 七张执行表、
+  `chat_session`、`system_setting`、Canvas graph/function/resource 相关表、Harness 七张执行表、
   `canvas_session`、`storage_blob`、`storage_upload`、`session_blob_ref`。
 
 ### Architecture tests 与测试基座
@@ -507,7 +507,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - Resolver/materialization：`DatabaseTurnResolverTest`、`AgentBranchSettingsMaterializerTest`、
   `AgentPromptComposerTest`、`DatabaseThreadSelectedSkillLookupTest`、`EnvironmentSkillBodyLoaderTest`。
 - Canvas/ComfyUI：`PlatformCanvasCommandServiceTest`、`PlatformCanvasResourceLifecycleTest`、
-  `CanvasBlobResourceMaterializer`相关测试、`OpenCliCanvasFunctionAdaptersTest`、
+  `PlatformCanvasFunctionBlobAccessTest`、`OpenCliCanvasFunctionAdaptersTest`、
   `MiniMaxH3CanvasFunctionAdapterTest`、`ComfyuiRuntimeServiceTest`、`ComfyuiWorkflowApiBindingsParserTest`。
 - Environment：`LiveEnvironmentRegistryTest`、`EnvironmentDaemonGatewayFinalTest`、
   `EnvironmentDaemonGatewaySettingsLiveTest`、`LiveEnvironmentQueryServiceImplTest`。
