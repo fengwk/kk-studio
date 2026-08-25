@@ -68,7 +68,7 @@ flowchart LR
     CanvasInfra --> PG
     HarnessInfra --> PG
     Frontend -->|short-lived signed URL| S3
-    Web <-->|WebSocket v2| Env
+    Web <-->|WebSocket| Env
     Trusted -->|startup snapshot| Web
 ```
 
@@ -123,37 +123,15 @@ PostgreSQL 中的关键事实分为四组：
 
 ### S3 字节边界
 
-全局 Blob 的服务端对象键由 Blob identity 派生：
+`storage_blob` 保存内容摘要、媒体事实、引用计数和生命周期；对象内容与预览字节
+保存在 S3。对象 key 只由服务端根据 Blob identity 派生，浏览器和业务 DTO 不接收
+bucket、key 或长期 URL。
 
-```text
-uploads/{uploadId}/original
-blobs/{blobId}/original
-blobs/{blobId}/preview.webp
-```
-
-`storage_blob` 保存 `sha256`、`size_bytes`、`media_type`、尺寸、时长、`ref_count`
-和 `ACTIVE/DELETING` 状态；对象内容在 S3。上传流程在事务外执行预签名 PUT 与
-checksum-mode HEAD，完成校验后复制到 Blob candidate key，再以短事务解决去重并
-绑定 `storage_upload`。
-
-预签名服务要求 checksum 解码后恰为 32-byte SHA-256，`contentType` 不超过 255
-字节，过期秒数必须为正且不超过部署上限；complete 还会复核对象的 checksum、
-大小和媒体事实。数据库只保存这些校验后的 metadata，不保存原始文件字节。
-
-durable message 只保存 `resource(blobId,name,preview)`，Canvas Resource 只保存
-`blob_id` 或内联 `text_content`。Provider 输入和浏览器呈现都在使用点读取权威
-媒体事实，并获取新鲜的短期 URL；全局 Blob 响应不把 bucket、对象 key 或长期 URL
-暴露给业务 DTO。ComfyUI 专用 presign DTO 只接受服务端限定的 namespace。S3 规则
-由以下实现共同固定：
-
-- `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/StorageObjectKeys.java`
-- `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/S3PresignServiceImpl.java`
-- `platform/src/main/java/fun/fengwk/kkstudio/platform/storage/service/impl/StorageUploadServiceImpl.java`
-- `web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioStorageController.java`
-
-Blob 的 `retain/release` 只能在数据库事务内完成。引用归零转为 `DELETING`，
-提交后由 `StorageMaintenance` 在事务外删除 preview、original，再以 token-fenced
-短事务删除元数据。
+上传校验、对象复制和删除在数据库长事务外执行；短事务只负责 upload/Blob
+去重、引用和 cleanup 事实。durable message 与 Canvas Resource 只保存 `blobId`
+或内联文本，读取时再获取短期签名 URL。引用归零后，后台 maintenance 依据
+PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。完整协议由
+[Platform 模块](modules/platform.md)负责。
 
 ## 2. 模块与依赖边界
 

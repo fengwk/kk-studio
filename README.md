@@ -66,8 +66,8 @@ operations 文档；建议先读[系统设计](docs/system-design.md)。
 
 ## 安全边界
 
-- Provider credential、Daemon token 和部署密钥只在运行时配置，不进入源码、
-  镜像、seed 或公共 DTO。
+- 真实 Provider credential、Daemon token 和部署密钥只在运行时配置，不进入
+  源码、镜像、seed 或公共 DTO。
 - PostgreSQL 保存可恢复的业务事实；对象字节由受控存储服务保存，浏览器只
   获得短期签名 URL。
 - Trusted plugin JAR 只从显式部署目录在启动时加载；HTTP 认证、TLS 和 ingress

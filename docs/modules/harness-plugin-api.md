@@ -160,9 +160,11 @@ PluginTool 不在执行时重新解析 catalog、读取 Store 或重建 branch�
 
 ## 配置 / 扩展
 
-- 新 plugin 实现 `HarnessPlugin`，在 `contribute` 内通过 scoped registrar 注册能力。
-- 新 branch state 先注册 `customEntryType`，再让 PluginTool 声明对应 `READ`/`WRITE` access。
-- 新模型上下文通过 `ContextProjector` 注册；不应把完整 transcript 或 Store handle 放进投影结果。
+- Plugin contribution 通过 `HarnessPlugin.contribute` 和 scoped registrar 注册。
+- Branch state contribution 先注册 `customEntryType`，PluginTool 再声明对应
+  `READ`/`WRITE` access。
+- `ContextProjector` 是插件向 Model context 投影消息的唯一扩展点；投影结果不
+  包含完整 transcript 或 Store handle。
 - priority 只解决同一扩展点的非依赖排序；requires 传递闭包优先于 priority。
 - plugin-api 不定义 plugin discovery、trusted JAR classloader、Spring bean 装配或 runtime reload；这些属于组合根边界。
 

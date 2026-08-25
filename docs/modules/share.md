@@ -21,7 +21,8 @@ flowchart LR
 - 提供稳定、严格、可反序列化的 public JSON 形状。
 - 让 Canvas、Harness、Storage、Catalog、Environment、Settings 和 ComfyUI 的
   HTTP 契约共享同一 DTO 定义。
-- 在 DTO 边界拒绝未知字段、错误 union、非法 UUID/cursor 和不应回显的敏感字段。
+- 在 DTO 边界拒绝未知字段、错误 union 和不应回显的敏感字段；canonical
+  UUID/cursor 由 Web mapper 校验。
 - 保持生产依赖最小，使契约测试不需要 Spring、PostgreSQL 或 Flyway。
 
 ## Non-goals

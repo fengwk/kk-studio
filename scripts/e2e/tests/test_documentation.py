@@ -12,7 +12,7 @@ class TestDocumentation(unittest.TestCase):
     """The documentation checker must accept the committed fixed layout."""
 
     def test_documentation_checker_passes(self):
-        """The CLI covers layout, links, headings, source paths, and retired terms."""
+        """The CLI covers layout, links, headings, source paths, and forbidden terms."""
         result = subprocess.run(
             ["node", "scripts/docs/check.mjs"],
             cwd=REPOSITORY_ROOT,

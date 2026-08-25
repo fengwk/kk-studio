@@ -56,15 +56,15 @@ const checkableTopLevels = new Set([
   'pom.xml',
 ])
 const generatedPathMarkers = ['/target/', '/coverage/', '/reports/']
-const retiredArchitectureDocuments = ['technical', 'solution'].join('-')
-const retiredDesignDocuments = ['product', 'design'].join('-')
-const retiredCacheTerm = ['re', 'dis'].join('')
-const retiredGoalTable = ['agent', 'thread', 'goal'].join('_')
+const forbiddenArchitectureDocuments = ['technical', 'solution'].join('-')
+const forbiddenDesignDocuments = ['product', 'design'].join('-')
+const forbiddenCacheTerm = ['re', 'dis'].join('')
+const forbiddenGoalTable = ['agent', 'thread', 'goal'].join('_')
 const forbiddenDocumentationTerms = [
-  [retiredArchitectureDocuments, new RegExp(retiredArchitectureDocuments, 'i')],
-  [retiredDesignDocuments, new RegExp(retiredDesignDocuments, 'i')],
-  [retiredCacheTerm, new RegExp(`\\b${retiredCacheTerm}\\b`, 'i')],
-  [retiredGoalTable, new RegExp(`\\b${retiredGoalTable}\\b`, 'i')],
+  [forbiddenArchitectureDocuments, new RegExp(forbiddenArchitectureDocuments, 'i')],
+  [forbiddenDesignDocuments, new RegExp(forbiddenDesignDocuments, 'i')],
+  [forbiddenCacheTerm, new RegExp(`\\b${forbiddenCacheTerm}\\b`, 'i')],
+  [forbiddenGoalTable, new RegExp(`\\b${forbiddenGoalTable}\\b`, 'i')],
   ['Workspace NOTES', /workspace\s+notes/i],
   ['本切片', /本切片/],
   ['路线图', /路线图/],
@@ -113,10 +113,30 @@ function walkDirectories(directory) {
   })
 }
 
+function outsideFencedCode(source) {
+  let fence = null
+  const lines = []
+  for (const line of source.split(/\r?\n/u)) {
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/)
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0]
+      if (fence === null) {
+        fence = marker
+      } else if (fence === marker) {
+        fence = null
+      }
+      lines.push('')
+    } else {
+      lines.push(fence === null ? line : '')
+    }
+  }
+  return lines.join('\n')
+}
+
 function markdownLinks(source) {
   const links = []
   const pattern = /!?\[[^\]]*]\(([^)\n]+)\)/g
-  for (const match of source.matchAll(pattern)) {
+  for (const match of outsideFencedCode(source).matchAll(pattern)) {
     let destination = match[1].trim()
     if (destination.startsWith('<') && destination.includes('>')) {
       destination = destination.slice(1, destination.indexOf('>'))
@@ -140,39 +160,30 @@ function localLinkPath(documentPath, destination) {
     return null
   }
   try {
-    return path.resolve(
+    const resolved = path.resolve(
       repositoryRoot,
       path.dirname(documentPath),
       decodeURIComponent(withoutFragment),
     )
+    const relative = path.relative(repositoryRoot, resolved)
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      return false
+    }
+    return resolved
   } catch {
     return false
   }
 }
 
 function fenceAndHeadingCount(source) {
-  let fence = null
-  let headings = 0
-  for (const line of source.split(/\r?\n/u)) {
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/)
-    if (fenceMatch) {
-      const marker = fenceMatch[1][0]
-      if (fence === null) {
-        fence = marker
-      } else if (fence === marker) {
-        fence = null
-      }
-      continue
-    }
-    if (fence === null && /^#\s+\S/u.test(line)) {
-      headings += 1
-    }
-  }
-  return headings
+  return outsideFencedCode(source)
+    .split(/\r?\n/u)
+    .filter((line) => /^#\s+\S/u.test(line))
+    .length
 }
 
 function inlineCodeValues(source) {
-  return [...source.matchAll(/`([^`\n]+)`/g)].map((match) => match[1].trim())
+  return [...outsideFencedCode(source).matchAll(/`([^`\n]+)`/g)].map((match) => match[1].trim())
 }
 
 function looksLikeCheckablePath(value) {
@@ -315,7 +326,7 @@ function checkInlineSourcePaths() {
   }
 }
 
-function checkLegacyReferencesAndTerms() {
+function checkForbiddenReferencesAndTerms() {
   const scanPaths = [
     'README.md',
     'AGENTS.md',
@@ -324,15 +335,15 @@ function checkLegacyReferencesAndTerms() {
   ]
   for (const relativePath of scanPaths) {
     const source = read(relativePath)
-    const retiredPathPattern = new RegExp(
-      `docs/(?:${retiredArchitectureDocuments}|${retiredDesignDocuments})|${retiredArchitectureDocuments}|${retiredDesignDocuments}`,
+    const forbiddenPathPattern = new RegExp(
+      `docs/(?:${forbiddenArchitectureDocuments}|${forbiddenDesignDocuments})|${forbiddenArchitectureDocuments}|${forbiddenDesignDocuments}`,
       'iu',
     )
-    if (retiredPathPattern.test(source)) {
-      addError(`${relativePath}: contains a retired documentation path`)
+    if (forbiddenPathPattern.test(source)) {
+      addError(`${relativePath}: contains a forbidden documentation path`)
     }
   }
-  for (const relativePath of documentPaths) {
+  for (const relativePath of markdownSurfaces) {
     const source = read(relativePath)
     for (const [label, pattern] of forbiddenDocumentationTerms) {
       if (pattern.test(source)) {
@@ -346,7 +357,7 @@ checkFixedLayout()
 checkHeadings()
 checkLinks()
 checkInlineSourcePaths()
-checkLegacyReferencesAndTerms()
+checkForbiddenReferencesAndTerms()
 
 if (errors.length > 0) {
   console.error(`FAIL docs (${errors.length} error${errors.length === 1 ? '' : 's'})`)
