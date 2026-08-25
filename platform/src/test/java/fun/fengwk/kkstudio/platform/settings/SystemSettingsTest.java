@@ -66,7 +66,7 @@ class SystemSettingsTest {
     assertEquals(1_800_000L, integrations.comfyui().websocketTimeoutMillis());
     assertEquals(50L * 1024 * 1024, integrations.comfyui().maxInputFileBytes());
     assertEquals(false, integrations.openCliHub().enabled());
-    assertEquals("http://vps-opencli-hub:8080", integrations.openCliHub().baseUrl());
+    assertEquals(null, integrations.openCliHub().baseUrl());
     assertEquals(5_000L, integrations.openCliHub().connectTimeoutMillis());
     assertEquals(120_000L, integrations.openCliHub().requestTimeoutMillis());
     assertEquals(130_000L, integrations.openCliHub().longPollTimeoutMillis());
@@ -374,7 +374,7 @@ class SystemSettingsTest {
         () ->
             new SystemSettings.OpenCliHub(
                 false,
-                "http://vps-opencli-hub:8080",
+                "http://hub:8080",
                 5_000L,
                 120_000L,
                 130_000L,

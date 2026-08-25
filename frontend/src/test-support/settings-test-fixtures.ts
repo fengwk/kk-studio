@@ -52,7 +52,7 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       },
       openCliHub: {
         enabled: false,
-        baseUrl: 'http://vps-opencli-hub:8080',
+        baseUrl: null,
         connectTimeoutMillis: '5000',
         requestTimeoutMillis: '120000',
         longPollTimeoutMillis: '130000',
