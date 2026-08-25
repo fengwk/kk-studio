@@ -1100,10 +1100,28 @@ NODE
 EOF
 
     if ((${#FAILURES[@]} == 0)); then
-        cat >>"$RUN_DIR/summary.md" <<'EOF'
+        local success_note
+        case "$MODE" in
+            sbom)
+                success_note="The requested backend and frontend SBOM checks completed successfully, and both CycloneDX JSON reports are non-empty and parseable."
+                ;;
+            audit)
+                success_note="The requested dependency audit checks completed successfully. npm audit reported no findings at the low threshold, and Dependency-Check JSON contains zero non-suppressed vulnerabilities."
+                ;;
+            image)
+                success_note="The requested image checks completed successfully. Both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
+                ;;
+            all)
+                success_note="All requested checks completed successfully. Both SBOMs are valid, npm audit and Dependency-Check contain zero non-suppressed vulnerabilities, both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
+                ;;
+            *)
+                success_note="All requested checks completed successfully."
+                ;;
+        esac
+        cat >>"$RUN_DIR/summary.md" <<EOF
 ## Notes
 
-All requested checks completed successfully. Dependency-Check JSON contains zero non-suppressed vulnerabilities, both image functional smokes passed, and each image report contains zero fixable HIGH/CRITICAL vulnerabilities.
+$success_note
 EOF
     else
         cat >>"$RUN_DIR/summary.md" <<'EOF'
