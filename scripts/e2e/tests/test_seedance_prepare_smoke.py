@@ -16,13 +16,45 @@ class TestSeedancePrepareSmoke(unittest.TestCase):
 
     def test_missing_hub_origin_fails_closed_before_curl(self):
         """A missing origin exits before the first network request."""
+        result, curl_invocation = self.run_smoke()
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        self.assertIn("OPENCLI_HUB_BASE_URL is required", result.stderr)
+        self.assertIsNone(curl_invocation, "missing Hub origin must fail before curl")
+
+    def test_invalid_hub_origin_fails_closed_before_curl(self):
+        """Invalid origins fail without echoing the supplied URL or invoking curl."""
+        for invalid_origin in (
+            "ftp://secret.example",
+            "https://secret.example/private-token",
+        ):
+            with self.subTest(invalid_origin=invalid_origin):
+                result, curl_invocation = self.run_smoke(invalid_origin)
+
+                self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+                self.assertIn(
+                    "OPENCLI_HUB_BASE_URL must be an HTTP(S) origin",
+                    result.stderr,
+                )
+                self.assertNotIn(invalid_origin, result.stderr)
+                self.assertIsNone(curl_invocation, "invalid Hub origin must fail before curl")
+
+    def test_valid_hub_origin_strips_root_trailing_slash_before_curl(self):
+        """A valid origin is normalized before the first request is built."""
+        result, curl_invocation = self.run_smoke("https://hub.example/")
+
+        self.assertIsNotNone(curl_invocation, result.stdout + result.stderr)
+        self.assertIn("https://hub.example/api/opencli/execute", curl_invocation)
+        self.assertNotIn("https://hub.example//api", curl_invocation)
+
+    def run_smoke(self, hub_url=None):
+        """Run the guard with a fake curl and retain its evidence before cleanup."""
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             curl_marker = temporary_path / "curl-called"
             fake_curl = temporary_path / "curl"
             fake_curl.write_text(
                 "#!/usr/bin/env bash\n"
-                'printf "curl called\\n" > "$CURL_MARKER"\n'
+                'printf "%s\\n" "$*" > "$CURL_MARKER"\n'
                 "exit 99\n",
                 encoding="utf-8",
             )
@@ -39,7 +71,10 @@ class TestSeedancePrepareSmoke(unittest.TestCase):
                     ),
                 }
             )
-            environment.pop("OPENCLI_HUB_BASE_URL", None)
+            if hub_url is None:
+                environment.pop("OPENCLI_HUB_BASE_URL", None)
+            else:
+                environment["OPENCLI_HUB_BASE_URL"] = hub_url
 
             result = subprocess.run(
                 [str(SMOKE_SCRIPT), "--confirm-prepare-only"],
@@ -49,10 +84,13 @@ class TestSeedancePrepareSmoke(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
+            curl_invocation = (
+                curl_marker.read_text(encoding="utf-8")
+                if curl_marker.exists()
+                else None
+            )
 
-        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
-        self.assertIn("OPENCLI_HUB_BASE_URL is required", result.stderr)
-        self.assertFalse(curl_marker.exists(), "missing Hub origin must fail before curl")
+        return result, curl_invocation
 
 
 if __name__ == "__main__":
