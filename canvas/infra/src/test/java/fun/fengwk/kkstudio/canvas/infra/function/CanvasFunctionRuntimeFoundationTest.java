@@ -72,7 +72,6 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   @Autowired private CanvasFunctionCatalog catalog;
   @Autowired private CanvasFunctionRunStateCodecPort stateCodec;
   @Autowired private CanvasFunctionWorkStore workStore;
-  @Autowired private Clock clock;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private TestBlobAccess blobAccess;
 
@@ -119,11 +118,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     canvasStore.addLink(new CanvasLink(canvasId, sourceNodeId, targetNodeId));
     CanvasResource source = addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
-    runtimeTransactions.start(canvasId, targetNodeId, REQUEST_1);
-    ClaimedRun claim =
-        workStore
-            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-success")
-            .orElseThrow();
+    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "foundation-success");
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     assertEquals(source.blobId(), frozen.manifest().get(0).blobId());
     assertEquals(3L, frozen.manifest().get(0).sizeBytes());
@@ -147,11 +142,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void checkpointRollbackLeavesRunAndVersionUntouched() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
-    ClaimedRun claim =
-        workStore
-            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-rollback")
-            .orElseThrow();
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-rollback");
     long versionAfterStart = version(canvasId);
 
     TransactionTemplate template = new TransactionTemplate(transactionManager);
@@ -181,11 +172,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void checkpointAndFailureRequireTheCurrentLease() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
-    ClaimedRun claim =
-        workStore
-            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-fencing")
-            .orElseThrow();
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-fencing");
 
     runtimeTransactions.checkpoint(
         canvasId, nodeId, REQUEST_1, claim.leaseToken(), "SUBMITTED", Map.of("jobId", "job"));
@@ -209,11 +196,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void completeSuccessWithStaleLeaseIsANoOp() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
-    ClaimedRun claim =
-        workStore
-            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-success-fence")
-            .orElseThrow();
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-success-fence");
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target = addBlobResource(canvasId, null, null, frozen.targetResourceId());
 
@@ -231,11 +214,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void completeSuccessRejectsInvalidOrUnmaterializedTarget() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
-    ClaimedRun claim =
-        workStore
-            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-invalid-success")
-            .orElseThrow();
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-invalid-success");
     CanvasFunctionFrozenRun frozen = decode(claim.run());
 
     assertThrows(
@@ -265,11 +244,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void checkpointCancelsAfterAggregateDisappears() {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
-    ClaimedRun claim =
-        workStore
-            .claimNext(clock.instant(), Duration.ofSeconds(30), "foundation-delete-fence")
-            .orElseThrow();
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-delete-fence");
     jdbc.update("delete from canvas_function_resource_pin where node_id = ?", nodeId);
     jdbc.update("delete from canvas_function_run where node_id = ?", nodeId);
     jdbc.update("delete from canvas_node where id = ?", nodeId);
@@ -285,6 +260,18 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         () ->
             runtimeTransactions.checkpoint(
                 canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
+  }
+
+  /** start 提交的 availableAt 是 claim 的权威时间；不能用独立 wall clock 跨过同一事务的时间边界。 */
+  private ClaimedRun claimStartedRun(
+      UUID canvasId, UUID nodeId, String requestId, String ownerToken) {
+    CanvasFunctionRun started = runtimeTransactions.start(canvasId, nodeId, requestId).run();
+    ClaimedRun claim =
+        workStore
+            .claimNext(started.availableAt(), Duration.ofSeconds(30), ownerToken)
+            .orElseThrow();
+    assertEquals(nodeId, claim.nodeId(), "claim must correspond to the started node");
+    return claim;
   }
 
   private UUID addFunctionNode(UUID canvasId, String name, String config) {

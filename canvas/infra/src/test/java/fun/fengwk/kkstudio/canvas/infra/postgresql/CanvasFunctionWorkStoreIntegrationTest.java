@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +18,7 @@ import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.util.AopTestUtils;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
@@ -44,10 +47,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 真实 PostgreSQL 验证 Canvas Function queue 的多节点 claim、lease 恢复、fencing 与 NOTIFY。 */
 class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupport {
@@ -232,19 +237,24 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     when(adapter.models()).thenReturn(List.of(model));
     when(adapter.enabled()).thenReturn(true);
     when(adapter.unavailableReason()).thenReturn(null);
+    CountDownLatch renewalCompleted = new CountDownLatch(1);
+    AtomicBoolean renewalObserved = new AtomicBoolean();
+    CanvasFunctionWorkStore workStoreTarget = AopTestUtils.getUltimateTargetObject(workStore);
+    CanvasFunctionWorkStore observedWorkStore = spy(workStoreTarget);
+    doAnswer(
+            invocation -> {
+              boolean renewed = (Boolean) invocation.callRealMethod();
+              if (renewed) {
+                renewalCompleted.countDown();
+              }
+              return renewed;
+            })
+        .when(observedWorkStore)
+        .renew(any(), any(), any());
     when(adapter.execute(any(), any()))
         .thenAnswer(
             ignored -> {
-              long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-              while (!runs.findByNodeId(node.id())
-                  .orElseThrow()
-                  .leaseUntil()
-                  .isAfter(initialLeaseUntil)) {
-                if (System.nanoTime() >= deadline) {
-                  throw new AssertionError("heartbeat did not renew the PostgreSQL lease");
-                }
-                Thread.onSpinWait();
-              }
+              renewalObserved.set(renewalCompleted.await(5, TimeUnit.SECONDS));
               return List.of(targetResourceId);
             });
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
@@ -266,7 +276,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
             runTransactions,
             mock(CanvasFunctionBlobAccess.class),
             materializers,
-            workStore,
+            observedWorkStore,
             properties,
             Clock.systemUTC(),
             heartbeat);
@@ -276,7 +286,11 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
       heartbeat.shutdownNow();
     }
 
-    assertTrue(runs.findByNodeId(node.id()).orElseThrow().leaseUntil().isAfter(initialLeaseUntil));
+    assertTrue(renewalObserved.get(), "adapter must observe a successful real PostgreSQL renewal");
+    CanvasFunctionRun renewedRun = runs.findByNodeId(node.id()).orElseThrow();
+    assertTrue(
+        renewedRun.leaseUntil().isAfter(initialLeaseUntil),
+        "real PostgreSQL renewal must extend the lease");
     verify(runTransactions).completeSuccess(frozen, claim.leaseToken(), List.of(targetResourceId));
   }
 
