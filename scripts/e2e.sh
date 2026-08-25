@@ -11,7 +11,7 @@
 #   ./scripts/e2e.sh --list           # 只打印矩阵，不执行
 #
 # 文档事实源：
-#   docs/technical-solution/e2e-regression.md
+#   docs/operations/development-and-testing.md
 #   node scripts/e2e/run-matrix.mjs --docs
 #
 # 报告（gitignore）：

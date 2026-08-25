@@ -32,7 +32,7 @@ composition root。Web 不实现 Catalog、Canvas、Harness、Storage 或 Enviro
 - 不直接引用 `harness-tool`、`harness-daemon` 或 Platform 的 `EnvironmentDaemonGateway` /
   `LiveEnvironmentRegistry` implementation；这些由 Platform API 和 WebSocket adapter 隔离。
 - 不在 Controller 内实现事务、owner authorization、Blob 引用计数、Provider admission 或 Harness reducer。
-- 不创建第二份 schema、第二个 Flyway baseline、第二套 durable realtime store 或 Redis stack。
+- 不创建第二份 schema、第二个 Flyway baseline 或第二套 durable realtime store。
 - 不提供 trusted JAR 的运行时安装、刷新或不受控 classloader；插件只在启动阶段按显式目录加载。
 - 不在浏览器事件 WebSocket 中搬运 command、snapshot、stop、approval 等 HTTP 能力；这些仍走 REST。
 
@@ -93,7 +93,13 @@ Canvas query projection 和 Function dispatcher；Web main 不直接 import 这�
 只负责产生外部 plugin snapshot，Tool contribution 和 context projector 的运行语义仍由 Platform/Harness plugin API
 负责。
 
-数据库是唯一 durable database，Web 不引入 Spring Security 或 Redis client。HTTP 认证/TLS 的部署边界在应用外；
+`web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java`
+是 composition seam：它直接 import
+`CanvasFunctionDispatcher`，把 `canvas_function_work` notification 接到 Canvas
+dispatcher；这不是 Platform 对 Canvas Infra implementation 的反向依赖。
+
+数据库是唯一 durable database，Web 不在当前 context 内实现 HTTP 认证。HTTP
+认证/TLS 的部署边界在应用外；
 Environment Daemon 的连接身份由 `daemon-token`在 Platform gateway HELLO 协议中校验，trusted plugin directory 是另一个
 显式部署信任边界。
 
@@ -131,7 +137,8 @@ Profile locations 是：
 3. 将 dist copy 到 `${project.build.outputDirectory}/static`；
 4. `spring-boot-maven-plugin:repackage`把它放入 Fat JAR。
 
-该 profile不写回 `frontend` source 或 `web/src/main/resources/static`；普通 `mvn test/package`不触发 Node toolchain。
+该 profile 不写回 `frontend` source 或 Web 的静态资源源码目录；普通
+`mvn test/package` 不触发 Node toolchain。
 `SpaFallbackConfig`把 `classpath:/static/`接到 `/**`，真实 asset 优先；只有 GET、非 `/api/`、非 `/actuator/`、且
 末段无扩展名的路径才 fallback 到 `static/index.html`。
 
@@ -440,7 +447,6 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 - `web/src/main/java/fun/fengwk/kkstudio/web/runtime/plugin/TrustedJarPluginLoader.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/WebModuleArchitectureTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java`
-- `web/src/test/java/fun/fengwk/kkstudio/web/NoRedisArchitectureTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/SpaFallbackTest.java`
 - `web/src/test/java/fun/fengwk/kkstudio/web/WebPostgresTestSupport.java`
 
@@ -490,3 +496,9 @@ Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于 compositio
 这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single baseline、PostgreSQL notification
 reconnect/resync、worker NOTIFY/poll 两条唤醒路径、ack-before-event、bounded sender、Environment large READY frame、
 HTTP async error mapping、strict DTO、trusted JAR classloader lifecycle、locale fallback 和静态 SPA fallback。
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、
+[Canvas Infra](canvas-infra.md)、[Harness Infra](harness-infra.md)、
+[部署与运行](../operations/deployment.md)。

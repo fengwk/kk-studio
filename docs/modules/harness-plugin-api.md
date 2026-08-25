@@ -2,7 +2,10 @@
 
 ## 定位
 
-`harness-plugin-api` 是受信任 build-time plugin SPI。它把插件能力收集为不可变 `PluginCatalog`，并通过 scoped `ContributionId`、`BranchView`、`PluginTool`、`AppendCustomEntry` 和 `ContextProjector` 将插件限制在声明式扩展边界内。
+`harness-plugin-api` 是受信任 Java plugin 的 startup discovery/catalog freeze
+SPI。组合根在启动时收集插件能力并冻结为不可变 `PluginCatalog`，再通过 scoped
+`ContributionId`、`BranchView`、`PluginTool`、`AppendCustomEntry` 和
+`ContextProjector` 将插件限制在声明式扩展边界内。
 
 插件作者不接触 `HarnessStore`、gateway、transaction、lock 或 processor。插件读取由调用方冻结在 Tool 所属 Assistant Entry 的 `BranchView`，写入只返回 intent，由 Harness Core 在 Tool terminal apply transaction 中验证和追加 CUSTOM Entry。
 
@@ -178,3 +181,9 @@ PluginTool 不在执行时重新解析 catalog、读取 Store 或重建 branch�
 - [`PluginCatalogTest.java`](../../harness/plugin-api/src/test/java/fun/fengwk/kkstudio/harness/plugin/api/PluginCatalogTest.java)：DAG、拓扑顺序、priority、ContributionId、freeze、duplicate 和未调用 contributor。
 - [`PluginContractTest.java`](../../harness/plugin-api/src/test/java/fun/fengwk/kkstudio/harness/plugin/api/PluginContractTest.java)：intent、error ToolResult、immutable context 和 state declaration。
 - [`BranchViewTest.java`](../../harness/plugin-api/src/test/java/fun/fengwk/kkstudio/harness/plugin/api/BranchViewTest.java)：branch-scoped `(pluginId, customType)` 查询与 latest snapshot。
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、
+[Harness Tool](harness-tool.md)、[Harness Plugin Goal](harness-plugin-goal.md)、
+[Web](web.md)。

@@ -5,6 +5,21 @@ Harness / AI 负责可恢复的 Agent Thread 执行，Studio / Canvas 负责图�
 与 Function 运行。两者共享 PostgreSQL、全局 Blob Storage、应用事件 WebSocket
 和浏览器入口，但不共享领域状态机。
 
+## 核心概念与全局不变量
+
+| 概念 | 当前边界 |
+| --- | --- |
+| Durable truth | PostgreSQL 保存会影响恢复、重试、查询、删除和版本对账的业务事实；进程内对象只保存执行期 reservation、连接和 live projection。 |
+| Snapshot | REST Snapshot 是 Thread 和 Canvas 的权威读取面；通知和 WebSocket 只负责低延迟唤醒或可丢失 overlay。 |
+| Work | Harness 与 Canvas 都把可调度事实放在 PostgreSQL，并以 claim、lease、token 和 poll 处理丢通知、断线和进程退出。 |
+| Version | Harness Thread version 与 Canvas document version 是独立单调坐标；HTTP mapper 使用 canonical UUID 和 decimal cursor。 |
+| Composition root | `web` 是唯一生产 Spring Boot root；`platform`、Core、Runtime 和 plugin API 不创建第二个 root。 |
+| Byte boundary | Blob metadata 与引用在 PostgreSQL；对象字节在受控 Blob Storage；浏览器只取得短期签名 URL。 |
+
+跨域写入必须在单个定义清晰的事务边界内完成，失败时不留下半成品事实；
+外部 I/O 不持有业务锁。任何 stale token、过期 lease、重复 callback 或版本
+gap 都只能产生 no-op、resync 或可恢复的内部失败，不能覆盖新 owner 的状态。
+
 ```mermaid
 flowchart LR
     Browser[Browser]
@@ -23,7 +38,7 @@ flowchart LR
     HarnessGoal[Harness plugins/goal]
     PG[(PostgreSQL<br/>durable truth)]
     S3[(S3<br/>blob bytes)]
-    Env[Environment Daemon<br/>Daemon v3]
+    Env["/daemon/v2 endpoint · protocol v3"]
     Trusted[Trusted plugin JARs]
 
     Browser --> Frontend
@@ -42,6 +57,7 @@ flowchart LR
     HarnessGoal --> HarnessPluginApi
     HarnessDaemon --> HarnessTool
     Platform --> CanvasCore
+    Platform --> Share
     Platform --> HarnessRuntime
     Platform --> HarnessTool
     Platform --> HarnessPluginApi
@@ -141,7 +157,14 @@ Blob 的 `retain/release` 只能在数据库事务内完成。引用归零转为
 
 ## 2. 模块与依赖边界
 
-根 `pom.xml` 以 Java 21 聚合以下模块：
+### Maven reactor 与逻辑模块
+
+根 `pom.xml` 直接聚合六个 Maven module：`share`、`schema`、`canvas`、
+`harness`、`platform`、`web`。`canvas/pom.xml` 再聚合 `canvas/core` 和
+`canvas/infra`；`harness/pom.xml` 再聚合 `tool`、`runtime`、`plugin-api`、
+`infra`、`daemon` 和 `plugins/goal`。下表列出的是可维护的逻辑模块/目录，
+不是 root reactor 的直接 children。`frontend/` 是独立的 Node/Vite 工程，
+不属于 Maven reactor。
 
 | 模块 | 当前职责 | 直接边界 |
 | --- | --- | --- |
@@ -156,7 +179,7 @@ Blob 的 `retain/release` 只能在数据库事务内完成。引用归零转为
 | `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 Runtime/Tool |
 | `harness/daemon` | 独立 Environment 进程适配器 | 只依赖 Tool |
 | `harness/plugins/goal` | Goal v2 的 branch-scoped `CUSTOM` snapshot 插件 | 依赖 Plugin API |
-| `platform` | Catalog、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Core/Runtime ports，不成为组合根 |
+| `platform` | Catalog、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Share、Core/Runtime ports，不成为组合根 |
 | `web` | Spring Boot、HTTP、浏览器事件、daemon WebSocket、生产生命周期 | 唯一 composition root |
 
 依赖方向保持为：
@@ -164,6 +187,7 @@ Blob 的 `retain/release` 只能在数据库事务内完成。引用归零转为
 ```text
 frontend -> web API
 web -> platform
+platform -> share
 web -> canvas-infra -> canvas-core
 web -> harness-infra -> harness-runtime -> harness-tool
 web -> harness-runtime
@@ -181,7 +205,7 @@ Harness Infra、Plugin API 和 Goal plugin，保证组合根不会依赖未声�
 ## 3. Web composition root
 
 `web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java` 是唯一
-`@SpringBootApplication` 入口。它在 `web/runtime/` 与 `web/events/` 中完成以下
+`@SpringBootApplication` 入口。它在 Web runtime 与 event package 中完成以下
 装配：
 
 1. `HarnessRuntimeConfiguration` 注入 `UUID::randomUUID`、PostgreSQL
@@ -309,12 +333,20 @@ Subagent 使用 `SynchronousQueue + AbortPolicy` 的固定并发 executor。Admi
 
 ### Work 恢复
 
-`harness_runtime_work` 与 `canvas_function_work` 的 PostgreSQL trigger 只在
-durable wake 提交后发送提示。`web/src/main/java/fun/fengwk/kkstudio/web/events/postgresql/PostgresqlNotificationLoop.java`
+Harness Work 的通知由同一物理事务中的
+`requestWork -> pg_notify('harness_runtime_work', ...)` 发出：Work upsert、
+wake version 和通知使用同一 JDBC transaction，只有提交后 listener 才能看见
+提示。Harness 没有依赖 Work trigger。
+
+Canvas Function Work 的通知由
+`schema/src/main/resources/db/migration/V1__schema.sql` 中的
+`canvas_function_work` DB trigger 发出；trigger 只提示当前已到期的 READY row，
+不改变 queue fact。两条路径都由
+`web/src/main/java/fun/fengwk/kkstudio/web/events/postgresql/PostgresqlNotificationLoop.java`
 用单独 JDBC connection 执行 `LISTEN`，断线后重连；每个 channel handler 彼此
 隔离。Harness 和 Canvas dispatcher 都有 fixed-delay poll，因此通知丢失、连接
-重建或 worker 进程退出只会延迟 claim，不改变最终状态。Lease 到期后，任意
-可用 worker 可重新 claim。
+重建或 worker 进程退出只会延迟 claim，不改变最终状态。Lease 到期后，任意可用
+worker 可重新 claim。
 
 ### 浏览器 Snapshot 恢复
 
@@ -355,7 +387,8 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
   `GlobalStorageToolResultHistoryMaterializer` 摄入 Blob，无法摄入则 fail closed。
 - Environment 请求由 HELLO 绑定的 canonical name 路由；同名 live connection
   被占用时拒绝第二个持有者。
-- Trusted plugin loader 只位于 `web/runtime/plugin`，从配置目录加载并在启动时
+- Trusted plugin loader 只位于
+  `web/src/main/java/fun/fengwk/kkstudio/web/runtime/plugin/`，从配置目录加载并在启动时
   形成冻结 snapshot；Platform 和 Runtime 不直接接触 classloader。
 
 ## 8. 测试分层与阅读导航
@@ -376,3 +409,17 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - [schema 模块](modules/schema.md)：V1 baseline、profile seed 与数据库边界。
 - [canvas-core 模块](modules/canvas-core.md)：JDK-only Canvas 领域与 ports。
 - [canvas-infra 模块](modules/canvas-infra.md)：PostgreSQL/MyBatis 与 Function durable runtime。
+- [frontend 模块](modules/frontend.md)：React 宿主、feature 边界与浏览器恢复。
+- [harness-daemon 模块](modules/harness-daemon.md)：Environment Daemon 与 Daemon wire。
+- [harness-infra 模块](modules/harness-infra.md)：Harness Store、Work、通知与 ResourceStore。
+- [harness-plugin-api 模块](modules/harness-plugin-api.md)：trusted Java plugin SPI 与 catalog。
+- [harness-plugin-goal 模块](modules/harness-plugin-goal.md)：Goal branch snapshot contract。
+- [harness-runtime 模块](modules/harness-runtime.md)：Agent Runtime 状态机与 processors。
+- [harness-tool 模块](modules/harness-tool.md)：Tool、ResourceRef 与公共 wire contract。
+- [platform 模块](modules/platform.md)：application service、gateway 与外部适配。
+- [web 模块](modules/web.md)：唯一 Spring Boot composition root 与 transport。
+- [开发与测试](operations/development-and-testing.md)：质量、E2E、可靠性和报告入口。
+- [部署与运行](operations/deployment.md)：Fat JAR、Compose stacks、配置和清理。
+
+模块文档负责模块内 API、实现入口和测试边界；本页只保留跨模块的事实、
+依赖方向、事务边界和恢复规则，避免复制模块细节。

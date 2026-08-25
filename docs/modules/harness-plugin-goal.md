@@ -17,7 +17,8 @@
 
 ### Non-goals
 
-- 不创建 `harness_goal`、`agent_thread_goal` 或其它独立表；Goal durable fact 只存在 `harness_entry` 的 CUSTOM payload。
+- Goal durable fact 只存在 `harness_entry` 的 CUSTOM payload；插件不拥有独立
+  persistence boundary。
 - 不实现 host-side `/goal` command、pause/resume、自动 continuation、独立 dispatcher 或 Goal approval。
 - 不读取其它 branch、其它 Session 或 Store，也不把 terminal Goal 继续注入 Provider context。
 - 不让模型直接修改 Entry；Tool 只返回 intent，Core 负责 ownership、effects 和 durable apply。
@@ -146,9 +147,13 @@ sequenceDiagram
 ## 配置 / 扩展
 
 - Goal 的 schema、Tool description 和 active context 均由 classpath prompt resources 提供，入口是 [`GoalPrompts.java`](../../harness/plugins/goal/src/main/java/fun/fengwk/kkstudio/harness/plugins/goal/GoalPrompts.java)。
-- 若扩展新的 Goal state 字段，必须同步 `GoalState`、`GoalStateCodec`、schema version 和对应 tests；当前 schema version 1 的 decoder 不接受未知字段。
-- 若扩展新的 Goal operation，应在 Plugin API 中声明明确 READ/WRITE state access，并继续使用 branch snapshot + Core intent semantics。
-- Goal plugin 不配置独立 dispatcher、Store adapter 或数据库表；调度和 durable apply 始终由 Harness Core。
+- 当前 Goal state contract 固定为 schema version 1；`GoalState`、
+  `GoalStateCodec` 和 prompt schema 共同拒绝未知字段，并保持
+  `ACTIVE -> COMPLETE/BLOCKED` 的状态边界。
+- 当前三项 operation 只通过 Plugin API 声明 READ/WRITE state access，继续使用
+  branch snapshot 与 Core intent semantics。
+- Goal plugin 不配置独立 dispatcher、Store adapter 或数据库表；调度和 durable
+  apply 始终由 Harness Core。
 
 ## 测试与源码入口
 
@@ -161,3 +166,8 @@ sequenceDiagram
 ### 关键测试守卫
 
 - [`GoalPluginTest.java`](../../harness/plugins/goal/src/test/java/fun/fengwk/kkstudio/harness/plugins/goal/GoalPluginTest.java)：覆盖 catalog ownership、Tool descriptor/version/schema、副作用、branch latest snapshot、fork/sibling 隔离、replacement timestamp、invalid input no-intent、active projector silence 和 strict schema codec。
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Harness Plugin API](harness-plugin-api.md)、
+[Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md)。

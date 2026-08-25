@@ -98,7 +98,10 @@ lease_token / lease_until 保持不变
 
 `claimNextWork` 是 Work-only 短事务，按 `available_at,target_id` 选取一条 due 且 lease 缺失/过期的目标，使用 `FOR UPDATE SKIP LOCKED` 写入新 token/until。`lockClaimedWork` 校验 token 和 `lease_until > now`；`completeWork` 在 claimed wakeVersion 仍是最新时删除 Work，有新 wake 时清除 lease 保留行；`rescheduleWork` 清除 lease 并设置 requested time。
 
-Runtime mutation 提交后 `requestWork` 触发 `pg_notify('harness_runtime_work', ...)`。通知只是 availability hint；通知丢失由 fixed-delay poll、重连 wake 和 lease expiry claim 收敛。
+同一 Store transaction 内先由 `requestWork` upsert Work，再执行
+`pg_notify('harness_runtime_work', ...)`；PostgreSQL 只在该 transaction commit
+后向 listener 投递通知。通知只是 availability hint；通知丢失由 fixed-delay
+poll、重连 wake 和 lease expiry claim 收敛。
 
 ### Dispatcher lifecycle / fencing
 
@@ -209,3 +212,8 @@ maxDispatchTasks
 - [`HarnessWorkDispatcherLifecycleTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherLifecycleTest.java)、[`HarnessWorkDispatcherDrainTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherDrainTest.java)、[`HarnessWorkDispatcherHandoffTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherHandoffTest.java)：single drain、round-robin、bounded handoff、rejection 和 stop。
 - [`PostgresqlRealtimeEventSourceConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceConcurrencyTest.java)、[`PostgresqlRealtimeEventSinkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkTest.java)、[`RealtimeNotificationCodecTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodecTest.java)：source fencing、oversize RESYNC 和 canonical codec。
 - [`LocalFileResourceStoreTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/resource/LocalFileResourceStoreTest.java)：content address、并发 create-only、NOFOLLOW 和 size/sha 校验。
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、
+[Harness Tool](harness-tool.md)、[Schema](schema.md)、[Web](web.md)。

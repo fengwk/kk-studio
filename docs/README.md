@@ -1,55 +1,53 @@
-# Docs
+# 文档导航
 
-仓库文档统一收敛到当前生效的一套说明中维护，不按版本分叉，不按模块散落维护。
+这里是仓库文档的唯一入口。文档只描述当前代码、协议、职责和运行方式；
+同一主题只保留一份事实源。
 
-## 文档地图
+## 阅读顺序
 
-```mermaid
-flowchart TD
-    A[docs/README.md]
-    A --> B[technical-solution/README.md]
-    A --> D[technical-solution/domain-map.md]
-    A --> M[product-design/frontend-design-system.md]
-    B --> C[architecture.md]
-    B --> S[harness-runtime-architecture.md]
-    B --> X[harness-runtime-contracts.md]
-    B --> AA[harness-agent-loop.md]
-    B --> AB[session-thread-pane.md]
-    B --> E[backend-implementation-design.md]
-    B --> F[storage-models.md]
-    B --> G[frontend-implementation-design.md]
-    B --> H[harness-capability-wiring.md]
-    B --> N[prompt-cache-usage-cost.md]
-    B --> O[prompt-to-resource.md]
-    B --> P[s3-presign.md]
-    B --> Q[comfyui-workflow-api.md]
-    B --> R[environment-daemon-gateway.md]
-    B --> V[canvas-resource-function-v1.md]
-    B --> W[supply-chain-quality-gate.md]
-    M --> G
-```
+1. [系统设计](system-design.md)：先了解 Maven reactor、逻辑模块、全局不变量
+   和跨域主链路。
+2. [模块文档](#模块)：按职责阅读相关模块的边界、API、恢复语义和测试入口。
+3. [运行文档](#operations)：需要构建、测试、部署或运行 E2E 时阅读 operations。
 
-## 入口索引
+## 系统
 
-| 文档 | 角色 | 说明 |
+| 文档 | 内容 |
+| --- | --- |
+| [system-design.md](system-design.md) | 系统边界、依赖、耐久事实、并发、恢复和阅读导航 |
+
+## 模块
+
+| 模块 | 文档 | 内容 |
 | --- | --- | --- |
-| [technical-solution/README.md](technical-solution/README.md) | 技术方案入口 | 汇总已落地架构与实现边界 |
-| [technical-solution/domain-map.md](technical-solution/domain-map.md) | 领域词汇 | Harness/Studio 双域词汇与前后端映射 |
-| [product-design/frontend-design-system.md](product-design/frontend-design-system.md) | 前端设计规范 | 全局 token、AppShell、组件约定 |
-| [technical-solution/harness-runtime-architecture.md](technical-solution/harness-runtime-architecture.md) | Harness 架构事实源 | Entry/Thread/Command/Invocation/Work、Agent Loop 与 processor |
-| [technical-solution/harness-agent-loop.md](technical-solution/harness-agent-loop.md) | Agent Loop 细节 | reducer/planner/materializer/invocation lifecycle 与分类器规则 |
-| [technical-solution/session-thread-pane.md](technical-solution/session-thread-pane.md) | Session/Thread/Pane | 三态 PaneTarget、lazy materialization、SYSTEM steering、Stop/upload 生命周期 |
-| [technical-solution/harness-runtime-contracts.md](technical-solution/harness-runtime-contracts.md) | Runtime 契约 | JSON/DTO、命令 batch、CAS、replay、snapshot 与 wire 契约 |
-| [technical-solution/architecture.md](technical-solution/architecture.md) | 架构总览 | 模块边界、双域不变量与 Studio 当前事实 |
-| [technical-solution/storage-models.md](technical-solution/storage-models.md) | 关系存储摘要 | Chat、Harness（精确 7 表）、Canvas 当前持久化表；最终 schema 为 V1 |
-| [technical-solution/canvas-resource-function-v1.md](technical-solution/canvas-resource-function-v1.md) | Canvas v1 事实源 | ResourceNode、Resource、Function、Group、Link、typed commands 与八表持久化 |
-| [technical-solution/prompt-to-resource.md](technical-solution/prompt-to-resource.md) | 数据流 | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
-| [technical-solution/supply-chain-quality-gate.md](technical-solution/supply-chain-quality-gate.md) | 供应链质量门禁 | 普通 verify、显式在线扫描、SBOM、报告与失败语义 |
+| share | [modules/share.md](modules/share.md) | Public DTO 与 JSON wire |
+| schema | [modules/schema.md](modules/schema.md) | Flyway baseline、seed 与数据库约束 |
+| canvas-core | [modules/canvas-core.md](modules/canvas-core.md) | Canvas 领域模型、typed command 与 ports |
+| canvas-infra | [modules/canvas-infra.md](modules/canvas-infra.md) | Canvas PostgreSQL 适配与 Function runtime |
+| frontend | [modules/frontend.md](modules/frontend.md) | React 宿主、feature 边界与浏览器恢复 |
+| harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |
+| harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
+| harness-plugin-api | [modules/harness-plugin-api.md](modules/harness-plugin-api.md) | Trusted Java plugin SPI 与 catalog |
+| harness-plugin-goal | [modules/harness-plugin-goal.md](modules/harness-plugin-goal.md) | Goal branch snapshot plugin contract |
+| harness-runtime | [modules/harness-runtime.md](modules/harness-runtime.md) | Agent Runtime 状态机与 processors |
+| harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool、ResourceRef 和 Daemon wire contract |
+| platform | [modules/platform.md](modules/platform.md) | Application service、gateway 与外部适配 |
+| web | [modules/web.md](modules/web.md) | Spring Boot composition root 与 transport |
+
+## Operations
+
+| 文档 | 内容 |
+| --- | --- |
+| [development-and-testing.md](operations/development-and-testing.md) | 开发、质量、E2E、可靠性、性能和供应链入口 |
+| [deployment.md](operations/deployment.md) | Fat JAR、Compose stacks、运行配置和清理 |
 
 ## 维护规则
 
-| 规则 | 说明 |
-| --- | --- |
-| 单一事实来源 | 同一主题只维护一份当前有效文档，不维护历史版本分叉 |
-| 上下文无关 | 文档应让新接手的 Agent 不依赖会话历史即可理解 |
-| 状态边界明确 | 每份文档只陈述当前生效的职责、协议与约束；不写"以后恢复"、"后续切片"等历史或未来说明 |
+- 文档路径和源码路径必须与仓库当前布局一致；变更入口或协议时同步更新相关
+  模块和 operations 文档。
+- 每份文档只保留一个一级标题，并以系统设计为跨模块边界的上级事实源。
+- 精确的 E2E case inventory 由
+  `node scripts/e2e/run-matrix.mjs --list` 和 `--docs` 生成，不在文档中复制
+  case ID 清单。
+- 从仓库根目录运行 `node scripts/docs/check.mjs` 检查固定布局、链接、标题和
+  禁止旧路径。

@@ -3,7 +3,8 @@
 本文描述当前可执行的 Fat JAR、`deploy/local`、`deploy/test` 和
 `deploy/reliability` 运行方式。开发与测试入口见
 [开发与测试](development-and-testing.md)；Frontend 代码和发布资源的关系见
-[Frontend 模块](../modules/frontend.md)。
+[Frontend 模块](../modules/frontend.md)；跨模块边界见
+[系统设计](../system-design.md)。
 
 ## 1. Goals
 
@@ -69,7 +70,7 @@ test -f web/target/kk-studio-web-1.0.0.jar
    `11.9.0`；
 2. 执行 `npm ci`；
 3. 执行 `npm run build -- --outDir web/target/frontend-dist --emptyOutDir`；
-4. 清空本轮 `target/classes/static`，复制 frontend-dist 到
+4. 清空当前构建的 `target/classes/static`，复制 frontend-dist 到
    `web/target/classes/static`；
 5. `spring-boot-maven-plugin` repackage，将 static 资源写入
    `BOOT-INF/classes/static`。
@@ -418,3 +419,8 @@ ss -ltnp | grep -E ':8080|:5432|:15432|:18088|:18089|:19000|:18091' || true
 Healthcheck 通过后才能把服务交给上层脚本；任何 app、database、MinIO、
 mock、Daemon READY 或 smoke 失败都保留诊断并进入失败路径。清理命令只作用
 于对应 Compose project，不删除其它 project 的容器、network 或 volume。
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[开发与测试](development-and-testing.md)、
+[Frontend](../modules/frontend.md)、[Web](../modules/web.md)。

@@ -240,5 +240,7 @@ Blob access 来自 Core ports；Infra 不扫描第三方 model，也不维护第
 - `canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionWorkerHeartbeatTest.java`
 - `canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionDispatcherTest.java`
 
-相关模块：[系统设计](../system-design.md)、[Canvas Core](canvas-core.md)、
-[Schema](schema.md)。
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Canvas Core](canvas-core.md)、
+[Schema](schema.md)、[Web](web.md)。

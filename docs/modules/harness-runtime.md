@@ -271,3 +271,9 @@ TURN_START(reason=COMPACTION, CompactionStart)
 - [`ThreadProcessorCompactionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorCompactionTest.java)、[`ThreadProcessorManualCompactionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorManualCompactionTest.java)、[`CompactionPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlannerTest.java)：压缩切分、fallback、manual CAS 和 no-gain。
 - [`ModelProcessorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessorTest.java)、[`ToolProcessorRecoveryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorRecoveryTest.java)、[`WorkHeartbeatTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeatTest.java)：两阶段 activation、UNKNOWN recovery、lease fencing。
 - [`TaskToolTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/subagent/TaskToolTest.java)、[`SubagentRunRegistryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/subagent/SubagentRunRegistryTest.java)、[`ConcurrencyAdmissionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/admission/ConcurrencyAdmissionTest.java)：child Thread、事件观察、并发 reservation 和 lease 释放。
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Harness Infra](harness-infra.md)、
+[Harness Tool](harness-tool.md)、[Harness Plugin API](harness-plugin-api.md)、
+[Platform](platform.md)。

@@ -1,124 +1,74 @@
 # kk-studio
 
-`kk-studio` 是全局单实例产品，包含两个并列域：
+`kk-studio` 是由一个 Web 应用承载的单实例 AI 与 Canvas 工作台。Harness
+负责可恢复的 Thread 执行，Canvas 负责图形和 Function 运行，Frontend 提供
+浏览器界面。
 
-| 域 | 说明 |
-| --- | --- |
-| **Harness / AI** | 可恢复 Agent Thread、Tool 与实时投影 |
-| **Studio / Canvas** | 全局单实例画布工作台，持久化 ResourceNode/Resource/Function/Group/Link 与 typed commands |
+## 模块边界
 
-架构事实源：
+根 Maven reactor 直接聚合六个目录；其中 `canvas` 和 `harness` 继续聚合
+叶子模块。`frontend` 是独立的 Node/Vite 工程，不是 Maven module。
 
-- [docs/technical-solution/architecture.md](docs/technical-solution/architecture.md)
-- [docs/technical-solution/domain-map.md](docs/technical-solution/domain-map.md)
-- [docs/technical-solution/harness-runtime-architecture.md](docs/technical-solution/harness-runtime-architecture.md)
-- [docs/technical-solution/harness-agent-loop.md](docs/technical-solution/harness-agent-loop.md)
-- [docs/technical-solution/prompt-to-resource.md](docs/technical-solution/prompt-to-resource.md)
-- [docs/technical-solution/canvas-resource-function-v1.md](docs/technical-solution/canvas-resource-function-v1.md)
-
-## 能力摘要
-
-- Harness：Session 共享 append-only Entry Tree（TURN_START/MESSAGE/TOOL/TURN_END 语义）；Thread 以非空 head + 命令 mailbox + version CAS 控制执行；7 张 durable 表 + 唯一 `harness_work` 调度 mailbox；PostgreSQL `LISTEN/NOTIFY` 提供低延迟提示，snapshot 与 periodic poll 负责恢复
-- Studio：Canvas 八表持久化 document/group/node/link/resource/function-run/function-resource-ref/command-dedup；typed command batch 使用 document version CAS 与 request hash 幂等
-- 前端：AI 与 Canvas 都接真实 snapshot/command API 与应用事件 WebSocket 通道；Canvas Editor 通过实体 Patch 更新，gap 时回退权威 Snapshot
-
-## 模块
-
-```text
-share / schema / canvas/core / platform / web
-harness/tool / harness/runtime / harness/plugin-api / harness/infra
-harness/daemon / harness/plugins/goal
-frontend
+```mermaid
+flowchart TD
+  Root["root Maven reactor"]
+  Root --> share
+  Root --> schema
+  Root --> canvas["canvas reactor"]
+  Root --> harness["harness reactor"]
+  Root --> platform
+  Root --> web
+  canvas --> canvasCore["canvas/core"]
+  canvas --> canvasInfra["canvas/infra"]
+  harness --> harnessLeaves["tool · runtime · plugin-api · infra · daemon · plugins/goal"]
+  Frontend["frontend · non-Maven"] --> web
 ```
 
-`harness-runtime` 是纯 Java 领域状态机；`harness-infra` 只做 PostgreSQL Store、Work、realtime notification 与 Resource 适配。
+模块清单：
 
-## 开发
+- `share`、`schema`
+- `canvas/core`、`canvas/infra`
+- `harness/tool`、`harness/runtime`、`harness/plugin-api`、`harness/infra`
+- `harness/daemon`、`harness/plugins/goal`
+- `platform`、`web`
+- `frontend`
 
-后端单元 / 集成测试：
-
-```bash
-env JAVA_HOME=$JAVA_HOME_21 mvn test
-```
-
-前端本地开发与校验：
-
-```bash
-cd frontend && npm test && npm run lint && npm run build
-```
-
-普通 `mvn verify` 不启动联网供应链门禁，不调用 NVD、npm audit、Trivy
-或 ECR。供应链门禁是显式入口，报告见
-[技术方案](docs/technical-solution/supply-chain-quality-gate.md)：
+## Quick start
 
 ```bash
-# 永久契约测试：不联网
-./scripts/supply-chain.sh test
-
-# 依赖 SBOM / audit：按命令需要在线源
-./scripts/supply-chain.sh sbom
-./scripts/supply-chain.sh audit
-
-# 构建并扫描当前 app / daemon 镜像：需要 Docker 和网络，或已有 Trivy DB cache
-./scripts/supply-chain.sh image
-
-# sbom + dependency audit + image：需要 Docker 和网络，或已有 Trivy DB cache
-./scripts/supply-chain.sh all
-```
-
-`image` / `all` 默认使用具名 Docker volume `kk-studio-trivy-cache` 保存
-Trivy 数据库；数据库已缓存时可设置
-`TRIVY_SKIP_DB_UPDATE=true` 离线复用。应用与 daemon 镜像标签可分别通过
-`SUPPLY_CHAIN_APP_IMAGE` 和 `SUPPLY_CHAIN_DAEMON_IMAGE` 覆盖。门禁只扫描
-漏洞，不上传密钥、不 push 镜像；失败报告保留在 gitignored 的
-`reports/supply-chain/` 下。
-
-完整应用 Fat JAR（包含 React 静态资源）：
-
-```bash
-env JAVA_HOME=$JAVA_HOME_21 mvn -Pdistribution -pl web -am clean package
-$JAVA_HOME_21/bin/java -jar web/target/kk-studio-web-1.0.0.jar
-```
-
-## 本地一键启动（app + PostgreSQL）
-
-仓库根目录构建 Spring Boot Fat JAR（含 React 产物），由 Docker Compose 拉起
-`app + postgres` 两个服务。Spring 直接服务 UI / API / SPA fallback，
-没有 Nginx，没有独立前端容器。
-
-```bash
-# 首次启动：构建镜像、等待 healthcheck 全 healthy
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp validate
 docker compose -f deploy/local/compose.yaml up -d --build --wait
-
-# 状态 / 日志
-docker compose -f deploy/local/compose.yaml ps
-docker compose -f deploy/local/compose.yaml logs -f app
-
-# 停止（保留 PostgreSQL 数据卷）
-docker compose -f deploy/local/compose.yaml down
-
-# 彻底清理（删除数据卷，下次启动重新执行 schema/data-dev）
-docker compose -f deploy/local/compose.yaml down -v
 ```
 
-统一地址：
+应用会由 Web Fat JAR 同时提供 UI、API 和 SPA fallback。完整部署入口见
+[本地部署说明](deploy/local/README.md) 和
+[部署与运行](docs/operations/deployment.md)。
 
-| 资源 | 地址 |
-| --- | --- |
-| Web UI | <http://localhost:8080/> |
-| Harness API | <http://localhost:8080/api/ai/runtime/threads/{threadId}/snapshot> 等 |
-| Health | <http://localhost:8080/actuator/health> |
-| PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码：`kk_studio`） |
+## 质量入口
 
-数据库首次初始化的约束：
+```bash
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test
+npm --prefix frontend run test
+npm --prefix frontend run lint
+npm --prefix frontend run build
+node scripts/docs/check.mjs
+python3 -m unittest discover -s scripts/e2e/tests -p 'test_*.py'
+node scripts/e2e/run-matrix.mjs --docs
+```
 
-- 应用通过 Flyway 执行
-  [`V1__schema.sql`](schema/src/main/resources/db/migration/V1__schema.sql) 与
-  [`V2__dev_seed.sql`](schema/src/main/resources/db/seed/dev/V2__dev_seed.sql)；
-  `flyway_schema_history` 确保重启不会重复迁移。
-- `V2__dev_seed.sql` 只写入 local-only 的 stub provider（`stub-key`），
-  不携带任何真实凭证。
-- 真实 Provider 的 `credential` 必须通过 UI 的 Provider 页面或
-  `PUT /api/ai/catalog/providers/{name}` 在运行时注入，**绝不**写入镜像或仓库。
+E2E、覆盖率、可靠性、性能和供应链命令以
+[开发与测试](docs/operations/development-and-testing.md) 为准。
 
-端口覆盖与并行 smoke 见 [`deploy/local/README.md`](deploy/local/README.md)。
+## 文档
+
+[文档唯一导航](docs/README.md) 汇总系统设计、13 个逻辑模块和两个运行
+operations 文档；建议先读[系统设计](docs/system-design.md)。
+
+## 安全边界
+
+- Provider credential、Daemon token 和部署密钥只在运行时配置，不进入源码、
+  镜像、seed 或公共 DTO。
+- PostgreSQL 保存可恢复的业务事实；对象字节由受控存储服务保存，浏览器只
+  获得短期签名 URL。
+- Trusted plugin JAR 只从显式部署目录在启动时加载；HTTP 认证、TLS 和 ingress
+  策略属于部署边界。

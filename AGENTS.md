@@ -31,5 +31,9 @@
 ## E2E
 
 - 端到端回归入口：`./scripts/e2e.sh` 或 `npm --prefix frontend run e2e`；矩阵实现为 Node：`scripts/e2e/run-matrix.mjs`。
-- 事实源文档：`docs/technical-solution/e2e-regression.md`。前端/API 契约变化时必须同步矩阵 case 与该文档。
+- 事实源文档：`docs/operations/development-and-testing.md`。精确 inventory 以 matrix 的 `--list` / `--docs` 输出为准；前端/API 契约变化时同步矩阵 case 与该文档的分类和入口说明。
 - 默认只跑无成本 L1 API 矩阵；真模型/tool/branch/UI 需显式开关（`--real` / `--with-tools` / `--ui`）。报告与截图写入 `reports/e2e/`（已 gitignore），以 `reports/e2e/latest/report.md` 为最近一次可读结论。
+
+## Docs
+
+- 文档质量入口：`node scripts/docs/check.mjs`。

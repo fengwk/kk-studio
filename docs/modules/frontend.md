@@ -31,6 +31,23 @@ React/Vite/TypeScript 工程；开发时由 Vite 提供页面，发布时由 Mav
 - Frontend 文档不定义后端领域状态机；它只记录浏览器端的投影、请求和恢复
   边界。
 
+## Invariants 与 failure recovery
+
+- REST Snapshot 是浏览器事实源；Application Event WebSocket 只触发 invalidate、
+  version 对账或提供短暂的 streaming overlay。
+- Thread 和 Canvas version 只能前进。旧 Snapshot、旧 Patch 和旧 version event
+  不得覆盖较新的本地状态；gap、resync、重连和非法事件统一回到完整 Snapshot。
+- 每个 mutation controller 冻结 request、target identity、cursor 和 generation。
+  不确定的网络结果保留 exact replay，明确的 conflict 交给 ConflictPresenter，
+  不自动重放具有业务语义的命令。
+- transient model/tool overlay 必须以 durable terminal/result fence 结束；迟到
+  delta、partial 和重复事件丢弃。
+- upload、signed URL 和 Canvas Function 的分阶段操作在 unmount、Canvas 切换、
+  timeout 或失败时清理本地 pending state；服务端以 handle、CAS 和过期策略继续
+  收敛。
+- shared 层不依赖 feature；feature controller 不把本地 draft、workspace path、
+  credential 或对象存储内部字段写入 durable API。
+
 ## 3. 总体图
 
 ```mermaid
@@ -487,18 +504,11 @@ loading、error、mutationError 和 panel composition。
 - tablist 支持 ArrowLeft/ArrowRight/Home/End；server schema 缺失或校验失败
   显示可重试的 StateBlock。
 
-## 11. Design tokens 和组件边界
+## 11. Design tokens ownership 与组件边界
 
-[styles.css](../../frontend/src/styles.css) 的 `:root` 是当前全局视觉 token
-源，Canvas prototype 与全局 shell 共用。Token 按职责分组如下：
-
-| 类别 | 当前 token |
-| --- | --- |
-| Surface/background | `--bg`、`--surface`、`--surface-hover`、`--surface-active`、`--surface-raised`、`--surface-soft`、`--stage-bg`、`--stage-dot` |
-| Border/text | `--border`、`--border-hover`、`--line`、`--line-strong`、`--fg`、`--fg-muted`、`--fg-dim`、`--text`、`--muted`、`--dim` |
-| Accent/status | `--green-primary`、`--green`、`--green-deep`、`--green-on`、`--green-gradient`、`--green-border`、`--green-soft`、`--green-soft-hover`、`--green-glow`、`--orange`、`--blue`、`--purple`、`--danger`、`--danger-soft`、`--warning`、`--warning-soft`、`--warning-border`、`--info`、`--info-soft`、`--danger-strong`、`--danger-border`、`--danger-gradient` |
-| Overlay/effect | `--scrim`、`--shadow-lg`、`--shadow-md`、`--shadow-composer`、`--shadow-drawer`、`--white-02`、`--white-04`、`--white-06`、`--topbar-bg`、`--avatar-fg`、`--focus-ring`、`--overlay-surface`、`--overlay-surface-strong` |
-| Shape/type | `--radius-sm`、`--radius-md`、`--radius-lg`、`--font`、`--mono`、`--accent` |
+[styles.css](../../frontend/src/styles.css) 的 `:root` 是全局 token 的唯一
+owner，Canvas feature 只拥有 Canvas 专属样式；新组件复用 token，不在 feature
+之间复制全局 token inventory。
 
 组件边界：
 
@@ -517,36 +527,7 @@ loading、error、mutationError 和 panel composition。
 6. 全局 CSS 只承载 tokens、shell、通用 form/modal/typography；Canvas 专属样式
    由 [canvas.css](../../frontend/src/features/canvas/canvas.css) 负责。
 
-## 12. 构建、lint、test 和 coverage
-
-### 12.1 前端脚本
-
-在仓库根目录执行：
-
-```bash
-npm --prefix frontend ci
-npm --prefix frontend run dev
-npm --prefix frontend run test
-npm --prefix frontend run lint
-npm --prefix frontend run build
-npm --prefix frontend run coverage
-```
-
-`package.json` 的当前绑定是：
-
-| 命令 | 实际执行 |
-| --- | --- |
-| `npm --prefix frontend run test` | `vitest run` |
-| `npm --prefix frontend run lint` | `eslint .` |
-| `npm --prefix frontend run build` | `tsc -b && vite build` |
-| `npm --prefix frontend run coverage` | `vitest run --coverage` |
-| `npm --prefix frontend run e2e` | `../scripts/e2e.sh` |
-| `npm --prefix frontend run e2e:ui` | `../scripts/e2e.sh --ui` |
-| `npm --prefix frontend run e2e:matrix` | `node ../scripts/e2e/run-matrix.mjs --frontend-url http://127.0.0.1:5173` |
-| `npm --prefix frontend run e2e:list` | `node ../scripts/e2e/run-matrix.mjs --list` |
-| `npm --prefix frontend run e2e:docs` | `node ../scripts/e2e/run-matrix.mjs --docs` |
-
-### 12.2 Test layer
+## 12. 测试边界
 
 | 层级 | 当前覆盖 |
 | --- | --- |
@@ -565,16 +546,12 @@ feature 路径与实现同目录组织；Canvas 集成测试位于
 [features/canvas/\_\_tests\_\_](../../frontend/src/features/canvas/__tests__/)，
 shared/service 测试位于各自 source directory。
 
-### 12.3 Coverage 合同
+构建、lint、coverage、E2E 和 Java 报告入口统一见
+[开发与测试](../operations/development-and-testing.md)；本模块只定义浏览器
+测试覆盖的边界和测试基座。
 
-[vite.config.ts](../../frontend/vite.config.ts) 收集 `src/**/*.{ts,tsx}`，
-排除 `src/main.tsx` 和 `src/test-setup.ts`，输出 text/html，且 lines、
-functions、branches、statements 四项阈值均为 `80`。报告写入
-`frontend/coverage/`；阈值不满足时 `npm --prefix frontend run coverage`
-失败。
+---
 
-Java 侧的 JaCoCo 由当前 effective Maven POM 中的
-`jacoco-maven-plugin 0.8.11` 提供 `prepare-agent` 和 test phase report；
-核心路径覆盖率目标按仓库约定保持 `>=90%`，没有把未生成报告当作通过。
-前端与 Java 报告入口和 E2E/部署联调命令见
+上级：[系统设计](../system-design.md)。相关文档：[Share](share.md)、
+[Canvas Core](canvas-core.md)、[Web](web.md)、
 [开发与测试](../operations/development-and-testing.md)。

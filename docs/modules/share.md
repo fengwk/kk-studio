@@ -8,11 +8,12 @@
 
 ```mermaid
 flowchart LR
-    Frontend[frontend API client] -->|JSON| Web[web mapper / controller]
-    Web --> Share[share DTO / wire]
-    Share --> Platform[platform application API]
-    Share --> Canvas[Canvas HTTP projection]
-    Share --> Harness[Harness HTTP projection]
+    Frontend[frontend API client] -->|JSON request| RequestMapper[Web request mapper]
+    RequestMapper -->|decode| ShareRequest[share request DTO / wire]
+    ShareRequest -->|map values| Platform[platform application API]
+    Platform -->|domain result| ResponseMapper[Web response mapper]
+    ResponseMapper -->|construct| ShareResponse[share response DTO / wire]
+    ShareResponse -->|JSON response| Frontend
 ```
 
 ## Goals
@@ -78,8 +79,8 @@ DELETE_GROUP
 RENAME_GROUP
 ```
 
-HTTP mapper 对 UUID 与 cursor 继续执行 canonical 校验。Canvas、Harness 的
-`version`、`sequence` 等 long cursor 以非负十进制 string 传输；`ModelRef` 使用
+canonical UUID 与 cursor 属于 Web request/response mapper 的 HTTP 边界，不由
+share DTO 决定解析策略。Canvas、Harness 的 `version`、`sequence` 等 long cursor 以非负十进制 string 传输；`ModelRef` 使用
 `providerName/modelName` 的 canonical 形式，并在第一个 `/` 处分隔。
 
 ### 可空与安全输出
@@ -130,8 +131,8 @@ Thread 或 Canvas；这些动作由调用方在 DTO 已经严格解析后完成�
   wire 边界失败，不进入领域服务。
 - required-nullable 字段即使值为 `null` 也必须序列化，避免客户端把“未返回”误判
   为“无值”。
-- DTO collection 在构造后保持不可变，Command batch 不允许调用方通过集合修改
-  已解析请求。
+- Command batch 只表达已解析的边界值；集合是否可变由具体 DTO 和调用方的
+  contract 决定，不把统一的 collection immutability 作为 share 规则。
 - `CanvasDocumentDTO` 不含 `threadId`；Canvas Graph version 与 Harness Thread
   version 是两个独立坐标。
 - DTO 不回显 credential、secret 等部署输入；Blob URL 由服务端按请求重新生成，
@@ -156,5 +157,7 @@ Thread 或 Canvas；这些动作由调用方在 DTO 已经严格解析后完成�
 - `share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java`
 - `share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java`
 
-相关模块：[系统设计](../system-design.md)、[Canvas Core](canvas-core.md)、
-[Schema](schema.md)。
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Canvas Core](canvas-core.md)、
+[Schema](schema.md)、[Web](web.md)。
