@@ -24,9 +24,11 @@ SPRING_PROFILE=${SPRING_PROFILES_ACTIVE:-e2e}
 DAEMON_ENV_NAME=${DAEMON_ENV_NAME:-tool-e2e}
 DAEMON_ID=${DAEMON_ID:-tool-e2e-daemon}
 DAEMON_TOKEN=${DAEMON_TOKEN:-e2e-daemon-token}
-DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-/tmp/kk-studio-e2e-env}
+DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-"$WORK_DIR/environment"}
 DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 SKILL_DIR=${SKILL_DIR:-"$HOME/.agents/skills"}
+
+export DAEMON_ENV_ROOT
 
 BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.0.jar"}
 DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-harness-daemon-1.0.0.jar"}
@@ -38,6 +40,23 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
+}
+
+run_maven() {
+  local java_home=$1
+  shift
+  local -a offline_args=()
+  case "${E2E_MAVEN_OFFLINE-false}" in
+    true)
+      offline_args=(-o)
+      ;;
+    false)
+      ;;
+    *)
+      die "E2E_MAVEN_OFFLINE must be exactly true or false (got '${E2E_MAVEN_OFFLINE-}')"
+      ;;
+  esac
+  env JAVA_HOME="$java_home" mvn "${offline_args[@]}" "$@"
 }
 
 resolve_java_home() {
@@ -121,19 +140,19 @@ kill_daemon() {
 
 package_backend() {
   local java_home=$1
-  step "Clean packaging backend (Java 21, offline, skipTests)"
+  step "Clean packaging backend (Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
   (
     cd "$REPO_ROOT"
-    env JAVA_HOME="$java_home" mvn -o -pl web -am -DskipTests clean package
+    run_maven "$java_home" -pl web -am -DskipTests clean package
   )
 }
 
 package_daemon() {
   local java_home=$1
-  step "Clean packaging daemon (Java 21, offline, skipTests)"
+  step "Clean packaging daemon (Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
   (
     cd "$REPO_ROOT"
-    env JAVA_HOME="$java_home" mvn -o -pl harness/daemon -am -DskipTests clean package
+    run_maven "$java_home" -pl harness/daemon -am -DskipTests clean package
   )
 }
 
@@ -143,7 +162,7 @@ build_daemon_classpath() {
   step "Building daemon runtime classpath"
   (
     cd "$REPO_ROOT"
-    env JAVA_HOME="$java_home" mvn -o -pl harness/daemon -q \
+    run_maven "$java_home" -pl harness/daemon -q \
       -DincludeScope=runtime dependency:build-classpath \
       -Dmdep.outputFile="$DAEMON_CP_FILE"
   )

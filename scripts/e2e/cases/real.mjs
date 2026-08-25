@@ -715,7 +715,8 @@ registerCase({
       // 固定大文本 fixture（临时 root，不进仓库）：总量 >8KB、每行低于 read 单行截断阈值，
       // 且整体低于 daemon preview 阈值（50KB）=> read 返回完整 Text，Tool Result Entry 写入前
       // 由 history materializer 摄入全局 Blob，durable history 不保留 file URI。
-      const envRoot = process.env.DAEMON_ENV_ROOT || '/tmp/kk-studio-e2e-env'
+      const envRoot = process.env.DAEMON_ENV_ROOT
+      assert(envRoot, 'DAEMON_ENV_ROOT must be exported by scripts/e2e/lib.sh')
       const fixturePath = path.join(envRoot, 'e2e-resource.txt')
       const fixtureLines = Array.from(
         { length: 32 },
