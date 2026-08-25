@@ -26,7 +26,7 @@ import {
   stopThread,
   threadTarget,
   userMessageCommand,
-  waitForModelTextDeltaAfterEventSubscribed,
+  waitForModelContentDeltaAfterEventSubscribed,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
@@ -266,7 +266,7 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '仅 minimax/MiniMax-M2.7：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 物化空闲 Thread（不调用真实 Provider）；随后 THREAD batch SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空文本 delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '仅 minimax/MiniMax-M2.7：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 物化空闲 Thread（不调用真实 Provider）；随后 THREAD batch SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
@@ -305,7 +305,7 @@ registerCase({
     const idle = await waitForQuiescentThread(ctx, tid, { timeoutMs: 60_000, intervalMs: 100 })
 
     const { signal: firstDelta, startResult } =
-      await waitForModelTextDeltaAfterEventSubscribed(
+      await waitForModelContentDeltaAfterEventSubscribed(
         ctx,
         tid,
         () =>
@@ -1040,8 +1040,8 @@ function assertAssistantAbortedEntry(entry) {
     )
   }
   assert(
-    contents.some((content) => content.type === 'text' && content.text.trim()),
-    `expected non-empty durable partial text: ${JSON.stringify(payload)}`,
+    contents.some((content) => content.text.trim()),
+    `expected non-empty durable partial content: ${JSON.stringify(payload)}`,
   )
 }
 
