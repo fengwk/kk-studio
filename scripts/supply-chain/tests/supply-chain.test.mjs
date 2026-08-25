@@ -347,6 +347,10 @@ test('honors a custom report root and publishes timestamped and latest reports',
         assert.equal(summary.mode, 'sbom')
         assert.equal(summary.checks.find(check => check.name === 'backend-sbom').status, 'PASS')
         assert.equal(summary.checks.find(check => check.name === 'frontend-sbom').status, 'PASS')
+        const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
+        assert.match(summaryMarkdown, /requested backend and frontend SBOM checks completed/i)
+        assert.doesNotMatch(summaryMarkdown, /Dependency-Check JSON contains zero/)
+        assert.doesNotMatch(summaryMarkdown, /image functional smokes passed/)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }
@@ -459,6 +463,9 @@ test('builds both current images and constructs a pinned proxy-aware Trivy scan'
         assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
         assert.doesNotMatch(result.stdout, /127\.0\.0\.1:7890/)
         assert.doesNotMatch(result.stderr, /127\.0\.0\.1:7890/)
+        const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
+        assert.match(summaryMarkdown, /requested image checks completed/i)
+        assert.doesNotMatch(summaryMarkdown, /Dependency-Check JSON contains zero/)
 
         const calls = readFileSync(toolchain.callsFile, 'utf8')
         assert.match(calls, /build .*deploy\/local\/Dockerfile/)
