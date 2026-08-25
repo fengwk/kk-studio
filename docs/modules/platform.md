@@ -519,3 +519,8 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 
 这些测试覆盖的是当前 application layer 的可观察 contract：CAS、owner lock order、Blob ref 对账、S3 cleanup lease、
 Provider/Tool admission、terminal-once、Environment bind、Canvas resource pin、strict codec 和 schema 约束。
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、
+[Canvas Core](canvas-core.md)、[Share](share.md)、[Web](web.md)。

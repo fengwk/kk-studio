@@ -152,5 +152,7 @@ Flyway 位置由 Web runtime、测试 application 配置和
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java`
 - `canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresCanvasInfraTestSupport.java`
 
-相关模块：[系统设计](../system-design.md)、[Share](share.md)、
-[Canvas Infra](canvas-infra.md)。
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Share](share.md)、
+[Canvas Infra](canvas-infra.md)、[Harness Infra](harness-infra.md)。

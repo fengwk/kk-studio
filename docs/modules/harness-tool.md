@@ -223,3 +223,8 @@ RemoteTool
 - [`EnvironmentToolCatalogSchemaTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalogSchemaTest.java)：固定 11 项 Environment catalog 与 schema。
 - [`ResourceRefTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ResourceRefTest.java)：scheme、canonical URI、size/sha 和边界。
 - [`DaemonEnvelopeCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilitiesCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilitiesCodecTest.java)、[`DaemonToolResultCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonToolResultCodecTest.java)：wire 版本、能力摘要、资源大小和严格 JSON。
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、
+[Harness Daemon](harness-daemon.md)、[Platform](platform.md)、[Web](web.md)。

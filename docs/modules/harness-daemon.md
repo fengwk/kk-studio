@@ -228,3 +228,8 @@ Daemon disconnect 后保留 journal 和 running execution 的进程内事实，�
 - [`JdkWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransportTest.java)：文本帧、binary、16 MiB 上限和 policy close。
 - [`DaemonSkillRegistryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistryTest.java)、[`McpConfigParserTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpConfigParserTest.java)、[`McpServerRegistryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpServerRegistryTest.java)：Skill/MCP 发现、配置 strictness、独立失败和 close。
 - [`EnvironmentDirectoryBrowserTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/EnvironmentDirectoryBrowserTest.java)：root boundary、symlink、stable listing、entry count 和安全 wire path。
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Harness Tool](harness-tool.md)、
+[Harness Infra](harness-infra.md)、[Platform](platform.md)、[部署与运行](../operations/deployment.md)。

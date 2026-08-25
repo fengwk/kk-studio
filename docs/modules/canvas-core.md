@@ -41,8 +41,8 @@ flowchart LR
 
 `canvas/core/pom.xml` 的生产依赖为空，只有 JUnit test dependency。
 `CanvasCoreArchitectureTest` 扫描全部 main source，禁止 `java.sql`、
-`javax.sql`、`jakarta.persistence`、Spring、MyBatis 以及
-`harness/platform/share/web` 包前缀。
+`javax.sql`、`jakarta.persistence`、Spring、MyBatis 以及 Harness、Platform、
+Share、Web 包前缀。
 
 外层实现只能通过 Core ports 进入：
 
@@ -189,5 +189,7 @@ RegisteredModel 读取 output kind、reference policy 和参数描述。
 - `canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionModelTest.java`
 - `canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenTest.java`
 
-相关模块：[系统设计](../system-design.md)、[Canvas Infra](canvas-infra.md)、
-[Share](share.md)。
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[Canvas Infra](canvas-infra.md)、
+[Share](share.md)、[Platform](platform.md)。

@@ -114,15 +114,15 @@ npm `11.9.0`，对 `frontend/` 执行 `npm ci` 和 `npm run build`，再把 Vite
 - `removeUnusedImports`；
 - import order：`#,,fun.fengwk.kkstudio,javax,java`。
 
-只格式化本切片变更的 Java 文件：
+Spotless 只在发生 Java 变更的 module 执行：
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp spotless:check
-env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web spotless:apply
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <changed-module> spotless:apply
 ```
 
-`spotless:apply` 会修改源码；上面的 `web` 只是模块示例，实际只替换为
-发生 Java 变更的模块，提交前检查 `git diff`，不要对无关模块执行全仓格式化。
+`spotless:apply` 会修改源码；`<changed-module>` 使用实际发生 Java 变更的
+Maven module，避免对无关模块执行全仓格式化。
 
 ### 5.2 Checkstyle
 
@@ -154,8 +154,9 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test
 find . -path '*/target/site/jacoco/index.html' -print
 ```
 
-关键路径覆盖率按仓库约定目标为 `>=90%`；Java POM 当前不以一个统一
-`check` execution 自动阻断该目标，因此 review 时同时检查报告和测试证据。
+JaCoCo `>=90%` 是变更核心路径的人工质量目标、非统一自动 gate。Java
+报告 surface 是各 module 的 `target/site/jacoco/index.html`；覆盖率检查应
+结合对应测试证据进行。
 
 ## 6. Frontend lint、test、coverage、build
 
@@ -231,17 +232,17 @@ Fat JAR 的 static 资源检查由 `-Pdistribution` 的
 `frontend-maven-plugin + maven-resources-plugin + spring-boot-maven-plugin`
 完成；应用在 `/actuator/health` 通过后再检查浏览器入口。
 
-文档切片提交前从仓库根目录执行：
+文档质量入口：
 
 ```bash
 node scripts/e2e/run-matrix.mjs --docs
+node scripts/docs/check.mjs
 git diff --check
-git status --short
 ```
 
-`--docs` 必须以 `Total registered: 75` 结束；case ID、层级和 requires 必须
-与下文一致。Markdown 内链、命令路径和报告目录使用本切片
-的静态检查脚本验证，验证结果记录在 Workspace NOTES。
+`--docs` 必须以 `Total registered: 75` 结束；精确 case inventory、标题和
+requires 以 `--list/--docs` 输出为准。`check.mjs` 负责固定文档布局、Markdown
+链接、H1、源码路径和旧词守卫。
 
 ## 8. E2E：API levels、flags 和当前 75-case matrix
 
@@ -259,7 +260,7 @@ git status --short
 ./scripts/e2e.sh --with-canvas-function
 ./scripts/e2e.sh --real --with-tools --with-canvas-storage
 ./scripts/e2e.sh --ui
-./scripts/e2e.sh --only thread.user_message_strict_wire
+./scripts/e2e.sh --only CASE_ID
 ./scripts/e2e.sh --level L1
 ./scripts/e2e.sh --list
 ./scripts/e2e.sh --docs
@@ -309,185 +310,41 @@ git status --short
 | Level | 注册数 | 默认/开关 | 当前覆盖 |
 | --- | ---: | --- | --- |
 | L1 | 68 | 默认执行 64；storage/function/attachment case 需显式开关 | 免费 API contract、CRUD、Session/Thread、command batch、CAS、idempotency、i18n、model attempt、Canvas API |
-| L2 | 3 | `--real` | 真实文本轮次、真实 task delegation、stop partial/replay/continue |
+| L2 | 3 | `--real` | 真实文本 turn、真实 task delegation、stop partial/replay/continue |
 | L3 | 1 | `--real --with-branch` | 同 Session `ENTRY` 分支 Thread |
 | L4 | 3 | `--with-tools`；真实 Tool turn 还需 `--real --with-tools --with-canvas-storage` | Environment READY、directories、approval 后 Resource 外部化 |
 | UI/L5 | 注册 39，默认 37 | `--ui`；额外 `--with-tools`、`--real` | Playwright 页面、Composer、debug、settings 和 runtime UI |
 
-L1 的 4 个默认关闭 case 是：
-
-- `canvas.storage_upload_contract`、`chat.attachment_upload_contract`、
-  `chat.attachment_inline_image_latest_agent_tools`：需要
-  `--with-canvas-storage`；
-- `canvas.function_fake_runtime`：需要 `--with-canvas-function`。
+L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function；
+它们分别需要 `--with-canvas-storage` 或 `--with-canvas-function`。
 
 因此 `--with-canvas-function` 会同时打开 storage、fake Function、rebuild，
 让 L1 的 68 个 case 都可选择；它不等于真实 Provider。
 
-### 8.3 L1：注册 68，默认 64
+### 8.3 API categories 与 gates
 
-下列 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。除本节末尾标出的
-storage/function case 外，L1 的 `requires` 为 `-`：
+L1 的 categories 是 seed/catalog、Thread command、CRUD、i18n、settings/events、
+model attempt 和 Canvas API。注册 68 个，默认执行 64 个；storage、attachment
+和 fake Function 需要 `--with-canvas-storage` 或 `--with-canvas-function`。
+`--with-canvas-function` 同时打开 storage、fake Function 和 rebuild，不等于真实
+Provider。
 
-```text
-seed.structured_model_config
-seed.agent_and_provider
-catalog.internal_tools_hidden
-thread.new_session_submission_atomic
-thread.branch_settings_projection
-thread.user_message_strict_wire
-thread.product_http_rejects_custom_message
-thread.command_idempotent_replay
-thread.stale_command_cas_rejected
-thread.entry_materialization_same_session
-thread.session_entry_tree
-thread.entry_cross_session_rejected
-thread.stop_idle_noop
-thread.branch_settings_diff_commands
-thread.yolo_direct_update
-thread_snapshot.unknown_thread_404
-frontend.proxy_model_contract
+L2 的 categories 是真实文本 turn、task delegation 和 stop/partial/replay；
+L3 是同一 Session 的 `ENTRY` 分支；L4 是 Environment READY、directory、
+approval 和 Resource externalization。对应 gates 分别是 `--real`、
+`--real --with-branch`、`--with-tools`，需要真实 Tool history 时再加
+`--with-canvas-storage`。
 
-crud.provider.invalid_name
-crud.provider.invalid_missing_type
-crud.model.invalid_update_config
-crud.agent.invalid_name
-crud.agent.invalid_variant
-crud.provider.lifecycle
-crud.model.lifecycle
-crud.agent.lifecycle
-crud.agent.subagent_reference_lifecycle
-crud.chat.invalid_agent_name
-crud.chat.thread_branch_settings_independent
-crud.model.delete_unknown_rejected
-crud.chat.lifecycle
-crud.chat.session_ownership_list
+精确的 API case ID、标题和 `requires` 只由
+`node scripts/e2e/run-matrix.mjs --list` 与 `--docs` 提供。
 
-i18n.error_response_accept_language
-
-matrix.model.setup_provider
-config.model.valid.minimal
-config.model.valid.reasoning_variants
-config.model.valid.sampling_fields
-config.model.invalid.defaultVariant_mismatch
-config.model.invalid.empty_variants
-config.model.invalid.context_non_positive
-config.model.invalid.output_gt_context
-config.model.invalid.blank_currency
-config.model.invalid.empty_modalities
-config.model.invalid.duplicate_variant_id
-config.model.invalid.missing_config
-config.model.invalid.variant_blank_id
-config.model.invalid.negative_temperature
-matrix.model.teardown_provider
-
-matrix.agent.setup_model
-config.agent.valid.empty_lists
-config.agent.valid.goal_plugin_tools
-config.agent.invalid.missing_tools
-config.agent.invalid.missing_skills
-config.agent.invalid.missing_subagents
-config.agent.invalid.unknown_tool
-config.agent.invalid.duplicate_skill
-config.agent.invalid.duplicate_subagent
-config.agent.invalid.unknown_subagent
-config.agent.invalid.unknown_field_rejected
-matrix.agent.teardown_model
-
-settings.system_contract_cas
-events.heartbeat_keepalive
-model.attempt_failure_visibility
-canvas.storage_upload_contract
-canvas.function_fake_runtime
-chat.attachment_upload_contract
-chat.attachment_inline_image_latest_agent_tools
-canvas.api_version_contract
-thread.queued_command_batch
-```
-
-`frontend.proxy_model_contract` 在没有 `--frontend-url` 时会被 Node runner
-跳过；标准 `scripts/e2e.sh` 总是传入 frontend URL，因此属于默认 64。
-
-### 8.4 L2、L3、L4
-
-| Level | Case ID | requires |
-| --- | --- | --- |
-| L2 | `real.text_turn` | `real` |
-| L2 | `real.task_delegation` | `real` |
-| L2 | `real.stop_partial_continue` | `real` |
-| L3 | `branch.same_session_entry_thread` | `real, branch` |
-| L4 | `daemon.ready` | `tools` |
-| L4 | `daemon.directories` | `tools` |
-| L4 | `tool.read_turn` | `real, tools, canvas-storage` |
-
-L4 的 `tool.read_turn` 需要 backend S3 enabled；非 YOLO 流程会经过
-`WAITING_APPROVAL -> ALLOW`，tool result 在写入 durable history 前外部化
-为 Blob Resource。
-
-### 8.5 UI matrix：注册 39，默认 37
+### 8.4 UI matrix：注册 39，默认 37
 
 UI 由 `scripts/e2e/ui-smoke.mjs`、`scripts/e2e/ui/composer-matrix.mjs` 和
-`scripts/e2e/ui/refactor-contracts.mjs` 注册；它不是 75 个 API case 的一
-部分。`--ui` 使用 frontend URL、backend URL 和当前 E2E report directory。
-
-基础 page/runtime 的 15 个 case：
-
-```text
-ui.i18n.language_switch
-ui.chats.page_loads
-ui.models.page_loads
-ui.models.open_create_modal
-ui.agents.page_loads
-ui.providers.page_loads
-ui.environments.page_loads
-ui.canvas.page_loads
-ui.nav.roundtrip
-ui.chat.create_flow
-ui.model.create_edit_delete_flow
-ui.agent.create_edit_delete_flow
-ui.model.validation_empty_name
-ui.provider.create_edit_delete_flow
-ui.chat.blank_workspace_shell
-```
-
-Composer/debug 的 15 个 case：
-
-```text
-ui.chat.composer.history_order_boundaries
-ui.chat.composer.duplicate_entries
-ui.chat.composer.multiline_scroll
-ui.chat.composer.multiline_caret_boundaries
-ui.chat.composer.edit_recalled
-ui.chat.composer.draft_persistence_boundaries
-ui.chat.composer.palette_precedence
-ui.chat.selection_panel.keyboard_mode
-ui.chat.composer.escape_refocus
-ui.chat.composer.submit_clears_draft
-ui.chat.composer.attachment_previews
-ui.chat.debug.conversation_switch
-ui.chat.debug.keyboard_nav
-ui.chat.shortcuts.escape_restores_focus
-ui.chat.debug.scroll_restore
-```
-
-Refactor contract 的 7 个 case：
-
-```text
-ui.chat.composer.settings_controls_batch
-ui.chat.composer.multi_pane_settings_isolation
-ui.chat.footer.readonly_facts
-ui.chat.tool_card.streaming_layout_scroll
-ui.chat.task_status.bound_widget
-ui.settings.notifications_single_entry
-ui.settings.system_contract_cas
-```
-
-开关追加：
-
-| 开关 | 额外 case |
-| --- | --- |
-| `--with-tools --ui` | `ui.chat.create_environment_workspace` |
-| `--real --ui` | `ui.chat.blank_first_send_real` |
+`scripts/e2e/ui/refactor-contracts.mjs` 注册；它不是 75 个 API case 的一部分。
+UI categories 是页面/runtime、Composer/debug 和 refactor contract；`--ui` 是
+总 gate，`--with-tools` 与 `--real` 分别增加 Environment 和真实 Provider
+覆盖。精确 UI inventory 以这些脚本中的注册表为准。
 
 UI 单独入口的当前帮助格式：
 
@@ -501,7 +358,7 @@ node scripts/e2e/ui-smoke.mjs \
 执行该入口前必须完成 `npm --prefix frontend ci`，因为 Playwright 从
 `frontend/package.json` 加载。
 
-### 8.6 Real credentials 和付费边界
+### 8.5 Real credentials 和付费边界
 
 - 真实 E2E 只接受完整 pair：`TEST_MINIMAX_BASE_URL` +
   `TEST_MINIMAX_API_KEY`。Base URL 去除尾部斜杠并补为 `/v1`；真实 case
@@ -545,43 +402,17 @@ node scripts/e2e/ui-smoke.mjs \
 
 ```text
 mvn --batch-mode -pl web,canvas/infra,harness/infra,platform -am
-  -Dtest=<17 个冻结 FQCN，以逗号连接>
+  -Dtest=<regression.sh 中 TARGET_FQCNS 的逗号连接值>
   -Dsurefire.failIfNoSpecifiedTests=false
   -Dstyle.color=never test
 ```
 
-冻结类按模块：
-
-```text
-Web
-fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoopTest
-fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoopPostgresqlIntegrationTest
-fun.fengwk.kkstudio.web.environment.DaemonOutboundSenderTest
-fun.fengwk.kkstudio.web.events.ApplicationEventHubTest
-fun.fengwk.kkstudio.web.events.ApplicationEventWebSocketHandlerTest
-
-Canvas
-fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStoreIntegrationTest
-fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcherTest
-fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionExecutionContextImplTest
-fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorkerHeartbeatTest
-
-Harness Infra
-fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherHandoffTest
-fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherLifecycleTest
-fun.fengwk.kkstudio.harness.runtime.store.testing.PostgresqlWorkTest
-fun.fengwk.kkstudio.harness.runtime.store.testing.PostgresqlWorkNotificationTest
-fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSourceConcurrencyTest
-
-Platform Storage
-fun.fengwk.kkstudio.platform.storage.StorageUploadCleanupLeaseIntegrationTest
-fun.fengwk.kkstudio.platform.storage.StorageMaintenanceTest
-fun.fengwk.kkstudio.platform.storage.StorageUploadServiceIntegrationTest
-```
-
-每一轮都要求目标模块的 Surefire XML 证明 `tests > 0`、`failures = 0`、
-`errors = 0` 且不是全 skipped；缺类、invalid XML、Maven `[ERROR]`、
-`Surefire is going to kill` 或非零退出都失败。
+`regression.sh` 内的 `TARGET_MODULES` 与 `TARGET_FQCNS` 是可靠性回归的唯一
+精确 inventory。它覆盖 Web event/transport、Canvas Function Work/dispatcher、
+Harness Work/notification 和 Platform Storage cleanup；每轮要求目标模块的
+Surefire XML 证明 `tests > 0`、`failures = 0`、`errors = 0` 且不是全 skipped。
+缺类、invalid XML、Maven `[ERROR]`、`Surefire is going to kill` 或非零退出都
+失败。
 
 ### 9.2 Reliability stack 和真实 Agent matrix
 
@@ -610,8 +441,7 @@ workspace 可写和 credential/config 隔离。
 node scripts/reliability/run-agent-matrix.mjs --help
 node scripts/reliability/run-agent-matrix.mjs --list
 node scripts/reliability/run-agent-matrix.mjs \
-  --only m27-pi-investigate \
-  --only m3-pi-repair
+  --only CASE_ID
 node scripts/reliability/reassess-agent-run.mjs <runId>
 ```
 
@@ -784,7 +614,6 @@ Trivy JSON、image id/digest、smoke log 和 summary。
 ./scripts/dev.sh stop
 docker compose -f deploy/local/compose.yaml down
 docker compose -f deploy/local/compose.yaml down -v
-./deploy/test/run.sh
 docker compose -f deploy/test/compose.yaml --profile app down --volumes --remove-orphans
 ./scripts/reliability/stack.sh down
 ./scripts/reliability/stack.sh down --volumes
@@ -824,3 +653,8 @@ R   reliability regression + optional eight-case Agent matrix
 P   offline performance three-scenario threshold
 S   SBOM/audit/image supply-chain gate
 ```
+
+---
+
+上级：[系统设计](../system-design.md)。相关文档：[部署与运行](deployment.md)、
+[Frontend](../modules/frontend.md)、[Web](../modules/web.md)。
