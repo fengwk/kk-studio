@@ -57,8 +57,8 @@ import java.util.concurrent.atomic.AtomicInteger;
       "kk-studio.storage.s3.public-endpoint=https://cdn.example.com",
       "kk-studio.storage.s3.region=us-east-1",
       "kk-studio.storage.s3.bucket=test-bucket",
-      "kk-studio.storage.s3.access-key=AKIAIOSFODNN7EXAMPLE",
-      "kk-studio.storage.s3.secret-key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      "kk-studio.storage.s3.access-key=local-test-access-key",
+      "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
 class GlobalStorageToolResultHistoryMaterializerTest extends S3PostgresSpringTestSupport {
 
