@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -34,6 +35,8 @@ class CanvasCoreArchitectureTest {
           "org.springframework.");
   private static final Pattern DEPENDENCY_PATTERN =
       Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL);
+  private static final Set<String> GENERATED_DIRS =
+      Set.of(".git", ".workspace", "target", "node_modules", "dist", "coverage", "reports");
 
   @Test
   void mainSourcesUseOnlyJdkAndCanvasPackages() throws IOException {
@@ -129,6 +132,7 @@ class CanvasCoreArchitectureTest {
       throws IOException {
     try (Stream<Path> stream = Files.walk(repositoryRoot)) {
       return stream
+          .filter(path -> isRepositorySource(repositoryRoot, path))
           .filter(path -> path.toString().replace('\\', '/').contains("/src/main/java/"))
           .filter(path -> path.getFileName().toString().equals(fileName))
           .toList();
@@ -138,6 +142,7 @@ class CanvasCoreArchitectureTest {
   private static List<Path> implementationSources(Path repositoryRoot) throws IOException {
     try (Stream<Path> stream = Files.walk(repositoryRoot)) {
       return stream
+          .filter(path -> isRepositorySource(repositoryRoot, path))
           .filter(path -> path.toString().replace('\\', '/').contains("/src/main/java/"))
           .filter(path -> path.toString().endsWith(".java"))
           .filter(
@@ -151,6 +156,16 @@ class CanvasCoreArchitectureTest {
               })
           .toList();
     }
+  }
+
+  /** 路径任一段命中生成/依赖目录名时不算仓库源文件。 */
+  private static boolean isRepositorySource(Path repositoryRoot, Path path) {
+    for (Path segment : repositoryRoot.relativize(path)) {
+      if (GENERATED_DIRS.contains(segment.toString())) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private static boolean isAllowedImport(String imported) {
