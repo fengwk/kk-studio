@@ -35,7 +35,40 @@ if [[ -z "${OPENCLI_HUB_BASE_URL:-}" ]]; then
   exit 2
 fi
 
-HUB_URL="${OPENCLI_HUB_BASE_URL%/}"
+if ! HUB_URL=$(
+  OPENCLI_HUB_BASE_URL="$OPENCLI_HUB_BASE_URL" python3 - <<'PY'
+import os
+import sys
+from urllib.parse import urlsplit, urlunsplit
+
+value = os.environ["OPENCLI_HUB_BASE_URL"]
+try:
+    parsed = urlsplit(value)
+    hostname = parsed.hostname
+    parsed.port
+except ValueError:
+    print("OPENCLI_HUB_BASE_URL must be an HTTP(S) origin", file=sys.stderr)
+    raise SystemExit(2)
+
+if (
+    parsed.scheme.lower() not in {"http", "https"}
+    or hostname is None
+    or parsed.username is not None
+    or parsed.password is not None
+    or "?" in value
+    or "#" in value
+    or parsed.path not in ("", "/")
+    or parsed.netloc.endswith(":")
+    or any(character.isspace() for character in parsed.netloc)
+):
+    print("OPENCLI_HUB_BASE_URL must be an HTTP(S) origin", file=sys.stderr)
+    raise SystemExit(2)
+
+print(urlunsplit((parsed.scheme.lower(), parsed.netloc, "", "", "")))
+PY
+); then
+  exit 2
+fi
 PROMPT=${SEEDANCE_PREPARE_SMOKE_PROMPT:-Prepare-only smoke. Do not submit generation.}
 
 request_body=$(
