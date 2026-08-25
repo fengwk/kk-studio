@@ -105,12 +105,12 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 
 HTTP mock 固定提供 `GET /health`、内置的 `POST /v1/chat/completions` 确定性 OpenAI
 Chat Completions SSE stub（响应固定文本，`data:` 分块以 `[DONE]` 结尾，供 dev seed 的
-`stub/acceptance-stub` 离线对话），并在隔离栈中模拟本切片使用的 Hub upload、
+`stub/acceptance-stub` 离线对话），并在隔离栈中模拟 Canvas Function 使用的 Hub upload、
 execute、execution detail 与 Resource download。其余 route 从 JSON 文件读取，只按 HTTP method 与
 URL path 精确匹配，不解析或假设请求体。默认
 [`mock/routes.json`](mock/routes.json) 为空。
 
-后续 Canvas tests 可准备自己的 route 文件，并在启动前传入绝对路径：
+Canvas tests 可准备自己的 route 文件，并在启动前传入绝对路径：
 
 ```bash
 CANVAS_TEST_MOCK_ROUTES=/absolute/path/to/routes.json \

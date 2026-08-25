@@ -10,7 +10,7 @@ import {
   sleep,
 } from '../lib/http.mjs'
 import { assertReadOnlyZeroFooter } from './assertions.mjs'
-import { runRefactorContractMatrix } from './refactor-contracts.mjs'
+import { runWorkspaceContractMatrix } from './workspace-contracts.mjs'
 import {
   acceptCommandBatch,
   branchSettingsOf,
@@ -1062,7 +1062,7 @@ export async function runComposerMatrix(ui) {
     },
   )
 
-  await runRefactorContractMatrix({
+  await runWorkspaceContractMatrix({
     ...ui,
     bindThreadComposer,
     createBranchedHistoryFixture,

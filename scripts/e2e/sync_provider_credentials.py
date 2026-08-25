@@ -112,10 +112,10 @@ def sync_minimax(backend_url, env=None, urlopen=None):
         None)
     if current is None:
         raise RuntimeError(
-            "E2E seed is missing deterministic MiniMax provider name=minimax")
+            "E2E database is missing the seeded MiniMax provider name=minimax")
     if current.get("version") is None or not str(current["version"]).strip():
         raise RuntimeError(
-            "E2E seed MiniMax provider is missing the required version")
+            "E2E database MiniMax provider row is missing the required version")
 
     payload = build_payload(normalize_minimax_base_url(base_url), api_key, current)
     body = put_provider(

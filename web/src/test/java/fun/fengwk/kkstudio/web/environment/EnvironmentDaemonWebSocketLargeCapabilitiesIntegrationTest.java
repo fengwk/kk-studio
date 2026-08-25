@@ -63,7 +63,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   @Autowired private SystemSettingsSnapshot snapshot;
 
   @MockitoBean private ResourceStore resourceStore;
-  // Gateway 的 READY 唤醒由 durable-target dispatcher 切片装配，本切片将其抑制。
+  // 该 WebSocket 测试只验证握手边界，因此隔离 READY 后的 durable dispatcher 唤醒。
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   /** 远大于 8 KiB 的 {@code READY} skills 帧被内嵌容器接受，握手进入 READY；绝不能观察到 close code 1009。 */

@@ -25,7 +25,7 @@ import {
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
 
-export async function runRefactorContractMatrix(ui) {
+export async function runWorkspaceContractMatrix(ui) {
   const {
     apiCtx,
     bindThreadComposer,

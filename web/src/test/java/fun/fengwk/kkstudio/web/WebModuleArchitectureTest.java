@@ -16,8 +16,8 @@ import java.util.stream.Stream;
 /**
  * web 模块的轻量架构守护。
  *
- * <p>生产源码不得引用 Harness Tool/Daemon 包或选定的 Core 基础设施实现。web 模块是 Harness 组合根：它按设计将 Runtime 契约与 infra
- * 传输适配器声明为直接依赖，且 {@code web/pom.xml} 必须保留该声明。
+ * <p>生产源码不得引用 Harness Tool execution/Daemon 包或选定的 Core 基础设施实现；DTO mapping 只放行列出的 canonical Tool
+ * 类型。web 模块是 Harness 组合根：它按设计将 Runtime 契约与 infra 传输适配器声明为直接依赖，且 {@code web/pom.xml} 必须保留该声明。
  */
 class WebModuleArchitectureTest {
 
