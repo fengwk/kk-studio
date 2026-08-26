@@ -33,7 +33,7 @@ registerCase({
   level: 'L1',
   title: 'SystemSettings 完整聚合、严格校验、CAS 与恢复',
   docs:
-    'GET 六 section + decimal-string Long/version；PUT 完整聚合推进版本；首尾空白权限 400、stale version 409 且不推进；finally 用最新版本恢复原值',
+    'GET 六 section + decimal-string Long/version；PUT 完整聚合推进版本；AgentToolId key 首尾空白权限 400、stale version 409 且不推进；finally 用最新版本恢复原值',
   async run(ctx) {
     const readSettings = async () => {
       const { json } = await ctx.call('GET', '/api/settings')
@@ -73,8 +73,9 @@ registerCase({
       )
 
       const badPermission = updateBody(structuredClone(saved))
-      badPermission.tool.permission[' write'] = badPermission.tool.permission.write
-      delete badPermission.tool.permission.write
+      badPermission.tool.permission[' base.write'] =
+        badPermission.tool.permission['base.write']
+      delete badPermission.tool.permission['base.write']
       await expectHttpError(() => ctx.call('PUT', '/api/settings', badPermission), {
         status: 400,
       })

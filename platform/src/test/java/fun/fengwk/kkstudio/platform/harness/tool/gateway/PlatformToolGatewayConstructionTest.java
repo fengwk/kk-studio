@@ -37,7 +37,7 @@ class PlatformToolGatewayConstructionTest {
     properties.setWorkdir(Path.of("sub/./deep"));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.factories(),
+            ToolGatewayTestSupport.factories(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             properties,

@@ -64,15 +64,17 @@ public final class ToolSettingsCodec {
       return result;
     }
     if (permissionNode.isTextual()) {
-      result.put("*", decodeRules(permissionNode));
+      result.put(PermissionKeyValidator.GLOBAL_KEY, decodeRules(permissionNode));
       return result;
     }
     if (!permissionNode.isObject()) {
       throw new IllegalArgumentException(
-          "permission must be allow, ask or deny, or a JSON object keyed by tool name");
+          "permission must be allow, ask or deny, or a JSON object keyed by AgentToolId");
     }
     for (Map.Entry<String, JsonNode> field : permissionNode.properties()) {
-      result.put(field.getKey(), decodeRules(field.getValue()));
+      String key = field.getKey();
+      PermissionKeyValidator.requireValid(key, "permission key");
+      result.put(key, decodeRules(field.getValue()));
     }
     return result;
   }
@@ -115,8 +117,8 @@ public final class ToolSettingsCodec {
   private ObjectNode encodePermission(Map<String, List<PermissionRule>> permission) {
     ObjectNode result = objectMapper.createObjectNode();
     permission.forEach(
-        (tool, rules) -> {
-          ArrayNode array = result.putArray(tool);
+        (key, rules) -> {
+          ArrayNode array = result.putArray(key);
           for (PermissionRule rule : rules) {
             ObjectNode node = array.addObject();
             node.put("pattern", rule.pattern());

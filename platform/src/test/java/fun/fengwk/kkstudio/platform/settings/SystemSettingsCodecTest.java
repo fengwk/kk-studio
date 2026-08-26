@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
+import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
 
@@ -54,7 +55,7 @@ class SystemSettingsCodecTest {
     assertTrue(
         integrations > environment && storageMedia > integrations && tool > storageMedia,
         "sections must be sorted: " + canonical);
-    // 规则对象键与 tool 名也排序。
+    // 规则对象键与 AgentToolId key 也排序。
     assertTrue(canonical.indexOf("\"action\":\"ask\",\"pattern\":\"*\"") >= 0, canonical);
     // null 可空字段省略。
     assertTrue(!canonical.contains("workspaceId"), canonical);
@@ -114,7 +115,7 @@ class SystemSettingsCodecTest {
   void preservesPermissionRuleOrderThroughJsonRoundTrip() {
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
     permission.put(
-        "bash",
+        BaseToolIds.BASH.value(),
         List.of(
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("git ?", PermissionAction.ALLOW),
@@ -127,7 +128,19 @@ class SystemSettingsCodecTest {
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("git ?", PermissionAction.ALLOW),
             new PermissionRule("secret/**", PermissionAction.DENY)),
-        decoded.tool().permission().get("bash"));
+        decoded.tool().permission().get(BaseToolIds.BASH.value()));
+  }
+
+  @Test
+  void preservesGlobalAndAgentToolIdPermissionKeysThroughJsonAndDtoRoundTrips() {
+    Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
+    permission.put("*", List.of(new PermissionRule("*", PermissionAction.ASK)));
+    permission.put(
+        BaseToolIds.BASH.value(), List.of(new PermissionRule("git *", PermissionAction.ALLOW)));
+    SystemSettings settings = withToolPermission(permission);
+
+    assertEquals(settings, codec.decode(codec.encode(settings)));
+    assertEquals(settings, codec.fromDto(codec.toSections(settings)));
   }
 
   @Test
@@ -271,7 +284,7 @@ class SystemSettingsCodecTest {
         .getTool()
         .getPermission()
         .put(
-            "write",
+            BaseToolIds.WRITE.value(),
             List.of(
                 new SystemSettingsToolDTO.PermissionRuleDTO() {
                   {
@@ -280,6 +293,28 @@ class SystemSettingsCodecTest {
                   }
                 }));
     assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
+  }
+
+  @Test
+  void rejectsNonCanonicalPermissionKeysAtDtoBoundary() {
+    // DTO 仍使用 String key，但保存边界必须只接受精确 wildcard 或 canonical AgentToolId。
+    for (String key : List.of("Base.write", " base.write", "base.write ")) {
+      SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+      SystemSettingsToolDTO.PermissionRuleDTO rule = new SystemSettingsToolDTO.PermissionRuleDTO();
+      rule.setPattern("*");
+      rule.setAction("ask");
+      sections.getTool().getPermission().put(key, List.of(rule));
+      assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections), key);
+    }
+
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    sections
+        .getTool()
+        .getPermission()
+        .put(" base.write", List.of(new SystemSettingsToolDTO.PermissionRuleDTO()));
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
+    assertEquals("tool.permission key must be '*' or a canonical AgentToolId", error.getMessage());
   }
 
   @Test

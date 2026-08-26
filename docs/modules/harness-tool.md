@@ -115,7 +115,7 @@ ToolExecutionHandle execute(
 | `base.mcp-list-tools` | `mcp_list_tools` | `mcp.list` | ENVIRONMENT / `1` | READ_ONLY | 30 s |
 | `base.mcp-call-tool` | `mcp_call_tool` | `mcp.call` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 5 min |
 
-`EnvironmentToolCatalog.entries()` 返回不可变的 `Entry` 列表；每个 Entry 固定包含 selectable 的 `AgentToolDefinition` 和 Environment Capability ID。AgentToolId 与 model name 各自唯一，Capability ID 不建立唯一索引，因此多个 Entry 可以复用同一个 Capability。Platform 侧的 [`AgentToolRegistry`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry.java) 将这些固定条目与 Host factory、Plugin contribution 合并。
+`EnvironmentToolCatalog.entries()` 返回不可变的 `Entry` 列表；每个 Entry 固定包含 selectable 的 `AgentToolDefinition` 和 Environment Capability ID。AgentToolId 与 model name 各自唯一，Capability ID 不建立唯一索引，因此多个 Entry 可以复用同一个 Capability。Platform 侧的 [`AgentToolRegistry`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry.java) 将这些固定条目与 Host factory、Plugin contribution 合并。Platform permission 使用稳定 AgentToolId 作为规则 key；精确 `*` 仍表示全局 wildcard，不使用 model-visible name。
 
 `AgentToolRegistry` 的 Environment 条目保持上述固定顺序追加；Host、Plugin 与 Environment 的 AgentToolId 和 model-visible name 在统一构造边界校验全局唯一，内部条目不进入 `selectableEntries()`。
 

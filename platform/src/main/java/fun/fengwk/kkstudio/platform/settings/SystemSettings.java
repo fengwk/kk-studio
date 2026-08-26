@@ -2,8 +2,10 @@ package fun.fengwk.kkstudio.platform.settings;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -60,13 +62,13 @@ public record SystemSettings(
       long toolGatewayOverloadRetryMillis,
       long skillLoadTimeoutMillis) {
 
-    /** 默认 permission：write/edit/bash 各自 {@code * -> ask}（与 V1 默认行一致；read 保持不限制）。 */
+    /** 默认 permission：base.write/base.edit/base.bash 各自 {@code * -> ask}（read 保持不限制）。 */
     public static final Tool DEFAULT =
         new Tool(
             Map.of(
-                "write", List.of(new PermissionRule("*", PermissionAction.ASK)),
-                "edit", List.of(new PermissionRule("*", PermissionAction.ASK)),
-                "bash", List.of(new PermissionRule("*", PermissionAction.ASK))),
+                BaseToolIds.WRITE.value(), List.of(new PermissionRule("*", PermissionAction.ASK)),
+                BaseToolIds.EDIT.value(), List.of(new PermissionRule("*", PermissionAction.ASK)),
+                BaseToolIds.BASH.value(), List.of(new PermissionRule("*", PermissionAction.ASK))),
             false,
             5_000L,
             1_000L,
@@ -90,14 +92,8 @@ public record SystemSettings(
       Objects.requireNonNull(source, "tool.permission");
       Map<String, List<PermissionRule>> copy = new LinkedHashMap<>();
       source.forEach(
-          (toolName, rules) -> {
-            if (toolName == null || toolName.isBlank()) {
-              throw new IllegalArgumentException("tool.permission tool name must not be blank");
-            }
-            if (!toolName.equals(toolName.strip())) {
-              throw new IllegalArgumentException(
-                  "tool.permission tool name must not contain surrounding whitespace");
-            }
+          (toolId, rules) -> {
+            PermissionKeyValidator.requireValid(toolId, "tool.permission key");
             List<PermissionRule> copiedRules = new ArrayList<>();
             for (PermissionRule rule : Objects.requireNonNull(rules, "tool.permission rules")) {
               if (rule == null) {
@@ -106,7 +102,7 @@ public record SystemSettings(
               SystemSettingsValidation.requireValidPattern(rule.pattern());
               copiedRules.add(rule);
             }
-            copy.put(toolName, List.copyOf(copiedRules));
+            copy.put(toolId, List.copyOf(copiedRules));
           });
       return Collections.unmodifiableMap(copy);
     }

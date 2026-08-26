@@ -5,12 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -71,7 +75,10 @@ class PlatformToolGatewayPreflightTest {
     ToolGateway.PreflightResult result = preflight(PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
     // canonical 单行 reason 包含 tool 与 bounded arguments preview。
-    assertTrue(ask.reason().contains("demo"), ask.reason());
+    assertTrue(
+        ask.reason().startsWith(ToolGatewayTestSupport.TEST_TOOL_ID.value() + " requires approval"),
+        ask.reason());
+    assertTrue(ask.reason().contains(ToolGatewayTestSupport.TEST_TOOL_ID.value()), ask.reason());
     assertTrue(ask.reason().contains("\"path\":\"/tmp/x\""), ask.reason());
     assertEquals(ask.reason(), ask.reason().strip());
     assertTrue(ask.reason().length() <= 1024);
@@ -83,6 +90,89 @@ class PlatformToolGatewayPreflightTest {
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("PERMISSION_DENIED", deny.error().kind());
     assertEquals("Tool permission was denied.", deny.error().message());
+  }
+
+  @Test
+  void preflightUsesFrozenRegistryIdInsteadOfModelVisibleName() {
+    ToolGatewayTestSupport.FakeTool tool =
+        new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR);
+    ToolSettings settings =
+        new ToolSettings(
+            Map.of(
+                "*",
+                List.of(new PermissionRule("*", PermissionAction.ASK)),
+                "demo",
+                List.of(new PermissionRule("*", PermissionAction.ALLOW)),
+                ToolGatewayTestSupport.TEST_TOOL_ID.value(),
+                List.of(new PermissionRule("*", PermissionAction.DENY))),
+            false);
+    PlatformToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.factories(tool),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.ManualExecutor(),
+            settings);
+
+    ToolGateway.Deny deny =
+        assertInstanceOf(
+            ToolGateway.Deny.class,
+            gateway.preflight(
+                ToolGatewayTestSupport.platformRequest("call-1", PREFLIGHT_DESCRIPTOR)));
+
+    // registry 中的 frozen entry 将 model-visible name demo 恢复为 test.platform-tool；不能误用 name 规则。
+    assertEquals(PlatformToolGateway.PERMISSION_DENIED_KIND, deny.error().kind());
+    assertEquals("Tool permission was denied.", deny.error().message());
+  }
+
+  @Test
+  void unknownAndMismatchedDescriptorsAreDeniedBeforePermissionEvaluation() {
+    PermissionEvaluator evaluator = mock(PermissionEvaluator.class);
+    PlatformToolGateway gateway =
+        new PlatformToolGateway(
+            ToolGatewayTestSupport.factories(
+                new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR)),
+            ToolGatewayTestSupport.EMPTY_PLUGIN_CATALOG,
+            ToolGatewayTestSupport.FAILING_PLUGIN_BRANCH_LOADER,
+            new ToolGatewayTestSupport.FakeTransport(),
+            evaluator,
+            new ToolGatewayTestSupport.FixedToolSettingsProvider(
+                ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            ToolGatewayTestSupport.WORKDIR,
+            ToolGatewayTestSupport.ENVIRONMENT_ROOT,
+            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+            new ToolGatewayTestSupport.ManualExecutor(),
+            ToolGatewayTestSupport.BUSY_RETRY_DELAY,
+            ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
+            ToolGatewayTestSupport.TEST_CLOCK,
+            new ConcurrencyAdmission(Integer.MAX_VALUE));
+
+    ToolDescriptor unknown = ToolGatewayTestSupport.platformDescriptor("missing");
+    ToolGateway.Deny unknownDeny =
+        assertInstanceOf(
+            ToolGateway.Deny.class,
+            gateway.preflight(
+                new ToolInvocationRequest(
+                    new ToolCall("unknown", "missing", "{}"),
+                    new ToolBinding(unknown, ToolType.PLATFORM, null))));
+    assertEquals(PlatformToolGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
+    assertEquals("Frozen tool missing@1 is not registered.", unknownDeny.error().message());
+
+    ToolDescriptor mismatched = ToolGatewayTestSupport.platformDescriptor("demo");
+    ToolGateway.Deny mismatchDeny =
+        assertInstanceOf(
+            ToolGateway.Deny.class,
+            gateway.preflight(
+                new ToolInvocationRequest(
+                    new ToolCall("mismatch", "demo", "{}"),
+                    new ToolBinding(mismatched, ToolType.PLATFORM, null))));
+    // 两个请求都在 evaluator 前收敛；mock 没有任何交互，证明未知/漂移 descriptor 不会产生评估副作用。
+    assertEquals(PlatformToolGateway.TOOL_DESCRIPTOR_MISMATCH_KIND, mismatchDeny.error().kind());
+    assertEquals(
+        "Frozen tool demo@1 does not match its catalog descriptor.",
+        mismatchDeny.error().message());
+    verifyNoInteractions(evaluator);
   }
 
   @Test
