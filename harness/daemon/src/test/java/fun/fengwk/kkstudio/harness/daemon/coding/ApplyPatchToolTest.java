@@ -19,6 +19,8 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -279,6 +281,44 @@ class ApplyPatchToolTest {
     assertFalse(Files.exists(outside.resolve("new.txt")));
   }
 
+  /** preflight 后父目录被替换为 symlink 时必须拒绝，不能把 Add 写到 workspace 外。 */
+  @Test
+  void rejectsParentSymlinkIntroducedAfterPreflight() throws Exception {
+    assumeSymbolicLinksSupported();
+    Path outside = Files.createTempDirectory("apply-patch-race-outside");
+    Path raced = environmentRoot.resolve("raced");
+    ApplyPatchTool tool =
+        new ApplyPatchTool(
+            config(),
+            executor,
+            () -> {
+              try {
+                Files.createSymbolicLink(raced, outside);
+              } catch (IOException error) {
+                throw new UncheckedIOException(error);
+              }
+            });
+
+    try {
+      ToolResult result =
+          invoke(
+              tool,
+              patch(
+                  "*** Begin Patch",
+                  "*** Add File: raced/created.txt",
+                  "+blocked",
+                  "*** End Patch"));
+
+      assertTrue(result.error());
+      assertTrue(Files.isSymbolicLink(raced));
+      assertFalse(Files.exists(outside.resolve("created.txt")));
+    } finally {
+      Files.deleteIfExists(raced);
+      Files.deleteIfExists(outside.resolve("created.txt"));
+      Files.deleteIfExists(outside);
+    }
+  }
+
   /** 二进制和非法 UTF-8 文件都必须在 preflight 阶段失败并保持原始字节。 */
   @Test
   void rejectsBinaryAndInvalidUtf8Files() throws Exception {
@@ -358,6 +398,37 @@ class ApplyPatchToolTest {
     assertArrayEquals(
         new byte[] {(byte) 0xef, (byte) 0xbb, (byte) 0xbf, 'a', '\n', 'c'},
         Files.readAllBytes(bom));
+  }
+
+  /** Update 使用 replacement temp 时必须保留 POSIX 可执行位和自定义权限集合。 */
+  @Test
+  void preservesPosixPermissionsWhenUpdating() throws Exception {
+    Path file = Files.writeString(environmentRoot.resolve("permissions.txt"), "before\n");
+    PosixFileAttributeView view = Files.getFileAttributeView(file, PosixFileAttributeView.class);
+    Assumptions.assumeTrue(view != null);
+    Set<PosixFilePermission> expected =
+        EnumSet.of(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_EXECUTE,
+            PosixFilePermission.GROUP_READ,
+            PosixFilePermission.GROUP_EXECUTE,
+            PosixFilePermission.OTHERS_READ);
+    Files.setPosixFilePermissions(file, expected);
+
+    ToolResult result =
+        invoke(
+            tool(),
+            patch(
+                "*** Begin Patch",
+                "*** Update File: permissions.txt",
+                "@@",
+                "-before",
+                "+after",
+                "*** End Patch"));
+
+    assertFalse(result.error());
+    assertEquals("after\n", Files.readString(file));
+    assertEquals(expected, Files.getPosixFilePermissions(file));
   }
 
   /** 提交阶段后续 I/O 失败时，已经提交的前序文件必须尽力恢复到原始字节。 */
@@ -444,6 +515,14 @@ class ApplyPatchToolTest {
     Assumptions.assumeTrue(
         Files.getFileAttributeView(environmentRoot, PosixFileAttributeView.class) != null);
     Path deleted = Files.writeString(environmentRoot.resolve("deleted.txt"), "deleted\n");
+    Set<PosixFilePermission> deletedPermissions =
+        EnumSet.of(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_WRITE,
+            PosixFilePermission.OWNER_EXECUTE,
+            PosixFilePermission.GROUP_READ,
+            PosixFilePermission.OTHERS_READ);
+    Files.setPosixFilePermissions(deleted, deletedPermissions);
     Path lockedDirectory = Files.createDirectory(environmentRoot.resolve("locked"));
     Path second = lockedDirectory.resolve("second.txt");
     Files.writeString(second, "second-old\n");
@@ -469,6 +548,7 @@ class ApplyPatchToolTest {
 
       assertTrue(result.error());
       assertEquals("deleted\n", Files.readString(deleted));
+      assertEquals(deletedPermissions, Files.getPosixFilePermissions(deleted));
       assertEquals("second-old\n", Files.readString(second));
     } finally {
       Files.setPosixFilePermissions(lockedDirectory, originalPermissions);
@@ -560,6 +640,21 @@ class ApplyPatchToolTest {
 
   private static String text(ToolContent content) {
     return content instanceof TextToolContent text ? text.text() : "";
+  }
+
+  private void assumeSymbolicLinksSupported() throws Exception {
+    Path target = Files.createTempDirectory("apply-patch-symlink-target");
+    Path link = environmentRoot.resolve("symlink-probe");
+    try {
+      try {
+        Files.createSymbolicLink(link, target);
+      } catch (UnsupportedOperationException | IOException error) {
+        Assumptions.assumeTrue(false, "symbolic links are not supported");
+      }
+    } finally {
+      Files.deleteIfExists(link);
+      Files.deleteIfExists(target);
+    }
   }
 
   private static final class RecordingListener implements ToolExecutionListener {

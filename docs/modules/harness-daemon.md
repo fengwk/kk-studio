@@ -138,7 +138,8 @@ scope 不匹配、未知 protocol/type、缺失/未知 payload 字段、duplicat
 
 `read`、`write`、`edit`、`apply_patch` 共享编码/preview/文件 mutation 边界；`apply_patch`
 在一次 invocation 内先完成全部 patch 解析、路径和上下文预检，再用临时文件提交并对已提交
-文件做尽力回滚。`grep`、`find` 使用 Java NIO/JGit ignore 规则，不启动外部搜索命令；LSP
+文件做尽力回滚。Add 的父目录逐级使用 NOFOLLOW 检查，并在写目标前重新 canonicalize 到 invocation
+workspace；POSIX 可用时 replacement 与 Delete rollback 保留原文件权限。`grep`、`find` 使用 Java NIO/JGit ignore 规则，不启动外部搜索命令；LSP
 tools 通过可选 `kkstudio.daemon.lsp-bridge`，`lsp_java_decompile` 对可解析 class 目标可用
 `javap` fallback。配置见 [`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java)：
 
