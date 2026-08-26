@@ -9,8 +9,8 @@ import java.util.Map;
 /**
  * tool section：权限规则（保序数组）+ 默认 YOLO + 模型/工具 Gateway 与 skill 加载预算。
  *
- * <p>{@code permission} 是 tool name 到有序规则数组的映射；规则数组顺序即求值顺序，必须保持。action 取值仅为 {@code allow}/{@code
- * ask}/{@code deny}。
+ * <p>{@code permission} 是 AgentToolId 到有序规则数组的映射；规则数组顺序即求值顺序，必须保持。key 也可使用精确 {@code *} 表示全局规则。
+ * action 取值仅为 {@code allow}/{@code ask}/{@code deny}。
  *
  * <p>pattern 语义：带 {@code path} 的目标走 gitignore 语义，bash / 普通 command 候选仍使用简单 wildcard；持久化只接受安全校验子集 （非
  * negation / 非空白 / 非 comment-only 的有效形态）。

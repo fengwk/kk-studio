@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
+
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -30,15 +33,15 @@ public final class PermissionEvaluator {
   public Evaluation evaluate(PermissionEvaluationContext context) {
     JsonNode input = readArguments(context.argumentsJson());
     PermissionAction action;
-    if (context.toolName().equals("bash") && input.path("command").isTextual()) {
-      action = evaluateBash(input.path("command").asText(), context.settings(), context.toolName());
+    if (BaseToolIds.BASH.equals(context.toolId()) && input.path("command").isTextual()) {
+      action = evaluateBash(input.path("command").asText(), context.settings(), context.toolId());
     } else if (input.path("path").isTextual() && !input.path("path").asText().trim().isEmpty()) {
       Path targetWorkdir = resolveWorkdir(input, context.workdir());
       PathTarget target = describePathTarget(input.path("path").asText(), targetWorkdir);
-      action = evaluatePathRules(target, context.settings(), context.toolName());
+      action = evaluatePathRules(target, context.settings(), context.toolId());
     } else {
       action =
-          evaluateWildcardRules(describeCandidates(input), context.settings(), context.toolName());
+          evaluateWildcardRules(describeCandidates(input), context.settings(), context.toolId());
     }
     return new Evaluation(action, promptPreview(context, input));
   }
@@ -70,10 +73,10 @@ public final class PermissionEvaluator {
   }
 
   private PermissionAction evaluatePathRules(
-      PathTarget target, ToolSettings settings, String toolName) {
+      PathTarget target, ToolSettings settings, AgentToolId toolId) {
     PermissionAction action = PermissionAction.ALLOW;
     List<List<PermissionRule>> rulesets =
-        List.of(settings.rulesFor("*"), settings.rulesFor(toolName));
+        List.of(settings.globalRules(), settings.rulesFor(toolId));
     for (List<PermissionRule> rules : rulesets) {
       for (PermissionRule rule : rules) {
         if (pathMatcher.matches(rule.pattern(), target)) {
@@ -84,19 +87,19 @@ public final class PermissionEvaluator {
     return action;
   }
 
-  private PermissionAction evaluateBash(String command, ToolSettings settings, String toolName) {
+  private PermissionAction evaluateBash(String command, ToolSettings settings, AgentToolId toolId) {
     BashSurfaceAnalyzer.Analysis analysis = bashAnalyzer.analyze(command);
     if (!analysis.supported()) {
-      PermissionAction staticAction = evaluateWildcardRules(List.of(command), settings, toolName);
+      PermissionAction staticAction = evaluateWildcardRules(List.of(command), settings, toolId);
       return staticAction == PermissionAction.DENY ? PermissionAction.DENY : PermissionAction.ASK;
     }
     if (analysis.segments().isEmpty()) {
-      return evaluateWildcardRules(List.of(command), settings, toolName);
+      return evaluateWildcardRules(List.of(command), settings, toolId);
     }
     PermissionAction action = PermissionAction.ALLOW;
     for (String segment : analysis.segments()) {
       PermissionAction next =
-          evaluateWildcardRules(bashAnalyzer.buildCandidates(segment), settings, toolName);
+          evaluateWildcardRules(bashAnalyzer.buildCandidates(segment), settings, toolId);
       if (next == PermissionAction.DENY) {
         return PermissionAction.DENY;
       }
@@ -108,10 +111,10 @@ public final class PermissionEvaluator {
   }
 
   private PermissionAction evaluateWildcardRules(
-      List<String> candidates, ToolSettings settings, String toolName) {
+      List<String> candidates, ToolSettings settings, AgentToolId toolId) {
     PermissionAction action = PermissionAction.ALLOW;
     List<List<PermissionRule>> rulesets =
-        List.of(settings.rulesFor("*"), settings.rulesFor(toolName));
+        List.of(settings.globalRules(), settings.rulesFor(toolId));
     for (List<PermissionRule> rules : rulesets) {
       for (PermissionRule rule : rules) {
         if (candidates.stream().anyMatch(candidate -> wildcardMatches(rule.pattern(), candidate))) {
@@ -134,7 +137,7 @@ public final class PermissionEvaluator {
       workdir = singleLine(stripAtPrefix(workdirNode.asText()));
     }
     return new PermissionPromptPreview(
-        context.toolName(), workdir, truncate(singleLine(writeArguments(input))));
+        context.toolId().value(), workdir, truncate(singleLine(writeArguments(input))));
   }
 
   private String writeArguments(JsonNode input) {

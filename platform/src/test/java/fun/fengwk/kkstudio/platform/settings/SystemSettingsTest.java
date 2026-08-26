@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
@@ -28,13 +29,13 @@ class SystemSettingsTest {
 
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
-        defaults.tool().permission().get("write"));
+        defaults.tool().permission().get(BaseToolIds.WRITE.value()));
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
-        defaults.tool().permission().get("edit"));
+        defaults.tool().permission().get(BaseToolIds.EDIT.value()));
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
-        defaults.tool().permission().get("bash"));
+        defaults.tool().permission().get(BaseToolIds.BASH.value()));
     assertEquals(false, defaults.tool().defaultYolo());
     assertEquals(5_000L, defaults.tool().modelGatewayBusyRetryMillis());
     assertEquals(1_000L, defaults.tool().toolGatewayBusyRetryMillis());
@@ -120,30 +121,40 @@ class SystemSettingsTest {
     for (String invalid : List.of("!logs/", "#comment", " ", "[unclosed-class", "\\", "logs/\\")) {
       assertThrows(
           IllegalArgumentException.class,
-          () -> toolWithRules("write", new PermissionRule(invalid, PermissionAction.DENY)),
+          () ->
+              toolWithRules(
+                  BaseToolIds.WRITE.value(), new PermissionRule(invalid, PermissionAction.DENY)),
           invalid);
     }
     // 转义后的 literal pattern 放行（语义交给匹配器）。
-    toolWithRules("write", new PermissionRule("\\!literal.txt", PermissionAction.DENY));
+    toolWithRules(
+        BaseToolIds.WRITE.value(), new PermissionRule("\\!literal.txt", PermissionAction.DENY));
   }
 
-  /** tool 名和 pattern 的首尾空白会制造不可见、不可命中的规则，持久化边界必须拒绝；内部空格仍合法。 */
+  /** AgentToolId 和 pattern 的首尾空白会制造不可见、不可命中的规则，持久化边界必须拒绝。 */
   @Test
   void rejectsSurroundingWhitespaceInPermissionNamesAndPatterns() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> toolWithRules(" write", new PermissionRule("*", PermissionAction.ASK)));
+        () -> toolWithRules(" base.write", new PermissionRule("*", PermissionAction.ASK)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> toolWithRules("write", new PermissionRule("git status * ", PermissionAction.ASK)));
-    toolWithRules("bash", new PermissionRule("git status *", PermissionAction.ASK));
+        () -> toolWithRules("Base.write", new PermissionRule("*", PermissionAction.ASK)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            toolWithRules(
+                BaseToolIds.WRITE.value(),
+                new PermissionRule("git status * ", PermissionAction.ASK)));
+    toolWithRules(
+        BaseToolIds.BASH.value(), new PermissionRule("git status *", PermissionAction.ASK));
   }
 
   @Test
   void preservesPermissionRuleOrder() {
     SystemSettings.Tool tool =
         toolWithRules(
-            "write",
+            BaseToolIds.WRITE.value(),
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("*.txt", PermissionAction.ALLOW),
             new PermissionRule("secret/**", PermissionAction.DENY));
@@ -152,7 +163,7 @@ class SystemSettingsTest {
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("*.txt", PermissionAction.ALLOW),
             new PermissionRule("secret/**", PermissionAction.DENY)),
-        tool.permission().get("write"));
+        tool.permission().get(BaseToolIds.WRITE.value()));
   }
 
   @Test
@@ -449,9 +460,9 @@ class SystemSettingsTest {
     }
   }
 
-  private static SystemSettings.Tool toolWithRules(String toolName, PermissionRule... rules) {
+  private static SystemSettings.Tool toolWithRules(String toolId, PermissionRule... rules) {
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
-    permission.put(toolName, List.of(rules));
+    permission.put(toolId, List.of(rules));
     SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
     return new SystemSettings.Tool(
         permission,

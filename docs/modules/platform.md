@@ -241,8 +241,10 @@ terminal listener 异常只记录日志，不发第二个 terminal。terminal、
 `PluginCatalog`，不读取目录、不创建 classloader、不提供 refresh。Web 组合根负责把 built-in plugin 与 trusted JAR
 source 合并，详见 [web 模块](web.md)。
 
-`PlatformToolGateway`的 `preflight`是纯权限判定：按 frozen binding、arguments、Environment workspace 或 server
-workdir 生成 `ALLOW`、`ASK`或`DENY`，不改写 binding/arguments，也不感知 YOLO。`start`先获取 tool admission
+`PlatformToolGateway`的 `preflight`先用 frozen binding 的 descriptor name/version 从 registry 恢复冻结 Entry 和稳定
+`AgentToolId`；Entry 缺失或 descriptor 漂移直接生成确定性的 `TOOL_NOT_FOUND` / `TOOL_DESCRIPTOR_MISMATCH` Deny，不进入
+permission evaluator。正常路径按 AgentToolId、arguments、Environment workspace 或 server workdir 生成 `ALLOW`、`ASK`或
+`DENY`，不改写 binding/arguments，也不感知 YOLO。`start`先获取 tool admission
 （默认 `kk-studio.harness.execution-admission.tool=64`），再按 binding 路由：
 
 | binding | admission / transport |
@@ -440,7 +442,7 @@ Function dispatcher claim + RUNNING lease
 
 | section | 主要字段 / 默认值 | 应用时点 |
 | --- | --- | --- |
-| `tool` | permission 默认 write/edit/bash `* -> ask`，`defaultYolo=false`，Model Busy 5s、Tool Busy 1s、Tool Overload 5s、skill load 30s | admission/permission 读取点 live |
+| `tool` | permission 默认 `base.write`/`base.edit`/`base.bash` 各 `* -> ask`，`*` 为全局 wildcard，`defaultYolo=false`，Model Busy 5s、Tool Busy 1s、Tool Overload 5s、skill load 30s | admission/permission 读取点 live |
 | `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s；compaction keep 20000；subagent depth 2、per-parent concurrency 10、maxTurns 50 | retry、resolver、subagent 配置读取点 |
 | `environment` | resource 8 MiB、heartbeat 60s、directory list 10s | Environment gateway 查询/超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |

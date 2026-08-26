@@ -122,13 +122,14 @@ on conflict (name) do nothing;
 -- -----------------------------------------------------------------------------
 -- E2E Tool 权限语义：只在 e2e 数据库生效的 system_setting 覆盖。
 --
--- V1 默认行（id=1）是 write/edit/bash 各 `* -> ask`，read 保持不限制（生产默认）。e2e 验收要求 read 也进入审批，
--- 因此本 seed 把 tool.permission 覆盖为 read/write/edit/bash 各 `* -> ask`（defaultYolo 仍为 false）。这是 e2e 的
+-- V1 默认行（id=1）是 base.write/base.edit/base.bash 各 `* -> ask`，base.read 保持不限制（生产默认）。e2e 验收要求
+-- base.read 也进入审批，因此本 seed 把 tool.permission 覆盖为 base.read/base.write/base.edit/base.bash 各 `* -> ask`
+--（defaultYolo 仍为 false）。这是 e2e 的
 -- 唯一权限事实来源；其余字段继续直接继承 V1 默认聚合，避免 seed 复制整份配置。
 update system_setting
 set config = jsonb_set(
     config,
     '{tool,permission}',
-    '{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"read":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]}'::jsonb
+    '{"base.bash":[{"action":"ask","pattern":"*"}],"base.edit":[{"action":"ask","pattern":"*"}],"base.read":[{"action":"ask","pattern":"*"}],"base.write":[{"action":"ask","pattern":"*"}]}'::jsonb
 )
 where id = 1;

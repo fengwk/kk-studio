@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
+import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
@@ -415,27 +416,24 @@ public class SystemSettingsCodec {
     }
     Map<String, List<PermissionRule>> result = new LinkedHashMap<>();
     dto.forEach(
-        (toolName, rules) -> {
-          if (toolName == null || toolName.isBlank()) {
-            throw new IllegalArgumentException("tool.permission tool name must not be blank");
-          }
+        (toolId, rules) -> {
+          PermissionKeyValidator.requireValid(toolId, "tool.permission key");
           if (rules == null) {
-            throw new IllegalArgumentException("tool.permission." + toolName + " is required");
+            throw new IllegalArgumentException("tool.permission." + toolId + " is required");
           }
           List<PermissionRule> converted = new ArrayList<>();
           for (SystemSettingsToolDTO.PermissionRuleDTO rule : rules) {
             if (rule == null) {
               throw new IllegalArgumentException(
-                  "tool.permission." + toolName + " rule must not be null");
+                  "tool.permission." + toolId + " rule must not be null");
             }
             converted.add(
                 new PermissionRule(
-                    requiredText(rule.getPattern(), "tool.permission." + toolName + " pattern"),
+                    requiredText(rule.getPattern(), "tool.permission." + toolId + " pattern"),
                     PermissionAction.fromValue(
-                        requiredText(
-                            rule.getAction(), "tool.permission." + toolName + " action"))));
+                        requiredText(rule.getAction(), "tool.permission." + toolId + " action"))));
           }
-          result.put(toolName, converted);
+          result.put(toolId, converted);
         });
     return result;
   }
@@ -445,7 +443,7 @@ public class SystemSettingsCodec {
     Map<String, List<SystemSettingsToolDTO.PermissionRuleDTO>> permission = new LinkedHashMap<>();
     tool.permission()
         .forEach(
-            (toolName, rules) -> {
+            (toolId, rules) -> {
               List<SystemSettingsToolDTO.PermissionRuleDTO> ruleDtos = new ArrayList<>();
               for (PermissionRule rule : rules) {
                 SystemSettingsToolDTO.PermissionRuleDTO ruleDto =
@@ -454,7 +452,7 @@ public class SystemSettingsCodec {
                 ruleDto.setAction(rule.action().value());
                 ruleDtos.add(ruleDto);
               }
-              permission.put(toolName, ruleDtos);
+              permission.put(toolId, ruleDtos);
             });
     dto.setPermission(permission);
     dto.setDefaultYolo(tool.defaultYolo());

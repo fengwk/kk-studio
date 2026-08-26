@@ -71,14 +71,15 @@ import java.util.function.Supplier;
 /**
  * Production {@link ToolGateway}：冻结 Tool request 的权限 preflight 与 admission 路由。
  *
- * <p>{@link #preflight} 是纯判定：用 {@link PermissionEvaluator} + 部署 {@link ToolSettings} + 配置的
- * workdir/environmentRoot 评估冻结的 call/binding，绝不改写 binding/arguments；YOLO 短路由由 Runtime 决定，本类 不感知
- * YOLO 也不查询 HarnessStore。{@link #start} 按冻结 binding 的 {@link ToolType} 路由：PLATFORM 走 {@link
- * AgentToolRegistry} 精确 name/version + descriptor equality 后提交注入的 {@link ExecutorService}
- * 执行；ENVIRONMENT 只按冻结的完整 binding 经 {@link RemoteToolTransport} 发送。missing capability /
- * 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active remote invocation 映射
- * Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定 / 提交结果不确定映射
- * Indeterminate。
+ * <p>{@link #preflight} 是纯判定：先由 registry 按冻结 descriptor 恢复 entry/AgentToolId，再用 {@link
+ * PermissionEvaluator} + 部署 {@link ToolSettings} + 配置的 workdir/environmentRoot 评估冻结的
+ * call/binding；缺失 entry 或 descriptor 漂移直接生成 确定性 Deny，绝不进入 evaluator，也不改写 binding/arguments。YOLO
+ * 短路由由 Runtime 决定，本类 不感知 YOLO 也不查询 HarnessStore。 {@link #start} 按冻结 binding 的 {@link ToolType}
+ * 路由：PLATFORM 走 {@link AgentToolRegistry} 精确 name/version + descriptor equality 后提交注入的 {@link
+ * ExecutorService} 执行；ENVIRONMENT 只按冻结的完整 binding 经 {@link RemoteToolTransport} 发送。missing
+ * capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active remote
+ * invocation 映射 Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定 /
+ * 提交结果不确定映射 Indeterminate。
  *
  * <p>回调桥（{@link GatedToolExecutionListener}）：两阶段激活——{@code start()} 绝不打开回调 gate（Tool 的同步回调只进缓冲），
  * {@link ToolGateway.Handle#activate()} 由 Processor 在 attach + durable markRunning 后调用，直接打开 gate +
@@ -184,14 +185,34 @@ public final class PlatformToolGateway implements ToolGateway {
   @Override
   public PreflightResult preflight(ToolInvocationRequest request) {
     Objects.requireNonNull(request, "request");
+    ToolDescriptor bindingDescriptor = request.binding().descriptor();
+    AgentToolRegistry.Entry entry =
+        toolRegistry.find(bindingDescriptor.name(), bindingDescriptor.version()).orElse(null);
+    if (entry == null) {
+      return new ToolGateway.Deny(
+          new ToolInvocationError(
+              TOOL_NOT_FOUND_KIND,
+              "Frozen tool "
+                  + bindingDescriptor.name()
+                  + "@"
+                  + bindingDescriptor.version()
+                  + " is not registered."));
+    }
+    if (!entry.definition().descriptor().equals(bindingDescriptor)) {
+      return new ToolGateway.Deny(
+          new ToolInvocationError(
+              TOOL_DESCRIPTOR_MISMATCH_KIND,
+              "Frozen tool "
+                  + bindingDescriptor.name()
+                  + "@"
+                  + bindingDescriptor.version()
+                  + " does not match its catalog descriptor."));
+    }
     ToolSettings settings = toolSettingsProvider.get();
     PermissionEvaluator.Evaluation evaluation =
         permissionEvaluator.evaluate(
             new PermissionEvaluationContext(
-                request.binding().descriptor().name(),
-                request.call().argumentsJson(),
-                permissionWorkdir(request),
-                settings));
+                entry.id(), request.call().argumentsJson(), permissionWorkdir(request), settings));
     PermissionAction action = evaluation.action();
     return switch (action) {
       case ALLOW -> new ToolGateway.Allow();

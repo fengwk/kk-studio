@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
@@ -27,8 +28,9 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     assertNotNull(dto.getCreateTime());
     assertNotNull(dto.getUpdateTime());
     assertEquals(systemSettingsCodec.toSections(SystemSettings.DEFAULT), sectionsOf(dto));
-    assertTrue(dto.getTool().getPermission().containsKey("bash"));
-    assertEquals("ask", dto.getTool().getPermission().get("bash").get(0).getAction());
+    assertTrue(dto.getTool().getPermission().containsKey(BaseToolIds.BASH.value()));
+    assertEquals(
+        "ask", dto.getTool().getPermission().get(BaseToolIds.BASH.value()).get(0).getAction());
   }
 
   @Test
