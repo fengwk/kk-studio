@@ -29,7 +29,7 @@ function environment(name: string, skills: { name: string; description: string |
     status: 'READY',
     ready: true,
     lastSeen: null,
-    tools: [],
+    capabilities: [],
     skills,
     mcpServers: [],
   }

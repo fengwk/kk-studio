@@ -107,7 +107,7 @@ describe('CreateChatModal', () => {
               status: 'READY',
               ready: true,
               lastSeen: null,
-              tools: [],
+              capabilities: [],
               skills: [],
               mcpServers: [],
             },

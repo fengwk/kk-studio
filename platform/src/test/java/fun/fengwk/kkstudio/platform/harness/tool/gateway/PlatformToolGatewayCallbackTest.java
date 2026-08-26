@@ -31,11 +31,12 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCancelledException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityFailedException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolFailedException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -384,7 +385,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void cancelledErrorMapsToCancelled() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new RemoteToolCancelledException("user stopped"));
+        runPlatformSyncError(new EnvironmentCapabilityCancelledException("user stopped"));
     ToolGatewayTestSupport.RecordingListener.Event.Cancelled cancelled =
         (ToolGatewayTestSupport.RecordingListener.Event.Cancelled) listener.events.get(0);
     assertEquals("CANCELLED", cancelled.error().kind());
@@ -393,7 +394,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void uncertainErrorMapsToUnknown() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new RemoteToolSendUncertainException("connection lost"));
+        runPlatformSyncError(new EnvironmentCapabilitySendUncertainException("connection lost"));
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("REMOTE_UNCERTAIN", unknown.error().kind());
@@ -402,7 +403,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void unavailableErrorIsRetryableFailure() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new RemoteToolUnavailableException("environment offline"));
+        runPlatformSyncError(new EnvironmentCapabilityUnavailableException("environment offline"));
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("UNAVAILABLE", failed.failure().error().kind());
@@ -412,7 +413,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void daemonFailedErrorIsNonRetryableKnownFailure() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new RemoteToolFailedException("tool blew up"));
+        runPlatformSyncError(new EnvironmentCapabilityFailedException("tool blew up"));
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", failed.failure().error().kind());
@@ -678,7 +679,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void nullMessageUnavailableErrorUsesFallbackMessage() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new RemoteToolUnavailableException(null));
+        runPlatformSyncError(new EnvironmentCapabilityUnavailableException(null));
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("UNAVAILABLE", failed.failure().error().kind());
@@ -950,10 +951,10 @@ class PlatformToolGatewayCallbackTest {
     RejectedTerminalRun run =
         runRejectedTerminal(
             listener -> listener.throwOnFailed = true,
-            listener -> listener.onError(new RemoteToolFailedException("tool blew up")));
+            listener -> listener.onError(new EnvironmentCapabilityFailedException("tool blew up")));
     assertEquals(1, run.listener.terminalInvocations.get(), "onFailed threw: exactly one terminal");
     assertTrue(run.listener.events.isEmpty(), "no UNKNOWN may follow a rejected terminal");
-    run.bridge.get().onError(new RemoteToolCancelledException("late"));
+    run.bridge.get().onError(new EnvironmentCapabilityCancelledException("late"));
     assertEquals(1, run.listener.terminalInvocations.get());
   }
 
@@ -962,7 +963,8 @@ class PlatformToolGatewayCallbackTest {
     RejectedTerminalRun run =
         runRejectedTerminal(
             listener -> listener.throwOnCancelled = true,
-            listener -> listener.onError(new RemoteToolCancelledException("user stopped")));
+            listener ->
+                listener.onError(new EnvironmentCapabilityCancelledException("user stopped")));
     assertEquals(
         1, run.listener.terminalInvocations.get(), "onCancelled threw: exactly one terminal");
     assertTrue(run.listener.events.isEmpty(), "no UNKNOWN may follow a rejected terminal");
@@ -1021,6 +1023,77 @@ class PlatformToolGatewayCallbackTest {
   }
 
   @Test
+  void environmentCapabilityCorrelationRestoresModelCallId() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
+    transport.syncResult = ToolGatewayTestSupport.result("call-1", "done");
+    ToolGatewayTestSupport.RecordingListener listener =
+        new ToolGatewayTestSupport.RecordingListener();
+    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    listener.store = store;
+    PlatformToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.factories(),
+            transport,
+            store,
+            new ToolGatewayTestSupport.ManualExecutor());
+
+    ToolGateway.Started started =
+        assertInstanceOf(
+            ToolGateway.Started.class,
+            gateway.start(
+                ToolGatewayTestSupport.execution(
+                    ToolGatewayTestSupport.environmentRequest(
+                        "call-1", ToolGatewayTestSupport.ENV_A)),
+                listener));
+    started.handle().activate();
+    listener.awaitCount(1);
+
+    ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
+        (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.getFirst();
+    assertEquals("call-1", succeeded.result().toolCallId());
+    assertEquals("done", ((TextToolContent) succeeded.result().contents().getFirst()).text());
+    assertTrue(store.puts.isEmpty());
+  }
+
+  @Test
+  void wrongEnvironmentCapabilityCorrelationFailsBeforeResourceExternalization() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
+    transport.callbackCallId = "call-1";
+    transport.syncResult =
+        new ToolResult(
+            "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
+    ToolGatewayTestSupport.RecordingListener listener =
+        new ToolGatewayTestSupport.RecordingListener();
+    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    listener.store = store;
+    PlatformToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.factories(),
+            transport,
+            store,
+            new ToolGatewayTestSupport.ManualExecutor());
+
+    ToolGateway.Started started =
+        assertInstanceOf(
+            ToolGateway.Started.class,
+            gateway.start(
+                ToolGatewayTestSupport.execution(
+                    ToolGatewayTestSupport.environmentRequest(
+                        "call-1", ToolGatewayTestSupport.ENV_A)),
+                listener));
+    started.handle().activate();
+    listener.awaitCount(1);
+
+    ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
+        (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.getFirst();
+    assertEquals("INVALID_RESULT", failed.failure().error().kind());
+    assertEquals(1, listener.terminalInvocations.get());
+    assertTrue(store.puts.isEmpty(), "wrong correlation must be rejected before externalization");
+  }
+
+  @Test
   void bufferedOverflowSelectsExactlyOneUnknownAtActivationWithoutStoreWrites() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_PARTIALS;
@@ -1052,9 +1125,9 @@ class PlatformToolGatewayCallbackTest {
     assertEquals(1, listener.terminalInvocations.get(), "overflow selects exactly one terminal");
     assertTrue(store.puts.isEmpty(), "overflow must never touch the resource store");
     // 溢出后迟到信号一律丢弃，绝不出现第二个 terminal、绝不产生 store 副作用。
-    ToolExecutionListener bridge = transport.invocations.get(0).listener();
-    bridge.onComplete(ToolGatewayTestSupport.result("call-1", "late done"));
-    bridge.onPartial(ToolGatewayTestSupport.result("call-1", "later"));
+    EnvironmentCapabilityExecutionListener bridge = transport.invocations.get(0).listener();
+    bridge.onComplete(ToolGatewayTestSupport.capabilityResult("call-1", "late done"));
+    bridge.onPartial(ToolGatewayTestSupport.capabilityResult("call-1", "later"));
     assertEquals(1, listener.terminalInvocations.get());
     assertTrue(store.puts.isEmpty());
   }

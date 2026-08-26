@@ -92,7 +92,7 @@ public class LiveEnvironmentRegistry {
   public synchronized void markReady(
       EnvironmentName environmentName, EnvironmentDaemonConnection connection, Instant now) {
     LiveEnvironment current = requireOwned(environmentName, connection);
-    if (current.capabilities() == null) {
+    if (current.daemonCapabilities() == null) {
       throw new IllegalStateException("environment cannot become READY before capabilities");
     }
     byName.put(
@@ -101,7 +101,7 @@ public class LiveEnvironmentRegistry {
             current.name(),
             LiveEnvironmentStatus.READY,
             current.connection(),
-            current.capabilities(),
+            current.daemonCapabilities(),
             Objects.requireNonNull(now, "now")));
   }
 
@@ -115,7 +115,7 @@ public class LiveEnvironmentRegistry {
             current.name(),
             current.status(),
             current.connection(),
-            current.capabilities(),
+            current.daemonCapabilities(),
             Objects.requireNonNull(now, "now")));
   }
 

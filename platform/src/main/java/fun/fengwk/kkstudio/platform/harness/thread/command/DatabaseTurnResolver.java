@@ -497,9 +497,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
     LiveEnvironment liveEnvironment =
         environmentRegistry.find(binding.environmentName()).orElse(null);
     DaemonEnvironmentInfo environmentInfo =
-        liveEnvironment == null || liveEnvironment.capabilities() == null
+        liveEnvironment == null || liveEnvironment.daemonCapabilities() == null
             ? null
-            : liveEnvironment.capabilities().environment();
+            : liveEnvironment.daemonCapabilities().environment();
     ZoneId zone = environmentInfo == null ? clock.getZone() : ZoneId.of(environmentInfo.timeZone());
     return new CurrentEnvironmentContext(
         binding,

@@ -55,8 +55,8 @@ class LiveEnvironmentMcpServerDtoSerializationTest {
   }
 
   /**
-   * 公共 Environment 查询 DTO 只投影 name/status/ready/lastSeen/tools/skills/mcpServers/rootPath，不泄漏其它
-   * READY metadata。
+   * 公共 Environment 查询 DTO 只投影
+   * name/status/ready/lastSeen/capabilities/skills/mcpServers/rootPath，不泄漏其它 READY metadata。
    */
   @Test
   void publicEnvironmentDtoDoesNotExposeInternalMetadata() throws Exception {
@@ -65,7 +65,7 @@ class LiveEnvironmentMcpServerDtoSerializationTest {
     dto.setStatus("READY");
     dto.setReady(true);
     dto.setLastSeen(Instant.parse("2026-08-10T00:00:00Z"));
-    dto.setTools(List.of());
+    dto.setCapabilities(List.of());
     dto.setSkills(List.of());
     dto.setMcpServers(List.of());
     dto.setRootPath("/home/dev");
@@ -73,7 +73,7 @@ class LiveEnvironmentMcpServerDtoSerializationTest {
     JsonNode json = STRICT_NON_NULL_MAPPER.readTree(STRICT_NON_NULL_MAPPER.writeValueAsString(dto));
 
     assertTrue(json.path("name").isTextual());
-    assertTrue(json.path("tools").isArray());
+    assertTrue(json.path("capabilities").isArray());
     assertTrue(json.path("skills").isArray());
     assertTrue(json.path("mcpServers").isArray());
     assertEquals("/home/dev", json.path("rootPath").asText());

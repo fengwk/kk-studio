@@ -340,7 +340,7 @@ describe('AI domain utilities', () => {
     expect(filterProviders(providers, 'minimax').map((item) => item.name)).toEqual(['minimax'])
     expect(filterProviders(providers, 'endpoint')).toHaveLength(0)
     expect(filterProviders(providers, '').map((item) => item.name)).toEqual(['minimax', 'openai'])
-    expect(filterEnvironments([{ name: 'tool-e2e', status: 'READY', lastSeen: null, tools: [], skills: [] }, { name: 'platform', status: 'READY', lastSeen: null, tools: [], skills: [] }], '').map((item) => item.name)).toEqual([
+    expect(filterEnvironments([{ name: 'tool-e2e', status: 'READY', lastSeen: null, capabilities: [], skills: [] }, { name: 'platform', status: 'READY', lastSeen: null, capabilities: [], skills: [] }], '').map((item) => item.name)).toEqual([
       'platform',
       'tool-e2e',
     ])

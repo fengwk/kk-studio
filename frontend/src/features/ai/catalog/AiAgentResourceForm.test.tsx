@@ -55,7 +55,7 @@ function liveEnvironment(
     status: 'READY',
     ready: true,
     lastSeen: null,
-    tools: [],
+    capabilities: [],
     skills,
     mcpServers: [],
     ...extra,
@@ -387,7 +387,7 @@ describe('AgentForm current contracts', () => {
     expect(screen.getByText('暂无候选 Skills')).toBeInTheDocument()
   })
 
-  it('keeps fixed tool candidates independent of Environment tools and MCP summaries', () => {
+  it('keeps fixed tool candidates independent of Environment capabilities and MCP summaries', () => {
     render(
       <AgentForm
         draft={emptyAgentDraft(modelWithVariants())}
@@ -395,7 +395,7 @@ describe('AgentForm current contracts', () => {
         environments={[
           {
             ...liveEnvironment('local', []),
-            tools: [{ name: 'env-only-tool', version: null, description: null }],
+            capabilities: [{ id: 'env-only-capability', version: '1' }],
             mcpServers: [
               {
                 name: 'demo-server',

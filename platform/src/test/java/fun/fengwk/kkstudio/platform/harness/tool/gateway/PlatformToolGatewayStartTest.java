@@ -20,9 +20,11 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
@@ -109,16 +111,18 @@ class PlatformToolGatewayStartTest {
       awaitSize(transport.invocations, 2);
       assertEquals(ToolGatewayTestSupport.ENV_A, transport.invocations.get(0).environment());
       assertEquals(ToolGatewayTestSupport.ENV_B, transport.invocations.get(1).environment());
-      // 冻结 call 原样发送，携带与 PLATFORM 相同的 durable 上下文（daemon gateway 需要 invocationId）。
-      assertSame(requestA.call(), transport.invocations.get(0).request().call());
+      // Capability transport 使用 durable invocation UUID 作为独立 correlation id，不携带 model Tool call 对象。
       assertEquals(
-          new ToolExecutionContext(
-              ToolGatewayTestSupport.INVOCATION_ID, ToolGatewayTestSupport.THREAD_ID),
-          transport.invocations.get(0).request().context());
+          ToolGatewayTestSupport.INVOCATION_ID.toString(),
+          transport.invocations.get(0).request().call().id());
       assertEquals(
-          EnvironmentToolCatalog.require("bash"),
+          requestA.call().argumentsJson(),
+          transport.invocations.get(0).request().call().argumentsJson());
+      assertEquals(
+          EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC),
           transport.invocations.get(0).request().descriptor());
       assertEquals(Duration.ZERO, transport.invocations.get(0).request().timeout());
+      assertEquals(null, transport.invocations.get(0).request().workdir());
     } finally {
       executor.shutdownNow();
     }
@@ -675,9 +679,9 @@ class PlatformToolGatewayStartTest {
         assertInstanceOf(ToolGateway.Indeterminate.class, result);
     assertEquals(expectedKind, indeterminate.error().kind());
     // Indeterminate 后桥必须已取消：迟到的 transport 回调被丢弃而不是永远缓冲，任何回调都绝不触达 listener。
-    ToolExecutionListener bridge = transport.invocations.get(0).listener();
-    bridge.onPartial(ToolGatewayTestSupport.result("call-1", "late"));
-    bridge.onComplete(ToolGatewayTestSupport.result("call-1", "late done"));
+    EnvironmentCapabilityExecutionListener bridge = transport.invocations.get(0).listener();
+    bridge.onPartial(ToolGatewayTestSupport.capabilityResult("call-1", "late"));
+    bridge.onComplete(ToolGatewayTestSupport.capabilityResult("call-1", "late done"));
     bridge.onError(new IllegalStateException("late"));
     assertTrue(bridgeIsCancelled(bridge), "Indeterminate must close the callback bridge");
     assertEquals(0, bridgeQueueSize(bridge), "late callbacks must be dropped, not buffered");
@@ -685,16 +689,27 @@ class PlatformToolGatewayStartTest {
   }
 
   /** 白盒断言桥内部已 cancel（transport 持有的桥引用不可从外部触达）。 */
-  private static boolean bridgeIsCancelled(ToolExecutionListener bridge) throws Exception {
-    Field field = bridge.getClass().getDeclaredField("cancelled");
+  private static boolean bridgeIsCancelled(EnvironmentCapabilityExecutionListener bridge)
+      throws Exception {
+    Object gatedBridge = gatedBridge(bridge);
+    Field field = gatedBridge.getClass().getDeclaredField("cancelled");
     field.setAccessible(true);
-    return field.getBoolean(bridge);
+    return field.getBoolean(gatedBridge);
   }
 
   /** 白盒断言桥缓冲为空（迟到回调被丢弃而非永远缓冲）。 */
-  private static int bridgeQueueSize(ToolExecutionListener bridge) throws Exception {
-    Field field = bridge.getClass().getDeclaredField("queue");
+  private static int bridgeQueueSize(EnvironmentCapabilityExecutionListener bridge)
+      throws Exception {
+    Object gatedBridge = gatedBridge(bridge);
+    Field field = gatedBridge.getClass().getDeclaredField("queue");
     field.setAccessible(true);
-    return ((ArrayDeque<?>) field.get(bridge)).size();
+    return ((ArrayDeque<?>) field.get(gatedBridge)).size();
+  }
+
+  private static Object gatedBridge(EnvironmentCapabilityExecutionListener adapter)
+      throws Exception {
+    Field field = adapter.getClass().getDeclaredField("bridge");
+    field.setAccessible(true);
+    return field.get(adapter);
   }
 }

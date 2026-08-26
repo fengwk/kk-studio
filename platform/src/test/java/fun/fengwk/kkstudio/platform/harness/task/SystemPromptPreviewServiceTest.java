@@ -106,7 +106,7 @@ class SystemPromptPreviewServiceTest {
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
     LiveEnvironment liveEnvironment = mock(LiveEnvironment.class);
-    when(liveEnvironment.capabilities())
+    when(liveEnvironment.daemonCapabilities())
         .thenReturn(
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,

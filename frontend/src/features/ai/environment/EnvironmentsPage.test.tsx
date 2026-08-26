@@ -29,7 +29,7 @@ function environment(overrides: Partial<LiveEnvironmentDTO>): LiveEnvironmentDTO
     status: 'READY',
     ready: true,
     lastSeen: null,
-    tools: [],
+    capabilities: [],
     skills: [],
     mcpServers: [],
     ...overrides,
@@ -37,14 +37,14 @@ function environment(overrides: Partial<LiveEnvironmentDTO>): LiveEnvironmentDTO
 }
 
 describe('EnvironmentsPage', () => {
-  it('renders live registry entries with status tools skills and mcp summaries', async () => {
+  it('renders live registry entries with status capabilities skills and mcp summaries', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       {
         name: 'local-dev',
         status: 'READY',
         ready: true,
         lastSeen: '2026-07-20T01:02:03.000Z',
-        tools: [{ name: 'bash', version: '1', description: 'shell' }],
+        capabilities: [{ id: 'process.exec', version: '1' }],
         skills: [{ name: 'dev', description: 'dev skill' }],
         mcpServers: [
           {
@@ -66,7 +66,7 @@ describe('EnvironmentsPage', () => {
         status: 'READY',
         ready: false,
         lastSeen: '2026-07-19T00:00:00.000Z',
-        tools: [],
+        capabilities: [],
         skills: [],
         mcpServers: [],
       },
@@ -75,7 +75,7 @@ describe('EnvironmentsPage', () => {
         status: 'CONNECTING',
         ready: false,
         lastSeen: null,
-        tools: [],
+        capabilities: [],
         skills: [],
         mcpServers: [],
       },
@@ -85,10 +85,10 @@ describe('EnvironmentsPage', () => {
     // 环境状态 pill 与 READY MCP server 状态 pill 各一枚；stale-box 必须显示 UNAVAILABLE 而非 READY。
     expect(screen.getAllByText('READY').length).toBe(2)
     expect(screen.getByText('UNAVAILABLE')).toBeInTheDocument()
-    expect(screen.getByText('bash')).toBeInTheDocument()
+    expect(screen.getByText('process.exec')).toBeInTheDocument()
     expect(screen.getByText('dev')).toBeInTheDocument()
     expect(screen.getByText('CONNECTING')).toBeInTheDocument()
-    expect(screen.getAllByText('Tools').length).toBe(3)
+    expect(screen.getAllByText('Capabilities').length).toBe(3)
     expect(screen.getAllByText('Skills').length).toBe(3)
     // MCP 摘要：server 名、状态、限长错误与工具名；FAILED 的 error 仅展示通用信息。
     expect(screen.getByText('fs')).toBeInTheDocument()
@@ -166,24 +166,24 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({
         name: 'fat-box',
-        tools: [
-          { name: 'a', version: null, description: null },
-          { name: 'b', version: null, description: null },
-          { name: 'c', version: null, description: null },
-          { name: 'd', version: null, description: null },
-          { name: 'e', version: null, description: null },
+        capabilities: [
+          { id: 'a', version: '1' },
+          { id: 'b', version: '1' },
+          { id: 'c', version: '1' },
+          { id: 'd', version: '1' },
+          { id: 'e', version: '1' },
         ],
       }),
     ])
     renderPage()
 
-    // 工具名超过 3 个：只渲染前 3 个 chip，剩余数量以 +N 汇总。
+    // Capability ID 超过 3 个：只渲染前 3 个 chip，剩余数量以 +N 汇总。
     const card = (await screen.findByText('fat-box')).closest('article')
     expect(card).not.toBeNull()
-    const toolRow = within(card!).getByText('Tools').closest('.env-tag-row')
-    expect(toolRow).not.toBeNull()
-    expect(toolRow!.querySelectorAll('.meta-chip')).toHaveLength(4)
-    expect(within(toolRow!).getByText('+2')).toBeInTheDocument()
-    expect(toolRow!.querySelector('.meta-chips')).toHaveAttribute('title', 'a, b, c, d, e')
+    const capabilityRow = within(card!).getByText('Capabilities').closest('.env-tag-row')
+    expect(capabilityRow).not.toBeNull()
+    expect(capabilityRow!.querySelectorAll('.meta-chip')).toHaveLength(4)
+    expect(within(capabilityRow!).getByText('+2')).toBeInTheDocument()
+    expect(capabilityRow!.querySelector('.meta-chips')).toHaveAttribute('title', 'a, b, c, d, e')
   })
 })

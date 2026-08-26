@@ -179,12 +179,14 @@ Environment 是服务器内存中的 live registry，不是持久化资源。`Li
 
 - `EnvironmentDaemonEndpoint`：HELLO/WELCOME/READY/HEARTBEAT/close 协议；
 - `EnvironmentSkillLoader`：按冻结 skill binding 读取正文；
-- `RemoteToolTransport`：向 READY Daemon 发送 Environment tool；
+- `EnvironmentCapabilityTransport`：按固定 capability catalog 向 READY Daemon 发送原子 capability；
 - `EnvironmentDirectoryLister`：不占 Tool invocation slot 的 control-plane 目录查询。
 
 同名连接的 bind 是原子三态：新连接 `Accepted`、新鲜持有者存在时 `Rejected`、持有者关闭或心跳过期时
 `Replaced`。每个 Environment 只有一个 active remote invocation；并发 sibling 在 INVOKE 发送前返回
-`RemoteToolBusyException`，不同 Environment 可以并行。发送不确定时连接和 active/pending 请求都按不确定结果收敛，
+`EnvironmentCapabilityBusyException`，不同 Environment 可以并行。Gateway 只接受 v4 HELLO，严格校验
+`capabilityCatalogVersion`；INVOKE payload 使用 `capabilityId`、`capabilityVersion`、`workspacePath`、
+`arguments` 和 `timeoutMillis`，不携带 model Tool name。发送不确定时连接和 active/pending 请求都按不确定结果收敛，
 不重发可能已经产生副作用的请求。
 
 ### Provider adapters 与 PlatformModelGateway
@@ -251,7 +253,7 @@ permission evaluator。正常路径按 AgentToolId、arguments、Environment wor
 | --- | --- |
 | `PLATFORM` local | 精确匹配 name/version/descriptor 后提交 virtual-thread executor |
 | `PLATFORM` plugin | 精确匹配 `ContributionId`、descriptor、state access，执行声明式 intent |
-| `ENVIRONMENT` | 精确匹配 registry 的 definition/capability mapping，检查 READY/active slot 后经 `RemoteToolTransport`发送 |
+| `ENVIRONMENT` | 精确匹配 registry 的 model definition/capability mapping，检查 READY/active slot 后经 `EnvironmentCapabilityTransport` 发送 |
 
 local executor 明确拒绝返回 `Overloaded`，提交不确定返回 `Indeterminate(EXECUTION_FAILED)`。Environment 在发送前
 不可用返回 `Rejected(UNAVAILABLE)`，同 Environment active 返回 `Busy`，发送不确定返回
@@ -431,7 +433,7 @@ Function dispatcher claim + RUNNING lease
    Provider/Tool，等待线程可被唤醒且不泄漏。
 10. Tool terminal 成功先完成 descriptor、toolCallId、canonical size 和 externalization plan 校验，再写 ResourceStore；
     partial 不允许 Binary/Resource，外部化失败不会伪造 durable success。
-11. Environment active remote invocation 每个 Environment 至多一个；发送 outcome 不确定时保守收敛 `UNKNOWN`，不自动重发
+11. Environment active capability invocation 每个 Environment 至多一个；发送 outcome 不确定时保守收敛 `UNKNOWN`，不自动重发
     非幂等副作用。
 12. Canvas pin 不增加 Blob ref_count；Resource row、Session ref、upload owner 各自只维护一条明确引用边，任何 owner 删除
     都必须经过对应 manager。

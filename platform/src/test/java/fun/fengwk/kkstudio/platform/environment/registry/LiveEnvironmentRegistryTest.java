@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
@@ -91,7 +92,9 @@ class LiveEnvironmentRegistryTest {
 
     // CONNECTING 的新鲜声明（连接打开 + 心跳未过期）与 READY 同等受保护：不能因为未 READY 就被抢走。
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
-    assertEquals(null, registry.find(DEV).orElseThrow().capabilities());
+    assertEquals(
+        EnvironmentCapabilityCatalog.descriptors(),
+        registry.find(DEV).orElseThrow().capabilities());
     assertThrows(IllegalStateException.class, () -> registry.markReady(DEV, first, NOW));
     assertInstanceOf(BindResult.Rejected.class, bind(registry, DEV, second, NOW));
     assertEquals("c1", registry.find(DEV).orElseThrow().connection().connectionId());

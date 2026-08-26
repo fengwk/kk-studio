@@ -501,7 +501,7 @@ describe('AgentPane orchestration', () => {
       ready: true,
       status: 'READY',
       lastSeen: null,
-      tools: [],
+      capabilities: [],
       skills: [],
     }])
     const composer = await screen.findByLabelText('给 AI 发送消息')
