@@ -2,9 +2,10 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -14,14 +15,16 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** 在 environment root 下按意图创建或替换单个文本文件。 */
-public final class WriteTool extends AbstractCodingTool {
+public final class WriteCapability extends AbstractCodingCapability {
 
-  public WriteTool(CodingToolsConfig config, ExecutorService executor) {
-    super(config, executor, EnvironmentToolCatalog.require("write"));
+  public WriteCapability(CodingToolsConfig config, ExecutorService executor) {
+    super(
+        config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE));
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
     String content = string(args, "content");

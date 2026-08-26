@@ -4,12 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.util.List;
 import java.util.Objects;
@@ -17,31 +17,35 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** MCP 固定桥接工具的通用异步执行：取消/中断不会产生重复终态回调。 */
-abstract class AbstractMcpBridgeTool implements Tool {
+/** MCP 固定 bridge capability 的通用异步执行：取消/中断不会产生重复终态回调。 */
+abstract class AbstractMcpBridgeCapability implements EnvironmentCapability {
 
   static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   final McpServerRegistry registry;
   private final ExecutorService executor;
-  private final ToolDescriptor descriptor;
+  private final EnvironmentCapabilityDescriptor descriptor;
 
-  AbstractMcpBridgeTool(
-      McpServerRegistry registry, ExecutorService executor, ToolDescriptor descriptor) {
+  AbstractMcpBridgeCapability(
+      McpServerRegistry registry,
+      ExecutorService executor,
+      EnvironmentCapabilityDescriptor descriptor) {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
   }
 
   @Override
-  public final ToolDescriptor descriptor() {
+  public final EnvironmentCapabilityDescriptor descriptor() {
     return descriptor;
   }
 
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public EnvironmentCapabilityExecutionHandle execute(
+      EnvironmentCapabilityExecutionRequest request,
+      EnvironmentCapabilityExecutionListener listener) {
     if (!descriptor.equals(request.descriptor())) {
-      throw new IllegalArgumentException("request descriptor does not match tool descriptor");
+      throw new IllegalArgumentException("request descriptor does not match capability descriptor");
     }
     Objects.requireNonNull(listener, "listener");
     Execution execution = new Execution(request.call().id(), listener);
@@ -49,7 +53,7 @@ abstract class AbstractMcpBridgeTool implements Tool {
         executor.submit(
             () -> {
               try {
-                ToolResult result = run(request, execution);
+                EnvironmentCapabilityResult result = run(request, execution);
                 execution.complete(result);
               } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
@@ -61,13 +65,14 @@ abstract class AbstractMcpBridgeTool implements Tool {
     return execution;
   }
 
-  abstract ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception;
+  abstract EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception;
 
   protected String failureMessage(Exception error) {
     return error.getMessage();
   }
 
-  static JsonNode arguments(ToolExecutionRequest request) throws Exception {
+  static JsonNode arguments(EnvironmentCapabilityExecutionRequest request) throws Exception {
     return OBJECT_MAPPER.readTree(request.call().argumentsJson());
   }
 
@@ -84,20 +89,21 @@ abstract class AbstractMcpBridgeTool implements Tool {
     return value == null ? null : value.textValue();
   }
 
-  static ToolResult error(String id, String message) {
-    String detail = message == null || message.isBlank() ? "tool execution failed" : message;
-    return new ToolResult(id, List.of(new TextToolContent("Error: " + detail)), true, "{}");
+  static EnvironmentCapabilityResult error(String id, String message) {
+    String detail = message == null || message.isBlank() ? "capability execution failed" : message;
+    return new EnvironmentCapabilityResult(
+        id, List.of(new TextToolContent("Error: " + detail)), true, "{}");
   }
 
   /** 可变执行状态，其终态回调保证恰好执行一次。 */
-  static final class Execution implements ToolExecutionHandle {
+  static final class Execution implements EnvironmentCapabilityExecutionHandle {
     private final String callId;
-    private final ToolExecutionListener listener;
+    private final EnvironmentCapabilityExecutionListener listener;
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
     private volatile Future<?> worker;
 
-    private Execution(String callId, ToolExecutionListener listener) {
+    private Execution(String callId, EnvironmentCapabilityExecutionListener listener) {
       this.callId = callId;
       this.listener = listener;
     }
@@ -118,7 +124,7 @@ abstract class AbstractMcpBridgeTool implements Tool {
       return cancelled.get();
     }
 
-    void complete(ToolResult result) {
+    void complete(EnvironmentCapabilityResult result) {
       if (terminal.compareAndSet(false, true)) {
         listener.onComplete(result);
       }

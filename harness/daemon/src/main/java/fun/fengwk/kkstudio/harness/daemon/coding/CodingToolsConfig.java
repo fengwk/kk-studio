@@ -6,10 +6,11 @@ import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * Daemon coding tools 共享的不可变本地执行配置。
+ * Daemon coding capabilities 共享的不可变本地执行配置。
  *
  * <p>默认 cwd 不是静态配置：每次 invocation 的 workspace 目录由 Daemon 从 INVOKE payload canonicalize 后写入 {@code
- * ToolExecutionRequest.workdir}，coding tools 以它为缺省 workdir；本配置只持有 environment root 与输出/进程参数。
+ * EnvironmentCapabilityExecutionRequest.workdir}，coding capabilities 以它为缺省 workdir；本配置只持有
+ * environment root 与输出/进程参数。
  */
 public record CodingToolsConfig(
     Path environmentRoot,

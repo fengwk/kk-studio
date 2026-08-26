@@ -4,12 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -18,14 +19,18 @@ import java.util.concurrent.ExecutorService;
  * 固定 {@code mcp_list_tools} 桥接工具：确定性 JSON 报告请求的 server 状态与 READY server 的工具 （name/description/完整输入
  * schema），不泄漏任何 secrets。
  */
-public final class McpListToolsTool extends AbstractMcpBridgeTool {
+public final class McpListCapability extends AbstractMcpBridgeCapability {
 
-  public McpListToolsTool(McpServerRegistry registry, ExecutorService executor) {
-    super(registry, executor, EnvironmentToolCatalog.require("mcp_list_tools"));
+  public McpListCapability(McpServerRegistry registry, ExecutorService executor) {
+    super(
+        registry,
+        executor,
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.MCP_LIST));
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String requested = optionalString(args, "server");
     List<DaemonMcpServerDescriptor> summaries =
@@ -38,7 +43,7 @@ public final class McpListToolsTool extends AbstractMcpBridgeTool {
     for (DaemonMcpServerDescriptor summary : summaries) {
       servers.add(serverNode(summary));
     }
-    return new ToolResult(
+    return new EnvironmentCapabilityResult(
         request.call().id(),
         List.of(new JsonToolContent(OBJECT_MAPPER.writeValueAsString(root))),
         false,

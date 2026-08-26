@@ -11,12 +11,12 @@ import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,7 +29,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-class NativeSearchToolsTest {
+class NativeSearchCapabilitiesTest {
 
   @TempDir Path environmentRoot;
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -76,7 +76,8 @@ class NativeSearchToolsTest {
     write(".pi/git/generated.txt", "needle\n");
     write(".git/config", "needle\n");
 
-    ToolResult found = invoke(find(config()), "{\"pattern\":\"*\",\"path\":\".\"}");
+    EnvironmentCapabilityResult found =
+        invoke(find(config()), "{\"pattern\":\"*\",\"path\":\".\"}");
     String findText = text(found);
     List<String> findLines = List.of(findText.split("\n"));
     assertTrue(findText.contains(".hidden.txt"));
@@ -96,7 +97,8 @@ class NativeSearchToolsTest {
     assertFalse(findText.contains(".pi/git/generated.txt"));
     assertFalse(findText.contains(".git/config"));
 
-    ToolResult grepped = invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\".\"}");
+    EnvironmentCapabilityResult grepped =
+        invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\".\"}");
     String grepText = text(grepped);
     assertTrue(grepText.contains(".hidden.txt:1:needle"));
     assertTrue(grepText.contains("logs/deep/keep.log:1:needle"));
@@ -113,12 +115,14 @@ class NativeSearchToolsTest {
     write("foo/bar.log", "ignored\n");
     write("foo/keep.txt", "visible\n");
 
-    ToolResult negatedDirectory = invoke(find(config()), "{\"pattern\":\"*\",\"path\":\".\"}");
+    EnvironmentCapabilityResult negatedDirectory =
+        invoke(find(config()), "{\"pattern\":\"*\",\"path\":\".\"}");
     assertTrue(text(negatedDirectory).contains("foo/keep.txt"));
     assertFalse(text(negatedDirectory).contains("foo/bar.log"));
 
     Files.writeString(environmentRoot.resolve(".gitignore"), "foo\n");
-    ToolResult ignoredDirectory = invoke(find(config()), "{\"pattern\":\"*\",\"path\":\".\"}");
+    EnvironmentCapabilityResult ignoredDirectory =
+        invoke(find(config()), "{\"pattern\":\"*\",\"path\":\".\"}");
     assertFalse(text(ignoredDirectory).contains("foo/keep.txt"));
     assertFalse(text(ignoredDirectory).contains("foo/bar.log"));
   }
@@ -136,20 +140,22 @@ class NativeSearchToolsTest {
     Files.createSymbolicLink(
         environmentRoot.resolve("search-link"), environmentRoot.resolve("search"));
 
-    ToolResult basenames = invoke(find(config()), "{\"pattern\":\"*.ts\",\"path\":\"search\"}");
+    EnvironmentCapabilityResult basenames =
+        invoke(find(config()), "{\"pattern\":\"*.ts\",\"path\":\"search\"}");
     assertEquals(
         "search/.hidden.ts\nsearch/a.ts\nsearch/nested/b.ts\nsearch/z.ts", text(basenames));
     assertFalse(text(basenames).contains("link.ts"));
 
-    ToolResult fullPath =
+    EnvironmentCapabilityResult fullPath =
         invoke(find(config()), "{\"pattern\":\"nested/*.ts\",\"path\":\"search\"}");
     assertEquals("search/nested/b.ts", text(fullPath));
 
-    ToolResult doubleStar = invoke(find(config()), "{\"pattern\":\"**/*.ts\",\"path\":\"search\"}");
+    EnvironmentCapabilityResult doubleStar =
+        invoke(find(config()), "{\"pattern\":\"**/*.ts\",\"path\":\"search\"}");
     assertEquals(
         "search/.hidden.ts\nsearch/a.ts\nsearch/nested/b.ts\nsearch/z.ts", text(doubleStar));
 
-    ToolResult characterClass =
+    EnvironmentCapabilityResult characterClass =
         invoke(find(config()), "{\"pattern\":\"[ab].ts\",\"path\":\"search\"}");
     assertEquals("search/a.ts\nsearch/nested/b.ts", text(characterClass));
     assertTrue(
@@ -170,18 +176,18 @@ class NativeSearchToolsTest {
     write("nested/c.txt", "ALPHA.FOO\n");
     write("b.md", "alpha.foo\n");
 
-    ToolResult literal =
+    EnvironmentCapabilityResult literal =
         invoke(
             grep(config()),
             "{\"pattern\":\"alpha.foo\",\"path\":\".\",\"literal\":true,"
                 + "\"ignore_case\":true,\"include\":\"**/*.txt\"}");
     assertEquals("a.txt:2:alpha.foo alpha.foo\nnested/c.txt:1:ALPHA.FOO", text(literal));
 
-    ToolResult regex =
+    EnvironmentCapabilityResult regex =
         invoke(grep(config()), "{\"pattern\":\"^Alpha\\\\s+foo$\",\"path\":\"a.txt\"}");
     assertEquals("a.txt:1:Alpha foo", text(regex));
 
-    ToolResult once =
+    EnvironmentCapabilityResult once =
         invoke(
             grep(config()),
             "{\"pattern\":\"alpha\\\\.foo\",\"path\":\"a.txt\",\"ignore_case\":true}");
@@ -193,7 +199,7 @@ class NativeSearchToolsTest {
   void grepMultilineReportsCoveredLinesOnce() throws Exception {
     write("multi.txt", "zero\nalpha\nbeta gamma\ndelta\n");
 
-    ToolResult result =
+    EnvironmentCapabilityResult result =
         invoke(
             grep(config()),
             "{\"pattern\":\"alpha\\nbeta|gamma\\ndelta\",\"path\":\"multi.txt\","
@@ -209,15 +215,18 @@ class NativeSearchToolsTest {
     write("text.txt", "needle\n");
     Files.write(environmentRoot.resolve("binary.bin"), new byte[] {'n', 0, 'e'});
 
-    ToolResult direct = invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\"binary.bin\"}");
+    EnvironmentCapabilityResult direct =
+        invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\"binary.bin\"}");
     assertTrue(direct.error());
     assertTrue(text(direct).contains("file appears to be binary"));
 
-    ToolResult directory = invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\".\"}");
+    EnvironmentCapabilityResult directory =
+        invoke(grep(config()), "{\"pattern\":\"needle\",\"path\":\".\"}");
     assertFalse(directory.error());
     assertEquals("text.txt:1:needle", text(directory));
 
-    ToolResult invalid = invoke(grep(config()), "{\"pattern\":\"[\",\"path\":\".\"}");
+    EnvironmentCapabilityResult invalid =
+        invoke(grep(config()), "{\"pattern\":\"[\",\"path\":\".\"}");
     assertTrue(invalid.error());
     assertTrue(text(invalid).contains("Invalid regex"));
   }
@@ -261,9 +270,9 @@ class NativeSearchToolsTest {
     write("a.txt", longLine + "\n");
     write("b.txt", "needle\n");
     write("c.txt", "needle\n");
-    GrepTool grep = grep(config(2000, 50 * 1024, store));
+    GrepCapability grep = grep(config(2000, 50 * 1024, store));
 
-    ToolResult grepResult =
+    EnvironmentCapabilityResult grepResult =
         invoke(grep, "{\"pattern\":\".+\",\"path\":\".\",\"include\":\"*.txt\",\"limit\":1}");
     assertTrue(text(grepResult).contains("line truncated to 500 chars"));
     assertTrue(text(grepResult).contains("1 results limit reached"));
@@ -273,7 +282,7 @@ class NativeSearchToolsTest {
     assertTrue(completeGrep.startsWith("a.txt:1:" + longLine));
     assertTrue(completeGrep.endsWith("b.txt:1:needle\nc.txt:1:needle"));
 
-    ToolResult findResult =
+    EnvironmentCapabilityResult findResult =
         invoke(
             find(config(2000, 50 * 1024, store)),
             "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":1}");
@@ -282,7 +291,7 @@ class NativeSearchToolsTest {
         new String(store.get(resource(findResult).resource().sha256()), StandardCharsets.UTF_8);
     assertEquals("a.txt\nb.txt\nc.txt", completeFind);
 
-    ToolResult previewLimitedGrep =
+    EnvironmentCapabilityResult previewLimitedGrep =
         invoke(grep(config(1, 20, store)), "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":10}");
     assertTrue(text(previewLimitedGrep).contains("configured preview limits"));
     assertEquals(
@@ -290,7 +299,7 @@ class NativeSearchToolsTest {
         new String(
             store.get(resource(previewLimitedGrep).resource().sha256()), StandardCharsets.UTF_8));
 
-    ToolResult previewLimitedFind =
+    EnvironmentCapabilityResult previewLimitedFind =
         invoke(find(config(1, 5, store)), "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10}");
     assertTrue(text(previewLimitedFind).contains("Output truncated"));
     assertEquals(
@@ -318,12 +327,12 @@ class NativeSearchToolsTest {
     return config(2000, 50 * 1024, new InMemoryResourceStore());
   }
 
-  private GrepTool grep(CodingToolsConfig config) {
-    return new GrepTool(config, executor);
+  private GrepCapability grep(CodingToolsConfig config) {
+    return new GrepCapability(config, executor);
   }
 
-  private FindTool find(CodingToolsConfig config) {
-    return new FindTool(config, executor);
+  private FindCapability find(CodingToolsConfig config) {
+    return new FindCapability(config, executor);
   }
 
   private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
@@ -336,21 +345,21 @@ class NativeSearchToolsTest {
     Files.writeString(path, content);
   }
 
-  private ToolResult invoke(Tool tool, String arguments) throws Exception {
+  private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)
+      throws Exception {
     RecordingListener listener = new RecordingListener();
-    tool.execute(
-        new ToolExecutionRequest(
-            tool.descriptor(),
-            new ToolCall("native-search", tool.descriptor().name(), arguments),
+    capability.execute(
+        new EnvironmentCapabilityExecutionRequest(
+            capability.descriptor(),
+            new EnvironmentCapabilityCall("native-search", arguments),
             Duration.ZERO,
-            null,
             environmentRoot),
         listener);
     assertTrue(listener.completed.await(5, TimeUnit.SECONDS));
     return listener.result;
   }
 
-  private static ResourceToolContent resource(ToolResult result) {
+  private static ResourceToolContent resource(EnvironmentCapabilityResult result) {
     return (ResourceToolContent)
         result.contents().stream()
             .filter(ResourceToolContent.class::isInstance)
@@ -358,23 +367,25 @@ class NativeSearchToolsTest {
             .orElseThrow();
   }
 
-  private static String text(ToolResult result) {
-    return result.contents().stream().map(NativeSearchToolsTest::text).reduce("", String::concat);
+  private static String text(EnvironmentCapabilityResult result) {
+    return result.contents().stream()
+        .map(NativeSearchCapabilitiesTest::text)
+        .reduce("", String::concat);
   }
 
   private static String text(ToolContent content) {
     return content instanceof TextToolContent value ? value.text() : "";
   }
 
-  private static final class RecordingListener implements ToolExecutionListener {
+  private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
     private final CountDownLatch completed = new CountDownLatch(1);
-    private volatile ToolResult result;
+    private volatile EnvironmentCapabilityResult result;
 
     @Override
-    public void onPartial(ToolResult partial) {}
+    public void onPartial(EnvironmentCapabilityResult partial) {}
 
     @Override
-    public void onComplete(ToolResult result) {
+    public void onComplete(EnvironmentCapabilityResult result) {
       this.result = result;
       completed.countDown();
     }

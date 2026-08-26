@@ -2,11 +2,12 @@ package fun.fengwk.kkstudio.harness.daemon.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -15,14 +16,18 @@ import java.util.concurrent.ExecutorService;
  * 固定 {@code mcp_call_tool} 桥接工具：按精确 server/tool 查找并执行 MCP 调用，保留上游 isError 与 文本/结构化 JSON 结果；未知/未
  * READY server 或未知工具是确定性错误。
  */
-public final class McpCallToolTool extends AbstractMcpBridgeTool {
+public final class McpCallCapability extends AbstractMcpBridgeCapability {
 
-  public McpCallToolTool(McpServerRegistry registry, ExecutorService executor) {
-    super(registry, executor, EnvironmentToolCatalog.require("mcp_call_tool"));
+  public McpCallCapability(McpServerRegistry registry, ExecutorService executor) {
+    super(
+        registry,
+        executor,
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.MCP_CALL));
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String server = string(args, "server");
     String tool = string(args, "tool");
@@ -54,9 +59,9 @@ public final class McpCallToolTool extends AbstractMcpBridgeTool {
     String id = request.call().id();
     String text = outcome.text();
     if (isJsonValue(text)) {
-      return new ToolResult(id, List.of(new JsonToolContent(text)), false, "{}");
+      return new EnvironmentCapabilityResult(id, List.of(new JsonToolContent(text)), false, "{}");
     }
-    return new ToolResult(id, List.of(new TextToolContent(text)), false, "{}");
+    return new EnvironmentCapabilityResult(id, List.of(new TextToolContent(text)), false, "{}");
   }
 
   private boolean isJsonValue(String text) {

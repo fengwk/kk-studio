@@ -2,9 +2,10 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -16,17 +17,18 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 /** 读取有界文本窗口或确定性的目录清单。 */
-public final class ReadTool extends AbstractCodingTool {
+public final class ReadCapability extends AbstractCodingCapability {
 
   private static final int DEFAULT_LIMIT = 200;
   private static final int MAX_LIMIT = 2000;
 
-  public ReadTool(CodingToolsConfig config, ExecutorService executor) {
-    super(config, executor, EnvironmentToolCatalog.require("read"));
+  public ReadCapability(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ));
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
     Path path =
@@ -36,9 +38,12 @@ public final class ReadTool extends AbstractCodingTool {
       List<String> names;
       try (var entries = Files.list(path)) {
         names =
-            entries.map(ReadTool::directoryEntryName).sorted(Comparator.naturalOrder()).toList();
+            entries
+                .map(ReadCapability::directoryEntryName)
+                .sorted(Comparator.naturalOrder())
+                .toList();
       }
-      return new ToolResult(
+      return new EnvironmentCapabilityResult(
           request.call().id(),
           OutputLimiter.limit(
               String.join("\n", prepend("path: " + rawPath, "kind: directory", "", names))
@@ -54,7 +59,7 @@ public final class ReadTool extends AbstractCodingTool {
       decoded = TextFileCodec.decode(bytes);
     } catch (IllegalArgumentException error) {
       if ("file appears to be binary".equals(error.getMessage())) {
-        return new ToolResult(
+        return new EnvironmentCapabilityResult(
             request.call().id(),
             OutputLimiter.limit(bytes, "application/octet-stream", config),
             false,
@@ -99,7 +104,7 @@ public final class ReadTool extends AbstractCodingTool {
               + (end + 1)
               + " to continue.]");
     }
-    return new ToolResult(
+    return new EnvironmentCapabilityResult(
         request.call().id(),
         OutputLimiter.limit(
             String.join("\n", output).getBytes(StandardCharsets.UTF_8), "text/plain", config),

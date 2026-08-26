@@ -7,11 +7,11 @@ import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * 为每个面向文件系统的 tool 强制执行 Daemon environment root 边界。
+ * 为每个面向文件系统的 capability 强制执行 Daemon environment root 边界。
  *
  * <p>只持有 canonical environment root；每次 invocation 的默认 workdir（workspace 目录）由 Daemon 写入 {@code
- * ToolExecutionRequest.workdir}，各 tool 以此为缺省基准：未提供 {@code workdir} 时使用 invocation workspace，相对值以
- * invocation workspace 为基准，absolute 值允许但必须 canonical 在 root 内。
+ * EnvironmentCapabilityExecutionRequest.workdir}，各 capability 以此为缺省基准：未提供 {@code workdir} 时使用
+ * invocation workspace，相对值以 invocation workspace 为基准，absolute 值允许但必须 canonical 在 root 内。
  *
  * <p>Platform permission 负责授权命令；它绝不会放宽本地的路径与 symlink 边界。
  */

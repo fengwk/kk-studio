@@ -4,7 +4,7 @@ import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.io.IOException;
 
-/** 将有界预览之外的完整 Environment Tool 输出存储为不可变 resources。 */
+/** 将有界预览之外的完整 Environment Capability 输出存储为不可变 resources。 */
 public interface ResourceSink {
 
   /** 持久化字节并返回其稳定的 canonical 引用。 */

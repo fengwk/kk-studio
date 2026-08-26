@@ -13,7 +13,7 @@ public final class DaemonMain {
   private DaemonMain() {}
 
   /**
-   * 使用 CLI 参数启动带本地 coding tools、skill 发现与 MCP server 的 Daemon。
+   * 使用 CLI 参数启动带本地 coding capabilities、skill 发现与 MCP server 的 Daemon。
    *
    * <p>权威参数：{@code --environment-name}、可选且唯一 {@code --note}、唯一 {@code --environment-root}、可重复
    * {@code --skill-dir} 与可选 {@code --mcp-config}；连接参数见 {@link
@@ -29,7 +29,7 @@ public final class DaemonMain {
         daemonConfig.mcpConfigPath() == null
             ? McpConfig.empty()
             : McpConfigParser.parse(daemonConfig.mcpConfigPath());
-    // 每个配置的 server 独立初始化：单个失败只记为 FAILED，不影响 coding/skills 启动。
+    // 每个配置的 server 独立初始化：单个失败只记为 FAILED，不影响 coding capabilities/skills 启动。
     McpServerRegistry mcpRegistry =
         new McpServerRegistry(
             mcpConfig, new LangChainMcpClientFactory(), daemonConfig.defaultToolTimeout());

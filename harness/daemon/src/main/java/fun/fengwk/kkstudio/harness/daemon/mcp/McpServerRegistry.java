@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Daemon 本地 MCP server registry。
  *
- * <p>每个配置的 server 独立初始化：一个 server 失败只记录为 FAILED，不影响其它 server、coding tools 与 skills 启动。 摘要与
+ * <p>每个配置的 server 独立初始化：一个 server 失败只记录为 FAILED，不影响其它 server、coding capabilities 与 skills 启动。 摘要与
  * READY/FAILED 状态在 {@link #start()} 后冻结，直到 daemon 重启。{@link #close()} 对每个成功创建的 client 恰好关闭一次。
  */
 public final class McpServerRegistry implements AutoCloseable {

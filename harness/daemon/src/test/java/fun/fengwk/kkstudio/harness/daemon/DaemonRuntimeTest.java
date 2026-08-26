@@ -21,7 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.daemon.coding.ApplyPatchTool;
+import fun.fengwk.kkstudio.harness.daemon.coding.ApplyPatchCapability;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
@@ -42,15 +42,19 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
@@ -64,10 +68,6 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.io.IOException;
@@ -100,7 +100,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Daemon 生命周期及本地 Tool SPI 的协议集成测试。 */
+/** Daemon 生命周期及本地 Environment Capability SPI 的协议集成测试。 */
 class DaemonRuntimeTest {
 
   private static final long ASYNC_TEST_TIMEOUT_SECONDS = 5;
@@ -122,7 +122,7 @@ class DaemonRuntimeTest {
   @Test
   void nameConflictErrorIsTerminalFailureWithoutReconnect() throws Exception {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool());
+    runtime = runtime(transport, new TestCapability());
 
     runtime.start();
     transport.awaitConnections(1);
@@ -130,7 +130,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     transport.receiveRaw(
-        "{\"protocolVersion\":3,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+        "{\"protocolVersion\":4,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
             + "\"sequence\":1,\"payload\":{\"code\":\"ENVIRONMENT_NAME_CONFLICT\","
             + "\"message\":\"environment already bound to another active daemon\"}}");
 
@@ -146,14 +146,14 @@ class DaemonRuntimeTest {
   @Test
   void nonConflictErrorDoesNotTerminate() throws Exception {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool());
+    runtime = runtime(transport, new TestCapability());
 
     runtime.start();
     transport.awaitConnections(1);
     completeHandshake(0);
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":3,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+        "{\"protocolVersion\":4,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
             + "\"sequence\":1,\"payload\":{\"message\":\"informational\"}}");
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
@@ -162,7 +162,7 @@ class DaemonRuntimeTest {
   @Test
   void reconnectsAfterDisconnectAndReannouncesReadiness() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool(), "Custom & stable environment.");
+    runtime = runtime(transport, new TestCapability(), "Custom & stable environment.");
 
     runtime.start();
     transport.awaitConnections(1);
@@ -172,8 +172,10 @@ class DaemonRuntimeTest {
     JsonNode hello = codec.readPayload(handshake.get(0));
     assertEquals("test-gateway-token", hello.path("gatewayToken").asText());
     assertEquals("daemon", hello.path("daemonId").asText());
-    assertEquals(DaemonProtocol.VERSION_3, hello.path("protocolVersion").asInt());
-    assertEquals(EnvironmentToolCatalog.version(), hello.path("toolCatalogVersion").asText());
+    assertEquals(DaemonProtocol.VERSION_4, hello.path("protocolVersion").asInt());
+    assertEquals(
+        EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asText());
+    assertTrue(hello.path("toolCatalogVersion").isMissingNode());
     DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
     DaemonEnvironmentInfo firstEnvironment =
         capabilitiesCodec.decode(handshake.get(1).payloadJson()).environment();
@@ -216,10 +218,10 @@ class DaemonRuntimeTest {
                 DaemonSkillRegistry.empty(),
                 McpServerRegistry.empty(),
                 null,
-                (registry, executor, scheduler) -> registry.register(new TestTool())));
+                (registry, executor, scheduler) -> registry.register(new TestCapability())));
   }
 
-  /** 生产工厂必须在同一装配点创建资源、注入完整固定 Tool 目录，并把生命周期移交给可关闭 runtime。 */
+  /** 生产工厂必须在同一装配点创建资源、注入完整固定 capability 目录，并把生命周期移交给可关闭 runtime。 */
   @Test
   void productionFactoryCreatesCompleteClosableRuntime() {
     DaemonConfig config =
@@ -249,7 +251,7 @@ class DaemonRuntimeTest {
     assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
   }
 
-  /** 生产装配在 Tool 注册失败时必须释放已经创建的 scheduler/executor，并关闭已启动的 MCP registry。 */
+  /** 生产装配在 capability 注册失败时必须释放已经创建的 scheduler/executor，并关闭已启动的 MCP registry。 */
   @Test
   void productionConstructionFailureReleasesCreatedLifecycleResources() throws Exception {
     DaemonConfig config =
@@ -318,7 +320,7 @@ class DaemonRuntimeTest {
       runtime =
           runtime(
               transport,
-              new TestTool(),
+              new TestCapability(),
               skillRegistry,
               mcpRegistry,
               Duration.ofMinutes(1),
@@ -372,7 +374,7 @@ class DaemonRuntimeTest {
   @Test
   void sendsHeartbeatWhileReady() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool(), Duration.ofMillis(20));
+    runtime = runtime(transport, new TestCapability(), Duration.ofMillis(20));
 
     runtime.start();
     transport.awaitConnections(1);
@@ -388,7 +390,7 @@ class DaemonRuntimeTest {
   void reconnectsAfterConnectionFailure() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     transport.failNextConnection();
-    runtime = runtime(transport, new TestTool());
+    runtime = runtime(transport, new TestCapability());
 
     runtime.start();
     transport.awaitConnections(2);
@@ -401,7 +403,7 @@ class DaemonRuntimeTest {
   @Test
   void reconnectsAfterSendFailureWithoutRestartingInvocation() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -420,11 +422,12 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.executions.get());
   }
 
-  /** 未注册工具必须以 FAILED 终态返回，而不是让协议处理线程失败。 */
+  /** 未注册 capability 必须以 FAILED 终态返回，而不是让协议处理线程失败。 */
   @Test
-  void returnsFailedTerminalForUnknownTool() throws InterruptedException {
+  void returnsFailedTerminalForUnknownCapability() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool());
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, new TestCapability(), journal);
 
     runtime.start();
     transport.awaitConnections(1);
@@ -434,14 +437,16 @@ class DaemonRuntimeTest {
 
     List<DaemonEnvelope> messages = transport.takeMessages(2);
     assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
-    assertTrue(messages.get(1).payloadJson().contains("unknown environment tool"));
+    assertTrue(messages.get(1).payloadJson().contains("unknown Environment capability"));
+    assertEquals(
+        DaemonInvocationState.FAILED, journal.find("unknown-invocation").orElseThrow().state());
   }
 
-  /** workspacePath 是必填 wire 字段：缺失/非文本/未知字段在协议边界拒绝，不触达 Tool SPI。 */
+  /** workspacePath 是必填 wire 字段：缺失/非文本/未知字段在协议边界拒绝，不触达 capability SPI。 */
   @Test
   void rejectsMissingOrUnknownInvokeWorkspaceFieldsBeforeSideEffects() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -450,21 +455,21 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     transport.receiveRaw(
-        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
-            + "\"toolVersion\":\"1.0.0\",\"arguments\":{},\"timeoutMillis\":100}}");
+        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
+            + "\"capabilityVersion\":\"1.0.0\",\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
     transport.receiveRaw(
-        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{\"toolName\":\"test\","
-            + "\"toolVersion\":\"1.0.0\",\"workspacePath\":1,\"arguments\":{},\"timeoutMillis\":100}}");
+        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{\"capabilityId\":\"test\","
+            + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":1,\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
     transport.receiveRaw(
-        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":3,\"payload\":{\"toolName\":\"test\","
-            + "\"toolVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100,"
+        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":3,\"payload\":{\"capabilityId\":\"test\","
+            + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100,"
             + "\"extra\":true}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
     assertEquals(0, tool.executions.get());
@@ -485,7 +490,7 @@ class DaemonRuntimeTest {
       Path escaping = Files.createSymbolicLink(root.resolve("escape"), outside);
 
       FakeTransport transport = new FakeTransport();
-      TestTool tool = new TestTool();
+      TestCapability tool = new TestCapability();
       runtime = runtime(transport, tool, root);
 
       runtime.start();
@@ -498,14 +503,14 @@ class DaemonRuntimeTest {
       List<DaemonEnvelope> started = transport.takeMessages(2);
       assertMessageTypes(started, ACK, STARTED);
       assertEquals(root.toRealPath(), tool.request.workdir());
-      tool.complete(new ToolResult("workspace-root", List.of(), false, "{}"));
+      tool.complete(new EnvironmentCapabilityResult("workspace-root", List.of(), false, "{}"));
       transport.takeMessages(1);
 
       transport.receive(
           invokeWithWorkspace("workspace-nested", 2, "test", "1.0.0", 100, "projects/web"));
       assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
       assertEquals(nested.toRealPath(), tool.request.workdir());
-      tool.complete(new ToolResult("workspace-nested", List.of(), false, "{}"));
+      tool.complete(new EnvironmentCapabilityResult("workspace-nested", List.of(), false, "{}"));
       transport.takeMessages(1);
 
       // 形状非法（非空但非 canonical）在 workspace canonicalize 层收敛为 FAILED。
@@ -566,7 +571,7 @@ class DaemonRuntimeTest {
   @Test
   void rejectsWrongScopeAndMalformedInvocationPayload() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool());
+    runtime = runtime(transport, new TestCapability());
 
     runtime.start();
     transport.awaitConnections(1);
@@ -574,22 +579,33 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3,
+            DaemonProtocol.VERSION_4,
             DaemonMessageType.INVOKE,
             new EnvironmentName("other-environment"),
             "wrong-scope",
             1,
-            "{\"toolName\":\"test\",\"arguments\":{}}"));
+            "{\"capabilityId\":\"test\",\"arguments\":{}}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3,
+            DaemonProtocol.VERSION_4,
             DaemonMessageType.INVOKE,
             ENVIRONMENT_NAME,
             "bad-payload",
             2,
-            "{\"toolName\":\"test\",\"arguments\":[]}"));
+            "{\"capabilityId\":\"test\",\"arguments\":[]}"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_4,
+            DaemonMessageType.INVOKE,
+            ENVIRONMENT_NAME,
+            "invalid-capability-id",
+            3,
+            "{\"capabilityId\":\"TEST\",\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\","
+                + "\"arguments\":{},\"timeoutMillis\":1000}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
   }
 
@@ -597,7 +613,7 @@ class DaemonRuntimeTest {
   @Test
   void rejectsLegacyVersionOneEnvelopes() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -607,18 +623,19 @@ class DaemonRuntimeTest {
     transport.receiveRaw(
         "{\"protocolVersion\":1,\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":1,"
-            + "\"payload\":{\"toolName\":\"test\",\"toolVersion\":\"1.0.0\",\"arguments\":{}}}");
+            + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
+            + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receive(invoke("valid-after-v1", 1));
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
   }
 
-  /** 缺失 invocationId 在 codec 边界失败，不得触达 journal 或 Tool SPI。 */
+  /** 缺失 invocationId 在 codec 边界失败，不得触达 journal 或 capability SPI。 */
   @Test
   void rejectsInvokeWithoutInvocationIdBeforeSideEffects() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -626,13 +643,14 @@ class DaemonRuntimeTest {
     completeHandshake(0);
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
-            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
-            + "\"toolVersion\":\"1.0.0\",\"arguments\":{}}}");
+        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
+            + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},"
+            + "\"timeoutMillis\":1000}}");
 
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     transport.receiveRaw(
-        "{\"protocolVersion\":3,\"messageType\":\"CANCEL\","
+        "{\"protocolVersion\":4,\"messageType\":\"CANCEL\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
@@ -645,7 +663,7 @@ class DaemonRuntimeTest {
   void rejectsOutOfOrderSequenceAndHandlesIdenticalReplayIdempotently()
       throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -671,7 +689,7 @@ class DaemonRuntimeTest {
   @Test
   void rejectsConflictingEnvelopeThatReusesLatestSequence() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -699,7 +717,7 @@ class DaemonRuntimeTest {
   @Test
   void acceptsInboundPlatformProtocolMessagesWithinSequence() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -724,7 +742,7 @@ class DaemonRuntimeTest {
     Files.writeString(envRoot.resolve("README.md"), "x");
     try {
       FakeTransport transport = new FakeTransport();
-      TestTool tool = new TestTool();
+      TestCapability tool = new TestCapability();
       runtime = runtime(transport, tool, envRoot);
 
       runtime.start();
@@ -767,7 +785,7 @@ class DaemonRuntimeTest {
     Files.writeString(envRoot.resolve("file.txt"), "x");
     try {
       FakeTransport transport = new FakeTransport();
-      runtime = runtime(transport, new TestTool(), envRoot);
+      runtime = runtime(transport, new TestCapability(), envRoot);
 
       runtime.start();
       transport.awaitConnections(1);
@@ -823,7 +841,7 @@ class DaemonRuntimeTest {
         });
     try {
       FakeTransport transport = new FakeTransport();
-      TestTool tool = new TestTool();
+      TestCapability tool = new TestCapability();
       runtime = runtime(transport, tool, envRoot, directoryWorker);
 
       runtime.start();
@@ -866,7 +884,7 @@ class DaemonRuntimeTest {
     directoryWorker.shutdownNow();
     try {
       FakeTransport transport = new FakeTransport();
-      runtime = runtime(transport, new TestTool(), envRoot, directoryWorker);
+      runtime = runtime(transport, new TestCapability(), envRoot, directoryWorker);
 
       runtime.start();
       transport.awaitConnections(1);
@@ -887,12 +905,13 @@ class DaemonRuntimeTest {
     }
   }
 
-  /** Cloud 声明的工具版本必须匹配本地 descriptor，避免以错误参数契约启动 Tool。 */
+  /** Cloud 声明的 capability 版本必须匹配本地 descriptor，避免以错误参数契约启动 capability。 */
   @Test
-  void rejectsMismatchedToolVersion() throws InterruptedException {
+  void rejectsMismatchedCapabilityVersion() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
-    runtime = runtime(transport, tool);
+    TestCapability tool = new TestCapability();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
 
     runtime.start();
     transport.awaitConnections(1);
@@ -902,13 +921,15 @@ class DaemonRuntimeTest {
 
     assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.FAILED);
     assertEquals(0, tool.executions.get());
+    assertEquals(
+        DaemonInvocationState.FAILED, journal.find("version-mismatch").orElseThrow().state());
   }
 
-  /** 重复 INVOKE 仅重放 STARTED 或终态，不得再次调用本地 Tool。 */
+  /** 重复 INVOKE 仅重放 STARTED 或终态，不得再次调用本地 capability。 */
   @Test
   void deduplicatesRunningInvocationAndReplaysTerminalAfterReconnect() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -925,11 +946,12 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.executions.get());
 
     tool.complete(
-        new ToolResult("invocation-1", List.of(new TextToolContent("done")), false, "{}"));
+        new EnvironmentCapabilityResult(
+            "invocation-1", List.of(new TextToolContent("done")), false, "{}"));
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
     assertTrue(terminal.get(0).payloadJson().contains("done"));
-    tool.complete(new ToolResult("invocation-1", List.of(), false, "{}"));
+    tool.complete(new EnvironmentCapabilityResult("invocation-1", List.of(), false, "{}"));
     assertFalse(transport.hasMessages());
 
     transport.disconnect();
@@ -941,11 +963,11 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.executions.get());
   }
 
-  /** Runtime 在 deadline 主动 cancel Tool，并阻止 timeout 后的完成回调覆盖 FAILED。 */
+  /** Runtime 在 deadline 主动 cancel capability，并阻止 timeout 后的完成回调覆盖 FAILED。 */
   @Test
   void enforcesTimeoutAndGuardsLateCompletion() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -959,7 +981,7 @@ class DaemonRuntimeTest {
     assertMessageTypes(terminal, DaemonMessageType.FAILED);
     assertTrue(terminal.get(0).payloadJson().contains("timed out"));
     assertEquals(1, tool.handle.cancelCalls.get());
-    tool.complete(new ToolResult("timeout", List.of(), false, "{}"));
+    tool.complete(new EnvironmentCapabilityResult("timeout", List.of(), false, "{}"));
     assertFalse(transport.hasMessages());
   }
 
@@ -983,9 +1005,9 @@ class DaemonRuntimeTest {
     try {
       assertTrue(blockerStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
       FakeTransport transport = new FakeTransport();
-      DaemonToolRegistry registry = new DaemonToolRegistry();
+      DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
       registry.register(
-          new ApplyPatchTool(
+          new ApplyPatchCapability(
               new CodingToolsConfig(root, 2000, 50 * 1024, "bash", new InMemoryResourceStore()),
               taskExecutor));
       runtime =
@@ -1024,7 +1046,7 @@ class DaemonRuntimeTest {
           invokeWithArguments(
               "apply-patch-timeout",
               1,
-              "apply_patch",
+              "fs.apply-patch",
               "1",
               100,
               ".",
@@ -1052,7 +1074,7 @@ class DaemonRuntimeTest {
   @Test
   void omittedTimeoutUsesDescriptorTimeout() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(30));
 
     runtime.start();
@@ -1069,7 +1091,7 @@ class DaemonRuntimeTest {
   @Test
   void omittedTimeoutFallsBackToDaemonDefault() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    DefaultTimeoutTool tool = new DefaultTimeoutTool();
+    DefaultTimeoutCapability tool = new DefaultTimeoutCapability();
     runtime = runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(12));
 
     runtime.start();
@@ -1087,7 +1109,7 @@ class DaemonRuntimeTest {
   void resolvesZeroTimeoutAndCancelsDeadlineAfterCompletionOrCancellation()
       throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -1097,7 +1119,7 @@ class DaemonRuntimeTest {
     transport.receive(invoke("zero-timeout", 1, "test", "1.0.0", 0));
     transport.takeMessages(2);
     assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
-    tool.complete(new ToolResult("zero-timeout", List.of(), false, "{}"));
+    tool.complete(new EnvironmentCapabilityResult("zero-timeout", List.of(), false, "{}"));
     assertMessageTypes(transport.takeMessages(1), COMPLETED);
 
     transport.receive(invoke("cancel-before-timeout", 2, "test", "1.0.0", 30));
@@ -1111,7 +1133,7 @@ class DaemonRuntimeTest {
   @Test
   void fallsBackToDaemonTimeoutWhenRequestAndDescriptorAreZero() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    DefaultTimeoutTool tool = new DefaultTimeoutTool();
+    DefaultTimeoutCapability tool = new DefaultTimeoutCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -1130,7 +1152,7 @@ class DaemonRuntimeTest {
   @Test
   void completionWinsAgainstPendingTimeout() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -1139,7 +1161,8 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(invoke("complete-before-timeout", 1, "test", "1.0.0", 50));
     transport.takeMessages(2);
-    tool.complete(new ToolResult("complete-before-timeout", List.of(), false, "{}"));
+    tool.complete(
+        new EnvironmentCapabilityResult("complete-before-timeout", List.of(), false, "{}"));
 
     assertMessageTypes(transport.takeMessages(1), COMPLETED);
     assertFalse(transport.awaitMessage(Duration.ofMillis(100)));
@@ -1150,7 +1173,7 @@ class DaemonRuntimeTest {
   @Test
   void partialSerializesTextAndJsonButRejectsResourceContents() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     InMemoryResourceStore store = new InMemoryResourceStore();
     ResourceRef stored = store.store(new byte[] {1, 2}, "application/json");
     runtime = runtime(transport, tool, store);
@@ -1162,7 +1185,7 @@ class DaemonRuntimeTest {
     transport.receive(invoke("structured-content", 1));
     transport.takeMessages(2);
     tool.partial(
-        new ToolResult(
+        new EnvironmentCapabilityResult(
             "structured-content",
             List.of(new JsonToolContent("[1,2]"), new TextToolContent("hi")),
             false,
@@ -1180,7 +1203,7 @@ class DaemonRuntimeTest {
     transport.receive(invoke("structured-content-2", 2));
     transport.takeMessages(2);
     tool.partial(
-        new ToolResult(
+        new EnvironmentCapabilityResult(
             "structured-content-2", List.of(new ResourceToolContent(stored)), false, "{}"));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
@@ -1194,7 +1217,7 @@ class DaemonRuntimeTest {
   @Test
   void streamsMultiplePartialsBeforeCompletionOnWire() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
     String invocationId = "streaming-invocation";
 
@@ -1204,11 +1227,14 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(invoke(invocationId, 1));
     tool.partial(
-        new ToolResult(invocationId, List.of(new TextToolContent("partial1")), false, "{}"));
+        new EnvironmentCapabilityResult(
+            invocationId, List.of(new TextToolContent("partial1")), false, "{}"));
     tool.partial(
-        new ToolResult(invocationId, List.of(new TextToolContent("partial2")), false, "{}"));
+        new EnvironmentCapabilityResult(
+            invocationId, List.of(new TextToolContent("partial2")), false, "{}"));
     tool.complete(
-        new ToolResult(invocationId, List.of(new TextToolContent("complete")), false, "{}"));
+        new EnvironmentCapabilityResult(
+            invocationId, List.of(new TextToolContent("complete")), false, "{}"));
 
     List<DaemonEnvelope> messages = transport.takeMessages(5);
     assertMessageTypes(messages, ACK, STARTED, PARTIAL, PARTIAL, COMPLETED);
@@ -1238,7 +1264,7 @@ class DaemonRuntimeTest {
   @Test
   void resourcePayloadIsSelfContainedAndDecodesOnReceiver() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     InMemoryResourceStore store = new InMemoryResourceStore();
     byte[] data = new byte[] {(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE};
     ResourceRef stored = store.store(data, "application/octet-stream");
@@ -1251,7 +1277,8 @@ class DaemonRuntimeTest {
     transport.receive(invoke("resource-rewrite", 1));
     transport.takeMessages(2);
     tool.complete(
-        new ToolResult("resource-rewrite", List.of(new ResourceToolContent(stored)), false, "{}"));
+        new EnvironmentCapabilityResult(
+            "resource-rewrite", List.of(new ResourceToolContent(stored)), false, "{}"));
 
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
@@ -1278,7 +1305,7 @@ class DaemonRuntimeTest {
   @Test
   void storesBinaryToolContentBeforeEncoding() throws Exception {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     InMemoryResourceStore store = new InMemoryResourceStore();
     runtime = runtime(transport, tool, store);
     byte[] data = new byte[] {1, 2, 3};
@@ -1290,7 +1317,7 @@ class DaemonRuntimeTest {
     transport.receive(invoke("binary-content", 1));
     transport.takeMessages(2);
     tool.complete(
-        new ToolResult(
+        new EnvironmentCapabilityResult(
             "binary-content",
             List.of(new BinaryToolContent("application/octet-stream", data)),
             false,
@@ -1317,7 +1344,7 @@ class DaemonRuntimeTest {
   @Test
   void convergesResourceFailuresToFailedTerminal() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     ResourceStore failingStore =
         new ResourceStore() {
           @Override
@@ -1343,21 +1370,23 @@ class DaemonRuntimeTest {
 
     // PARTIAL 失败必须收敛为 FAILED，且不再发出 PARTIAL 或 COMPLETED。
     tool.partial(
-        new ToolResult("resource-fail", List.of(new ResourceToolContent(local)), false, "{}"));
+        new EnvironmentCapabilityResult(
+            "resource-fail", List.of(new ResourceToolContent(local)), false, "{}"));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
 
     // FAILED 之后迟到的 COMPLETED 必须被忽略（由 journal 守卫）。
     tool.complete(
-        new ToolResult("resource-fail", List.of(new ResourceToolContent(local)), false, "{}"));
+        new EnvironmentCapabilityResult(
+            "resource-fail", List.of(new ResourceToolContent(local)), false, "{}"));
     assertFalse(transport.hasMessages());
 
     // 现在一次带 COMPLETED 失败的独立 invocation 也必须收敛为 FAILED。
     transport.receive(invoke("resource-fail-2", 2));
     transport.takeMessages(2);
     tool.complete(
-        new ToolResult(
+        new EnvironmentCapabilityResult(
             "resource-fail-2",
             List.of(
                 new ResourceToolContent(
@@ -1374,7 +1403,7 @@ class DaemonRuntimeTest {
   @Test
   void failsClosedWhenResourceStoreIsAbsent() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool); // no resource store
 
     runtime.start();
@@ -1385,7 +1414,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     tool.complete(
-        new ToolResult(
+        new EnvironmentCapabilityResult(
             "no-source",
             List.of(
                 new ResourceToolContent(
@@ -1410,7 +1439,7 @@ class DaemonRuntimeTest {
   @Test
   void convertsToolErrorsAndMismatchedResultsToFailedTerminal() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -1424,7 +1453,7 @@ class DaemonRuntimeTest {
 
     transport.receive(invoke("wrong-result", 2));
     transport.takeMessages(2);
-    tool.complete(new ToolResult("another-id", List.of(), false, "{}"));
+    tool.complete(new EnvironmentCapabilityResult("another-id", List.of(), false, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.FAILED);
   }
 
@@ -1433,7 +1462,7 @@ class DaemonRuntimeTest {
   void forwardsPartialAndGuardsCancelledInvocationAgainstLateCallbacks()
       throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -1444,7 +1473,8 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     tool.partial(
-        new ToolResult("invocation-2", List.of(new TextToolContent("chunk")), false, "{}"));
+        new EnvironmentCapabilityResult(
+            "invocation-2", List.of(new TextToolContent("chunk")), false, "{}"));
     List<DaemonEnvelope> partial = transport.takeMessages(1);
     assertMessageTypes(partial, PARTIAL);
     assertTrue(partial.get(0).payloadJson().contains("chunk"));
@@ -1454,7 +1484,8 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.handle.cancelCalls.get());
 
     tool.complete(
-        new ToolResult("invocation-2", List.of(new TextToolContent("late")), false, "{}"));
+        new EnvironmentCapabilityResult(
+            "invocation-2", List.of(new TextToolContent("late")), false, "{}"));
     assertFalse(transport.hasMessages());
   }
 
@@ -1473,7 +1504,7 @@ class DaemonRuntimeTest {
       runtime =
           runtime(
               transport,
-              new TestTool(),
+              new TestCapability(),
               skills,
               mcpRegistry,
               Duration.ofMinutes(1),
@@ -1523,7 +1554,8 @@ class DaemonRuntimeTest {
     try {
       FakeTransport transport = new FakeTransport();
       runtime =
-          runtime(transport, new TestTool(), DaemonSkillRegistry.discover(List.of(skillRoot)));
+          runtime(
+              transport, new TestCapability(), DaemonSkillRegistry.discover(List.of(skillRoot)));
       runtime.start();
       transport.awaitConnections(1);
       completeHandshake(0);
@@ -1532,7 +1564,7 @@ class DaemonRuntimeTest {
       DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
       transport.receive(
           new DaemonEnvelope(
-              DaemonProtocol.VERSION_3,
+              DaemonProtocol.VERSION_4,
               DaemonMessageType.LOAD_SKILL,
               ENVIRONMENT_NAME,
               "skill-1",
@@ -1555,7 +1587,7 @@ class DaemonRuntimeTest {
   @Test
   void failsUnknownSkillLoadDeterministically() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool(), DaemonSkillRegistry.empty());
+    runtime = runtime(transport, new TestCapability(), DaemonSkillRegistry.empty());
     runtime.start();
     transport.awaitConnections(1);
     completeHandshake(0);
@@ -1564,7 +1596,7 @@ class DaemonRuntimeTest {
     DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3,
+            DaemonProtocol.VERSION_4,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "skill-missing",
@@ -1585,7 +1617,7 @@ class DaemonRuntimeTest {
     FakeTransport transport = new FakeTransport();
     transport.throwNextConnection();
     transport.returnNullNextConnection();
-    runtime = runtime(transport, new TestTool());
+    runtime = runtime(transport, new TestCapability());
 
     runtime.start();
 
@@ -1600,7 +1632,7 @@ class DaemonRuntimeTest {
   void closesConnectionThatCompletesAfterRuntimeShutdown() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     transport.delayNextConnection();
-    runtime = runtime(transport, new TestTool());
+    runtime = runtime(transport, new TestCapability());
 
     runtime.start();
     transport.awaitConnections(1);
@@ -1616,7 +1648,7 @@ class DaemonRuntimeTest {
   @Test
   void ignoresLateMessageFromSupersededConnection() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -1641,7 +1673,7 @@ class DaemonRuntimeTest {
   @Test
   void doesNotRouteStaleCancelAcknowledgementToReplacementConnection() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool());
+    runtime = runtime(transport, new TestCapability());
 
     runtime.start();
     transport.awaitConnections(1);
@@ -1665,7 +1697,7 @@ class DaemonRuntimeTest {
       throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
-    runtime = runtime(transport, new TestTool(), DaemonSkillRegistry.empty());
+    runtime = runtime(transport, new TestCapability(), DaemonSkillRegistry.empty());
 
     runtime.start();
     transport.awaitConnections(1);
@@ -1679,7 +1711,7 @@ class DaemonRuntimeTest {
     transport.receiveFromConnection(
         0,
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3,
+            DaemonProtocol.VERSION_4,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "stale-skill",
@@ -1687,13 +1719,13 @@ class DaemonRuntimeTest {
             skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
     transport.receiveRawFromConnection(
         0,
-        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{}}");
     assertFalse(transport.hasMessages());
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3,
+            DaemonProtocol.VERSION_4,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "current-skill",
@@ -1708,7 +1740,7 @@ class DaemonRuntimeTest {
     FakeTransport transport = new FakeTransport();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     scheduler.shutdownNow();
-    runtime = runtime(transport, new TestTool(), scheduler);
+    runtime = runtime(transport, new TestCapability(), scheduler);
 
     runtime.start();
 
@@ -1723,7 +1755,7 @@ class DaemonRuntimeTest {
   void remainsStoppedWhenSchedulerRejectsInitialReconnect() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     ScheduledExecutorService scheduler = new ReconnectRejectingScheduler();
-    runtime = runtime(transport, new TestTool(), scheduler);
+    runtime = runtime(transport, new TestCapability(), scheduler);
 
     runtime.start();
 
@@ -1738,7 +1770,7 @@ class DaemonRuntimeTest {
   void isolatesUnexpectedAndMalformedProtocolMessagesFromInvocationExecution()
       throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
@@ -1748,7 +1780,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3, DaemonMessageType.HELLO, ENVIRONMENT_NAME, null, 1, "{}"));
+            DaemonProtocol.VERSION_4, DaemonMessageType.HELLO, ENVIRONMENT_NAME, null, 1, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
     transport.receive(cancel("unknown-cancel", 1));
@@ -1756,7 +1788,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3,
+            DaemonProtocol.VERSION_4,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "invalid-skill-payload",
@@ -1770,7 +1802,7 @@ class DaemonRuntimeTest {
   @Test
   void closeCancelsRunningInvocationAndPreventsRestart() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    TestTool tool = new TestTool();
+    TestCapability tool = new TestCapability();
     InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
     runtime = runtime(transport, tool, journal);
 
@@ -1788,7 +1820,8 @@ class DaemonRuntimeTest {
     assertEquals(
         DaemonInvocationState.CANCELLED, journal.find("shutdown-invocation").orElseThrow().state());
     tool.complete(
-        new ToolResult("shutdown-invocation", List.of(new TextToolContent("late")), false, "{}"));
+        new EnvironmentCapabilityResult(
+            "shutdown-invocation", List.of(new TextToolContent("late")), false, "{}"));
     assertFalse(transport.hasMessages());
 
     runtime.start();
@@ -1799,7 +1832,7 @@ class DaemonRuntimeTest {
   @Test
   void closesUnstartedRuntimeWithoutAllowingLaterStart() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool());
+    runtime = runtime(transport, new TestCapability());
 
     runtime.close();
 
@@ -1813,8 +1846,8 @@ class DaemonRuntimeTest {
   @Test
   void closeTerminatesSchedulerAndSharedTaskExecutorIdempotently() throws Exception {
     FakeTransport transport = new FakeTransport();
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(new TestTool());
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(new TestCapability());
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     ExecutorService taskExecutor = Executors.newVirtualThreadPerTaskExecutor();
     runtime =
@@ -1854,8 +1887,8 @@ class DaemonRuntimeTest {
   void blockingTaskExecutorDoesNotDelayHeartbeatScheduler() throws Exception {
     FakeTransport transport = new FakeTransport();
     handshakeTransport = transport;
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(new TestTool());
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(new TestCapability());
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     ExecutorService taskExecutor = Executors.newSingleThreadExecutor();
     CountDownLatch release = new CountDownLatch(1);
@@ -1918,7 +1951,7 @@ class DaemonRuntimeTest {
     runtime =
         runtime(
             transport,
-            new TestTool(),
+            new TestCapability(),
             DaemonSkillRegistry.empty(),
             mcpRegistry,
             Duration.ofMinutes(1),
@@ -1943,7 +1976,7 @@ class DaemonRuntimeTest {
   @Test
   void closesInvocationThatCompletesToolStartupAfterShutdown() throws Exception {
     FakeTransport transport = new FakeTransport();
-    BlockingTool tool = new BlockingTool();
+    BlockingCapability tool = new BlockingCapability();
     InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
     runtime = runtime(transport, tool, journal);
 
@@ -1970,18 +2003,20 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
-  private DaemonRuntime runtime(FakeTransport transport, Tool tool) {
-    return runtime(transport, tool, Duration.ofMinutes(1));
+  private DaemonRuntime runtime(FakeTransport transport, EnvironmentCapability capability) {
+    return runtime(transport, capability, Duration.ofMinutes(1));
   }
 
-  private DaemonRuntime runtime(FakeTransport transport, Tool tool, Duration heartbeatInterval) {
-    return runtime(transport, tool, heartbeatInterval, Duration.ofSeconds(10));
+  private DaemonRuntime runtime(
+      FakeTransport transport, EnvironmentCapability capability, Duration heartbeatInterval) {
+    return runtime(transport, capability, heartbeatInterval, Duration.ofSeconds(10));
   }
 
-  private DaemonRuntime runtime(FakeTransport transport, Tool tool, String note) {
+  private DaemonRuntime runtime(
+      FakeTransport transport, EnvironmentCapability capability, String note) {
     handshakeTransport = transport;
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(tool);
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(capability);
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
@@ -2004,10 +2039,11 @@ class DaemonRuntimeTest {
         Executors.newVirtualThreadPerTaskExecutor());
   }
 
-  private DaemonRuntime runtime(FakeTransport transport, Tool tool, Path environmentRoot) {
+  private DaemonRuntime runtime(
+      FakeTransport transport, EnvironmentCapability capability, Path environmentRoot) {
     handshakeTransport = transport;
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(tool);
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(capability);
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
@@ -2031,10 +2067,13 @@ class DaemonRuntimeTest {
   }
 
   private DaemonRuntime runtime(
-      FakeTransport transport, Tool tool, Path environmentRoot, ExecutorService directoryWorker) {
+      FakeTransport transport,
+      EnvironmentCapability capability,
+      Path environmentRoot,
+      ExecutorService directoryWorker) {
     handshakeTransport = transport;
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(tool);
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(capability);
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
@@ -2057,15 +2096,19 @@ class DaemonRuntimeTest {
         directoryWorker);
   }
 
-  private DaemonRuntime runtime(FakeTransport transport, Tool tool, ResourceStore resourceStore) {
-    return runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(10), resourceStore);
+  private DaemonRuntime runtime(
+      FakeTransport transport, EnvironmentCapability capability, ResourceStore resourceStore) {
+    return runtime(
+        transport, capability, Duration.ofMinutes(1), Duration.ofSeconds(10), resourceStore);
   }
 
   private DaemonRuntime runtime(
-      FakeTransport transport, Tool tool, InMemoryDaemonInvocationJournal journal) {
+      FakeTransport transport,
+      EnvironmentCapability capability,
+      InMemoryDaemonInvocationJournal journal) {
     handshakeTransport = transport;
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(tool);
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(capability);
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
@@ -2089,10 +2132,12 @@ class DaemonRuntimeTest {
   }
 
   private DaemonRuntime runtime(
-      FakeTransport transport, Tool tool, ScheduledExecutorService scheduler) {
+      FakeTransport transport,
+      EnvironmentCapability capability,
+      ScheduledExecutorService scheduler) {
     handshakeTransport = transport;
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(tool);
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(capability);
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
@@ -2116,19 +2161,22 @@ class DaemonRuntimeTest {
   }
 
   private DaemonRuntime runtime(
-      FakeTransport transport, Tool tool, Duration heartbeatInterval, Duration defaultToolTimeout) {
-    return runtime(transport, tool, heartbeatInterval, defaultToolTimeout, null);
+      FakeTransport transport,
+      EnvironmentCapability capability,
+      Duration heartbeatInterval,
+      Duration defaultToolTimeout) {
+    return runtime(transport, capability, heartbeatInterval, defaultToolTimeout, null);
   }
 
   private DaemonRuntime runtime(
       FakeTransport transport,
-      Tool tool,
+      EnvironmentCapability capability,
       Duration heartbeatInterval,
       Duration defaultToolTimeout,
       ResourceStore resourceStore) {
     return runtime(
         transport,
-        tool,
+        capability,
         DaemonSkillRegistry.empty(),
         heartbeatInterval,
         defaultToolTimeout,
@@ -2136,21 +2184,23 @@ class DaemonRuntimeTest {
   }
 
   private DaemonRuntime runtime(
-      FakeTransport transport, Tool tool, DaemonSkillRegistry skillRegistry) {
+      FakeTransport transport,
+      EnvironmentCapability capability,
+      DaemonSkillRegistry skillRegistry) {
     return runtime(
-        transport, tool, skillRegistry, Duration.ofMinutes(1), Duration.ofSeconds(10), null);
+        transport, capability, skillRegistry, Duration.ofMinutes(1), Duration.ofSeconds(10), null);
   }
 
   private DaemonRuntime runtime(
       FakeTransport transport,
-      Tool tool,
+      EnvironmentCapability capability,
       DaemonSkillRegistry skillRegistry,
       Duration heartbeatInterval,
       Duration defaultToolTimeout,
       ResourceStore resourceStore) {
     return runtime(
         transport,
-        tool,
+        capability,
         skillRegistry,
         McpServerRegistry.empty(),
         heartbeatInterval,
@@ -2160,15 +2210,15 @@ class DaemonRuntimeTest {
 
   private DaemonRuntime runtime(
       FakeTransport transport,
-      Tool tool,
+      EnvironmentCapability capability,
       DaemonSkillRegistry skillRegistry,
       McpServerRegistry mcpRegistry,
       Duration heartbeatInterval,
       Duration defaultToolTimeout,
       ResourceStore resourceStore) {
     handshakeTransport = transport;
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    registry.register(tool);
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(capability);
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
@@ -2286,22 +2336,26 @@ class DaemonRuntimeTest {
     return invoke(invocationId, sequence, "test");
   }
 
-  private DaemonEnvelope invoke(String invocationId, long sequence, String toolName) {
-    return invoke(invocationId, sequence, toolName, "1.0.0", 1000);
+  private DaemonEnvelope invoke(String invocationId, long sequence, String capabilityId) {
+    return invoke(invocationId, sequence, capabilityId, "1.0.0", 1000);
   }
 
   private DaemonEnvelope invoke(
-      String invocationId, long sequence, String toolName, String toolVersion, long timeoutMillis) {
+      String invocationId,
+      long sequence,
+      String capabilityId,
+      String capabilityVersion,
+      long timeoutMillis) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3,
+        DaemonProtocol.VERSION_4,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
         sequence,
-        "{\"toolName\":\""
-            + toolName
-            + "\",\"toolVersion\":\""
-            + toolVersion
+        "{\"capabilityId\":\""
+            + capabilityId
+            + "\",\"capabilityVersion\":\""
+            + capabilityVersion
             + "\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":"
             + timeoutMillis
             + "}");
@@ -2310,20 +2364,20 @@ class DaemonRuntimeTest {
   private DaemonEnvelope invokeWithWorkspace(
       String invocationId,
       long sequence,
-      String toolName,
-      String toolVersion,
+      String capabilityId,
+      String capabilityVersion,
       long timeoutMillis,
       String workspacePath) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3,
+        DaemonProtocol.VERSION_4,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
         sequence,
-        "{\"toolName\":\""
-            + toolName
-            + "\",\"toolVersion\":\""
-            + toolVersion
+        "{\"capabilityId\":\""
+            + capabilityId
+            + "\",\"capabilityVersion\":\""
+            + capabilityVersion
             + "\",\"workspacePath\":\""
             + jsonEscape(workspacePath)
             + "\",\"arguments\":{},\"timeoutMillis\":"
@@ -2334,21 +2388,21 @@ class DaemonRuntimeTest {
   private DaemonEnvelope invokeWithArguments(
       String invocationId,
       long sequence,
-      String toolName,
-      String toolVersion,
+      String capabilityId,
+      String capabilityVersion,
       long timeoutMillis,
       String workspacePath,
       String argumentsJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3,
+        DaemonProtocol.VERSION_4,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
         sequence,
-        "{\"toolName\":\""
-            + toolName
-            + "\",\"toolVersion\":\""
-            + toolVersion
+        "{\"capabilityId\":\""
+            + capabilityId
+            + "\",\"capabilityVersion\":\""
+            + capabilityVersion
             + "\",\"workspacePath\":\""
             + jsonEscape(workspacePath)
             + "\",\"arguments\":"
@@ -2369,18 +2423,18 @@ class DaemonRuntimeTest {
   }
 
   private DaemonEnvelope invokeWithoutTimeout(
-      String invocationId, long sequence, String toolName, String toolVersion) {
+      String invocationId, long sequence, String capabilityId, String capabilityVersion) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3,
+        DaemonProtocol.VERSION_4,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
         sequence,
-        "{\"toolName\":\""
-            + toolName
-            + "\",\"toolVersion\":\""
-            + toolVersion
-            + "\",\"workspacePath\":\".\",\"arguments\":{}}");
+        "{\"capabilityId\":\""
+            + capabilityId
+            + "\",\"capabilityVersion\":\""
+            + capabilityVersion
+            + "\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":0}");
   }
 
   private DaemonEnvelope listDirectory(long sequence, String path) {
@@ -2389,7 +2443,7 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope listDirectory(String requestId, long sequence, String path) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3,
+        DaemonProtocol.VERSION_4,
         DaemonMessageType.LIST_DIRECTORY,
         ENVIRONMENT_NAME,
         null,
@@ -2399,12 +2453,12 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3, messageType, ENVIRONMENT_NAME, null, sequence, "{}");
+        DaemonProtocol.VERSION_4, messageType, ENVIRONMENT_NAME, null, sequence, "{}");
   }
 
   private DaemonEnvelope cancel(String invocationId, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3,
+        DaemonProtocol.VERSION_4,
         DaemonMessageType.CANCEL,
         ENVIRONMENT_NAME,
         invocationId,
@@ -2594,84 +2648,76 @@ class DaemonRuntimeTest {
     }
   }
 
-  private static final class DefaultTimeoutTool implements Tool {
+  private static final class DefaultTimeoutCapability implements EnvironmentCapability {
 
-    private final ToolDescriptor descriptor =
-        new ToolDescriptor(
-            "fallback",
+    private final EnvironmentCapabilityDescriptor descriptor =
+        new EnvironmentCapabilityDescriptor(
+            new EnvironmentCapabilityId("fallback"),
             "1.0.0",
-            ToolType.ENVIRONMENT,
-            "default timeout tool",
-            "fallback",
             new ToolParamsSchema("fallback arguments", Map.of(), Set.of(), false),
-            ToolSideEffect.READ_ONLY,
             Duration.ZERO);
-    private final TestHandle handle = new TestHandle();
-    private volatile ToolExecutionListener listener;
-    private volatile ToolExecutionRequest request;
+    private final TestCapabilityHandle handle = new TestCapabilityHandle();
+    private volatile EnvironmentCapabilityExecutionListener listener;
+    private volatile EnvironmentCapabilityExecutionRequest request;
 
     @Override
-    public ToolDescriptor descriptor() {
+    public EnvironmentCapabilityDescriptor descriptor() {
       return descriptor;
     }
 
     @Override
-    public ToolExecutionHandle execute(
-        ToolExecutionRequest request, ToolExecutionListener listener) {
+    public EnvironmentCapabilityExecutionHandle execute(
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener) {
       this.request = request;
       this.listener = listener;
       return handle;
     }
 
     private void complete() {
-      listener.onComplete(new ToolResult(request.call().id(), List.of(), false, "{}"));
+      listener.onComplete(
+          new EnvironmentCapabilityResult(request.call().id(), List.of(), false, "{}"));
     }
   }
 
-  private static final class TestTool implements Tool {
+  private static final class TestCapability implements EnvironmentCapability {
 
-    private final ToolDescriptor descriptor;
+    private final EnvironmentCapabilityDescriptor descriptor;
     private final AtomicInteger executions = new AtomicInteger();
-    private final TestHandle handle = new TestHandle();
-    private volatile ToolExecutionListener listener;
-    private volatile ToolExecutionRequest request;
+    private final TestCapabilityHandle handle = new TestCapabilityHandle();
+    private volatile EnvironmentCapabilityExecutionListener listener;
+    private volatile EnvironmentCapabilityExecutionRequest request;
 
-    private TestTool() {
+    private TestCapability() {
       this("test", new ToolParamsSchema("test arguments", Map.of(), Set.of(), false));
     }
 
-    private TestTool(String name, ToolParamsSchema schema) {
+    private TestCapability(String name, ToolParamsSchema schema) {
       descriptor =
-          new ToolDescriptor(
-              name,
-              "1.0.0",
-              ToolType.ENVIRONMENT,
-              name + " tool",
-              name,
-              schema,
-              ToolSideEffect.READ_ONLY,
-              Duration.ofSeconds(10));
+          new EnvironmentCapabilityDescriptor(
+              new EnvironmentCapabilityId(name), "1.0.0", schema, Duration.ofSeconds(10));
     }
 
     @Override
-    public ToolDescriptor descriptor() {
+    public EnvironmentCapabilityDescriptor descriptor() {
       return descriptor;
     }
 
     @Override
-    public ToolExecutionHandle execute(
-        ToolExecutionRequest request, ToolExecutionListener listener) {
+    public EnvironmentCapabilityExecutionHandle execute(
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener) {
       executions.incrementAndGet();
       this.request = request;
       this.listener = listener;
       return handle;
     }
 
-    private void partial(ToolResult result) {
+    private void partial(EnvironmentCapabilityResult result) {
       listener.onPartial(result);
     }
 
-    private void complete(ToolResult result) {
+    private void complete(EnvironmentCapabilityResult result) {
       listener.onComplete(result);
     }
 
@@ -2680,30 +2726,27 @@ class DaemonRuntimeTest {
     }
   }
 
-  private static final class BlockingTool implements Tool {
+  private static final class BlockingCapability implements EnvironmentCapability {
 
-    private final ToolDescriptor descriptor =
-        new ToolDescriptor(
-            "blocking",
+    private final EnvironmentCapabilityDescriptor descriptor =
+        new EnvironmentCapabilityDescriptor(
+            new EnvironmentCapabilityId("blocking"),
             "1.0.0",
-            ToolType.ENVIRONMENT,
-            "blocking tool",
-            "blocking",
             new ToolParamsSchema("blocking arguments", Map.of(), Set.of(), false),
-            ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(10));
     private final CountDownLatch executionStarted = new CountDownLatch(1);
     private final CountDownLatch allowReturn = new CountDownLatch(1);
-    private final TestHandle handle = new TestHandle();
+    private final TestCapabilityHandle handle = new TestCapabilityHandle();
 
     @Override
-    public ToolDescriptor descriptor() {
+    public EnvironmentCapabilityDescriptor descriptor() {
       return descriptor;
     }
 
     @Override
-    public ToolExecutionHandle execute(
-        ToolExecutionRequest request, ToolExecutionListener listener) {
+    public EnvironmentCapabilityExecutionHandle execute(
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener) {
       executionStarted.countDown();
       try {
         if (!allowReturn.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -2729,7 +2772,7 @@ class DaemonRuntimeTest {
     }
   }
 
-  private static final class TestHandle implements ToolExecutionHandle {
+  private static final class TestCapabilityHandle implements EnvironmentCapabilityExecutionHandle {
 
     private final AtomicInteger cancelCalls = new AtomicInteger();
 

@@ -11,16 +11,17 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.daemon.DaemonToolRegistry;
+import fun.fengwk.kkstudio.harness.daemon.DaemonCapabilityRegistry;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -34,7 +35,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-class CodingToolsTest {
+class CodingCapabilitiesTest {
 
   @TempDir Path environmentRoot;
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -49,23 +50,23 @@ class CodingToolsTest {
   @Test
   void registersEnvironmentDescriptorsAndRejectsMalformedArguments() {
     CodingToolsConfig config = config();
-    DaemonToolRegistry registry = new DaemonToolRegistry();
-    CodingTools.registerAll(registry, config, executor, scheduler);
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    CodingCapabilities.registerAll(registry, config, executor, scheduler);
 
     assertEquals(
         List.of(
-            "read",
-            "write",
-            "edit",
-            "apply_patch",
-            "bash",
-            "grep",
-            "find",
-            "lsp_goto_definition",
-            "lsp_workspace_symbols",
-            "lsp_java_decompile"),
-        registry.descriptors().stream().map(d -> d.name()).toList());
-    Tool read = registry.find("read").orElseThrow();
+            "fs.read",
+            "fs.write",
+            "fs.apply-edit",
+            "fs.apply-patch",
+            "process.exec",
+            "fs.search",
+            "fs.find",
+            "lsp.goto-definition",
+            "lsp.workspace-symbols",
+            "lsp.java-decompile"),
+        registry.descriptors().stream().map(d -> d.id().value()).toList());
+    EnvironmentCapability read = registry.find(EnvironmentCapabilityIds.FS_READ).orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> request(read, "{\"path\":1}"));
     assertThrows(
         IllegalArgumentException.class, () -> request(read, "{\"path\":\"x\",\"unknown\":true}"));
@@ -76,12 +77,13 @@ class CodingToolsTest {
     Path outside = Files.createTempDirectory("coding-outside");
     Files.writeString(outside.resolve("secret.txt"), "secret");
     Files.createSymbolicLink(environmentRoot.resolve("escape"), outside);
-    ReadTool read = read(config());
-    WriteTool write = write(config());
+    ReadCapability read = read(config());
+    WriteCapability write = write(config());
 
-    ToolResult traversal = invoke(read, "{\"path\":\"../secret.txt\"}");
-    ToolResult symlink = invoke(read, "{\"path\":\"escape/secret.txt\"}");
-    ToolResult unsafeWrite = invoke(write, "{\"path\":\"escape/new.txt\",\"content\":\"x\"}");
+    EnvironmentCapabilityResult traversal = invoke(read, "{\"path\":\"../secret.txt\"}");
+    EnvironmentCapabilityResult symlink = invoke(read, "{\"path\":\"escape/secret.txt\"}");
+    EnvironmentCapabilityResult unsafeWrite =
+        invoke(write, "{\"path\":\"escape/new.txt\",\"content\":\"x\"}");
 
     assertTrue(text(traversal).contains("escapes environment root"));
     assertTrue(text(symlink).contains("outside environment root"));
@@ -94,11 +96,11 @@ class CodingToolsTest {
     Path file = environmentRoot.resolve("sample.txt");
     Files.write(
         file, new byte[] {(byte) 0xef, (byte) 0xbb, (byte) 0xbf, 'a', '\r', '\n', 'a', '\r', '\n'});
-    EditTool edit = edit(config());
+    EditCapability edit = edit(config());
 
-    ToolResult duplicate =
+    EnvironmentCapabilityResult duplicate =
         invoke(edit, "{\"path\":\"sample.txt\",\"old_string\":\"a\\n\",\"new_string\":\"b\\n\"}");
-    ToolResult replaced =
+    EnvironmentCapabilityResult replaced =
         invoke(
             edit,
             "{\"path\":\"sample.txt\",\"old_string\":\"a\\n"
@@ -119,8 +121,8 @@ class CodingToolsTest {
         new CodingToolsConfig(
             environmentRoot, 2000, 50 * 1024, "bash", new InMemoryResourceStore(), "echo", "javap");
 
-    ToolResult disabled = invoke(read(config()), "{\"path\":\"lsp-status.txt\"}");
-    ToolResult enabled = invoke(read(bridged), "{\"path\":\"lsp-status.txt\"}");
+    EnvironmentCapabilityResult disabled = invoke(read(config()), "{\"path\":\"lsp-status.txt\"}");
+    EnvironmentCapabilityResult enabled = invoke(read(bridged), "{\"path\":\"lsp-status.txt\"}");
 
     assertTrue(text(disabled).contains("lsp: unsupported"));
     assertTrue(text(enabled).contains("lsp: supported"));
@@ -132,15 +134,15 @@ class CodingToolsTest {
     Files.writeString(overlap, "aaa\n");
     Path replaced = environmentRoot.resolve("replace-all.txt");
     Files.writeString(replaced, "abab\n");
-    EditTool edit = edit(config());
+    EditCapability edit = edit(config());
 
-    ToolResult overlapping =
+    EnvironmentCapabilityResult overlapping =
         invoke(edit, "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\"}");
-    ToolResult overlappingAll =
+    EnvironmentCapabilityResult overlappingAll =
         invoke(
             edit,
             "{\"path\":\"overlap.txt\",\"old_string\":\"aa\",\"new_string\":\"b\",\"replace_all\":true}");
-    ToolResult replacedResult =
+    EnvironmentCapabilityResult replacedResult =
         invoke(
             edit,
             "{\"path\":\"replace-all.txt\",\"old_string\":\"ab\",\"new_string\":\"x\",\"replace_all\":true}");
@@ -160,13 +162,13 @@ class CodingToolsTest {
     byte[] originalLf = "alpha\n".getBytes(StandardCharsets.UTF_8);
     Files.write(crlf, originalCrlf);
     Files.write(lf, originalLf);
-    EditTool edit = edit(config());
+    EditCapability edit = edit(config());
 
-    ToolResult crlfSpelled =
+    EnvironmentCapabilityResult crlfSpelled =
         invoke(
             edit,
             "{\"path\":\"crlf-noop.txt\",\"old_string\":\"alpha\\r\\n\",\"new_string\":\"alpha\\n\"}");
-    ToolResult lfSpelled =
+    EnvironmentCapabilityResult lfSpelled =
         invoke(
             edit,
             "{\"path\":\"lf-noop.txt\",\"old_string\":\"alpha\\n\",\"new_string\":\"alpha\\r\\n\"}");
@@ -188,13 +190,13 @@ class CodingToolsTest {
     Path mixed = environmentRoot.resolve("mixed.txt");
     byte[] originalMixed = "alpha\r\nbeta\rgamma".getBytes(StandardCharsets.UTF_8);
     Files.write(mixed, originalMixed);
-    EditTool edit = edit(config());
+    EditCapability edit = edit(config());
 
-    ToolResult crResult =
+    EnvironmentCapabilityResult crResult =
         invoke(
             edit,
             "{\"path\":\"cr-only.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\"}");
-    ToolResult mixedResult =
+    EnvironmentCapabilityResult mixedResult =
         invoke(
             edit,
             "{\"path\":\"mixed.txt\",\"old_string\":\"alpha\\nbeta\",\"new_string\":\"left\\nright\"}");
@@ -202,7 +204,7 @@ class CodingToolsTest {
     // mixed 文件中被替换段内部无行尾（歧义）时，新增换行回退 LF，未修改区域仍原样保留。
     Path ambiguous = environmentRoot.resolve("mixed-ambiguous.txt");
     Files.write(ambiguous, "head\r\nmiddle\rtail".getBytes(StandardCharsets.UTF_8));
-    ToolResult ambiguousResult =
+    EnvironmentCapabilityResult ambiguousResult =
         invoke(
             edit,
             "{\"path\":\"mixed-ambiguous.txt\",\"old_string\":\"middle\",\"new_string\":\"left\\nright\"}");
@@ -225,12 +227,12 @@ class CodingToolsTest {
     Files.write(environmentRoot.resolve("binary.bin"), new byte[] {1, 0, 2});
     Files.createDirectory(environmentRoot.resolve("directory"));
     Files.writeString(environmentRoot.resolve("directory/a.txt"), "a");
-    ReadTool read = read(config());
-    ReadTool constrainedRead = read(config(1, 16));
+    ReadCapability read = read(config());
+    ReadCapability constrainedRead = read(config(1, 16));
 
-    ToolResult window = invoke(read, "{\"path\":\"many.txt\",\"limit\":1}");
-    ToolResult directory = invoke(read, "{\"path\":\"directory\"}");
-    ToolResult binary = invoke(constrainedRead, "{\"path\":\"binary.bin\"}");
+    EnvironmentCapabilityResult window = invoke(read, "{\"path\":\"many.txt\",\"limit\":1}");
+    EnvironmentCapabilityResult directory = invoke(read, "{\"path\":\"directory\"}");
+    EnvironmentCapabilityResult binary = invoke(constrainedRead, "{\"path\":\"binary.bin\"}");
 
     assertTrue(text(window).contains("Showing lines 1-1 of 3"));
     assertTrue(directory.contents().stream().anyMatch(content -> text(content).contains("a.txt")));
@@ -239,7 +241,7 @@ class CodingToolsTest {
 
   @Test
   void serializesConcurrentMutationsOfTheSameFile() throws Exception {
-    WriteTool write = write(config());
+    WriteCapability write = write(config());
 
     RecordingListener first =
         invokeAsync(write, "{\"path\":\"shared.txt\",\"content\":\"first\"}", Duration.ZERO);
@@ -259,11 +261,13 @@ class CodingToolsTest {
     Files.writeString(environmentRoot.resolve("visible.txt"), "needle\nneedle\n");
     Files.writeString(environmentRoot.resolve(".gitignore"), "ignored.txt\n");
     Files.writeString(environmentRoot.resolve("ignored.txt"), "needle\n");
-    GrepTool grep = grep(config());
-    FindTool find = find(config());
+    GrepCapability grep = grep(config());
+    FindCapability find = find(config());
 
-    ToolResult grepResult = invoke(grep, "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":1}");
-    ToolResult findResult = invoke(find, "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10}");
+    EnvironmentCapabilityResult grepResult =
+        invoke(grep, "{\"pattern\":\"needle\",\"path\":\".\",\"limit\":1}");
+    EnvironmentCapabilityResult findResult =
+        invoke(find, "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":10}");
 
     assertTrue(text(grepResult).contains("results limit reached"));
     assertTrue(text(findResult).contains("visible.txt"));
@@ -272,7 +276,7 @@ class CodingToolsTest {
 
   @Test
   void bashStreamsAndReportsTimeoutAndIdempotentCancellation() throws Exception {
-    BashTool bash = bash(config());
+    BashCapability bash = bash(config());
     RecordingListener streaming =
         invokeAsync(
             bash,
@@ -306,31 +310,32 @@ class CodingToolsTest {
 
   @Test
   void bashTimeoutParameterDefaultsAndNeverExceedsInvocationDeadline() throws Exception {
-    var missing = AbstractCodingTool.OBJECT_MAPPER.readTree("{\"command\":\"true\"}");
+    var missing = AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"command\":\"true\"}");
     var explicit =
-        AbstractCodingTool.OBJECT_MAPPER.readTree("{\"command\":\"true\",\"timeout_seconds\":7}");
-    assertEquals(120, BashTool.requestedTimeoutSeconds(missing));
-    assertEquals(7, BashTool.requestedTimeoutSeconds(explicit));
+        AbstractCodingCapability.OBJECT_MAPPER.readTree(
+            "{\"command\":\"true\",\"timeout_seconds\":7}");
+    assertEquals(120, BashCapability.requestedTimeoutSeconds(missing));
+    assertEquals(7, BashCapability.requestedTimeoutSeconds(explicit));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            BashTool.requestedTimeoutSeconds(
-                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":0}")));
+            BashCapability.requestedTimeoutSeconds(
+                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":0}")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            BashTool.requestedTimeoutSeconds(
-                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":3601}")));
+            BashCapability.requestedTimeoutSeconds(
+                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":3601}")));
 
     assertEquals(
         Duration.ofSeconds(120),
-        BashTool.effectiveProcessTimeout(Duration.ofHours(1), Duration.ofSeconds(120)));
+        BashCapability.effectiveProcessTimeout(Duration.ofHours(1), Duration.ofSeconds(120)));
     assertEquals(
         Duration.ofSeconds(2),
-        BashTool.effectiveProcessTimeout(Duration.ofSeconds(2), Duration.ofSeconds(120)));
+        BashCapability.effectiveProcessTimeout(Duration.ofSeconds(2), Duration.ofSeconds(120)));
     assertEquals(
         Duration.ofSeconds(7),
-        BashTool.effectiveProcessTimeout(Duration.ofSeconds(30), Duration.ofSeconds(7)));
+        BashCapability.effectiveProcessTimeout(Duration.ofSeconds(30), Duration.ofSeconds(7)));
 
     // 显式的短 timeout 必须在外部 request deadline 到来之前终止命令。
     RecordingListener timed =
@@ -345,72 +350,75 @@ class CodingToolsTest {
   /** grep 保持 15 秒默认值；find 只受调用 deadline 或显式 timeout 约束。 */
   @Test
   void searchTimeoutsMatchPiDefaultsAndRespectInvocationDeadlines() throws Exception {
-    var absent = AbstractCodingTool.OBJECT_MAPPER.readTree("{}");
-    var explicit = AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":7}");
+    var absent = AbstractCodingCapability.OBJECT_MAPPER.readTree("{}");
+    var explicit = AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":7}");
 
     assertEquals(Duration.ofHours(1), grep(config()).descriptor().timeout());
     assertEquals(Duration.ofHours(1), find(config()).descriptor().timeout());
-    assertEquals(15, GrepTool.requestedTimeoutSeconds(absent));
-    assertEquals(7, GrepTool.requestedTimeoutSeconds(explicit));
+    assertEquals(15, GrepCapability.requestedTimeoutSeconds(absent));
+    assertEquals(7, GrepCapability.requestedTimeoutSeconds(explicit));
     assertEquals(
         Duration.ofSeconds(15),
-        GrepTool.effectiveSearchTimeout(
-            Duration.ofHours(1), GrepTool.requestedTimeoutSeconds(absent)));
+        GrepCapability.effectiveSearchTimeout(
+            Duration.ofHours(1), GrepCapability.requestedTimeoutSeconds(absent)));
     assertEquals(
         Duration.ofSeconds(2),
-        GrepTool.effectiveSearchTimeout(
-            Duration.ofSeconds(2), GrepTool.requestedTimeoutSeconds(absent)));
+        GrepCapability.effectiveSearchTimeout(
+            Duration.ofSeconds(2), GrepCapability.requestedTimeoutSeconds(absent)));
     assertEquals(
         Duration.ofSeconds(7),
-        GrepTool.effectiveSearchTimeout(
-            Duration.ofSeconds(30), GrepTool.requestedTimeoutSeconds(explicit)));
+        GrepCapability.effectiveSearchTimeout(
+            Duration.ofSeconds(30), GrepCapability.requestedTimeoutSeconds(explicit)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            GrepTool.requestedTimeoutSeconds(
-                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":3601}")));
+            GrepCapability.requestedTimeoutSeconds(
+                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":3601}")));
 
-    assertEquals(Duration.ofHours(1), FindTool.effectiveSearchTimeout(Duration.ZERO, absent));
+    assertEquals(Duration.ofHours(1), FindCapability.effectiveSearchTimeout(Duration.ZERO, absent));
     assertEquals(
-        Duration.ofMinutes(2), FindTool.effectiveSearchTimeout(Duration.ofMinutes(2), absent));
+        Duration.ofMinutes(2),
+        FindCapability.effectiveSearchTimeout(Duration.ofMinutes(2), absent));
     assertEquals(
-        Duration.ofSeconds(7), FindTool.effectiveSearchTimeout(Duration.ofMinutes(2), explicit));
+        Duration.ofSeconds(7),
+        FindCapability.effectiveSearchTimeout(Duration.ofMinutes(2), explicit));
     assertEquals(
-        Duration.ofSeconds(2), FindTool.effectiveSearchTimeout(Duration.ofSeconds(2), explicit));
+        Duration.ofSeconds(2),
+        FindCapability.effectiveSearchTimeout(Duration.ofSeconds(2), explicit));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            FindTool.effectiveSearchTimeout(
+            FindCapability.effectiveSearchTimeout(
                 Duration.ofMinutes(2),
-                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":0}")));
+                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":0}")));
   }
 
   private CodingToolsConfig config() {
     return config(2000, 50 * 1024);
   }
 
-  private ReadTool read(CodingToolsConfig config) {
-    return new ReadTool(config, executor);
+  private ReadCapability read(CodingToolsConfig config) {
+    return new ReadCapability(config, executor);
   }
 
-  private WriteTool write(CodingToolsConfig config) {
-    return new WriteTool(config, executor);
+  private WriteCapability write(CodingToolsConfig config) {
+    return new WriteCapability(config, executor);
   }
 
-  private EditTool edit(CodingToolsConfig config) {
-    return new EditTool(config, executor);
+  private EditCapability edit(CodingToolsConfig config) {
+    return new EditCapability(config, executor);
   }
 
-  private GrepTool grep(CodingToolsConfig config) {
-    return new GrepTool(config, executor);
+  private GrepCapability grep(CodingToolsConfig config) {
+    return new GrepCapability(config, executor);
   }
 
-  private FindTool find(CodingToolsConfig config) {
-    return new FindTool(config, executor);
+  private FindCapability find(CodingToolsConfig config) {
+    return new FindCapability(config, executor);
   }
 
-  private BashTool bash(CodingToolsConfig config) {
-    return new BashTool(config, executor, scheduler);
+  private BashCapability bash(CodingToolsConfig config) {
+    return new BashCapability(config, executor, scheduler);
   }
 
   private CodingToolsConfig config(int lines, int bytes) {
@@ -418,57 +426,58 @@ class CodingToolsTest {
         environmentRoot, lines, bytes, "bash", new InMemoryResourceStore());
   }
 
-  private ToolExecutionRequest request(Tool tool, String arguments) {
-    return new ToolExecutionRequest(
-        tool.descriptor(),
-        new ToolCall("call", tool.descriptor().name(), arguments),
+  private EnvironmentCapabilityExecutionRequest request(
+      EnvironmentCapability capability, String arguments) {
+    return new EnvironmentCapabilityExecutionRequest(
+        capability.descriptor(),
+        new EnvironmentCapabilityCall("call", arguments),
         Duration.ZERO,
-        null,
         environmentRoot);
   }
 
-  private ToolResult invoke(Tool tool, String arguments) throws Exception {
-    RecordingListener listener = invokeAsync(tool, arguments, Duration.ZERO);
+  private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)
+      throws Exception {
+    RecordingListener listener = invokeAsync(capability, arguments, Duration.ZERO);
     assertTrue(listener.await());
     assertNotNull(listener.result);
     return listener.result;
   }
 
-  private RecordingListener invokeAsync(Tool tool, String arguments, Duration timeout) {
+  private RecordingListener invokeAsync(
+      EnvironmentCapability capability, String arguments, Duration timeout) {
     RecordingListener listener = new RecordingListener();
     listener.handle =
-        tool.execute(
-            new ToolExecutionRequest(
-                tool.descriptor(),
-                new ToolCall("call", tool.descriptor().name(), arguments),
+        capability.execute(
+            new EnvironmentCapabilityExecutionRequest(
+                capability.descriptor(),
+                new EnvironmentCapabilityCall("call", arguments),
                 timeout,
-                null,
                 environmentRoot),
             listener);
     return listener;
   }
 
-  private static String text(ToolResult result) {
-    return result.contents().stream().map(CodingToolsTest::text).reduce("", String::concat);
+  private static String text(EnvironmentCapabilityResult result) {
+    return result.contents().stream().map(CodingCapabilitiesTest::text).reduce("", String::concat);
   }
 
   private static String text(ToolContent content) {
     return content instanceof TextToolContent text ? text.text() : "";
   }
 
-  private static final class RecordingListener implements ToolExecutionListener {
+  private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
     private final CountDownLatch completed = new CountDownLatch(1);
-    private final List<ToolResult> partials = new ArrayList<>();
-    private volatile ToolResult result;
-    private volatile ToolExecutionHandle handle;
+    private final List<EnvironmentCapabilityResult> partials = new ArrayList<>();
+    private volatile EnvironmentCapabilityResult result;
+    private volatile EnvironmentCapabilityExecutionHandle handle;
 
     @Override
-    public void onPartial(ToolResult partial) {
+    public void onPartial(EnvironmentCapabilityResult partial) {
       partials.add(partial);
     }
 
     @Override
-    public void onComplete(ToolResult result) {
+    public void onComplete(EnvironmentCapabilityResult result) {
       this.result = result;
       completed.countDown();
     }

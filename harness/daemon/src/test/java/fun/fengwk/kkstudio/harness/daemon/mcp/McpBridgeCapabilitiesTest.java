@@ -10,15 +10,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -32,7 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 固定 MCP 桥接工具：list/call/错误/取消的确定性行为。 */
-class McpBridgeToolsTest {
+class McpBridgeCapabilitiesTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -44,12 +45,12 @@ class McpBridgeToolsTest {
 
   @Test
   void listToolsReportsAllServerStatusesAndReadySchemas() throws Exception {
-    ToolExecutionRequest request = request("mcp_list_tools", "{}");
+    EnvironmentCapabilityExecutionRequest request = request("mcp.list", "{}");
     FakeClient client = new FakeClient("fs");
-    McpListToolsTool tool = new McpListToolsTool(registry(client), executor);
+    McpListCapability capability = new McpListCapability(registry(client), executor);
     client.tools = List.of(new McpToolSpec("late_tool", "Late tool", "{\"name\":\"late_tool\"}"));
 
-    ToolResult result = new RecordingListener().execute(tool, request);
+    EnvironmentCapabilityResult result = new RecordingListener().execute(capability, request);
 
     assertFalse(result.error());
     JsonNode root = MAPPER.readTree(((JsonToolContent) result.contents().get(0)).json());
@@ -71,10 +72,10 @@ class McpBridgeToolsTest {
 
   @Test
   void listToolsFiltersByExactServerAndFailsUnknown() throws Exception {
-    McpListToolsTool tool = new McpListToolsTool(registry(new FakeClient("fs")), executor);
+    McpListCapability capability = new McpListCapability(registry(new FakeClient("fs")), executor);
 
-    ToolResult requested =
-        new RecordingListener().execute(tool, request("mcp_list_tools", "{\"server\":\"fs\"}"));
+    EnvironmentCapabilityResult requested =
+        new RecordingListener().execute(capability, request("mcp.list", "{\"server\":\"fs\"}"));
     assertFalse(requested.error());
     assertEquals(
         1,
@@ -83,9 +84,9 @@ class McpBridgeToolsTest {
             .path("servers")
             .size());
 
-    ToolResult unknown =
+    EnvironmentCapabilityResult unknown =
         new RecordingListener()
-            .execute(tool, request("mcp_list_tools", "{\"server\":\"missing\"}"));
+            .execute(capability, request("mcp.list", "{\"server\":\"missing\"}"));
     assertTrue(unknown.error());
     assertTrue(((TextToolContent) unknown.contents().get(0)).text().contains("unknown MCP server"));
   }
@@ -94,9 +95,10 @@ class McpBridgeToolsTest {
   void listToolsDoesNotExposeFrozenSchemaRenderingFailures() throws Exception {
     FakeClient client = new FakeClient("fs");
     client.tools = List.of(new McpToolSpec("read_file", "Read a file", "credential=secret-value"));
-    McpListToolsTool tool = new McpListToolsTool(registry(client), executor);
+    McpListCapability capability = new McpListCapability(registry(client), executor);
 
-    ToolResult result = new RecordingListener().execute(tool, request("mcp_list_tools", "{}"));
+    EnvironmentCapabilityResult result =
+        new RecordingListener().execute(capability, request("mcp.list", "{}"));
 
     assertTrue(result.error());
     assertEquals(
@@ -111,24 +113,23 @@ class McpBridgeToolsTest {
     FakeClient client = new FakeClient("fs");
     client.outcomes.put("echo", new McpCallOutcome(false, "plain text"));
     client.outcomes.put("sum", new McpCallOutcome(false, "{\"total\":3}"));
-    McpCallToolTool tool = new McpCallToolTool(registry(client), executor);
+    McpCallCapability capability = new McpCallCapability(registry(client), executor);
 
-    ToolResult textResult =
+    EnvironmentCapabilityResult textResult =
         new RecordingListener()
             .execute(
-                tool,
+                capability,
                 request(
-                    "mcp_call_tool",
-                    "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{\"x\":1}}"));
+                    "mcp.call", "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{\"x\":1}}"));
     assertFalse(textResult.error());
     assertEquals("plain text", ((TextToolContent) textResult.contents().get(0)).text());
 
-    ToolResult jsonResult =
+    EnvironmentCapabilityResult jsonResult =
         new RecordingListener()
             .execute(
-                tool,
+                capability,
                 request(
-                    "mcp_call_tool",
+                    "mcp.call",
                     "{\"server\":\"fs\",\"tool\":\"sum\",\"arguments\":{\"a\":1,\"b\":2}}"));
     assertFalse(jsonResult.error());
     assertEquals("{\"total\":3}", ((JsonToolContent) jsonResult.contents().get(0)).json());
@@ -139,13 +140,13 @@ class McpBridgeToolsTest {
   void callToolPreservesUpstreamIsError() throws Exception {
     FakeClient client = new FakeClient("fs");
     client.outcomes.put("boom", new McpCallOutcome(true, "upstream failure text"));
-    McpCallToolTool tool = new McpCallToolTool(registry(client), executor);
+    McpCallCapability capability = new McpCallCapability(registry(client), executor);
 
-    ToolResult result =
+    EnvironmentCapabilityResult result =
         new RecordingListener()
             .execute(
-                tool,
-                request("mcp_call_tool", "{\"server\":\"fs\",\"tool\":\"boom\",\"arguments\":{}}"));
+                capability,
+                request("mcp.call", "{\"server\":\"fs\",\"tool\":\"boom\",\"arguments\":{}}"));
     assertTrue(result.error());
     assertTrue(
         ((TextToolContent) result.contents().get(0)).text().contains("upstream failure text"));
@@ -154,14 +155,13 @@ class McpBridgeToolsTest {
   @Test
   void callToolFailsDeterministicallyForUnknownServerAndTool() throws Exception {
     FakeClient client = new FakeClient("fs");
-    McpCallToolTool tool = new McpCallToolTool(registry(client), executor);
+    McpCallCapability capability = new McpCallCapability(registry(client), executor);
 
-    ToolResult unknownServer =
+    EnvironmentCapabilityResult unknownServer =
         new RecordingListener()
             .execute(
-                tool,
-                request(
-                    "mcp_call_tool", "{\"server\":\"missing\",\"tool\":\"t\",\"arguments\":{}}"));
+                capability,
+                request("mcp.call", "{\"server\":\"missing\",\"tool\":\"t\",\"arguments\":{}}"));
     assertTrue(unknownServer.error());
     assertTrue(
         ((TextToolContent) unknownServer.contents().get(0))
@@ -169,11 +169,11 @@ class McpBridgeToolsTest {
             .contains("MCP server is unknown or not ready"));
 
     // 未知工具是本地精确校验的确定性错误：client.call 绝不触达。
-    ToolResult unknownTool =
+    EnvironmentCapabilityResult unknownTool =
         new RecordingListener()
             .execute(
-                tool,
-                request("mcp_call_tool", "{\"server\":\"fs\",\"tool\":\"nope\",\"arguments\":{}}"));
+                capability,
+                request("mcp.call", "{\"server\":\"fs\",\"tool\":\"nope\",\"arguments\":{}}"));
     assertTrue(unknownTool.error());
     assertTrue(
         ((TextToolContent) unknownTool.contents().get(0)).text().contains("unknown MCP tool"));
@@ -181,13 +181,11 @@ class McpBridgeToolsTest {
 
     // READY 冻结列表中的工具仍正常调用。
     client.outcomes.put("read_file", new McpCallOutcome(false, "ok"));
-    ToolResult known =
+    EnvironmentCapabilityResult known =
         new RecordingListener()
             .execute(
-                tool,
-                request(
-                    "mcp_call_tool",
-                    "{\"server\":\"fs\",\"tool\":\"read_file\",\"arguments\":{}}"));
+                capability,
+                request("mcp.call", "{\"server\":\"fs\",\"tool\":\"read_file\",\"arguments\":{}}"));
     assertFalse(known.error());
     assertEquals(1, client.calls.get());
   }
@@ -197,21 +195,19 @@ class McpBridgeToolsTest {
     // arguments 必须是真实 JSON 对象；非对象在 ToolExecutionRequest 构造边界被拒绝。
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            request(
-                "mcp_call_tool", "{\"server\":\"fs\",\"tool\":\"t\",\"arguments\":\"string\"}"));
+        () -> request("mcp.call", "{\"server\":\"fs\",\"tool\":\"t\",\"arguments\":\"string\"}"));
   }
 
   @Test
   void cancelProducesExactlyOneTerminalCallback() throws Exception {
-    McpCallToolTool tool = new McpCallToolTool(registry(new FakeClient("fs")), executor);
-    ToolExecutionRequest request =
-        request("mcp_call_tool", "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{}}");
+    McpCallCapability capability = new McpCallCapability(registry(new FakeClient("fs")), executor);
+    EnvironmentCapabilityExecutionRequest request =
+        request("mcp.call", "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{}}");
     RecordingListener listener = new RecordingListener();
-    ToolExecutionHandle handle = tool.execute(request, listener);
+    EnvironmentCapabilityExecutionHandle handle = capability.execute(request, listener);
     handle.cancel();
     handle.cancel();
-    ToolResult result = listener.awaitComplete();
+    EnvironmentCapabilityResult result = listener.awaitComplete();
     assertTrue(result.error());
     assertTrue(((TextToolContent) result.contents().get(0)).text().contains("Operation cancelled"));
     assertEquals(1, listener.terminalCount.get());
@@ -221,26 +217,28 @@ class McpBridgeToolsTest {
   @Test
   void abstractBridgeExecutionUsesInjectedExecutorAndInterruptsOnCancel() throws Exception {
     CountDownLatch started = new CountDownLatch(1);
-    AbstractMcpBridgeTool blocking =
-        new AbstractMcpBridgeTool(
+    AbstractMcpBridgeCapability blocking =
+        new AbstractMcpBridgeCapability(
             registry(new FakeClient("fs")),
             executor,
-            EnvironmentToolCatalog.require("mcp_list_tools")) {
+            EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.MCP_LIST)) {
           @Override
-          ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+          EnvironmentCapabilityResult run(
+              EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
             started.countDown();
             new CountDownLatch(1).await();
             throw new IllegalStateException("unreachable");
           }
         };
     RecordingListener listener = new RecordingListener();
-    ToolExecutionHandle handle = blocking.execute(request("mcp_list_tools", "{}"), listener);
+    EnvironmentCapabilityExecutionHandle handle =
+        blocking.execute(request("mcp.list", "{}"), listener);
     assertTrue(started.await(5, TimeUnit.SECONDS));
 
     handle.cancel();
     handle.cancel();
 
-    ToolResult result = listener.awaitComplete();
+    EnvironmentCapabilityResult result = listener.awaitComplete();
     assertTrue(result.error());
     assertTrue(((TextToolContent) result.contents().get(0)).text().contains("Operation cancelled"));
     assertEquals(1, listener.terminalCount.get());
@@ -248,25 +246,27 @@ class McpBridgeToolsTest {
         IllegalArgumentException.class,
         () ->
             blocking.execute(
-                request("mcp_call_tool", "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{}}"),
+                request("mcp.call", "{\"server\":\"fs\",\"tool\":\"echo\",\"arguments\":{}}"),
                 new RecordingListener()));
   }
 
   /** 未覆盖 failureMessage 的桥接基座异常仍必须转为不抛出的 Tool error。 */
   @Test
   void abstractBridgeConvertsUnhandledExceptionToToolError() {
-    AbstractMcpBridgeTool failing =
-        new AbstractMcpBridgeTool(
+    AbstractMcpBridgeCapability failing =
+        new AbstractMcpBridgeCapability(
             registry(new FakeClient("fs")),
             executor,
-            EnvironmentToolCatalog.require("mcp_list_tools")) {
+            EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.MCP_LIST)) {
           @Override
-          ToolResult run(ToolExecutionRequest request, Execution execution) {
+          EnvironmentCapabilityResult run(
+              EnvironmentCapabilityExecutionRequest request, Execution execution) {
             throw new IllegalStateException("bridge failed");
           }
         };
 
-    ToolResult result = new RecordingListener().execute(failing, request("mcp_list_tools", "{}"));
+    EnvironmentCapabilityResult result =
+        new RecordingListener().execute(failing, request("mcp.list", "{}"));
 
     assertTrue(result.error());
     assertTrue(((TextToolContent) result.contents().get(0)).text().contains("bridge failed"));
@@ -292,11 +292,19 @@ class McpBridgeToolsTest {
         name, McpTransportType.STDIO, null, List.of("echo"), null, null, null);
   }
 
-  private static ToolExecutionRequest request(String toolName, String argumentsJson) {
-    return new ToolExecutionRequest(
-        EnvironmentToolCatalog.require(toolName),
-        new ToolCall("call-1", toolName, argumentsJson),
-        Duration.ofSeconds(30));
+  private static EnvironmentCapabilityExecutionRequest request(
+      String capabilityId, String argumentsJson) {
+    return new EnvironmentCapabilityExecutionRequest(
+        EnvironmentCapabilityCatalog.require(
+            switch (capabilityId) {
+              case "mcp.list" -> EnvironmentCapabilityIds.MCP_LIST;
+              case "mcp.call" -> EnvironmentCapabilityIds.MCP_CALL;
+              default -> throw new IllegalArgumentException(
+                  "unknown test capability: " + capabilityId);
+            }),
+        new EnvironmentCapabilityCall("call-1", argumentsJson),
+        Duration.ofSeconds(30),
+        null);
   }
 
   private static final class FakeClient implements McpServerClient {
@@ -347,20 +355,22 @@ class McpBridgeToolsTest {
     public void close() {}
   }
 
-  private static final class RecordingListener implements ToolExecutionListener {
+  private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
 
     private final CountDownLatch terminal = new CountDownLatch(1);
-    private final AtomicReference<ToolResult> result = new AtomicReference<>();
+    private final AtomicReference<EnvironmentCapabilityResult> result = new AtomicReference<>();
     private final AtomicInteger terminalCount = new AtomicInteger();
 
-    private ToolResult execute(Tool tool, ToolExecutionRequest request) {
-      tool.execute(request, this);
+    private EnvironmentCapabilityResult execute(
+        EnvironmentCapability capability, EnvironmentCapabilityExecutionRequest request) {
+      capability.execute(request, this);
       return awaitComplete();
     }
 
-    private ToolResult awaitComplete() {
+    private EnvironmentCapabilityResult awaitComplete() {
       try {
-        assertTrue(terminal.await(5, TimeUnit.SECONDS), "tool must produce a terminal callback");
+        assertTrue(
+            terminal.await(5, TimeUnit.SECONDS), "capability must produce a terminal callback");
       } catch (InterruptedException error) {
         Thread.currentThread().interrupt();
         throw new AssertionError(error);
@@ -369,10 +379,10 @@ class McpBridgeToolsTest {
     }
 
     @Override
-    public void onPartial(ToolResult partial) {}
+    public void onPartial(EnvironmentCapabilityResult partial) {}
 
     @Override
-    public void onComplete(ToolResult complete) {
+    public void onComplete(EnvironmentCapabilityResult complete) {
       terminalCount.incrementAndGet();
       result.set(complete);
       terminal.countDown();

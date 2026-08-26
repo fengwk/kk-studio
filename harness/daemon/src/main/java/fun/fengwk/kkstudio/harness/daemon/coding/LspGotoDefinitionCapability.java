@@ -2,26 +2,31 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 
 /** 通过可选的本机 LSP bridge 解析符号定义。 */
-public final class LspGotoDefinitionTool extends AbstractCodingTool {
+public final class LspGotoDefinitionCapability extends AbstractCodingCapability {
 
   private final LspBridge bridge;
 
-  public LspGotoDefinitionTool(CodingToolsConfig config, ExecutorService executor) {
-    super(config, executor, EnvironmentToolCatalog.require("lsp_goto_definition"));
+  public LspGotoDefinitionCapability(CodingToolsConfig config, ExecutorService executor) {
+    super(
+        config,
+        executor,
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION));
     this.bridge = new LspBridge(config);
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     Path path =
         boundary.existing(
