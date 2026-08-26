@@ -51,7 +51,7 @@ describe('useChatListController', () => {
         ready: true,
         status: 'READY',
         lastSeen: null,
-        tools: [],
+        capabilities: [],
         skills: [],
       },
     ]
@@ -99,7 +99,7 @@ describe('useChatListController', () => {
         ready: true,
         status: 'READY',
         lastSeen: null,
-        tools: [],
+        capabilities: [],
         skills: [],
       },
     ]

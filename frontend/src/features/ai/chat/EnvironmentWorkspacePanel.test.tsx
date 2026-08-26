@@ -17,9 +17,16 @@ vi.mock('@/shared/api/environment-service', () => ({
 }))
 
 const readyEnvironments: LiveEnvironmentDTO[] = [
-  { name: 'local', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
-  { name: 'remote', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
-  { name: 'connecting', ready: false, status: 'CONNECTING', lastSeen: null, tools: [], skills: [] },
+  { name: 'local', ready: true, status: 'READY', lastSeen: null, capabilities: [], skills: [] },
+  { name: 'remote', ready: true, status: 'READY', lastSeen: null, capabilities: [], skills: [] },
+  {
+    name: 'connecting',
+    ready: false,
+    status: 'CONNECTING',
+    lastSeen: null,
+    capabilities: [],
+    skills: [],
+  },
 ]
 
 function directory(
@@ -189,7 +196,7 @@ describe('EnvironmentWorkspacePanel', () => {
     renderPanel({
       environments: [
         ...readyEnvironments,
-        { name: 'proj', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
+        { name: 'proj', ready: true, status: 'READY', lastSeen: null, capabilities: [], skills: [] },
       ],
       current: { name: 'local', workspacePath: 'proj' },
     })

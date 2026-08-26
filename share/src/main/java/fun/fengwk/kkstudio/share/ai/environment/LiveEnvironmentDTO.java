@@ -24,8 +24,8 @@ public class LiveEnvironmentDTO {
   /** 最近一次活跃时间（UTC Instant，注册表心跳/更新维护）。 */
   private Instant lastSeen;
 
-  /** 该 Environment 发布的工具能力列表（由 EnvironmentToolCatalog 固定，与 daemon 技能无关）。 */
-  private List<LiveEnvironmentToolDTO> tools;
+  /** 该 Environment 支持的原子 capability 列表（由 HELLO 校验过版本的固定 capability catalog 提供）。 */
+  private List<LiveEnvironmentCapabilityDTO> capabilities;
 
   /** 该 Environment 的 daemon 声明的技能能力列表（仅 READY 状态发布）。 */
   private List<LiveEnvironmentSkillDTO> skills;

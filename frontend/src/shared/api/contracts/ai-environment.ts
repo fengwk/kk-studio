@@ -1,7 +1,6 @@
-export interface LiveEnvironmentToolDTO {
-  name: string
-  version: string | null
-  description: string | null
+export interface LiveEnvironmentCapabilityDTO {
+  id: string
+  version: string
 }
 
 export interface LiveEnvironmentSkillDTO {
@@ -81,7 +80,7 @@ export interface LiveEnvironmentDTO {
   status: string
   ready: boolean
   lastSeen: string | null
-  tools: LiveEnvironmentToolDTO[]
+  capabilities: LiveEnvironmentCapabilityDTO[]
   skills: LiveEnvironmentSkillDTO[]
   mcpServers: LiveEnvironmentMcpServerDTO[]
 }

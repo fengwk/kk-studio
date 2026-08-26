@@ -13,7 +13,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -166,16 +166,16 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private static DaemonEnvelope helloEnvelope(long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3,
+        DaemonProtocol.VERSION_4,
         DaemonMessageType.HELLO,
         ENVIRONMENT_NAME,
         null,
         sequence,
         "{"
             + "\"daemonId\":\"daemon-large-caps\","
-            + "\"protocolVersion\":3,"
-            + "\"toolCatalogVersion\":\""
-            + EnvironmentToolCatalog.version()
+            + "\"protocolVersion\":4,"
+            + "\"capabilityCatalogVersion\":\""
+            + EnvironmentCapabilityCatalog.version()
             + "\","
             + "\"gatewayToken\":\""
             + DAEMON_TOKEN
@@ -184,7 +184,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private static DaemonEnvelope readyEnvelope(String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3, DaemonMessageType.READY, ENVIRONMENT_NAME, null, 1, payloadJson);
+        DaemonProtocol.VERSION_4, DaemonMessageType.READY, ENVIRONMENT_NAME, null, 1, payloadJson);
   }
 
   private static final class FrameListener implements WebSocket.Listener {

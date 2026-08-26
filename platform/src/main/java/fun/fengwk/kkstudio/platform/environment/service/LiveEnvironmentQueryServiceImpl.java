@@ -2,18 +2,18 @@ package fun.fengwk.kkstudio.platform.environment.service;
 
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentMcpServerDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentMcpToolDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentSkillDTO;
-import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentToolDTO;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -54,15 +54,14 @@ public class LiveEnvironmentQueryServiceImpl implements LiveEnvironmentQueryServ
             clock.instant(),
             Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
     dto.setLastSeen(environment.lastSeenAt());
-    List<LiveEnvironmentToolDTO> tools = new ArrayList<>();
-    for (ToolDescriptor tool : environment.tools()) {
-      LiveEnvironmentToolDTO toolDto = new LiveEnvironmentToolDTO();
-      toolDto.setName(tool.name());
-      toolDto.setVersion(tool.version());
-      toolDto.setDescription(tool.description());
-      tools.add(toolDto);
+    List<LiveEnvironmentCapabilityDTO> capabilities = new ArrayList<>();
+    for (EnvironmentCapabilityDescriptor capability : environment.capabilities()) {
+      LiveEnvironmentCapabilityDTO capabilityDto = new LiveEnvironmentCapabilityDTO();
+      capabilityDto.setId(capability.id().value());
+      capabilityDto.setVersion(capability.version());
+      capabilities.add(capabilityDto);
     }
-    dto.setTools(List.copyOf(tools));
+    dto.setCapabilities(List.copyOf(capabilities));
     List<LiveEnvironmentSkillDTO> skills = new ArrayList<>();
     for (DaemonSkillDescriptor skill : environment.skills()) {
       LiveEnvironmentSkillDTO skillDto = new LiveEnvironmentSkillDTO();

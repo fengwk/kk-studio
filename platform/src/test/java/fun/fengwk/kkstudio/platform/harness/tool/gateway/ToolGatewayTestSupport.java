@@ -30,14 +30,18 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityBusyException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityTransport;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolBusyException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
@@ -312,6 +316,10 @@ final class ToolGatewayTestSupport {
     return new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}");
   }
 
+  static EnvironmentCapabilityResult capabilityResult(String callId, String text) {
+    return new EnvironmentCapabilityResult(callId, List.of(new TextToolContent(text)), false, "{}");
+  }
+
   static final class FixedToolSettingsProvider implements ToolSettingsProvider {
     private final ToolSettings settings;
 
@@ -361,7 +369,8 @@ final class ToolGatewayTestSupport {
     void execute(ToolExecutionRequest request, ToolExecutionListener listener);
   }
 
-  static final class FakeToolHandle implements ToolExecutionHandle {
+  static final class FakeToolHandle
+      implements ToolExecutionHandle, EnvironmentCapabilityExecutionHandle {
     private final AtomicBoolean cancelled = new AtomicBoolean();
 
     @Override
@@ -375,12 +384,13 @@ final class ToolGatewayTestSupport {
     }
   }
 
-  /** 可编程 RemoteToolTransport：记录路由目标，按 action 决定返回 / 同步回调 / 抛异常。 */
-  static final class FakeTransport implements RemoteToolTransport {
+  /** 可编程 EnvironmentCapabilityTransport：记录路由目标，按 action 决定返回 / 同步回调 / 抛异常。 */
+  static final class FakeTransport implements EnvironmentCapabilityTransport {
     final List<InvokeRecord> invocations = new CopyOnWriteArrayList<>();
     final List<FakeToolHandle> returnedHandles = new CopyOnWriteArrayList<>();
     volatile InvokeAction action = InvokeAction.RETURN_HANDLE;
     volatile ToolResult syncResult;
+    volatile String callbackCallId;
     volatile boolean returnNullHandle;
     volatile int syncPartialCount;
 
@@ -397,32 +407,37 @@ final class ToolGatewayTestSupport {
 
     record InvokeRecord(
         EnvironmentBinding environment,
-        ToolExecutionRequest request,
-        ToolExecutionListener listener) {}
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener) {}
 
     @Override
-    public ToolExecutionHandle invoke(
+    public EnvironmentCapabilityExecutionHandle invoke(
         EnvironmentBinding environment,
-        ToolExecutionRequest request,
-        ToolExecutionListener listener) {
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener) {
       invocations.add(new InvokeRecord(environment, request, listener));
       switch (action) {
         case SYNC_COMPLETE:
-          listener.onComplete(syncResult);
+          listener.onComplete(
+              toCapabilityResult(
+                  callbackCallId == null ? request.call().id() : callbackCallId, syncResult));
           break;
         case SYNC_PARTIALS:
           for (int i = 0; i < syncPartialCount; i++) {
             listener.onPartial(
-                new ToolResult(
-                    "call-1", List.of(new TextToolContent("progress-" + i)), false, "{}"));
+                new EnvironmentCapabilityResult(
+                    callbackCallId == null ? request.call().id() : callbackCallId,
+                    List.of(new TextToolContent("progress-" + i)),
+                    false,
+                    "{}"));
           }
           break;
         case THROW_BUSY:
-          throw new RemoteToolBusyException("environment already active");
+          throw new EnvironmentCapabilityBusyException("environment already active");
         case THROW_UNAVAILABLE:
-          throw new RemoteToolUnavailableException("environment offline");
+          throw new EnvironmentCapabilityUnavailableException("environment offline");
         case THROW_UNCERTAIN:
-          throw new RemoteToolSendUncertainException("send uncertain");
+          throw new EnvironmentCapabilitySendUncertainException("send uncertain");
         case THROW_INVALID:
           throw new IllegalArgumentException("invalid request");
         case THROW_GENERIC:
@@ -432,6 +447,15 @@ final class ToolGatewayTestSupport {
           break;
       }
       return returnNullHandle ? null : newReturnedHandle();
+    }
+
+    private static EnvironmentCapabilityResult toCapabilityResult(
+        String callId, ToolResult result) {
+      if (result == null) {
+        return null;
+      }
+      return new EnvironmentCapabilityResult(
+          callId, result.contents(), result.error(), result.detailsJson());
     }
 
     private FakeToolHandle newReturnedHandle() {

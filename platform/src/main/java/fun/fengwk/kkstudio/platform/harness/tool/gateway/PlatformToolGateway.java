@@ -34,18 +34,24 @@ import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityBusyException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCancelledException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityFailedException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityTransport;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolBusyException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolFailedException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
 import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 
@@ -76,10 +82,10 @@ import java.util.function.Supplier;
  * call/binding；缺失 entry 或 descriptor 漂移直接生成 确定性 Deny，绝不进入 evaluator，也不改写 binding/arguments。YOLO
  * 短路由由 Runtime 决定，本类 不感知 YOLO 也不查询 HarnessStore。 {@link #start} 按冻结 binding 的 {@link ToolType}
  * 路由：PLATFORM 走 {@link AgentToolRegistry} 精确 name/version + descriptor equality 后提交注入的 {@link
- * ExecutorService} 执行；ENVIRONMENT 只按冻结的完整 binding 经 {@link RemoteToolTransport} 发送。missing
- * capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active remote
- * invocation 映射 Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定 /
- * 提交结果不确定映射 Indeterminate。
+ * ExecutorService} 执行；ENVIRONMENT 只按冻结的完整 binding 经 {@link EnvironmentCapabilityTransport}
+ * 发送。missing capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active
+ * remote invocation 映射 Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定
+ * / 提交结果不确定映射 Indeterminate。
  *
  * <p>回调桥（{@link GatedToolExecutionListener}）：两阶段激活——{@code start()} 绝不打开回调 gate（Tool 的同步回调只进缓冲），
  * {@link ToolGateway.Handle#activate()} 由 Processor 在 attach + durable markRunning 后调用，直接打开 gate +
@@ -89,11 +95,11 @@ import java.util.function.Supplier;
  * 失败并阻止后续任何 resource 写入。terminal 回调 fire-once：listener 在 onSucceeded / onFailed / onCancelled /
  * onUnknown 上抛异常只记录日志、绝不发出第二个 terminal 回调，只有非 terminal 的 onPartial 失败才会选择第一个 terminal
  * UNKNOWN。terminal success 通过 {@link ToolResultExternalizer} 做 managed Resource
- * 外部化（all-or-nothing）；partial 拒绝 Binary/Resource 且零存储 I/O。错误映射只把 {@link RemoteToolFailedException}
- * （daemon FAILED）当作非可重试已知失败；cancelled / unavailable（retryable=true）/ uncertain 保留显式分类，其余未分类错误 （含
- * Platform {@code tool.execute} 抛异常、onError(null)） 一律 UNKNOWN。等待任务在 release
- * 前被中断（而非取消）时队列一个未分类失败，activate 时恰好一次 UNKNOWN；cancel-before- activate 保持静默。activate
- * 抛异常即激活失败，Processor 收敛一次 UNKNOWN。
+ * 外部化（all-or-nothing）；partial 拒绝 Binary/Resource 且零存储 I/O。错误映射只把 {@link
+ * EnvironmentCapabilityFailedException} （daemon FAILED）当作非可重试已知失败；cancelled /
+ * unavailable（retryable=true）/ uncertain 保留显式分类，其余未分类错误 （含 Platform {@code tool.execute}
+ * 抛异常、onError(null)） 一律 UNKNOWN。等待任务在 release 前被中断（而非取消）时队列一个未分类失败，activate 时恰好一次
+ * UNKNOWN；cancel-before- activate 保持静默。activate 抛异常即激活失败，Processor 收敛一次 UNKNOWN。
  *
  * <p>本类不查询 HarnessStore：持久线程所有权由 {@link ToolGateway.Execution} 的 {@code invocationId/threadId}
  * 提供。构造时拒绝 inline executor 与静默丢弃策略的 executor（inline executor 会使 admission gate 死锁，静默丢弃 会让 Started
@@ -125,7 +131,7 @@ public final class PlatformToolGateway implements ToolGateway {
   private final AgentToolRegistry toolRegistry;
   private final PluginCatalog pluginCatalog;
   private final PluginBranchViewLoader pluginBranchViewLoader;
-  private final RemoteToolTransport remoteTransport;
+  private final EnvironmentCapabilityTransport capabilityTransport;
   private final PermissionEvaluator permissionEvaluator;
   private final ToolSettingsProvider toolSettingsProvider;
   private final ToolResultExternalizer externalizer;
@@ -147,7 +153,7 @@ public final class PlatformToolGateway implements ToolGateway {
       AgentToolRegistry toolRegistry,
       PluginCatalog pluginCatalog,
       PluginBranchViewLoader pluginBranchViewLoader,
-      RemoteToolTransport remoteTransport,
+      EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
@@ -163,7 +169,7 @@ public final class PlatformToolGateway implements ToolGateway {
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.pluginBranchViewLoader =
         Objects.requireNonNull(pluginBranchViewLoader, "pluginBranchViewLoader");
-    this.remoteTransport = Objects.requireNonNull(remoteTransport, "remoteTransport");
+    this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
     this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
     this.toolSettingsProvider =
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
@@ -482,9 +488,9 @@ public final class PlatformToolGateway implements ToolGateway {
   }
 
   /**
-   * ENVIRONMENT：只按冻结的完整 binding 路由（transport 使用 {@code binding.environmentName()} 查找连接，并携带 {@code
-   * workspacePath}）。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未 READY、心跳过期）都是确定性 Rejected；同 Environment
-   * 的瞬时容量冲突是 Busy；发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
+   * ENVIRONMENT：从 registry 冻结 entry 的 capability descriptor 构造独立 capability request，再按完整 binding
+   * 路由。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未 READY、心跳过期）都是确定性 Rejected；同 Environment 的瞬时容量冲突是 Busy；
+   * 发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
    */
   private StartResult startEnvironment(
       Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
@@ -521,29 +527,43 @@ public final class PlatformToolGateway implements ToolGateway {
                   + bindingDescriptor.version()
                   + " no longer matches the daemon capability descriptor."));
     }
-    ToolExecutionRequest request = request(execution, bindingDescriptor);
+    EnvironmentCapabilityDescriptor capability = entry.capability();
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
-            listener, externalizer, bindingDescriptor.name(), request.call().id(), lease);
+            listener,
+            externalizer,
+            bindingDescriptor.name(),
+            execution.request().call().id(),
+            lease);
     // 两阶段激活：activate() 之前 gate 保持关闭（同步回调只进缓冲）；activate() 直接打开 gate 并串行重放（不提交独立重放任务）。
     GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel, lease);
-    ToolExecutionHandle transportHandle;
+    EnvironmentCapabilityExecutionHandle transportHandle;
     try {
+      EnvironmentCapabilityCall capabilityCall =
+          new EnvironmentCapabilityCall(
+              execution.invocationId().toString(), execution.request().call().argumentsJson());
+      EnvironmentCapabilityExecutionRequest capabilityRequest =
+          new EnvironmentCapabilityExecutionRequest(
+              capability, capabilityCall, Duration.ZERO, null);
+      EnvironmentCapabilityExecutionListener capabilityListener =
+          new EnvironmentCapabilityListenerAdapter(
+              bridge, execution.invocationId().toString(), execution.request().call().id());
       transportHandle =
-          remoteTransport.invoke(execution.request().binding().environment(), request, bridge);
-    } catch (RemoteToolBusyException busy) {
+          capabilityTransport.invoke(
+              execution.request().binding().environment(), capabilityRequest, capabilityListener);
+    } catch (EnvironmentCapabilityBusyException busy) {
       // 同 Environment 已有 active remote invocation：INVOKE 肯定未发送，由 Harness 按固定延迟重新 admission，
       // 不创建 durable error。
       bridge.cancel();
       return new ToolGateway.Busy(busyRetryDelay.get());
-    } catch (RemoteToolUnavailableException unavailable) {
+    } catch (EnvironmentCapabilityUnavailableException unavailable) {
       // 发送前目标不可用（路由缺失/未注册/未 READY/心跳过期）：肯定未开始，且当前分支配置下重试不会改变结论——
       // 确定性拒绝，让模型看到 durable 错误结果并继续收敛。
       bridge.cancel();
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               UNAVAILABLE_KIND, failureMessage(unavailable, "Tool is unavailable.")));
-    } catch (RemoteToolSendUncertainException uncertain) {
+    } catch (EnvironmentCapabilitySendUncertainException uncertain) {
       // 发送不确定：可能已开始，绝不能抛。取消本地桥：迟到的 transport 回调被丢弃而不是永远缓冲。
       bridge.cancel();
       return new ToolGateway.Indeterminate(
@@ -570,10 +590,10 @@ public final class PlatformToolGateway implements ToolGateway {
       // activate 时恰好一次 UNKNOWN。
       bridge.onError(
           new IllegalStateException(
-              "remote tool returned a null execution handle; outcome cannot be confirmed"));
+              "remote capability returned a null execution handle; outcome cannot be confirmed"));
       return new ToolGateway.Started(handle);
     }
-    handle.attach(transportHandle);
+    handle.attach(transportHandle::cancel);
     return new ToolGateway.Started(handle);
   }
 
@@ -597,7 +617,7 @@ public final class PlatformToolGateway implements ToolGateway {
               "tool returned a null execution handle; outcome cannot be confirmed"));
       return;
     }
-    handle.attach(toolHandle);
+    handle.attach(toolHandle::cancel);
   }
 
   private static ToolExecutionRequest request(Execution execution, ToolDescriptor descriptor) {
@@ -675,6 +695,59 @@ public final class PlatformToolGateway implements ToolGateway {
   }
 
   /**
+   * Environment capability 回调桥：只在 capability call id 与 durable invocation UUID 一致时恢复 model call
+   * id；错误 correlation 保留原值交给 Gated bridge 的既有 INVALID_PARTIAL / INVALID_RESULT 校验，从而在任何 Resource
+   * externalization 前 terminalize。
+   */
+  private static final class EnvironmentCapabilityListenerAdapter
+      implements EnvironmentCapabilityExecutionListener {
+    private final GatedToolExecutionListener bridge;
+    private final String expectedCapabilityCallId;
+    private final String modelCallId;
+
+    private EnvironmentCapabilityListenerAdapter(
+        GatedToolExecutionListener bridge, String expectedCapabilityCallId, String modelCallId) {
+      this.bridge = Objects.requireNonNull(bridge, "bridge");
+      this.expectedCapabilityCallId =
+          Objects.requireNonNull(expectedCapabilityCallId, "expectedCapabilityCallId");
+      this.modelCallId = Objects.requireNonNull(modelCallId, "modelCallId");
+    }
+
+    @Override
+    public void onPartial(EnvironmentCapabilityResult partial) {
+      bridge.onPartial(toToolResult(partial));
+    }
+
+    @Override
+    public void onComplete(EnvironmentCapabilityResult result) {
+      bridge.onComplete(toToolResult(result));
+    }
+
+    @Override
+    public void onError(Throwable error) {
+      bridge.onError(error);
+    }
+
+    private ToolResult toToolResult(EnvironmentCapabilityResult result) {
+      if (result == null) {
+        return null;
+      }
+      String toolCallId = result.callId();
+      if (expectedCapabilityCallId.equals(toolCallId)) {
+        toolCallId = modelCallId;
+      } else if (modelCallId.equals(toolCallId)) {
+        // 即使恶意 capability callId 恰好等于 model call id，也必须让 Gated bridge 看到 correlation mismatch。
+        toolCallId = expectedCapabilityCallId;
+      }
+      return new ToolResult(toolCallId, result.contents(), result.error(), result.detailsJson());
+    }
+  }
+
+  private interface CancellableHandle {
+    void cancel();
+  }
+
+  /**
    * 本地取消 / 激活控制：包装 Tool 的 execution handle；handle 尚未返回时记录取消意图，返回后立即取消；幂等且 best effort。 activate /
    * cancel 都原子且幂等：CAS 标志保证 cancel 已先到则 activate 绝不再打开投递（不会重新投递或产生 resource 写入）， 二者在桥 monitor 内与
    * {@link GatedToolExecutionListener#activate()} / {@code cancel()} 互斥。
@@ -682,7 +755,7 @@ public final class PlatformToolGateway implements ToolGateway {
   private static final class GatewayHandle implements ToolGateway.Handle {
     private final AtomicBoolean activated = new AtomicBoolean();
     private final AtomicBoolean cancelled = new AtomicBoolean();
-    private final AtomicReference<ToolExecutionHandle> toolHandle = new AtomicReference<>();
+    private final AtomicReference<CancellableHandle> cancellableHandle = new AtomicReference<>();
     private final Runnable activation;
     private final Runnable abort;
     private final ConcurrencyAdmission.Lease lease;
@@ -693,11 +766,13 @@ public final class PlatformToolGateway implements ToolGateway {
       this.lease = Objects.requireNonNull(lease, "lease");
     }
 
-    void attach(ToolExecutionHandle handle) {
-      if (handle == null) {
-        return;
-      }
-      toolHandle.set(handle);
+    void attach(Runnable cancellation) {
+      Objects.requireNonNull(cancellation, "cancellation");
+      CancellableHandle handle =
+          () -> {
+            cancellation.run();
+          };
+      cancellableHandle.set(handle);
       if (cancelled.get()) {
         handle.cancel();
       }
@@ -725,7 +800,7 @@ public final class PlatformToolGateway implements ToolGateway {
         try {
           // 与 activate 在桥 monitor 内原子互斥：cancel 先到则 activate no-op；activate 先到则此后所有信号被丢弃。
           abort.run();
-          ToolExecutionHandle handle = toolHandle.get();
+          CancellableHandle handle = cancellableHandle.get();
           if (handle != null) {
             handle.cancel();
           }
@@ -1034,7 +1109,7 @@ public final class PlatformToolGateway implements ToolGateway {
     }
 
     /**
-     * 错误分类：只有 {@link RemoteToolFailedException}（daemon FAILED）是已确认的非可重试已知失败；cancelled /
+     * 错误分类：只有 {@link EnvironmentCapabilityFailedException}（daemon FAILED）是已确认的非可重试已知失败；cancelled /
      * unavailable（retryable=true）/ uncertain 保留显式分类；其余未分类错误（含 Platform {@code tool.execute} 抛异常）一律
      * UNKNOWN。任何错误信号都使桥 terminal。
      */
@@ -1043,7 +1118,7 @@ public final class PlatformToolGateway implements ToolGateway {
         // onError(null)：无法确认执行结果，恰好一次 UNKNOWN。
         return unknown(null, "tool reported a null error; outcome cannot be confirmed");
       }
-      if (error instanceof RemoteToolCancelledException cancelled) {
+      if (error instanceof EnvironmentCapabilityCancelledException cancelled) {
         deliverTerminal(
             () ->
                 listener.onCancelled(
@@ -1051,7 +1126,7 @@ public final class PlatformToolGateway implements ToolGateway {
                         CANCELLED_KIND, failureMessage(cancelled, "Tool execution cancelled."))));
         return true;
       }
-      if (error instanceof RemoteToolFailedException failed) {
+      if (error instanceof EnvironmentCapabilityFailedException failed) {
         deliverTerminal(
             () ->
                 listener.onFailed(
@@ -1062,7 +1137,7 @@ public final class PlatformToolGateway implements ToolGateway {
                         false)));
         return true;
       }
-      if (error instanceof RemoteToolSendUncertainException uncertain) {
+      if (error instanceof EnvironmentCapabilitySendUncertainException uncertain) {
         deliverTerminal(
             () ->
                 listener.onUnknown(
@@ -1073,7 +1148,7 @@ public final class PlatformToolGateway implements ToolGateway {
                             "Remote tool outcome is uncertain; side effect result is unknown."))));
         return true;
       }
-      if (error instanceof RemoteToolUnavailableException unavailable) {
+      if (error instanceof EnvironmentCapabilityUnavailableException unavailable) {
         // 肯定未开始（发送前不可用）：重试安全，明确 retryable。
         deliverTerminal(
             () ->

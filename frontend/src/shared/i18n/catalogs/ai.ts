@@ -1878,9 +1878,9 @@ export const aiCatalog = {
     'en-US': 'Last seen',
     'zh-CN': '最近查看',
   },
-  'ai.environment.tools': {
-    'en-US': 'Tools',
-    'zh-CN': 'Tools',
+  'ai.environment.capabilities': {
+    'en-US': 'Capabilities',
+    'zh-CN': 'Capabilities',
   },
   'ai.environment.skills': {
     'en-US': 'Skills',

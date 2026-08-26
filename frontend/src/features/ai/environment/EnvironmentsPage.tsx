@@ -143,7 +143,9 @@ export function EnvironmentsPage() {
                 // 可用性以统一 ready 标记为准：READY 但 ready=false 的过期条目必须显式显示不可用。
                 const ready = environment.ready === true
                 const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
-                const toolNames = (environment.tools ?? []).map((tool) => tool.name).filter(Boolean)
+                const capabilityIds = (environment.capabilities ?? [])
+                  .map((capability) => capability.id)
+                  .filter(Boolean)
                 const skillNames = (environment.skills ?? []).map((skill) => skill.name).filter(Boolean)
                 const lastSeen = formatLastSeen(environment.lastSeen, locale)
                 return (
@@ -162,7 +164,7 @@ export function EnvironmentsPage() {
                       </div>
                     </div>
                     <div className="meta-block">
-                      <TagRow label={t('ai.environment.tools')} names={toolNames} />
+                      <TagRow label={t('ai.environment.capabilities')} names={capabilityIds} />
                       <TagRow label={t('ai.environment.skills')} names={skillNames} />
                       {(environment.mcpServers ?? []).map((server) => (
                         <McpServerRow key={server.name} server={server} t={t} />

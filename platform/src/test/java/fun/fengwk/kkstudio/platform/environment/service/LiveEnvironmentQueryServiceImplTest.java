@@ -9,7 +9,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
@@ -37,7 +37,7 @@ import java.util.List;
 /**
  * 验证 registry 快照投影为 share DTO（只按 canonical 名称键控 + ready 可用性标记），且不会有 harness 类型泄漏。
  *
- * <p>Environment 工具来自静态 {@link EnvironmentToolCatalog}；daemon 仅对外声明 skill。
+ * <p>Environment capabilities 来自静态 {@link EnvironmentCapabilityCatalog}；daemon 仅对外声明 skill。
  */
 class LiveEnvironmentQueryServiceImplTest {
 
@@ -97,8 +97,8 @@ class LiveEnvironmentQueryServiceImplTest {
     assertEquals("READY", dto.getStatus());
     assertTrue(dto.isReady());
     assertEquals(NOW, dto.getLastSeen());
-    // Environment 工具由 EnvironmentToolCatalog 固定提供，无论 daemon 的 READY 载荷如何都会暴露。
-    assertEquals(EnvironmentToolCatalog.descriptors().size(), dto.getTools().size());
+    // Environment capabilities 由 EnvironmentCapabilityCatalog 固定提供，无论 daemon 的 READY 载荷如何都会暴露。
+    assertEquals(EnvironmentCapabilityCatalog.descriptors().size(), dto.getCapabilities().size());
     assertEquals(1, dto.getSkills().size());
     assertEquals("demo", dto.getSkills().get(0).getName());
     assertEquals("demo skill", dto.getSkills().get(0).getDescription());

@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
@@ -61,7 +61,7 @@ public class HarnessToolGatewayConfiguration {
       AgentToolRegistry toolRegistry,
       PluginCatalog pluginCatalog,
       PluginBranchViewLoader pluginBranchViewLoader,
-      RemoteToolTransport remoteTransport,
+      EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
@@ -79,7 +79,7 @@ public class HarnessToolGatewayConfiguration {
         toolRegistry,
         pluginCatalog,
         pluginBranchViewLoader,
-        remoteTransport,
+        capabilityTransport,
         permissionEvaluator,
         toolSettingsProvider,
         resourceStore,

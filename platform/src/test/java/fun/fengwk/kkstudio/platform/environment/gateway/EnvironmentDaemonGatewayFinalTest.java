@@ -13,14 +13,24 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityBusyException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCancelledException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityInvokeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -35,14 +45,6 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolBusyException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
-import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 import fun.fengwk.kkstudio.platform.environment.registry.BindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
@@ -54,6 +56,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentDirectoryDTO;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
@@ -84,7 +87,6 @@ class EnvironmentDaemonGatewayFinalTest {
       new EnvironmentBinding(OTHER_ENVIRONMENT_NAME, ".");
   private static final UUID INVOCATION_ID = new UUID(0L, 9001L);
   private static final UUID SECOND_INVOCATION_ID = new UUID(0L, 9002L);
-  private static final UUID THREAD_ID = new UUID(0L, 7001L);
   private static final Instant NOW = Instant.parse("2026-07-17T00:00:00Z");
   private static final String GATEWAY_TOKEN = "gateway-test-token";
   private static final List<DaemonSkillDescriptor> ADVERTISED_SKILLS =
@@ -121,7 +123,7 @@ class EnvironmentDaemonGatewayFinalTest {
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
 
     RecordingListener listener = new RecordingListener();
-    ToolExecutionHandle handle =
+    EnvironmentCapabilityExecutionHandle handle =
         fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
@@ -129,14 +131,20 @@ class EnvironmentDaemonGatewayFinalTest {
     DaemonEnvelope invoke = connection.envelopes().get(1);
     assertEquals(ENVIRONMENT_NAME, invoke.environmentName());
     assertEquals(INVOCATION_ID.toString(), invoke.invocationId());
-    assertTrue(invoke.payloadJson().contains("\"toolName\":\"read\""));
+    DaemonCapabilityInvokeCodec.InvokeRequest decoded =
+        new DaemonCapabilityInvokeCodec().decode(invoke.payloadJson());
+    assertEquals("fs.read", decoded.capabilityId().value());
+    assertEquals("1", decoded.capabilityVersion());
+    assertEquals(".", decoded.workspacePath());
+    assertEquals("{\"path\":\"README.md\"}", decoded.argumentsJson());
+    assertEquals(Duration.ofSeconds(30), decoded.timeout());
 
     handle.cancel();
     assertTrue(messageTypes(connection.envelopes()).contains(DaemonMessageType.CANCEL));
 
     fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("done")));
     assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
-    assertEquals("provider-call", listener.completed.toolCallId());
+    assertEquals(INVOCATION_ID.toString(), listener.completed.callId());
   }
 
   @Test
@@ -231,7 +239,7 @@ class EnvironmentDaemonGatewayFinalTest {
             INVOCATION_ID.toString(),
             2,
             "{\"reason\":\"stop\"}"));
-    assertTrue(listener.error instanceof RemoteToolCancelledException);
+    assertTrue(listener.error instanceof EnvironmentCapabilityCancelledException);
     assertEquals("stop", listener.error.getMessage());
   }
 
@@ -239,7 +247,7 @@ class EnvironmentDaemonGatewayFinalTest {
   void invokeWhenOfflineThrowsUnavailable() {
     Fixture fixture = fixture();
     assertThrows(
-        RemoteToolUnavailableException.class,
+        EnvironmentCapabilityUnavailableException.class,
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT, request(fixture.descriptor), new RecordingListener()));
@@ -249,21 +257,48 @@ class EnvironmentDaemonGatewayFinalTest {
   void invokeWithDescriptorDriftThrowsUnavailableBeforeWireSend() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-descriptor-drift");
-    ToolDescriptor current = fixture.descriptor;
-    ToolDescriptor drifted =
-        new ToolDescriptor(
-            current.name(),
-            current.version(),
-            current.type(),
-            current.description() + " drifted",
-            current.rendererKey(),
-            current.inputSchema(),
-            current.sideEffect(),
-            current.timeout());
+    EnvironmentCapabilityDescriptor current = fixture.descriptor;
+    EnvironmentCapabilityDescriptor drifted =
+        new EnvironmentCapabilityDescriptor(
+            current.id(), current.version() + "-drifted", current.inputSchema(), current.timeout());
 
     assertThrows(
-        RemoteToolUnavailableException.class,
+        IllegalArgumentException.class,
         () -> fixture.gateway.invoke(ENVIRONMENT, request(drifted), new RecordingListener()));
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
+  }
+
+  @Test
+  void invokeWithNonNullWorkdirFailsBeforeWireSend() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-workdir");
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(
+            fixture.descriptor,
+            new EnvironmentCapabilityCall(INVOCATION_ID.toString(), "{\"path\":\"README.md\"}"),
+            Duration.ofSeconds(30),
+            Path.of("/workspace"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> fixture.gateway.invoke(ENVIRONMENT, request, new RecordingListener()));
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
+  }
+
+  @Test
+  void invokeWithNonUuidCallIdFailsBeforeWireSend() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-invalid-call-id");
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(
+            fixture.descriptor,
+            new EnvironmentCapabilityCall("model-call", "{\"path\":\"README.md\"}"),
+            Duration.ofSeconds(30),
+            null);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> fixture.gateway.invoke(ENVIRONMENT, request, new RecordingListener()));
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
   }
 
@@ -273,14 +308,14 @@ class EnvironmentDaemonGatewayFinalTest {
     FakeConnection connection = fixture.connectReady("connection-invalid-payload");
 
     assertThrows(
-        ArithmeticException.class,
+        IllegalArgumentException.class,
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT,
                 request(fixture.descriptor, Duration.ofSeconds(Long.MAX_VALUE)),
                 new RecordingListener()));
 
-    ToolExecutionHandle handle =
+    EnvironmentCapabilityExecutionHandle handle =
         fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), new RecordingListener());
     assertNotNull(handle);
     assertEquals(
@@ -298,7 +333,7 @@ class EnvironmentDaemonGatewayFinalTest {
     fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), firstListener);
 
     assertThrows(
-        RemoteToolBusyException.class,
+        EnvironmentCapabilityBusyException.class,
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT,
@@ -313,7 +348,7 @@ class EnvironmentDaemonGatewayFinalTest {
     assertNull(secondListener.completed);
     assertNull(secondListener.error);
 
-    ToolExecutionHandle next =
+    EnvironmentCapabilityExecutionHandle next =
         fixture.gateway.invoke(
             ENVIRONMENT,
             request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
@@ -329,12 +364,12 @@ class EnvironmentDaemonGatewayFinalTest {
   void cancelledTerminalReleasesEnvironmentSlotForNextInvoke() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-cancel-release");
-    ToolExecutionHandle first =
+    EnvironmentCapabilityExecutionHandle first =
         fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), new RecordingListener());
     first.cancel();
 
     assertThrows(
-        RemoteToolBusyException.class,
+        EnvironmentCapabilityBusyException.class,
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT,
@@ -349,7 +384,7 @@ class EnvironmentDaemonGatewayFinalTest {
             2,
             "{\"reason\":\"stop\"}"));
 
-    ToolExecutionHandle next =
+    EnvironmentCapabilityExecutionHandle next =
         fixture.gateway.invoke(
             ENVIRONMENT,
             request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
@@ -437,7 +472,7 @@ class EnvironmentDaemonGatewayFinalTest {
     RecordingListener listener = new RecordingListener();
     fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     fixture.gateway.close(connection.connectionId());
-    assertTrue(listener.error instanceof RemoteToolSendUncertainException);
+    assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
     assertNull(listener.completed);
   }
 
@@ -468,7 +503,7 @@ class EnvironmentDaemonGatewayFinalTest {
     RecordingListener listener =
         new RecordingListener() {
           @Override
-          public void onComplete(ToolResult result) {
+          public void onComplete(EnvironmentCapabilityResult result) {
             super.onComplete(result);
             // 在完成时重新进入 close 路径；不能在 ConnectionState 锁内执行。
             fixture.gateway.close(connection.connectionId());
@@ -488,7 +523,7 @@ class EnvironmentDaemonGatewayFinalTest {
     connection.failNextSend = true;
     RecordingListener listener = new RecordingListener();
     assertThrows(
-        RemoteToolSendUncertainException.class,
+        EnvironmentCapabilitySendUncertainException.class,
         () -> fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener));
     assertNull(listener.error);
     assertNull(listener.completed);
@@ -503,7 +538,7 @@ class EnvironmentDaemonGatewayFinalTest {
             ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
     connection.failNextSend = true;
     assertThrows(
-        RemoteToolSendUncertainException.class,
+        EnvironmentCapabilitySendUncertainException.class,
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT, request(fixture.descriptor), new RecordingListener()));
@@ -556,14 +591,14 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-cancel-rejected");
     RecordingListener listener = new RecordingListener();
-    ToolExecutionHandle handle =
+    EnvironmentCapabilityExecutionHandle handle =
         fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     connection.failNextSend = true;
 
     handle.cancel();
 
     assertTrue(connection.closed);
-    assertTrue(listener.error instanceof RemoteToolSendUncertainException);
+    assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
     assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
   }
 
@@ -603,7 +638,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-cancel-idempotent");
     RecordingListener listener = new RecordingListener();
-    ToolExecutionHandle handle =
+    EnvironmentCapabilityExecutionHandle handle =
         fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
     handle.cancel();
     handle.cancel();
@@ -621,7 +656,7 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   @Test
-  void connectingDoesNotFabricateCapabilitiesAndReadyPublishesMetadata() {
+  void connectingPublishesStaticCapabilitiesAndReadyPublishesMetadata() {
     Fixture fixture = fixture();
     FakeConnection connection = new FakeConnection("connection-metadata");
     fixture.gateway.open(connection);
@@ -629,18 +664,18 @@ class EnvironmentDaemonGatewayFinalTest {
 
     var connecting = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, connecting.status());
-    assertNull(connecting.capabilities());
+    assertEquals(EnvironmentCapabilityCatalog.descriptors(), connecting.capabilities());
     assertTrue(connecting.skills().isEmpty());
     assertTrue(connecting.mcpServers().isEmpty());
 
     fixture.gateway.receive(connection.connectionId(), ready(1, ENVIRONMENT_NAME));
     var ready = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, ready.status());
-    assertEquals(ADVERTISED_CAPABILITIES, ready.capabilities());
+    assertEquals(ADVERTISED_CAPABILITIES, ready.daemonCapabilities());
   }
 
   @Test
-  void readyRegistersAdvertisedSkillsAndStaticTools() {
+  void readyRegistersAdvertisedSkillsAndStaticCapabilities() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-skills");
     assertTrue(
@@ -660,8 +695,8 @@ class EnvironmentDaemonGatewayFinalTest {
     assertEquals(DaemonMcpServerStatus.FAILED, registered.mcpServers().get(1).status());
     assertEquals("cannot connect", registered.mcpServers().get(1).error());
     assertTrue(registered.mcpServers().get(1).tools().isEmpty());
-    // 工具来自静态 EnvironmentToolCatalog；wire READY 不会对外声明它们。
-    assertEquals(EnvironmentToolCatalog.descriptors(), registered.tools());
+    // Capability 来自静态 EnvironmentCapabilityCatalog；wire READY 不会对外声明它们。
+    assertEquals(EnvironmentCapabilityCatalog.descriptors(), registered.capabilities());
   }
 
   @Test
@@ -744,7 +779,7 @@ class EnvironmentDaemonGatewayFinalTest {
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(second.envelopes()));
     // 被替换的旧连接恰好关闭一次；active remote 与 pending skill load 不泄漏。
     assertEquals(1, first.closeCount);
-    assertTrue(listener.error instanceof RemoteToolSendUncertainException);
+    assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
     assertTrue(pendingSkill.join() instanceof EnvironmentSkillLoadResult.Failed);
     assertEquals(
         second.connectionId(),
@@ -835,7 +870,7 @@ class EnvironmentDaemonGatewayFinalTest {
         fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofSeconds(5)).join();
     assertInstanceOf(EnvironmentSkillLoadResult.Failed.class, result);
     assertThrows(
-        RemoteToolUnavailableException.class,
+        EnvironmentCapabilityUnavailableException.class,
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT, request(fixture.descriptor), new RecordingListener()));
@@ -1008,7 +1043,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
     // active 槽位仍被 invocation 占用：目录浏览不释放它。
     assertThrows(
-        RemoteToolBusyException.class,
+        EnvironmentCapabilityBusyException.class,
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT,
@@ -1397,26 +1432,28 @@ class EnvironmentDaemonGatewayFinalTest {
     assertTrue(connection.closed);
   }
 
-  private ToolExecutionRequest request(ToolDescriptor descriptor) {
+  private EnvironmentCapabilityExecutionRequest request(
+      EnvironmentCapabilityDescriptor descriptor) {
     return request(descriptor, Duration.ofSeconds(30));
   }
 
-  private ToolExecutionRequest request(ToolDescriptor descriptor, Duration timeout) {
-    return request(descriptor, timeout, INVOCATION_ID, "provider-call");
+  private EnvironmentCapabilityExecutionRequest request(
+      EnvironmentCapabilityDescriptor descriptor, Duration timeout) {
+    return request(descriptor, timeout, INVOCATION_ID);
   }
 
-  private ToolExecutionRequest request(
-      ToolDescriptor descriptor, UUID invocationId, String toolCallId) {
-    return request(descriptor, Duration.ofSeconds(30), invocationId, toolCallId);
+  private EnvironmentCapabilityExecutionRequest request(
+      EnvironmentCapabilityDescriptor descriptor, UUID invocationId, String ignoredModelCallId) {
+    return request(descriptor, Duration.ofSeconds(30), invocationId);
   }
 
-  private ToolExecutionRequest request(
-      ToolDescriptor descriptor, Duration timeout, UUID invocationId, String toolCallId) {
-    return new ToolExecutionRequest(
+  private EnvironmentCapabilityExecutionRequest request(
+      EnvironmentCapabilityDescriptor descriptor, Duration timeout, UUID invocationId) {
+    return new EnvironmentCapabilityExecutionRequest(
         descriptor,
-        new ToolCall(toolCallId, descriptor.name(), "{\"path\":\"README.md\"}"),
+        new EnvironmentCapabilityCall(invocationId.toString(), "{\"path\":\"README.md\"}"),
         timeout,
-        new ToolExecutionContext(invocationId, THREAD_ID));
+        null);
   }
 
   private String resultPayload(String text) {
@@ -1459,8 +1496,8 @@ class EnvironmentDaemonGatewayFinalTest {
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":3,\"toolCatalogVersion\":\""
-            + EnvironmentToolCatalog.version()
+        "{\"daemonId\":\"d1\",\"protocolVersion\":4,\"capabilityCatalogVersion\":\""
+            + EnvironmentCapabilityCatalog.version()
             + "\",\"gatewayToken\":\""
             + GATEWAY_TOKEN
             + "\"}");
@@ -1474,8 +1511,8 @@ class EnvironmentDaemonGatewayFinalTest {
         sequence,
         "{\"daemonId\":\"d1\",\"protocolVersion\":"
             + protocolVersion
-            + ",\"toolCatalogVersion\":\""
-            + EnvironmentToolCatalog.version()
+            + ",\"capabilityCatalogVersion\":\""
+            + EnvironmentCapabilityCatalog.version()
             + "\",\"gatewayToken\":\""
             + GATEWAY_TOKEN
             + "\"}");
@@ -1487,7 +1524,7 @@ class EnvironmentDaemonGatewayFinalTest {
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":3,\"toolCatalogVersion\":\""
+        "{\"daemonId\":\"d1\",\"protocolVersion\":4,\"capabilityCatalogVersion\":\""
             + catalogVersion
             + "\",\"gatewayToken\":\""
             + GATEWAY_TOKEN
@@ -1529,7 +1566,7 @@ class EnvironmentDaemonGatewayFinalTest {
       String payload) {
     return envelopeCodec.encode(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3,
+            DaemonProtocol.VERSION_4,
             messageType,
             environmentName,
             invocationId,
@@ -1549,8 +1586,8 @@ class EnvironmentDaemonGatewayFinalTest {
     return new Fixture(descriptor(), readyListener);
   }
 
-  private static ToolDescriptor descriptor() {
-    return EnvironmentToolCatalog.require("read");
+  private static EnvironmentCapabilityDescriptor descriptor() {
+    return EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
   }
 
   private final class Fixture {
@@ -1558,9 +1595,10 @@ class EnvironmentDaemonGatewayFinalTest {
     final AtomicReference<Instant> now = new AtomicReference<>(NOW);
     final Duration heartbeatTimeout = Duration.ofSeconds(60);
     final EnvironmentDaemonGateway gateway;
-    final ToolDescriptor descriptor;
+    final EnvironmentCapabilityDescriptor descriptor;
 
-    private Fixture(ToolDescriptor descriptor, EnvironmentReadyListener readyListener) {
+    private Fixture(
+        EnvironmentCapabilityDescriptor descriptor, EnvironmentReadyListener readyListener) {
       this.descriptor = descriptor;
       EnvironmentGatewayProperties gatewayProperties = new EnvironmentGatewayProperties();
       gatewayProperties.setDaemonToken(GATEWAY_TOKEN);
@@ -1597,20 +1635,20 @@ class EnvironmentDaemonGatewayFinalTest {
     }
   }
 
-  private static class RecordingListener implements ToolExecutionListener {
-    private final List<ToolResult> partials = new ArrayList<>();
+  private static class RecordingListener implements EnvironmentCapabilityExecutionListener {
+    private final List<EnvironmentCapabilityResult> partials = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
-    private ToolResult completed;
+    private EnvironmentCapabilityResult completed;
     private Throwable error;
 
     @Override
-    public void onPartial(ToolResult partial) {
+    public void onPartial(EnvironmentCapabilityResult partial) {
       partials.add(partial);
       events.add(((TextToolContent) partial.contents().get(0)).text());
     }
 
     @Override
-    public void onComplete(ToolResult result) {
+    public void onComplete(EnvironmentCapabilityResult result) {
       events.add("complete");
       completed = result;
     }
