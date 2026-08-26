@@ -100,20 +100,22 @@ ToolExecutionHandle execute(
 
 [`EnvironmentToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java) 是每个 Environment Daemon 的固定目录，版本为 `"3"`。descriptor、schema 和 prompt 全部来自 `harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/environment/prompts/`；资源缺失会在 catalog 初始化时失败。
 
-| Tool | type / version | side effect | descriptor timeout |
-| --- | --- | --- | --- |
-| `read` | ENVIRONMENT / `1` | READ_ONLY | 1 min |
-| `write` | ENVIRONMENT / `1` | IDEMPOTENT | 1 min |
-| `edit` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 min |
-| `apply_patch` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 min |
-| `bash` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 h |
-| `grep` | ENVIRONMENT / `1` | READ_ONLY | 1 h |
-| `find` | ENVIRONMENT / `1` | READ_ONLY | 1 h |
-| `lsp_goto_definition` | ENVIRONMENT / `1` | READ_ONLY | 2 min |
-| `lsp_workspace_symbols` | ENVIRONMENT / `1` | READ_ONLY | 2 min |
-| `lsp_java_decompile` | ENVIRONMENT / `1` | READ_ONLY | 2 min |
-| `mcp_list_tools` | ENVIRONMENT / `1` | READ_ONLY | 30 s |
-| `mcp_call_tool` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 5 min |
+| Agent tool ID | model name | Capability ID | type / version | side effect | descriptor timeout |
+| --- | --- | --- | --- | --- | --- |
+| `base.read` | `read` | `fs.read` | ENVIRONMENT / `1` | READ_ONLY | 1 min |
+| `base.write` | `write` | `fs.write` | ENVIRONMENT / `1` | IDEMPOTENT | 1 min |
+| `base.edit` | `edit` | `fs.apply-edit` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 min |
+| `base.apply-patch` | `apply_patch` | `fs.apply-patch` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 min |
+| `base.bash` | `bash` | `process.exec` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 h |
+| `base.grep` | `grep` | `fs.search` | ENVIRONMENT / `1` | READ_ONLY | 1 h |
+| `base.find` | `find` | `fs.find` | ENVIRONMENT / `1` | READ_ONLY | 1 h |
+| `base.lsp-goto-definition` | `lsp_goto_definition` | `lsp.goto-definition` | ENVIRONMENT / `1` | READ_ONLY | 2 min |
+| `base.lsp-workspace-symbols` | `lsp_workspace_symbols` | `lsp.workspace-symbols` | ENVIRONMENT / `1` | READ_ONLY | 2 min |
+| `base.lsp-java-decompile` | `lsp_java_decompile` | `lsp.java-decompile` | ENVIRONMENT / `1` | READ_ONLY | 2 min |
+| `base.mcp-list-tools` | `mcp_list_tools` | `mcp.list` | ENVIRONMENT / `1` | READ_ONLY | 30 s |
+| `base.mcp-call-tool` | `mcp_call_tool` | `mcp.call` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 5 min |
+
+`EnvironmentToolCatalog.entries()` 返回不可变的 `Entry` 列表；每个 Entry 固定包含 selectable 的 `AgentToolDefinition` 和 Environment Capability ID。AgentToolId 与 model name 各自唯一，Capability ID 不建立唯一索引，因此多个 Entry 可以复用同一个 Capability。
 
 [`ToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCatalog.java) 接收 Platform descriptor 和 internal name 集合，将 internal tool 从 selectable map 移出，再合并上述 Environment descriptor；Platform 与 Environment 名称冲突、重复 Platform 名称以及非法 internal 名称均在构造期拒绝。
 

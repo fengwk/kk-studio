@@ -3,9 +3,11 @@ package fun.fengwk.kkstudio.harness.tool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolSchemaElement;
 
@@ -13,8 +15,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** Environment daemon 固定 12 工具 catalog 的 schema 契约测试。 */
@@ -55,6 +59,145 @@ class EnvironmentToolCatalogSchemaTest {
             "mcp_list_tools",
             "mcp_call_tool"),
         EnvironmentToolCatalog.descriptors().stream().map(ToolDescriptor::name).toList());
+  }
+
+  /** 稳定锁定 12 个模型 Tool identity、模型可见名称、Capability 映射和目录顺序。 */
+  @Test
+  void exposesStableAgentToolAndCapabilityMappings() {
+    List<EnvironmentToolCatalog.Entry> entries = EnvironmentToolCatalog.entries();
+
+    assertEquals(
+        List.of(
+            "base.read",
+            "base.write",
+            "base.edit",
+            "base.apply-patch",
+            "base.bash",
+            "base.grep",
+            "base.find",
+            "base.lsp-goto-definition",
+            "base.lsp-workspace-symbols",
+            "base.lsp-java-decompile",
+            "base.mcp-list-tools",
+            "base.mcp-call-tool"),
+        entries.stream().map(entry -> entry.definition().id().value()).toList());
+    assertEquals(
+        List.of(
+            "read",
+            "write",
+            "edit",
+            "apply_patch",
+            "bash",
+            "grep",
+            "find",
+            "lsp_goto_definition",
+            "lsp_workspace_symbols",
+            "lsp_java_decompile",
+            "mcp_list_tools",
+            "mcp_call_tool"),
+        entries.stream().map(entry -> entry.definition().descriptor().name()).toList());
+    assertEquals(
+        List.of(
+            "fs.read",
+            "fs.write",
+            "fs.apply-edit",
+            "fs.apply-patch",
+            "process.exec",
+            "fs.search",
+            "fs.find",
+            "lsp.goto-definition",
+            "lsp.workspace-symbols",
+            "lsp.java-decompile",
+            "mcp.list",
+            "mcp.call"),
+        entries.stream().map(entry -> entry.capabilityId().value()).toList());
+    assertEquals(
+        EnvironmentToolCatalog.descriptors(),
+        entries.stream().map(entry -> entry.definition().descriptor()).toList());
+    for (EnvironmentToolCatalog.Entry entry : entries) {
+      assertEquals(AgentToolBackend.ENVIRONMENT_CAPABILITY, entry.definition().backend());
+      assertEquals(ToolVisibility.SELECTABLE, entry.definition().visibility());
+      assertEquals(ToolType.ENVIRONMENT, entry.definition().descriptor().type());
+    }
+
+    EnvironmentToolCatalog.Entry read = entries.getFirst();
+    assertEquals(read, EnvironmentToolCatalog.find(new AgentToolId("base.read")).orElseThrow());
+    assertEquals(read, EnvironmentToolCatalog.require(new AgentToolId("base.read")));
+    assertTrue(EnvironmentToolCatalog.find(new AgentToolId("base.unknown")).isEmpty());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> EnvironmentToolCatalog.require(new AgentToolId("base.unknown")));
+  }
+
+  /** Entry 只接受 Environment Capability、selectable 和 Environment descriptor 的统一组合。 */
+  @Test
+  void enforcesEnvironmentEntryContract() {
+    EnvironmentCapabilityId capabilityId = new EnvironmentCapabilityId("test.shared");
+    AgentToolDefinition valid =
+        definition(
+            "test.valid",
+            "valid",
+            ToolType.ENVIRONMENT,
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.ENVIRONMENT_CAPABILITY);
+
+    assertThrows(
+        NullPointerException.class, () -> new EnvironmentToolCatalog.Entry(null, capabilityId));
+    assertThrows(NullPointerException.class, () -> new EnvironmentToolCatalog.Entry(valid, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EnvironmentToolCatalog.Entry(
+                definition(
+                    "test.host",
+                    "host",
+                    ToolType.ENVIRONMENT,
+                    ToolVisibility.SELECTABLE,
+                    AgentToolBackend.HOST),
+                capabilityId));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EnvironmentToolCatalog.Entry(
+                definition(
+                    "test.internal",
+                    "internal",
+                    ToolType.ENVIRONMENT,
+                    ToolVisibility.INTERNAL,
+                    AgentToolBackend.ENVIRONMENT_CAPABILITY),
+                capabilityId));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EnvironmentToolCatalog.Entry(
+                definition(
+                    "test.platform",
+                    "platform",
+                    ToolType.PLATFORM,
+                    ToolVisibility.SELECTABLE,
+                    AgentToolBackend.ENVIRONMENT_CAPABILITY),
+                capabilityId));
+  }
+
+  /** ID 和模型名称分别唯一；同一个 CapabilityId 可以被多个 Entry 复用。 */
+  @Test
+  void indexesRejectDuplicateIdsAndNamesButAllowCapabilityReuse() {
+    EnvironmentCapabilityId sharedCapability = new EnvironmentCapabilityId("test.shared");
+    EnvironmentToolCatalog.Entry first = entry("test.first", "first", sharedCapability);
+    EnvironmentToolCatalog.Entry second = entry("test.second", "second", sharedCapability);
+
+    assertEquals(2, EnvironmentToolCatalog.indexById(List.of(first, second)).size());
+    assertEquals(2, EnvironmentToolCatalog.indexByName(List.of(first, second)).size());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            EnvironmentToolCatalog.indexById(
+                List.of(first, entry("test.first", "different", sharedCapability))));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            EnvironmentToolCatalog.indexByName(
+                List.of(first, entry("test.different", "first", sharedCapability))));
   }
 
   /** 每个工具精确断言 required 与 optional keys；find 必须要求 pattern 和 path。 */
@@ -178,6 +321,35 @@ class EnvironmentToolCatalogSchemaTest {
     expectedProperties.addAll(optional);
     assertEquals(expectedProperties, schema.properties().keySet(), name + " declared keys");
     assertFalse(schema.additionalProperties(), name + " must reject unknown keys");
+  }
+
+  private static EnvironmentToolCatalog.Entry entry(
+      String id, String name, EnvironmentCapabilityId capabilityId) {
+    return new EnvironmentToolCatalog.Entry(
+        definition(
+            id,
+            name,
+            ToolType.ENVIRONMENT,
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.ENVIRONMENT_CAPABILITY),
+        capabilityId);
+  }
+
+  private static AgentToolDefinition definition(
+      String id, String name, ToolType type, ToolVisibility visibility, AgentToolBackend backend) {
+    return new AgentToolDefinition(
+        new AgentToolId(id),
+        new ToolDescriptor(
+            name,
+            "1",
+            type,
+            name + " description",
+            name,
+            new ToolParamsSchema(null, Map.of(), Set.of(), false),
+            ToolSideEffect.READ_ONLY,
+            Duration.ZERO),
+        visibility,
+        backend);
   }
 
   private static String promptResource(String name) {
