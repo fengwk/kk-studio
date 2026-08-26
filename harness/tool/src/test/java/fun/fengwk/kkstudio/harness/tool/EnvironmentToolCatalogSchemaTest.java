@@ -68,19 +68,19 @@ class EnvironmentToolCatalogSchemaTest {
 
     assertEquals(
         List.of(
-            "base.read",
-            "base.write",
-            "base.edit",
-            "base.apply-patch",
-            "base.bash",
-            "base.grep",
-            "base.find",
-            "base.lsp-goto-definition",
-            "base.lsp-workspace-symbols",
-            "base.lsp-java-decompile",
-            "base.mcp-list-tools",
-            "base.mcp-call-tool"),
-        entries.stream().map(entry -> entry.definition().id().value()).toList());
+            BaseToolIds.READ,
+            BaseToolIds.WRITE,
+            BaseToolIds.EDIT,
+            BaseToolIds.APPLY_PATCH,
+            BaseToolIds.BASH,
+            BaseToolIds.GREP,
+            BaseToolIds.FIND,
+            BaseToolIds.LSP_GOTO_DEFINITION,
+            BaseToolIds.LSP_WORKSPACE_SYMBOLS,
+            BaseToolIds.LSP_JAVA_DECOMPILE,
+            BaseToolIds.MCP_LIST_TOOLS,
+            BaseToolIds.MCP_CALL_TOOL),
+        entries.stream().map(entry -> entry.definition().id()).toList());
     assertEquals(
         List.of(
             "read",
@@ -121,8 +121,8 @@ class EnvironmentToolCatalogSchemaTest {
     }
 
     EnvironmentToolCatalog.Entry read = entries.getFirst();
-    assertEquals(read, EnvironmentToolCatalog.find(new AgentToolId("base.read")).orElseThrow());
-    assertEquals(read, EnvironmentToolCatalog.require(new AgentToolId("base.read")));
+    assertEquals(read, EnvironmentToolCatalog.find(BaseToolIds.READ).orElseThrow());
+    assertEquals(read, EnvironmentToolCatalog.require(BaseToolIds.READ));
     assertTrue(EnvironmentToolCatalog.find(new AgentToolId("base.unknown")).isEmpty());
     assertThrows(
         IllegalArgumentException.class,

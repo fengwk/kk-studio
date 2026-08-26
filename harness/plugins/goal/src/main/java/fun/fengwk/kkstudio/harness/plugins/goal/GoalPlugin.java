@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginDescriptor;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginRegistrar;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 import java.util.Set;
@@ -14,9 +15,9 @@ public final class GoalPlugin implements HarnessPlugin {
 
   public static final PluginId ID = new PluginId("goal");
   public static final String STATE_TYPE = "state";
-  public static final AgentToolId CREATE_TOOL_ID = new AgentToolId("base.goal.create");
-  public static final AgentToolId GET_TOOL_ID = new AgentToolId("base.goal.get");
-  public static final AgentToolId UPDATE_TOOL_ID = new AgentToolId("base.goal.update");
+  public static final AgentToolId CREATE_TOOL_ID = BaseToolIds.GOAL_CREATE;
+  public static final AgentToolId GET_TOOL_ID = BaseToolIds.GOAL_GET;
+  public static final AgentToolId UPDATE_TOOL_ID = BaseToolIds.GOAL_UPDATE;
 
   private static final PluginDescriptor DESCRIPTOR =
       new PluginDescriptor(ID, "Goal", "2", Set.of());
