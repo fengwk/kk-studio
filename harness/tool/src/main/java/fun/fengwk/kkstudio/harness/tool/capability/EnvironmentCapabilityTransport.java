@@ -18,8 +18,9 @@ public interface EnvironmentCapabilityTransport {
    * -> terminal/cancel}，实现必须按 {@code PARTIAL* -> exactly one terminal} 顺序透传 listener 事件；远程 {@code
    * FAILED} 和 {@code CANCELLED} 分别透传为 {@link
    * EnvironmentCapabilityExecutionListener#onError(Throwable)} 携带 {@link
-   * EnvironmentCapabilityFailedException} 和 {@link EnvironmentCapabilityCancelledException}。返回句柄的
-   * cancel 请求必须透传为远程 cancel，partial 与 terminal 的顺序不得重排。
+   * EnvironmentCapabilityFailedException} 和 {@link
+   * EnvironmentCapabilityCancelledException}。terminal 之后到达的 late event 必须丢弃；返回句柄的 cancel 请求必须透传为远程
+   * cancel，partial 与 terminal 的顺序不得重排。
    *
    * @param binding 冻结的完整 Environment binding，不得为 null
    * @param request capability execution request

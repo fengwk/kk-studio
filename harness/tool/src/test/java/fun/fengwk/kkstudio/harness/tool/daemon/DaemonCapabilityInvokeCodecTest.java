@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
 
+import java.time.Duration;
+
 /** Daemon capability INVOKE payload 的 canonical 编解码和严格拒绝边界测试。 */
 class DaemonCapabilityInvokeCodecTest {
 
@@ -21,16 +23,14 @@ class DaemonCapabilityInvokeCodecTest {
   void encodesAllFieldsAndRoundTrips() {
     DaemonCapabilityInvokeCodec.InvokeRequest request =
         new DaemonCapabilityInvokeCodec.InvokeRequest(
-            EnvironmentCapabilityIds.FS_READ.value(),
+            EnvironmentCapabilityIds.FS_READ,
             "1",
             "src/main",
             "{ \"path\": \"README.md\" }",
-            0);
+            Duration.ZERO);
 
-    assertEquals(VALID, codec.encodeRequest(request));
-    assertEquals(request, codec.decodeRequest(VALID));
-    assertEquals(request, codec.decode(VALID));
     assertEquals(VALID, codec.encode(request));
+    assertEquals(request, codec.decode(VALID));
   }
 
   /** long 最大值和非 canonical workspace 都是 codec 可表达的合法边界；路径业务校验留给 Daemon。 */
@@ -38,33 +38,72 @@ class DaemonCapabilityInvokeCodecTest {
   void acceptsLongTimeoutAndOnlyRequiresNonBlankWorkspace() {
     DaemonCapabilityInvokeCodec.InvokeRequest request =
         new DaemonCapabilityInvokeCodec.InvokeRequest(
-            "fs.read", "version with spaces", "../outside", "{}", Long.MAX_VALUE);
+            EnvironmentCapabilityIds.FS_READ,
+            "version with spaces",
+            "../outside",
+            "{}",
+            Duration.ofMillis(Long.MAX_VALUE));
 
-    assertEquals(request, codec.decodeRequest(codec.encodeRequest(request)));
+    assertEquals(request, codec.decode(codec.encode(request)));
     assertEquals("../outside", request.workspacePath());
-    assertEquals(Long.MAX_VALUE, request.timeoutMillis());
+    assertEquals(Long.MAX_VALUE, request.timeout().toMillis());
   }
 
-  /** 记录构造器与 decode 共同拒绝 ID、版本、workspace 和 arguments 的非法形状。 */
+  /** typed record 构造器校验 null/blank、arguments object 和 timeout 基础值。 */
   @Test
   void rejectsInvalidRequestValues() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new DaemonCapabilityInvokeCodec.InvokeRequest("FS.READ", "1", ".", "{}", 0));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new DaemonCapabilityInvokeCodec.InvokeRequest("fs.read", "1", " ", "{}", 0));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new DaemonCapabilityInvokeCodec.InvokeRequest("fs.read", "1", ".", "[]", 0));
+        NullPointerException.class,
+        () -> new DaemonCapabilityInvokeCodec.InvokeRequest(null, "1", ".", "{}", Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new DaemonCapabilityInvokeCodec.InvokeRequest(
-                "fs.read", "1", ".", "{\"x\":1} trailing", 0));
+                EnvironmentCapabilityIds.FS_READ, " ", ".", "{}", Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new DaemonCapabilityInvokeCodec.InvokeRequest("fs.read", "1", ".", "{}", -1));
+        () ->
+            new DaemonCapabilityInvokeCodec.InvokeRequest(
+                EnvironmentCapabilityIds.FS_READ, "1", " ", "{}", Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonCapabilityInvokeCodec.InvokeRequest(
+                EnvironmentCapabilityIds.FS_READ, "1", ".", "[]", Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonCapabilityInvokeCodec.InvokeRequest(
+                EnvironmentCapabilityIds.FS_READ, "1", ".", "{\"x\":1} trailing", Duration.ZERO));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new DaemonCapabilityInvokeCodec.InvokeRequest(
+                EnvironmentCapabilityIds.FS_READ, "1", ".", "{}", null));
+  }
+
+  /** timeout 只接受非负的精确整毫秒，且毫秒值必须能表达为 wire long。 */
+  @Test
+  void rejectsNonMillisecondNegativeAndOverflowTimeouts() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonCapabilityInvokeCodec.InvokeRequest(
+                EnvironmentCapabilityIds.FS_READ, "1", ".", "{}", Duration.ofNanos(1)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonCapabilityInvokeCodec.InvokeRequest(
+                EnvironmentCapabilityIds.FS_READ, "1", ".", "{}", Duration.ofMillis(-1)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonCapabilityInvokeCodec.InvokeRequest(
+                EnvironmentCapabilityIds.FS_READ,
+                "1",
+                ".",
+                "{}",
+                Duration.ofSeconds(Long.MAX_VALUE)));
   }
 
   /** duplicate、trailing、unknown 和 missing 字段必须在 wire 边界拒绝，避免不同解释器分叉。 */
@@ -121,6 +160,6 @@ class DaemonCapabilityInvokeCodecTest {
   }
 
   private void assertInvalid(String json) {
-    assertThrows(DaemonProtocolException.class, () -> codec.decodeRequest(json), json);
+    assertThrows(DaemonProtocolException.class, () -> codec.decode(json), json);
   }
 }

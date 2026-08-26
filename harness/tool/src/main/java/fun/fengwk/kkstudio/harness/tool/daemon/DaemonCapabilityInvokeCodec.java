@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
 
+import java.time.Duration;
 import java.util.Iterator;
 import java.util.Objects;
 import java.util.Set;
@@ -28,25 +29,18 @@ import java.util.Set;
 public final class DaemonCapabilityInvokeCodec {
 
   public record InvokeRequest(
-      String capabilityId,
+      EnvironmentCapabilityId capabilityId,
       String capabilityVersion,
       String workspacePath,
-      String arguments,
-      long timeoutMillis) {
+      String argumentsJson,
+      Duration timeout) {
 
     public InvokeRequest {
-      capabilityId = canonicalCapabilityId(capabilityId);
+      capabilityId = Objects.requireNonNull(capabilityId, "capabilityId");
       capabilityVersion = requireNonBlank(capabilityVersion, "capabilityVersion");
       workspacePath = requireNonBlank(workspacePath, "workspacePath");
-      arguments = canonicalArguments(arguments);
-      if (timeoutMillis < 0) {
-        throw new IllegalArgumentException("timeoutMillis must not be negative");
-      }
-    }
-
-    /** 返回 wire {@code arguments} 对象的 canonical JSON 文本。 */
-    public String argumentsJson() {
-      return arguments;
+      argumentsJson = canonicalArguments(argumentsJson);
+      timeout = requireTimeout(timeout);
     }
   }
 
@@ -72,52 +66,32 @@ public final class DaemonCapabilityInvokeCodec {
   }
 
   /** 把 request 编码为字段顺序固定且不省略任何字段的 canonical JSON。 */
-  public String encodeRequest(InvokeRequest request) {
+  public String encode(InvokeRequest request) {
     Objects.requireNonNull(request, "request");
     ObjectNode root = MAPPER.createObjectNode();
-    root.put("capabilityId", request.capabilityId());
+    root.put("capabilityId", request.capabilityId().value());
     root.put("capabilityVersion", request.capabilityVersion());
     root.put("workspacePath", request.workspacePath());
-    root.set("arguments", readArguments(request.arguments()));
-    root.put("timeoutMillis", request.timeoutMillis());
+    root.set("arguments", readArguments(request.argumentsJson()));
+    root.put("timeoutMillis", request.timeout().toMillis());
     return write(root);
   }
 
-  /** {@link #encodeRequest(InvokeRequest)} 的简短别名。 */
-  public String encode(InvokeRequest request) {
-    return encodeRequest(request);
-  }
-
   /** 解码严格的 capability INVOKE payload。 */
-  public InvokeRequest decodeRequest(String json) {
+  public InvokeRequest decode(String json) {
     ObjectNode root = requiredObject(json);
     rejectUnknownFields(root);
     JsonNode arguments = requiredObjectField(root, "arguments");
     try {
       return new InvokeRequest(
-          requiredText(root, "capabilityId"),
+          new EnvironmentCapabilityId(requiredText(root, "capabilityId")),
           requiredText(root, "capabilityVersion"),
           requiredText(root, "workspacePath"),
           write(arguments),
-          requiredNonNegativeLong(root, "timeoutMillis"));
+          Duration.ofMillis(requiredNonNegativeLong(root, "timeoutMillis")));
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
           "capability INVOKE payload validation failed: " + error.getMessage(), error);
-    }
-  }
-
-  /** {@link #decodeRequest(String)} 的简短别名。 */
-  public InvokeRequest decode(String json) {
-    return decodeRequest(json);
-  }
-
-  private static String canonicalCapabilityId(String value) {
-    value = requireNonBlank(value, "capabilityId");
-    try {
-      return new EnvironmentCapabilityId(value).value();
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          "capabilityId must be a canonical Environment Capability ID", error);
     }
   }
 
@@ -196,6 +170,22 @@ public final class DaemonCapabilityInvokeCodec {
   private static String requireNonBlank(String value, String field) {
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException(field + " must not be blank");
+    }
+    return value;
+  }
+
+  private static Duration requireTimeout(Duration value) {
+    value = Objects.requireNonNull(value, "timeout");
+    if (value.isNegative()) {
+      throw new IllegalArgumentException("timeout must not be negative");
+    }
+    if (value.getNano() % 1_000_000 != 0) {
+      throw new IllegalArgumentException("timeout must be an exact number of milliseconds");
+    }
+    try {
+      value.toMillis();
+    } catch (ArithmeticException error) {
+      throw new IllegalArgumentException("timeout milliseconds overflow long", error);
     }
     return value;
   }

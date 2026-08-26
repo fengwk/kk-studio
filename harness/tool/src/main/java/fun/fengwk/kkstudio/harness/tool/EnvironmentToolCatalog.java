@@ -16,12 +16,10 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * The single source of truth for the fixed tools provided by every Environment Daemon.
+ * Defines model-visible environment-backed Agent Tools.
  *
- * <p>Model-visible descriptor metadata and prompt text are deliberately defined in the
- * dependency-free {@code harness/tool} module. Input schema and timeout are reused from {@link
- * EnvironmentCapabilityCatalog}; Core uses the catalog for validation and planning, while Daemon
- * implementations use the same descriptors for registration and wire checks.
+ * <p>This catalog owns Agent Tool names, model prompt metadata and selectable visibility. Daemon
+ * implementation, registration and wire contracts use {@link EnvironmentCapabilityCatalog}.
  */
 public final class EnvironmentToolCatalog {
 

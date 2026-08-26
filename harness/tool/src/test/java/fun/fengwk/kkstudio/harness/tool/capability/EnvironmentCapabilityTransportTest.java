@@ -40,7 +40,7 @@ class EnvironmentCapabilityTransportTest {
           Duration.ZERO,
           null);
 
-  /** 多个 partial 必须按 FIFO 顺序透传，terminal 后不再产生第二个事件，cancel 必须幂等。 */
+  /** 多个 partial 必须按 FIFO 顺序透传，FakeTransport 的 terminal fence 丢弃 late event，cancel 必须幂等。 */
   @Test
   void forwardsOrderedPartialsTerminalAndCancel() {
     FakeTransport transport = new FakeTransport(Mode.STREAM);
@@ -126,14 +126,18 @@ class EnvironmentCapabilityTransportTest {
 
       invoked = true;
       AtomicBoolean cancelled = new AtomicBoolean();
+      EnvironmentCapabilityExecutionListener fencedListener = new TerminalFence(listener);
       if (mode == Mode.STREAM) {
-        listener.onPartial(result("partial-1"));
-        listener.onPartial(result("partial-2"));
-        listener.onComplete(result("complete"));
+        fencedListener.onPartial(result("partial-1"));
+        fencedListener.onPartial(result("partial-2"));
+        fencedListener.onComplete(result("complete"));
+        fencedListener.onPartial(result("late-partial"));
+        fencedListener.onComplete(result("duplicate-complete"));
+        fencedListener.onError(new EnvironmentCapabilityFailedException("duplicate-failed"));
       } else if (mode == Mode.FAILED) {
-        listener.onError(new EnvironmentCapabilityFailedException("failed"));
+        fencedListener.onError(new EnvironmentCapabilityFailedException("failed"));
       } else {
-        listener.onError(new EnvironmentCapabilityCancelledException("cancelled"));
+        fencedListener.onError(new EnvironmentCapabilityCancelledException("cancelled"));
       }
       return new EnvironmentCapabilityExecutionHandle() {
         @Override
@@ -146,6 +150,39 @@ class EnvironmentCapabilityTransportTest {
           return cancelled.get();
         }
       };
+    }
+
+    /** Fake 内只实现 transport contract 所需的最小 terminal fence；它不替生产 transport 提供实现。 */
+    private static final class TerminalFence implements EnvironmentCapabilityExecutionListener {
+      private final EnvironmentCapabilityExecutionListener delegate;
+      private boolean terminal;
+
+      private TerminalFence(EnvironmentCapabilityExecutionListener delegate) {
+        this.delegate = delegate;
+      }
+
+      @Override
+      public void onPartial(EnvironmentCapabilityResult partial) {
+        if (!terminal) {
+          delegate.onPartial(partial);
+        }
+      }
+
+      @Override
+      public void onComplete(EnvironmentCapabilityResult result) {
+        if (!terminal) {
+          terminal = true;
+          delegate.onComplete(result);
+        }
+      }
+
+      @Override
+      public void onError(Throwable error) {
+        if (!terminal) {
+          terminal = true;
+          delegate.onError(error);
+        }
+      }
     }
 
     private EnvironmentCapabilityResult result(String text) {
