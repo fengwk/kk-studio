@@ -983,6 +983,7 @@ class PlatformToolGatewayCallbackTest {
     assertEquals(1, run.listener.terminalInvocations.get());
   }
 
+  /** Capability 重构不可退化的 fitness gate：Environment callback bridge 必须按到达顺序完整重放多个 PARTIAL。 */
   @Test
   void bufferedSignalsUpToLimitAreReplayedOnActivation() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
@@ -1008,8 +1009,13 @@ class PlatformToolGatewayCallbackTest {
     startedResult.handle().activate();
     listener.awaitCount(PlatformToolGateway.MAX_BUFFERED_SIGNALS);
     assertEquals(0, listener.terminalInvocations.get(), "partials are never terminals");
-    for (ToolGatewayTestSupport.RecordingListener.Event event : listener.events) {
-      assertInstanceOf(ToolGatewayTestSupport.RecordingListener.Event.Partial.class, event);
+    for (int index = 0; index < listener.events.size(); index++) {
+      ToolGatewayTestSupport.RecordingListener.Event.Partial partial =
+          assertInstanceOf(
+              ToolGatewayTestSupport.RecordingListener.Event.Partial.class,
+              listener.events.get(index));
+      assertEquals(
+          "progress-" + index, ((TextToolContent) partial.partial().contents().get(0)).text());
     }
     assertTrue(store.puts.isEmpty());
   }

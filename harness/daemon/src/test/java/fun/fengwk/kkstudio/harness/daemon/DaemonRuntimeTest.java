@@ -13,6 +13,7 @@ import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.STARTED;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1184,6 +1185,53 @@ class DaemonRuntimeTest {
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
+  }
+
+  /**
+   * Capability 重构不可退化的 fitness gate：daemon wire 必须按序发送两个 PARTIAL，再发送唯一 COMPLETED，并保留
+   * invocation/call id。
+   */
+  @Test
+  void streamsMultiplePartialsBeforeCompletionOnWire() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+    String invocationId = "streaming-invocation";
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+    transport.receive(invoke(invocationId, 1));
+    tool.partial(
+        new ToolResult(invocationId, List.of(new TextToolContent("partial1")), false, "{}"));
+    tool.partial(
+        new ToolResult(invocationId, List.of(new TextToolContent("partial2")), false, "{}"));
+    tool.complete(
+        new ToolResult(invocationId, List.of(new TextToolContent("complete")), false, "{}"));
+
+    List<DaemonEnvelope> messages = transport.takeMessages(5);
+    assertMessageTypes(messages, ACK, STARTED, PARTIAL, PARTIAL, COMPLETED);
+    assertNull(messages.get(0).invocationId());
+    for (int index = 1; index < messages.size(); index++) {
+      assertEquals(invocationId, messages.get(index).invocationId());
+    }
+    assertEquals(1, codec.readPayload(messages.get(0)).path("acknowledgedSequence").asLong());
+    assertTrue(codec.readPayload(messages.get(1)).isEmpty());
+
+    DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
+    List<ToolResult> results =
+        messages.subList(2, 5).stream()
+            .map(message -> resultCodec.decodeResult(message.payloadJson()))
+            .toList();
+    assertEquals(
+        List.of(invocationId, invocationId, invocationId),
+        results.stream().map(ToolResult::toolCallId).toList());
+    assertEquals(
+        List.of("partial1", "partial2", "complete"),
+        results.stream()
+            .map(result -> ((TextToolContent) result.contents().get(0)).text())
+            .toList());
   }
 
   /** wire resource 必须包含 Base64 字节，使接收端可独立持久化；终端 payload 自包含，不依赖连接内映射。 */
