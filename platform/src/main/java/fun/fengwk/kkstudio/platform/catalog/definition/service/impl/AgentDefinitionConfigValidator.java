@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.util.List;
@@ -12,10 +12,10 @@ import java.util.Objects;
 @Component
 final class AgentDefinitionConfigValidator {
 
-  private final ToolCatalog toolCatalog;
+  private final AgentToolRegistry toolRegistry;
 
-  AgentDefinitionConfigValidator(ToolCatalog toolCatalog) {
-    this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
+  AgentDefinitionConfigValidator(AgentToolRegistry toolRegistry) {
+    this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
   }
 
   void validate(AgentDefinitionConfigDTO config) {
@@ -27,11 +27,11 @@ final class AgentDefinitionConfigValidator {
 
   private void validateTools(List<String> names) {
     for (String name : names) {
-      if (toolCatalog.findInternal(name).isPresent()) {
+      if (toolRegistry.findInternal(name).isPresent()) {
         throw new IllegalArgumentException(
             "internal platform tool cannot be selected by an Agent: " + name);
       }
-      if (toolCatalog.findSelectable(name).isEmpty()) {
+      if (toolRegistry.findSelectable(name).isEmpty()) {
         throw new IllegalArgumentException("unknown agent tool: " + name);
       }
     }

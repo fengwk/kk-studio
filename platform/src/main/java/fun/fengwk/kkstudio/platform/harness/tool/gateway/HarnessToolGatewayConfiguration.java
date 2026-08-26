@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
-import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Clock;
@@ -58,7 +58,7 @@ public class HarnessToolGatewayConfiguration {
   @ConditionalOnBean(ResourceStore.class)
   @ConditionalOnMissingBean(ToolGateway.class)
   public PlatformToolGateway platformToolGateway(
-      ToolContributionCatalog toolContributionCatalog,
+      AgentToolRegistry toolRegistry,
       PluginCatalog pluginCatalog,
       PluginBranchViewLoader pluginBranchViewLoader,
       RemoteToolTransport remoteTransport,
@@ -76,7 +76,7 @@ public class HarnessToolGatewayConfiguration {
     int resourceMaxBytes =
         Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     return new PlatformToolGateway(
-        toolContributionCatalog,
+        toolRegistry,
         pluginCatalog,
         pluginBranchViewLoader,
         remoteTransport,

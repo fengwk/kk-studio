@@ -224,17 +224,18 @@ Provider callback 经 `BridgingHandler`进入单一 FIFO drainer，队列上限 
 迟到/重复信号全部丢弃；队列溢出、未知 transport 异常或非 terminal listener 异常统一以一次 `UNKNOWN`收敛；
 terminal listener 异常只记录日志，不发第二个 terminal。terminal、cancel 和提交失败共享幂等 permit release。
 
-### PlatformToolGateway、ToolContributionCatalog 与 plugin source
+### PlatformToolGateway、AgentToolRegistry 与 plugin source
 
-`ToolContributionCatalog`把本地 `ToolFactory`和 `PluginCatalog`中的 Tool contribution 合并成一份不可变
-Platform directory：
+`AgentToolRegistry`把本地 `ToolFactory`、`PluginCatalog`中的 Tool contribution 和固定
+`EnvironmentToolCatalog.entries()` 合并成一份不可变 Platform directory：
 
 - 本地 factory 必须声明 `HOST` backend 的 `AgentToolDefinition` 和 `ToolType.PLATFORM`，entry 暴露稳定 `AgentToolId`，排序 identity 是 `core:name@version`。
 - 插件 entry 必须声明 `PLUGIN` backend 的 `AgentToolDefinition`，暴露稳定 `AgentToolId`；entry identity 是 `plugin:ContributionId`，保留 plugin provenance、priority 和 state access declaration。
+- Environment entry 必须声明 `ENVIRONMENT_CAPABILITY` backend，保留 `EnvironmentCapabilityId`；它们按固定 Environment catalog 顺序追加。
 - Host 与 Plugin 的 `AgentToolId` 共享全局命名空间；重复 `AgentToolId` 或 model-visible name 直接失败。
 - 排序先满足 plugin `requires` 的传递拓扑序，再按 priority 降序和 identity 字典序；重复 name 或依赖环直接失败。
-- `find(name, version)`是 durable binding 恢复路径；本地重新 `factory.create()`后必须完整 descriptor equality。
-- `toToolCatalog()`派生 selectable/internal catalog；Environment fixed catalog 不与 Platform factory 混淆。
+- `find(name, version)`和 `find(AgentToolId)`返回 registry 的冻结 Entry；本地通过 `createHostTool` 重新 `factory.create()`后必须完整 descriptor equality。
+- `selectableEntries()`、`findSelectable`和`findInternal`共享同一份冻结索引，Environment 不再由调用方二次查找固定 catalog。
 
 `HarnessPluginSource`只是 `List<HarnessPlugin> plugins()`的启动快照 port。Platform 接收已冻结的
 `PluginCatalog`，不读取目录、不创建 classloader、不提供 refresh。Web 组合根负责把 built-in plugin 与 trusted JAR
@@ -248,7 +249,7 @@ workdir 生成 `ALLOW`、`ASK`或`DENY`，不改写 binding/arguments，也不�
 | --- | --- |
 | `PLATFORM` local | 精确匹配 name/version/descriptor 后提交 virtual-thread executor |
 | `PLATFORM` plugin | 精确匹配 `ContributionId`、descriptor、state access，执行声明式 intent |
-| `ENVIRONMENT` | 精确匹配 fixed daemon descriptor，检查 READY/active slot 后经 `RemoteToolTransport`发送 |
+| `ENVIRONMENT` | 精确匹配 registry 的 definition/capability mapping，检查 READY/active slot 后经 `RemoteToolTransport`发送 |
 
 local executor 明确拒绝返回 `Overloaded`，提交不确定返回 `Indeterminate(EXECUTION_FAILED)`。Environment 在发送前
 不可用返回 `Rejected(UNAVAILABLE)`，同 Environment active 返回 `Busy`，发送不确定返回
@@ -269,12 +270,12 @@ Plugin Tool 的 `AppendCustomEntry` intent 必须属于自身 plugin、命中已
 
 1. 当前 Agent、Model、Provider、Variant 和 ProviderFactory；
 2. 当前 Environment context；
-3. Agent config 中的 selectable tools；
+3. Agent config 中的 registry selectable tools；
 4. skills、subagents 和内部 `load_skill`/`task`；
 5. plugin context projector、system prompt、cache control、context window 和 output budget。
 
 Agent 配置有 skills 时追加 `LoadSkillTool`；subagents 非空且 Session depth 小于
-`SubagentConfig.maxDepth`时追加 `TaskTool`。每个 tool 都精确恢复 descriptor；Environment tool 使用 branch 当前
+`SubagentConfig.maxDepth`时追加 `TaskTool`。每个 tool 都从 registry 精确恢复 descriptor；Environment tool 使用 branch 当前
 完整 Environment binding。Skill 必须由当前选中的 live Environment 提供，且 Environment 必须 READY；缺失、未 READY、
 能力或 Model 不支持时返回统一 `AssistantError.code=PLANNING_FAILED`。Repository/registry 基础设施异常向上抛出，由
 ThreadProcessor 按 runtime policy reschedule。
@@ -475,6 +476,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 ### 组合与 schema
 
 - `platform/src/main/java/fun/fengwk/kkstudio/platform/PlatformAutoConfiguration.java`
+- `platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry.java`
 - `platform/pom.xml`
 - `schema/pom.xml`
 - `schema/src/main/resources/db/migration/V1__schema.sql`
@@ -489,6 +491,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/PlatformPackageArchitectureTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/PlatformArchitectureTest.java`
+- `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/AgentToolRegistryArchitectureTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/ProviderTypeArchitectureTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/HarnessExecutionAdmissionArchitectureTest.java`
 - `platform/src/test/java/fun/fengwk/kkstudio/platform/PlatformTestApplication.java`
@@ -504,7 +507,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
 - Model/Provider：`PlatformModelGatewayTest`、`DatabaseProviderResolutionServiceIntegrationTest`、
   `ProviderAdapterContractTest`、Provider error/stop-reason/terminal normalization tests。
 - Tool/plugin：`PlatformToolGatewayAdmissionTest`、`PlatformToolGatewayCallbackTest`、
-  `PlatformToolGatewayPluginTest`、`ToolContributionCatalogTest`、`GlobalStorageToolResultHistoryMaterializerTest`。
+  `PlatformToolGatewayPluginTest`、`AgentToolRegistryTest`、`GlobalStorageToolResultHistoryMaterializerTest`。
 - Resolver/materialization：`DatabaseTurnResolverTest`、`AgentBranchSettingsMaterializerTest`、
   `AgentPromptComposerTest`、`DatabaseThreadSelectedSkillLookupTest`、`EnvironmentSkillBodyLoaderTest`。
 - Canvas/ComfyUI：`PlatformCanvasCommandServiceTest`、`PlatformCanvasResourceLifecycleTest`、

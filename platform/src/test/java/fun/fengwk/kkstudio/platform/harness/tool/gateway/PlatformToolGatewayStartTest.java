@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
@@ -458,7 +458,7 @@ class PlatformToolGatewayStartTest {
   void factoryCreatingMismatchedToolIsRejectedAsInvalidRequest() {
     ToolDescriptor drifted = platformDriftedDescriptor("2");
     var factories =
-        new ToolContributionCatalog(
+        new AgentToolRegistry(
             List.of(
                 new ToolFactory() {
                   @Override
@@ -475,7 +475,8 @@ class PlatformToolGatewayStartTest {
                     return new ToolGatewayTestSupport.FakeTool(drifted);
                   }
                 }),
-            PluginCatalog.from(List.of()));
+            PluginCatalog.from(List.of()),
+            EnvironmentToolCatalog.entries());
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
             factories,

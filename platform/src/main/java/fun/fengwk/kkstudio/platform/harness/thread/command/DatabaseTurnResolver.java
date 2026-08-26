@@ -39,10 +39,9 @@ import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
@@ -61,7 +60,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
-import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
@@ -100,15 +99,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final ProviderFactories providerFactories;
-  private final ToolCatalog toolCatalog;
-  private final ToolContributionCatalog toolContributionCatalog;
+  private final AgentToolRegistry toolRegistry;
   private final PluginCatalog pluginCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
   private final SystemSettingsSnapshot snapshot;
   private final CompactionConfigProvider compactionConfigProvider;
   private final SubagentConfigProvider subagentConfigProvider;
   private final AgentPromptComposer promptComposer;
-  private final TaskTool taskTool;
   private final Clock clock;
   private final ProviderMessageProjector messageProjector;
   private final ToolDescriptorJsonCodec toolDescriptorCodec;
@@ -121,15 +118,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentDefinitionConfigCodec agentConfigCodec,
       AgentModelRuntimeConfigParser modelConfigParser,
       ProviderFactories providerFactories,
-      ToolCatalog toolCatalog,
-      ToolContributionCatalog toolContributionCatalog,
+      AgentToolRegistry toolRegistry,
       PluginCatalog pluginCatalog,
       LiveEnvironmentRegistry environmentRegistry,
       SystemSettingsSnapshot snapshot,
       CompactionConfigProvider compactionConfigProvider,
       SubagentConfigProvider subagentConfigProvider,
       AgentPromptComposer promptComposer,
-      TaskTool taskTool,
       Clock clock) {
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
@@ -138,9 +133,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
-    this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
-    this.toolContributionCatalog =
-        Objects.requireNonNull(toolContributionCatalog, "toolContributionCatalog");
+    this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
     this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
@@ -149,7 +142,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.subagentConfigProvider =
         Objects.requireNonNull(subagentConfigProvider, "subagentConfigProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
-    this.taskTool = Objects.requireNonNull(taskTool, "taskTool");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.messageProjector = new ProviderMessageProjector();
     this.toolDescriptorCodec = new ToolDescriptorJsonCodec();
@@ -404,34 +396,28 @@ public final class DatabaseTurnResolver implements TurnResolver {
       BranchSettings settings, List<String> activeTools, boolean subagentDelegationEnabled) {
     List<ToolBinding> bindings = new ArrayList<>(activeTools.size());
     for (String name : activeTools) {
-      if (name.equals(TaskTool.NAME)) {
-        if (!subagentDelegationEnabled) {
-          throw rejection(
-              "task requires a non-empty Agent subagents allowlist below the maximum depth");
+      if (name.equals(TaskTool.NAME) && !subagentDelegationEnabled) {
+        throw rejection(
+            "task requires a non-empty Agent subagents allowlist below the maximum depth");
+      }
+      Optional<AgentToolRegistry.Entry> selectable = toolRegistry.findSelectable(name);
+      if (selectable.isPresent()) {
+        AgentToolRegistry.Entry entry = selectable.get();
+        if (entry.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY) {
+          bindings.add(
+              new ToolBinding(
+                  entry.definition().descriptor(),
+                  ToolType.ENVIRONMENT,
+                  settings.environment(),
+                  null));
+        } else {
+          bindings.add(platformBinding(entry));
         }
-        // task descriptor 每次现拼（当前 maxTurns 渲染），不使用 ToolCatalog 启动快照。
-        bindings.add(platformBinding(taskTool.descriptor()));
         continue;
       }
-      Optional<ToolDescriptor> selectable = toolCatalog.findSelectable(name);
-      if (selectable.isPresent() && selectable.get().type() == ToolType.PLATFORM) {
-        bindings.add(platformBinding(selectable.get()));
-        continue;
-      }
-      Optional<ToolDescriptor> internal = toolCatalog.findInternal(name);
+      Optional<AgentToolRegistry.Entry> internal = toolRegistry.findInternal(name);
       if (internal.isPresent()) {
         bindings.add(platformBinding(internal.get()));
-        continue;
-      }
-      // selectable catalog 合并了 Environment 工具；ENVIRONMENT 工具由固定 catalog 精确提供。
-      Optional<ToolDescriptor> environmentTool =
-          selectable
-              .filter(descriptor -> descriptor.type() == ToolType.ENVIRONMENT)
-              .or(() -> EnvironmentToolCatalog.find(name));
-      if (environmentTool.isPresent()) {
-        bindings.add(
-            new ToolBinding(
-                environmentTool.get(), ToolType.ENVIRONMENT, settings.environment(), null));
         continue;
       }
       throw rejection("tool not found: " + name);
@@ -439,17 +425,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return List.copyOf(bindings);
   }
 
-  private ToolBinding platformBinding(ToolDescriptor descriptor) {
-    if (descriptor.name().equals(TaskTool.NAME)) {
+  private ToolBinding platformBinding(AgentToolRegistry.Entry entry) {
+    ToolDescriptor descriptor = entry.definition().descriptor();
+    if (entry.definition().backend() == AgentToolBackend.HOST) {
       return new ToolBinding(descriptor, ToolType.PLATFORM, null, null);
     }
-    ToolContributionCatalog.Entry entry =
-        toolContributionCatalog.find(descriptor.name(), descriptor.version()).orElse(null);
-    if (entry == null) {
+    if (entry.definition().backend() != AgentToolBackend.PLUGIN
+        || entry.pluginContribution() == null) {
       throw rejection("platform tool not found: " + descriptor.name() + "@" + descriptor.version());
-    }
-    if (!entry.isPlugin()) {
-      return new ToolBinding(descriptor, ToolType.PLATFORM, null, null);
     }
     ToolContribution contribution = entry.pluginContribution();
     List<PluginStateAccess> stateAccesses = new ArrayList<>(contribution.stateAccesses().size());
