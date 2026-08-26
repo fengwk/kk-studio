@@ -38,7 +38,7 @@ class EnvironmentCapabilityContractTest {
 
   private static final EnvironmentCapabilityDescriptor DESCRIPTOR =
       new EnvironmentCapabilityDescriptor(
-          new EnvironmentCapabilityId("filesystem.read"), "1.0.0", SCHEMA, Duration.ofSeconds(10));
+          new EnvironmentCapabilityId("fs.read"), "1.0.0", SCHEMA, Duration.ofSeconds(10));
 
   /** 反射锁定 capability descriptor 只有执行所需字段，不引入模型展示、renderer 或权限元数据。 */
   @Test
@@ -67,21 +67,18 @@ class EnvironmentCapabilityContractTest {
     assertEquals(
         Duration.ZERO,
         new EnvironmentCapabilityDescriptor(
-                new EnvironmentCapabilityId("filesystem.read"), "1", SCHEMA, Duration.ZERO)
+                new EnvironmentCapabilityId("fs.read"), "1", SCHEMA, Duration.ZERO)
             .timeout());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EnvironmentCapabilityDescriptor(
-                new EnvironmentCapabilityId("filesystem.read"), " ", SCHEMA, Duration.ZERO));
+                new EnvironmentCapabilityId("fs.read"), " ", SCHEMA, Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EnvironmentCapabilityDescriptor(
-                new EnvironmentCapabilityId("filesystem.read"),
-                "1",
-                SCHEMA,
-                Duration.ofSeconds(-1)));
+                new EnvironmentCapabilityId("fs.read"), "1", SCHEMA, Duration.ofSeconds(-1)));
   }
 
   /** filePath 别名经过现有归一化器改为 schema 声明的 path，且原调用保持不变。 */
