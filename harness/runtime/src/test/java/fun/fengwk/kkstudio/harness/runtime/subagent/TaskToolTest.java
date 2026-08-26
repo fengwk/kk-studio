@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -174,11 +175,19 @@ class TaskToolTest {
     return tool(cfg, new SubagentRunRegistry());
   }
 
+  private TaskTool tool(SubagentConfigProvider provider) {
+    return tool(provider, new SubagentRunRegistry());
+  }
+
   private TaskTool tool(SubagentConfig cfg, SubagentRunRegistry registry) {
+    return tool(() -> cfg, registry);
+  }
+
+  private TaskTool tool(SubagentConfigProvider provider, SubagentRunRegistry registry) {
     return new TaskTool(
         () -> runtime,
         settingsMaterializer,
-        () -> cfg,
+        provider,
         registry,
         changeSource,
         executor,
@@ -205,6 +214,13 @@ class TaskToolTest {
             .properties()
             .get("maxTurns")
             .description()
+            .contains("Defaults to the current subagent policy when omitted"),
+        schema.properties().get("maxTurns").description());
+    assertFalse(
+        schema
+            .properties()
+            .get("maxTurns")
+            .description()
             .contains("Defaults to " + DEFAULT_MAX_TURNS),
         schema.properties().get("maxTurns").description());
     assertFalse(schema.description().isBlank());
@@ -216,6 +232,28 @@ class TaskToolTest {
     assertInstanceOf(ToolStringSchema.class, schema.properties().get("session_id"));
     assertEquals(Set.of("subagent_type", "prompt"), schema.required());
     assertFalse(schema.additionalProperties());
+  }
+
+  /** descriptor 不读取 live policy；配置变化前后返回同一个冻结值，避免 equality 随运行期设置失效。 */
+  @Test
+  void keepsDescriptorStableAcrossPolicyChangesWithoutReadingProvider() {
+    AtomicReference<SubagentConfig> liveConfig =
+        new AtomicReference<>(config(2, 10, Duration.ZERO, DEFAULT_MAX_TURNS));
+    AtomicInteger providerReads = new AtomicInteger();
+    TaskTool configuredTool =
+        tool(
+            () -> {
+              providerReads.incrementAndGet();
+              return liveConfig.get();
+            });
+
+    var before = configuredTool.descriptor();
+    liveConfig.set(config(2, 10, Duration.ZERO, 13));
+    var after = configuredTool.descriptor();
+
+    assertEquals(before, after);
+    assertSame(before, after);
+    assertEquals(0, providerReads.get());
   }
 
   /** 缺失 durable context 的执行请求在提交前同步拒绝，listener 不被触碰。 */
@@ -1282,11 +1320,16 @@ class TaskToolTest {
     assertEquals(1, changeSource.totalClosed());
   }
 
-  /** maxTurns 软预算：达到后每 5 轮入队一次 system reminder，入队冲突只跳过本轮提醒。 */
+  /** 省略 maxTurns 时使用执行期最新 policy；达到预算后每 5 轮提醒一次，冲突只跳过本轮。 */
   @Test
-  void sendsMaxTurnsRemindersEveryFiveTurns() throws Exception {
+  void usesLatestDefaultMaxTurnsForReminders() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
+    AtomicReference<SubagentConfig> liveConfig =
+        new AtomicReference<>(config(2, 10, Duration.ZERO, DEFAULT_MAX_TURNS));
+    TaskTool liveTool = tool(liveConfig::get);
+    liveTool.descriptor();
+    liveConfig.set(config(2, 10, Duration.ZERO, 3));
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
@@ -1317,9 +1360,8 @@ class TaskToolTest {
             });
     RecordingListener listener = new RecordingListener();
 
-    tool.execute(
-        request(
-            "call-remind", "{\"subagent_type\":\"reviewer\",\"prompt\":\"Work\",\"maxTurns\":3}"),
+    liveTool.execute(
+        request(liveTool, "call-remind", "{\"subagent_type\":\"reviewer\",\"prompt\":\"Work\"}"),
         listener);
 
     ToolResult result = listener.completed.get(5, TimeUnit.SECONDS);
@@ -1909,8 +1951,12 @@ class TaskToolTest {
   }
 
   private ToolExecutionRequest request(String callId, String argumentsJson) {
+    return request(tool, callId, argumentsJson);
+  }
+
+  private ToolExecutionRequest request(TaskTool requestTool, String callId, String argumentsJson) {
     return new ToolExecutionRequest(
-        tool.descriptor(),
+        requestTool.descriptor(),
         new ToolCall(callId, TaskTool.NAME, argumentsJson),
         Duration.ZERO,
         new ToolExecutionContext(TASK_INVOCATION_ID, PARENT_THREAD_ID));
