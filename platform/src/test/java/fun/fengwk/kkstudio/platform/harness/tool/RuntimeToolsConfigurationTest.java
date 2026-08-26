@@ -18,6 +18,9 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -44,6 +47,10 @@ import java.util.concurrent.TimeUnit;
  * 的五个 subagent 字段完整映射为 {@link SubagentConfig}。纯 JUnit 单元测试：不启动 Spring/Postgres，直接构造 provider 现读。
  */
 class RuntimeToolsConfigurationTest {
+
+  private static final AgentToolId LOAD_SKILL_TOOL_ID = new AgentToolId("test.load-skill");
+  private static final AgentToolId TASK_TOOL_ID = new AgentToolId("test.task");
+  private static final AgentToolId PLUGIN_TOOL_ID = new AgentToolId("test.plugin-internal");
 
   @Test
   void subagentConfigMapsAllFiveAiRuntimeFields() {
@@ -130,12 +137,16 @@ class RuntimeToolsConfigurationTest {
     ToolDescriptor loadSkill = descriptor("load_skill");
     ToolDescriptor task = descriptor("task");
     ToolFactory loadSkillFactory = mock(ToolFactory.class);
-    when(loadSkillFactory.descriptor()).thenReturn(loadSkill);
-    when(loadSkillFactory.visibility()).thenReturn(ToolVisibility.INTERNAL);
+    when(loadSkillFactory.definition())
+        .thenReturn(
+            new AgentToolDefinition(
+                LOAD_SKILL_TOOL_ID, loadSkill, ToolVisibility.INTERNAL, AgentToolBackend.HOST));
     when(loadSkillFactory.priority()).thenReturn(0);
     ToolFactory taskFactory = mock(ToolFactory.class);
-    when(taskFactory.descriptor()).thenReturn(task);
-    when(taskFactory.visibility()).thenReturn(ToolVisibility.INTERNAL);
+    when(taskFactory.definition())
+        .thenReturn(
+            new AgentToolDefinition(
+                TASK_TOOL_ID, task, ToolVisibility.INTERNAL, AgentToolBackend.HOST));
     when(taskFactory.priority()).thenReturn(0);
 
     ToolDescriptor pluginDescriptor = descriptor("plugin-internal");
@@ -155,7 +166,8 @@ class RuntimeToolsConfigurationTest {
         HarnessPlugin.of(
             new PluginDescriptor(new PluginId("admission"), "Admission", "1", Set.of()),
             registrar ->
-                registrar.registerTool("plugin-internal", pluginTool, ToolVisibility.INTERNAL));
+                registrar.registerTool(
+                    "plugin-internal", PLUGIN_TOOL_ID, pluginTool, ToolVisibility.INTERNAL));
 
     ToolContributionCatalog contributions =
         new ToolContributionCatalog(

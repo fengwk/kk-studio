@@ -57,12 +57,12 @@ void contribute(PluginRegistrar registrar);
 [`PluginRegistrar`](../../harness/plugin-api/src/main/java/fun/fengwk/kkstudio/harness/plugin/api/PluginRegistrar.java) 只有三个扩展点：
 
 ```text
-registerTool(localName, PluginTool, visibility, priority)
+registerTool(localName, agentToolId, PluginTool, visibility, priority)
 registerCustomEntryType(localName, customType, priority)
 registerContextProjector(localName, ContextProjector, priority)
 ```
 
-`localName` 只在所属 plugin 内跨三种 contribution 类型共享唯一性；不同 plugin 可以使用同名 localName。Tool name 在全局唯一，plugin tool 必须是 `ToolType.PLATFORM`。Custom entry ownership 是 `(pluginId, customType)`，不同 plugin 可以各自拥有同名 customType。
+`registerTool` 还必须显式传入跨 Host/Plugin 全局唯一的 `AgentToolId`；`localName` 只在所属 plugin 内跨三种 contribution 类型共享唯一性，不同 plugin 可以使用同名 localName。Tool name 在全局唯一，plugin tool 必须是 `ToolType.PLATFORM`，冻结后的 `ToolContribution` 携带 `PLUGIN` backend 的 `AgentToolDefinition`。Custom entry ownership 是 `(pluginId, customType)`，不同 plugin 可以各自拥有同名 customType。
 
 ### PluginCatalog、requires DAG 与冻结顺序
 
@@ -79,7 +79,7 @@ registerContextProjector(localName, ContextProjector, priority)
 
 requires 图非法时，任何 contributor 都不会被调用。descriptor 输入顺序不影响最终顺序；catalog 完成后 `descriptors()`、`tools()`、`customEntryTypes()` 和 `contextProjectors()` 都是不可变列表。`transitiveRequires(pluginId)` 暴露不可变传递依赖集合，依赖中间 plugin 即使没有某个扩展点 contribution，也不会打破 contribution 的依赖偏序。
 
-重复 plugin id、缺失 dependency、cycle、同 plugin 重复 localName、全局重复 Tool name、同 plugin 重复 `(customType)`、未注册 state type、重复 state access、非 PLATFORM descriptor 均在冻结阶段失败。
+重复 plugin id、缺失 dependency、cycle、同 plugin 重复 localName、全局重复 AgentToolId/Tool name、同 plugin 重复 `(customType)`、未注册 state type、重复 state access、非 PLATFORM descriptor 均在冻结阶段失败。
 
 ### BranchView 与 state access
 

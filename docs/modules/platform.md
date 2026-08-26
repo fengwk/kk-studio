@@ -229,10 +229,11 @@ terminal listener 异常只记录日志，不发第二个 terminal。terminal、
 `ToolContributionCatalog`把本地 `ToolFactory`和 `PluginCatalog`中的 Tool contribution 合并成一份不可变
 Platform directory：
 
-- 本地 factory 必须声明 `ToolType.PLATFORM`，identity 是 `core:name@version`。
-- 插件 entry identity 是 `plugin:ContributionId`，保留 plugin provenance、priority 和 state access declaration。
+- 本地 factory 必须声明 `HOST` backend 的 `AgentToolDefinition` 和 `ToolType.PLATFORM`，entry 暴露稳定 `AgentToolId`，排序 identity 是 `core:name@version`。
+- 插件 entry 必须声明 `PLUGIN` backend 的 `AgentToolDefinition`，暴露稳定 `AgentToolId`；entry identity 是 `plugin:ContributionId`，保留 plugin provenance、priority 和 state access declaration。
+- Host 与 Plugin 的 `AgentToolId` 共享全局命名空间；重复 `AgentToolId` 或 model-visible name 直接失败。
 - 排序先满足 plugin `requires` 的传递拓扑序，再按 priority 降序和 identity 字典序；重复 name 或依赖环直接失败。
-- `find(name, version)`是 durable binding 恢复路径；本地重新 `factory.create()`后必须 descriptor equality。
+- `find(name, version)`是 durable binding 恢复路径；本地重新 `factory.create()`后必须完整 descriptor equality。
 - `toToolCatalog()`派生 selectable/internal catalog；Environment fixed catalog 不与 Platform factory 混淆。
 
 `HarnessPluginSource`只是 `List<HarnessPlugin> plugins()`的启动快照 port。Platform 接收已冻结的

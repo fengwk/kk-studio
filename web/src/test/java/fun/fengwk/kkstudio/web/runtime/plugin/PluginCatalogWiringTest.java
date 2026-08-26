@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginTool;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -29,6 +30,8 @@ import java.util.Set;
 /** 验证 Spring startup wiring：收集 HarnessPlugin bean 并冻结 PluginCatalog，空注册表也允许。 */
 class PluginCatalogWiringTest {
 
+  private static final AgentToolId TOOL_ID = new AgentToolId("test.extra-tool");
+
   @Test
   void collectsPluginBeansIntoOneFrozenCatalog() {
     try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
@@ -42,6 +45,7 @@ class PluginCatalogWiringTest {
                   registrar ->
                       registrar.registerTool(
                           "goal-tool",
+                          TOOL_ID,
                           tool(descriptor("extra_tool", "1")),
                           ToolVisibility.SELECTABLE)));
       context.registerBean(

@@ -73,6 +73,9 @@ import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
@@ -124,6 +127,7 @@ class DatabaseTurnResolverTest {
   private static final Instant NOW = Instant.parse("2026-08-02T00:00:00Z");
   private static final UUID THREAD_ID = new UUID(0L, 1L);
   private static final UUID SESSION_ID = new UUID(0L, 100L);
+  private static final AgentToolId TEST_PLATFORM_TOOL_ID = new AgentToolId("test.platform-tool");
 
   private static UUID id(long value) {
     return new UUID(0L, value);
@@ -545,7 +549,7 @@ class DatabaseTurnResolverTest {
   void freezesPluginProvenanceAndProjectsBranchScopedGoalContext() {
     PluginCatalog plugins = PluginCatalog.from(List.of(new GoalPlugin()));
     List<ToolDescriptor> descriptors =
-        plugins.tools().stream().map(tool -> tool.descriptor()).toList();
+        plugins.tools().stream().map(tool -> tool.definition().descriptor()).toList();
     Fixture fixture = new Fixture(List.of("create_goal"), List.of(), descriptors, plugins);
     BranchSettings settings = settings(null, "default", List.of("create_goal"));
     EntryPath path =
@@ -1812,8 +1816,13 @@ class DatabaseTurnResolverTest {
                       .map(
                           descriptor -> {
                             ToolFactory factory = mock(ToolFactory.class);
-                            when(factory.descriptor()).thenReturn(descriptor);
-                            when(factory.visibility()).thenReturn(ToolVisibility.SELECTABLE);
+                            when(factory.definition())
+                                .thenReturn(
+                                    new AgentToolDefinition(
+                                        TEST_PLATFORM_TOOL_ID,
+                                        descriptor,
+                                        ToolVisibility.SELECTABLE,
+                                        AgentToolBackend.HOST));
                             when(factory.priority()).thenReturn(0);
                             return factory;
                           })

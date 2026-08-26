@@ -259,7 +259,7 @@ public final class PlatformToolGateway implements ToolGateway {
                   + bindingDescriptor.version()
                   + " is not registered."));
     }
-    if (!entry.descriptor().equals(bindingDescriptor)) {
+    if (!entry.definition().descriptor().equals(bindingDescriptor)) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_DESCRIPTOR_MISMATCH_KIND,
@@ -368,7 +368,7 @@ public final class PlatformToolGateway implements ToolGateway {
               "Frozen plugin tool contribution " + id + " is not registered."));
     }
     ToolDescriptor descriptor = execution.request().binding().descriptor();
-    if (!descriptor.equals(contribution.descriptor())) {
+    if (!descriptor.equals(contribution.definition().descriptor())) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_DESCRIPTOR_MISMATCH_KIND,

@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -62,6 +63,7 @@ class PlatformToolGatewayPluginTest {
 
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
   private static final PluginId PLUGIN_ID = new PluginId("goal");
+  private static final AgentToolId AGENT_TOOL_ID = new AgentToolId("test.plugin-tool");
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           "plugin_tool",
@@ -211,7 +213,7 @@ class PlatformToolGatewayPluginTest {
             new PluginDescriptor(PLUGIN_ID, "Goal", "1", Set.of()),
             registrar -> {
               registrar.registerCustomEntryType("state-type", "state");
-              registrar.registerTool("write", tool, ToolVisibility.SELECTABLE);
+              registrar.registerTool("write", AGENT_TOOL_ID, tool, ToolVisibility.SELECTABLE);
             });
     PluginCatalog catalog = PluginCatalog.from(List.of(plugin));
     AtomicReference<UUID> loadedAssistantId = new AtomicReference<>();

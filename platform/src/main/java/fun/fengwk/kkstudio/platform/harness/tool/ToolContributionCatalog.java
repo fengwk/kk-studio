@@ -6,6 +6,9 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginDescriptor;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginId;
 import fun.fengwk.kkstudio.harness.plugin.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
@@ -26,8 +29,8 @@ import java.util.stream.Collectors;
 /**
  * Platform 唯一的 Tool contribution catalog：把普通 {@link ToolFactory} 与冻结插件 Tool 合并为一份不可变目录。
  *
- * <p>普通 Tool 是无依赖的 host entry，内部排序身份固定为 {@code core:name@version}；插件 Tool 保留 {@link ContributionId}
- * provenance。目录顺序同时满足插件 requires 偏序、priority 降序和稳定 identity 字典序，输入 bean 顺序不会改变结果。
+ * <p>普通 Tool 是无依赖的 host entry，插件 Tool 保留 {@link ContributionId} provenance；两者的 {@link AgentToolId}
+ * 必须全局唯一。目录顺序同时满足插件 requires 偏序、priority 降序和稳定 identity 字典序，输入 bean 顺序不会改变结果。
  */
 public final class ToolContributionCatalog {
 
@@ -43,33 +46,36 @@ public final class ToolContributionCatalog {
 
     List<Entry> collected = new ArrayList<>();
     Map<String, Entry> byName = new LinkedHashMap<>();
+    Map<AgentToolId, Entry> byAgentToolId = new LinkedHashMap<>();
     for (ToolFactory factory : factories) {
       Objects.requireNonNull(factory, "factory");
-      ToolDescriptor descriptor =
-          Objects.requireNonNull(factory.descriptor(), "factory.descriptor");
+      AgentToolDefinition definition =
+          Objects.requireNonNull(factory.definition(), "factory.definition");
+      if (definition.backend() != AgentToolBackend.HOST) {
+        throw new IllegalArgumentException(
+            "local ToolFactory must declare a HOST definition: " + definition.id());
+      }
+      ToolDescriptor descriptor = definition.descriptor();
       if (descriptor.type() != ToolType.PLATFORM) {
         throw new IllegalArgumentException(
             "local ToolFactory must declare a PLATFORM descriptor: " + descriptor.name());
       }
-      Entry entry =
-          Entry.local(
-              descriptor,
-              Objects.requireNonNull(factory.visibility(), "factory.visibility"),
-              factory.priority(),
-              factory);
+      Entry entry = Entry.local(definition, factory.priority(), factory);
       putUnique(byName, entry);
+      putUniqueId(byAgentToolId, entry);
       collected.add(entry);
     }
     for (ToolContribution contribution : pluginCatalog.tools()) {
       Entry entry = Entry.plugin(contribution);
       putUnique(byName, entry);
+      putUniqueId(byAgentToolId, entry);
       collected.add(entry);
     }
 
     List<Entry> sorted = sort(collected);
     Map<Key, Entry> byKey = new LinkedHashMap<>();
     for (Entry entry : sorted) {
-      byKey.put(new Key(entry.descriptor()), entry);
+      byKey.put(new Key(entry.definition().descriptor()), entry);
     }
     this.entries = List.copyOf(sorted);
     this.entriesByKey = Map.copyOf(byKey);
@@ -115,37 +121,53 @@ public final class ToolContributionCatalog {
     }
     Tool tool = Objects.requireNonNull(entry.localFactory().create(), "ToolFactory.create");
     ToolDescriptor actual = Objects.requireNonNull(tool.descriptor(), "created tool descriptor");
-    if (!entry.descriptor().equals(actual)) {
+    if (!entry.definition().descriptor().equals(actual)) {
       throw new IllegalArgumentException(
           "created local tool descriptor "
               + actual.name()
               + "@"
               + actual.version()
               + " does not match frozen "
-              + entry.descriptor().name()
+              + entry.definition().descriptor().name()
               + "@"
-              + entry.descriptor().version());
+              + entry.definition().descriptor().version());
     }
     return tool;
   }
 
   /** 从同一份 Platform contribution catalog 派生可选/内部目录，并追加固定 Environment 目录。 */
   public ToolCatalog toToolCatalog() {
-    List<ToolDescriptor> descriptors = entries.stream().map(Entry::descriptor).toList();
+    List<ToolDescriptor> descriptors =
+        entries.stream().map(entry -> entry.definition().descriptor()).toList();
     Set<String> internalNames =
         entries.stream()
-            .filter(entry -> entry.visibility() == ToolVisibility.INTERNAL)
-            .map(entry -> entry.descriptor().name())
+            .filter(entry -> entry.definition().visibility() == ToolVisibility.INTERNAL)
+            .map(entry -> entry.definition().descriptor().name())
             .collect(Collectors.toUnmodifiableSet());
     return new ToolCatalog(descriptors, internalNames);
   }
 
   private static void putUnique(Map<String, Entry> byName, Entry entry) {
-    Entry previous = byName.putIfAbsent(entry.descriptor().name(), entry);
+    String name = entry.definition().descriptor().name();
+    Entry previous = byName.putIfAbsent(name, entry);
     if (previous != null) {
       throw new IllegalArgumentException(
           "duplicate Platform tool name "
-              + entry.descriptor().name()
+              + name
+              + " ("
+              + previous.identity()
+              + " and "
+              + entry.identity()
+              + ")");
+    }
+  }
+
+  private static void putUniqueId(Map<AgentToolId, Entry> byId, Entry entry) {
+    Entry previous = byId.putIfAbsent(entry.id(), entry);
+    if (previous != null) {
+      throw new IllegalArgumentException(
+          "duplicate AgentToolId "
+              + entry.id()
               + " ("
               + previous.identity()
               + " and "
@@ -198,8 +220,7 @@ public final class ToolContributionCatalog {
 
   /** 单一 Tool contribution 的不可变冻结视图。 */
   public record Entry(
-      ToolDescriptor descriptor,
-      ToolVisibility visibility,
+      AgentToolDefinition definition,
       int priority,
       String identity,
       Origin origin,
@@ -207,12 +228,17 @@ public final class ToolContributionCatalog {
       ToolContribution pluginContribution) {
 
     public Entry {
-      descriptor = Objects.requireNonNull(descriptor, "descriptor");
-      visibility = Objects.requireNonNull(visibility, "visibility");
+      definition = Objects.requireNonNull(definition, "definition");
       if (identity == null || identity.isBlank()) {
         throw new IllegalArgumentException("identity must not be blank");
       }
       origin = Objects.requireNonNull(origin, "origin");
+      AgentToolBackend expectedBackend =
+          origin == Origin.LOCAL ? AgentToolBackend.HOST : AgentToolBackend.PLUGIN;
+      if (definition.backend() != expectedBackend) {
+        throw new IllegalArgumentException(
+            "entry definition backend does not match origin " + origin);
+      }
       if ((origin == Origin.LOCAL) == (localFactory == null)) {
         throw new IllegalArgumentException("local entry must have exactly one local factory");
       }
@@ -222,11 +248,10 @@ public final class ToolContributionCatalog {
       }
     }
 
-    static Entry local(
-        ToolDescriptor descriptor, ToolVisibility visibility, int priority, ToolFactory factory) {
+    static Entry local(AgentToolDefinition definition, int priority, ToolFactory factory) {
+      ToolDescriptor descriptor = definition.descriptor();
       return new Entry(
-          descriptor,
-          visibility,
+          definition,
           priority,
           "core:" + descriptor.name() + "@" + descriptor.version(),
           Origin.LOCAL,
@@ -236,13 +261,16 @@ public final class ToolContributionCatalog {
 
     static Entry plugin(ToolContribution contribution) {
       return new Entry(
-          contribution.descriptor(),
-          contribution.visibility(),
+          contribution.definition(),
           contribution.priority(),
           "plugin:" + contribution.id(),
           Origin.PLUGIN,
           null,
           contribution);
+    }
+
+    public AgentToolId id() {
+      return definition.id();
     }
 
     public boolean isLocal() {
