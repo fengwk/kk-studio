@@ -21,10 +21,9 @@ public final class SubagentPrompts {
     return render("task.md", Map.of());
   }
 
-  /** task 参数 schema：每次按当前 defaultMaxTurns 渲染字段说明。 */
-  public static ToolParamsSchema taskInputSchema(int defaultMaxTurns) {
-    return CODEC.decodeInputSchema(
-        render("task.schema.json", Map.of("defaultMaxTurns", Integer.toString(defaultMaxTurns))));
+  /** task 参数 schema：稳定声明运行期 policy 默认值语义，不嵌入具体配置快照。 */
+  public static ToolParamsSchema taskInputSchema() {
+    return CODEC.decodeInputSchema(render("task.schema.json", Map.of()));
   }
 
   /** Agent 正文委派段落：{@code <available_subagents>} 外壳由调用方在渲染后拼接。 */

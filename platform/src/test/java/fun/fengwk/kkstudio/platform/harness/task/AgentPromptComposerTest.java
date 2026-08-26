@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Agent 正文 + current environment + skills + subagents 唯一 system prompt 边界的组合语义。 */
 class AgentPromptComposerTest {
@@ -140,6 +141,23 @@ class AgentPromptComposerTest {
 
     assertTrue(result.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), result);
     assertFalse(result.contains("${defaultMaxTurns}"), result);
+  }
+
+  /** system prompt 每次组合都读取最新 policy，不能复用 descriptor 的冻结 schema 快照。 */
+  @Test
+  void rendersLiveDefaultMaxTurnsInTaskInstructions() {
+    AtomicReference<SubagentConfig> liveConfig =
+        new AtomicReference<>(new SubagentConfig(2, 10, 0, Duration.ZERO, DEFAULT_MAX_TURNS));
+    AgentPromptComposer liveComposer = new AgentPromptComposer(liveConfig::get);
+    List<SubagentBinding> subagents = List.of(new SubagentBinding("researcher", "Do research."));
+
+    String initial = liveComposer.compose("body", none(), List.of(), subagents);
+    liveConfig.set(new SubagentConfig(2, 10, 0, Duration.ZERO, 13));
+    String updated = liveComposer.compose("body", none(), List.of(), subagents);
+
+    assertTrue(initial.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), initial);
+    assertTrue(updated.contains("The default is `13`"), updated);
+    assertFalse(updated.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), updated);
   }
 
   /** Agent 正文只替换 date/workspace/cwd；未知或未闭合占位符原文保留，不把 shell 示例打成规划失败。 */

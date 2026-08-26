@@ -75,6 +75,16 @@ public final class TaskTool implements Tool {
   private static final int MAX_TURNS_REMINDER_INTERVAL = 5;
   private static final int REPORT_FALLBACK_MAX_CHARS = 8_000;
   private static final long STATUS_HEARTBEAT_NANOS = Duration.ofSeconds(1).toNanos();
+  private static final ToolDescriptor DESCRIPTOR =
+      new ToolDescriptor(
+          NAME,
+          VERSION,
+          ToolType.PLATFORM,
+          SubagentPrompts.taskToolDescription(),
+          RENDERER_KEY,
+          SubagentPrompts.taskInputSchema(),
+          ToolSideEffect.NON_IDEMPOTENT,
+          Duration.ZERO);
 
   private final Supplier<HarnessRuntime> runtimeProvider;
   private final SubagentBranchSettingsMaterializer settingsMaterializer;
@@ -102,22 +112,10 @@ public final class TaskTool implements Tool {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
-  /**
-   * 每次调用按当前 {@link SubagentConfig#maxTurns()} 现拼 descriptor：描述与 schema 的默认 maxTurns 随 aiRuntime 配置
-   * live 生效，绝不冻结装配期快照。
-   */
+  /** 返回不携带运行期配置快照的稳定 task descriptor。 */
   @Override
   public ToolDescriptor descriptor() {
-    int defaultMaxTurns = configProvider.subagentConfig().maxTurns();
-    return new ToolDescriptor(
-        NAME,
-        VERSION,
-        ToolType.PLATFORM,
-        SubagentPrompts.taskToolDescription(),
-        RENDERER_KEY,
-        SubagentPrompts.taskInputSchema(defaultMaxTurns),
-        ToolSideEffect.NON_IDEMPOTENT,
-        Duration.ZERO);
+    return DESCRIPTOR;
   }
 
   @Override

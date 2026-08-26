@@ -12,7 +12,7 @@
     },
     "maxTurns": {
       "type": "integer",
-      "description": "Positive integer interaction-turn budget for this invocation. Defaults to ${defaultMaxTurns}. If the child is unfinished when the budget is reached, it returns a phase report; use a smaller value when early path verification or frequent parent-child interaction is needed."
+      "description": "Positive integer interaction-turn budget for this invocation. Defaults to the current subagent policy when omitted. If the child is unfinished when the budget is reached, it returns a phase report; use a smaller value when early path verification or frequent parent-child interaction is needed."
     },
     "session_id": {
       "type": "string",
