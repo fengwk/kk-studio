@@ -147,7 +147,7 @@ class EnvironmentDaemonGatewayFinalTest {
     fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
 
     fixture.gateway.receive(connection.connectionId(), partial(2, resultPayload("chunk")));
-    assertEquals("chunk", ((TextToolContent) listener.partial.contents().get(0)).text());
+    assertEquals("chunk", ((TextToolContent) listener.partials.get(0).contents().get(0)).text());
 
     String resourcePayload =
         resultCodec.encodeCompleted(
@@ -159,6 +159,39 @@ class EnvironmentDaemonGatewayFinalTest {
             inlineResourceStore(new byte[] {1, 2}));
     fixture.gateway.receive(connection.connectionId(), partial(4, resourcePayload));
     assertTrue(connection.closed);
+  }
+
+  /**
+   * Capability 重构不可退化的 fitness gate：Environment daemon 的多个 PARTIAL 必须保序透传，terminal 后迟到 PARTIAL
+   * 按协议失败处理且不得回调 listener。
+   */
+  @Test
+  void forwardsMultiplePartialsInOrderAndRejectsLatePartialAfterTerminal() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-partial-order");
+    RecordingListener listener = new RecordingListener();
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
+
+    fixture.gateway.receive(connection.connectionId(), partial(2, resultPayload("partial1")));
+    fixture.gateway.receive(connection.connectionId(), partial(3, resultPayload("partial2")));
+    fixture.gateway.receive(connection.connectionId(), completed(4, resultPayload("complete")));
+
+    assertEquals(List.of("partial1", "partial2", "complete"), listener.events);
+    assertEquals(2, listener.partials.size());
+    assertEquals("complete", ((TextToolContent) listener.completed.contents().get(0)).text());
+    assertNull(listener.error);
+
+    // terminal 后的迟到 PARTIAL 没有 active invocation：按现有协议 contract 关闭连接，不得复活回调。
+    fixture.gateway.receive(connection.connectionId(), partial(5, resultPayload("late")));
+
+    assertEquals(List.of("partial1", "partial2", "complete"), listener.events);
+    assertEquals(2, listener.partials.size());
+    assertEquals("complete", ((TextToolContent) listener.completed.contents().get(0)).text());
+    assertTrue(connection.closed);
+    assertEquals(1, connection.closeAfterFlushCount);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.ERROR),
+        messageTypes(connection.envelopes()));
   }
 
   @Test
@@ -1565,17 +1598,20 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private static class RecordingListener implements ToolExecutionListener {
-    private ToolResult partial;
+    private final List<ToolResult> partials = new ArrayList<>();
+    private final List<String> events = new ArrayList<>();
     private ToolResult completed;
     private Throwable error;
 
     @Override
     public void onPartial(ToolResult partial) {
-      this.partial = partial;
+      partials.add(partial);
+      events.add(((TextToolContent) partial.contents().get(0)).text());
     }
 
     @Override
     public void onComplete(ToolResult result) {
+      events.add("complete");
       completed = result;
     }
 
