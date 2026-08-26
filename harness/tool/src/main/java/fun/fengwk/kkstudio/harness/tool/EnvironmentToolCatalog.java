@@ -1,14 +1,14 @@
 package fun.fengwk.kkstudio.harness.tool;
 
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
-import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,8 +18,9 @@ import java.util.Optional;
 /**
  * The single source of truth for the fixed tools provided by every Environment Daemon.
  *
- * <p>Descriptor, schema and prompt text are deliberately defined in the dependency-free {@code
- * harness/tool} module. Core uses the catalog for validation and planning, while Daemon
+ * <p>Model-visible descriptor metadata and prompt text are deliberately defined in the
+ * dependency-free {@code harness/tool} module. Input schema and timeout are reused from {@link
+ * EnvironmentCapabilityCatalog}; Core uses the catalog for validation and planning, while Daemon
  * implementations use the same descriptors for registration and wire checks.
  */
 public final class EnvironmentToolCatalog {
@@ -28,7 +29,6 @@ public final class EnvironmentToolCatalog {
 
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/tool/environment/prompts/";
-  private static final ToolDescriptorJsonCodec CODEC = new ToolDescriptorJsonCodec();
   private static final List<Entry> ENTRIES = createEntries();
   private static final List<ToolDescriptor> DESCRIPTORS = descriptorsOf(ENTRIES);
   private static final Map<AgentToolId, Entry> BY_ID = indexById(ENTRIES);
@@ -40,11 +40,11 @@ public final class EnvironmentToolCatalog {
    * Stable mapping between a model-visible Environment-backed Base Tool and its execution
    * capability.
    */
-  public record Entry(AgentToolDefinition definition, EnvironmentCapabilityId capabilityId) {
+  public record Entry(AgentToolDefinition definition, EnvironmentCapabilityDescriptor capability) {
 
     public Entry {
       definition = Objects.requireNonNull(definition, "definition");
-      capabilityId = Objects.requireNonNull(capabilityId, "capabilityId");
+      capability = Objects.requireNonNull(capability, "capability");
       if (definition.backend() != AgentToolBackend.ENVIRONMENT_CAPABILITY) {
         throw new IllegalArgumentException(
             "Environment catalog entries must use the Environment Capability backend");
@@ -55,6 +55,11 @@ public final class EnvironmentToolCatalog {
       if (definition.descriptor().type() != ToolType.ENVIRONMENT) {
         throw new IllegalArgumentException(
             "Environment catalog entries must use Environment descriptors");
+      }
+      if (!definition.descriptor().inputSchema().equals(capability.inputSchema())
+          || !definition.descriptor().timeout().equals(capability.timeout())) {
+        throw new IllegalArgumentException(
+            "Environment tool descriptor schema and timeout must match capability");
       }
     }
   }
@@ -109,91 +114,83 @@ public final class EnvironmentToolCatalog {
 
   private static List<Entry> createEntries() {
     return List.of(
-        entry(BaseToolIds.READ, "read", "fs.read", ToolSideEffect.READ_ONLY, Duration.ofMinutes(1)),
+        entry(BaseToolIds.READ, "read", EnvironmentCapabilityIds.FS_READ, ToolSideEffect.READ_ONLY),
         entry(
             BaseToolIds.WRITE,
             "write",
-            "fs.write",
-            ToolSideEffect.IDEMPOTENT,
-            Duration.ofMinutes(1)),
+            EnvironmentCapabilityIds.FS_WRITE,
+            ToolSideEffect.IDEMPOTENT),
         entry(
             BaseToolIds.EDIT,
             "edit",
-            "fs.apply-edit",
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMinutes(1)),
+            EnvironmentCapabilityIds.FS_APPLY_EDIT,
+            ToolSideEffect.NON_IDEMPOTENT),
         entry(
             BaseToolIds.APPLY_PATCH,
             "apply_patch",
-            "fs.apply-patch",
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMinutes(1)),
+            EnvironmentCapabilityIds.FS_APPLY_PATCH,
+            ToolSideEffect.NON_IDEMPOTENT),
         entry(
             BaseToolIds.BASH,
             "bash",
-            "process.exec",
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofHours(1)),
-        entry(BaseToolIds.GREP, "grep", "fs.search", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
-        entry(BaseToolIds.FIND, "find", "fs.find", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
+            EnvironmentCapabilityIds.PROCESS_EXEC,
+            ToolSideEffect.NON_IDEMPOTENT),
+        entry(
+            BaseToolIds.GREP, "grep", EnvironmentCapabilityIds.FS_SEARCH, ToolSideEffect.READ_ONLY),
+        entry(BaseToolIds.FIND, "find", EnvironmentCapabilityIds.FS_FIND, ToolSideEffect.READ_ONLY),
         entry(
             BaseToolIds.LSP_GOTO_DEFINITION,
             "lsp_goto_definition",
-            "lsp.goto-definition",
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(2)),
+            EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
+            ToolSideEffect.READ_ONLY),
         entry(
             BaseToolIds.LSP_WORKSPACE_SYMBOLS,
             "lsp_workspace_symbols",
-            "lsp.workspace-symbols",
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(2)),
+            EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
+            ToolSideEffect.READ_ONLY),
         entry(
             BaseToolIds.LSP_JAVA_DECOMPILE,
             "lsp_java_decompile",
-            "lsp.java-decompile",
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(2)),
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
+            ToolSideEffect.READ_ONLY),
         entry(
             BaseToolIds.MCP_LIST_TOOLS,
             "mcp_list_tools",
-            "mcp.list",
-            ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(30)),
+            EnvironmentCapabilityIds.MCP_LIST,
+            ToolSideEffect.READ_ONLY),
         entry(
             BaseToolIds.MCP_CALL_TOOL,
             "mcp_call_tool",
-            "mcp.call",
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMinutes(5)));
+            EnvironmentCapabilityIds.MCP_CALL,
+            ToolSideEffect.NON_IDEMPOTENT));
   }
 
   private static Entry entry(
       AgentToolId id,
       String name,
-      String capabilityId,
-      ToolSideEffect sideEffect,
-      Duration timeout) {
+      EnvironmentCapabilityId capabilityId,
+      ToolSideEffect sideEffect) {
+    EnvironmentCapabilityDescriptor capability = EnvironmentCapabilityCatalog.require(capabilityId);
     return new Entry(
         new AgentToolDefinition(
             id,
-            descriptor(name, sideEffect, timeout),
+            descriptor(name, sideEffect, capability),
             ToolVisibility.SELECTABLE,
             AgentToolBackend.ENVIRONMENT_CAPABILITY),
-        new EnvironmentCapabilityId(capabilityId));
+        capability);
   }
 
   private static ToolDescriptor descriptor(
-      String name, ToolSideEffect sideEffect, Duration timeout) {
+      String name, ToolSideEffect sideEffect, EnvironmentCapabilityDescriptor capability) {
     return new ToolDescriptor(
         name,
         "1",
         ToolType.ENVIRONMENT,
         loadPrompt(name),
         name,
-        loadSchema(name),
+        capability.inputSchema(),
         sideEffect,
-        timeout);
+        capability.timeout());
   }
 
   static Map<AgentToolId, Entry> indexById(List<Entry> entries) {
@@ -228,10 +225,6 @@ public final class EnvironmentToolCatalog {
 
   private static String loadPrompt(String name) {
     return loadText(name + ".md", "prompt").trim();
-  }
-
-  private static ToolParamsSchema loadSchema(String name) {
-    return CODEC.decodeInputSchema(loadText(name + ".schema.json", "schema"));
   }
 
   private static String loadText(String fileName, String kind) {

@@ -40,7 +40,9 @@ class DaemonEnvelopeCodecTest {
         "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        "{\"protocolVersion\":4,\"messageType\":\"READY\",\"environmentName\":\"e\","
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION_4
+            + ",\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
         "{\"protocolVersion\":2,\"messageType\":\"FUTURE\",\"environmentName\":\"e\","
