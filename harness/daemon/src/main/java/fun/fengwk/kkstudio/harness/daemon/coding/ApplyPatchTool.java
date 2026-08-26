@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -19,6 +20,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -41,8 +44,15 @@ public final class ApplyPatchTool extends AbstractCodingTool {
   private static final String DELETE_PREFIX = "*** Delete File:";
   private static final String END_OF_FILE = "*** End of File";
 
+  private final Runnable afterPreflightHook;
+
   public ApplyPatchTool(CodingToolsConfig config, ExecutorService executor) {
+    this(config, executor, () -> {});
+  }
+
+  ApplyPatchTool(CodingToolsConfig config, ExecutorService executor, Runnable afterPreflightHook) {
     super(config, executor, EnvironmentToolCatalog.require("apply_patch"));
+    this.afterPreflightHook = Objects.requireNonNull(afterPreflightHook, "afterPreflightHook");
   }
 
   @Override
@@ -55,7 +65,8 @@ public final class ApplyPatchTool extends AbstractCodingTool {
     }
     Path workdir = resolveWorkdir(patch.workdir(), invocationWorkspace);
     List<MutationPlan> plans = preflight(patch.files(), workdir, invocationWorkspace, execution);
-    commit(plans, execution);
+    afterPreflightHook.run();
+    commit(plans, invocationWorkspace, execution);
     return success(request.call().id(), successSummary(plans));
   }
 
@@ -91,13 +102,14 @@ public final class ApplyPatchTool extends AbstractCodingTool {
     if (file.operation() == Operation.ADD) {
       byte[] output = encodeText(renderAddedFile(file.addLines()), false, file.path());
       validateText(output, file.path());
-      return new MutationPlan(Operation.ADD, file.path(), target, null, output);
+      return new MutationPlan(Operation.ADD, file.path(), target, null, output, null);
     }
 
     byte[] before = Files.readAllBytes(target);
     DecodedText decoded = decodeText(before, file.path());
+    Set<PosixFilePermission> permissions = readPosixPermissions(target);
     if (file.operation() == Operation.DELETE) {
-      return new MutationPlan(Operation.DELETE, file.path(), target, before, null);
+      return new MutationPlan(Operation.DELETE, file.path(), target, before, null, permissions);
     }
 
     String afterText = applyUpdate(file.path(), decoded.text(), file.hunks());
@@ -106,7 +118,7 @@ public final class ApplyPatchTool extends AbstractCodingTool {
     if (Arrays.equals(before, after)) {
       throw new IllegalArgumentException("update would make no changes");
     }
-    return new MutationPlan(Operation.UPDATE, file.path(), target, before, after);
+    return new MutationPlan(Operation.UPDATE, file.path(), target, before, after, permissions);
   }
 
   private Path resolveWorkdir(String rawWorkdir, Path invocationWorkspace) {
@@ -220,7 +232,8 @@ public final class ApplyPatchTool extends AbstractCodingTool {
     return errors;
   }
 
-  private void commit(List<MutationPlan> plans, Execution execution) throws Exception {
+  private void commit(List<MutationPlan> plans, Path invocationWorkspace, Execution execution)
+      throws Exception {
     Path[] paths = plans.stream().map(MutationPlan::target).toArray(Path[]::new);
     List<ReentrantLock> locks = FileMutations.lockAll(paths);
     List<AppliedMutation> applied = new ArrayList<>();
@@ -235,12 +248,12 @@ public final class ApplyPatchTool extends AbstractCodingTool {
           checkCancelled(execution);
           AppliedMutation mutation = new AppliedMutation(plan);
           applied.add(mutation);
-          commitOne(mutation, createdDirectories, execution);
+          commitOne(mutation, invocationWorkspace, createdDirectories, execution);
         }
         checkCancelled(execution);
       } catch (Exception error) {
         boolean interrupted = Thread.interrupted();
-        rollback(applied, createdDirectories);
+        rollback(applied, createdDirectories, invocationWorkspace);
         if (execution.isCancelled() || interrupted || error instanceof InterruptedException) {
           Thread.currentThread().interrupt();
           throw new InterruptedException();
@@ -249,6 +262,33 @@ public final class ApplyPatchTool extends AbstractCodingTool {
       }
     } finally {
       FileMutations.unlockAll(locks);
+    }
+  }
+
+  private void commitOne(
+      AppliedMutation mutation,
+      Path invocationWorkspace,
+      List<Path> createdDirectories,
+      Execution execution)
+      throws Exception {
+    MutationPlan plan = mutation.plan();
+    if (plan.operation() == Operation.ADD) {
+      ensureParentDirectories(plan.target(), invocationWorkspace, createdDirectories);
+      checkCancelled(execution);
+      verifyUnchanged(plan);
+      verifyCanonicalTargetParent(plan.target(), invocationWorkspace);
+      mutation.markStarted();
+      writeFile(plan.target(), plan.after(), false, plan.permissions());
+      return;
+    }
+    verifyUnchanged(plan);
+    checkCancelled(execution);
+    verifyCanonicalTargetParent(plan.target(), invocationWorkspace);
+    mutation.markStarted();
+    if (plan.operation() == Operation.DELETE) {
+      Files.delete(plan.target());
+    } else {
+      writeFile(plan.target(), plan.after(), true, plan.permissions());
     }
   }
 
@@ -271,31 +311,21 @@ public final class ApplyPatchTool extends AbstractCodingTool {
     }
   }
 
-  private void commitOne(
-      AppliedMutation mutation, List<Path> createdDirectories, Execution execution)
-      throws Exception {
-    MutationPlan plan = mutation.plan();
-    if (plan.operation() == Operation.ADD) {
-      ensureParentDirectories(plan.target(), createdDirectories);
-      checkCancelled(execution);
-      verifyUnchanged(plan);
-      mutation.markStarted();
-      writeFile(plan.target(), plan.after(), false);
-      return;
-    }
-    verifyUnchanged(plan);
-    checkCancelled(execution);
-    mutation.markStarted();
-    if (plan.operation() == Operation.DELETE) {
-      Files.delete(plan.target());
-    } else {
-      writeFile(plan.target(), plan.after(), true);
+  private void verifyCanonicalTargetParent(Path target, Path invocationWorkspace) {
+    Path parent = Objects.requireNonNull(target.getParent(), "patch target must have a parent");
+    Path canonicalParent = realPath(parent, "target parent");
+    requireInside(canonicalParent, invocationWorkspace, "target parent", parent.toString());
+    if (!canonicalParent.equals(parent)) {
+      throw new IllegalArgumentException("target parent changed after preflight: " + parent);
     }
   }
 
-  private static void ensureParentDirectories(Path target, List<Path> createdDirectories)
-      throws IOException {
+  private static void ensureParentDirectories(
+      Path target, Path invocationWorkspace, List<Path> createdDirectories) throws IOException {
     Path parent = Objects.requireNonNull(target.getParent(), "patch target must have a parent");
+    if (!parent.startsWith(invocationWorkspace)) {
+      throw new IOException("patch target parent escapes invocation workspace: " + parent);
+    }
     Path current = parent;
     List<Path> missing = new ArrayList<>();
     while (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
@@ -306,13 +336,13 @@ public final class ApplyPatchTool extends AbstractCodingTool {
       missing.add(name);
       current = current.getParent();
     }
-    if (!Files.isDirectory(current)) {
+    if (!Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS)) {
       throw new IOException("patch target parent is not a directory: " + target);
     }
     for (int index = missing.size() - 1; index >= 0; index--) {
       Path directory = current.resolve(missing.get(index));
       if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
-        if (!Files.isDirectory(directory)) {
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
           throw new IOException("patch target parent is not a directory: " + directory);
         }
         current = directory;
@@ -320,9 +350,12 @@ public final class ApplyPatchTool extends AbstractCodingTool {
       }
       try {
         Files.createDirectory(directory);
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+          throw new IOException("patch target parent is not a directory: " + directory);
+        }
         createdDirectories.add(directory);
       } catch (FileAlreadyExistsException race) {
-        if (!Files.isDirectory(directory)) {
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
           throw new IOException("patch target parent is not a directory: " + directory, race);
         }
       }
@@ -330,19 +363,40 @@ public final class ApplyPatchTool extends AbstractCodingTool {
     }
   }
 
-  private static void writeFile(Path target, byte[] bytes, boolean replaceExisting)
+  private static void writeFile(
+      Path target, byte[] bytes, boolean replaceExisting, Set<PosixFilePermission> permissions)
       throws IOException {
     Path parent = Objects.requireNonNull(target.getParent(), "patch target must have a parent");
     Path temporary = Files.createTempFile(parent, ".kkstudio-apply-patch-", ".tmp");
     boolean moved = false;
     try {
-      Files.write(temporary, bytes);
+      try (OutputStream output = Files.newOutputStream(temporary)) {
+        applyPosixPermissions(temporary, permissions);
+        output.write(bytes);
+      }
       move(temporary, target, replaceExisting);
       moved = true;
     } finally {
       if (!moved) {
         Files.deleteIfExists(temporary);
       }
+    }
+  }
+
+  private static Set<PosixFilePermission> readPosixPermissions(Path path) throws IOException {
+    PosixFileAttributeView view =
+        Files.getFileAttributeView(path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+    return view == null ? null : Set.copyOf(view.readAttributes().permissions());
+  }
+
+  private static void applyPosixPermissions(Path path, Set<PosixFilePermission> permissions)
+      throws IOException {
+    if (permissions == null) {
+      return;
+    }
+    PosixFileAttributeView view = Files.getFileAttributeView(path, PosixFileAttributeView.class);
+    if (view != null) {
+      view.setPermissions(permissions);
     }
   }
 
@@ -363,7 +417,8 @@ public final class ApplyPatchTool extends AbstractCodingTool {
     }
   }
 
-  private static void rollback(List<AppliedMutation> applied, List<Path> createdDirectories) {
+  private void rollback(
+      List<AppliedMutation> applied, List<Path> createdDirectories, Path invocationWorkspace) {
     for (int index = applied.size() - 1; index >= 0; index--) {
       AppliedMutation mutation = applied.get(index);
       if (!mutation.started()) {
@@ -372,11 +427,11 @@ public final class ApplyPatchTool extends AbstractCodingTool {
       MutationPlan plan = mutation.plan();
       try {
         if (plan.operation() == Operation.ADD) {
-          deleteCreatedFileIfUnchanged(plan);
+          deleteCreatedFileIfUnchanged(plan, invocationWorkspace);
         } else if (plan.operation() == Operation.UPDATE) {
-          restoreUpdatedFileIfUnchanged(plan);
+          restoreUpdatedFileIfUnchanged(plan, invocationWorkspace);
         } else {
-          restoreDeletedFileIfMissing(plan);
+          restoreDeletedFileIfMissing(plan, invocationWorkspace);
         }
       } catch (Exception ignored) {
         // Rollback is best effort; never hide the original commit failure.
@@ -391,7 +446,9 @@ public final class ApplyPatchTool extends AbstractCodingTool {
     }
   }
 
-  private static void deleteCreatedFileIfUnchanged(MutationPlan plan) throws IOException {
+  private void deleteCreatedFileIfUnchanged(MutationPlan plan, Path invocationWorkspace)
+      throws IOException {
+    verifyCanonicalTargetParent(plan.target(), invocationWorkspace);
     if (!Files.isRegularFile(plan.target(), LinkOption.NOFOLLOW_LINKS)) {
       return;
     }
@@ -400,21 +457,26 @@ public final class ApplyPatchTool extends AbstractCodingTool {
     }
   }
 
-  private static void restoreUpdatedFileIfUnchanged(MutationPlan plan) throws IOException {
+  private void restoreUpdatedFileIfUnchanged(MutationPlan plan, Path invocationWorkspace)
+      throws IOException {
     if (!Files.isRegularFile(plan.target(), LinkOption.NOFOLLOW_LINKS)) {
       if (!Files.exists(plan.target(), LinkOption.NOFOLLOW_LINKS)) {
-        writeFile(plan.target(), plan.before(), false);
+        verifyCanonicalTargetParent(plan.target(), invocationWorkspace);
+        writeFile(plan.target(), plan.before(), false, plan.permissions());
       }
       return;
     }
     if (Arrays.equals(Files.readAllBytes(plan.target()), plan.after())) {
-      writeFile(plan.target(), plan.before(), true);
+      verifyCanonicalTargetParent(plan.target(), invocationWorkspace);
+      writeFile(plan.target(), plan.before(), true, plan.permissions());
     }
   }
 
-  private static void restoreDeletedFileIfMissing(MutationPlan plan) throws IOException {
+  private void restoreDeletedFileIfMissing(MutationPlan plan, Path invocationWorkspace)
+      throws IOException {
     if (!Files.exists(plan.target(), LinkOption.NOFOLLOW_LINKS)) {
-      writeFile(plan.target(), plan.before(), false);
+      verifyCanonicalTargetParent(plan.target(), invocationWorkspace);
+      writeFile(plan.target(), plan.before(), false, plan.permissions());
     }
   }
 
@@ -917,7 +979,12 @@ public final class ApplyPatchTool extends AbstractCodingTool {
   private record ParsedPatch(String workdir, List<PatchFile> files) {}
 
   private record MutationPlan(
-      Operation operation, String path, Path target, byte[] before, byte[] after) {}
+      Operation operation,
+      String path,
+      Path target,
+      byte[] before,
+      byte[] after,
+      Set<PosixFilePermission> permissions) {}
 
   private static final class AppliedMutation {
     private final MutationPlan plan;
