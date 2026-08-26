@@ -132,9 +132,11 @@ export interface AgentDefinitionConfigDTO {
 
 /** 可离线选择的统一运行时 tool catalog 条目。 */
 export interface ToolCatalogEntryDTO {
+  id: string
   name: string
   version: string | null
   description: string | null
+  backend: 'HOST' | 'PLUGIN' | 'ENVIRONMENT_CAPABILITY'
   type: 'PLATFORM' | 'ENVIRONMENT'
 }
 

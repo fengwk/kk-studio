@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { buildToolCandidates } from '@/features/ai/catalog/agent-capability-candidates'
+import { buildPermissionToolCandidates } from '@/features/ai/catalog/agent-capability-candidates'
 import {
   addRule,
   addTool,
@@ -17,12 +17,12 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { Select } from '@/shared/ui/console/Select'
 
 /**
- * 保序 permission 规则编辑器（tool 名 + 该 tool 下有序规则数组）。
+ * 保序 permission 规则编辑器（tool ID + 该 tool 下有序规则数组）。
  *
  * - 规则数组顺序即求值顺序，只能在同 tool 内上移/下移，禁止跨 tool 重排；
- * - 重命名 tool 时目标名冲突会确定性合并（源规则追加到目标之后）而不是丢规则；
- * - 空 tool 名 / 空 pattern 呈现可修复的内联错误态，保存会被 codec 阻止；
- * - tool 名从运行时 catalog 选择；catalog 缺失的已保存名称保留为可改选项。
+ * - 重命名 tool ID 时目标 ID 冲突会确定性合并（源规则追加到目标之后）而不是丢规则；
+ * - 空 tool ID / 空 pattern 呈现可修复的内联错误态，保存会被 codec 阻止；
+ * - tool ID 从运行时 catalog 选择；catalog 缺失的已保存 ID 保留为可改选项。
  */
 export function PermissionEditor({
   groups,
@@ -38,7 +38,8 @@ export function PermissionEditor({
     queryKey: queryKeys.tools.list,
     queryFn: () => agentService.listTools(),
   })
-  const catalogNames = buildToolCandidates(toolsQuery.data ?? []).map((tool) => tool.name)
+  const permissionToolCandidates = buildPermissionToolCandidates(toolsQuery.data ?? [])
+  const catalogIds = permissionToolCandidates.map((tool) => tool.name)
 
   return (
     <div className="permission-editor" data-permission-editor>
@@ -47,8 +48,8 @@ export function PermissionEditor({
       ) : null}
 
       {groups.map((group, groupIndex) => {
-        const toolNameBlank = group.tool.trim() === ''
-        const toolUnavailable = !toolNameBlank && !catalogNames.includes(group.tool)
+        const toolIdBlank = group.tool.trim() === ''
+        const toolUnavailable = !toolIdBlank && !catalogIds.includes(group.tool)
         const toolOptions = [
           ...(toolUnavailable
             ? [
@@ -58,7 +59,10 @@ export function PermissionEditor({
                 },
               ]
             : []),
-          ...catalogNames.map((name) => ({ value: name, label: name })),
+          ...permissionToolCandidates.map((candidate) => ({
+            value: candidate.name,
+            label: candidate.name,
+          })),
         ]
         return (
           <section
@@ -76,11 +80,11 @@ export function PermissionEditor({
                   id={`perm-tool-${groupIndex}`}
                   value={group.tool}
                   placeholder={t('shared.selectPlaceholder')}
-                  aria-invalid={toolNameBlank}
+                  aria-invalid={toolIdBlank}
                   options={toolOptions}
                   onChange={(tool) => onChange(renameTool(groups, groupIndex, tool))}
                 />
-                {toolNameBlank ? (
+                {toolIdBlank ? (
                   <span className="permission-error" role="alert">
                     {t('settings.error.permissionToolNameRequired')}
                   </span>

@@ -24,7 +24,14 @@ const PERMISSION_OPTIONS: SystemSettingsSchemaOption[] = [
 ]
 
 function tool(name: string): ToolCatalogEntryDTO {
-  return { name, version: '1', description: null, type: 'PLATFORM' }
+  return {
+    id: `base.${name}`,
+    name,
+    version: '1',
+    description: null,
+    backend: 'HOST',
+    type: 'PLATFORM',
+  }
 }
 
 function Harness({ initial }: { initial: PermissionGroupDraft[] }) {
@@ -55,22 +62,36 @@ describe('PermissionEditor UI', () => {
   })
 
   it('renders tool groups with their ordered rules', async () => {
+    const user = userEvent.setup()
     renderEditor([
-      { tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] },
-      { tool: 'write', rules: [{ pattern: 'node_modules/**', action: 'deny' }] },
+      { tool: 'base.bash', rules: [{ pattern: '*', action: 'ask' }] },
+      { tool: 'base.write', rules: [{ pattern: 'node_modules/**', action: 'deny' }] },
     ])
-    const bashGroup = screen.getByLabelText('权限分组 bash')
-    const writeGroup = screen.getByLabelText('权限分组 write')
+    const bashGroup = screen.getByLabelText('权限分组 base.bash')
+    const writeGroup = screen.getByLabelText('权限分组 base.write')
     await waitFor(() => {
-      expect(within(bashGroup).getByLabelText('工具')).toHaveAttribute('data-value', 'bash')
+      expect(within(bashGroup).getByLabelText('工具')).toHaveAttribute('data-value', 'base.bash')
     })
     expect(within(bashGroup).getByDisplayValue('*')).toBeInTheDocument()
     expect(within(writeGroup).getByDisplayValue('node_modules/**')).toBeInTheDocument()
+    await user.click(within(bashGroup).getByLabelText('工具'))
+    expect(screen.getByRole('option', { name: 'base.bash' })).toBeInTheDocument()
+  })
+
+  it('retains a persisted tool ID missing from the catalog as an unavailable option', async () => {
+    const user = userEvent.setup()
+    renderEditor([{ tool: 'legacy.read', rules: [{ pattern: '*', action: 'ask' }] }])
+
+    const group = screen.getByLabelText('权限分组 legacy.read')
+    const select = within(group).getByLabelText('工具')
+    expect(select).toHaveAttribute('data-value', 'legacy.read')
+    await user.click(select)
+    expect(screen.getByRole('option', { name: 'legacy.read (不可用)' })).toBeInTheDocument()
   })
 
   it('edits the action of a rule via the select', async () => {
     const user = userEvent.setup()
-    renderEditor([{ tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] }])
+    renderEditor([{ tool: 'base.bash', rules: [{ pattern: '*', action: 'ask' }] }])
     const select = screen.getByLabelText('第 1 条规则的动作')
     expect(select).toHaveAttribute('data-value', 'ask')
     await chooseSelectOption(user, '第 1 条规则的动作', '拒绝')
@@ -79,8 +100,8 @@ describe('PermissionEditor UI', () => {
 
   it('adds and removes rules for a tool', async () => {
     const user = userEvent.setup()
-    renderEditor([{ tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] }])
-    const group = screen.getByLabelText('权限分组 bash')
+    renderEditor([{ tool: 'base.bash', rules: [{ pattern: '*', action: 'ask' }] }])
+    const group = screen.getByLabelText('权限分组 base.bash')
     expect(patternInputs(group)).toHaveLength(1)
 
     await user.click(within(group).getByRole('button', { name: '添加规则' }))
@@ -96,14 +117,14 @@ describe('PermissionEditor UI', () => {
     const user = userEvent.setup()
     renderEditor([
       {
-        tool: 'bash',
+        tool: 'base.bash',
         rules: [
           { pattern: 'first', action: 'ask' },
           { pattern: 'second', action: 'allow' },
         ],
       },
     ])
-    const group = screen.getByLabelText('权限分组 bash')
+    const group = screen.getByLabelText('权限分组 base.bash')
     const inputs = patternInputs(group)
     expect(inputs[0]).toHaveValue('first')
 
@@ -125,17 +146,17 @@ describe('PermissionEditor UI', () => {
   it('merges rules deterministically when renaming a tool onto an existing tool', async () => {
     const user = userEvent.setup()
     renderEditor([
-      { tool: 'bash', rules: [{ pattern: 'scripts/*', action: 'deny' }] },
-      { tool: 'write', rules: [{ pattern: '*', action: 'ask' }] },
+      { tool: 'base.bash', rules: [{ pattern: 'scripts/*', action: 'deny' }] },
+      { tool: 'base.write', rules: [{ pattern: '*', action: 'ask' }] },
     ])
-    const bashGroup = await screen.findByLabelText('权限分组 bash')
+    const bashGroup = await screen.findByLabelText('权限分组 base.bash')
     await waitFor(() => {
-      expect(within(bashGroup).getByLabelText('工具')).toHaveAttribute('data-value', 'bash')
+      expect(within(bashGroup).getByLabelText('工具')).toHaveAttribute('data-value', 'base.bash')
     })
-    await chooseSelectOption(user, '工具', 'write', within(bashGroup))
+    await chooseSelectOption(user, '工具', 'base.write', within(bashGroup))
 
-    expect(screen.queryByLabelText('权限分组 bash')).not.toBeInTheDocument()
-    const writeGroup = screen.getByLabelText('权限分组 write')
+    expect(screen.queryByLabelText('权限分组 base.bash')).not.toBeInTheDocument()
+    const writeGroup = screen.getByLabelText('权限分组 base.write')
     const patterns = patternInputs(writeGroup).map((input) => input.getAttribute('value'))
     expect(patterns).toEqual(['*', 'scripts/*'])
   })
@@ -148,7 +169,7 @@ describe('PermissionEditor UI', () => {
 
   it('adds a new empty tool group', async () => {
     const user = userEvent.setup()
-    renderEditor([{ tool: 'bash', rules: [] }])
+    renderEditor([{ tool: 'base.bash', rules: [] }])
     expect(screen.getAllByLabelText(/^权限分组/)).toHaveLength(1)
     await user.click(screen.getByRole('button', { name: '添加工具' }))
     const groups = screen.getAllByLabelText(/^权限分组/)
@@ -158,9 +179,9 @@ describe('PermissionEditor UI', () => {
 
   it('removes an entire tool group', async () => {
     const user = userEvent.setup()
-    renderEditor([{ tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] }])
-    await user.click(screen.getByRole('button', { name: '移除工具 bash' }))
-    expect(screen.queryByLabelText('权限分组 bash')).not.toBeInTheDocument()
+    renderEditor([{ tool: 'base.bash', rules: [{ pattern: '*', action: 'ask' }] }])
+    await user.click(screen.getByRole('button', { name: '移除工具 base.bash' }))
+    expect(screen.queryByLabelText('权限分组 base.bash')).not.toBeInTheDocument()
     expect(screen.getByText('尚未配置权限规则。')).toBeInTheDocument()
   })
 })

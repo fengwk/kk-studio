@@ -96,8 +96,22 @@ describe('AgentForm current contracts', () => {
             liveEnvironment('local', [{ name: 'dev', description: 'dev' }]),
           ]}
           toolCatalog={[
-            { name: 'bash', version: '1', description: longDescription, type: 'PLATFORM' },
-            { name: 'lsp', version: '1', description: 'lsp', type: 'ENVIRONMENT' },
+            {
+              id: 'base.bash',
+              name: 'bash',
+              version: '1',
+              description: longDescription,
+              backend: 'HOST',
+              type: 'PLATFORM',
+            },
+            {
+              id: 'environment.lsp',
+              name: 'lsp',
+              version: '1',
+              description: 'lsp',
+              backend: 'ENVIRONMENT_CAPABILITY',
+              type: 'ENVIRONMENT',
+            },
           ]}
           onChange={setDraft}
         />
@@ -346,8 +360,22 @@ describe('AgentForm current contracts', () => {
         models={[modelWithVariants()]}
         environments={[]}
         toolCatalog={[
-          { name: 'bash', version: '1', description: 'shell', type: 'PLATFORM' },
-          { name: 'read', version: null, description: 'files', type: 'ENVIRONMENT' },
+          {
+            id: 'base.bash',
+            name: 'bash',
+            version: '1',
+            description: 'shell',
+            backend: 'HOST',
+            type: 'PLATFORM',
+          },
+          {
+            id: 'base.read',
+            name: 'read',
+            version: null,
+            description: 'files',
+            backend: 'ENVIRONMENT_CAPABILITY',
+            type: 'ENVIRONMENT',
+          },
         ]}
         onChange={() => undefined}
       />,
@@ -379,8 +407,22 @@ describe('AgentForm current contracts', () => {
           },
         ]}
         toolCatalog={[
-          { name: 'bash', version: '1', description: 'shell', type: 'PLATFORM' },
-          { name: 'read', version: null, description: 'files', type: 'ENVIRONMENT' },
+          {
+            id: 'base.bash',
+            name: 'bash',
+            version: '1',
+            description: 'shell',
+            backend: 'HOST',
+            type: 'PLATFORM',
+          },
+          {
+            id: 'base.read',
+            name: 'read',
+            version: null,
+            description: 'files',
+            backend: 'ENVIRONMENT_CAPABILITY',
+            type: 'ENVIRONMENT',
+          },
         ]}
         onChange={() => undefined}
       />,
