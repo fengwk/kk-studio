@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.tool;
 
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
@@ -28,13 +29,42 @@ public final class EnvironmentToolCatalog {
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/tool/environment/prompts/";
   private static final ToolDescriptorJsonCodec CODEC = new ToolDescriptorJsonCodec();
-  private static final List<ToolDescriptor> DESCRIPTORS = createDescriptors();
-  private static final Map<String, ToolDescriptor> BY_NAME = indexByName(DESCRIPTORS);
+  private static final List<Entry> ENTRIES = createEntries();
+  private static final List<ToolDescriptor> DESCRIPTORS = descriptorsOf(ENTRIES);
+  private static final Map<AgentToolId, Entry> BY_ID = indexById(ENTRIES);
+  private static final Map<String, Entry> BY_NAME = indexByName(ENTRIES);
 
   private EnvironmentToolCatalog() {}
 
+  /**
+   * Stable mapping between a model-visible Environment-backed Base Tool and its execution
+   * capability.
+   */
+  public record Entry(AgentToolDefinition definition, EnvironmentCapabilityId capabilityId) {
+
+    public Entry {
+      definition = Objects.requireNonNull(definition, "definition");
+      capabilityId = Objects.requireNonNull(capabilityId, "capabilityId");
+      if (definition.backend() != AgentToolBackend.ENVIRONMENT_CAPABILITY) {
+        throw new IllegalArgumentException(
+            "Environment catalog entries must use the Environment Capability backend");
+      }
+      if (definition.visibility() != ToolVisibility.SELECTABLE) {
+        throw new IllegalArgumentException("Environment catalog entries must be selectable");
+      }
+      if (definition.descriptor().type() != ToolType.ENVIRONMENT) {
+        throw new IllegalArgumentException(
+            "Environment catalog entries must use Environment descriptors");
+      }
+    }
+  }
+
   public static String version() {
     return VERSION;
+  }
+
+  public static List<Entry> entries() {
+    return ENTRIES;
   }
 
   public static List<ToolDescriptor> descriptors() {
@@ -42,7 +72,11 @@ public final class EnvironmentToolCatalog {
   }
 
   public static Optional<ToolDescriptor> find(String name) {
-    return Optional.ofNullable(BY_NAME.get(name));
+    return Optional.ofNullable(BY_NAME.get(name)).map(entry -> entry.definition().descriptor());
+  }
+
+  public static Optional<Entry> find(AgentToolId id) {
+    return Optional.ofNullable(BY_ID.get(id));
   }
 
   public static Optional<ToolDescriptor> find(String name, String version) {
@@ -68,20 +102,76 @@ public final class EnvironmentToolCatalog {
     return descriptor;
   }
 
-  private static List<ToolDescriptor> createDescriptors() {
+  public static Entry require(AgentToolId id) {
+    return find(id)
+        .orElseThrow(() -> new IllegalArgumentException("unknown Environment tool id: " + id));
+  }
+
+  private static List<Entry> createEntries() {
     return List.of(
-        descriptor("read", ToolSideEffect.READ_ONLY, Duration.ofMinutes(1)),
-        descriptor("write", ToolSideEffect.IDEMPOTENT, Duration.ofMinutes(1)),
-        descriptor("edit", ToolSideEffect.NON_IDEMPOTENT, Duration.ofMinutes(1)),
-        descriptor("apply_patch", ToolSideEffect.NON_IDEMPOTENT, Duration.ofMinutes(1)),
-        descriptor("bash", ToolSideEffect.NON_IDEMPOTENT, Duration.ofHours(1)),
-        descriptor("grep", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
-        descriptor("find", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
-        descriptor("lsp_goto_definition", ToolSideEffect.READ_ONLY, Duration.ofMinutes(2)),
-        descriptor("lsp_workspace_symbols", ToolSideEffect.READ_ONLY, Duration.ofMinutes(2)),
-        descriptor("lsp_java_decompile", ToolSideEffect.READ_ONLY, Duration.ofMinutes(2)),
-        descriptor("mcp_list_tools", ToolSideEffect.READ_ONLY, Duration.ofSeconds(30)),
-        descriptor("mcp_call_tool", ToolSideEffect.NON_IDEMPOTENT, Duration.ofMinutes(5)));
+        entry("base.read", "read", "fs.read", ToolSideEffect.READ_ONLY, Duration.ofMinutes(1)),
+        entry("base.write", "write", "fs.write", ToolSideEffect.IDEMPOTENT, Duration.ofMinutes(1)),
+        entry(
+            "base.edit",
+            "edit",
+            "fs.apply-edit",
+            ToolSideEffect.NON_IDEMPOTENT,
+            Duration.ofMinutes(1)),
+        entry(
+            "base.apply-patch",
+            "apply_patch",
+            "fs.apply-patch",
+            ToolSideEffect.NON_IDEMPOTENT,
+            Duration.ofMinutes(1)),
+        entry(
+            "base.bash",
+            "bash",
+            "process.exec",
+            ToolSideEffect.NON_IDEMPOTENT,
+            Duration.ofHours(1)),
+        entry("base.grep", "grep", "fs.search", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
+        entry("base.find", "find", "fs.find", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
+        entry(
+            "base.lsp-goto-definition",
+            "lsp_goto_definition",
+            "lsp.goto-definition",
+            ToolSideEffect.READ_ONLY,
+            Duration.ofMinutes(2)),
+        entry(
+            "base.lsp-workspace-symbols",
+            "lsp_workspace_symbols",
+            "lsp.workspace-symbols",
+            ToolSideEffect.READ_ONLY,
+            Duration.ofMinutes(2)),
+        entry(
+            "base.lsp-java-decompile",
+            "lsp_java_decompile",
+            "lsp.java-decompile",
+            ToolSideEffect.READ_ONLY,
+            Duration.ofMinutes(2)),
+        entry(
+            "base.mcp-list-tools",
+            "mcp_list_tools",
+            "mcp.list",
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(30)),
+        entry(
+            "base.mcp-call-tool",
+            "mcp_call_tool",
+            "mcp.call",
+            ToolSideEffect.NON_IDEMPOTENT,
+            Duration.ofMinutes(5)));
+  }
+
+  private static Entry entry(
+      String id, String name, String capabilityId, ToolSideEffect sideEffect, Duration timeout) {
+    return new Entry(
+        new AgentToolDefinition(
+            new AgentToolId(id),
+            descriptor(name, sideEffect, timeout),
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.ENVIRONMENT_CAPABILITY),
+        new EnvironmentCapabilityId(capabilityId));
   }
 
   private static ToolDescriptor descriptor(
@@ -97,15 +187,34 @@ public final class EnvironmentToolCatalog {
         timeout);
   }
 
-  private static Map<String, ToolDescriptor> indexByName(List<ToolDescriptor> descriptors) {
-    Map<String, ToolDescriptor> result = new LinkedHashMap<>();
-    for (ToolDescriptor descriptor : descriptors) {
-      if (result.putIfAbsent(descriptor.name(), descriptor) != null) {
+  static Map<AgentToolId, Entry> indexById(List<Entry> entries) {
+    Objects.requireNonNull(entries, "entries");
+    Map<AgentToolId, Entry> result = new LinkedHashMap<>();
+    for (Entry entry : entries) {
+      Objects.requireNonNull(entry, "entries[]");
+      if (result.putIfAbsent(entry.definition().id(), entry) != null) {
         throw new IllegalStateException(
-            "duplicate Environment tool catalog name: " + descriptor.name());
+            "duplicate Environment tool catalog id: " + entry.definition().id());
       }
     }
     return Map.copyOf(result);
+  }
+
+  static Map<String, Entry> indexByName(List<Entry> entries) {
+    Objects.requireNonNull(entries, "entries");
+    Map<String, Entry> result = new LinkedHashMap<>();
+    for (Entry entry : entries) {
+      Objects.requireNonNull(entry, "entries[]");
+      String name = entry.definition().descriptor().name();
+      if (result.putIfAbsent(name, entry) != null) {
+        throw new IllegalStateException("duplicate Environment tool catalog name: " + name);
+      }
+    }
+    return Map.copyOf(result);
+  }
+
+  private static List<ToolDescriptor> descriptorsOf(List<Entry> entries) {
+    return entries.stream().map(entry -> entry.definition().descriptor()).toList();
   }
 
   private static String loadPrompt(String name) {
