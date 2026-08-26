@@ -13,7 +13,7 @@ import java.util.Iterator;
 import java.util.Set;
 
 /**
- * Daemon v3 envelope 的 JSON codec。
+ * Daemon envelope 的 JSON codec。
  *
  * <p>codec 在边界拒绝未知版本、未知消息类型、缺失字段、duplicate field、trailing token 和非对象 payload，避免将不完整 wire
  * 消息传给运行时；{@code environmentName} 必须是 canonical 有界小写路由名称。
@@ -21,6 +21,8 @@ import java.util.Set;
 public final class DaemonEnvelopeCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final Set<Integer> SUPPORTED_PROTOCOL_VERSIONS =
+      Set.of(DaemonProtocol.VERSION_3, DaemonProtocol.VERSION_4);
 
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -54,12 +56,12 @@ public final class DaemonEnvelopeCodec {
     }
   }
 
-  /** 解码且校验单个 v3 envelope。 */
+  /** 解码且校验单个受支持版本的 envelope。 */
   public DaemonEnvelope decode(String json) {
     JsonNode root = readObject(json, "envelope");
     rejectUnknownFields(root);
     int protocolVersion = requiredInt(root, "protocolVersion");
-    if (protocolVersion != DaemonProtocol.VERSION_3) {
+    if (!SUPPORTED_PROTOCOL_VERSIONS.contains(protocolVersion)) {
       throw new DaemonProtocolException("unsupported protocolVersion: " + protocolVersion);
     }
     String messageTypeValue = requiredText(root, "messageType");
