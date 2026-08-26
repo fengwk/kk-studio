@@ -4,12 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.util.List;
 import java.util.Objects;
@@ -17,18 +17,20 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** 文件系统 coding tools 的通用异步执行与严格 JSON 访问。 */
-abstract class AbstractCodingTool implements Tool {
+/** 文件系统 coding capability 的通用异步执行与严格 JSON 访问。 */
+abstract class AbstractCodingCapability implements EnvironmentCapability {
 
   static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   final CodingToolsConfig config;
   final EnvironmentPathBoundary boundary;
   private final ExecutorService executor;
-  private final ToolDescriptor descriptor;
+  private final EnvironmentCapabilityDescriptor descriptor;
 
-  AbstractCodingTool(
-      CodingToolsConfig config, ExecutorService executor, ToolDescriptor descriptor) {
+  AbstractCodingCapability(
+      CodingToolsConfig config,
+      ExecutorService executor,
+      EnvironmentCapabilityDescriptor descriptor) {
     this.config = Objects.requireNonNull(config, "config");
     this.boundary = new EnvironmentPathBoundary(config);
     this.executor = Objects.requireNonNull(executor, "executor");
@@ -36,14 +38,16 @@ abstract class AbstractCodingTool implements Tool {
   }
 
   @Override
-  public final ToolDescriptor descriptor() {
+  public final EnvironmentCapabilityDescriptor descriptor() {
     return descriptor;
   }
 
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public EnvironmentCapabilityExecutionHandle execute(
+      EnvironmentCapabilityExecutionRequest request,
+      EnvironmentCapabilityExecutionListener listener) {
     if (!descriptor.equals(request.descriptor())) {
-      throw new IllegalArgumentException("request descriptor does not match tool descriptor");
+      throw new IllegalArgumentException("request descriptor does not match capability descriptor");
     }
     Objects.requireNonNull(listener, "listener");
     Execution execution = new Execution(request.call().id(), listener);
@@ -51,7 +55,7 @@ abstract class AbstractCodingTool implements Tool {
         executor.submit(
             () -> {
               try {
-                ToolResult result = run(request, execution);
+                EnvironmentCapabilityResult result = run(request, execution);
                 execution.complete(result);
               } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
@@ -63,9 +67,10 @@ abstract class AbstractCodingTool implements Tool {
     return execution;
   }
 
-  abstract ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception;
+  abstract EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception;
 
-  static JsonNode arguments(ToolExecutionRequest request) throws Exception {
+  static JsonNode arguments(EnvironmentCapabilityExecutionRequest request) throws Exception {
     return OBJECT_MAPPER.readTree(request.call().argumentsJson());
   }
 
@@ -122,24 +127,25 @@ abstract class AbstractCodingTool implements Tool {
     return value != null && value.booleanValue();
   }
 
-  static ToolResult success(String id, String text) {
-    return new ToolResult(id, List.of(new TextToolContent(text)), false, "{}");
+  static EnvironmentCapabilityResult success(String id, String text) {
+    return new EnvironmentCapabilityResult(id, List.of(new TextToolContent(text)), false, "{}");
   }
 
-  static ToolResult error(String id, String message) {
-    String detail = message == null || message.isBlank() ? "tool execution failed" : message;
-    return new ToolResult(id, List.of(new TextToolContent("Error: " + detail)), true, "{}");
+  static EnvironmentCapabilityResult error(String id, String message) {
+    String detail = message == null || message.isBlank() ? "capability execution failed" : message;
+    return new EnvironmentCapabilityResult(
+        id, List.of(new TextToolContent("Error: " + detail)), true, "{}");
   }
 
   /** 可变执行状态，其终态回调保证恰好执行一次。 */
-  static final class Execution implements ToolExecutionHandle {
+  static final class Execution implements EnvironmentCapabilityExecutionHandle {
     private final String callId;
-    private final ToolExecutionListener listener;
+    private final EnvironmentCapabilityExecutionListener listener;
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
     private volatile Future<?> worker;
 
-    private Execution(String callId, ToolExecutionListener listener) {
+    private Execution(String callId, EnvironmentCapabilityExecutionListener listener) {
       this.callId = callId;
       this.listener = listener;
     }
@@ -160,7 +166,7 @@ abstract class AbstractCodingTool implements Tool {
       return cancelled.get();
     }
 
-    void complete(ToolResult result) {
+    void complete(EnvironmentCapabilityResult result) {
       if (terminal.compareAndSet(false, true)) {
         listener.onComplete(result);
       }

@@ -12,12 +12,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -36,7 +36,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-class ApplyPatchToolTest {
+class ApplyPatchCapabilityTest {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final long TEST_TIMEOUT_SECONDS = 5;
@@ -52,10 +52,10 @@ class ApplyPatchToolTest {
   /** 三种文件操作必须分别成功，并让 Update 严格按 hunk 内容修改目标文本。 */
   @Test
   void appliesAddUpdateAndDeleteHappyPaths() throws Exception {
-    ApplyPatchTool tool = tool();
-    ToolResult added =
+    ApplyPatchCapability capability = tool();
+    EnvironmentCapabilityResult added =
         invoke(
-            tool,
+            capability,
             patch(
                 "*** Begin Patch",
                 "*** Add File: added.txt",
@@ -68,9 +68,9 @@ class ApplyPatchToolTest {
     assertEquals("", Files.readString(environmentRoot.resolve("empty.txt")));
 
     Files.writeString(environmentRoot.resolve("updated.txt"), "alpha\nbeta\n");
-    ToolResult updated =
+    EnvironmentCapabilityResult updated =
         invoke(
-            tool,
+            capability,
             patch(
                 "*** Begin Patch",
                 "*** Update File: updated.txt",
@@ -82,8 +82,9 @@ class ApplyPatchToolTest {
     assertFalse(updated.error());
     assertEquals("alpha\ngamma\n", Files.readString(environmentRoot.resolve("updated.txt")));
 
-    ToolResult deleted =
-        invoke(tool, patch("*** Begin Patch", "*** Delete File: updated.txt", "*** End Patch"));
+    EnvironmentCapabilityResult deleted =
+        invoke(
+            capability, patch("*** Begin Patch", "*** Delete File: updated.txt", "*** End Patch"));
     assertFalse(deleted.error());
     assertFalse(Files.exists(environmentRoot.resolve("updated.txt")));
   }
@@ -94,7 +95,7 @@ class ApplyPatchToolTest {
     Path file = environmentRoot.resolve("multi-hunk.txt");
     Files.writeString(file, "head\none\nmiddle\nend\n");
 
-    ToolResult result =
+    EnvironmentCapabilityResult result =
         invoke(
             tool(),
             patch(
@@ -120,7 +121,7 @@ class ApplyPatchToolTest {
     Files.writeString(module.resolve("updated.txt"), "before\n");
     Files.writeString(module.resolve("deleted.txt"), "remove\n");
 
-    ToolResult result =
+    EnvironmentCapabilityResult result =
         invoke(
             tool(),
             patch(
@@ -151,7 +152,7 @@ class ApplyPatchToolTest {
     Path first = environmentRoot.resolve("first.txt");
     Files.writeString(first, "old\n");
 
-    ToolResult result =
+    EnvironmentCapabilityResult result =
         invoke(
             tool(),
             patch(
@@ -174,7 +175,7 @@ class ApplyPatchToolTest {
   /** 未知 directive 与重复路径必须在任何文件写入前拒绝。 */
   @Test
   void rejectsUnknownAndDuplicatePaths() throws Exception {
-    ToolResult duplicate =
+    EnvironmentCapabilityResult duplicate =
         invoke(
             tool(),
             patch(
@@ -188,7 +189,7 @@ class ApplyPatchToolTest {
     assertTrue(text(duplicate).contains("Duplicate patch path"));
     assertFalse(Files.exists(environmentRoot.resolve("duplicate.txt")));
 
-    ToolResult unknown =
+    EnvironmentCapabilityResult unknown =
         invoke(tool(), patch("*** Begin Patch", "*** Rename File: old.txt", "*** End Patch"));
     assertTrue(unknown.error());
     assertTrue(text(unknown).contains("Unknown patch line"));
@@ -199,7 +200,7 @@ class ApplyPatchToolTest {
   void rejectsMissingAndAmbiguousContext() throws Exception {
     Path missing = environmentRoot.resolve("missing-context.txt");
     Files.writeString(missing, "present\n");
-    ToolResult missingResult =
+    EnvironmentCapabilityResult missingResult =
         invoke(
             tool(),
             patch(
@@ -216,7 +217,7 @@ class ApplyPatchToolTest {
 
     Path ambiguous = environmentRoot.resolve("ambiguous-context.txt");
     Files.writeString(ambiguous, "same\nsame\n");
-    ToolResult ambiguousResult =
+    EnvironmentCapabilityResult ambiguousResult =
         invoke(
             tool(),
             patch(
@@ -238,7 +239,7 @@ class ApplyPatchToolTest {
     Path outsideFile = Files.writeString(outside.resolve("outside.txt"), "outside\n");
     Files.createSymbolicLink(environmentRoot.resolve("escape"), outside);
 
-    ToolResult absolute =
+    EnvironmentCapabilityResult absolute =
         invoke(
             tool(),
             patch(
@@ -248,13 +249,13 @@ class ApplyPatchToolTest {
                 "*** End Patch"));
     assertTrue(absolute.error());
 
-    ToolResult parent =
+    EnvironmentCapabilityResult parent =
         invoke(
             tool(),
             patch("*** Begin Patch", "*** Add File: ../parent.txt", "+blocked", "*** End Patch"));
     assertTrue(parent.error());
 
-    ToolResult symlink =
+    EnvironmentCapabilityResult symlink =
         invoke(
             tool(),
             patch(
@@ -268,7 +269,7 @@ class ApplyPatchToolTest {
     assertEquals("outside\n", Files.readString(outsideFile));
     assertFalse(Files.exists(outside.resolve("absolute.txt")));
 
-    ToolResult workdirSymlink =
+    EnvironmentCapabilityResult workdirSymlink =
         invoke(
             tool(),
             patch(
@@ -287,8 +288,8 @@ class ApplyPatchToolTest {
     assumeSymbolicLinksSupported();
     Path outside = Files.createTempDirectory("apply-patch-race-outside");
     Path raced = environmentRoot.resolve("raced");
-    ApplyPatchTool tool =
-        new ApplyPatchTool(
+    ApplyPatchCapability capability =
+        new ApplyPatchCapability(
             config(),
             executor,
             () -> {
@@ -300,9 +301,9 @@ class ApplyPatchToolTest {
             });
 
     try {
-      ToolResult result =
+      EnvironmentCapabilityResult result =
           invoke(
-              tool,
+              capability,
               patch(
                   "*** Begin Patch",
                   "*** Add File: raced/created.txt",
@@ -329,7 +330,7 @@ class ApplyPatchToolTest {
     byte[] invalidBytes = {(byte) 0xc3, 0x28};
     Files.write(invalid, invalidBytes);
 
-    ToolResult binaryResult =
+    EnvironmentCapabilityResult binaryResult =
         invoke(
             tool(),
             patch(
@@ -343,7 +344,7 @@ class ApplyPatchToolTest {
     assertTrue(text(binaryResult).contains("binary"));
     assertArrayEquals(binaryBytes, Files.readAllBytes(binary));
 
-    ToolResult invalidResult =
+    EnvironmentCapabilityResult invalidResult =
         invoke(
             tool(),
             patch(
@@ -368,7 +369,7 @@ class ApplyPatchToolTest {
     Path bom = environmentRoot.resolve("bom.txt");
     Files.write(bom, new byte[] {(byte) 0xef, (byte) 0xbb, (byte) 0xbf, 'a', '\n', 'b'});
 
-    ToolResult result =
+    EnvironmentCapabilityResult result =
         invoke(
             tool(),
             patch(
@@ -415,7 +416,7 @@ class ApplyPatchToolTest {
             PosixFilePermission.OTHERS_READ);
     Files.setPosixFilePermissions(file, expected);
 
-    ToolResult result =
+    EnvironmentCapabilityResult result =
         invoke(
             tool(),
             patch(
@@ -449,7 +450,7 @@ class ApplyPatchToolTest {
 
     try {
       Files.setPosixFilePermissions(lockedDirectory, readOnlyPermissions);
-      ToolResult result =
+      EnvironmentCapabilityResult result =
           invoke(
               tool(),
               patch(
@@ -488,7 +489,7 @@ class ApplyPatchToolTest {
 
     try {
       Files.setPosixFilePermissions(lockedDirectory, readOnlyPermissions);
-      ToolResult result =
+      EnvironmentCapabilityResult result =
           invoke(
               tool(),
               patch(
@@ -534,7 +535,7 @@ class ApplyPatchToolTest {
 
     try {
       Files.setPosixFilePermissions(lockedDirectory, readOnlyPermissions);
-      ToolResult result =
+      EnvironmentCapabilityResult result =
           invoke(
               tool(),
               patch(
@@ -572,10 +573,10 @@ class ApplyPatchToolTest {
         });
     try {
       assertTrue(blockerStarted.await(TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
-      ApplyPatchTool tool = new ApplyPatchTool(config(), blockedExecutor);
+      ApplyPatchCapability capability = new ApplyPatchCapability(config(), blockedExecutor);
       RecordingListener listener =
           invokeAsync(
-              tool,
+              capability,
               patch("*** Begin Patch", "*** Add File: cancelled.txt", "+blocked", "*** End Patch"),
               Duration.ZERO,
               environmentRoot);
@@ -592,8 +593,8 @@ class ApplyPatchToolTest {
     }
   }
 
-  private ApplyPatchTool tool() {
-    return new ApplyPatchTool(config(), executor);
+  private ApplyPatchCapability tool() {
+    return new ApplyPatchCapability(config(), executor);
   }
 
   private CodingToolsConfig config() {
@@ -601,22 +602,22 @@ class ApplyPatchToolTest {
         environmentRoot, 2000, 50 * 1024, "bash", new InMemoryResourceStore());
   }
 
-  private ToolResult invoke(ApplyPatchTool tool, String patch) throws Exception {
-    RecordingListener listener = invokeAsync(tool, patch, Duration.ZERO, environmentRoot);
+  private EnvironmentCapabilityResult invoke(ApplyPatchCapability capability, String patch)
+      throws Exception {
+    RecordingListener listener = invokeAsync(capability, patch, Duration.ZERO, environmentRoot);
     assertTrue(listener.await());
     return listener.result;
   }
 
   private RecordingListener invokeAsync(
-      ApplyPatchTool tool, String patch, Duration timeout, Path workdir) {
+      ApplyPatchCapability capability, String patch, Duration timeout, Path workdir) {
     RecordingListener listener = new RecordingListener();
     listener.handle =
-        tool.execute(
-            new ToolExecutionRequest(
-                tool.descriptor(),
-                new ToolCall("apply-patch-test", "apply_patch", arguments(patch)),
+        capability.execute(
+            new EnvironmentCapabilityExecutionRequest(
+                capability.descriptor(),
+                new EnvironmentCapabilityCall("apply-patch-test", arguments(patch)),
                 timeout,
-                null,
                 workdir),
             listener);
     return listener;
@@ -634,8 +635,10 @@ class ApplyPatchToolTest {
     return String.join("\n", lines);
   }
 
-  private static String text(ToolResult result) {
-    return result.contents().stream().map(ApplyPatchToolTest::text).reduce("", String::concat);
+  private static String text(EnvironmentCapabilityResult result) {
+    return result.contents().stream()
+        .map(ApplyPatchCapabilityTest::text)
+        .reduce("", String::concat);
   }
 
   private static String text(ToolContent content) {
@@ -657,19 +660,19 @@ class ApplyPatchToolTest {
     }
   }
 
-  private static final class RecordingListener implements ToolExecutionListener {
+  private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
     private final CountDownLatch completed = new CountDownLatch(1);
-    private final List<ToolResult> partials = new ArrayList<>();
-    private volatile ToolExecutionHandle handle;
-    private volatile ToolResult result;
+    private final List<EnvironmentCapabilityResult> partials = new ArrayList<>();
+    private volatile EnvironmentCapabilityExecutionHandle handle;
+    private volatile EnvironmentCapabilityResult result;
 
     @Override
-    public void onPartial(ToolResult partial) {
+    public void onPartial(EnvironmentCapabilityResult partial) {
       partials.add(partial);
     }
 
     @Override
-    public void onComplete(ToolResult result) {
+    public void onComplete(EnvironmentCapabilityResult result) {
       this.result = result;
       completed.countDown();
     }

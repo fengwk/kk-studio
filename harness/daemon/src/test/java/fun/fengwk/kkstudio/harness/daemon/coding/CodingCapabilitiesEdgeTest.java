@@ -12,17 +12,18 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -37,7 +38,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-class CodingToolsEdgeTest {
+class CodingCapabilitiesEdgeTest {
 
   @TempDir Path environmentRoot;
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -52,7 +53,7 @@ class CodingToolsEdgeTest {
   /** 错误类型与未知字段必须在执行前拒绝；integer 数字字符串会被归一化，因此 grep 用非数字文本证明类型失败。 */
   @Test
   void everyDescriptorRejectsWrongTypedAndUnknownArguments() {
-    Tool[] tools = {
+    EnvironmentCapability[] capabilities = {
       write(config()), edit(config()), bash(config()), grep(config()), find(config())
     };
     String[] wrong = {
@@ -62,74 +63,82 @@ class CodingToolsEdgeTest {
       "{\"pattern\":\"x\",\"path\":\".\",\"limit\":\"one\"}",
       "{\"pattern\":\"*\",\"path\":\".\",\"timeout_seconds\":false}"
     };
-    for (int index = 0; index < tools.length; index++) {
-      Tool tool = tools[index];
+    for (int index = 0; index < capabilities.length; index++) {
+      EnvironmentCapability capability = capabilities[index];
       String arguments = wrong[index];
       assertThrows(
           IllegalArgumentException.class,
           () ->
-              new ToolExecutionRequest(
-                  tool.descriptor(),
-                  new ToolCall("invalid", tool.descriptor().name(), arguments),
-                  Duration.ZERO));
+              new EnvironmentCapabilityExecutionRequest(
+                  capability.descriptor(),
+                  new EnvironmentCapabilityCall("invalid", arguments),
+                  Duration.ZERO,
+                  environmentRoot));
       assertThrows(
           IllegalArgumentException.class,
           () ->
-              new ToolExecutionRequest(
-                  tool.descriptor(),
-                  new ToolCall("unknown", tool.descriptor().name(), "{\"unknown\":true}"),
-                  Duration.ZERO));
+              new EnvironmentCapabilityExecutionRequest(
+                  capability.descriptor(),
+                  new EnvironmentCapabilityCall("unknown", "{\"unknown\":true}"),
+                  Duration.ZERO,
+                  environmentRoot));
     }
   }
 
   @Test
   void commonArgumentHelpersRejectInvalidValuesAndKeepDefaults() throws Exception {
     JsonNode values =
-        AbstractCodingTool.OBJECT_MAPPER.readTree("{\"text\":\"x\",\"number\":2,\"truth\":true}");
-    assertEquals("x", AbstractCodingTool.string(values, "text"));
-    assertNull(AbstractCodingTool.optionalString(values, "missing"));
-    assertEquals(7, AbstractCodingTool.optionalPositiveInt(values, "missing", 7, 9));
-    assertEquals(2, AbstractCodingTool.optionalPositiveInt(values, "number", 7, 9));
-    assertEquals(2, AbstractCodingTool.requiredPositiveInt(values, "number"));
-    assertEquals(7, AbstractCodingTool.optionalNonNegativeInt(values, "missing", 7));
-    assertEquals(2, AbstractCodingTool.optionalNonNegativeInt(values, "number", 7));
-    assertTrue(AbstractCodingTool.optionalBoolean(values, "truth"));
-    assertFalse(AbstractCodingTool.optionalBoolean(values, "missing"));
-    assertThrows(IllegalArgumentException.class, () -> AbstractCodingTool.string(values, "number"));
+        AbstractCodingCapability.OBJECT_MAPPER.readTree(
+            "{\"text\":\"x\",\"number\":2,\"truth\":true}");
+    assertEquals("x", AbstractCodingCapability.string(values, "text"));
+    assertNull(AbstractCodingCapability.optionalString(values, "missing"));
+    assertEquals(7, AbstractCodingCapability.optionalPositiveInt(values, "missing", 7, 9));
+    assertEquals(2, AbstractCodingCapability.optionalPositiveInt(values, "number", 7, 9));
+    assertEquals(2, AbstractCodingCapability.requiredPositiveInt(values, "number"));
+    assertEquals(7, AbstractCodingCapability.optionalNonNegativeInt(values, "missing", 7));
+    assertEquals(2, AbstractCodingCapability.optionalNonNegativeInt(values, "number", 7));
+    assertTrue(AbstractCodingCapability.optionalBoolean(values, "truth"));
+    assertFalse(AbstractCodingCapability.optionalBoolean(values, "missing"));
+    assertThrows(
+        IllegalArgumentException.class, () -> AbstractCodingCapability.string(values, "number"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> AbstractCodingTool.optionalPositiveInt(values, "text", 1, 9));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            AbstractCodingTool.optionalPositiveInt(
-                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"number\":0}"), "number", 1, 9));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> AbstractCodingTool.requiredPositiveInt(values, "missing"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> AbstractCodingTool.requiredPositiveInt(values, "text"));
+        () -> AbstractCodingCapability.optionalPositiveInt(values, "text", 1, 9));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            AbstractCodingTool.optionalNonNegativeInt(
-                AbstractCodingTool.OBJECT_MAPPER.readTree("{\"number\":-1}"), "number", 1));
+            AbstractCodingCapability.optionalPositiveInt(
+                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"number\":0}"), "number", 1, 9));
     assertThrows(
         IllegalArgumentException.class,
-        () -> AbstractCodingTool.optionalNonNegativeInt(values, "text", 1));
-    assertTrue(AbstractCodingTool.error("id", "failure").error());
-    assertFalse(AbstractCodingTool.success("id", "ok").error());
+        () -> AbstractCodingCapability.requiredPositiveInt(values, "missing"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AbstractCodingCapability.requiredPositiveInt(values, "text"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            AbstractCodingCapability.optionalNonNegativeInt(
+                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"number\":-1}"), "number", 1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AbstractCodingCapability.optionalNonNegativeInt(values, "text", 1));
+    assertTrue(AbstractCodingCapability.error("id", "failure").error());
+    assertFalse(AbstractCodingCapability.success("id", "ok").error());
   }
 
   /** 共享 executor 上的 coding 任务收到 cancel 后必须被中断，并且只产生一次取消终态。 */
   @Test
   void abstractCodingExecutionUsesInjectedExecutorAndInterruptsOnCancel() throws Exception {
     CountDownLatch started = new CountDownLatch(1);
-    AbstractCodingTool blocking =
-        new AbstractCodingTool(config(), executor, EnvironmentToolCatalog.require("read")) {
+    AbstractCodingCapability blocking =
+        new AbstractCodingCapability(
+            config(),
+            executor,
+            EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ)) {
           @Override
-          ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+          EnvironmentCapabilityResult run(
+              EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
             started.countDown();
             new CountDownLatch(1).await();
             return success(request.call().id(), "unexpected");
@@ -145,12 +154,11 @@ class CodingToolsEdgeTest {
     assertTrue(listener.result.error());
     assertTrue(text(listener.result).contains("Operation cancelled"));
     assertEquals(1, listener.completions);
-    ToolExecutionRequest wrong =
-        new ToolExecutionRequest(
-            EnvironmentToolCatalog.require("bash"),
-            new ToolCall("wrong", "bash", "{\"command\":\"true\"}"),
+    EnvironmentCapabilityExecutionRequest wrong =
+        new EnvironmentCapabilityExecutionRequest(
+            EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC),
+            new EnvironmentCapabilityCall("wrong", "{\"command\":\"true\"}"),
             Duration.ofSeconds(1),
-            null,
             environmentRoot);
     assertThrows(IllegalArgumentException.class, () -> blocking.execute(wrong, listener));
   }
@@ -261,7 +269,7 @@ class CodingToolsEdgeTest {
         environmentRoot.resolve("utf16.txt"),
         TextFileCodec.encode("alpha\nbeta\n", StandardCharsets.UTF_16LE, 2));
 
-    ToolResult result = invoke(read(config()), "{\"path\":\"utf16.txt\"}");
+    EnvironmentCapabilityResult result = invoke(read(config()), "{\"path\":\"utf16.txt\"}");
 
     assertFalse(result.error());
     assertTrue(text(result).contains("1|alpha"));
@@ -332,21 +340,22 @@ class CodingToolsEdgeTest {
 
   @Test
   void writeAndEditHandleCreateBinaryAndNoMatchErrors() throws Exception {
-    WriteTool write = write(config());
-    EditTool edit = edit(config());
-    ToolResult created = invoke(write, "{\"path\":\"new/created.txt\",\"content\":\"one\"}");
-    ToolResult unchanged =
+    WriteCapability write = write(config());
+    EditCapability edit = edit(config());
+    EnvironmentCapabilityResult created =
+        invoke(write, "{\"path\":\"new/created.txt\",\"content\":\"one\"}");
+    EnvironmentCapabilityResult unchanged =
         invoke(
             edit, "{\"path\":\"new/created.txt\",\"old_string\":\"one\",\"new_string\":\"one\"}");
-    ToolResult absent =
+    EnvironmentCapabilityResult absent =
         invoke(
             edit, "{\"path\":\"new/created.txt\",\"old_string\":\"zero\",\"new_string\":\"two\"}");
     Files.write(environmentRoot.resolve("binary.txt"), new byte[] {0, 1});
-    ToolResult binary =
+    EnvironmentCapabilityResult binary =
         invoke(edit, "{\"path\":\"binary.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}");
-    ToolResult empty =
+    EnvironmentCapabilityResult empty =
         invoke(edit, "{\"path\":\"new/created.txt\",\"old_string\":\"\",\"new_string\":\"b\"}");
-    ToolResult directory =
+    EnvironmentCapabilityResult directory =
         invoke(edit, "{\"path\":\"new\",\"old_string\":\"a\",\"new_string\":\"b\"}");
 
     assertFalse(created.error());
@@ -360,13 +369,13 @@ class CodingToolsEdgeTest {
 
   @Test
   void bashReportsStartupAndNonZeroFailuresWithoutDuplicateTerminalCallbacks() throws Exception {
-    BashTool missing =
+    BashCapability missing =
         bash(
             new CodingToolsConfig(
                 environmentRoot, 10, 100, "missing-bash", new InMemoryResourceStore()));
     assertTrue(text(invoke(missing, "{\"command\":\"echo x\"}")).contains("missing-bash"));
-    BashTool bash = bash(config());
-    ToolResult nonZero = invoke(bash, "{\"command\":\"echo failure; exit 7\"}");
+    BashCapability bash = bash(config());
+    EnvironmentCapabilityResult nonZero = invoke(bash, "{\"command\":\"echo failure; exit 7\"}");
     assertTrue(nonZero.error());
     assertTrue(text(nonZero).contains("Command exited with code 7"));
   }
@@ -394,7 +403,7 @@ class CodingToolsEdgeTest {
 
     assertTrue(listener.await());
     String partialText =
-        listener.partials.stream().map(CodingToolsEdgeTest::text).reduce("", String::concat);
+        listener.partials.stream().map(CodingCapabilitiesEdgeTest::text).reduce("", String::concat);
     assertEquals("😀", partialText);
     assertFalse(partialText.contains("�"));
     assertEquals(1, listener.completions);
@@ -404,80 +413,81 @@ class CodingToolsEdgeTest {
     return config(2000, 50 * 1024, new InMemoryResourceStore());
   }
 
-  private ReadTool read(CodingToolsConfig config) {
-    return new ReadTool(config, executor);
+  private ReadCapability read(CodingToolsConfig config) {
+    return new ReadCapability(config, executor);
   }
 
-  private WriteTool write(CodingToolsConfig config) {
-    return new WriteTool(config, executor);
+  private WriteCapability write(CodingToolsConfig config) {
+    return new WriteCapability(config, executor);
   }
 
-  private EditTool edit(CodingToolsConfig config) {
-    return new EditTool(config, executor);
+  private EditCapability edit(CodingToolsConfig config) {
+    return new EditCapability(config, executor);
   }
 
-  private GrepTool grep(CodingToolsConfig config) {
-    return new GrepTool(config, executor);
+  private GrepCapability grep(CodingToolsConfig config) {
+    return new GrepCapability(config, executor);
   }
 
-  private FindTool find(CodingToolsConfig config) {
-    return new FindTool(config, executor);
+  private FindCapability find(CodingToolsConfig config) {
+    return new FindCapability(config, executor);
   }
 
-  private BashTool bash(CodingToolsConfig config) {
-    return new BashTool(config, executor, scheduler);
+  private BashCapability bash(CodingToolsConfig config) {
+    return new BashCapability(config, executor, scheduler);
   }
 
   private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
     return new CodingToolsConfig(environmentRoot, lines, bytes, "bash", store);
   }
 
-  private ToolResult invoke(Tool tool, String arguments) throws Exception {
-    RecordingListener listener = invokeAsync(tool, arguments, Duration.ZERO);
+  private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)
+      throws Exception {
+    RecordingListener listener = invokeAsync(capability, arguments, Duration.ZERO);
     assertTrue(listener.await());
     return listener.result;
   }
 
-  private RecordingListener invokeAsync(Tool tool, String arguments, Duration timeout) {
+  private RecordingListener invokeAsync(
+      EnvironmentCapability capability, String arguments, Duration timeout) {
     RecordingListener listener = new RecordingListener();
     listener.handle =
-        tool.execute(
-            new ToolExecutionRequest(
-                tool.descriptor(),
-                new ToolCall("edge", tool.descriptor().name(), arguments),
+        capability.execute(
+            new EnvironmentCapabilityExecutionRequest(
+                capability.descriptor(),
+                new EnvironmentCapabilityCall("edge", arguments),
                 timeout,
-                null,
                 environmentRoot),
             listener);
     return listener;
   }
 
-  private static String text(ToolResult result) {
+  private static String text(EnvironmentCapabilityResult result) {
     return text(result.contents());
   }
 
   private static String text(List<ToolContent> contents) {
-    return contents.stream().map(CodingToolsEdgeTest::text).reduce("", String::concat);
+    return contents.stream().map(CodingCapabilitiesEdgeTest::text).reduce("", String::concat);
   }
 
   private static String text(ToolContent content) {
     return content instanceof TextToolContent value ? value.text() : "";
   }
 
-  private static final class RecordingListener implements ToolExecutionListener {
+  private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
     private final CountDownLatch done = new CountDownLatch(1);
-    private final List<ToolResult> partials = new ArrayList<>();
-    private volatile ToolResult result;
-    private volatile ToolExecutionHandle handle;
+    private final List<EnvironmentCapabilityResult> partials = new ArrayList<>();
+    private volatile EnvironmentCapabilityResult result;
+    private volatile EnvironmentCapabilityExecutionHandle handle;
     private volatile int completions;
 
     @Override
-    public synchronized void onPartial(ToolResult partial) {
+    public synchronized void onPartial(EnvironmentCapabilityResult partial) {
       partials.add(partial);
     }
 
     @Override
-    public void onComplete(ToolResult result) {
+    public void onComplete(EnvironmentCapabilityResult result) {
       this.result = result;
       completions++;
       done.countDown();

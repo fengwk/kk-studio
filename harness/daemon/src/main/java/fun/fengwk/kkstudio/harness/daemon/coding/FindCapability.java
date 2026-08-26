@@ -2,12 +2,13 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -19,16 +20,17 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /** 使用 Java NIO 查找遵守分层 {@code .gitignore} 的 environment 文件。 */
-public final class FindTool extends AbstractCodingTool {
+public final class FindCapability extends AbstractCodingCapability {
 
   static final int MAX_TIMEOUT_SECONDS = 3600;
 
-  public FindTool(CodingToolsConfig config, ExecutorService executor) {
-    super(config, executor, EnvironmentToolCatalog.require("find"));
+  public FindCapability(CodingToolsConfig config, ExecutorService executor) {
+    super(config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND));
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     Path workdir = boundary.workdir(optionalString(args, "workdir"), request.workdir());
     Path path = boundary.existingWithoutSymlinks(string(args, "path"), workdir);
@@ -67,7 +69,8 @@ public final class FindTool extends AbstractCodingTool {
     return outerTimeout.compareTo(requestedTimeout) > 0 ? requestedTimeout : outerTimeout;
   }
 
-  private ToolResult result(String callId, List<String> completeLines, int limit) throws Exception {
+  private EnvironmentCapabilityResult result(String callId, List<String> completeLines, int limit)
+      throws Exception {
     boolean limited = completeLines.size() > limit;
     List<String> previewLines =
         new ArrayList<>(completeLines.subList(0, Math.min(limit, completeLines.size())));
@@ -76,7 +79,7 @@ public final class FindTool extends AbstractCodingTool {
       previewLines.add("[" + limit + " results limit reached. Refine the pattern or raise limit.]");
     }
     if (!limited) {
-      return new ToolResult(
+      return new EnvironmentCapabilityResult(
           callId,
           OutputLimiter.limit(
               String.join("\n", previewLines).getBytes(StandardCharsets.UTF_8),
@@ -101,6 +104,6 @@ public final class FindTool extends AbstractCodingTool {
                 .store(
                     String.join("\n", completeLines).getBytes(StandardCharsets.UTF_8),
                     "text/plain")));
-    return new ToolResult(callId, contents, false, "{}");
+    return new EnvironmentCapabilityResult(callId, contents, false, "{}");
   }
 }

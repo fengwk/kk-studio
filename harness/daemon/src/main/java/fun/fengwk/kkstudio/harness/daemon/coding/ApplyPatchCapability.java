@@ -2,10 +2,11 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentWorkspacePath;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -34,7 +35,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** 在 invocation workspace 内解析并原子提交一组文本文件 patch。 */
-public final class ApplyPatchTool extends AbstractCodingTool {
+public final class ApplyPatchCapability extends AbstractCodingCapability {
 
   private static final String BEGIN_PATCH = "*** Begin Patch";
   private static final String END_PATCH = "*** End Patch";
@@ -46,17 +47,22 @@ public final class ApplyPatchTool extends AbstractCodingTool {
 
   private final Runnable afterPreflightHook;
 
-  public ApplyPatchTool(CodingToolsConfig config, ExecutorService executor) {
+  public ApplyPatchCapability(CodingToolsConfig config, ExecutorService executor) {
     this(config, executor, () -> {});
   }
 
-  ApplyPatchTool(CodingToolsConfig config, ExecutorService executor, Runnable afterPreflightHook) {
-    super(config, executor, EnvironmentToolCatalog.require("apply_patch"));
+  ApplyPatchCapability(
+      CodingToolsConfig config, ExecutorService executor, Runnable afterPreflightHook) {
+    super(
+        config,
+        executor,
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_APPLY_PATCH));
     this.afterPreflightHook = Objects.requireNonNull(afterPreflightHook, "afterPreflightHook");
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     ParsedPatch patch = parse(string(args, "patchText"));
     Path invocationWorkspace = boundary.workdir(null, request.workdir());

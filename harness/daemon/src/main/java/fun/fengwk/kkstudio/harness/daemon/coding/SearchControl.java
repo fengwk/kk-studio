@@ -12,17 +12,17 @@ final class SearchControl {
   private final long startedNanos;
   private final long timeoutNanos;
   private final long timeoutMillis;
-  private final String toolName;
+  private final String capabilityName;
   private final LongSupplier nanoTime;
 
   SearchControl(
-      Duration timeout, BooleanSupplier cancelled, String toolName, LongSupplier nanoTime) {
+      Duration timeout, BooleanSupplier cancelled, String capabilityName, LongSupplier nanoTime) {
     Objects.requireNonNull(timeout, "timeout");
     if (timeout.isNegative() || timeout.isZero()) {
       throw new IllegalArgumentException("timeout must be positive");
     }
     this.cancelled = Objects.requireNonNull(cancelled, "cancelled");
-    this.toolName = Objects.requireNonNull(toolName, "toolName");
+    this.capabilityName = Objects.requireNonNull(capabilityName, "capabilityName");
     this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     startedNanos = nanoTime.getAsLong();
     timeoutNanos = timeout.toNanos();
@@ -30,9 +30,9 @@ final class SearchControl {
   }
 
   static SearchControl start(
-      Duration timeout, AbstractCodingTool.Execution execution, String toolName) {
+      Duration timeout, AbstractCodingCapability.Execution execution, String capabilityName) {
     Objects.requireNonNull(execution, "execution");
-    return new SearchControl(timeout, execution::isCancelled, toolName, System::nanoTime);
+    return new SearchControl(timeout, execution::isCancelled, capabilityName, System::nanoTime);
   }
 
   void check() throws InterruptedException {
@@ -41,7 +41,7 @@ final class SearchControl {
     }
     if (nanoTime.getAsLong() - startedNanos >= timeoutNanos) {
       throw new IllegalArgumentException(
-          toolName + " timed out after " + timeoutMillis + " milliseconds");
+          capabilityName + " timed out after " + timeoutMillis + " milliseconds");
     }
   }
 }

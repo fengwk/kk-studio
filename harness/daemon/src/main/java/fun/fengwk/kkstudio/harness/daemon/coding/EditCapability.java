@@ -2,9 +2,10 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,14 +16,18 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** 在保留文件表示形式（编码/BOM/未修改区域的行尾分隔符）的前提下执行确定性的精确文本替换。 */
-public final class EditTool extends AbstractCodingTool {
+public final class EditCapability extends AbstractCodingCapability {
 
-  public EditTool(CodingToolsConfig config, ExecutorService executor) {
-    super(config, executor, EnvironmentToolCatalog.require("edit"));
+  public EditCapability(CodingToolsConfig config, ExecutorService executor) {
+    super(
+        config,
+        executor,
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_APPLY_EDIT));
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
     String oldText = string(args, "old_string");

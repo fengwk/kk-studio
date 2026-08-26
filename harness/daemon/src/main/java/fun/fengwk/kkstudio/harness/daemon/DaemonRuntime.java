@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.daemon.coding.CodingTools;
+import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournal;
@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
-import fun.fengwk.kkstudio.harness.daemon.mcp.McpBridgeTools;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpBridgeCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerRegistry;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkill;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
@@ -21,14 +21,21 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityInvokeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -41,10 +48,6 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -54,11 +57,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -73,7 +74,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Environment Daemon 的连接、协议和本地 Tool SPI 执行基座。
+ * Environment Daemon 的连接、协议和本地 Environment Capability 执行基座。
  *
  * <p>Invocation journal 是进程内去重事实源；WebSocket 仅传递消息。连接断开后 Daemon 会重新握手；若 gateway 再次发送相同
  * invocationId，RUNNING/terminal journal 条目分别重放 STARTED/terminal。
@@ -88,7 +89,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonConfig config;
   private final EnvironmentName environmentName;
   private final DaemonTransport transport;
-  private final DaemonToolRegistry toolRegistry;
+  private final DaemonCapabilityRegistry capabilityRegistry;
   private final DaemonSkillRegistry skillRegistry;
   private final McpServerRegistry mcpRegistry;
   private final DaemonInvocationJournal journal;
@@ -98,6 +99,8 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonEnvironmentInfo environmentInfo;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
+  private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
+      new DaemonCapabilityInvokeCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
   private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
@@ -119,8 +122,8 @@ public final class DaemonRuntime implements AutoCloseable {
   private Duration nextReconnectDelay;
 
   /**
-   * 创建完整生产运行时。scheduler 与 virtual-thread-per-task executor 在注册 Tool 前创建并注入，成功后由 runtime 独占生命周期；
-   * 任一步构造失败都会释放 transport、MCP registry 和已创建的执行资源。
+   * 创建完整生产运行时。scheduler 与 virtual-thread-per-task executor 在注册 capability 前创建并注入，成功后由 runtime
+   * 独占生命周期；任一步构造失败都会释放 transport、MCP registry 和已创建的执行资源。
    */
   public static DaemonRuntime create(
       DaemonConfig config,
@@ -135,8 +138,8 @@ public final class DaemonRuntime implements AutoCloseable {
         mcpRegistry,
         toolsConfig.resourceStore(),
         (registry, executor, scheduler) -> {
-          CodingTools.registerAll(registry, toolsConfig, executor, scheduler);
-          McpBridgeTools.registerAll(registry, mcpRegistry, executor);
+          CodingCapabilities.registerAll(registry, toolsConfig, executor, scheduler);
+          McpBridgeCapabilities.registerAll(registry, mcpRegistry, executor);
         });
   }
 
@@ -145,7 +148,7 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonSkillRegistry skillRegistry,
       McpServerRegistry mcpRegistry,
       ResourceStore resourceStore,
-      ToolRegistrar registrar) {
+      CapabilityRegistrar registrar) {
     Objects.requireNonNull(config, "config");
     Objects.requireNonNull(skillRegistry, "skillRegistry");
     Objects.requireNonNull(mcpRegistry, "mcpRegistry");
@@ -157,13 +160,13 @@ public final class DaemonRuntime implements AutoCloseable {
     try {
       taskExecutor = newTaskExecutor();
       transport = new JdkWebSocketTransport(config.gatewayUri());
-      DaemonToolRegistry toolRegistry = new DaemonToolRegistry();
-      registrar.register(toolRegistry, taskExecutor, scheduler);
+      DaemonCapabilityRegistry capabilityRegistry = new DaemonCapabilityRegistry();
+      registrar.register(capabilityRegistry, taskExecutor, scheduler);
       DaemonRuntime runtime =
           new DaemonRuntime(
               config,
               transport,
-              toolRegistry,
+              capabilityRegistry,
               skillRegistry,
               mcpRegistry,
               new InMemoryDaemonInvocationJournal(),
@@ -186,7 +189,7 @@ public final class DaemonRuntime implements AutoCloseable {
   DaemonRuntime(
       DaemonConfig config,
       DaemonTransport transport,
-      DaemonToolRegistry toolRegistry,
+      DaemonCapabilityRegistry capabilityRegistry,
       DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
@@ -194,7 +197,7 @@ public final class DaemonRuntime implements AutoCloseable {
     this(
         config,
         transport,
-        toolRegistry,
+        capabilityRegistry,
         skillRegistry,
         McpServerRegistry.empty(),
         journal,
@@ -208,7 +211,7 @@ public final class DaemonRuntime implements AutoCloseable {
   DaemonRuntime(
       DaemonConfig config,
       DaemonTransport transport,
-      DaemonToolRegistry toolRegistry,
+      DaemonCapabilityRegistry capabilityRegistry,
       DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
@@ -217,7 +220,7 @@ public final class DaemonRuntime implements AutoCloseable {
     this(
         config,
         transport,
-        toolRegistry,
+        capabilityRegistry,
         skillRegistry,
         McpServerRegistry.empty(),
         journal,
@@ -231,7 +234,7 @@ public final class DaemonRuntime implements AutoCloseable {
   DaemonRuntime(
       DaemonConfig config,
       DaemonTransport transport,
-      DaemonToolRegistry toolRegistry,
+      DaemonCapabilityRegistry capabilityRegistry,
       DaemonSkillRegistry skillRegistry,
       McpServerRegistry mcpRegistry,
       DaemonInvocationJournal journal,
@@ -241,7 +244,7 @@ public final class DaemonRuntime implements AutoCloseable {
     this(
         config,
         transport,
-        toolRegistry,
+        capabilityRegistry,
         skillRegistry,
         mcpRegistry,
         journal,
@@ -254,18 +257,18 @@ public final class DaemonRuntime implements AutoCloseable {
   private DaemonRuntime(
       DaemonConfig config,
       DaemonTransport transport,
-      DaemonToolRegistry toolRegistry,
+      DaemonCapabilityRegistry capabilityRegistry,
       DaemonSkillRegistry skillRegistry,
       McpServerRegistry mcpRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor,
       ResourceStore resourceStore,
-      boolean requireFixedToolCatalog) {
+      boolean requireFixedCapabilityCatalog) {
     this.config = Objects.requireNonNull(config, "config");
     this.environmentName = Objects.requireNonNull(config.environmentName(), "environmentName");
     this.transport = Objects.requireNonNull(transport, "transport");
-    this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
+    this.capabilityRegistry = Objects.requireNonNull(capabilityRegistry, "capabilityRegistry");
     this.skillRegistry = Objects.requireNonNull(skillRegistry, "skillRegistry");
     this.mcpRegistry = Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     this.journal = Objects.requireNonNull(journal, "journal");
@@ -281,11 +284,13 @@ public final class DaemonRuntime implements AutoCloseable {
             config.environmentRoot().toString());
     this.directoryBrowser = new EnvironmentDirectoryBrowser(config.environmentRoot());
     this.nextReconnectDelay = config.initialReconnectDelay();
-    if (requireFixedToolCatalog
-        && !List.copyOf(toolRegistry.descriptors()).equals(EnvironmentToolCatalog.descriptors())) {
-      throw new IllegalStateException("daemon tool registry does not match EnvironmentToolCatalog");
+    if (requireFixedCapabilityCatalog
+        && !List.copyOf(capabilityRegistry.descriptors())
+            .equals(EnvironmentCapabilityCatalog.descriptors())) {
+      throw new IllegalStateException(
+          "daemon capability registry does not match EnvironmentCapabilityCatalog");
     }
-    toolRegistry.freeze();
+    capabilityRegistry.freeze();
   }
 
   private static ScheduledThreadPoolExecutor newScheduler() {
@@ -419,9 +424,9 @@ public final class DaemonRuntime implements AutoCloseable {
   private boolean sendHello(ActiveConnection connection) {
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("daemonId", config.daemonId());
-    payload.put("protocolVersion", DaemonProtocol.VERSION_3);
-    payload.put("toolCatalogVersion", EnvironmentToolCatalog.version());
+    payload.put("protocolVersion", DaemonProtocol.VERSION_4);
     payload.put("gatewayToken", config.gatewayToken());
+    payload.put("capabilityCatalogVersion", EnvironmentCapabilityCatalog.version());
     return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
   }
 
@@ -449,6 +454,7 @@ public final class DaemonRuntime implements AutoCloseable {
     }
     try {
       DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
+      requireProtocolVersion(envelope);
       verifyScope(envelope);
       InboundEnvelopeIdentity identity =
           InboundEnvelopeIdentity.from(envelope, envelopeCodec.readPayload(envelope));
@@ -491,6 +497,13 @@ public final class DaemonRuntime implements AutoCloseable {
       }
     } catch (IllegalArgumentException error) {
       sendOn(connection, DaemonMessageType.ERROR, null, errorPayload(error));
+    }
+  }
+
+  private void requireProtocolVersion(DaemonEnvelope envelope) {
+    if (envelope.protocolVersion() != DaemonProtocol.VERSION_4) {
+      throw new DaemonProtocolException(
+          "daemon runtime requires protocolVersion " + DaemonProtocol.VERSION_4);
     }
   }
 
@@ -569,25 +582,25 @@ public final class DaemonRuntime implements AutoCloseable {
       // workspace 必须在发送 STARTED / 执行工具之前 canonicalize 为 Environment Root 内现存目录；
       // 形状非法、symlink 越界、路径删除或非目录都是确定性 FAILED，绝不产生 STARTED。
       Path workdir = canonicalWorkspace(payload.workspacePath());
-      Tool tool =
-          toolRegistry
-              .find(payload.toolName())
+      EnvironmentCapability capability =
+          capabilityRegistry
+              .find(payload.capabilityId())
               .orElseThrow(
                   () ->
                       new IllegalArgumentException(
-                          "unknown environment tool: " + payload.toolName()));
-      ToolDescriptor descriptor = tool.descriptor();
-      if (!descriptor.version().equals(payload.toolVersion())) {
+                          "unknown Environment capability: " + payload.capabilityId()));
+      EnvironmentCapabilityDescriptor descriptor = capability.descriptor();
+      if (!descriptor.version().equals(payload.capabilityVersion())) {
         throw new IllegalArgumentException(
-            "toolVersion does not match environment descriptor: " + payload.toolVersion());
+            "capabilityVersion does not match environment descriptor: "
+                + payload.capabilityVersion());
       }
       Duration timeout = resolveTimeout(payload.timeout(), descriptor);
-      ToolExecutionRequest request =
-          new ToolExecutionRequest(
+      EnvironmentCapabilityExecutionRequest request =
+          new EnvironmentCapabilityExecutionRequest(
               descriptor,
-              new ToolCall(envelope.invocationId(), payload.toolName(), payload.argumentsJson()),
+              new EnvironmentCapabilityCall(envelope.invocationId(), payload.argumentsJson()),
               timeout,
-              null,
               workdir);
       RunningInvocation invocation = new RunningInvocation(envelope.invocationId());
       running.put(envelope.invocationId(), invocation);
@@ -602,8 +615,9 @@ public final class DaemonRuntime implements AutoCloseable {
         return;
       }
       sendOn(connection, DaemonMessageType.STARTED, envelope.invocationId(), "{}");
-      ToolExecutionHandle handle = tool.execute(request, new InvocationListener(invocation));
-      invocation.setHandle(Objects.requireNonNull(handle, "tool execution handle"));
+      EnvironmentCapabilityExecutionHandle handle =
+          capability.execute(request, new InvocationListener(invocation));
+      invocation.setHandle(Objects.requireNonNull(handle, "capability execution handle"));
       scheduleTimeout(invocation, timeout);
     } catch (RuntimeException error) {
       terminal(
@@ -792,7 +806,7 @@ public final class DaemonRuntime implements AutoCloseable {
                       invocation.invocationId(),
                       new DaemonTerminalMessage(
                           DaemonMessageType.FAILED,
-                          "{\"message\":\"tool execution timed out after "
+                          "{\"message\":\"capability execution timed out after "
                               + timeout.toMillis()
                               + "ms\"}"),
                       true),
@@ -805,10 +819,11 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   /**
-   * 0 timeoutMillis 表示不覆盖 descriptor；descriptor 未设置 deadline 时回退 daemon 默认值，确保 每次 invocation 都有有效
+   * 0 timeoutMillis 表示不覆盖 descriptor；descriptor 未设置 deadline 时回退 daemon 默认值，确保每次 invocation 都有有效
    * deadline。
    */
-  private Duration resolveTimeout(Duration requestedTimeout, ToolDescriptor descriptor) {
+  private Duration resolveTimeout(
+      Duration requestedTimeout, EnvironmentCapabilityDescriptor descriptor) {
     if (!requestedTimeout.isZero()) {
       return requestedTimeout;
     }
@@ -816,18 +831,9 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   /**
-   * INVOKE payload 是严格字段集：toolName/toolVersion/workspacePath/arguments 必填，timeoutMillis 可选（缺省时按
-   * descriptor/daemon 默认收敛）；未知字段一律协议拒绝。workspacePath 的形状（canonical 相对 wire 路径）在 {@link
-   * #handleInvoke} 中与本地解析一起确定性收敛为 FAILED。
-   */
-  private static final Set<String> INVOKE_PAYLOAD_FIELDS =
-      Set.of("toolName", "toolVersion", "workspacePath", "arguments", "timeoutMillis");
-
-  private static final Set<String> REQUIRED_INVOKE_PAYLOAD_FIELDS =
-      Set.of("toolName", "toolVersion", "workspacePath", "arguments");
-
-  /**
-   * 把 INVOKE 的 canonical 相对 wire workspace path 解析为 Environment Root 内的 canonical 现存目录。
+   * INVOKE payload 由 capability codec 严格解码，字段为
+   * capabilityId/capabilityVersion/workspacePath/arguments/timeoutMillis；再把 canonical 相对 wire
+   * workspace path 解析为 Environment Root 内的 canonical 现存目录。
    *
    * <p>先经共享 workspace validator 做形状校验（{@code '.'} 表示 root、仅 {@code '/'} 分隔、拒绝 absolute/Windows
    * drive/反斜杠/空段/{@code '.'}/{@code '..'} 段/控制字符），再相对 environment root 解析并 {@code toRealPath}：
@@ -854,37 +860,14 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private InvokePayload readInvokePayload(DaemonEnvelope envelope) {
-    ObjectNode payload = envelopeCodec.readPayload(envelope);
-    Set<String> actual = new LinkedHashSet<>();
-    payload.fieldNames().forEachRemaining(actual::add);
-    if (!actual.containsAll(REQUIRED_INVOKE_PAYLOAD_FIELDS)
-        || !INVOKE_PAYLOAD_FIELDS.containsAll(actual)) {
-      throw new DaemonProtocolException(
-          "INVOKE payload must declare exactly " + INVOKE_PAYLOAD_FIELDS + ": " + actual);
-    }
-    JsonNode arguments = payload.get("arguments");
-    if (arguments == null || !arguments.isObject()) {
-      throw new DaemonProtocolException("INVOKE payload.arguments must be a JSON object");
-    }
-    long timeoutMillis = optionalNonNegativeLong(payload, "timeoutMillis", 0);
+    DaemonCapabilityInvokeCodec.InvokeRequest request =
+        capabilityInvokeCodec.decode(envelope.payloadJson());
     return new InvokePayload(
-        requiredPayloadText(payload, "toolName"),
-        requiredPayloadText(payload, "toolVersion"),
-        requiredPayloadText(payload, "workspacePath"),
-        envelopeCodec.writeJson(arguments),
-        Duration.ofMillis(timeoutMillis));
-  }
-
-  private long optionalNonNegativeLong(ObjectNode payload, String fieldName, long defaultValue) {
-    JsonNode value = payload.get(fieldName);
-    if (value == null || value.isNull()) {
-      return defaultValue;
-    }
-    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
-      throw new DaemonProtocolException(
-          "INVOKE payload." + fieldName + " must be a non-negative long");
-    }
-    return value.longValue();
+        request.capabilityId(),
+        request.capabilityVersion(),
+        request.workspacePath(),
+        request.argumentsJson(),
+        request.timeout());
   }
 
   private void requireInvocationId(DaemonEnvelope envelope) {
@@ -898,15 +881,6 @@ public final class DaemonRuntime implements AutoCloseable {
     if (envelope.invocationId() != null) {
       throw new DaemonProtocolException(envelope.messageType() + " must not declare invocationId");
     }
-  }
-
-  private String requiredPayloadText(ObjectNode payload, String fieldName) {
-    JsonNode value = payload.get(fieldName);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
-      throw new DaemonProtocolException(
-          "INVOKE payload." + fieldName + " must be a non-blank string");
-    }
-    return value.textValue();
   }
 
   private void sendAck(ActiveConnection connection, long acknowledgedSequence) {
@@ -949,7 +923,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private DaemonEnvelope envelope(
       DaemonMessageType messageType, String invocationId, String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_3,
+        DaemonProtocol.VERSION_4,
         messageType,
         environmentName,
         invocationId,
@@ -1095,15 +1069,15 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   @FunctionalInterface
-  interface ToolRegistrar {
+  interface CapabilityRegistrar {
 
     void register(
-        DaemonToolRegistry registry,
+        DaemonCapabilityRegistry registry,
         ExecutorService taskExecutor,
         ScheduledExecutorService scheduler);
   }
 
-  private final class InvocationListener implements ToolExecutionListener {
+  private final class InvocationListener implements EnvironmentCapabilityExecutionListener {
 
     private final RunningInvocation invocation;
 
@@ -1112,7 +1086,7 @@ public final class DaemonRuntime implements AutoCloseable {
     }
 
     @Override
-    public void onPartial(ToolResult partial) {
+    public void onPartial(EnvironmentCapabilityResult partial) {
       if (!isRunning(invocation.invocationId())
           || !matchesInvocation(partial, invocation.invocationId())) {
         return;
@@ -1121,26 +1095,26 @@ public final class DaemonRuntime implements AutoCloseable {
         send(
             DaemonMessageType.PARTIAL,
             invocation.invocationId(),
-            resultCodec.encodePartial(partial, resourceWriter()));
+            resultCodec.encodePartial(toWireToolResult(partial), resourceWriter()));
       } catch (RuntimeException error) {
         failResultEncoding(invocation.invocationId(), error, "partial");
       }
     }
 
     @Override
-    public void onComplete(ToolResult result) {
+    public void onComplete(EnvironmentCapabilityResult result) {
       if (!matchesInvocation(result, invocation.invocationId())) {
         terminal(
             invocation.invocationId(),
             new DaemonTerminalMessage(
                 DaemonMessageType.FAILED,
-                "{\"message\":\"tool result toolCallId does not match invocationId\"}"),
+                "{\"message\":\"capability result callId does not match invocationId\"}"),
             false);
         return;
       }
       String payload;
       try {
-        payload = resultCodec.encodeCompleted(result, resourceWriter());
+        payload = resultCodec.encodeCompleted(toWireToolResult(result), resourceWriter());
       } catch (RuntimeException error) {
         failResultEncoding(invocation.invocationId(), error, "complete");
         return;
@@ -1162,12 +1136,17 @@ public final class DaemonRuntime implements AutoCloseable {
 
   /** resource 读取/落盘或编码失败时，确定性收敛为 FAILED，避免让 callback 漏掉终态。允许已有 journal 记录为 RUNNING 时覆盖。 */
   private void failResultEncoding(String invocationId, RuntimeException error, String phase) {
-    String message = "cannot " + phase + " tool result: " + error.getMessage();
+    String message = "cannot " + phase + " capability result: " + error.getMessage();
     terminal(
         invocationId,
         new DaemonTerminalMessage(
             DaemonMessageType.FAILED, errorPayload(new IllegalStateException(message, error))),
         false);
+  }
+
+  /** 仅在 Daemon wire codec 边界将 capability result 映射为现有 wire codec 所需的等价结果。 */
+  private ToolResult toWireToolResult(EnvironmentCapabilityResult result) {
+    return new ToolResult(result.callId(), result.contents(), result.error(), result.detailsJson());
   }
 
   /** 提供给结果 codec 的 resource 读写 SPI；未配置 store 时对任何 resource/binary 内容确定性失败。 */
@@ -1199,8 +1178,8 @@ public final class DaemonRuntime implements AutoCloseable {
         .orElse(false);
   }
 
-  private boolean matchesInvocation(ToolResult result, String invocationId) {
-    return result != null && invocationId.equals(result.toolCallId());
+  private boolean matchesInvocation(EnvironmentCapabilityResult result, String invocationId) {
+    return result != null && invocationId.equals(result.callId());
   }
 
   private final class RuntimeTransportListener implements DaemonTransportListener {
@@ -1228,7 +1207,8 @@ public final class DaemonRuntime implements AutoCloseable {
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean begun = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
-    private final AtomicReference<ToolExecutionHandle> handle = new AtomicReference<>();
+    private final AtomicReference<EnvironmentCapabilityExecutionHandle> handle =
+        new AtomicReference<>();
     private final AtomicReference<ScheduledFuture<?>> deadline = new AtomicReference<>();
 
     private RunningInvocation(String invocationId) {
@@ -1243,7 +1223,7 @@ public final class DaemonRuntime implements AutoCloseable {
       return !cancelled.get() && begun.compareAndSet(false, true);
     }
 
-    private void setHandle(ToolExecutionHandle value) {
+    private void setHandle(EnvironmentCapabilityExecutionHandle value) {
       handle.set(value);
       if (cancelled.get()) {
         value.cancel();
@@ -1276,7 +1256,7 @@ public final class DaemonRuntime implements AutoCloseable {
 
     private void cancel() {
       if (cancelled.compareAndSet(false, true)) {
-        ToolExecutionHandle value = handle.get();
+        EnvironmentCapabilityExecutionHandle value = handle.get();
         if (value != null) {
           value.cancel();
         }
@@ -1371,8 +1351,8 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private record InvokePayload(
-      String toolName,
-      String toolVersion,
+      EnvironmentCapabilityId capabilityId,
+      String capabilityVersion,
       String workspacePath,
       String argumentsJson,
       Duration timeout) {}

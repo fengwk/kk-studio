@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
-/** 将 coding tools 使用的 POSIX glob 转换为与平台无关的 Java regex。 */
+/** 将 coding capabilities 使用的 POSIX glob 转换为与平台无关的 Java regex。 */
 final class GlobPattern {
 
   private final Pattern pattern;

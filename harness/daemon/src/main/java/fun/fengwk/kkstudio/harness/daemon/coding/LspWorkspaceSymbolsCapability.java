@@ -2,28 +2,33 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 
 /** 通过可选的本机 LSP bridge 搜索 workspace symbols。 */
-public final class LspWorkspaceSymbolsTool extends AbstractCodingTool {
+public final class LspWorkspaceSymbolsCapability extends AbstractCodingCapability {
 
   private static final int DEFAULT_LIMIT = 50;
   private static final int MAX_LIMIT = 500;
 
   private final LspBridge bridge;
 
-  public LspWorkspaceSymbolsTool(CodingToolsConfig config, ExecutorService executor) {
-    super(config, executor, EnvironmentToolCatalog.require("lsp_workspace_symbols"));
+  public LspWorkspaceSymbolsCapability(CodingToolsConfig config, ExecutorService executor) {
+    super(
+        config,
+        executor,
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS));
     this.bridge = new LspBridge(config);
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     Path path =
         boundary.existing(

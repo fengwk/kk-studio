@@ -2,12 +2,13 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -25,18 +26,20 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 /** 使用 Java NIO 与 regex 搜索 environment 文件，并遵守分层 {@code .gitignore}。 */
-public final class GrepTool extends AbstractCodingTool {
+public final class GrepCapability extends AbstractCodingCapability {
 
   private static final int MAX_DISPLAY_LINE_CHARS = 500;
   static final int DEFAULT_TIMEOUT_SECONDS = 15;
   static final int MAX_TIMEOUT_SECONDS = 3600;
 
-  public GrepTool(CodingToolsConfig config, ExecutorService executor) {
-    super(config, executor, EnvironmentToolCatalog.require("grep"));
+  public GrepCapability(CodingToolsConfig config, ExecutorService executor) {
+    super(
+        config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_SEARCH));
   }
 
   @Override
-  ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
+  EnvironmentCapabilityResult run(
+      EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String sourcePattern = string(args, "pattern");
     Path workdir = boundary.workdir(optionalString(args, "workdir"), request.workdir());
@@ -136,7 +139,7 @@ public final class GrepTool extends AbstractCodingTool {
     return SearchFiles.collect(config.environmentRoot(), path, control);
   }
 
-  private ToolResult result(String callId, List<String> completeLines, int limit)
+  private EnvironmentCapabilityResult result(String callId, List<String> completeLines, int limit)
       throws IOException {
     boolean resultLimited = completeLines.size() > limit;
     List<String> previewLines =
@@ -173,7 +176,7 @@ public final class GrepTool extends AbstractCodingTool {
       contents.add(
           new ResourceToolContent(config.resourceStore().store(completeBytes, "text/plain")));
     }
-    return new ToolResult(callId, contents, false, "{}");
+    return new EnvironmentCapabilityResult(callId, contents, false, "{}");
   }
 
   private static Pattern compilePattern(

@@ -2,15 +2,16 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -33,7 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>静态解析无法沙箱化 shell 内部行为；命令授权属于 Platform permission。但 Daemon 仍会校验 workdir，并使用运行时注入的共享 scheduler
  * 在超时或取消时终止完整 process tree。
  */
-public final class BashTool implements Tool {
+public final class BashCapability implements EnvironmentCapability {
 
   static final int DEFAULT_TIMEOUT_SECONDS = 120;
   static final int MAX_TIMEOUT_SECONDS = 3600;
@@ -41,24 +42,26 @@ public final class BashTool implements Tool {
   private final EnvironmentPathBoundary boundary;
   private final ExecutorService executor;
   private final ScheduledExecutorService scheduler;
-  private final ToolDescriptor descriptor;
+  private final EnvironmentCapabilityDescriptor descriptor;
 
-  public BashTool(
+  public BashCapability(
       CodingToolsConfig config, ExecutorService executor, ScheduledExecutorService scheduler) {
     this.config = Objects.requireNonNull(config, "config");
     boundary = new EnvironmentPathBoundary(config);
     this.executor = Objects.requireNonNull(executor, "executor");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
-    descriptor = EnvironmentToolCatalog.require("bash");
+    descriptor = EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC);
   }
 
   @Override
-  public ToolDescriptor descriptor() {
+  public EnvironmentCapabilityDescriptor descriptor() {
     return descriptor;
   }
 
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public EnvironmentCapabilityExecutionHandle execute(
+      EnvironmentCapabilityExecutionRequest request,
+      EnvironmentCapabilityExecutionListener listener) {
     if (!descriptor.equals(request.descriptor())) {
       throw new IllegalArgumentException("request descriptor does not match tool descriptor");
     }
@@ -69,12 +72,15 @@ public final class BashTool implements Tool {
   }
 
   private void run(
-      ToolExecutionRequest request, ToolExecutionListener listener, BashHandle handle) {
+      EnvironmentCapabilityExecutionRequest request,
+      EnvironmentCapabilityExecutionListener listener,
+      BashHandle handle) {
     try {
-      JsonNode args = AbstractCodingTool.arguments(request);
-      String command = AbstractCodingTool.string(args, "command");
+      JsonNode args = AbstractCodingCapability.arguments(request);
+      String command = AbstractCodingCapability.string(args, "command");
       Path workdir =
-          boundary.workdir(AbstractCodingTool.optionalString(args, "workdir"), request.workdir());
+          boundary.workdir(
+              AbstractCodingCapability.optionalString(args, "workdir"), request.workdir());
       int timeoutSeconds = requestedTimeoutSeconds(args);
       Duration processTimeout =
           effectiveProcessTimeout(request.effectiveTimeout(), Duration.ofSeconds(timeoutSeconds));
@@ -117,10 +123,10 @@ public final class BashTool implements Tool {
       int exitCode = process.waitFor();
       if (handle.cancelled.get()) {
         handle.complete(
-            listener, AbstractCodingTool.error(request.call().id(), "Operation cancelled"));
+            listener, AbstractCodingCapability.error(request.call().id(), "Operation cancelled"));
       } else if (handle.timedOut.get()) {
         handle.complete(
-            listener, AbstractCodingTool.error(request.call().id(), "Command timed out"));
+            listener, AbstractCodingCapability.error(request.call().id(), "Command timed out"));
       } else {
         boolean failed = exitCode != 0;
         List<ToolContent> contents =
@@ -129,15 +135,17 @@ public final class BashTool implements Tool {
           contents = new ArrayList<>(contents);
           contents.add(new TextToolContent("\nCommand exited with code " + exitCode));
         }
-        handle.complete(listener, new ToolResult(request.call().id(), contents, failed, "{}"));
+        handle.complete(
+            listener, new EnvironmentCapabilityResult(request.call().id(), contents, failed, "{}"));
       }
     } catch (Exception error) {
-      handle.complete(listener, AbstractCodingTool.error(request.call().id(), error.getMessage()));
+      handle.complete(
+          listener, AbstractCodingCapability.error(request.call().id(), error.getMessage()));
     }
   }
 
   static int requestedTimeoutSeconds(JsonNode args) {
-    return AbstractCodingTool.optionalPositiveInt(
+    return AbstractCodingCapability.optionalPositiveInt(
         args, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS);
   }
 
@@ -150,15 +158,19 @@ public final class BashTool implements Tool {
   }
 
   private static void emitPartial(
-      String callId, ToolExecutionListener listener, BashHandle handle, String text) {
+      String callId,
+      EnvironmentCapabilityExecutionListener listener,
+      BashHandle handle,
+      String text) {
     if (!text.isEmpty() && !handle.cancelled.get() && !handle.timedOut.get()) {
-      listener.onPartial(new ToolResult(callId, List.of(new TextToolContent(text)), false, "{}"));
+      listener.onPartial(
+          new EnvironmentCapabilityResult(callId, List.of(new TextToolContent(text)), false, "{}"));
     }
   }
 
-  private static final class BashHandle implements ToolExecutionHandle {
+  private static final class BashHandle implements EnvironmentCapabilityExecutionHandle {
     private final String callId;
-    private final ToolExecutionListener listener;
+    private final EnvironmentCapabilityExecutionListener listener;
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean timedOut = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
@@ -166,7 +178,7 @@ public final class BashTool implements Tool {
     private volatile Future<?> worker;
     private volatile ScheduledFuture<?> timeoutFuture;
 
-    private BashHandle(String callId, ToolExecutionListener listener) {
+    private BashHandle(String callId, EnvironmentCapabilityExecutionListener listener) {
       this.callId = callId;
       this.listener = listener;
     }
@@ -179,7 +191,7 @@ public final class BashTool implements Tool {
           current.cancel(true);
         }
         stopProcessTree();
-        complete(listener, AbstractCodingTool.error(callId, "Operation cancelled"));
+        complete(listener, AbstractCodingCapability.error(callId, "Operation cancelled"));
       }
     }
 
@@ -205,7 +217,8 @@ public final class BashTool implements Tool {
       }
     }
 
-    private void complete(ToolExecutionListener listener, ToolResult result) {
+    private void complete(
+        EnvironmentCapabilityExecutionListener listener, EnvironmentCapabilityResult result) {
       if (terminal.compareAndSet(false, true)) {
         ScheduledFuture<?> timeout = timeoutFuture;
         if (timeout != null) {
