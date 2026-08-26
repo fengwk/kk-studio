@@ -15,9 +15,12 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
 
 import java.util.List;
@@ -82,8 +85,12 @@ class PlatformToolGatewayAdmissionTest {
       ToolFactory factory =
           new ToolFactory() {
             @Override
-            public ToolDescriptor descriptor() {
-              return platformDescriptor;
+            public AgentToolDefinition definition() {
+              return new AgentToolDefinition(
+                  ToolGatewayTestSupport.TEST_TOOL_ID,
+                  platformDescriptor,
+                  ToolVisibility.SELECTABLE,
+                  AgentToolBackend.HOST);
             }
 
             @Override
@@ -164,8 +171,12 @@ class PlatformToolGatewayAdmissionTest {
     ToolFactory factory =
         new ToolFactory() {
           @Override
-          public ToolDescriptor descriptor() {
-            return descriptor;
+          public AgentToolDefinition definition() {
+            return new AgentToolDefinition(
+                ToolGatewayTestSupport.TEST_TOOL_ID,
+                descriptor,
+                ToolVisibility.SELECTABLE,
+                AgentToolBackend.HOST);
           }
 
           @Override

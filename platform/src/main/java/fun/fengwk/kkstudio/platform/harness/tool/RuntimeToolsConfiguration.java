@@ -59,7 +59,8 @@ public class RuntimeToolsConfiguration {
   @ConditionalOnBean(LoadSkillTool.class)
   @ConditionalOnMissingBean(name = "loadSkillToolFactory")
   public ToolFactory loadSkillToolFactory(LoadSkillTool loadSkillTool) {
-    return ToolFactory.singleton(loadSkillTool, ToolVisibility.INTERNAL, 0);
+    return ToolFactory.singleton(
+        LoadSkillTool.AGENT_TOOL_ID, loadSkillTool, ToolVisibility.INTERNAL, 0);
   }
 
   /**
@@ -118,7 +119,7 @@ public class RuntimeToolsConfiguration {
 
   @Bean
   public ToolFactory taskToolFactory(TaskTool taskTool) {
-    return ToolFactory.singleton(taskTool, ToolVisibility.INTERNAL, 0);
+    return ToolFactory.singleton(TaskTool.AGENT_TOOL_ID, taskTool, ToolVisibility.INTERNAL, 0);
   }
 
   @Bean

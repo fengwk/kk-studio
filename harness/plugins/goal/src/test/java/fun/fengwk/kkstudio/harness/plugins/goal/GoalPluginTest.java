@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -52,7 +53,16 @@ class GoalPluginTest {
     PluginCatalog catalog = PluginCatalog.from(List.of(new GoalPlugin()));
     assertEquals(
         List.of("create_goal", "get_goal", "update_goal"),
-        catalog.tools().stream().map(tool -> tool.descriptor().name()).toList());
+        catalog.tools().stream().map(tool -> tool.definition().descriptor().name()).toList());
+    assertEquals(
+        GoalPlugin.CREATE_TOOL_ID, catalog.findTool("create_goal").orElseThrow().definition().id());
+    assertEquals(
+        GoalPlugin.GET_TOOL_ID, catalog.findTool("get_goal").orElseThrow().definition().id());
+    assertEquals(
+        GoalPlugin.UPDATE_TOOL_ID, catalog.findTool("update_goal").orElseThrow().definition().id());
+    assertEquals(
+        AgentToolBackend.PLUGIN,
+        catalog.findTool("create_goal").orElseThrow().definition().backend());
     assertEquals("goal", catalog.findTool("create_goal").orElseThrow().id().pluginId().value());
     assertEquals(
         PluginStateMode.WRITE,

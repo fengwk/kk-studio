@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.plugin.api;
 
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -23,9 +26,9 @@ import java.util.function.Function;
 /**
  * 冻结的不可变插件目录：从一个插件集合构建，先冻结并验证全部 descriptor，再按确定性拓扑顺序收集贡献。
  *
- * <p>唯一性维度：plugin id（全局）；贡献 localName（仅插件内，跨三种贡献类型）；Tool name（全局，model-visible 调用只携带名称）；custom
- * entry type ownership（结构化键 {@code (pluginId, customType)}，不同插件可各自拥有同名 customType）。允许空插件列表。catalog
- * 构建完成后不可变，插件后续变更不产生任何影响。
+ * <p>唯一性维度：plugin id（全局）；贡献 localName（仅插件内，跨三种贡献类型）；AgentToolId 与 Tool name（均全局，model-visible 调用只携带
+ * Tool name）；custom entry type ownership（结构化键 {@code (pluginId, customType)}，不同插件可各自拥有同名
+ * customType）。允许空插件列表。 catalog 构建完成后不可变，插件后续变更不产生任何影响。
  */
 public final class PluginCatalog {
 
@@ -54,9 +57,14 @@ public final class PluginCatalog {
     this.tools = List.copyOf(tools);
     Map<String, ToolContribution> byName = new LinkedHashMap<>();
     Map<ContributionId, ToolContribution> byId = new LinkedHashMap<>();
+    Set<AgentToolId> agentToolIds = new HashSet<>();
     for (ToolContribution tool : tools) {
-      if (byName.putIfAbsent(tool.descriptor().name(), tool) != null) {
-        throw new IllegalStateException("duplicate frozen tool name: " + tool.descriptor().name());
+      String name = tool.definition().descriptor().name();
+      if (byName.putIfAbsent(name, tool) != null) {
+        throw new IllegalStateException("duplicate frozen tool name: " + name);
+      }
+      if (!agentToolIds.add(tool.definition().id())) {
+        throw new IllegalStateException("duplicate frozen AgentToolId: " + tool.definition().id());
       }
       byId.put(tool.id(), tool);
     }
@@ -151,6 +159,7 @@ public final class PluginCatalog {
     private final Set<PluginId> pluginIds = new HashSet<>();
     private final Set<ContributionId> contributionIds = new HashSet<>();
     private final Map<String, ContributionId> toolOwners = new HashMap<>();
+    private final Map<AgentToolId, ContributionId> agentToolOwners = new HashMap<>();
     private PluginId currentPluginId;
 
     void collect(HarnessPlugin plugin) {
@@ -211,7 +220,12 @@ public final class PluginCatalog {
 
     @Override
     public void registerTool(
-        String localName, PluginTool tool, ToolVisibility visibility, int priority) {
+        String localName,
+        AgentToolId agentToolId,
+        PluginTool tool,
+        ToolVisibility visibility,
+        int priority) {
+      Objects.requireNonNull(agentToolId, "agentToolId");
       Objects.requireNonNull(tool, "tool");
       Objects.requireNonNull(visibility, "visibility");
       ContributionId id = requireNewContributionId(localName);
@@ -234,7 +248,14 @@ public final class PluginCatalog {
         throw new IllegalArgumentException(
             "duplicate tool name " + name + " (already owned by " + toolOwners.get(name) + ")");
       }
-      tools.add(new ToolContribution(id, tool, descriptor, stateAccesses, visibility, priority));
+      ContributionId previous = agentToolOwners.putIfAbsent(agentToolId, id);
+      if (previous != null) {
+        throw new IllegalArgumentException(
+            "duplicate AgentToolId " + agentToolId + " (already owned by " + previous + ")");
+      }
+      AgentToolDefinition definition =
+          new AgentToolDefinition(agentToolId, descriptor, visibility, AgentToolBackend.PLUGIN);
+      tools.add(new ToolContribution(id, tool, definition, stateAccesses, priority));
     }
 
     @Override

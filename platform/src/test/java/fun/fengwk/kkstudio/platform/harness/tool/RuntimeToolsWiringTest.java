@@ -36,6 +36,11 @@ class RuntimeToolsWiringTest extends PostgresSpringTestSupport {
     assertEquals("1", taskTool.descriptor().version());
     assertTrue(toolContributionCatalog.find("load_skill", "1").isPresent());
     assertTrue(toolContributionCatalog.find("task", "1").isPresent());
+    assertEquals(
+        LoadSkillTool.AGENT_TOOL_ID,
+        toolContributionCatalog.find("load_skill", "1").orElseThrow().id());
+    assertEquals(
+        TaskTool.AGENT_TOOL_ID, toolContributionCatalog.find("task", "1").orElseThrow().id());
     assertTrue(toolContributionCatalog.find("create_goal", "2").isEmpty());
     assertTrue(pluginCatalog.tools().isEmpty());
     assertTrue(toolCatalog.findSelectable("create_goal").isEmpty());

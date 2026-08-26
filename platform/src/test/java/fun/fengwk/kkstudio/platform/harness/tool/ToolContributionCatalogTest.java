@@ -19,6 +19,9 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginTool;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolContext;
 import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -38,6 +41,14 @@ import java.util.function.Consumer;
 
 class ToolContributionCatalogTest {
 
+  private static final AgentToolId LOCAL_TOOL_ID = new AgentToolId("test.local-tool");
+  private static final AgentToolId BASE_TOOL_ID = new AgentToolId("test.base-tool");
+  private static final AgentToolId DEPENDENT_TOOL_ID = new AgentToolId("test.dependent-tool");
+  private static final AgentToolId TOP_TOOL_ID = new AgentToolId("test.top-tool");
+  private static final AgentToolId PLUGIN_TOOL_ID = new AgentToolId("test.plugin-tool");
+  private static final AgentToolId DUPLICATE_FIRST_ID = new AgentToolId("test.duplicate-first");
+  private static final AgentToolId DUPLICATE_SECOND_ID = new AgentToolId("test.duplicate-second");
+
   @Test
   void mergesLocalAndPluginToolsWithDependencyAndPriorityOrder() {
     PluginDescriptor base = descriptor("base", Set.of());
@@ -48,6 +59,7 @@ class ToolContributionCatalogTest {
             registrar ->
                 registrar.registerTool(
                     "base",
+                    BASE_TOOL_ID,
                     pluginTool(descriptor("plugin_base", "1")),
                     ToolVisibility.SELECTABLE,
                     0));
@@ -57,11 +69,13 @@ class ToolContributionCatalogTest {
             registrar ->
                 registrar.registerTool(
                     "dependent",
+                    DEPENDENT_TOOL_ID,
                     pluginTool(descriptor("plugin_dependent", "1")),
                     ToolVisibility.INTERNAL,
                     100));
     ToolFactory local =
         factory(
+            LOCAL_TOOL_ID,
             descriptor("local", "1"),
             tool(descriptor("local", "1")),
             ToolVisibility.SELECTABLE,
@@ -96,6 +110,7 @@ class ToolContributionCatalogTest {
             registrar ->
                 registrar.registerTool(
                     "base",
+                    BASE_TOOL_ID,
                     pluginTool(descriptor("plugin_base", "1")),
                     ToolVisibility.SELECTABLE,
                     -100));
@@ -106,6 +121,7 @@ class ToolContributionCatalogTest {
             registrar ->
                 registrar.registerTool(
                     "top",
+                    TOP_TOOL_ID,
                     pluginTool(descriptor("plugin_top", "1")),
                     ToolVisibility.SELECTABLE,
                     100));
@@ -125,14 +141,19 @@ class ToolContributionCatalogTest {
     Tool expected = tool(descriptor);
     ToolContributionCatalog catalog =
         new ToolContributionCatalog(
-            List.of(factory(descriptor, expected, ToolVisibility.SELECTABLE, 0)),
+            List.of(factory(LOCAL_TOOL_ID, descriptor, expected, ToolVisibility.SELECTABLE, 0)),
             PluginCatalog.from(List.of()));
     ToolContributionCatalog.Entry entry = catalog.find("local", "1").orElseThrow();
     assertSame(expected, catalog.createLocalTool(entry));
 
     ToolDescriptor drifted = descriptor("local", "1");
     ToolFactory driftingFactory =
-        factory(descriptor, toolWithDifferentDescriptor(drifted), ToolVisibility.SELECTABLE, 0);
+        factory(
+            LOCAL_TOOL_ID,
+            descriptor,
+            toolWithDifferentDescriptor(drifted),
+            ToolVisibility.SELECTABLE,
+            0);
     ToolContributionCatalog driftingCatalog =
         new ToolContributionCatalog(List.of(driftingFactory), PluginCatalog.from(List.of()));
     IllegalArgumentException drift =
@@ -147,7 +168,10 @@ class ToolContributionCatalogTest {
             descriptor("plugin", Set.of()),
             registrar ->
                 registrar.registerTool(
-                    "tool", pluginTool(descriptor("plugin_tool", "1")), ToolVisibility.SELECTABLE));
+                    "tool",
+                    PLUGIN_TOOL_ID,
+                    pluginTool(descriptor("plugin_tool", "1")),
+                    ToolVisibility.SELECTABLE));
     ToolContributionCatalog.Entry pluginEntry =
         new ToolContributionCatalog(List.of(), PluginCatalog.from(List.of(plugin)))
             .find("plugin_tool", "1")
@@ -182,7 +206,13 @@ class ToolContributionCatalogTest {
             IllegalArgumentException.class,
             () ->
                 new ToolContributionCatalog(
-                    List.of(factory(environment, tool(environment), ToolVisibility.SELECTABLE, 0)),
+                    List.of(
+                        factory(
+                            LOCAL_TOOL_ID,
+                            environment,
+                            tool(environment),
+                            ToolVisibility.SELECTABLE,
+                            0)),
                     PluginCatalog.from(List.of())));
     assertTrue(nonPlatform.getMessage().contains("PLATFORM descriptor"));
 
@@ -193,10 +223,50 @@ class ToolContributionCatalogTest {
             () ->
                 new ToolContributionCatalog(
                     List.of(
-                        factory(duplicate, tool(duplicate), ToolVisibility.SELECTABLE, 0),
-                        factory(duplicate, tool(duplicate), ToolVisibility.SELECTABLE, 0)),
+                        factory(
+                            DUPLICATE_FIRST_ID,
+                            duplicate,
+                            tool(duplicate),
+                            ToolVisibility.SELECTABLE,
+                            0),
+                        factory(
+                            DUPLICATE_SECOND_ID,
+                            duplicate,
+                            tool(duplicate),
+                            ToolVisibility.SELECTABLE,
+                            0)),
                     PluginCatalog.from(List.of())));
     assertTrue(duplicateError.getMessage().contains("duplicate Platform tool name"));
+  }
+
+  /** 验证启动时 Host 与 Plugin 贡献共享同一个 AgentToolId 命名空间。 */
+  @Test
+  void rejectsAgentToolIdCollisionBetweenHostAndPlugin() {
+    HarnessPlugin plugin =
+        plugin(
+            descriptor("plugin", Set.of()),
+            registrar ->
+                registrar.registerTool(
+                    "plugin-tool",
+                    LOCAL_TOOL_ID,
+                    pluginTool(descriptor("plugin-tool", "1")),
+                    ToolVisibility.SELECTABLE));
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new ToolContributionCatalog(
+                    List.of(
+                        factory(
+                            LOCAL_TOOL_ID,
+                            descriptor("local", "1"),
+                            tool(descriptor("local", "1")),
+                            ToolVisibility.SELECTABLE,
+                            0)),
+                    PluginCatalog.from(List.of(plugin))));
+    assertTrue(error.getMessage().contains("duplicate AgentToolId"));
+    assertTrue(error.getMessage().contains(LOCAL_TOOL_ID.toString()));
   }
 
   @Test
@@ -204,12 +274,18 @@ class ToolContributionCatalogTest {
     ToolDescriptor descriptor = descriptor("local", "1");
     ToolContributionCatalog catalog =
         new ToolContributionCatalog(
-            List.of(factory(descriptor, tool(descriptor), ToolVisibility.SELECTABLE, 0)),
+            List.of(
+                factory(LOCAL_TOOL_ID, descriptor, tool(descriptor), ToolVisibility.SELECTABLE, 0)),
             PluginCatalog.from(List.of()));
     ToolContributionCatalog.Entry local = catalog.find("local", "1").orElseThrow();
     assertTrue(local.isLocal());
     assertTrue(!local.isPlugin());
     assertEquals("core:local@1", local.stableIdentity());
+    assertEquals(LOCAL_TOOL_ID, local.id());
+    assertEquals(
+        new AgentToolDefinition(
+            LOCAL_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
+        local.definition());
     assertTrue(local.contributionId() == null);
     assertTrue(local.pluginId() == null);
 
@@ -217,19 +293,19 @@ class ToolContributionCatalogTest {
         IllegalArgumentException.class,
         () ->
             new ToolContributionCatalog.Entry(
-                descriptor,
-                ToolVisibility.SELECTABLE,
+                new AgentToolDefinition(
+                    LOCAL_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
                 0,
                 " ",
                 ToolContributionCatalog.Origin.LOCAL,
-                factory(descriptor, tool(descriptor), ToolVisibility.SELECTABLE, 0),
+                factory(LOCAL_TOOL_ID, descriptor, tool(descriptor), ToolVisibility.SELECTABLE, 0),
                 null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolContributionCatalog.Entry(
-                descriptor,
-                ToolVisibility.SELECTABLE,
+                new AgentToolDefinition(
+                    LOCAL_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
                 0,
                 "local",
                 ToolContributionCatalog.Origin.LOCAL,
@@ -239,8 +315,8 @@ class ToolContributionCatalogTest {
         IllegalArgumentException.class,
         () ->
             new ToolContributionCatalog.Entry(
-                descriptor,
-                ToolVisibility.SELECTABLE,
+                new AgentToolDefinition(
+                    PLUGIN_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.PLUGIN),
                 0,
                 "plugin",
                 ToolContributionCatalog.Origin.PLUGIN,
@@ -270,21 +346,20 @@ class ToolContributionCatalogTest {
   }
 
   private static ToolFactory factory(
-      ToolDescriptor descriptor, Tool tool, ToolVisibility visibility, int priority) {
+      AgentToolId id,
+      ToolDescriptor descriptor,
+      Tool tool,
+      ToolVisibility visibility,
+      int priority) {
     return new ToolFactory() {
       @Override
-      public ToolDescriptor descriptor() {
-        return descriptor;
+      public AgentToolDefinition definition() {
+        return new AgentToolDefinition(id, descriptor, visibility, AgentToolBackend.HOST);
       }
 
       @Override
       public Tool create() {
         return tool;
-      }
-
-      @Override
-      public ToolVisibility visibility() {
-        return visibility;
       }
 
       @Override

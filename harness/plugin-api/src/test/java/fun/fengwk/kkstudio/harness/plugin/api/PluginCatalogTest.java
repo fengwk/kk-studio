@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -26,6 +29,8 @@ class PluginCatalogTest {
 
   private static final PluginDescriptor FIRST = descriptor("first", "1");
   private static final PluginDescriptor SECOND = descriptor("second", "2");
+  private static final AgentToolId FIRST_TOOL_ID = new AgentToolId("test.first-tool");
+  private static final AgentToolId SECOND_TOOL_ID = new AgentToolId("test.second-tool");
 
   @Test
   void permitsEmptyPluginList() {
@@ -44,7 +49,8 @@ class PluginCatalogTest {
         HarnessPlugin.of(
             FIRST,
             registrar -> {
-              registrar.registerTool("goal-tool", pluginTool, ToolVisibility.SELECTABLE);
+              registrar.registerTool(
+                  "goal-tool", FIRST_TOOL_ID, pluginTool, ToolVisibility.SELECTABLE);
               registrar.registerCustomEntryType("goal-type", "goal");
             });
     HarnessPlugin second =
@@ -58,8 +64,13 @@ class PluginCatalogTest {
     ToolContribution tool = catalog.tools().get(0);
     assertEquals(new ContributionId(new PluginId("first"), "goal-tool"), tool.id());
     assertSame(pluginTool, tool.tool());
-    assertEquals(pluginTool.descriptor(), tool.descriptor());
-    assertEquals(ToolVisibility.SELECTABLE, tool.visibility());
+    assertEquals(
+        new AgentToolDefinition(
+            FIRST_TOOL_ID,
+            pluginTool.descriptor(),
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.PLUGIN),
+        tool.definition());
     assertEquals(
         new CustomEntryTypeContribution(
             new ContributionId(new PluginId("first"), "goal-type"), "goal", 0),
@@ -269,14 +280,44 @@ class PluginCatalogTest {
                         HarnessPlugin.of(
                             FIRST,
                             registrar ->
-                                registrar.registerTool("a", firstTool, ToolVisibility.SELECTABLE)),
+                                registrar.registerTool(
+                                    "a", FIRST_TOOL_ID, firstTool, ToolVisibility.SELECTABLE)),
                         HarnessPlugin.of(
                             SECOND,
                             registrar ->
                                 registrar.registerTool(
-                                    "b", secondTool, ToolVisibility.INTERNAL)))));
+                                    "b", SECOND_TOOL_ID, secondTool, ToolVisibility.INTERNAL)))));
     assertTrue(error.getMessage().contains("duplicate tool name"));
     assertTrue(error.getMessage().contains("goal"));
+  }
+
+  /** 验证不同 model-visible name 也不能绕过跨插件 AgentToolId 全局唯一约束。 */
+  @Test
+  void rejectsDuplicateAgentToolIdsAcrossPlugins() {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                PluginCatalog.from(
+                    List.of(
+                        HarnessPlugin.of(
+                            FIRST,
+                            registrar ->
+                                registrar.registerTool(
+                                    "first",
+                                    FIRST_TOOL_ID,
+                                    pluginTool(toolDescriptor("first", "1")),
+                                    ToolVisibility.SELECTABLE)),
+                        HarnessPlugin.of(
+                            SECOND,
+                            registrar ->
+                                registrar.registerTool(
+                                    "second",
+                                    FIRST_TOOL_ID,
+                                    pluginTool(toolDescriptor("second", "1")),
+                                    ToolVisibility.SELECTABLE)))));
+    assertTrue(error.getMessage().contains("duplicate AgentToolId"));
+    assertTrue(error.getMessage().contains(FIRST_TOOL_ID.toString()));
   }
 
   @Test
@@ -292,7 +333,8 @@ class PluginCatalogTest {
                     FIRST,
                     registrar -> {
                       registrar.registerCustomEntryType("state-type", "state");
-                      registrar.registerTool("writer", writer, ToolVisibility.SELECTABLE);
+                      registrar.registerTool(
+                          "writer", FIRST_TOOL_ID, writer, ToolVisibility.SELECTABLE);
                     })));
     assertEquals(
         List.of(new PluginStateDeclaration("state", PluginStateMode.WRITE)),
@@ -313,7 +355,10 @@ class PluginCatalogTest {
                             FIRST,
                             registrar ->
                                 registrar.registerTool(
-                                    "reader", undeclaredOwner, ToolVisibility.SELECTABLE)))));
+                                    "reader",
+                                    FIRST_TOOL_ID,
+                                    undeclaredOwner,
+                                    ToolVisibility.SELECTABLE)))));
     assertTrue(unregistered.getMessage().contains("unregistered custom entry type"));
 
     PluginTool duplicateAccess =
@@ -332,7 +377,10 @@ class PluginCatalogTest {
                             FIRST,
                             registrar ->
                                 registrar.registerTool(
-                                    "duplicate", duplicateAccess, ToolVisibility.SELECTABLE)))));
+                                    "duplicate",
+                                    FIRST_TOOL_ID,
+                                    duplicateAccess,
+                                    ToolVisibility.SELECTABLE)))));
     assertTrue(duplicate.getMessage().contains("duplicate state access"));
 
     PluginTool environment =
@@ -356,7 +404,10 @@ class PluginCatalogTest {
                             FIRST,
                             registrar ->
                                 registrar.registerTool(
-                                    "environment", environment, ToolVisibility.SELECTABLE)))));
+                                    "environment",
+                                    FIRST_TOOL_ID,
+                                    environment,
+                                    ToolVisibility.SELECTABLE)))));
     assertTrue(nonPlatform.getMessage().contains("must be PLATFORM"));
   }
 
@@ -440,7 +491,8 @@ class PluginCatalogTest {
                     HarnessPlugin.of(
                         FIRST,
                         registrar ->
-                            registrar.registerTool("a", null, ToolVisibility.SELECTABLE)))));
+                            registrar.registerTool(
+                                "a", FIRST_TOOL_ID, null, ToolVisibility.SELECTABLE)))));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -450,7 +502,10 @@ class PluginCatalogTest {
                         FIRST,
                         registrar ->
                             registrar.registerTool(
-                                "a", pluginTool(toolDescriptor("goal", "1")), null)))));
+                                "a",
+                                FIRST_TOOL_ID,
+                                pluginTool(toolDescriptor("goal", "1")),
+                                null)))));
   }
 
   @Test

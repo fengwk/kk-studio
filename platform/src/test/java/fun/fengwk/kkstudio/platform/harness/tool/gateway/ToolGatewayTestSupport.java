@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
@@ -84,6 +85,7 @@ final class ToolGatewayTestSupport {
   static final UUID THREAD_ID = new UUID(0L, 7L);
   static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
   static final int PROPOSED_ATTEMPT = 3;
+  static final AgentToolId TEST_TOOL_ID = new AgentToolId("test.platform-tool");
 
   /** 测试默认的 ResourceStore 单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
@@ -140,7 +142,7 @@ final class ToolGatewayTestSupport {
   static ToolContributionCatalog factories(Tool... tools) {
     List<ToolFactory> factories = new ArrayList<>(tools.length);
     for (Tool tool : tools) {
-      factories.add(ToolFactory.singleton(tool));
+      factories.add(ToolFactory.singleton(TEST_TOOL_ID, tool));
     }
     return new ToolContributionCatalog(factories, EMPTY_PLUGIN_CATALOG);
   }

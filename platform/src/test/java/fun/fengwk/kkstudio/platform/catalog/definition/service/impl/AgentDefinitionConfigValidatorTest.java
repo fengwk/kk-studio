@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -32,6 +33,13 @@ import java.util.Set;
  * 名必须遵守有界长度规则。
  */
 class AgentDefinitionConfigValidatorTest {
+
+  private static final AgentToolId CUSTOM_TOOL_ID = new AgentToolId("test.custom-tool");
+  private static final AgentToolId LOAD_SKILL_TOOL_ID = new AgentToolId("test.load-skill");
+  private static final AgentToolId DUPLICATE_FIRST_TOOL_ID =
+      new AgentToolId("test.duplicate-first");
+  private static final AgentToolId DUPLICATE_SECOND_TOOL_ID =
+      new AgentToolId("test.duplicate-second");
 
   @Test
   void acceptsEnvironmentAndPlatformToolNames() {
@@ -113,8 +121,8 @@ class AgentDefinitionConfigValidatorTest {
             () ->
                 new ToolContributionCatalog(
                     List.of(
-                        ToolFactory.singleton(tool(descriptor)),
-                        ToolFactory.singleton(tool(descriptor))),
+                        ToolFactory.singleton(DUPLICATE_FIRST_TOOL_ID, tool(descriptor)),
+                        ToolFactory.singleton(DUPLICATE_SECOND_TOOL_ID, tool(descriptor))),
                     PluginCatalog.from(List.of())));
     assertTrue(error.getMessage().contains("duplicate Platform tool name"));
   }
@@ -156,17 +164,14 @@ class AgentDefinitionConfigValidatorTest {
 
     private Fixture(List<Tool> tools) {
       List<Tool> registeredTools = new ArrayList<>(tools);
-      registeredTools.add(platformTool("load_skill", "1"));
+      Tool loadSkill = platformTool("load_skill", "1");
+      List<ToolFactory> factories = new ArrayList<>(registeredTools.size() + 1);
+      for (Tool tool : registeredTools) {
+        factories.add(ToolFactory.singleton(CUSTOM_TOOL_ID, tool));
+      }
+      factories.add(ToolFactory.singleton(LOAD_SKILL_TOOL_ID, loadSkill, ToolVisibility.INTERNAL));
       this.toolContributions =
-          new ToolContributionCatalog(
-              registeredTools.stream()
-                  .map(
-                      tool ->
-                          tool.descriptor().name().equals("load_skill")
-                              ? ToolFactory.singleton(tool, ToolVisibility.INTERNAL)
-                              : ToolFactory.singleton(tool))
-                  .toList(),
-              PluginCatalog.from(List.of()));
+          new ToolContributionCatalog(factories, PluginCatalog.from(List.of()));
       this.validator = new AgentDefinitionConfigValidator(toolContributions.toToolCatalog());
     }
 
