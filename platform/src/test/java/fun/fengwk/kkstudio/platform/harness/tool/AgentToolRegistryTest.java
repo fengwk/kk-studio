@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -39,7 +40,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
-class ToolContributionCatalogTest {
+class AgentToolRegistryTest {
 
   private static final AgentToolId LOCAL_TOOL_ID = new AgentToolId("test.local-tool");
   private static final AgentToolId BASE_TOOL_ID = new AgentToolId("test.base-tool");
@@ -81,22 +82,102 @@ class ToolContributionCatalogTest {
             ToolVisibility.SELECTABLE,
             50);
 
-    ToolContributionCatalog catalog =
-        new ToolContributionCatalog(
-            List.of(local), PluginCatalog.from(List.of(dependentPlugin, basePlugin)));
+    AgentToolRegistry catalog =
+        registry(List.of(local), PluginCatalog.from(List.of(dependentPlugin, basePlugin)));
 
     assertEquals(
         List.of("core:local@1", "plugin:base:base", "plugin:dependent:dependent"),
-        catalog.entries().stream().map(ToolContributionCatalog.Entry::identity).toList());
+        catalog.entries().subList(0, 3).stream().map(AgentToolRegistry.Entry::identity).toList());
     assertEquals(
         new ContributionId(new PluginId("dependent"), "dependent"),
         catalog.find("plugin_dependent", "1").orElseThrow().contributionId());
-    assertTrue(catalog.find(new ContributionId(new PluginId("base"), "base")).isPresent());
-    assertTrue(catalog.find("missing").isEmpty());
+    assertTrue(catalog.find(BASE_TOOL_ID).isPresent());
+    assertTrue(catalog.findSelectable("missing").isEmpty());
 
-    assertTrue(catalog.toToolCatalog().findSelectable("local").isPresent());
-    assertTrue(catalog.toToolCatalog().findInternal("plugin_dependent").isPresent());
-    assertTrue(catalog.toToolCatalog().findSelectable("plugin_dependent").isEmpty());
+    assertTrue(catalog.findSelectable("local").isPresent());
+    assertTrue(catalog.findInternal("plugin_dependent").isPresent());
+    assertTrue(catalog.findSelectable("plugin_dependent").isEmpty());
+  }
+
+  @Test
+  void appendsEnvironmentEntriesInFixedCatalogOrder() {
+    ToolDescriptor hostDescriptor = descriptor("host", "1");
+    AgentToolRegistry catalog =
+        registry(
+            List.of(
+                factory(
+                    LOCAL_TOOL_ID,
+                    hostDescriptor,
+                    tool(hostDescriptor),
+                    ToolVisibility.SELECTABLE,
+                    0)),
+            PluginCatalog.from(List.of()));
+
+    assertEquals("core:host@1", catalog.entries().getFirst().stableIdentity());
+    assertEquals(
+        EnvironmentToolCatalog.entries().stream().map(entry -> entry.definition().id()).toList(),
+        catalog.entries().subList(1, catalog.entries().size()).stream()
+            .map(AgentToolRegistry.Entry::id)
+            .toList());
+    assertEquals(
+        EnvironmentToolCatalog.entries().stream()
+            .map(entry -> entry.definition().descriptor().name())
+            .toList(),
+        catalog.entries().subList(1, catalog.entries().size()).stream()
+            .map(entry -> entry.definition().descriptor().name())
+            .toList());
+    assertEquals(EnvironmentToolCatalog.entries().size() + 1, catalog.selectableEntries().size());
+  }
+
+  @Test
+  void rejectsAgentToolIdAndModelNameCollisionsAcrossBackends() {
+    ToolDescriptor uniqueName =
+        new ToolDescriptor(
+            "host_read",
+            "1",
+            ToolType.PLATFORM,
+            "host read",
+            "host_read",
+            new ToolParamsSchema("", Map.of(), Set.of(), false),
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(5));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentToolRegistry(
+                List.of(
+                    factory(
+                        new AgentToolId("base.read"),
+                        uniqueName,
+                        tool(uniqueName),
+                        ToolVisibility.SELECTABLE,
+                        0)),
+                PluginCatalog.from(List.of()),
+                EnvironmentToolCatalog.entries()));
+
+    ToolDescriptor duplicateName =
+        new ToolDescriptor(
+            "read",
+            "1",
+            ToolType.PLATFORM,
+            "platform read",
+            "read",
+            new ToolParamsSchema("", Map.of(), Set.of(), false),
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(5));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentToolRegistry(
+                List.of(
+                    factory(
+                        new AgentToolId("test.host-read"),
+                        duplicateName,
+                        tool(duplicateName),
+                        ToolVisibility.SELECTABLE,
+                        0)),
+                PluginCatalog.from(List.of()),
+                EnvironmentToolCatalog.entries()));
   }
 
   @Test
@@ -126,25 +207,24 @@ class ToolContributionCatalogTest {
                     ToolVisibility.SELECTABLE,
                     100));
 
-    ToolContributionCatalog catalog =
-        new ToolContributionCatalog(
-            List.of(), PluginCatalog.from(List.of(topPlugin, middlePlugin, basePlugin)));
+    AgentToolRegistry catalog =
+        registry(List.of(), PluginCatalog.from(List.of(topPlugin, middlePlugin, basePlugin)));
 
     assertEquals(
         List.of("plugin:base:base", "plugin:top:top"),
-        catalog.entries().stream().map(ToolContributionCatalog.Entry::identity).toList());
+        catalog.entries().subList(0, 2).stream().map(AgentToolRegistry.Entry::identity).toList());
   }
 
   @Test
-  void createsLocalToolAndRejectsDescriptorDriftOrPluginEntry() {
+  void createsHostToolAndRejectsDescriptorDriftOrPluginEntry() {
     ToolDescriptor descriptor = descriptor("local", "1");
     Tool expected = tool(descriptor);
-    ToolContributionCatalog catalog =
-        new ToolContributionCatalog(
+    AgentToolRegistry catalog =
+        registry(
             List.of(factory(LOCAL_TOOL_ID, descriptor, expected, ToolVisibility.SELECTABLE, 0)),
             PluginCatalog.from(List.of()));
-    ToolContributionCatalog.Entry entry = catalog.find("local", "1").orElseThrow();
-    assertSame(expected, catalog.createLocalTool(entry));
+    AgentToolRegistry.Entry entry = catalog.find("local", "1").orElseThrow();
+    assertSame(expected, catalog.createHostTool(entry));
 
     ToolDescriptor drifted = descriptor("local", "1");
     ToolFactory driftingFactory =
@@ -154,13 +234,12 @@ class ToolContributionCatalogTest {
             toolWithDifferentDescriptor(drifted),
             ToolVisibility.SELECTABLE,
             0);
-    ToolContributionCatalog driftingCatalog =
-        new ToolContributionCatalog(List.of(driftingFactory), PluginCatalog.from(List.of()));
+    AgentToolRegistry driftingCatalog =
+        registry(List.of(driftingFactory), PluginCatalog.from(List.of()));
     IllegalArgumentException drift =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                driftingCatalog.createLocalTool(driftingCatalog.find("local", "1").orElseThrow()));
+            () -> driftingCatalog.createHostTool(driftingCatalog.find("local", "1").orElseThrow()));
     assertTrue(drift.getMessage().contains("does not match frozen"));
 
     HarnessPlugin plugin =
@@ -172,25 +251,25 @@ class ToolContributionCatalogTest {
                     PLUGIN_TOOL_ID,
                     pluginTool(descriptor("plugin_tool", "1")),
                     ToolVisibility.SELECTABLE));
-    ToolContributionCatalog.Entry pluginEntry =
-        new ToolContributionCatalog(List.of(), PluginCatalog.from(List.of(plugin)))
+    AgentToolRegistry.Entry pluginEntry =
+        registry(List.of(), PluginCatalog.from(List.of(plugin)))
             .find("plugin_tool", "1")
             .orElseThrow();
-    assertTrue(pluginEntry.isPlugin());
-    assertTrue(!pluginEntry.isLocal());
+    assertEquals(AgentToolBackend.PLUGIN, pluginEntry.definition().backend());
+    assertTrue(pluginEntry.hostFactory() == null);
     assertEquals("plugin:plugin:tool", pluginEntry.stableIdentity());
     assertEquals(new PluginId("plugin"), pluginEntry.pluginId());
     IllegalArgumentException notLocal =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                new ToolContributionCatalog(List.of(), PluginCatalog.from(List.of(plugin)))
-                    .createLocalTool(pluginEntry));
+                registry(List.of(), PluginCatalog.from(List.of(plugin)))
+                    .createHostTool(pluginEntry));
     assertInstanceOf(IllegalArgumentException.class, notLocal);
   }
 
   @Test
-  void rejectsInvalidLocalFactoriesAndDuplicateNames() {
+  void rejectsInvalidHostFactoriesAndDuplicateNames() {
     ToolDescriptor environment =
         new ToolDescriptor(
             "environment",
@@ -205,7 +284,7 @@ class ToolContributionCatalogTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                new ToolContributionCatalog(
+                new AgentToolRegistry(
                     List.of(
                         factory(
                             LOCAL_TOOL_ID,
@@ -213,7 +292,8 @@ class ToolContributionCatalogTest {
                             tool(environment),
                             ToolVisibility.SELECTABLE,
                             0)),
-                    PluginCatalog.from(List.of())));
+                    PluginCatalog.from(List.of()),
+                    EnvironmentToolCatalog.entries()));
     assertTrue(nonPlatform.getMessage().contains("PLATFORM descriptor"));
 
     ToolDescriptor duplicate = descriptor("duplicate", "1");
@@ -221,7 +301,7 @@ class ToolContributionCatalogTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                new ToolContributionCatalog(
+                new AgentToolRegistry(
                     List.of(
                         factory(
                             DUPLICATE_FIRST_ID,
@@ -235,8 +315,9 @@ class ToolContributionCatalogTest {
                             tool(duplicate),
                             ToolVisibility.SELECTABLE,
                             0)),
-                    PluginCatalog.from(List.of())));
-    assertTrue(duplicateError.getMessage().contains("duplicate Platform tool name"));
+                    PluginCatalog.from(List.of()),
+                    EnvironmentToolCatalog.entries()));
+    assertTrue(duplicateError.getMessage().contains("duplicate Agent tool name"));
   }
 
   /** 验证启动时 Host 与 Plugin 贡献共享同一个 AgentToolId 命名空间。 */
@@ -256,7 +337,7 @@ class ToolContributionCatalogTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                new ToolContributionCatalog(
+                new AgentToolRegistry(
                     List.of(
                         factory(
                             LOCAL_TOOL_ID,
@@ -264,7 +345,8 @@ class ToolContributionCatalogTest {
                             tool(descriptor("local", "1")),
                             ToolVisibility.SELECTABLE,
                             0)),
-                    PluginCatalog.from(List.of(plugin))));
+                    PluginCatalog.from(List.of(plugin)),
+                    EnvironmentToolCatalog.entries()));
     assertTrue(error.getMessage().contains("duplicate AgentToolId"));
     assertTrue(error.getMessage().contains(LOCAL_TOOL_ID.toString()));
   }
@@ -272,56 +354,65 @@ class ToolContributionCatalogTest {
   @Test
   void exposesEntryProvenanceAndRejectsInvalidEntryShapes() {
     ToolDescriptor descriptor = descriptor("local", "1");
-    ToolContributionCatalog catalog =
-        new ToolContributionCatalog(
-            List.of(
-                factory(LOCAL_TOOL_ID, descriptor, tool(descriptor), ToolVisibility.SELECTABLE, 0)),
-            PluginCatalog.from(List.of()));
-    ToolContributionCatalog.Entry local = catalog.find("local", "1").orElseThrow();
-    assertTrue(local.isLocal());
-    assertTrue(!local.isPlugin());
-    assertEquals("core:local@1", local.stableIdentity());
-    assertEquals(LOCAL_TOOL_ID, local.id());
+    ToolFactory hostFactory =
+        factory(LOCAL_TOOL_ID, descriptor, tool(descriptor), ToolVisibility.SELECTABLE, 0);
+    AgentToolRegistry registry = registry(List.of(hostFactory), PluginCatalog.from(List.of()));
+    AgentToolRegistry.Entry host = registry.find("local", "1").orElseThrow();
+    assertEquals(AgentToolBackend.HOST, host.definition().backend());
+    assertSame(hostFactory, host.hostFactory());
+    assertEquals("core:local@1", host.stableIdentity());
+    assertEquals(LOCAL_TOOL_ID, host.id());
+    assertTrue(host.pluginContribution() == null);
+    assertTrue(host.capabilityId() == null);
+
+    HarnessPlugin plugin =
+        plugin(
+            descriptor("plugin", Set.of()),
+            registrar ->
+                registrar.registerTool(
+                    "tool",
+                    PLUGIN_TOOL_ID,
+                    pluginTool(descriptor("plugin_tool", "1")),
+                    ToolVisibility.SELECTABLE));
+    AgentToolRegistry pluginRegistry = registry(List.of(), PluginCatalog.from(List.of(plugin)));
+    AgentToolRegistry.Entry pluginEntry = pluginRegistry.find("plugin_tool", "1").orElseThrow();
+    assertEquals(AgentToolBackend.PLUGIN, pluginEntry.definition().backend());
+    assertEquals("plugin:plugin:tool", pluginEntry.stableIdentity());
+    assertEquals(new PluginId("plugin"), pluginEntry.pluginId());
+    assertTrue(pluginEntry.hostFactory() == null);
+    assertTrue(pluginEntry.capabilityId() == null);
+
+    AgentToolRegistry.Entry environment =
+        registry(List.of(), PluginCatalog.from(List.of()))
+            .find(EnvironmentToolCatalog.entries().getFirst().definition().id())
+            .orElseThrow();
+    assertEquals(AgentToolBackend.ENVIRONMENT_CAPABILITY, environment.definition().backend());
     assertEquals(
-        new AgentToolDefinition(
-            LOCAL_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
-        local.definition());
-    assertTrue(local.contributionId() == null);
-    assertTrue(local.pluginId() == null);
+        EnvironmentToolCatalog.entries().getFirst().capabilityId(), environment.capabilityId());
+    assertTrue(environment.hostFactory() == null);
+    assertTrue(environment.pluginContribution() == null);
 
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ToolContributionCatalog.Entry(
-                new AgentToolDefinition(
-                    LOCAL_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
-                0,
-                " ",
-                ToolContributionCatalog.Origin.LOCAL,
-                factory(LOCAL_TOOL_ID, descriptor, tool(descriptor), ToolVisibility.SELECTABLE, 0),
-                null));
+        () -> new AgentToolRegistry.Entry(host.definition(), 0, " ", hostFactory, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ToolContributionCatalog.Entry(
-                new AgentToolDefinition(
-                    LOCAL_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
-                0,
-                "local",
-                ToolContributionCatalog.Origin.LOCAL,
-                null,
-                null));
+            new AgentToolRegistry.Entry(
+                host.definition(), 0, "host", hostFactory, null, environment.capabilityId()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AgentToolRegistry.Entry(pluginEntry.definition(), 0, "plugin", null, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ToolContributionCatalog.Entry(
-                new AgentToolDefinition(
-                    PLUGIN_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.PLUGIN),
-                0,
-                "plugin",
-                ToolContributionCatalog.Origin.PLUGIN,
-                null,
-                null));
+            new AgentToolRegistry.Entry(
+                environment.definition(), 0, "environment", hostFactory, null, null));
+  }
+
+  private static AgentToolRegistry registry(
+      List<? extends ToolFactory> factories, PluginCatalog pluginCatalog) {
+    return new AgentToolRegistry(factories, pluginCatalog, EnvironmentToolCatalog.entries());
   }
 
   private static PluginDescriptor descriptor(String id, Set<PluginId> requires) {

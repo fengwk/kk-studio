@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
@@ -46,7 +47,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
-import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -227,7 +228,7 @@ class PlatformToolGatewayPluginTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     PlatformToolGateway gateway =
         new PlatformToolGateway(
-            new ToolContributionCatalog(List.of(), catalog),
+            new AgentToolRegistry(List.of(), catalog, EnvironmentToolCatalog.entries()),
             catalog,
             loader,
             new ToolGatewayTestSupport.FakeTransport(),

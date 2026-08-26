@@ -17,11 +17,12 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -103,7 +104,10 @@ class PlatformToolGatewayAdmissionTest {
       ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
       PlatformToolGateway gateway =
           ToolGatewayTestSupport.gateway(
-              new ToolContributionCatalog(List.of(factory), PluginCatalog.from(List.of())),
+              new AgentToolRegistry(
+                  List.of(factory),
+                  PluginCatalog.from(List.of()),
+                  EnvironmentToolCatalog.entries()),
               pluginCatalog,
               transport,
               new ToolGatewayTestSupport.FakeResourceStore(),
@@ -143,7 +147,8 @@ class PlatformToolGatewayAdmissionTest {
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            new ToolContributionCatalog(List.of(), PluginCatalog.from(List.of())),
+            new AgentToolRegistry(
+                List.of(), PluginCatalog.from(List.of()), EnvironmentToolCatalog.entries()),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),
@@ -184,8 +189,9 @@ class PlatformToolGatewayAdmissionTest {
             throw new IllegalStateException("unexpected factory failure");
           }
         };
-    ToolContributionCatalog contributions =
-        new ToolContributionCatalog(List.of(factory), PluginCatalog.from(List.of()));
+    AgentToolRegistry contributions =
+        new AgentToolRegistry(
+            List.of(factory), PluginCatalog.from(List.of()), EnvironmentToolCatalog.entries());
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
@@ -258,7 +264,8 @@ class PlatformToolGatewayAdmissionTest {
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            new ToolContributionCatalog(List.of(), PluginCatalog.from(List.of())),
+            new AgentToolRegistry(
+                List.of(), PluginCatalog.from(List.of()), EnvironmentToolCatalog.entries()),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),
@@ -303,7 +310,8 @@ class PlatformToolGatewayAdmissionTest {
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
-            new ToolContributionCatalog(List.of(), PluginCatalog.from(List.of())),
+            new AgentToolRegistry(
+                List.of(), PluginCatalog.from(List.of()), EnvironmentToolCatalog.entries()),
             transport,
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.ManualExecutor(),

@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Duration;
@@ -29,7 +29,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Agent 配置的静态校验：工具名必须来自本地 ToolContributionCatalog 或固定的 {@link EnvironmentToolCatalog}，且 skill
+ * Agent 配置的静态校验：工具名必须来自统一 AgentToolRegistry 或固定的 {@link EnvironmentToolCatalog}，且 skill
  * 名必须遵守有界长度规则。
  */
 class AgentDefinitionConfigValidatorTest {
@@ -113,18 +113,19 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void rejectsDuplicatePlatformToolRegistration() {
-    // 两个不同工厂声明相同 (name, version) 会在统一 Tool contribution catalog 构造边界被拒绝。
+    // 两个不同工厂声明相同 model-visible name 会在统一 registry 构造边界被拒绝。
     ToolDescriptor descriptor = platformDescriptor("dup", "1");
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                new ToolContributionCatalog(
+                new AgentToolRegistry(
                     List.of(
                         ToolFactory.singleton(DUPLICATE_FIRST_TOOL_ID, tool(descriptor)),
                         ToolFactory.singleton(DUPLICATE_SECOND_TOOL_ID, tool(descriptor))),
-                    PluginCatalog.from(List.of())));
-    assertTrue(error.getMessage().contains("duplicate Platform tool name"));
+                    PluginCatalog.from(List.of()),
+                    EnvironmentToolCatalog.entries()));
+    assertTrue(error.getMessage().contains("duplicate Agent tool name"));
   }
 
   private static Tool platformTool(String name, String version) {
@@ -159,7 +160,7 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   private static final class Fixture implements AutoCloseable {
-    private final ToolContributionCatalog toolContributions;
+    private final AgentToolRegistry toolRegistry;
     private final AgentDefinitionConfigValidator validator;
 
     private Fixture(List<Tool> tools) {
@@ -170,9 +171,10 @@ class AgentDefinitionConfigValidatorTest {
         factories.add(ToolFactory.singleton(CUSTOM_TOOL_ID, tool));
       }
       factories.add(ToolFactory.singleton(LOAD_SKILL_TOOL_ID, loadSkill, ToolVisibility.INTERNAL));
-      this.toolContributions =
-          new ToolContributionCatalog(factories, PluginCatalog.from(List.of()));
-      this.validator = new AgentDefinitionConfigValidator(toolContributions.toToolCatalog());
+      this.toolRegistry =
+          new AgentToolRegistry(
+              factories, PluginCatalog.from(List.of()), EnvironmentToolCatalog.entries());
+      this.validator = new AgentDefinitionConfigValidator(toolRegistry);
     }
 
     @Override

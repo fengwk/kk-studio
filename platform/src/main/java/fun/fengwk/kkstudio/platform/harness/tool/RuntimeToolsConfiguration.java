@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentRunRegistry;
 import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
-import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 把普通 runtime 工具（当前为 {@code load_skill} 与 {@code task}）装配为 Spring {@code Tool} bean，并为 {@code
- * {@link ToolFactory} bean；普通 Tool 与插件 Tool 随后统一进入 {@link ToolContributionCatalog}。
+ * {@link ToolFactory} bean；普通 Tool 与插件 Tool 随后统一进入 {@link AgentToolRegistry}。
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessExecutionAdmissionProperties.class)
@@ -123,13 +123,9 @@ public class RuntimeToolsConfiguration {
   }
 
   @Bean
-  public ToolContributionCatalog toolContributionCatalog(
+  public AgentToolRegistry agentToolRegistry(
       ObjectProvider<ToolFactory> toolFactoryBeans, PluginCatalog pluginCatalog) {
-    return new ToolContributionCatalog(toolFactoryBeans.orderedStream().toList(), pluginCatalog);
-  }
-
-  @Bean
-  public ToolCatalog toolCatalog(ToolContributionCatalog toolContributionCatalog) {
-    return toolContributionCatalog.toToolCatalog();
+    return new AgentToolRegistry(
+        toolFactoryBeans.orderedStream().toList(), pluginCatalog, EnvironmentToolCatalog.entries());
   }
 }

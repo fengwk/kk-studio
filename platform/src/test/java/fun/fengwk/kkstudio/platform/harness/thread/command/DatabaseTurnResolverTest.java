@@ -78,7 +78,7 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
@@ -100,7 +100,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
-import fun.fengwk.kkstudio.platform.harness.tool.ToolContributionCatalog;
+import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
@@ -119,7 +119,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentName 路由、严格有序的工具/skill 能力、唯一的 catalog
+ * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentName 路由、严格有序的工具/skill 能力、唯一的 registry
  * Variant 请求预设、语义化消息投影、缓存终结与基础设施异常透传。
  */
 class DatabaseTurnResolverTest {
@@ -749,9 +749,9 @@ class DatabaseTurnResolverTest {
             .message());
   }
 
-  /** task descriptor 来自注入的 TaskTool 现拼，不依赖 ToolCatalog 启动快照。 */
+  /** task 必须来自统一 registry；registry 快照缺少 task 时立即拒绝。 */
   @Test
-  void bindsLiveTaskDescriptorWhenCatalogSnapshotOmitsTask() {
+  void rejectsTaskWhenRegistrySnapshotOmitsTask() {
     Fixture fixture =
         new Fixture(
             List.of(),
@@ -764,10 +764,12 @@ class DatabaseTurnResolverTest {
             true);
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review");
-    ModelRequestSpec request =
-        fixture.resolved(fixture.path(settings(null, "default", List.of(TaskTool.NAME))));
-    assertEquals(TaskTool.NAME, request.toolBindings().getFirst().descriptor().name());
-    assertEquals(TaskTool.VERSION, request.toolBindings().getFirst().descriptor().version());
+    assertEquals(
+        "tool not found: task",
+        fixture
+            .rejected(fixture.path(settings(null, "default", List.of(TaskTool.NAME))))
+            .error()
+            .message());
   }
 
   @Test
@@ -1789,18 +1791,6 @@ class DatabaseTurnResolverTest {
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
       SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 50);
-      TaskTool taskTool = mock(TaskTool.class);
-      when(taskTool.descriptor())
-          .thenReturn(
-              new ToolDescriptor(
-                  TaskTool.NAME,
-                  TaskTool.VERSION,
-                  ToolType.PLATFORM,
-                  "task",
-                  TaskTool.RENDERER_KEY,
-                  new ToolParamsSchema("task", Map.of(), Set.of(), false),
-                  ToolSideEffect.NON_IDEMPOTENT,
-                  Duration.ZERO));
       resolver =
           new DatabaseTurnResolver(
               agents,
@@ -1809,8 +1799,7 @@ class DatabaseTurnResolverTest {
               agentConfigCodec,
               modelConfigParser,
               new ProviderFactories(factories),
-              new ToolCatalog(platformDescriptors, internalPlatformToolNames),
-              new ToolContributionCatalog(
+              new AgentToolRegistry(
                   platformDescriptors.stream()
                       .filter(descriptor -> pluginCatalog.findTool(descriptor.name()).isEmpty())
                       .map(
@@ -1821,20 +1810,22 @@ class DatabaseTurnResolverTest {
                                     new AgentToolDefinition(
                                         TEST_PLATFORM_TOOL_ID,
                                         descriptor,
-                                        ToolVisibility.SELECTABLE,
+                                        internalPlatformToolNames.contains(descriptor.name())
+                                            ? ToolVisibility.INTERNAL
+                                            : ToolVisibility.SELECTABLE,
                                         AgentToolBackend.HOST));
                             when(factory.priority()).thenReturn(0);
                             return factory;
                           })
                       .toList(),
-                  pluginCatalog),
+                  pluginCatalog,
+                  EnvironmentToolCatalog.entries()),
               pluginCatalog,
               environmentRegistry,
               new SystemSettingsSnapshot(SystemSettings.DEFAULT),
               () -> new CompactionConfig(20_000, null),
               () -> subagentConfig,
               new AgentPromptComposer(() -> subagentConfig),
-              taskTool,
               clock);
     }
 

@@ -21,8 +21,8 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
@@ -133,7 +133,7 @@ class RuntimeToolsConfigurationTest {
   }
 
   @Test
-  void toolCatalogKeepsInternalPluginContributionInternal() {
+  void agentToolRegistryKeepsInternalPluginContributionInternal() {
     ToolDescriptor loadSkill = descriptor("load_skill");
     ToolDescriptor task = descriptor("task");
     ToolFactory loadSkillFactory = mock(ToolFactory.class);
@@ -169,10 +169,11 @@ class RuntimeToolsConfigurationTest {
                 registrar.registerTool(
                     "plugin-internal", PLUGIN_TOOL_ID, pluginTool, ToolVisibility.INTERNAL));
 
-    ToolContributionCatalog contributions =
-        new ToolContributionCatalog(
-            List.of(loadSkillFactory, taskFactory), PluginCatalog.from(List.of(plugin)));
-    ToolCatalog catalog = new RuntimeToolsConfiguration().toolCatalog(contributions);
+    AgentToolRegistry catalog =
+        new AgentToolRegistry(
+            List.of(loadSkillFactory, taskFactory),
+            PluginCatalog.from(List.of(plugin)),
+            EnvironmentToolCatalog.entries());
 
     assertTrue(catalog.findInternal("plugin-internal").isPresent());
     assertTrue(catalog.findSelectable("plugin-internal").isEmpty());

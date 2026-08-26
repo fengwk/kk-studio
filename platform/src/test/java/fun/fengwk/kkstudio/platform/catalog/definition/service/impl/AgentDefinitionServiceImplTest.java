@@ -15,7 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 
-import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
+import fun.fengwk.kkstudio.harness.plugin.api.PluginCatalog;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.converter.AgentDefinitionConverter;
@@ -25,6 +26,7 @@ import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
@@ -203,7 +205,9 @@ public class AgentDefinitionServiceImplTest {
         factory,
         resolver,
         variants,
-        new AgentDefinitionConfigValidator(mock(ToolCatalog.class)),
+        new AgentDefinitionConfigValidator(
+            new AgentToolRegistry(
+                List.of(), PluginCatalog.from(List.of()), EnvironmentToolCatalog.entries())),
         new AgentDefinitionConfigCodec(new ObjectMapper()));
   }
 

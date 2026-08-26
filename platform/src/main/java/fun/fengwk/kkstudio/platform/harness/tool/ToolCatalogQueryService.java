@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
 
@@ -12,18 +11,21 @@ import java.util.List;
 @Service
 public class ToolCatalogQueryService {
 
-  private final ToolCatalog toolCatalog;
+  private final AgentToolRegistry toolRegistry;
 
-  public ToolCatalogQueryService(ToolCatalog toolCatalog) {
-    this.toolCatalog = toolCatalog;
+  public ToolCatalogQueryService(AgentToolRegistry toolRegistry) {
+    this.toolRegistry = toolRegistry;
   }
 
   public List<ToolCatalogEntryDTO> listTools() {
-    return toolCatalog.descriptors().stream().map(ToolCatalogQueryService::toDto).toList();
+    return toolRegistry.selectableEntries().stream().map(ToolCatalogQueryService::toDto).toList();
   }
 
-  private static ToolCatalogEntryDTO toDto(ToolDescriptor descriptor) {
+  private static ToolCatalogEntryDTO toDto(AgentToolRegistry.Entry entry) {
+    ToolDescriptor descriptor = entry.definition().descriptor();
     ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
+    dto.setId(entry.id().value());
+    dto.setBackend(entry.definition().backend().name());
     dto.setName(descriptor.name());
     dto.setVersion(descriptor.version());
     dto.setType(descriptor.type().name());

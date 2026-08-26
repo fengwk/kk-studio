@@ -115,9 +115,9 @@ ToolExecutionHandle execute(
 | `base.mcp-list-tools` | `mcp_list_tools` | `mcp.list` | ENVIRONMENT / `1` | READ_ONLY | 30 s |
 | `base.mcp-call-tool` | `mcp_call_tool` | `mcp.call` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 5 min |
 
-`EnvironmentToolCatalog.entries()` 返回不可变的 `Entry` 列表；每个 Entry 固定包含 selectable 的 `AgentToolDefinition` 和 Environment Capability ID。AgentToolId 与 model name 各自唯一，Capability ID 不建立唯一索引，因此多个 Entry 可以复用同一个 Capability。
+`EnvironmentToolCatalog.entries()` 返回不可变的 `Entry` 列表；每个 Entry 固定包含 selectable 的 `AgentToolDefinition` 和 Environment Capability ID。AgentToolId 与 model name 各自唯一，Capability ID 不建立唯一索引，因此多个 Entry 可以复用同一个 Capability。Platform 侧的 [`AgentToolRegistry`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry.java) 将这些固定条目与 Host factory、Plugin contribution 合并。
 
-[`ToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCatalog.java) 接收 Platform descriptor 和 internal name 集合，将 internal tool 从 selectable map 移出，再合并上述 Environment descriptor；Platform 与 Environment 名称冲突、重复 Platform 名称以及非法 internal 名称均在构造期拒绝。
+`AgentToolRegistry` 的 Environment 条目保持上述固定顺序追加；Host、Plugin 与 Environment 的 AgentToolId 和 model-visible name 在统一构造边界校验全局唯一，内部条目不进入 `selectableEntries()`。
 
 ### RemoteTool
 
@@ -204,7 +204,7 @@ RemoteTool
 
 ## 配置 / 扩展
 
-- 新的 Platform Tool 通过 `ToolDescriptor` + `Tool` 实现加入 Platform catalog；内部工具由 `ToolCatalog` 的 `internalToolNames` 标记。
+- 新的 Platform Tool 通过 `ToolDescriptor` + `Tool` 实现并包装为 `ToolFactory` 后加入 [`AgentToolRegistry`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry.java)；内部工具由 `AgentToolDefinition.visibility` 标记。
 - Environment Tool contract 要求 descriptor、schema、prompt 资源、
   `EnvironmentToolCatalog` 固定目录和 Daemon 注册保持同一 version。`apply_patch`
   在 Daemon 的 invocation workspace 内完成 Add/Update/Delete 的 UTF-8 文本
@@ -218,7 +218,7 @@ RemoteTool
 
 - [`ToolDescriptor.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java)、[`ToolCall.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCall.java)、[`ToolResult.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolResult.java)
 - [`Tool.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/Tool.java)、[`ToolExecutionRequest.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/ToolExecutionRequest.java)、[`RemoteTool.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/remote/RemoteTool.java)
-- [`EnvironmentToolCatalog.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java)、[`ToolCatalog.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCatalog.java)
+- [`EnvironmentToolCatalog.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java)
 - [`ResourceRef.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ResourceRef.java)、[`ResourceUriValidator.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ResourceUriValidator.java)
 - [`DaemonEnvelopeCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodec.java)、[`DaemonCapabilitiesCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilitiesCodec.java)、[`DaemonToolResultCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonToolResultCodec.java)
 
