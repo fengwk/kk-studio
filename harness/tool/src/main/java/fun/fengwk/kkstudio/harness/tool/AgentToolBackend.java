@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.tool;
 
-/** Agent tool 的执行后端，不替代 {@link ToolType} 的产品级分类。 */
+/** 模型可见 Agent Tool 的执行后端。 */
 public enum AgentToolBackend {
   HOST,
   PLUGIN,
