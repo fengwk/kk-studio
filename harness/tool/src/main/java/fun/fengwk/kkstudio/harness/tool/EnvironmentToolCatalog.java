@@ -23,7 +23,7 @@ import java.util.Optional;
  */
 public final class EnvironmentToolCatalog {
 
-  public static final String VERSION = "2";
+  public static final String VERSION = "3";
 
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/tool/environment/prompts/";
@@ -73,6 +73,7 @@ public final class EnvironmentToolCatalog {
         descriptor("read", ToolSideEffect.READ_ONLY, Duration.ofMinutes(1)),
         descriptor("write", ToolSideEffect.IDEMPOTENT, Duration.ofMinutes(1)),
         descriptor("edit", ToolSideEffect.NON_IDEMPOTENT, Duration.ofMinutes(1)),
+        descriptor("apply_patch", ToolSideEffect.NON_IDEMPOTENT, Duration.ofMinutes(1)),
         descriptor("bash", ToolSideEffect.NON_IDEMPOTENT, Duration.ofHours(1)),
         descriptor("grep", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
         descriptor("find", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),

@@ -98,13 +98,14 @@ ToolExecutionHandle execute(
 
 ### Environment tool catalog
 
-[`EnvironmentToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java) 是每个 Environment Daemon 的固定目录，版本为 `"2"`。descriptor、schema 和 prompt 全部来自 `harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/environment/prompts/`；资源缺失会在 catalog 初始化时失败。
+[`EnvironmentToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java) 是每个 Environment Daemon 的固定目录，版本为 `"3"`。descriptor、schema 和 prompt 全部来自 `harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/environment/prompts/`；资源缺失会在 catalog 初始化时失败。
 
 | Tool | type / version | side effect | descriptor timeout |
 | --- | --- | --- | --- |
 | `read` | ENVIRONMENT / `1` | READ_ONLY | 1 min |
 | `write` | ENVIRONMENT / `1` | IDEMPOTENT | 1 min |
 | `edit` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 min |
+| `apply_patch` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 min |
 | `bash` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 h |
 | `grep` | ENVIRONMENT / `1` | READ_ONLY | 1 h |
 | `find` | ENVIRONMENT / `1` | READ_ONLY | 1 h |
@@ -203,7 +204,9 @@ RemoteTool
 
 - 新的 Platform Tool 通过 `ToolDescriptor` + `Tool` 实现加入 Platform catalog；内部工具由 `ToolCatalog` 的 `internalToolNames` 标记。
 - Environment Tool contract 要求 descriptor、schema、prompt 资源、
-  `EnvironmentToolCatalog` 固定目录和 Daemon 注册保持同一 version。
+  `EnvironmentToolCatalog` 固定目录和 Daemon 注册保持同一 version。`apply_patch`
+  在 Daemon 的 invocation workspace 内完成 Add/Update/Delete 的 UTF-8 文本
+  patch；所有操作先完成语法、路径和上下文预检，再进入带尽力回滚的提交阶段。
 - RemoteTool 只需提供 `RemoteToolTransport`；WebSocket 或其它连接实现留在边界模块。
 - Daemon capabilities 只允许增加当前协议版本内明确定义的安全摘要字段；wire version 与 capabilities version 是独立版本。
 
@@ -221,7 +224,7 @@ RemoteTool
 
 - [`ToolModuleArchitectureTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolModuleArchitectureTest.java)：依赖方向和禁用 Runtime/Daemon/Platform/Provider SDK。
 - [`ToolContractTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolContractTest.java)、[`ToolExecutionNormalizationTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolExecutionNormalizationTest.java)：descriptor、调用参数归一化和 execution contract。
-- [`EnvironmentToolCatalogSchemaTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalogSchemaTest.java)：固定 11 项 Environment catalog 与 schema。
+- [`EnvironmentToolCatalogSchemaTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalogSchemaTest.java)：固定 12 项 Environment catalog 与 schema。
 - [`ResourceRefTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ResourceRefTest.java)：scheme、canonical URI、size/sha 和边界。
 - [`DaemonEnvelopeCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilitiesCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilitiesCodecTest.java)、[`DaemonToolResultCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonToolResultCodecTest.java)：wire 版本、能力摘要、资源大小和严格 JSON。
 

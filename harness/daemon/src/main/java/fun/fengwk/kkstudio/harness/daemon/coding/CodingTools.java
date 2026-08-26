@@ -11,7 +11,7 @@ public final class CodingTools {
 
   private CodingTools() {}
 
-  /** 注册 read、write、edit、bash、grep、find 以及三个 LSP 基线工具。 */
+  /** 注册 read、write、edit、apply_patch、bash、grep、find 以及三个 LSP 基线工具。 */
   public static void registerAll(
       DaemonToolRegistry registry,
       CodingToolsConfig config,
@@ -23,6 +23,7 @@ public final class CodingTools {
     registry.register(new ReadTool(config, executor));
     registry.register(new WriteTool(config, executor));
     registry.register(new EditTool(config, executor));
+    registry.register(new ApplyPatchTool(config, executor));
     registry.register(new BashTool(config, executor, scheduler));
     registry.register(new GrepTool(config, executor));
     registry.register(new FindTool(config, executor));

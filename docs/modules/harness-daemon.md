@@ -82,6 +82,7 @@ CLI -> DaemonConfig
 
 ```text
 read, write, edit, bash, grep, find,
+apply_patch,
 lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile
 ```
 
@@ -106,7 +107,7 @@ MCP 无论 server 是否配置都注册固定 `mcp_list_tools` 和 `mcp_call_too
 
 ```text
 DISCONNECTED -> CONNECTING
-  -> HELLO(v3, environmentName, toolCatalogVersion=2, token)
+  -> HELLO(v3, environmentName, toolCatalogVersion=3, token)
   <- WELCOME(empty payload)
   -> READY(capabilities version=4)
   -> READY + HEARTBEAT
@@ -135,7 +136,11 @@ scope 不匹配、未知 protocol/type、缺失/未知 payload 字段、duplicat
 - `writable` 先校验已存在祖先的 canonical path，再允许新 leaf；
 - Platform permission 负责授权，不能放宽 Daemon 的 root/symlink 边界。
 
-`read`、`write`、`edit` 共享编码/preview/文件 mutation 边界；`grep`、`find` 使用 Java NIO/JGit ignore 规则，不启动外部搜索命令；LSP tools 通过可选 `kkstudio.daemon.lsp-bridge`，`lsp_java_decompile` 对可解析 class 目标可用 `javap` fallback。配置见 [`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java)：
+`read`、`write`、`edit`、`apply_patch` 共享编码/preview/文件 mutation 边界；`apply_patch`
+在一次 invocation 内先完成全部 patch 解析、路径和上下文预检，再用临时文件提交并对已提交
+文件做尽力回滚。`grep`、`find` 使用 Java NIO/JGit ignore 规则，不启动外部搜索命令；LSP
+tools 通过可选 `kkstudio.daemon.lsp-bridge`，`lsp_java_decompile` 对可解析 class 目标可用
+`javap` fallback。配置见 [`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java)：
 
 ```text
 previewMaxLines = 2000
@@ -225,7 +230,7 @@ Daemon disconnect 后保留 journal 和 running execution 的进程内事实，�
 
 - [`DaemonModuleArchitectureTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)：依赖边界、LangChain4j adapter scope、executor ownership。
 - [`DaemonConfigTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)：CLI/default、握手、reconnect、journal replay、timeout/cancel/shutdown。
-- [`CodingToolsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsTest.java)、[`CodingToolsEdgeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsEdgeTest.java)、[`LocalFileResourceStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalFileResourceStoreTest.java)：coding tool、路径/symlink、Resource 和 output boundary。
+- [`CodingToolsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsTest.java)、[`CodingToolsEdgeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsEdgeTest.java)、[`ApplyPatchToolTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ApplyPatchToolTest.java)、[`LocalFileResourceStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalFileResourceStoreTest.java)：coding tool、路径/symlink、Resource 和 output boundary。
 - [`JdkWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransportTest.java)：文本帧、binary、16 MiB 上限和 policy close。
 - [`DaemonSkillRegistryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistryTest.java)、[`McpConfigParserTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpConfigParserTest.java)、[`McpServerRegistryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpServerRegistryTest.java)：Skill/MCP 发现、配置 strictness、独立失败和 close。
 - [`EnvironmentDirectoryBrowserTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/EnvironmentDirectoryBrowserTest.java)：root boundary、symlink、stable listing、entry count 和安全 wire path。

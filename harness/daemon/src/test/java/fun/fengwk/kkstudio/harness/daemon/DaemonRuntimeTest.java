@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.daemon.coding.ApplyPatchTool;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
@@ -959,6 +960,91 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.handle.cancelCalls.get());
     tool.complete(new ToolResult("timeout", List.of(), false, "{}"));
     assertFalse(transport.hasMessages());
+  }
+
+  /** Daemon timeout 必须取消排队中的 apply_patch，并在工具尚未开始时保持 workspace 不变。 */
+  @Test
+  void timeoutCancelsQueuedApplyPatchBeforeMutation() throws Exception {
+    Path root = Files.createTempDirectory("daemon-apply-patch-timeout");
+    ExecutorService taskExecutor = Executors.newSingleThreadExecutor();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    CountDownLatch blockerStarted = new CountDownLatch(1);
+    CountDownLatch releaseBlocker = new CountDownLatch(1);
+    taskExecutor.execute(
+        () -> {
+          blockerStarted.countDown();
+          try {
+            releaseBlocker.await();
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+          }
+        });
+    try {
+      assertTrue(blockerStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      FakeTransport transport = new FakeTransport();
+      DaemonToolRegistry registry = new DaemonToolRegistry();
+      registry.register(
+          new ApplyPatchTool(
+              new CodingToolsConfig(root, 2000, 50 * 1024, "bash", new InMemoryResourceStore()),
+              taskExecutor));
+      runtime =
+          new DaemonRuntime(
+              new DaemonConfig(
+                  URI.create("ws://localhost/gateway"),
+                  ENVIRONMENT_NAME,
+                  "daemon",
+                  Duration.ofMinutes(1),
+                  Duration.ZERO,
+                  Duration.ofSeconds(1),
+                  Duration.ofSeconds(10),
+                  "test-gateway-token",
+                  null,
+                  root,
+                  List.of(),
+                  null),
+              transport,
+              registry,
+              DaemonSkillRegistry.empty(),
+              new InMemoryDaemonInvocationJournal(),
+              scheduler,
+              taskExecutor);
+
+      handshakeTransport = transport;
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      transport.takeMessages(2);
+      String patch =
+          "*** Begin Patch\n"
+              + "*** Add File: timeout.txt\n"
+              + "+must not be written\n"
+              + "*** End Patch";
+      transport.receive(
+          invokeWithArguments(
+              "apply-patch-timeout",
+              1,
+              "apply_patch",
+              "1",
+              100,
+              ".",
+              "{\"patchText\":\"" + jsonEscape(patch) + "\"}"));
+
+      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+      List<DaemonEnvelope> terminal = transport.takeMessages(1);
+      assertMessageTypes(terminal, DaemonMessageType.FAILED);
+      assertTrue(terminal.getFirst().payloadJson().contains("timed out"));
+      assertFalse(Files.exists(root.resolve("timeout.txt")));
+    } finally {
+      releaseBlocker.countDown();
+      if (runtime != null) {
+        runtime.close();
+        runtime = null;
+      } else {
+        scheduler.shutdownNow();
+        taskExecutor.shutdownNow();
+      }
+      deleteRecursively(root);
+    }
   }
 
   /** 缺省 timeoutMillis 表示不覆盖，必须优先使用 Tool descriptor timeout。 */
@@ -2197,8 +2283,41 @@ class DaemonRuntimeTest {
             + "}");
   }
 
+  private DaemonEnvelope invokeWithArguments(
+      String invocationId,
+      long sequence,
+      String toolName,
+      String toolVersion,
+      long timeoutMillis,
+      String workspacePath,
+      String argumentsJson) {
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION_3,
+        DaemonMessageType.INVOKE,
+        ENVIRONMENT_NAME,
+        invocationId,
+        sequence,
+        "{\"toolName\":\""
+            + toolName
+            + "\",\"toolVersion\":\""
+            + toolVersion
+            + "\",\"workspacePath\":\""
+            + jsonEscape(workspacePath)
+            + "\",\"arguments\":"
+            + argumentsJson
+            + ",\"timeoutMillis\":"
+            + timeoutMillis
+            + "}");
+  }
+
   private static String jsonEscape(String value) {
-    return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\u0007", "\\u0007");
+    return value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+        .replace("\u0007", "\\u0007");
   }
 
   private DaemonEnvelope invokeWithoutTimeout(
