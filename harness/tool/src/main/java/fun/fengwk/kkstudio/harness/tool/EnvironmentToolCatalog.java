@@ -109,54 +109,59 @@ public final class EnvironmentToolCatalog {
 
   private static List<Entry> createEntries() {
     return List.of(
-        entry("base.read", "read", "fs.read", ToolSideEffect.READ_ONLY, Duration.ofMinutes(1)),
-        entry("base.write", "write", "fs.write", ToolSideEffect.IDEMPOTENT, Duration.ofMinutes(1)),
+        entry(BaseToolIds.READ, "read", "fs.read", ToolSideEffect.READ_ONLY, Duration.ofMinutes(1)),
         entry(
-            "base.edit",
+            BaseToolIds.WRITE,
+            "write",
+            "fs.write",
+            ToolSideEffect.IDEMPOTENT,
+            Duration.ofMinutes(1)),
+        entry(
+            BaseToolIds.EDIT,
             "edit",
             "fs.apply-edit",
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofMinutes(1)),
         entry(
-            "base.apply-patch",
+            BaseToolIds.APPLY_PATCH,
             "apply_patch",
             "fs.apply-patch",
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofMinutes(1)),
         entry(
-            "base.bash",
+            BaseToolIds.BASH,
             "bash",
             "process.exec",
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofHours(1)),
-        entry("base.grep", "grep", "fs.search", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
-        entry("base.find", "find", "fs.find", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
+        entry(BaseToolIds.GREP, "grep", "fs.search", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
+        entry(BaseToolIds.FIND, "find", "fs.find", ToolSideEffect.READ_ONLY, Duration.ofHours(1)),
         entry(
-            "base.lsp-goto-definition",
+            BaseToolIds.LSP_GOTO_DEFINITION,
             "lsp_goto_definition",
             "lsp.goto-definition",
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(2)),
         entry(
-            "base.lsp-workspace-symbols",
+            BaseToolIds.LSP_WORKSPACE_SYMBOLS,
             "lsp_workspace_symbols",
             "lsp.workspace-symbols",
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(2)),
         entry(
-            "base.lsp-java-decompile",
+            BaseToolIds.LSP_JAVA_DECOMPILE,
             "lsp_java_decompile",
             "lsp.java-decompile",
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(2)),
         entry(
-            "base.mcp-list-tools",
+            BaseToolIds.MCP_LIST_TOOLS,
             "mcp_list_tools",
             "mcp.list",
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30)),
         entry(
-            "base.mcp-call-tool",
+            BaseToolIds.MCP_CALL_TOOL,
             "mcp_call_tool",
             "mcp.call",
             ToolSideEffect.NON_IDEMPOTENT,
@@ -164,10 +169,14 @@ public final class EnvironmentToolCatalog {
   }
 
   private static Entry entry(
-      String id, String name, String capabilityId, ToolSideEffect sideEffect, Duration timeout) {
+      AgentToolId id,
+      String name,
+      String capabilityId,
+      ToolSideEffect sideEffect,
+      Duration timeout) {
     return new Entry(
         new AgentToolDefinition(
-            new AgentToolId(id),
+            id,
             descriptor(name, sideEffect, timeout),
             ToolVisibility.SELECTABLE,
             AgentToolBackend.ENVIRONMENT_CAPABILITY),
