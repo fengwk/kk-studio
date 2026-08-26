@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "patchText": {
+      "type": "string",
+      "description": "Complete apply_patch protocol text from *** Begin Patch through *** End Patch."
+    }
+  },
+  "required": ["patchText"],
+  "additionalProperties": false
+}

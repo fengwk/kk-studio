@@ -17,7 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Environment daemon 固定 11 工具 catalog 的 schema 契约测试。 */
+/** Environment daemon 固定 12 工具 catalog 的 schema 契约测试。 */
 class EnvironmentToolCatalogSchemaTest {
 
   private static final List<String> CODING_TOOLS =
@@ -25,6 +25,7 @@ class EnvironmentToolCatalogSchemaTest {
           "read",
           "write",
           "edit",
+          "apply_patch",
           "bash",
           "grep",
           "find",
@@ -34,15 +35,17 @@ class EnvironmentToolCatalogSchemaTest {
   private static final String PROMPT_RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/tool/environment/prompts/";
 
-  /** 目录必须恰好是 Daemon 侧的 9 个 coding tool 加 2 个 MCP 桥接工具，不得新增其它工具。 */
+  /** 目录必须恰好是 Daemon 侧的 10 个 coding tool 加 2 个 MCP 桥接工具，不得新增其它工具。 */
   @Test
-  void exposesExactlyTheElevenDaemonTools() {
-    assertEquals(11, EnvironmentToolCatalog.descriptors().size());
+  void exposesExactlyTheTwelveDaemonTools() {
+    assertEquals("3", EnvironmentToolCatalog.version());
+    assertEquals(12, EnvironmentToolCatalog.descriptors().size());
     assertEquals(
         List.of(
             "read",
             "write",
             "edit",
+            "apply_patch",
             "bash",
             "grep",
             "find",
@@ -52,8 +55,6 @@ class EnvironmentToolCatalogSchemaTest {
             "mcp_list_tools",
             "mcp_call_tool"),
         EnvironmentToolCatalog.descriptors().stream().map(ToolDescriptor::name).toList());
-    assertThrows(
-        IllegalArgumentException.class, () -> EnvironmentToolCatalog.require("apply_patch"));
   }
 
   /** 每个工具精确断言 required 与 optional keys；find 必须要求 pattern 和 path。 */
@@ -63,6 +64,7 @@ class EnvironmentToolCatalogSchemaTest {
     assertTool("write", Set.of("path", "content"), Set.of("workdir"));
     assertTool(
         "edit", Set.of("path", "old_string", "new_string"), Set.of("replace_all", "workdir"));
+    assertTool("apply_patch", Set.of("patchText"), Set.of());
     assertTool("bash", Set.of("command"), Set.of("workdir", "timeout_seconds"));
     assertTool(
         "grep",
@@ -83,7 +85,7 @@ class EnvironmentToolCatalogSchemaTest {
     assertTool("mcp_call_tool", Set.of("server", "tool", "arguments"), Set.of());
   }
 
-  /** 9 个 coding tool 的 description 必须与资源 md 原文一致（trim 后），不允许本地化改写。 */
+  /** 10 个 coding tool 的 description 必须与资源 md 原文一致（trim 后），不允许本地化改写。 */
   @Test
   void codingToolDescriptionsMatchPromptResources() {
     for (String name : CODING_TOOLS) {
@@ -122,6 +124,16 @@ class EnvironmentToolCatalogSchemaTest {
     assertEquals(
         "Arbitrary JSON object arguments, passed through to the MCP tool as-is.",
         mcpCall.inputSchema().properties().get("arguments").description());
+  }
+
+  /** apply_patch 的模型可见身份、版本、变更语义和 schema 必须稳定。 */
+  @Test
+  void applyPatchDescriptorUsesStableContract() {
+    ToolDescriptor descriptor = EnvironmentToolCatalog.require("apply_patch");
+    assertEquals("1", descriptor.version());
+    assertEquals("apply_patch", descriptor.rendererKey());
+    assertEquals(ToolSideEffect.NON_IDEMPOTENT, descriptor.sideEffect());
+    assertEquals(Set.of("patchText"), descriptor.inputSchema().properties().keySet());
   }
 
   /** bash 的 timeout_seconds 描述不允许出现 3600 上限文案（上限属于 daemon 侧，不属于模型可见 schema）。 */
