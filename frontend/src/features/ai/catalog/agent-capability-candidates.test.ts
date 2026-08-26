@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildPermissionToolCandidates,
   buildSkillCandidates,
   buildSubagentCandidates,
   buildToolCandidates,
   withSelectedOrphans,
 } from '@/features/ai/catalog/agent-capability-candidates'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionDTO, ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 
 function agent(name: string, description: string | null): AgentDefinitionDTO {
@@ -34,17 +35,56 @@ function environment(name: string, skills: { name: string; description: string |
   }
 }
 
+function tool(
+  id: string,
+  name: string,
+  description: string | null,
+  version: string | null = '1',
+  backend: ToolCatalogEntryDTO['backend'] = 'HOST',
+  type: ToolCatalogEntryDTO['type'] = 'PLATFORM',
+): ToolCatalogEntryDTO {
+  return {
+    id,
+    name,
+    version,
+    description,
+    backend,
+    type,
+  }
+}
+
 describe('agent-capability-candidates', () => {
-  it('builds unified tools without exposing an Environment source', () => {
-    const tools = buildToolCandidates([
-      { name: 'bash', version: '1', description: 'shell', type: 'PLATFORM' },
-      { name: 'bash', version: '2', description: 'duplicate', type: 'PLATFORM' },
-      { name: 'read', version: null, description: 'files', type: 'ENVIRONMENT' },
-    ])
-    expect(tools).toEqual([
+  it('keeps Agent candidates keyed by model-visible name', () => {
+    const tools = [
+      tool('base.bash', 'bash', 'shell'),
+      tool('base.bash-v2', 'bash', 'duplicate'),
+      tool('base.read', 'read', 'files', null, 'ENVIRONMENT_CAPABILITY', 'ENVIRONMENT'),
+    ]
+
+    expect(buildToolCandidates(tools)).toEqual([
       { name: 'bash', version: '1', description: 'shell' },
       { name: 'read', version: null, description: 'files' },
     ])
+    expect(buildToolCandidates(tools).map((item) => item.name)).toEqual(['bash', 'read'])
+    expect(buildToolCandidates(tools)[0]).not.toHaveProperty('source')
+  })
+
+  it('keeps permission candidates keyed by stable tool ID', () => {
+    const tools = [
+      tool('base.read', 'read', 'files', null, 'ENVIRONMENT_CAPABILITY', 'ENVIRONMENT'),
+      tool('plugin.read', 'read', 'plugin files', '1', 'PLUGIN'),
+      tool('base.read', 'renamed read', 'duplicate ID'),
+    ]
+
+    expect(buildPermissionToolCandidates(tools).map((item) => item.name)).toEqual([
+      'base.read',
+      'plugin.read',
+    ])
+    expect(buildPermissionToolCandidates(tools)[0]).toEqual({
+      name: 'base.read',
+      version: null,
+      description: 'read — files',
+    })
     expect(tools[0]).not.toHaveProperty('source')
   })
 

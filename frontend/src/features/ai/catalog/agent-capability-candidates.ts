@@ -29,6 +29,28 @@ export function buildToolCandidates(tools: ToolCatalogEntryDTO[]): CapabilityOpt
   return options
 }
 
+/** 构建供 permission 使用的稳定 tool ID 候选；模型可见名称仅作为补充描述。 */
+export function buildPermissionToolCandidates(
+  tools: ToolCatalogEntryDTO[],
+): CapabilityOption[] {
+  const options: CapabilityOption[] = []
+  const seen = new Set<string>()
+  for (const tool of tools) {
+    const id = tool.id?.trim()
+    if (!id || seen.has(id)) {
+      continue
+    }
+    seen.add(id)
+    options.push({
+      name: id,
+      version: tool.version ?? null,
+      description:
+        [tool.name?.trim(), tool.description?.trim()].filter(Boolean).join(' — ') || null,
+    })
+  }
+  return options
+}
+
 /**
  * 构建单个选中 live Environment 的 skill 候选。
  *

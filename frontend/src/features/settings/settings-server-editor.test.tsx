@@ -23,9 +23,30 @@ vi.mock('@/shared/api/system-settings-service', () => ({
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listTools: vi.fn(async () => [
-      { name: 'bash', version: '1', description: null, type: 'PLATFORM' },
-      { name: 'write', version: '1', description: null, type: 'PLATFORM' },
-      { name: 'edit', version: '1', description: null, type: 'PLATFORM' },
+      {
+        id: 'base.bash',
+        name: 'bash',
+        version: '1',
+        description: null,
+        backend: 'HOST',
+        type: 'PLATFORM',
+      },
+      {
+        id: 'base.write',
+        name: 'write',
+        version: '1',
+        description: null,
+        backend: 'HOST',
+        type: 'PLATFORM',
+      },
+      {
+        id: 'base.edit',
+        name: 'edit',
+        version: '1',
+        description: null,
+        backend: 'HOST',
+        type: 'PLATFORM',
+      },
     ]),
     listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })),
   },
@@ -312,7 +333,13 @@ describe('system settings server editor', () => {
   })
 
   it('merges a newly added tool group onto an existing catalog tool instead of duplicating it', async () => {
-    const backend = createBackend()
+    const initial = makeSettingsDto()
+    initial.tool.permission = {
+      'base.write': [{ pattern: '*', action: 'ask' }],
+      'base.edit': [{ pattern: '*', action: 'ask' }],
+      'base.bash': [{ pattern: '*', action: 'ask' }],
+    }
+    const backend = createBackend(initial)
     mocks.get.mockImplementation(backend.get)
     renderSettings()
 
@@ -321,8 +348,8 @@ describe('system settings server editor', () => {
     await userEvent.click(screen.getByRole('button', { name: '添加工具' }))
     const groups = screen.getAllByLabelText(/^权限分组/)
     expect(groups).toHaveLength(4)
-    await chooseSelectOption(userEvent.setup(), '工具', 'write', within(groups[3]!))
+    await chooseSelectOption(userEvent.setup(), '工具', 'base.write', within(groups[3]!))
     expect(screen.getAllByLabelText(/^权限分组/)).toHaveLength(3)
-    expect(screen.getByLabelText('权限分组 write')).toBeInTheDocument()
+    expect(screen.getByLabelText('权限分组 base.write')).toBeInTheDocument()
   })
 })
