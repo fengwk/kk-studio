@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.ArrayList;
@@ -253,7 +253,7 @@ public final class AgentToolRegistry {
       String identity,
       ToolFactory hostFactory,
       ToolContribution pluginContribution,
-      EnvironmentCapabilityId capabilityId) {
+      EnvironmentCapabilityDescriptor capability) {
 
     public Entry {
       definition = Objects.requireNonNull(definition, "definition");
@@ -263,7 +263,7 @@ public final class AgentToolRegistry {
       int payloads =
           (hostFactory == null ? 0 : 1)
               + (pluginContribution == null ? 0 : 1)
-              + (capabilityId == null ? 0 : 1);
+              + (capability == null ? 0 : 1);
       if (payloads != 1) {
         throw new IllegalArgumentException(
             "entry must have exactly one host factory, plugin contribution, or capability");
@@ -272,7 +272,7 @@ public final class AgentToolRegistry {
         case HOST -> {
           if (hostFactory == null
               || pluginContribution != null
-              || capabilityId != null
+              || capability != null
               || definition.descriptor().type() != ToolType.PLATFORM) {
             throw new IllegalArgumentException("HOST entry payload does not match definition");
           }
@@ -284,7 +284,7 @@ public final class AgentToolRegistry {
         case PLUGIN -> {
           if (hostFactory != null
               || pluginContribution == null
-              || capabilityId != null
+              || capability != null
               || definition.descriptor().type() != ToolType.PLATFORM) {
             throw new IllegalArgumentException("PLUGIN entry payload does not match definition");
           }
@@ -296,11 +296,16 @@ public final class AgentToolRegistry {
         case ENVIRONMENT_CAPABILITY -> {
           if (hostFactory != null
               || pluginContribution != null
-              || capabilityId == null
+              || capability == null
               || definition.visibility() != ToolVisibility.SELECTABLE
               || definition.descriptor().type() != ToolType.ENVIRONMENT) {
             throw new IllegalArgumentException(
                 "ENVIRONMENT_CAPABILITY entry payload does not match definition");
+          }
+          if (!definition.descriptor().inputSchema().equals(capability.inputSchema())
+              || !definition.descriptor().timeout().equals(capability.timeout())) {
+            throw new IllegalArgumentException(
+                "ENVIRONMENT_CAPABILITY descriptor does not match definition");
           }
         }
       }
@@ -334,7 +339,7 @@ public final class AgentToolRegistry {
           "environment:" + environmentEntry.definition().id(),
           null,
           null,
-          environmentEntry.capabilityId());
+          environmentEntry.capability());
     }
 
     public AgentToolId id() {

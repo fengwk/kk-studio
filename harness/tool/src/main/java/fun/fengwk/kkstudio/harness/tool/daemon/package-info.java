@@ -23,6 +23,11 @@
  *       {"name":string,"message":string}}。
  * </ul>
  *
+ * <p>Capability INVOKE payload 由 {@link
+ * fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityInvokeCodec} 编解码，字段固定为 {@code
+ * capabilityId}、{@code capabilityVersion}、{@code workspacePath}、{@code arguments} 和 {@code
+ * timeoutMillis}；该 capabilityId wire 预留给 {@code VERSION_4}，当前生产链仍使用 v3。
+ *
  * <p>result payload（{@code PARTIAL} / {@code COMPLETED}）由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec} 编解码。编码分相：PARTIAL 只允许 text/json，
  * resource/binary 在任何 store 操作之前拒绝；COMPLETED 先对全部内容做计数/单条/聚合资源字节预算预检（默认 8 MiB）， 预检全部通过后才允许任何 store

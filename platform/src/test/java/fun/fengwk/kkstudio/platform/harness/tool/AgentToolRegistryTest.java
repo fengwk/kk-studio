@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -363,7 +364,7 @@ class AgentToolRegistryTest {
     assertEquals("core:local@1", host.stableIdentity());
     assertEquals(LOCAL_TOOL_ID, host.id());
     assertTrue(host.pluginContribution() == null);
-    assertTrue(host.capabilityId() == null);
+    assertTrue(host.capability() == null);
 
     HarnessPlugin plugin =
         plugin(
@@ -380,7 +381,7 @@ class AgentToolRegistryTest {
     assertEquals("plugin:plugin:tool", pluginEntry.stableIdentity());
     assertEquals(new PluginId("plugin"), pluginEntry.pluginId());
     assertTrue(pluginEntry.hostFactory() == null);
-    assertTrue(pluginEntry.capabilityId() == null);
+    assertTrue(pluginEntry.capability() == null);
 
     AgentToolRegistry.Entry environment =
         registry(List.of(), PluginCatalog.from(List.of()))
@@ -388,7 +389,7 @@ class AgentToolRegistryTest {
             .orElseThrow();
     assertEquals(AgentToolBackend.ENVIRONMENT_CAPABILITY, environment.definition().backend());
     assertEquals(
-        EnvironmentToolCatalog.entries().getFirst().capabilityId(), environment.capabilityId());
+        EnvironmentToolCatalog.entries().getFirst().capability(), environment.capability());
     assertTrue(environment.hostFactory() == null);
     assertTrue(environment.pluginContribution() == null);
 
@@ -399,7 +400,7 @@ class AgentToolRegistryTest {
         IllegalArgumentException.class,
         () ->
             new AgentToolRegistry.Entry(
-                host.definition(), 0, "host", hostFactory, null, environment.capabilityId()));
+                host.definition(), 0, "host", hostFactory, null, environment.capability()));
     assertThrows(
         IllegalArgumentException.class,
         () -> new AgentToolRegistry.Entry(pluginEntry.definition(), 0, "plugin", null, null, null));
@@ -408,6 +409,17 @@ class AgentToolRegistryTest {
         () ->
             new AgentToolRegistry.Entry(
                 environment.definition(), 0, "environment", hostFactory, null, null));
+    EnvironmentCapabilityDescriptor drifted =
+        new EnvironmentCapabilityDescriptor(
+            environment.capability().id(),
+            environment.capability().version(),
+            environment.capability().inputSchema(),
+            environment.capability().timeout().plusMillis(1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new AgentToolRegistry.Entry(
+                environment.definition(), 0, "environment", null, null, drifted));
   }
 
   private static AgentToolRegistry registry(
