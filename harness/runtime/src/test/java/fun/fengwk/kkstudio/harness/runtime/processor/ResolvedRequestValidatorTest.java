@@ -54,8 +54,7 @@ class ResolvedRequestValidatorTest {
       new BranchSettings(
           EnvironmentBindings.binding("env-1"),
           "agent",
-          new ModelSelection("provider", "model", "v1"),
-          List.of());
+          new ModelSelection("provider", "model", "v1"));
   private static final UUID SESSION_ID = new UUID(0L, 1L);
   private static final UUID THREAD_ID = new UUID(0L, 2L);
   private static final UUID ROOT_ENTRY_ID = new UUID(0L, 3L);
