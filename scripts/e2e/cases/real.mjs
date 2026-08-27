@@ -750,6 +750,7 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
+          { environment },
         ),
         yoloEnabled: false,
         commands: [
