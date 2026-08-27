@@ -4,6 +4,7 @@ import type {
   InstantTimestamp,
 } from '@/shared/api/contracts/base'
 import type { EnvironmentBindingDTO } from '@/shared/api/contracts/ai-environment'
+import type { AgentToolBackend } from '@/shared/api/contracts/agent-tool'
 
 /**
  * 冻结进 branch settings 快照的不可变 provider/model/variant 选择。
@@ -194,10 +195,10 @@ export interface ModelInvocationDTO {
 
 /**
  * ToolInvocation 查询投影；id 均为 canonical UUID string。
- * toolCallId / toolName / argumentsJson 恒来自 durable ToolCall；toolVersion / toolType /
- * environment 仅 binding 非 null 时有值（unknown tool 槽位为 null），rendererKey 恒有值
- *（binding null 时固定回退为 "tool"）。approvalJson / resultJson / errorJson 是规范的运行时
- * codec JSON，仅在其对应阶段非 null。
+ * toolCallId / toolName / argumentsJson 恒来自 durable ToolCall；toolVersion / toolId /
+ * toolBackend / environment 在存在对应 binding 时提供（unknown tool binding 时 toolId 与
+ * toolBackend 均为 null），rendererKey 恒有值（binding null 时固定回退为 "tool"）。
+ * approvalJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段非 null。
  */
 export interface ToolInvocationDTO {
   id: string
@@ -210,7 +211,10 @@ export interface ToolInvocationDTO {
   toolName: string
   toolVersion: string | null
   rendererKey: string
-  toolType: string | null
+  /** binding 存在时为 canonical stable AgentToolId；unknown tool binding 为 null。 */
+  toolId: string | null
+  /** binding 存在时为 AgentToolBackend；unknown tool binding 为 null。 */
+  toolBackend: AgentToolBackend | null
   environment: EnvironmentBindingDTO | null
   argumentsJson: string
   approvalJson: string | null
