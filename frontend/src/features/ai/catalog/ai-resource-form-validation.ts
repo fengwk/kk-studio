@@ -23,7 +23,7 @@ export type ResourceFieldKey =
   | 'pricing'
   | 'model'
   | 'variant'
-  | 'tools'
+  | 'toolIds'
   | 'skills'
   | 'subagents'
   | 'general'
@@ -75,8 +75,8 @@ function mapError(error: unknown): ResourceFormValidationResult {
   if (/baseUrl/i.test(raw)) {
     return { ok: false, message, fields: { baseUrl: message } }
   }
-  if (/tools/i.test(raw)) {
-    return { ok: false, message, fields: { tools: message } }
+  if (/toolIds/i.test(raw)) {
+    return { ok: false, message, fields: { toolIds: message } }
   }
   if (/skills/i.test(raw)) {
     return { ok: false, message, fields: { skills: message } }

@@ -63,7 +63,6 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
     environment: copyBinding(draft.environment),
     agentName: draft.agentName,
     model: { ...draft.model },
-    activeTools: [...draft.activeTools],
   }
 }
 
@@ -161,7 +160,6 @@ export function copyBranchDraft(draft: BranchDraft): BranchDraft {
     ...draft,
     environment: copyBinding(draft.environment),
     model: { ...draft.model },
-    activeTools: [...draft.activeTools],
   }
 }
 

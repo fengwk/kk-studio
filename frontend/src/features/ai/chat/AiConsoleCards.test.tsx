@@ -59,7 +59,7 @@ function agent() {
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: 'default',
-    config: { tools: [], skills: [] },
+    config: { toolIds: [], skills: [], subagents: [] },
     version: '1',
     createTime: null,
     updateTime: null,

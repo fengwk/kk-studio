@@ -45,7 +45,7 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
     description: ' description ',
     systemPrompt: ' prompt ',
     variant: 'quality',
-    tools: [' read ', 'bash'],
+    toolIds: [' base.read ', 'base.bash'],
     skills: [' dev '],
     subagents: [' helper '],
     ...overrides,
@@ -62,13 +62,13 @@ describe('ai-agent-draft-codec', () => {
     expect(emptyAgentDraft()).toMatchObject({ model: '', variant: '', subagents: [] })
   })
 
-  it('normalizes short capability names and rejects collisions in create payloads', () => {
+  it('normalizes tool IDs and capability names and rejects collisions in create payloads', () => {
     expect(toEditableAgent(draft()).config).toMatchObject({
-      tools: ['read', 'bash'],
+      toolIds: ['base.read', 'base.bash'],
       skills: ['dev'],
       subagents: ['helper'],
     })
-    expect(() => toEditableAgent(draft({ tools: ['read', 'read'] }))).toThrow(
+    expect(() => toEditableAgent(draft({ toolIds: ['base.read', 'base.read'] }))).toThrow(
       /名称不能重复/,
     )
     expect(() => toEditableAgent(draft({ subagents: ['helper', 'helper'] }))).toThrow(
@@ -84,7 +84,7 @@ describe('ai-agent-draft-codec', () => {
       model: 'minimax/model',
       variant: 'quality',
       config: {
-        tools: [' read ', ''],
+        toolIds: [' base.read ', ''],
         skills: [],
         subagents: [' writer ', ''],
       },
@@ -99,7 +99,7 @@ describe('ai-agent-draft-codec', () => {
       systemPrompt: '',
       model: 'minimax/model',
       variant: 'quality',
-      tools: ['read'],
+      toolIds: ['base.read'],
       skills: [],
       subagents: ['writer'],
     })
@@ -120,7 +120,7 @@ describe('ai-agent-draft-codec', () => {
       model: 'minimax/model',
       variant: 'quality',
       config: {
-        tools: ['read', 'bash'],
+        toolIds: ['base.read', 'base.bash'],
         skills: ['dev'],
         subagents: ['helper'],
       },
@@ -132,7 +132,7 @@ describe('ai-agent-draft-codec', () => {
       model: 'minimax/model',
       variant: 'quality',
       config: {
-        tools: ['read', 'bash'],
+        toolIds: ['base.read', 'base.bash'],
         skills: ['dev'],
         subagents: ['helper'],
       },
@@ -145,7 +145,7 @@ describe('ai-agent-draft-codec', () => {
     ).toMatchObject({
       description: null,
       systemPrompt: null,
-      config: { tools: ['read', 'bash'], skills: ['dev'], subagents: ['helper'] },
+      config: { toolIds: ['base.read', 'base.bash'], skills: ['dev'], subagents: ['helper'] },
     })
     expect(toEditableAgent(draft({ variant: ' ' })).variant).toBeNull()
   })
@@ -153,7 +153,7 @@ describe('ai-agent-draft-codec', () => {
   it.each([
     [{ name: ' ' }, /name/],
     [{ model: ' ' }, /model/],
-    [{ tools: ['read', 'read'] }, /tools/],
+    [{ toolIds: ['base.read', 'base.read'] }, /toolIds/],
     [{ skills: ['dev', 'dev'] }, /skills/],
     [{ subagents: ['helper', 'helper'] }, /subagents/],
   ] as Array<[Partial<AgentDraft>, RegExp]>)(
@@ -166,9 +166,9 @@ describe('ai-agent-draft-codec', () => {
     },
   )
 
-  it('writes the strict config shape with only tools, skills, and subagents', () => {
+  it('writes the strict config shape with only toolIds, skills, and subagents', () => {
     expect(toEditableAgent(draft()).config).toEqual({
-      tools: ['read', 'bash'],
+      toolIds: ['base.read', 'base.bash'],
       skills: ['dev'],
       subagents: ['helper'],
     })

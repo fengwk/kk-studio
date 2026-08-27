@@ -2,6 +2,7 @@ import type { AgentDefinitionDTO, ToolCatalogEntryDTO } from '@/shared/api/contr
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 
 export interface CapabilityOption {
+  value: string
   name: string
   version?: string | null
   description: string | null
@@ -15,15 +16,17 @@ export function buildToolCandidates(tools: ToolCatalogEntryDTO[]): CapabilityOpt
   const options: CapabilityOption[] = []
   const seen = new Set<string>()
   for (const tool of tools) {
+    const value = tool.id?.trim()
     const name = tool.name?.trim()
-    if (!name || seen.has(name)) {
+    if (!value || !name || seen.has(value)) {
       continue
     }
-    seen.add(name)
+    seen.add(value)
     options.push({
+      value,
       name,
-      version: tool.version ?? null,
-      description: tool.description ?? null,
+      version: tool.version,
+      description: tool.description,
     })
   }
   return options
@@ -42,8 +45,9 @@ export function buildPermissionToolCandidates(
     }
     seen.add(id)
     options.push({
+      value: id,
       name: id,
-      version: tool.version ?? null,
+      version: tool.version,
       description:
         [tool.name?.trim(), tool.description?.trim()].filter(Boolean).join(' — ') || null,
     })
@@ -72,6 +76,7 @@ export function buildSkillCandidates(
     }
     seen.add(name)
     options.push({
+      value: name,
       name,
       description: skill.description ?? null,
     })
@@ -95,6 +100,7 @@ export function buildSubagentCandidates(agents: AgentDefinitionDTO[]): Capabilit
     }
     seen.add(name)
     options.push({
+      value: name,
       name,
       description: agent.description ?? null,
     })
@@ -110,20 +116,21 @@ export function withSelectedOrphans(
   candidates: CapabilityOption[],
   selected: string[],
 ): CapabilityOption[] {
-  const byName = new Map(candidates.map((item) => [item.name, item]))
+  const byValue = new Map(candidates.map((item) => [item.value, item]))
   const merged = [...candidates]
   for (const raw of selected) {
-    const name = raw.trim()
-    if (!name || byName.has(name)) {
+    const value = raw.trim()
+    if (!value || byValue.has(value)) {
       continue
     }
     const orphan: CapabilityOption = {
-      name,
+      value,
+      name: value,
       description: null,
       offline: true,
       missing: true,
     }
-    byName.set(name, orphan)
+    byValue.set(value, orphan)
     merged.push(orphan)
   }
   return merged

@@ -304,7 +304,7 @@ describe('AiResourceForms', () => {
           systemPrompt: '',
           model: '',
           variant: 'default',
-          tools: [],
+          toolIds: [],
           skills: [],
           subagents: [],
         }}
@@ -365,7 +365,7 @@ function AgentFormHarness() {
     systemPrompt: '',
     model: '',
     variant: 'default',
-    tools: [],
+    toolIds: [],
     skills: [],
     subagents: [],
   })

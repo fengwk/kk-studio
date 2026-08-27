@@ -25,7 +25,6 @@ const baseDraft: BranchDraft = {
   environment: null,
   agentName: 'assistant',
   model: { providerName: 'provider', modelName: 'model', variant: 'default' },
-  activeTools: ['task'],
   yoloEnabled: false,
 }
 
@@ -42,7 +41,6 @@ const thread: HarnessThreadDTO = {
     environment: null,
     agentName: 'assistant',
     model: { providerName: 'provider', modelName: 'model', variant: 'default' },
-    activeTools: ['task'],
   },
   createTime: null,
   updateTime: null,
@@ -71,7 +69,6 @@ describe('AgentPane acceptance pipeline', () => {
       rootSettings: {
         agentName: 'assistant',
         model: baseDraft.model,
-        activeTools: ['task'],
       },
       yoloEnabled: false,
     })

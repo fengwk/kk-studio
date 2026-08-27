@@ -748,7 +748,6 @@ function cloneDraft(draft: BranchDraft): BranchDraft {
     ...draft,
     environment: draft.environment ? { ...draft.environment } : null,
     model: { ...draft.model },
-    activeTools: [...draft.activeTools],
   }
 }
 
@@ -785,9 +784,6 @@ function branchDraftFromEntry(
         : fallback.model.modelName,
       variant: typeof model?.variant === 'string' ? model.variant : fallback.model.variant,
     },
-    activeTools: Array.isArray(settings.activeTools)
-      ? settings.activeTools.filter((item): item is string => typeof item === 'string')
-      : fallback.activeTools,
   }
 }
 

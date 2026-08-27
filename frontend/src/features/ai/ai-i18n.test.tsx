@@ -40,8 +40,9 @@ const agent = {
   model: 'm1',
   variant: 'default',
   config: {
-    tools: [],
+    toolIds: [],
     skills: [],
+    subagents: [],
   },
   version: '1',
   createTime: null,

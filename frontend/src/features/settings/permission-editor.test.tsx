@@ -28,7 +28,7 @@ function tool(name: string): ToolCatalogEntryDTO {
     id: `base.${name}`,
     name,
     version: '1',
-    description: null,
+    description: `${name} tool`,
     backend: 'HOST',
   }
 }

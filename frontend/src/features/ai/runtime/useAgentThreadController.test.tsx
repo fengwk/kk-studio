@@ -82,7 +82,6 @@ function branchSettings(
     environment: null,
     agentName: 'assistant',
     model: modelSelection(),
-    activeTools: [],
     ...overrides,
   }
 }
@@ -126,7 +125,7 @@ const assistantAgentEntry = {
   systemPrompt: null,
   model: 'minimax/MiniMax',
   variant: 'default',
-  config: { tools: [], skills: [] },
+  config: { toolIds: [], skills: [], subagents: [] },
   version: '0',
   createTime: null,
   updateTime: null,

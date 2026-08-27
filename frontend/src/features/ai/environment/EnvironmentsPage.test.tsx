@@ -26,6 +26,7 @@ function renderPage() {
 function environment(overrides: Partial<LiveEnvironmentDTO>): LiveEnvironmentDTO {
   return {
     name: 'env',
+    rootPath: null,
     status: 'READY',
     ready: true,
     lastSeen: null,
@@ -41,6 +42,7 @@ describe('EnvironmentsPage', () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       {
         name: 'local-dev',
+        rootPath: '/workspace/local-dev',
         status: 'READY',
         ready: true,
         lastSeen: '2026-07-20T01:02:03.000Z',
@@ -63,6 +65,7 @@ describe('EnvironmentsPage', () => {
       },
       {
         name: 'stale-box',
+        rootPath: '/workspace/stale-box',
         status: 'READY',
         ready: false,
         lastSeen: '2026-07-19T00:00:00.000Z',
@@ -72,6 +75,7 @@ describe('EnvironmentsPage', () => {
       },
       {
         name: 'connecting-box',
+        rootPath: '/workspace/connecting-box',
         status: 'CONNECTING',
         ready: false,
         lastSeen: null,

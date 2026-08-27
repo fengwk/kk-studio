@@ -17,18 +17,18 @@ function normalizeNames(items: string[] | null | undefined): string[] {
   return items.map((item) => item.trim()).filter(Boolean)
 }
 
-function normalizeCapabilityShortNames(
+function normalizeCapabilityValues(
   items: string[] | null | undefined,
-  kind: 'tools' | 'skills' | 'subagents',
+  kind: 'toolIds' | 'skills' | 'subagents',
 ): string[] {
-  const shortNames = normalizeNames(items)
+  const values = normalizeNames(items)
   const seen = new Set<string>()
   const duplicates = new Set<string>()
-  for (const name of shortNames) {
-    if (seen.has(name)) {
-      duplicates.add(name)
+  for (const value of values) {
+    if (seen.has(value)) {
+      duplicates.add(value)
     }
-    seen.add(name)
+    seen.add(value)
   }
   if (duplicates.size > 0) {
     throw new Error(
@@ -38,14 +38,14 @@ function normalizeCapabilityShortNames(
       }),
     )
   }
-  return shortNames
+  return values
 }
 
 function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
   return {
-    tools: normalizeCapabilityShortNames(draft.tools, 'tools'),
-    skills: normalizeCapabilityShortNames(draft.skills, 'skills'),
-    subagents: normalizeCapabilityShortNames(draft.subagents, 'subagents'),
+    toolIds: normalizeCapabilityValues(draft.toolIds, 'toolIds'),
+    skills: normalizeCapabilityValues(draft.skills, 'skills'),
+    subagents: normalizeCapabilityValues(draft.subagents, 'subagents'),
   }
 }
 
@@ -57,7 +57,7 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     model: model ? modelRef(model) : '',
     // 空值 = 不覆盖；runtime 使用 model.defaultVariant。
     variant: '',
-    tools: [],
+    toolIds: [],
     skills: [],
     subagents: [],
   }
@@ -71,7 +71,7 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     systemPrompt: agent.systemPrompt || '',
     model: agent.model,
     variant: agent.variant?.trim() || '',
-    tools: normalizeNames(config.tools),
+    toolIds: normalizeNames(config.toolIds),
     skills: normalizeNames(config.skills),
     subagents: normalizeNames(config.subagents),
   }

@@ -73,8 +73,6 @@ function isBranchSettings(value: unknown): value is HarnessBranchSettingsDTO {
     && isEnvironmentBinding(value.environment)
     && nonBlank(value.agentName)
     && isModelSelection(value.model)
-    && Array.isArray(value.activeTools)
-    && value.activeTools.every((item) => typeof item === 'string')
 }
 
 function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
@@ -133,9 +131,6 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
       return nonBlank(value.agentName)
     case 'SET_MODEL':
       return isModelSelection(value.model)
-    case 'SET_ACTIVE_TOOLS':
-      return Array.isArray(value.activeTools)
-        && value.activeTools.every((item) => typeof item === 'string')
     case 'SET_ENVIRONMENT':
       return Object.prototype.hasOwnProperty.call(value, 'environment')
         && isEnvironmentBinding(value.environment)
@@ -158,8 +153,6 @@ function isBranchDraft(value: unknown): value is BranchDraft {
     && isEnvironmentBinding(value.environment)
     && nonBlank(value.agentName)
     && isModelSelection(value.model)
-    && Array.isArray(value.activeTools)
-    && value.activeTools.every((item) => typeof item === 'string')
     && typeof value.yoloEnabled === 'boolean'
 }
 

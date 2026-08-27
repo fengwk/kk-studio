@@ -26,7 +26,7 @@ export function AgentResourceCard({
   const { t } = useI18n()
   const model = models.find((item) => modelRef(item) === agent.model)
   const modelLabel = formatAgentModelLabel(model, agent.model)
-  const tools = agent.config.tools
+  const toolIds = agent.config.toolIds
   const skills = agent.config.skills
   const subagents = agent.config.subagents
 
@@ -41,7 +41,7 @@ export function AgentResourceCard({
           t('ai.catalog.card.variant'),
           agent.variant?.trim() ? agent.variant.trim() : t('ai.catalog.card.modelDefault'),
         ],
-        { label: t('ai.catalog.card.tools'), tags: tools, limit: 2 },
+        { label: t('ai.catalog.card.tools'), tags: toolIds, limit: 2 },
         { label: t('ai.catalog.card.skills'), tags: skills, limit: 2 },
         { label: t('ai.catalog.card.subagents'), tags: subagents, limit: 2 },
       ]}

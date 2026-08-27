@@ -78,7 +78,7 @@ describe('ai-resource-form-validation additional branches', () => {
     ['pricing.inputPerMillionTokens must not be negative', /价格/],
     ['modelName is required', /Model/],
     ['baseUrl is invalid', /Base URL/],
-    ['tools 去前缀后存在重名', /Tools/],
+    ['toolIds 重名', /Tools/],
     ['skills 去前缀后存在重名', /Skills/],
     ['Network Error', /网络异常/],
     ['401 Unauthorized', /没有权限/],
@@ -197,7 +197,7 @@ describe('ai-resource-form-validation additional branches', () => {
 
   it.each([
     // 空 variant 是合法的「使用 model 默认」覆盖
-    [agent({ tools: ['read', 'read'] }), 'tools'],
+    [agent({ toolIds: ['base.read', 'base.read'] }), 'toolIds'],
     [agent({ skills: ['dev', 'dev'] }), 'skills'],
     [agent({ subagents: ['dev', 'dev'] }), 'subagents'],
   ] as Array<[AgentDraft, string]>)('maps invalid agent body %# to %s', (agentDraft, field) => {
