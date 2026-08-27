@@ -744,7 +744,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       systemPrompt: 'Return the deterministic local response.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
-      config: { tools: [], skills: [], subagents: [] },
+      config: { toolIds: [], skills: [], subagents: [] },
     })
     assert(agentResponse.status === 201, `create usage agent: ${JSON.stringify(agentResponse)}`)
     state.agent = envelopeData(agentResponse.json)
@@ -856,7 +856,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       systemPrompt: 'Stay in the deterministic local model call.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
-      config: { tools: [], skills: [], subagents: [] },
+      config: { toolIds: [], skills: [], subagents: [] },
     })
     assert(childResponse.status === 201, `create task child: ${JSON.stringify(childResponse)}`)
     state.childAgent = envelopeData(childResponse.json)
@@ -867,7 +867,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       systemPrompt: 'Call the configured task subagent exactly once.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
-      config: { tools: [], skills: [], subagents: [state.childAgent.name] },
+      config: { toolIds: [], skills: [], subagents: [state.childAgent.name] },
     })
     assert(parentResponse.status === 201, `create task parent: ${JSON.stringify(parentResponse)}`)
     state.parentAgent = envelopeData(parentResponse.json)
@@ -892,7 +892,6 @@ async function createActiveTaskFixture(apiCtx, stamp) {
           modelName: state.model.name,
           variant: 'default',
         },
-        { activeTools: ['task'] },
       ),
       yoloEnabled: true,
       commands: [userMessageCommand(`task materialize ${suffix}`, cid())],
@@ -1002,7 +1001,11 @@ async function createToolCardFixture(apiCtx, stamp) {
       systemPrompt: 'Follow each deterministic Tool request exactly once.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
-      config: { tools: ['write', 'edit', 'bash'], skills: [], subagents: [] },
+      config: {
+        toolIds: ['base.write', 'base.edit', 'base.bash'],
+        skills: [],
+        subagents: [],
+      },
     })
     assert(agentResponse.status === 201, `create tool-card agent: ${JSON.stringify(agentResponse)}`)
     state.agent = envelopeData(agentResponse.json)
@@ -1026,7 +1029,6 @@ async function createToolCardFixture(apiCtx, stamp) {
           modelName: state.model.name,
           variant: 'default',
         },
-        { activeTools: ['write', 'edit', 'bash'] },
       ),
       yoloEnabled: false,
       commands: [userMessageCommand(`tool card materialize ${suffix}`, cid())],

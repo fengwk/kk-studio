@@ -26,7 +26,7 @@ import {
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
  * - ENTRY{sessionId,startEntryId,threadId,yoloEnabled}：在既有 Session 既有 Entry 下开新 Thread
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：在既有 Thread 上继续
- * commands 必须是固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS 前缀 +
+ * commands 必须是固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL 前缀 +
  * 恰一条末尾 USER_MESSAGE；CUSTOM_MESSAGE 在产品 HTTP 面被拒绝。
  */
 
@@ -118,7 +118,7 @@ export async function createChat(
 export function branchSettingsOf(
   agent,
   model,
-  { environment = null, activeTools = [] } = {},
+  { environment = null } = {},
 ) {
   assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
@@ -134,7 +134,6 @@ export function branchSettingsOf(
       modelName: model.modelName,
       variant: model.variant,
     },
-    activeTools: [...(activeTools ?? [])],
   }
 }
 
@@ -488,12 +487,6 @@ export function setModelCommand(model, clientCommandId) {
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
   assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
   return { type: 'SET_MODEL', clientCommandId, model }
-}
-
-export function setActiveToolsCommand(activeTools, clientCommandId) {
-  assert(Array.isArray(activeTools), 'activeTools must be an array')
-  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  return { type: 'SET_ACTIVE_TOOLS', clientCommandId, activeTools }
 }
 
 /**

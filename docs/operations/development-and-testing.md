@@ -493,10 +493,12 @@ node scripts/reliability/reassess-agent-run.mjs <runId>
 | `minimax/MiniMax-M2.7` | `high` | `m27-pi-investigate`、`m27-pi-repair` | `m27-pi-base-investigate`、`m27-pi-base-repair` |
 | `minimax/MiniMax-M3` | `high` | `m3-pi-investigate`、`m3-pi-repair` | `m3-pi-base-investigate`、`m3-pi-base-repair` |
 
-Runner 固定 `tools=[read,write,edit,bash,grep,find]`，`skills=[]`、
-`subagents=[]`，每个 case 独立 Chat/Thread；真实执行前要求 provider、
-model、variant、Tool catalog 和 Environment READY 全部匹配。未知 cost、
-超过 USD 5、测试/工作区/凭证隔离证据缺失都 fail closed。
+Runner 固定 Agent config 为
+`toolIds=[base.read,base.write,base.edit,base.apply-patch,base.bash,base.grep,base.find]`、
+`skills=[]`、`subagents=[]`，Provider 请求中的 model-visible tool names
+对应为 `read,write,edit,apply_patch,bash,grep,find`。每个 case 独立 Chat/Thread；
+真实执行前要求 provider、model、variant、Tool catalog 和 Environment READY
+全部匹配。未知 cost、超过 USD 5、测试/工作区/凭证隔离证据缺失都 fail closed。
 
 ## 10. Performance baseline
 

@@ -121,7 +121,7 @@ registerCase({
             systemPrompt: 's',
             model: modelRef(model),
             variant: model.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [] },
+            config: { toolIds: [], skills: [], subagents: [] },
           }),
         { status: 400, messageIncludes },
       )
@@ -144,7 +144,7 @@ registerCase({
           systemPrompt: 's',
           model: modelRef(model),
           variant: '__missing_variant__',
-          config: { tools: [], skills: [], subagents: [] },
+          config: { toolIds: [], skills: [], subagents: [] },
         }),
       { status: 400, messageIncludes: /variant/i },
     )
@@ -312,7 +312,7 @@ registerCase({
           systemPrompt: 'you are e2e',
           model: modelRef(model),
           variant: model.config.defaultVariant,
-          config: { tools: [], skills: [], subagents: [] },
+          config: { toolIds: [], skills: [], subagents: [] },
         })
       ).json,
     )
@@ -324,7 +324,7 @@ registerCase({
           systemPrompt: 'updated prompt',
           model: modelRef(updatedModel),
           variant: updatedModel.config.defaultVariant,
-          config: { tools: [], skills: [], subagents: [] },
+          config: { toolIds: [], skills: [], subagents: [] },
           expectedVersion: agent.version,
         })
       ).json,
@@ -352,7 +352,7 @@ registerCase({
           systemPrompt: 'recreated prompt',
           model: modelRef(model),
           variant: model.config.defaultVariant,
-          config: { tools: [], skills: [], subagents: [] },
+          config: { toolIds: [], skills: [], subagents: [] },
         })
       ).json,
     )
@@ -374,7 +374,7 @@ registerCase({
   id: 'crud.agent.subagent_reference_lifecycle',
   level: 'L1',
   title: 'Agent subagents 名称引用与删除保护',
-  docs: '创建 parent.subagents=[child] 后 child DELETE => 409；PUT parent 移除引用后 child 可硬删除；公开 config 始终完整返回 tools/skills/subagents',
+  docs: '创建 parent.subagents=[child] 后 child DELETE => 409；PUT parent 移除引用后 child 可硬删除；公开 config 始终完整返回 toolIds/skills/subagents',
   async run(ctx) {
     const model = await firstModel(ctx)
     const suffix = cid().slice(0, 8)
@@ -389,7 +389,7 @@ registerCase({
             systemPrompt: 'return a concise report',
             model: modelRef(model),
             variant: model.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [] },
+            config: { toolIds: [], skills: [], subagents: [] },
           })
         ).json,
       )
@@ -401,13 +401,13 @@ registerCase({
             systemPrompt: 'delegate when needed',
             model: modelRef(model),
             variant: model.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [child.name] },
+            config: { toolIds: [], skills: [], subagents: [child.name] },
           })
         ).json,
       )
       assert(
-        Array.isArray(parent.config?.tools)
-          && parent.config.tools.length === 0
+        Array.isArray(parent.config?.toolIds)
+          && parent.config.toolIds.length === 0
           && Array.isArray(parent.config?.skills)
           && parent.config.skills.length === 0
           && JSON.stringify(parent.config?.subagents) === JSON.stringify([child.name]),
@@ -431,7 +431,7 @@ registerCase({
               systemPrompt: parent.systemPrompt,
               model: parent.model,
               variant: parent.variant,
-              config: { tools: [], skills: [], subagents: [] },
+              config: { toolIds: [], skills: [], subagents: [] },
               expectedVersion: parent.version,
             },
           )
@@ -485,7 +485,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 EnvironmentBinding；NEW_SESSION rootSettings 携带完整 branch draft；更新 Chat 默认值不改变既有 Thread',
+  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 EnvironmentBinding；NEW_SESSION rootSettings 携带 environment/agentName/model branch draft；更新 Chat 默认值不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -508,7 +508,6 @@ registerCase({
         environment: null,
         agentName: agent.name,
         model: modelSelectionFor(agent),
-        activeTools: [],
       }
       const threadId = cid()
       const accepted = await materializeNewSession(ctx, {

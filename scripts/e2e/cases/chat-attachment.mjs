@@ -52,7 +52,6 @@ registerCase({
         modelName: 'MiniMax-M2.7',
         variant: 'default',
       },
-      { activeTools: [] },
     )
 
     // 1. reserve：PENDING + PUT + 不暴露 bucket/key。
@@ -268,7 +267,7 @@ registerCase({
   level: 'L1',
   requires: ['canvas-storage'],
   title: '本地 Blob 图片内联且现有 Thread 使用最新 Agent 工具',
-  docs: '本地 OpenAI Responses mock：Thread 创建后更新同名 Agent 工具，下一 turn 必须忽略历史 branch activeTools 并发送最新工具；本地 MinIO 图片必须转换为 data:image/...;base64 source，Provider 请求不得包含 127.0.0.1/localhost 预签名 URL',
+  docs: '本地 OpenAI Responses mock：Thread 创建后更新同名 Agent 的 toolIds，下一 turn 必须忽略历史分支设置并发送最新工具；本地 MinIO 图片必须转换为 data:image/...;base64 source，Provider 请求不得包含 127.0.0.1/localhost 预签名 URL',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const mock = await startResponsesProbe()
@@ -319,7 +318,7 @@ registerCase({
             systemPrompt: 'Complete without calling tools.',
             model: `${model.providerName}/${model.name}`,
             variant: 'default',
-            config: { tools: ['read'], skills: [], subagents: [] },
+            config: { toolIds: ['base.read'], skills: [], subagents: [] },
           })
         ).json,
       )
@@ -351,7 +350,6 @@ registerCase({
             modelName: model.name,
             variant: 'default',
           },
-          { activeTools: ['read'] },
         ),
         yoloEnabled: false,
         commands: [
@@ -367,7 +365,7 @@ registerCase({
       })
       threadId = String(createdThreadId)
 
-      // Thread 已冻结旧 activeTools 后再更新 Agent；下一 turn 必须读取最新 Agent 配置。
+      // Thread 已创建后再更新 Agent；下一 turn 必须读取最新 Agent config.toolIds。
       agent = envelopeData(
         (
           await ctx.call('PUT', `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}`, {
@@ -375,7 +373,7 @@ registerCase({
             systemPrompt: 'Complete without calling tools.',
             model: agent.model,
             variant: 'default',
-            config: { tools: ['read', 'grep'], skills: [], subagents: [] },
+            config: { toolIds: ['base.read', 'base.grep'], skills: [], subagents: [] },
             expectedVersion: agent.version,
           })
         ).json,

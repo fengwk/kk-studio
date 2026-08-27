@@ -142,7 +142,7 @@ registerCase({
               'You are an E2E subagent. Follow the delegated prompt exactly and return only its requested marker.',
             model: `${ctx.vars.seedModel.providerName}/${ctx.vars.seedModel.name}`,
             variant: ctx.vars.seedModel.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [] },
+            config: { toolIds: [], skills: [], subagents: [] },
           })
         ).json,
       )
@@ -156,7 +156,7 @@ registerCase({
               + `Delegate the instruction "Return exactly ${marker}". After the task result, answer with the same marker.`,
             model: `${ctx.vars.seedModel.providerName}/${ctx.vars.seedModel.name}`,
             variant: ctx.vars.seedModel.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [childAgent.name] },
+            config: { toolIds: [], skills: [], subagents: [childAgent.name] },
           })
         ).json,
       )
@@ -180,7 +180,6 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environment: null, activeTools: ['task'] },
         ),
         yoloEnabled: false,
         commands: [
@@ -692,7 +691,7 @@ registerCase({
       model: `${ctx.vars.seedModel.providerName}/${ctx.vars.seedModel.name}`,
       variant: ctx.vars.seedModel.config.defaultVariant,
       config: {
-        tools: ['read'],
+        toolIds: ['base.read'],
         skills: [],
         subagents: [],
       },
@@ -704,11 +703,11 @@ registerCase({
       const agentConfig = toolAgent.config
       assert(
         agentConfig
-          && Object.keys(agentConfig).sort().join(',') === 'skills,subagents,tools'
-          && JSON.stringify(agentConfig.tools) === JSON.stringify(['read'])
+          && Object.keys(agentConfig).sort().join(',') === 'skills,subagents,toolIds'
+          && JSON.stringify(agentConfig.toolIds) === JSON.stringify(['base.read'])
           && JSON.stringify(agentConfig.skills) === JSON.stringify([])
           && JSON.stringify(agentConfig.subagents) === JSON.stringify([]),
-        `temporary tool Agent config must be exactly tools=[read], skills=[], subagents=[]: ${JSON.stringify(toolAgent)}`,
+        `temporary tool Agent config must be exactly toolIds=[base.read], skills=[], subagents=[]: ${JSON.stringify(toolAgent)}`,
       )
       const environment = {
         name: ctx.vars.daemonEnvironment.name,
@@ -751,7 +750,6 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environment, activeTools: ['read'] },
         ),
         yoloEnabled: false,
         commands: [
