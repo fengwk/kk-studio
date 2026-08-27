@@ -20,7 +20,6 @@ import {
   listSessionThreads,
   materializeEntryThread,
   materializeNewSession,
-  setActiveToolsCommand,
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
@@ -139,16 +138,23 @@ registerCase({
   id: 'catalog.internal_tools_hidden',
   level: 'L1',
   title: '内部 HOST Tool 不进入 Agent 可选目录',
-  docs: 'GET /api/ai/catalog/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools',
+  docs: 'GET /api/ai/catalog/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.toolIds',
   async run(ctx) {
     const tools = envelopeData((await ctx.call('GET', '/api/ai/catalog/tools')).json)
     assert(Array.isArray(tools), JSON.stringify(tools))
     const names = tools.map((tool) => String(tool.name))
+    const ids = tools.map((tool) => String(tool.id))
     assert(!names.includes('load_skill'), `load_skill must be internal: ${JSON.stringify(names)}`)
     assert(!names.includes('task'), `task must be internal: ${JSON.stringify(names)}`)
+    assert(!ids.includes('base.load-skill'), `base.load-skill must be internal: ${JSON.stringify(ids)}`)
+    assert(!ids.includes('base.task'), `base.task must be internal: ${JSON.stringify(ids)}`)
     assert(
-      ['create_goal', 'get_goal', 'update_goal'].every((name) => names.includes(name)),
-      `Goal plugin tools must remain selectable: ${JSON.stringify(names)}`,
+      [
+        ['base.goal.create', 'create_goal'],
+        ['base.goal.get', 'get_goal'],
+        ['base.goal.update', 'update_goal'],
+      ].every(([id, name]) => ids.includes(id) && names.includes(name)),
+      `Goal plugin tools must remain selectable: ${JSON.stringify(tools)}`,
     )
   },
 })
@@ -172,9 +178,7 @@ registerCase({
       owner: chatOwner(chat.id),
       sessionId,
       threadId,
-      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx), {
-        activeTools: [],
-      }),
+      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx)),
       yoloEnabled: false,
       commands: [userMessageCommand(`materialize ${sessionId.slice(0, 8)}`, cid())],
     })
@@ -227,7 +231,7 @@ registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: 'NEW_SESSION rootSettings 完整投影到 Thread 快照',
-  docs: 'EnvironmentBinding/agentName/model/activeTools/yoloEnabled 原样持久化并投影；Chat 默认值独立',
+  docs: 'EnvironmentBinding/agentName/model 与 yoloEnabled 原样持久化并投影；Chat 默认值独立',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -240,7 +244,6 @@ registerCase({
       environment: null,
       agentName: ctx.vars.agent.name,
       model: modelSelectionOf(ctx),
-      activeTools: ['read', 'grep'],
     }
     const accepted = await materializeNewSession(ctx, {
       owner: chatOwner(chat.id),
@@ -1078,7 +1081,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知类型、额外字段、显式 null 与非法 EnvironmentBinding => 400',
+  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；未知类型、额外字段、显式 null 与非法 EnvironmentBinding => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1115,7 +1118,6 @@ registerCase({
         },
         cid(),
       ),
-      setActiveToolsCommand(['read'], cid()),
       userMessageCommand(`${marker} 消费 SET 后的第一条消息。`, cid()),
     ]
     const accepted = await acceptCommandBatch(ctx, {
@@ -1131,7 +1133,7 @@ registerCase({
     const dto = accepted.acceptedCommands
     assert(
       dto.map((command) => command.type).join(',') ===
-        'SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,USER_MESSAGE',
+        'SET_ENVIRONMENT,SET_AGENT,SET_MODEL,USER_MESSAGE',
       JSON.stringify(dto),
     )
     for (let i = 1; i < dto.length; i++) {
@@ -1156,7 +1158,6 @@ registerCase({
         modelName: modelSelection.modelName,
         variant: modelSelection.variant,
       },
-      activeTools: ['read'],
     }
     assert(
       isDeepStrictEqual(finalSnapshot.thread.branchSettings, expectedSettings),

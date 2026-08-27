@@ -7,11 +7,28 @@ import {
   chatOwner,
   userMessageCommand,
 } from '../../e2e/lib/harness.mjs'
-import { ACTIVE_TOOLS, VARIANT } from '../matrix.mjs'
+import { AGENT_TOOL_IDS, MODEL_TOOL_NAMES, VARIANT } from '../matrix.mjs'
 import { assertThreadSettings, buildNewSessionRequest } from '../run-agent-matrix.mjs'
 
 const DAEMON_ENV = 'docker-reliability'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+test('reliability contract keeps selectable AgentToolIds separate from model tool names', () => {
+  // Test intent: freeze the wire IDs and the Provider-facing names independently,
+  // while ensuring internal resolver tools cannot become selectable by configuration.
+  assert.deepEqual(AGENT_TOOL_IDS, [
+    'base.read',
+    'base.write',
+    'base.edit',
+    'base.apply-patch',
+    'base.bash',
+    'base.grep',
+    'base.find',
+  ])
+  assert.deepEqual(MODEL_TOOL_NAMES, ['read', 'write', 'edit', 'apply_patch', 'bash', 'grep', 'find'])
+  assert.equal(AGENT_TOOL_IDS.includes('base.load-skill'), false)
+  assert.equal(AGENT_TOOL_IDS.includes('base.task'), false)
+})
 
 test('run-agent-matrix contract: NEW_SESSION request is atomic', () => {
   const chat = fakeChat()
@@ -51,9 +68,9 @@ test('run-agent-matrix contract: NEW_SESSION root settings freeze the environmen
     request.rootSettings,
     branchSettingsOf(agent, model, {
       environment: { name: DAEMON_ENV, workspacePath: '.' },
-      activeTools: [...ACTIVE_TOOLS],
     }),
   )
+  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'environment', 'model'])
 })
 
 test('run-agent-matrix contract: accepted snapshot assertions enforce the canonical envelope', () => {
@@ -124,7 +141,6 @@ function acceptedEnvelope(chat, model) {
       yoloEnabled: true,
       branchSettings: branchSettingsOf(fakeAgent(), model, {
         environment: { name: DAEMON_ENV, workspacePath: '.' },
-        activeTools: [...ACTIVE_TOOLS],
       }),
       status: 'PROCESSING',
       processing: true,

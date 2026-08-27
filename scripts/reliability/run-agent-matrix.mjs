@@ -7,9 +7,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs, formatCaseList, selectCases, usage } from './cli.mjs'
 import { DockerCaseHarness, summarizeCommand } from './docker-case.mjs'
 import {
-  ACTIVE_TOOLS,
+  AGENT_TOOL_IDS,
   CASE_TIMEOUT_MS,
+  ENVIRONMENT_CAPABILITY_IDS,
   MODELS,
+  MODEL_TOOL_NAMES,
   VARIANT,
   WRITE_PROOF_META,
   WRITE_PROOF_PATH,
@@ -171,8 +173,11 @@ async function validatePreflight(ctx, daemonEnv) {
   ])
   const providers = pageResults(providersResponse.json)
   const models = pageResults(modelsResponse.json)
-  const tools = envelopeData(toolsResponse.json)
-  assert(Array.isArray(tools), `expected tool catalog array: ${JSON.stringify(toolsResponse.json)}`)
+  const toolCatalog = envelopeData(toolsResponse.json)
+  assert(
+    Array.isArray(toolCatalog),
+    `expected tool catalog array: ${JSON.stringify(toolsResponse.json)}`,
+  )
 
   const provider = providers.find((candidate) => candidate.name === 'minimax')
   assert(provider, 'required provider is missing: minimax')
@@ -199,17 +204,29 @@ async function validatePreflight(ctx, daemonEnv) {
     environment.ready === true && environment.status === 'READY',
     `required Environment is not READY: ${daemonEnv}`,
   )
-  const environmentTools = new Set((environment.tools ?? []).map((tool) => tool.name))
-  const catalogTools = new Set(tools.map((tool) => tool.name))
-  for (const tool of ACTIVE_TOOLS) {
-    assert(environmentTools.has(tool), `Environment lacks required tool: ${tool}`)
-    assert(catalogTools.has(tool), `tool catalog lacks required tool: ${tool}`)
+  const environmentCapabilities = new Set(
+    (environment.capabilities ?? []).map((capability) => capability.id),
+  )
+  const catalogById = new Map(toolCatalog.map((tool) => [tool.id, tool]))
+  for (let index = 0; index < AGENT_TOOL_IDS.length; index += 1) {
+    const agentToolId = AGENT_TOOL_IDS[index]
+    const modelToolName = MODEL_TOOL_NAMES[index]
+    const catalogEntry = catalogById.get(agentToolId)
+    assert(
+      catalogEntry?.name === modelToolName,
+      `tool catalog mapping mismatch: ${agentToolId} != ${modelToolName}: ${JSON.stringify(catalogEntry)}`,
+    )
+    assert(
+      environmentCapabilities.has(ENVIRONMENT_CAPABILITY_IDS[index]),
+      `Environment lacks required capability: ${ENVIRONMENT_CAPABILITY_IDS[index]}`,
+    )
   }
   return {
     provider: { name: 'minimax', configured: true },
     models: checkedModels,
     environment: { name: daemonEnv, status: 'READY', ready: true },
-    tools: [...ACTIVE_TOOLS],
+    agentToolIds: [...AGENT_TOOL_IDS],
+    modelToolNames: [...MODEL_TOOL_NAMES],
   }
 }
 
@@ -222,7 +239,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId) {
     systemPrompt,
     model: model.ref,
     variant: VARIANT,
-    config: { tools: [...ACTIVE_TOOLS], skills: [], subagents: [] },
+    config: { toolIds: [...AGENT_TOOL_IDS], skills: [], subagents: [] },
   }
   const { status, json } = await ctx.call('POST', '/api/ai/catalog/agents', body)
   assert(status === 201, `create Agent status ${status}`)
@@ -547,7 +564,7 @@ async function postcheckCase(docker, testCase, precheck) {
   }
 }
 
-/** 构造原子 NEW_SESSION 提交：预分配 sessionId/threadId，rootSettings 绑定环境与 activeTools，yolo true，首条 USER command。 */
+/** 构造原子 NEW_SESSION 提交：预分配 sessionId/threadId，rootSettings 绑定环境，yolo true，首条 USER command。 */
 export function buildNewSessionRequest({ chat, agent, testCase, daemonEnv, prompt }) {
   return {
     owner: chatOwner(chat.id),
@@ -560,7 +577,7 @@ export function buildNewSessionRequest({ chat, agent, testCase, daemonEnv, promp
         modelName: testCase.model.modelName,
         variant: VARIANT,
       },
-      { environment: { name: daemonEnv, workspacePath: '.' }, activeTools: [...ACTIVE_TOOLS] },
+      { environment: { name: daemonEnv, workspacePath: '.' } },
     ),
     yoloEnabled: true,
     commands: [userMessageCommand(prompt, cid())],
@@ -600,8 +617,9 @@ export function assertThreadSettings(accepted, testCase, daemonEnv, agentName) {
     'Thread model selection mismatch',
   )
   assert(
-    JSON.stringify(thread.branchSettings?.activeTools) === JSON.stringify(ACTIVE_TOOLS),
-    'Thread activeTools mismatch',
+    Object.keys(thread.branchSettings ?? {}).sort().join(',')
+      === 'agentName,environment,model',
+    `Thread branch settings shape mismatch: ${JSON.stringify(thread.branchSettings)}`,
   )
 }
 

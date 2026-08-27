@@ -1,6 +1,24 @@
 import { createHash } from 'node:crypto'
 
-export const ACTIVE_TOOLS = Object.freeze(['read', 'write', 'edit', 'bash', 'grep', 'find'])
+export const AGENT_TOOL_IDS = Object.freeze([
+  'base.read',
+  'base.write',
+  'base.edit',
+  'base.apply-patch',
+  'base.bash',
+  'base.grep',
+  'base.find',
+])
+export const MODEL_TOOL_NAMES = Object.freeze(['read', 'write', 'edit', 'apply_patch', 'bash', 'grep', 'find'])
+export const ENVIRONMENT_CAPABILITY_IDS = Object.freeze([
+  'fs.read',
+  'fs.write',
+  'fs.apply-edit',
+  'fs.apply-patch',
+  'process.exec',
+  'fs.search',
+  'fs.find',
+])
 export const PROVIDER_NAME = 'minimax'
 export const VARIANT = 'high'
 export const DEFAULT_BASE_URL = 'http://127.0.0.1:18091'

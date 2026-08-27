@@ -560,7 +560,6 @@ accepted = json_call(
                     "modelName": "acceptance-stub",
                     "variant": "default",
                 },
-                "activeTools": [],
             },
             "yoloEnabled": False,
         },

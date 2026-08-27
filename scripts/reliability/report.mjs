@@ -1,7 +1,14 @@
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
-import { WRITE_PROOF, WRITE_PROOF_MARKER, WRITE_PROOF_META, sha256 } from './matrix.mjs'
+import {
+  AGENT_TOOL_IDS,
+  MODEL_TOOL_NAMES,
+  WRITE_PROOF,
+  WRITE_PROOF_MARKER,
+  WRITE_PROOF_META,
+  sha256,
+} from './matrix.mjs'
 import { aggregateUsage, summarizeString } from './policy.mjs'
 
 const SENSITIVE_KEY =
@@ -127,7 +134,8 @@ export function writeSummaryAndReport({
       daemonEnvironment: args.daemonEnv,
       selectedCaseIds: selectedCases.map((testCase) => testCase.id),
       maxCostUsd: args.maxCostUsd,
-      activeTools: ['read', 'write', 'edit', 'bash', 'grep', 'find'],
+      agentToolIds: [...AGENT_TOOL_IDS],
+      modelToolNames: [...MODEL_TOOL_NAMES],
       systemPrompt: systemPromptMeta,
       writeProof: {
         path: '.reliability-write-proof.txt',
@@ -152,7 +160,8 @@ export function writeSummaryAndReport({
   lines.push(`- Finished: \`${finishedAt}\``)
   lines.push(`- Environment: \`${args.daemonEnv}\``)
   lines.push(`- Models: \`minimax/MiniMax-M2.7\`, \`minimax/MiniMax-M3\`; variant \`high\``)
-  lines.push(`- Active tools: \`read, write, edit, bash, grep, find\``)
+  lines.push(`- Agent tool IDs: \`${AGENT_TOOL_IDS.join(', ')}\``)
+  lines.push(`- Model-visible tool names: \`${MODEL_TOOL_NAMES.join(', ')}\``)
   lines.push(`- Cost cap: USD ${formatCost(args.maxCostUsd)}; incurred: USD ${formatCost(usage.costTotal)}`)
   lines.push(
     `- Totals: pass=${totals.pass} fail=${totals.fail} skip=${totals.skip} realTurns=${totals.realTurns}/${selectedCases.length} unknownCostCases=${totals.unknownCostCases}`,

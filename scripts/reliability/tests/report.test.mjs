@@ -4,7 +4,15 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { CASES, WRITE_PROOF, WRITE_PROOF_META, buildSystemPrompt, sha256 } from '../matrix.mjs'
+import {
+  AGENT_TOOL_IDS,
+  CASES,
+  MODEL_TOOL_NAMES,
+  WRITE_PROOF,
+  WRITE_PROOF_META,
+  buildSystemPrompt,
+  sha256,
+} from '../matrix.mjs'
 import { aggregateUsage } from '../policy.mjs'
 import {
   assertSafeReportString,
@@ -90,6 +98,18 @@ test('report artifacts never repeat the 12KiB payload', () => {
         reason: 'Archived facts only; no Provider call.',
       },
     })
+    const summary = JSON.parse(readFileSync(path.join(runDir, 'summary.json'), 'utf8'))
+    assert.deepEqual(summary.configuration.agentToolIds, AGENT_TOOL_IDS)
+    assert.deepEqual(summary.configuration.modelToolNames, MODEL_TOOL_NAMES)
+    const report = readFileSync(path.join(runDir, 'report.md'), 'utf8')
+    assert.match(
+      report,
+      /Agent tool IDs: `base\.read, base\.write, base\.edit, base\.apply-patch, base\.bash, base\.grep, base\.find`/,
+    )
+    assert.match(
+      report,
+      /Model-visible tool names: `read, write, edit, apply_patch, bash, grep, find`/,
+    )
     for (const file of [
       path.join(runDir, 'artifacts/m27-pi-repair/trace.json'),
       path.join(runDir, 'summary.json'),
