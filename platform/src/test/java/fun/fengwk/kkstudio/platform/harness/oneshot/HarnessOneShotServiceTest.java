@@ -97,7 +97,7 @@ class HarnessOneShotServiceTest {
     materializer = mock(AgentBranchSettingsMaterializer.class);
     ObjectProvider<HarnessRuntime> runtimes = mock(ObjectProvider.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    when(materializer.materialize(any(), any(), any(Integer.class))).thenReturn(SETTINGS);
+    when(materializer.materialize(any(), any())).thenReturn(SETTINGS);
     changeSource = new TestThreadChangeSource();
     service = new HarnessOneShotService(runtimes, materializer, changeSource);
   }

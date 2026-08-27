@@ -22,7 +22,11 @@ class AgentDefinitionConfigCodecTest {
     config.setSkills(List.of("dev"));
     config.setSubagents(List.of("reviewer"));
 
-    AgentDefinitionConfigDTO decoded = codec.decode(codec.encode(config));
+    String encoded = codec.encode(config);
+
+    assertEquals(
+        "{\"toolIds\":[\"base.read\"],\"skills\":[\"dev\"],\"subagents\":[\"reviewer\"]}", encoded);
+    AgentDefinitionConfigDTO decoded = codec.decode(encoded);
 
     assertEquals(List.of("base.read"), decoded.getToolIds());
     assertEquals(List.of("dev"), decoded.getSkills());
@@ -52,6 +56,20 @@ class AgentDefinitionConfigCodecTest {
     AgentDefinitionConfigDTO whitespace = config();
     whitespace.setToolIds(List.of(" base.read "));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(whitespace));
+  }
+
+  /** 持久化 JSON 的已知顶层字段必须禁止重复，避免重复键的解析结果依赖 Jackson 行为。 */
+  @Test
+  void rejectsDuplicateKnownTopLevelFields() {
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode("{\"toolIds\":[],\"toolIds\":[],\"skills\":[],\"subagents\":[]}"));
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode("{\"toolIds\":[],\"skills\":[],\"skills\":[],\"subagents\":[]}"));
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode("{\"toolIds\":[],\"skills\":[],\"subagents\":[],\"subagents\":[]}"));
   }
 
   @Test

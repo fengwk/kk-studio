@@ -86,7 +86,7 @@ public final class HarnessOneShotService {
       throw new IllegalArgumentException("one-shot userMessage must use USER role");
     }
     HarnessRuntime runtime = requireRuntime();
-    var settings = settingsMaterializer.materialize(agentName, environment, 1);
+    var settings = settingsMaterializer.materialize(agentName, environment);
     CustomMessageCommandPayload systemPayload =
         new CustomMessageCommandPayload(AgentMessage.system(systemMessage));
     CustomMessageCommandPayload userPayload = new CustomMessageCommandPayload(userMessage);
