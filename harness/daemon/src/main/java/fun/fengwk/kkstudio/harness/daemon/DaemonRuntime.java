@@ -85,6 +85,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class DaemonRuntime implements AutoCloseable {
 
   private static final Duration EXECUTOR_TERMINATION_TIMEOUT = Duration.ofSeconds(5);
+  private static final String FALLBACK_FAILURE_MESSAGE = "capability execution failed";
 
   private final DaemonConfig config;
   private final EnvironmentName environmentName;
@@ -810,8 +811,8 @@ public final class DaemonRuntime implements AutoCloseable {
                               + timeout.toMillis()
                               + "ms\"}"),
                       true),
-              timeout.toNanos(),
-              TimeUnit.NANOSECONDS);
+              timeout.toMillis(),
+              TimeUnit.MILLISECONDS);
       invocation.setDeadline(deadline);
     } catch (RejectedExecutionException ignored) {
       // close() 已记录取消并停止 scheduler。
@@ -932,11 +933,19 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private String errorPayload(Throwable error) {
-    String message = error.getMessage();
-    if (message == null || message.isBlank()) {
-      message = error.getClass().getSimpleName();
+    return "{\"message\":" + quote(safeFailureMessage(error)) + "}";
+  }
+
+  private static String safeFailureMessage(Throwable error) {
+    if (error == null) {
+      return FALLBACK_FAILURE_MESSAGE;
     }
-    return "{\"message\":" + quote(message) + "}";
+    try {
+      String message = error.getMessage();
+      return message == null || message.isBlank() ? FALLBACK_FAILURE_MESSAGE : message;
+    } catch (RuntimeException ignored) {
+      return FALLBACK_FAILURE_MESSAGE;
+    }
   }
 
   private String quote(String value) {
@@ -1136,7 +1145,7 @@ public final class DaemonRuntime implements AutoCloseable {
 
   /** resource 读取/落盘或编码失败时，确定性收敛为 FAILED，避免让 callback 漏掉终态。允许已有 journal 记录为 RUNNING 时覆盖。 */
   private void failResultEncoding(String invocationId, RuntimeException error, String phase) {
-    String message = "cannot " + phase + " capability result: " + error.getMessage();
+    String message = "cannot " + phase + " capability result: " + safeFailureMessage(error);
     terminal(
         invocationId,
         new DaemonTerminalMessage(

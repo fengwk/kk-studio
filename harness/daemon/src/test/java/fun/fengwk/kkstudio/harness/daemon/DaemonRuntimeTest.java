@@ -985,6 +985,32 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
+  /** v4 最大毫秒 timeout 仍必须先发送 STARTED；测试显式 CANCEL 收敛，不能等待不可达的 deadline。 */
+  @Test
+  void acceptsMaximumWireTimeoutWithoutOverflowingScheduler() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestCapability tool = new TestCapability();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+    transport.receive(invoke("maximum-timeout", 1, "test", "1.0.0", Long.MAX_VALUE));
+
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertFalse(transport.awaitMessage(Duration.ofMillis(100)));
+    assertEquals(
+        DaemonInvocationState.RUNNING, journal.find("maximum-timeout").orElseThrow().state());
+
+    transport.receive(cancel("maximum-timeout", 2));
+    assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
+    assertEquals(
+        DaemonInvocationState.CANCELLED, journal.find("maximum-timeout").orElseThrow().state());
+    assertEquals(1, tool.handle.cancelCalls.get());
+  }
+
   /** Daemon timeout 必须取消排队中的 apply_patch，并在工具尚未开始时保持 workspace 不变。 */
   @Test
   void timeoutCancelsQueuedApplyPatchBeforeMutation() throws Exception {
@@ -1455,6 +1481,102 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     tool.complete(new EnvironmentCapabilityResult("another-id", List.of(), false, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.FAILED);
+  }
+
+  /** null callback error 也必须生成唯一 FAILED 终态；迟到 complete 不能再次写 journal 或发送终态。 */
+  @Test
+  void nullCapabilityErrorConvergesToSingleFailedTerminal() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestCapability tool = new TestCapability();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+    transport.receive(invoke("null-error", 1));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+
+    tool.error(null);
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, DaemonMessageType.FAILED);
+    assertEquals("{\"message\":\"capability execution failed\"}", terminal.get(0).payloadJson());
+    assertEquals(DaemonInvocationState.FAILED, journal.find("null-error").orElseThrow().state());
+
+    tool.complete(new EnvironmentCapabilityResult("null-error", List.of(), false, "{}"));
+    assertFalse(transport.hasMessages());
+    assertEquals(DaemonInvocationState.FAILED, journal.find("null-error").orElseThrow().state());
+  }
+
+  /** 恶意 Throwable 的 message 不能逃逸终态处理；同时覆盖结果编码失败并验证 Runtime 仍可接收后续 invocation。 */
+  @Test
+  void guardsAdversarialFailureMessagesAndKeepsRuntimeUsable() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestCapability tool = new TestCapability();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    ResourceStore adversarialStore =
+        new ResourceStore() {
+          @Override
+          public ResourceRef store(byte[] bytes, String mediaType) {
+            throw new ExplodingMessageException();
+          }
+
+          @Override
+          public byte[] read(ResourceRef ref) {
+            throw new ExplodingMessageException();
+          }
+        };
+    runtime = runtime(transport, tool, journal, adversarialStore);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+    transport.receive(invoke("adversarial-error", 1));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+
+    tool.error(new ExplodingMessageException());
+    List<DaemonEnvelope> errorTerminal = transport.takeMessages(1);
+    assertMessageTypes(errorTerminal, DaemonMessageType.FAILED);
+    assertEquals(
+        "{\"message\":\"capability execution failed\"}", errorTerminal.get(0).payloadJson());
+    assertEquals(
+        DaemonInvocationState.FAILED, journal.find("adversarial-error").orElseThrow().state());
+
+    tool.complete(new EnvironmentCapabilityResult("adversarial-error", List.of(), false, "{}"));
+    assertFalse(transport.hasMessages());
+
+    transport.receive(invoke("adversarial-result", 2));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    tool.complete(
+        new EnvironmentCapabilityResult(
+            "adversarial-result",
+            List.of(
+                new ResourceToolContent(
+                    new ResourceRef(
+                        "file:///export/adversarial",
+                        "application/octet-stream",
+                        null,
+                        1L,
+                        "0".repeat(64)))),
+            false,
+            "{}"));
+    List<DaemonEnvelope> resultTerminal = transport.takeMessages(1);
+    assertMessageTypes(resultTerminal, DaemonMessageType.FAILED);
+    assertEquals(
+        "{\"message\":\"cannot complete capability result: capability execution failed\"}",
+        resultTerminal.get(0).payloadJson());
+    assertEquals(
+        DaemonInvocationState.FAILED, journal.find("adversarial-result").orElseThrow().state());
+
+    transport.receive(invoke("runtime-still-usable", 3));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    tool.complete(new EnvironmentCapabilityResult("runtime-still-usable", List.of(), false, "{}"));
+    assertMessageTypes(transport.takeMessages(1), COMPLETED);
+    assertEquals(
+        DaemonInvocationState.COMPLETED,
+        journal.find("runtime-still-usable").orElseThrow().state());
   }
 
   /** PARTIAL 必须流式转发，CANCEL 后迟到 complete callback 不能覆盖 CANCELLED 终态。 */
@@ -2105,6 +2227,37 @@ class DaemonRuntimeTest {
   private DaemonRuntime runtime(
       FakeTransport transport,
       EnvironmentCapability capability,
+      InMemoryDaemonInvocationJournal journal,
+      ResourceStore resourceStore) {
+    handshakeTransport = transport;
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(capability);
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            new EnvironmentName("environment"),
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            null,
+            ENVIRONMENT_ROOT,
+            List.of(),
+            null),
+        transport,
+        registry,
+        DaemonSkillRegistry.empty(),
+        journal,
+        Executors.newSingleThreadScheduledExecutor(),
+        Executors.newVirtualThreadPerTaskExecutor(),
+        resourceStore);
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport,
+      EnvironmentCapability capability,
       InMemoryDaemonInvocationJournal journal) {
     handshakeTransport = transport;
     DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
@@ -2723,6 +2876,14 @@ class DaemonRuntimeTest {
 
     private void error(Throwable error) {
       listener.onError(error);
+    }
+  }
+
+  private static final class ExplodingMessageException extends RuntimeException {
+
+    @Override
+    public String getMessage() {
+      throw new IllegalStateException("message rendering failed");
     }
   }
 
