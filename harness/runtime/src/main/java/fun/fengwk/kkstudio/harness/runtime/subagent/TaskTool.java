@@ -131,7 +131,7 @@ public final class TaskTool implements Tool {
       executor.execute(execution::run);
     } catch (RejectedExecutionException rejected) {
       // 固定容量已耗尽：尚未创建 child Session/Thread，必须返回 task 自身的确定性 ERROR 结果，
-      // 不能把 executor 拒绝冒泡给已启动的 Platform Tool 并误收敛为 UNKNOWN。
+      // 不能把 executor 拒绝冒泡给已启动的 HOST Tool 并误收敛为 UNKNOWN。
       execution.completeRejected();
     }
     return execution;

@@ -14,11 +14,11 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
@@ -40,22 +40,21 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@link PlatformToolGateway#start}：PLATFORM / ENVIRONMENT 路由、admission 分类与同步回调门控。
+ * {@link PlatformToolGateway#start}：HOST / ENVIRONMENT_CAPABILITY 路由、admission 分类与同步回调门控。
  *
- * <p>ENVIRONMENT 断言只依赖冻结 {@code environmentName}（display name 完全不参与）；PLATFORM 断言精确的 {@link
+ * <p>ENVIRONMENT_CAPABILITY 断言只依赖冻结 {@code environmentName}（display name 完全不参与）；HOST 断言精确的 {@link
  * ToolExecutionRequest}（descriptor / 冻结 call / Duration.ZERO / 精确 ToolExecutionContext）。
  */
 class PlatformToolGatewayStartTest {
 
-  private static final ToolDescriptor DESCRIPTOR =
-      ToolGatewayTestSupport.platformDescriptor("demo");
+  private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
 
   @Test
-  void platformRouteExecutesWithExactRequestAndContext() {
+  void hostRouteExecutesWithExactRequestAndContext() {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    ToolInvocationRequest request = ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR);
+    ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
       PlatformToolGateway gateway =
@@ -77,7 +76,7 @@ class PlatformToolGatewayStartTest {
           new ToolExecutionContext(
               ToolGatewayTestSupport.INVOCATION_ID, ToolGatewayTestSupport.THREAD_ID),
           executed.context());
-      // PLATFORM 绝不触碰 remote transport。
+      // HOST 绝不触碰 remote transport。
       assertTrue(transport.invocations.isEmpty());
     } finally {
       executor.shutdownNow();
@@ -129,7 +128,7 @@ class PlatformToolGatewayStartTest {
   }
 
   @Test
-  void missingPlatformToolIsRejected() {
+  void missingHostToolIsRejected() {
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.factories(),
@@ -139,14 +138,14 @@ class PlatformToolGatewayStartTest {
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
     assertEquals("TOOL_NOT_FOUND", rejected.error().kind());
   }
 
   @Test
-  void platformDescriptorMismatchIsRejected() {
+  void hostDefinitionMismatchIsRejected() {
     ToolDescriptor drifted =
         new ToolDescriptor(
             DESCRIPTOR.name(),
@@ -164,11 +163,10 @@ class PlatformToolGatewayStartTest {
             new ToolGatewayTestSupport.ManualExecutor());
     ToolGateway.StartResult result =
         gateway.start(
-            ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", drifted)),
+            ToolGatewayTestSupport.execution(ToolGatewayTestSupport.hostRequest("call-1", drifted)),
             new ToolGatewayTestSupport.RecordingListener());
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals("TOOL_DESCRIPTOR_MISMATCH", rejected.error().kind());
+    assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
   }
 
   @Test
@@ -182,10 +180,16 @@ class PlatformToolGatewayStartTest {
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
+    AgentToolDefinition unknownDefinition =
+        new AgentToolDefinition(
+            new AgentToolId("test.no-such-daemon-tool"),
+            unknown,
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.ENVIRONMENT_CAPABILITY);
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "no_such_daemon_tool", "{}"),
-            new ToolBinding(unknown, ToolType.ENVIRONMENT, ToolGatewayTestSupport.ENV_A));
+            new ToolBinding(unknownDefinition, ToolGatewayTestSupport.ENV_A, null));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.factories(),
@@ -211,10 +215,22 @@ class PlatformToolGatewayStartTest {
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
+    AgentToolDefinition bashDefinition =
+        EnvironmentToolCatalog.entries().stream()
+            .filter(entry -> entry.definition().descriptor().name().equals("bash"))
+            .findFirst()
+            .orElseThrow()
+            .definition();
+    AgentToolDefinition driftedDefinition =
+        new AgentToolDefinition(
+            bashDefinition.id(),
+            driftedBash,
+            bashDefinition.visibility(),
+            bashDefinition.backend());
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "bash", "{}"),
-            new ToolBinding(driftedBash, ToolType.ENVIRONMENT, ToolGatewayTestSupport.ENV_A));
+            new ToolBinding(driftedDefinition, ToolGatewayTestSupport.ENV_A, null));
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.factories(),
@@ -226,7 +242,7 @@ class PlatformToolGatewayStartTest {
             ToolGatewayTestSupport.execution(request),
             new ToolGatewayTestSupport.RecordingListener());
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals("TOOL_DESCRIPTOR_MISMATCH", rejected.error().kind());
+    assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
   }
 
   @Test
@@ -375,7 +391,7 @@ class PlatformToolGatewayStartTest {
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
     ToolGateway.Overloaded overloaded = assertInstanceOf(ToolGateway.Overloaded.class, result);
     assertEquals(ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY.get(), overloaded.retryAfter());
@@ -401,7 +417,7 @@ class PlatformToolGatewayStartTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     // start 已返回但 gate 未打开：executor 任务仍在等待 release，任何回调都没有发生（门控生效）。
@@ -457,7 +473,7 @@ class PlatformToolGatewayStartTest {
 
   @Test
   void factoryCreatingMismatchedToolIsRejectedAsInvalidRequest() {
-    ToolDescriptor drifted = platformDriftedDescriptor("2");
+    ToolDescriptor drifted = hostDriftedDescriptor("2");
     var factories =
         new AgentToolRegistry(
             List.of(
@@ -487,15 +503,15 @@ class PlatformToolGatewayStartTest {
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
-    // create() 产物与注册 key 不匹配：catalog 统一映射为 descriptor mismatch。
+    // create() 产物与冻结 definition 不匹配：统一映射为 definition mismatch。
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals("TOOL_DESCRIPTOR_MISMATCH", rejected.error().kind());
+    assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
   }
 
   @Test
-  void platformExecutorAmbiguousSubmissionIsIndeterminate() {
+  void hostExecutorAmbiguousSubmissionIsIndeterminate() {
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     executor.executeFailure = new IllegalStateException("executor broken");
     PlatformToolGateway gateway =
@@ -507,7 +523,7 @@ class PlatformToolGatewayStartTest {
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             new ToolGatewayTestSupport.RecordingListener());
     // 提交抛出非 RejectedExecutionException：可能已启动，收敛为 Indeterminate 且绝不抛。
     ToolGateway.Indeterminate indeterminate =
@@ -634,7 +650,7 @@ class PlatformToolGatewayStartTest {
     assertEquals("call-1", succeeded.result().toolCallId());
   }
 
-  private static ToolDescriptor platformDriftedDescriptor(String version) {
+  private static ToolDescriptor hostDriftedDescriptor(String version) {
     return new ToolDescriptor(
         DESCRIPTOR.name(),
         version,

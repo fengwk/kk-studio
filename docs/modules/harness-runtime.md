@@ -111,7 +111,7 @@ cacheControl
 
 完整 history、Provider tools、顶层 Environment、YOLO、contextWindow、credential、endpoint 和 compaction transient metadata 不复制进 spec。[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 从 immutable EntryPath + spec 纯投影内存 ProviderRequest；普通请求只投影 MESSAGE、CUSTOM_MESSAGE、ASSISTANT_ABORTED 和 complete summary，compaction 请求只生成 summarization SYSTEM + USER 且无 tools。
 
-`ToolInvocation` 保存冻结 `ToolCall`、`ToolBinding`、assistant Entry、ordinal、approval、result、effects 和 error。状态为：
+`ToolInvocation` 保存冻结 `ToolCall`、完整 `ToolBinding`（`AgentToolDefinition` + 可选 Environment/plugin provenance）、assistant Entry、ordinal、approval、result、effects 和 error。状态为：
 
 ```text
 WAITING_APPROVAL -> READY -> DISPATCHING -> RUNNING
@@ -231,7 +231,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 
 `decideToolApproval` 只接受当前 `ToolActive` context 内 `WAITING_APPROVAL` invocation。`ALLOWED` → READY + TOOL Work，`DENIED` → FAILED + THREAD Work；相同 `decisionId` 与 payload 精确 replay，不 bump version。权限规则由 [`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java) 产生 Allow/Ask/Deny 候选，`ToolSettings.permission` 的 key 是精确 `*` 全局 wildcard 或 canonical `AgentToolId`，先应用全局规则再应用 tool id 规则，数组顺序保持为求值顺序；真实文件/symlink/执行边界不在 Runtime permission 包。
 
-[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/subagent/TaskTool.java) 是内部 PLATFORM Tool，不新增状态机或表。它验证父 ModelInvocation frozen `subagentBindings`，用 `HarnessRuntime.acceptCommands(NEW_SESSION, SubagentContext)` 创建普通 durable child Thread；`session_id` resume 要求同 parent/root 且 child quiescent。观察通过 `HarnessThreadChangeSource` 的 version/resync wake 和 [`ChangeGate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ChangeGate.java)，不固定读取 snapshot；`SubagentRunRegistry` 只 relay descendant status，并在 reservation 中拒绝超出 parent/tree concurrency 的调用。`maxTurns` 是软提醒，idle timeout 会取消 child 但保留 Session。
+[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/subagent/TaskTool.java) 是内部 HOST Tool，不新增状态机或表。它验证父 ModelInvocation frozen `subagentBindings`，用 `HarnessRuntime.acceptCommands(NEW_SESSION, SubagentContext)` 创建普通 durable child Thread；`session_id` resume 要求同 parent/root 且 child quiescent。观察通过 `HarnessThreadChangeSource` 的 version/resync wake 和 [`ChangeGate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ChangeGate.java)，不固定读取 snapshot；`SubagentRunRegistry` 只 relay descendant status，并在 reservation 中拒绝超出 parent/tree concurrency 的调用。`maxTurns` 是软提醒，idle timeout 会取消 child 但保留 Session。
 
 ## 不变量、failure / recovery
 

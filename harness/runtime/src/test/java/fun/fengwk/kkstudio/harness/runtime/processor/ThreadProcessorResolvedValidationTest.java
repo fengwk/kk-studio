@@ -37,9 +37,12 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
@@ -118,16 +121,20 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
   private static ModelRequestSpec requestWithEnvironmentTool(BranchSettings settings) {
     ToolBinding environmentTool =
         new ToolBinding(
-            new ToolDescriptor(
-                "fs",
-                "1.0",
-                "filesystem",
-                "fs",
-                new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
-                ToolSideEffect.READ_ONLY,
-                Duration.ofSeconds(30)),
-            ToolType.ENVIRONMENT,
-            settings.environment());
+            new AgentToolDefinition(
+                new AgentToolId("test.fs"),
+                new ToolDescriptor(
+                    "fs",
+                    "1.0",
+                    "filesystem",
+                    "fs",
+                    new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+                    ToolSideEffect.READ_ONLY,
+                    Duration.ofSeconds(30)),
+                ToolVisibility.SELECTABLE,
+                AgentToolBackend.ENVIRONMENT_CAPABILITY),
+            settings.environment(),
+            null);
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new ModelDescriptor(

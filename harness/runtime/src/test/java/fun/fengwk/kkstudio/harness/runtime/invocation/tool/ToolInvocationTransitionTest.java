@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.CALL_ID;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.call;
-import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.platform;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.host;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -67,7 +67,7 @@ class ToolInvocationTransitionTest {
         id(1L),
         0,
         call("bash", "{}"),
-        platform("bash"),
+        host("bash"),
         status,
         attempt,
         approval,
@@ -295,7 +295,7 @@ class ToolInvocationTransitionTest {
                 id(1L),
                 0,
                 call("bash", "{}"),
-                platform("bash"),
+                host("bash"),
                 ToolInvocationStatus.FAILED,
                 0,
                 null,
@@ -313,7 +313,7 @@ class ToolInvocationTransitionTest {
                 id(1L),
                 0,
                 call("bash", "{}"),
-                platform("bash"),
+                host("bash"),
                 ToolInvocationStatus.RUNNING,
                 1,
                 allowed(),
@@ -545,7 +545,7 @@ class ToolInvocationTransitionTest {
         source.assistantEntryId(),
         source.ordinal(),
         call("call-other", "{}"),
-        platform("bash"),
+        host("bash"),
         source.status(),
         source.attempt(),
         source.approval(),

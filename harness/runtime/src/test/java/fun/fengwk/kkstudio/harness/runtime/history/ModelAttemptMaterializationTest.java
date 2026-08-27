@@ -40,10 +40,13 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
@@ -856,15 +859,19 @@ class ModelAttemptMaterializationTest {
   private static ModelRequestSpec toolPhaseRequest() {
     ToolBinding binding =
         new ToolBinding(
-            new ToolDescriptor(
-                "bash",
-                "1.0",
-                "description of bash",
-                "bash",
-                new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
-                ToolSideEffect.READ_ONLY,
-                Duration.ofSeconds(30)),
-            ToolType.PLATFORM,
+            new AgentToolDefinition(
+                new AgentToolId("test.bash"),
+                new ToolDescriptor(
+                    "bash",
+                    "1.0",
+                    "description of bash",
+                    "bash",
+                    new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+                    ToolSideEffect.READ_ONLY,
+                    Duration.ofSeconds(30)),
+                ToolVisibility.SELECTABLE,
+                AgentToolBackend.HOST),
+            null,
             null);
     return new ModelRequestSpec(
         ProviderType.OPENAI,

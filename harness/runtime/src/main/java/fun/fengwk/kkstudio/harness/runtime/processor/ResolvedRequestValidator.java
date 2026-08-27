@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 
 import java.util.Objects;
 
@@ -59,7 +59,7 @@ final class ResolvedRequestValidator {
     ModelSelection expectedModel =
         preparation == null ? settings.model() : preparation.executionModel();
     for (ToolBinding binding : spec.toolBindings()) {
-      if (binding.type() == ToolType.ENVIRONMENT
+      if (binding.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY
           && !Objects.equals(binding.environment(), settings.environment())) {
         throw new IllegalStateException(
             "resolved tool environment="

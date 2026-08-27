@@ -52,10 +52,12 @@ inputSchema, sideEffect, timeout
 - `name` 必须匹配 `[A-Za-z][A-Za-z0-9_-]*`；`version`、`description`、`rendererKey` 非空；`timeout` 非负。
 - `sideEffect` 只有 `READ_ONLY`、`IDEMPOTENT`、`NON_IDEMPOTENT`。
 - `ToolVisibility`（`SELECTABLE` / `INTERNAL`）属于目录装配属性，不是 descriptor 的字段。
-- `AgentToolBackend`（`HOST` / `PLUGIN` / `ENVIRONMENT_CAPABILITY`）属于 `AgentToolDefinition`，不是 descriptor 的字段；`ToolBinding.type` 是持久化 binding 的 route。
+- `AgentToolDefinition` 完整冻结 `AgentToolId`、descriptor、visibility 和 `AgentToolBackend`（`HOST` / `PLUGIN` / `ENVIRONMENT_CAPABILITY`）；它同时提供 durable registry/permission identity、model contract 和唯一执行 backend。
 - `ToolParamsSchema` 是 provider 无关的 JSON Schema 子集，支持 string、integer、number、boolean、enum、array、object。Object schema 明确保存 `properties`、`required` 和 `additionalProperties`。
 
 [`ToolDescriptorJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolDescriptorJsonCodec.java) 的 descriptor JSON 字段为 `name`、`version`、`description`、`rendererKey`、`sideEffect`、`timeoutMillis`、`inputSchema`。Codec 拒绝未知字段、duplicate field、trailing token、错误类型和缺少 object-schema 必需字段；输出时 `properties`、`required` 按字典序，enum 保留输入顺序。Schema element 自身的 JSON `type` 用于描述参数类型并保留。
+
+[`AgentToolDefinitionJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec.java) 的 wire 固定为 `{"id", "descriptor", "visibility", "backend"}`，按该顺序输出；它复用 descriptor codec，并在 definition 边界拒绝 unknown/missing/null、duplicate、trailing、错误类型和未知枚举值。
 
 执行 SPI 只有三件事：
 
@@ -227,7 +229,7 @@ EnvironmentCapabilityTransport
 
 ## 配置 / 扩展
 
-- 新的 Platform Tool 通过 `ToolDescriptor` + `Tool` 实现并包装为 `ToolFactory` 后加入 [`AgentToolRegistry`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry.java)；内部工具由 `AgentToolDefinition.visibility` 标记。
+- 新的 HOST Tool 通过 `ToolDescriptor` + `Tool` 实现并包装为 `ToolFactory` 后加入 [`AgentToolRegistry`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry.java)；内部工具由 `AgentToolDefinition.visibility` 标记。
 - Environment Tool contract 要求 model descriptor 的 schema/timeout 与 capability descriptor 保持一致；
   prompt 资源、`EnvironmentToolCatalog` 固定目录和 Daemon 注册必须使用同一组 capability mapping。`apply_patch`
   在 Daemon 的 invocation workspace 内完成 Add/Update/Delete 的 UTF-8 文本
@@ -250,6 +252,7 @@ EnvironmentCapabilityTransport
 
 - [`ToolModuleArchitectureTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolModuleArchitectureTest.java)：依赖方向和禁用 Runtime/Daemon/Platform/Provider SDK。
 - [`ToolContractTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolContractTest.java)、[`ToolExecutionNormalizationTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolExecutionNormalizationTest.java)：descriptor、调用参数归一化和 execution contract。
+- [`AgentToolDefinitionJsonCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodecTest.java)：完整 Agent tool definition 的 canonical JSON 与严格边界。
 - [`EnvironmentToolCatalogSchemaTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalogSchemaTest.java)：固定 12 项 Environment catalog 与 schema。
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityCatalogTest.java)、[`EnvironmentCapabilityTransportTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityTransportTest.java)：atomic descriptor 与 transport 事件/异常分类。
 - [`DaemonCapabilityInvokeCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilityInvokeCodecTest.java)：capability INVOKE 的 canonical JSON 和严格边界。

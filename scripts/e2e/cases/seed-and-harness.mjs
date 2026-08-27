@@ -138,7 +138,7 @@ registerCase({
 registerCase({
   id: 'catalog.internal_tools_hidden',
   level: 'L1',
-  title: '内部 Platform Tool 不进入 Agent 可选目录',
+  title: '内部 HOST Tool 不进入 Agent 可选目录',
   docs: 'GET /api/ai/catalog/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools',
   async run(ctx) {
     const tools = envelopeData((await ctx.call('GET', '/api/ai/catalog/tools')).json)

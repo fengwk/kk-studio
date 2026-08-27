@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 覆盖 selected-skill 解析、platform source 优先级与离线失败场景。 */
+/** 覆盖 selected-skill 解析、source Environment 优先级与离线失败场景。 */
 class LoadSkillToolTest {
 
   private static final EnvironmentBinding PLATFORM = EnvironmentBindings.binding("platform");

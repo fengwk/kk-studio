@@ -6,7 +6,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 插件 PLATFORM Tool 的冻结 provenance 与 branch state 访问声明。
+ * 插件 PLUGIN Tool 的冻结 provenance 与 branch state 访问声明。
  *
  * <p>{@code pluginId + contributionLocalName} 在重启后精确恢复贡献 owner；state accesses 用于在执行前拒绝同一 Assistant
  * 内必然读取陈旧快照的 sibling 组合。

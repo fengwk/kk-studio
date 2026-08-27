@@ -28,7 +28,7 @@ class ToolInvocationRequestTest {
         () -> new ToolInvocationRequest(new ToolCall("call-1", "bash", "{}"), null));
     assertThrows(
         NullPointerException.class,
-        () -> new ToolInvocationRequest(null, ToolInvocationTestData.platform("bash")));
+        () -> new ToolInvocationRequest(null, ToolInvocationTestData.host("bash")));
   }
 
   /** Tool schema 语义校验已移入 {@link ModelResponsePlanner}，构造器只保留 call 自身的不变量。 */

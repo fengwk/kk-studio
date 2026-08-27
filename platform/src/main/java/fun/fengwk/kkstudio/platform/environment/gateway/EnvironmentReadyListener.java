@@ -10,6 +10,6 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 @FunctionalInterface
 public interface EnvironmentReadyListener {
 
-  /** 通知绑定到 {@code environmentName} 的 environment 已 READY，可以进行 ENVIRONMENT tool 派发。 */
+  /** 通知绑定到 {@code environmentName} 的 environment 已 READY，可以进行 environment capability dispatch。 */
   void onEnvironmentReady(EnvironmentName environmentName);
 }

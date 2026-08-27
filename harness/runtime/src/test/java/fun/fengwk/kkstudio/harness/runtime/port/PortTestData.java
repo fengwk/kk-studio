@@ -11,11 +11,14 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
@@ -57,7 +60,14 @@ final class PortTestData {
   }
 
   private static ToolBinding toolBinding() {
-    return new ToolBinding(toolDescriptor("bash"), ToolType.PLATFORM, null);
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new AgentToolId("test.bash"),
+            toolDescriptor("bash"),
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.HOST),
+        null,
+        null);
   }
 
   private static ToolDescriptor toolDescriptor(String name) {

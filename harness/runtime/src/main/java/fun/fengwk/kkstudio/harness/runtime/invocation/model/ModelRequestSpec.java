@@ -6,8 +6,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 
 import java.util.List;
 import java.util.Objects;
@@ -102,12 +102,14 @@ public record ModelRequestSpec(
   private static void requireConsistentRoutes(
       List<ToolBinding> toolBindings, List<SkillBinding> skillBindings) {
     EnvironmentBinding environment = null;
+    boolean environmentSeen = false;
     for (ToolBinding binding : toolBindings) {
-      if (binding.type() != ToolType.ENVIRONMENT) {
+      if (binding.definition().backend() != AgentToolBackend.ENVIRONMENT_CAPABILITY) {
         continue;
       }
-      if (environment == null) {
+      if (!environmentSeen) {
         environment = binding.environment();
+        environmentSeen = true;
       } else if (!Objects.equals(environment, binding.environment())) {
         throw new IllegalArgumentException("environment-bound tools must share one environment");
       }
@@ -116,9 +118,10 @@ public record ModelRequestSpec(
       if (skill.sourceEnvironment() == null) {
         continue;
       }
-      if (environment == null) {
+      if (!environmentSeen) {
         environment = skill.sourceEnvironment();
-      } else if (!environment.equals(skill.sourceEnvironment())) {
+        environmentSeen = true;
+      } else if (!Objects.equals(environment, skill.sourceEnvironment())) {
         throw new IllegalArgumentException(
             "skill source environment must match environment-bound tools");
       }

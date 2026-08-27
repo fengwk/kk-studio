@@ -90,7 +90,7 @@ class AgentToolRegistryTest {
         catalog.entries().subList(0, 3).stream().map(AgentToolRegistry.Entry::identity).toList());
     assertEquals(
         new ContributionId(new PluginId("dependent"), "dependent"),
-        catalog.find("plugin_dependent", "1").orElseThrow().contributionId());
+        catalog.find(DEPENDENT_TOOL_ID).orElseThrow().contributionId());
     assertTrue(catalog.find(BASE_TOOL_ID).isPresent());
     assertTrue(catalog.findSelectable("missing").isEmpty());
 
@@ -221,7 +221,7 @@ class AgentToolRegistryTest {
         registry(
             List.of(factory(LOCAL_TOOL_ID, descriptor, expected, ToolVisibility.SELECTABLE, 0)),
             PluginCatalog.from(List.of()));
-    AgentToolRegistry.Entry entry = catalog.find("local", "1").orElseThrow();
+    AgentToolRegistry.Entry entry = catalog.find(LOCAL_TOOL_ID).orElseThrow();
     assertSame(expected, catalog.createHostTool(entry));
 
     ToolDescriptor drifted = descriptor("local", "1");
@@ -237,7 +237,8 @@ class AgentToolRegistryTest {
     IllegalArgumentException drift =
         assertThrows(
             IllegalArgumentException.class,
-            () -> driftingCatalog.createHostTool(driftingCatalog.find("local", "1").orElseThrow()));
+            () ->
+                driftingCatalog.createHostTool(driftingCatalog.find(LOCAL_TOOL_ID).orElseThrow()));
     assertTrue(drift.getMessage().contains("does not match frozen"));
 
     HarnessPlugin plugin =
@@ -250,9 +251,7 @@ class AgentToolRegistryTest {
                     pluginTool(descriptor("plugin_tool", "1")),
                     ToolVisibility.SELECTABLE));
     AgentToolRegistry.Entry pluginEntry =
-        registry(List.of(), PluginCatalog.from(List.of(plugin)))
-            .find("plugin_tool", "1")
-            .orElseThrow();
+        registry(List.of(), PluginCatalog.from(List.of(plugin))).find(PLUGIN_TOOL_ID).orElseThrow();
     assertEquals(AgentToolBackend.PLUGIN, pluginEntry.definition().backend());
     assertTrue(pluginEntry.hostFactory() == null);
     assertEquals("plugin:plugin:tool", pluginEntry.stableIdentity());
@@ -329,7 +328,7 @@ class AgentToolRegistryTest {
     ToolFactory hostFactory =
         factory(LOCAL_TOOL_ID, descriptor, tool(descriptor), ToolVisibility.SELECTABLE, 0);
     AgentToolRegistry registry = registry(List.of(hostFactory), PluginCatalog.from(List.of()));
-    AgentToolRegistry.Entry host = registry.find("local", "1").orElseThrow();
+    AgentToolRegistry.Entry host = registry.find(LOCAL_TOOL_ID).orElseThrow();
     assertEquals(AgentToolBackend.HOST, host.definition().backend());
     assertSame(hostFactory, host.hostFactory());
     assertEquals("core:local@1", host.stableIdentity());
@@ -347,7 +346,7 @@ class AgentToolRegistryTest {
                     pluginTool(descriptor("plugin_tool", "1")),
                     ToolVisibility.SELECTABLE));
     AgentToolRegistry pluginRegistry = registry(List.of(), PluginCatalog.from(List.of(plugin)));
-    AgentToolRegistry.Entry pluginEntry = pluginRegistry.find("plugin_tool", "1").orElseThrow();
+    AgentToolRegistry.Entry pluginEntry = pluginRegistry.find(PLUGIN_TOOL_ID).orElseThrow();
     assertEquals(AgentToolBackend.PLUGIN, pluginEntry.definition().backend());
     assertEquals("plugin:plugin:tool", pluginEntry.stableIdentity());
     assertEquals(new PluginId("plugin"), pluginEntry.pluginId());

@@ -9,12 +9,12 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantErrorPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.hostBinding;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelRequest;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.platformBinding;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
@@ -1057,7 +1057,7 @@ public abstract class HarnessStoreInvocationContract {
                                 assistantEntryId,
                                 0,
                                 toolCall("call-1"),
-                                platformBinding(),
+                                hostBinding(),
                                 ToolInvocationStatus.READY,
                                 1,
                                 null,
@@ -1079,7 +1079,7 @@ public abstract class HarnessStoreInvocationContract {
                                 assistantEntryId,
                                 0,
                                 toolCall("call-1"),
-                                platformBinding(),
+                                hostBinding(),
                                 ToolInvocationStatus.READY,
                                 0,
                                 new ToolApproval(false, null, null, null, null, null, null),
@@ -1536,7 +1536,7 @@ public abstract class HarnessStoreInvocationContract {
             assistantEntryId,
             0,
             toolCall("call-1", argumentsJson),
-            platformBinding(),
+            hostBinding(),
             ToolInvocationStatus.READY,
             0,
             null,
@@ -1972,7 +1972,7 @@ public abstract class HarnessStoreInvocationContract {
                               stored.assistantEntryId(),
                               stored.ordinal(),
                               toolCall("call-other"),
-                              platformBinding(),
+                              hostBinding(),
                               stored.status(),
                               stored.attempt(),
                               stored.approval(),

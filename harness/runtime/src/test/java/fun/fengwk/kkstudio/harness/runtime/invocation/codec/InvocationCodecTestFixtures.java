@@ -3,6 +3,9 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 import fun.fengwk.kkstudio.harness.runtime.EnvironmentBindings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -12,10 +15,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
@@ -23,6 +29,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -50,9 +57,26 @@ final class InvocationCodecTestFixtures {
         Duration.ofSeconds(30));
   }
 
-  static ToolBinding binding(ToolType type) {
+  static ToolBinding binding(AgentToolBackend backend) {
+    PluginToolBinding plugin =
+        backend == AgentToolBackend.PLUGIN
+            ? new PluginToolBinding(
+                "goal",
+                "create",
+                List.of(new PluginStateAccess("state", PluginStateAccessMode.WRITE)))
+            : null;
     return new ToolBinding(
-        descriptor(), type, type == ToolType.ENVIRONMENT ? ENVIRONMENT_ID : null);
+        definition(backend),
+        backend == AgentToolBackend.ENVIRONMENT_CAPABILITY ? ENVIRONMENT_ID : null,
+        plugin);
+  }
+
+  private static AgentToolDefinition definition(AgentToolBackend backend) {
+    return new AgentToolDefinition(
+        new AgentToolId("test.bash-" + backend.name().toLowerCase(Locale.ROOT).replace('_', '-')),
+        descriptor(),
+        ToolVisibility.SELECTABLE,
+        backend);
   }
 
   static ProviderRequest providerRequest(ToolDescriptor... tools) {
@@ -79,7 +103,7 @@ final class InvocationCodecTestFixtures {
   }
 
   static ModelRequestSpec environmentModelRequest() {
-    ToolBinding binding = binding(ToolType.ENVIRONMENT);
+    ToolBinding binding = binding(AgentToolBackend.ENVIRONMENT_CAPABILITY);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -92,8 +116,8 @@ final class InvocationCodecTestFixtures {
         provider.cacheControl());
   }
 
-  static ModelRequestSpec platformModelRequest() {
-    ToolBinding binding = binding(ToolType.PLATFORM);
+  static ModelRequestSpec hostModelRequest() {
+    ToolBinding binding = binding(AgentToolBackend.HOST);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
         ProviderType.OPENAI,

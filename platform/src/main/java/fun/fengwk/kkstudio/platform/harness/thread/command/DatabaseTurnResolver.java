@@ -43,7 +43,6 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
@@ -389,8 +388,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 按最新 Agent 配置派生的精确顺序逐一绑定。ENVIRONMENT 工具一律绑定最新 branch 的完整 {@code settings.environment()}
-   * binding（可为 null 或当前不可用——实际执行时确定性失败）；PLATFORM 工具不携带路由。缺失能力仍立即拒绝，绝不静默跳过。
+   * 按最新 Agent 配置派生的精确顺序逐一绑定。ENVIRONMENT_CAPABILITY 工具一律绑定最新 branch 的完整 {@code
+   * settings.environment()} binding（可为 null 或当前不可用——实际执行时确定性失败）；HOST/PLUGIN 工具冻结 registry entry 的完整
+   * definition。缺失能力仍立即拒绝，绝不静默跳过。
    */
   private List<ToolBinding> resolveTools(
       BranchSettings settings, List<String> activeTools, boolean subagentDelegationEnabled) {
@@ -404,20 +404,15 @@ public final class DatabaseTurnResolver implements TurnResolver {
       if (selectable.isPresent()) {
         AgentToolRegistry.Entry entry = selectable.get();
         if (entry.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY) {
-          bindings.add(
-              new ToolBinding(
-                  entry.definition().descriptor(),
-                  ToolType.ENVIRONMENT,
-                  settings.environment(),
-                  null));
+          bindings.add(new ToolBinding(entry.definition(), settings.environment(), null));
         } else {
-          bindings.add(platformBinding(entry));
+          bindings.add(hostOrPluginBinding(entry));
         }
         continue;
       }
       Optional<AgentToolRegistry.Entry> internal = toolRegistry.findInternal(name);
       if (internal.isPresent()) {
-        bindings.add(platformBinding(internal.get()));
+        bindings.add(hostOrPluginBinding(internal.get()));
         continue;
       }
       throw rejection("tool not found: " + name);
@@ -425,14 +420,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return List.copyOf(bindings);
   }
 
-  private ToolBinding platformBinding(AgentToolRegistry.Entry entry) {
-    ToolDescriptor descriptor = entry.definition().descriptor();
+  private ToolBinding hostOrPluginBinding(AgentToolRegistry.Entry entry) {
     if (entry.definition().backend() == AgentToolBackend.HOST) {
-      return new ToolBinding(descriptor, ToolType.PLATFORM, null, null);
+      return new ToolBinding(entry.definition(), null, null);
     }
     if (entry.definition().backend() != AgentToolBackend.PLUGIN
         || entry.pluginContribution() == null) {
-      throw rejection("platform tool not found: " + descriptor.name() + "@" + descriptor.version());
+      throw rejection("host/plugin tool not found: " + entry.definition().descriptor().name());
     }
     ToolContribution contribution = entry.pluginContribution();
     List<PluginStateAccess> stateAccesses = new ArrayList<>(contribution.stateAccesses().size());
@@ -444,7 +438,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     PluginToolBinding plugin =
         new PluginToolBinding(
             contribution.id().pluginId().value(), contribution.id().localName(), stateAccesses);
-    return new ToolBinding(descriptor, ToolType.PLATFORM, null, plugin);
+    return new ToolBinding(entry.definition(), null, plugin);
   }
 
   /** Agent skills 只从最新 Agent config 读取，且必须由最新选中的 Environment 精确提供。 */

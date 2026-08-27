@@ -53,13 +53,12 @@ import java.util.function.Consumer;
 /**
  * {@link PlatformToolGateway} 回调桥：partial / terminal / error / cancel 语义与 managed Resource 外部化。
  *
- * <p>PLATFORM 路径由 FakeTool 的 handler 在 execute 内同步投递回调（gate 已打开，直达 listener）；ENVIRONMENT 路径 由测试直接驱动
- * FakeTransport 记录的 listener。
+ * <p>HOST 路径由 FakeTool 的 handler 在 execute 内同步投递回调（gate 已打开，直达 listener）；ENVIRONMENT_CAPABILITY
+ * 路径由测试直接驱动 FakeTransport 记录的 listener。
  */
 class PlatformToolGatewayCallbackTest {
 
-  private static final ToolDescriptor DESCRIPTOR =
-      ToolGatewayTestSupport.platformDescriptor("demo");
+  private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
 
   private static final byte[] BINARY_BYTES = new byte[] {1, 2, 3, 4, 5};
   private static final String LARGE_TEXT =
@@ -73,7 +72,7 @@ class PlatformToolGatewayCallbackTest {
     ToolResult result =
         new ToolResult(
             "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
     // store 收到一次 put：mediaType 原样、内容精确；展示名稳定有用。
@@ -103,7 +102,7 @@ class PlatformToolGatewayCallbackTest {
                 new JsonToolContent(LARGE_JSON)),
             false,
             "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
     assertEquals(2, listener.store.puts.size());
@@ -136,7 +135,7 @@ class PlatformToolGatewayCallbackTest {
             List.of(new TextToolContent(atThreshold), new TextToolContent(atThreshold + "x")),
             false,
             "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
     // 恰好 8192 字节保持内联；8193 字节外部化。
     assertEquals(1, listener.store.puts.size());
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
@@ -151,7 +150,7 @@ class PlatformToolGatewayCallbackTest {
   void externalizedTextAtPreviewLimitKeepsExactPreview() {
     String text = "x".repeat(ResourceRef.MAX_PREVIEW_UTF8_BYTES);
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncComplete(
+        runHostSyncComplete(
             new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}"));
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
@@ -175,10 +174,10 @@ class PlatformToolGatewayCallbackTest {
         "a".repeat(prefixBudget - 1) + ToolResultExternalizer.PREVIEW_TRUNCATION_MARKER;
 
     ToolGatewayTestSupport.RecordingListener first =
-        runPlatformSyncComplete(
+        runHostSyncComplete(
             new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}"));
     ToolGatewayTestSupport.RecordingListener second =
-        runPlatformSyncComplete(
+        runHostSyncComplete(
             new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}"));
     ResourceToolContent firstResource =
         (ResourceToolContent)
@@ -206,7 +205,7 @@ class PlatformToolGatewayCallbackTest {
     String text = "0123456789".repeat(992) + "123456";
     assertEquals(9926, text.getBytes(StandardCharsets.UTF_8).length);
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncComplete(
+        runHostSyncComplete(
             new ToolResult("call-1", List.of(new TextToolContent(text)), false, "{}"));
     ToolResult externalized =
         ((ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0))
@@ -217,8 +216,8 @@ class PlatformToolGatewayCallbackTest {
             ID,
             ID,
             0,
-            ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR).call(),
-            ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR).binding(),
+            ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR).call(),
+            ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR).binding(),
             ToolInvocationStatus.SUCCEEDED,
             1,
             ToolApproval.notRequired(),
@@ -259,7 +258,7 @@ class PlatformToolGatewayCallbackTest {
     ToolResult result =
         new ToolResult(
             "call-1", List.of(existingContent, new TextToolContent("inline")), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
     assertTrue(listener.store.puts.isEmpty());
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
@@ -274,7 +273,7 @@ class PlatformToolGatewayCallbackTest {
             List.of(new BinaryToolContent("application/octet-stream", BINARY_BYTES)),
             true,
             "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
     assertTrue(succeeded.result().error());
@@ -286,7 +285,7 @@ class PlatformToolGatewayCallbackTest {
     ToolResult partial =
         new ToolResult(
             "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformPartial(partial);
+    ToolGatewayTestSupport.RecordingListener listener = runHostPartial(partial);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_PARTIAL", failed.failure().error().kind());
@@ -306,7 +305,7 @@ class PlatformToolGatewayCallbackTest {
             ToolGatewayTestSupport.sha256(existing));
     ToolResult partial =
         new ToolResult("call-1", List.of(new ResourceToolContent(ref)), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformPartial(partial);
+    ToolGatewayTestSupport.RecordingListener listener = runHostPartial(partial);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_PARTIAL", failed.failure().error().kind());
@@ -317,7 +316,7 @@ class PlatformToolGatewayCallbackTest {
   void plainPartialIsForwardedAsIs() {
     ToolResult partial =
         new ToolResult("call-1", List.of(new TextToolContent("progress")), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformPartial(partial);
+    ToolGatewayTestSupport.RecordingListener listener = runHostPartial(partial);
     ToolGatewayTestSupport.RecordingListener.Event.Partial delivered =
         (ToolGatewayTestSupport.RecordingListener.Event.Partial) listener.events.get(0);
     assertEquals(partial, delivered.partial());
@@ -330,7 +329,7 @@ class PlatformToolGatewayCallbackTest {
     ToolResult result =
         new ToolResult(
             "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result, store);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result, store);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("RESOURCE_STORE_FAILED", unknown.error().kind());
@@ -343,7 +342,7 @@ class PlatformToolGatewayCallbackTest {
     ToolResult result =
         new ToolResult(
             "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result, store);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result, store);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -358,7 +357,7 @@ class PlatformToolGatewayCallbackTest {
     ToolResult result =
         new ToolResult(
             "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result, store);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result, store);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("RESOURCE_STORE_FAILED", unknown.error().kind());
@@ -374,7 +373,7 @@ class PlatformToolGatewayCallbackTest {
                 new BinaryToolContent("image/png", BINARY_BYTES)),
             false,
             "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
     // 全有或全无：第一个合法 put 之前就因非法 mediaType 拒绝，零存储副作用。
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
@@ -385,7 +384,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void cancelledErrorMapsToCancelled() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new EnvironmentCapabilityCancelledException("user stopped"));
+        runHostSyncError(new EnvironmentCapabilityCancelledException("user stopped"));
     ToolGatewayTestSupport.RecordingListener.Event.Cancelled cancelled =
         (ToolGatewayTestSupport.RecordingListener.Event.Cancelled) listener.events.get(0);
     assertEquals("CANCELLED", cancelled.error().kind());
@@ -394,7 +393,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void uncertainErrorMapsToUnknown() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new EnvironmentCapabilitySendUncertainException("connection lost"));
+        runHostSyncError(new EnvironmentCapabilitySendUncertainException("connection lost"));
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("REMOTE_UNCERTAIN", unknown.error().kind());
@@ -403,7 +402,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void unavailableErrorIsRetryableFailure() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new EnvironmentCapabilityUnavailableException("environment offline"));
+        runHostSyncError(new EnvironmentCapabilityUnavailableException("environment offline"));
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("UNAVAILABLE", failed.failure().error().kind());
@@ -413,7 +412,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void daemonFailedErrorIsNonRetryableKnownFailure() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new EnvironmentCapabilityFailedException("tool blew up"));
+        runHostSyncError(new EnvironmentCapabilityFailedException("tool blew up"));
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", failed.failure().error().kind());
@@ -424,7 +423,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void genericErrorMapsToUnknownNotKnownFailure() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new IllegalStateException("tool failed"));
+        runHostSyncError(new IllegalStateException("tool failed"));
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", unknown.error().kind());
@@ -434,7 +433,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void invalidArgumentErrorIsUnclassifiedUnknown() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new IllegalArgumentException("bad arguments"));
+        runHostSyncError(new IllegalArgumentException("bad arguments"));
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", unknown.error().kind());
@@ -461,7 +460,7 @@ class PlatformToolGatewayCallbackTest {
       ToolGateway.StartResult started =
           gateway.start(
               ToolGatewayTestSupport.execution(
-                  ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                  ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
               listener);
       ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
       // execute 抛异常无法确认是否产生副作用：UNKNOWN，绝不是已知 FAILED。
@@ -504,7 +503,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -542,7 +541,7 @@ class PlatformToolGatewayCallbackTest {
       ToolGateway.StartResult started =
           gateway.start(
               ToolGatewayTestSupport.execution(
-                  ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                  ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
               new ToolGatewayTestSupport.RecordingListener());
       ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
       // 两阶段激活后 Tool 才运行；execute 尚未返回 handle：cancel 只记录意图。
@@ -590,7 +589,7 @@ class PlatformToolGatewayCallbackTest {
 
   @Test
   void nullPartialIsRejectedAsInvalidPartial() {
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformPartial(null);
+    ToolGatewayTestSupport.RecordingListener listener = runHostPartial(null);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_PARTIAL", failed.failure().error().kind());
@@ -600,7 +599,7 @@ class PlatformToolGatewayCallbackTest {
 
   @Test
   void nullTerminalResultIsRejectedAsInvalidResult() {
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(null);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(null);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -609,7 +608,7 @@ class PlatformToolGatewayCallbackTest {
   }
 
   @Test
-  void nullPlatformToolHandleIsPostAcceptanceUnknown() {
+  void nullHostToolHandleIsPostAcceptanceUnknown() {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.returnNullHandle = true;
     ToolGatewayTestSupport.RecordingListener listener =
@@ -624,7 +623,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -639,7 +638,7 @@ class PlatformToolGatewayCallbackTest {
   }
 
   @Test
-  void synchronousTerminalWinsOverNullPlatformToolHandle() {
+  void synchronousTerminalWinsOverNullHostToolHandle() {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.returnNullHandle = true;
     tool.handler =
@@ -663,7 +662,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -679,7 +678,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void nullMessageUnavailableErrorUsesFallbackMessage() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new EnvironmentCapabilityUnavailableException(null));
+        runHostSyncError(new EnvironmentCapabilityUnavailableException(null));
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("UNAVAILABLE", failed.failure().error().kind());
@@ -690,7 +689,7 @@ class PlatformToolGatewayCallbackTest {
   @Test
   void nullMessageGenericErrorMapsToUnknownWithFallbackMessage() {
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncError(new IllegalStateException());
+        runHostSyncError(new IllegalStateException());
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("EXECUTION_FAILED", unknown.error().kind());
@@ -726,7 +725,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -788,7 +787,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -882,7 +881,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -909,7 +908,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -1142,7 +1141,7 @@ class PlatformToolGatewayCallbackTest {
             false,
             "{}");
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
+        runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -1177,7 +1176,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -1226,7 +1225,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -1248,7 +1247,7 @@ class PlatformToolGatewayCallbackTest {
         new ToolResult(
             "wrong-call", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncComplete(complete, new ToolGatewayTestSupport.FakeResourceStore());
+        runHostSyncComplete(complete, new ToolGatewayTestSupport.FakeResourceStore());
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -1273,7 +1272,7 @@ class PlatformToolGatewayCallbackTest {
     String details = "{\"data\":\"" + "y".repeat(600 * 1024) + "\"}";
     ToolResult result = new ToolResult("call-1", contents, false, details);
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
+        runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -1294,7 +1293,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
 
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncComplete(new ToolResult("call-1", contents, false, "{}"), store);
+        runHostSyncComplete(new ToolResult("call-1", contents, false, "{}"), store);
 
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.getFirst();
@@ -1310,7 +1309,7 @@ class PlatformToolGatewayCallbackTest {
     ToolResult result =
         new ToolResult(
             "call-1", List.of(new BinaryToolContent("image/png", BINARY_BYTES)), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runPlatformSyncComplete(result, store);
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result, store);
     ToolGatewayTestSupport.RecordingListener.Event.Unknown unknown =
         (ToolGatewayTestSupport.RecordingListener.Event.Unknown) listener.events.get(0);
     assertEquals("RESOURCE_STORE_FAILED", unknown.error().kind());
@@ -1340,7 +1339,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -1383,7 +1382,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -1408,7 +1407,7 @@ class PlatformToolGatewayCallbackTest {
             false,
             "{}");
     ToolGatewayTestSupport.RecordingListener listener =
-        runPlatformSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore(), maxBytes);
+        runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore(), maxBytes);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -1434,7 +1433,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     assertTrue(tool.requests.isEmpty(), "tool must not execute after interrupted waiting task");
@@ -1465,7 +1464,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     // 中断后 cancel-before-activate：缓冲的未分类失败被丢弃，保持静默（无 Tool、无回调、无泄漏）。
@@ -1475,17 +1474,16 @@ class PlatformToolGatewayCallbackTest {
     assertTrue(tool.requests.isEmpty(), "tool must never be touched");
   }
 
-  private static ToolGatewayTestSupport.RecordingListener runPlatformSyncComplete(
-      ToolResult result) {
-    return runPlatformSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
+  private static ToolGatewayTestSupport.RecordingListener runHostSyncComplete(ToolResult result) {
+    return runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
   }
 
-  private static ToolGatewayTestSupport.RecordingListener runPlatformSyncComplete(
+  private static ToolGatewayTestSupport.RecordingListener runHostSyncComplete(
       ToolResult result, ToolGatewayTestSupport.FakeResourceStore store) {
-    return runPlatformSyncComplete(result, store, ToolGatewayTestSupport.RESOURCE_MAX_BYTES);
+    return runHostSyncComplete(result, store, ToolGatewayTestSupport.RESOURCE_MAX_BYTES);
   }
 
-  private static ToolGatewayTestSupport.RecordingListener runPlatformSyncComplete(
+  private static ToolGatewayTestSupport.RecordingListener runHostSyncComplete(
       ToolResult result, ToolGatewayTestSupport.FakeResourceStore store, int resourceMaxBytes) {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.handler = (request, listener) -> listener.onComplete(result);
@@ -1502,7 +1500,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     // 两阶段激活：activate 打开回调 gate 后 executor 任务才运行 Tool。
@@ -1513,11 +1511,11 @@ class PlatformToolGatewayCallbackTest {
     return listener;
   }
 
-  private static ToolGatewayTestSupport.RecordingListener runPlatformPartial(ToolResult partial) {
-    return runPlatformPartial(partial, new ToolGatewayTestSupport.FakeResourceStore());
+  private static ToolGatewayTestSupport.RecordingListener runHostPartial(ToolResult partial) {
+    return runHostPartial(partial, new ToolGatewayTestSupport.FakeResourceStore());
   }
 
-  private static ToolGatewayTestSupport.RecordingListener runPlatformPartial(
+  private static ToolGatewayTestSupport.RecordingListener runHostPartial(
       ToolResult partial, ToolGatewayTestSupport.FakeResourceStore store) {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.handler = (request, listener) -> listener.onPartial(partial);
@@ -1533,7 +1531,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -1543,7 +1541,7 @@ class PlatformToolGatewayCallbackTest {
     return listener;
   }
 
-  private static ToolGatewayTestSupport.RecordingListener runPlatformSyncError(Throwable error) {
+  private static ToolGatewayTestSupport.RecordingListener runHostSyncError(Throwable error) {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.handler = (request, listener) -> listener.onError(error);
     ToolGatewayTestSupport.RecordingListener listener =
@@ -1558,7 +1556,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();
@@ -1574,7 +1572,7 @@ class PlatformToolGatewayCallbackTest {
       AtomicReference<ToolExecutionListener> bridge) {}
 
   /**
-   * 运行一个 Platform 同步发射信号的场景：{@code configure} 先配置记录器（如置位某个 throwOn* 标志），{@code emit} 在 execute
+   * 运行一个 HOST 同步发射信号的场景：{@code configure} 先配置记录器（如置位某个 throwOn* 标志），{@code emit} 在 execute
    * 内发射信号并捕获桥引用；activate + runAll 后所有分发已完成（同步），可直接断言 terminal 调用次数。
    */
   private static RejectedTerminalRun runRejectedTerminal(
@@ -1601,7 +1599,7 @@ class PlatformToolGatewayCallbackTest {
     ToolGateway.StartResult started =
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
             listener);
     ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
     startedResult.handle().activate();

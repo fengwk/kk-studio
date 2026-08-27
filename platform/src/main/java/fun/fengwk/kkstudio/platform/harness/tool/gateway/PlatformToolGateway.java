@@ -28,12 +28,12 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCancelledException;
@@ -77,27 +77,27 @@ import java.util.function.Supplier;
 /**
  * Production {@link ToolGateway}：冻结 Tool request 的权限 preflight 与 admission 路由。
  *
- * <p>{@link #preflight} 是纯判定：先由 registry 按冻结 descriptor 恢复 entry/AgentToolId，再用 {@link
+ * <p>{@link #preflight} 是纯判定：先由 registry 按冻结 definition id 恢复 entry/AgentToolId，再用 {@link
  * PermissionEvaluator} + 部署 {@link ToolSettings} + 配置的 workdir/environmentRoot 评估冻结的
- * call/binding；缺失 entry 或 descriptor 漂移直接生成 确定性 Deny，绝不进入 evaluator，也不改写 binding/arguments。YOLO
- * 短路由由 Runtime 决定，本类 不感知 YOLO 也不查询 HarnessStore。 {@link #start} 按冻结 binding 的 {@link ToolType}
- * 路由：PLATFORM 走 {@link AgentToolRegistry} 精确 name/version + descriptor equality 后提交注入的 {@link
- * ExecutorService} 执行；ENVIRONMENT 只按冻结的完整 binding 经 {@link EnvironmentCapabilityTransport}
+ * call/binding；缺失 entry 或 definition 漂移直接生成确定性 Deny，绝不进入 evaluator，也不改写 binding/arguments。YOLO 短路由由
+ * Runtime 决定，本类不感知 YOLO 也不查询 HarnessStore。 {@link #start} 按冻结 binding 的 {@link AgentToolBackend}
+ * 路由：HOST 走 {@link AgentToolRegistry} 的冻结本地 factory，PLUGIN 走冻结的 {@link
+ * ToolContribution}，ENVIRONMENT_CAPABILITY 只按冻结的完整 binding 经 {@link EnvironmentCapabilityTransport}
  * 发送。missing capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active
  * remote invocation 映射 Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定
  * / 提交结果不确定映射 Indeterminate。
  *
  * <p>回调桥（{@link GatedToolExecutionListener}）：两阶段激活——{@code start()} 绝不打开回调 gate（Tool 的同步回调只进缓冲），
  * {@link ToolGateway.Handle#activate()} 由 Processor 在 attach + durable markRunning 后调用，直接打开 gate +
- * 释放 PLATFORM 等待任务 + 串行重放缓冲（PLATFORM / ENVIRONMENT 同一路径，绝不提交独立重放任务）；重放与直接转发都绝不发生在 {@code start()}
- * 调用栈上，且整个桥是单线程串行 FIFO + terminal-once：迟到 / 重复信号一律忽略，缓冲有界（≤{@value #MAX_BUFFERED_SIGNALS}，
- * 溢出即清空缓冲并在激活/分发时确定性收敛恰好一次 UNKNOWN，绝不产生 resource 写入、绝不出现第二个 terminal），非法 partial 确定性 terminal
- * 失败并阻止后续任何 resource 写入。terminal 回调 fire-once：listener 在 onSucceeded / onFailed / onCancelled /
- * onUnknown 上抛异常只记录日志、绝不发出第二个 terminal 回调，只有非 terminal 的 onPartial 失败才会选择第一个 terminal
- * UNKNOWN。terminal success 通过 {@link ToolResultExternalizer} 做 managed Resource
+ * 释放 HOST 等待任务 + 串行重放缓冲（HOST / PLUGIN / ENVIRONMENT_CAPABILITY 同一路径，绝不提交独立重放任务）；重放与直接转发都绝不发生在
+ * {@code start()} 调用栈上，且整个桥是单线程串行 FIFO + terminal-once：迟到 / 重复信号一律忽略，缓冲有界（≤{@value
+ * #MAX_BUFFERED_SIGNALS}，溢出即清空缓冲并在激活/分发时确定性收敛恰好一次 UNKNOWN，绝不产生 resource 写入、绝不出现第二个 terminal），非法
+ * partial 确定性 terminal 失败并阻止后续任何 resource 写入。terminal 回调 fire-once：listener 在 onSucceeded /
+ * onFailed / onCancelled / onUnknown 上抛异常只记录日志、绝不发出第二个 terminal 回调，只有非 terminal 的 onPartial
+ * 失败才会选择第一个 terminal UNKNOWN。terminal success 通过 {@link ToolResultExternalizer} 做 managed Resource
  * 外部化（all-or-nothing）；partial 拒绝 Binary/Resource 且零存储 I/O。错误映射只把 {@link
  * EnvironmentCapabilityFailedException} （daemon FAILED）当作非可重试已知失败；cancelled /
- * unavailable（retryable=true）/ uncertain 保留显式分类，其余未分类错误 （含 Platform {@code tool.execute}
+ * unavailable（retryable=true）/ uncertain 保留显式分类，其余未分类错误（含 HOST/PLUGIN {@code tool.execute}
  * 抛异常、onError(null)） 一律 UNKNOWN。等待任务在 release 前被中断（而非取消）时队列一个未分类失败，activate 时恰好一次
  * UNKNOWN；cancel-before- activate 保持静默。activate 抛异常即激活失败，Processor 收敛一次 UNKNOWN。
  *
@@ -110,14 +110,13 @@ public final class PlatformToolGateway implements ToolGateway {
 
   static final String PERMISSION_DENIED_KIND = "PERMISSION_DENIED";
   static final String TOOL_NOT_FOUND_KIND = "TOOL_NOT_FOUND";
-  static final String TOOL_DESCRIPTOR_MISMATCH_KIND = "TOOL_DESCRIPTOR_MISMATCH";
+  static final String TOOL_DEFINITION_MISMATCH_KIND = "TOOL_DEFINITION_MISMATCH";
   static final String CANCELLED_KIND = "CANCELLED";
   static final String UNAVAILABLE_KIND = "UNAVAILABLE";
   static final String REMOTE_UNCERTAIN_KIND = "REMOTE_UNCERTAIN";
   static final String INVALID_REQUEST_KIND = "INVALID_REQUEST";
   static final String EXECUTION_FAILED_KIND = "EXECUTION_FAILED";
   static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
-  static final String PLUGIN_BINDING_MISMATCH_KIND = "PLUGIN_BINDING_MISMATCH";
   static final String PLUGIN_CONTRACT_VIOLATION_KIND = "PLUGIN_CONTRACT_VIOLATION";
 
   /** Ask reason 的字符上限（ToolGateway.Ask 契约）。 */
@@ -191,28 +190,21 @@ public final class PlatformToolGateway implements ToolGateway {
   @Override
   public PreflightResult preflight(ToolInvocationRequest request) {
     Objects.requireNonNull(request, "request");
-    ToolDescriptor bindingDescriptor = request.binding().descriptor();
-    AgentToolRegistry.Entry entry =
-        toolRegistry.find(bindingDescriptor.name(), bindingDescriptor.version()).orElse(null);
+    AgentToolDefinition frozenDefinition = request.binding().definition();
+    AgentToolRegistry.Entry entry = toolRegistry.find(frozenDefinition.id()).orElse(null);
     if (entry == null) {
       return new ToolGateway.Deny(
           new ToolInvocationError(
               TOOL_NOT_FOUND_KIND,
-              "Frozen tool "
-                  + bindingDescriptor.name()
-                  + "@"
-                  + bindingDescriptor.version()
-                  + " is not registered."));
+              "Frozen tool definition " + frozenDefinition.id() + " is not registered."));
     }
-    if (!entry.definition().descriptor().equals(bindingDescriptor)) {
+    if (!entry.definition().equals(frozenDefinition)) {
       return new ToolGateway.Deny(
           new ToolInvocationError(
-              TOOL_DESCRIPTOR_MISMATCH_KIND,
-              "Frozen tool "
-                  + bindingDescriptor.name()
-                  + "@"
-                  + bindingDescriptor.version()
-                  + " does not match its catalog descriptor."));
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Frozen tool definition "
+                  + frozenDefinition.id()
+                  + " does not match its catalog definition."));
     }
     ToolSettings settings = toolSettingsProvider.get();
     PermissionEvaluator.Evaluation evaluation =
@@ -229,12 +221,13 @@ public final class PlatformToolGateway implements ToolGateway {
   }
 
   /**
-   * ENVIRONMENT tool 的权限路径上下文体现冻结 binding 的 workspace：以现有 {@link #environmentRoot} 作为逻辑 root，把
-   * canonical {@code workspacePath} 纯路径解析为 effective workdir（不查询 live registry、不做文件系统 IO）；PLATFORM
-   * 与 null Environment binding 保持 server 默认 workdir（null binding 的确定性拒绝仍发生在 {@link #start}）。
+   * ENVIRONMENT_CAPABILITY tool 的权限路径上下文体现冻结 binding 的 workspace：以现有 {@link #environmentRoot} 作为逻辑
+   * root，把 canonical {@code workspacePath} 纯路径解析为 effective workdir（不查询 live registry、不做文件系统
+   * IO）；HOST、 PLUGIN 与 null Environment binding 保持 server 默认 workdir（null binding 的确定性拒绝仍发生在 {@link
+   * #start}）。
    */
   private Path permissionWorkdir(ToolInvocationRequest request) {
-    if (request.binding().type() == ToolType.ENVIRONMENT
+    if (request.binding().definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY
         && request.binding().environment() != null) {
       return environmentRoot.resolve(Path.of(request.binding().environment().workspacePath()));
     }
@@ -252,9 +245,10 @@ public final class PlatformToolGateway implements ToolGateway {
     ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     try {
       StartResult result =
-          switch (execution.request().binding().type()) {
-            case PLATFORM -> startPlatform(execution, listener, lease);
-            case ENVIRONMENT -> startEnvironment(execution, listener, lease);
+          switch (execution.request().binding().definition().backend()) {
+            case HOST -> startHost(execution, listener, lease);
+            case PLUGIN -> startPlugin(execution, listener, lease);
+            case ENVIRONMENT_CAPABILITY -> startEnvironment(execution, listener, lease);
           };
       if (!(result instanceof ToolGateway.Started)) {
         lease.close();
@@ -267,40 +261,24 @@ public final class PlatformToolGateway implements ToolGateway {
     }
   }
 
-  /** PLATFORM：统一 catalog 精确查找 + descriptor equality，然后提交 executor 执行（拒绝即 Overloaded）。 */
-  private StartResult startPlatform(
+  /** HOST：按 frozen definition id 查找并精确匹配 definition，然后提交 executor 执行（拒绝即 Overloaded）。 */
+  private StartResult startHost(
       Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
-    ToolDescriptor bindingDescriptor = execution.request().binding().descriptor();
-    AgentToolRegistry.Entry entry =
-        toolRegistry.find(bindingDescriptor.name(), bindingDescriptor.version()).orElse(null);
+    AgentToolDefinition frozenDefinition = execution.request().binding().definition();
+    AgentToolRegistry.Entry entry = toolRegistry.find(frozenDefinition.id()).orElse(null);
     if (entry == null) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_NOT_FOUND_KIND,
-              "Frozen tool "
-                  + bindingDescriptor.name()
-                  + "@"
-                  + bindingDescriptor.version()
-                  + " is not registered."));
+              "Frozen tool definition " + frozenDefinition.id() + " is not registered."));
     }
-    if (!entry.definition().descriptor().equals(bindingDescriptor)) {
+    if (!entry.definition().equals(frozenDefinition)) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
-              TOOL_DESCRIPTOR_MISMATCH_KIND,
-              "Frozen tool "
-                  + bindingDescriptor.name()
-                  + "@"
-                  + bindingDescriptor.version()
-                  + " does not match its catalog descriptor."));
-    }
-    if (execution.request().binding().plugin() != null) {
-      return startPlugin(execution, listener, lease, entry);
-    }
-    if (entry.definition().backend() == AgentToolBackend.PLUGIN) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              PLUGIN_BINDING_MISMATCH_KIND,
-              "Frozen local tool binding resolves to a plugin contribution."));
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Frozen tool definition "
+                  + frozenDefinition.id()
+                  + " does not match its catalog definition."));
     }
     Tool tool;
     try {
@@ -308,13 +286,11 @@ public final class PlatformToolGateway implements ToolGateway {
     } catch (IllegalArgumentException invalid) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
-              TOOL_DESCRIPTOR_MISMATCH_KIND,
-              "Registered tool "
-                  + bindingDescriptor.name()
-                  + "@"
-                  + bindingDescriptor.version()
-                  + " no longer matches its frozen descriptor: "
-                  + failureMessage(invalid, "descriptor mismatch")));
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Registered tool definition "
+                  + frozenDefinition.id()
+                  + " no longer matches its frozen definition: "
+                  + failureMessage(invalid, "definition mismatch")));
     }
     ToolExecutionRequest request = request(execution, tool.descriptor());
     GatedToolExecutionListener bridge =
@@ -350,7 +326,7 @@ public final class PlatformToolGateway implements ToolGateway {
       // 肯定未接受：cancel 唤醒 broken executor 可能已启动的等待任务（它绝不触碰 Tool），Overloaded。
       bridge.cancel();
       log.warn(
-          "tool gateway executor rejected platform execution for invocation {}",
+          "tool gateway executor rejected local execution for invocation {}",
           execution.invocationId());
       return new ToolGateway.Overloaded(overloadRetryDelay.get());
     } catch (RuntimeException ambiguous) {
@@ -369,38 +345,52 @@ public final class PlatformToolGateway implements ToolGateway {
     return new ToolGateway.Started(handle);
   }
 
-  /** 插件 PLATFORM Tool：按冻结 contribution owner 精确恢复，并在 externalize 前校验全部声明式 intents。 */
+  /** PLUGIN Tool：按 frozen definition id 恢复 contribution，并在 externalize 前校验全部声明式 intents。 */
   private StartResult startPlugin(
-      Execution execution,
-      Listener listener,
-      ConcurrencyAdmission.Lease lease,
-      AgentToolRegistry.Entry entry) {
+      Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
+    AgentToolDefinition frozenDefinition = execution.request().binding().definition();
+    AgentToolRegistry.Entry entry = toolRegistry.find(frozenDefinition.id()).orElse(null);
+    if (entry == null) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              TOOL_NOT_FOUND_KIND,
+              "Frozen tool definition " + frozenDefinition.id() + " is not registered."));
+    }
+    if (!entry.definition().equals(frozenDefinition)) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Frozen tool definition "
+                  + frozenDefinition.id()
+                  + " does not match its catalog definition."));
+    }
     PluginToolBinding binding = execution.request().binding().plugin();
     ContributionId id =
         new ContributionId(new PluginId(binding.pluginId()), binding.contributionLocalName());
     if (entry.pluginContribution() == null || !id.equals(entry.contributionId())) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
-              PLUGIN_BINDING_MISMATCH_KIND,
-              "Frozen plugin tool binding does not match the catalog contribution."));
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Frozen plugin tool definition "
+                  + frozenDefinition.id()
+                  + " does not match the catalog contribution."));
     }
     ToolContribution contribution = entry.pluginContribution();
-    ToolDescriptor descriptor = execution.request().binding().descriptor();
-    if (!descriptor.equals(contribution.definition().descriptor())) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              TOOL_DESCRIPTOR_MISMATCH_KIND,
-              "Plugin tool " + id + " no longer matches its frozen descriptor."));
-    }
     if (!pluginBindingMatches(binding, contribution)) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
-              PLUGIN_BINDING_MISMATCH_KIND,
-              "Plugin tool " + id + " no longer matches its frozen state access declaration."));
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Plugin tool definition "
+                  + frozenDefinition.id()
+                  + " no longer matches its frozen state access declaration."));
     }
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
-            listener, externalizer, descriptor.name(), execution.request().call().id(), lease);
+            listener,
+            externalizer,
+            frozenDefinition.descriptor().name(),
+            execution.request().call().id(),
+            lease);
     GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel, lease);
     return submitLocalExecution(
         execution, bridge, handle, () -> runPlugin(execution, contribution, bridge));
@@ -488,13 +478,28 @@ public final class PlatformToolGateway implements ToolGateway {
   }
 
   /**
-   * ENVIRONMENT：从 registry 冻结 entry 的 capability descriptor 构造独立 capability request，再按完整 binding
-   * 路由。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未 READY、心跳过期）都是确定性 Rejected；同 Environment 的瞬时容量冲突是 Busy；
-   * 发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
+   * ENVIRONMENT_CAPABILITY：从 registry 冻结 entry 的 capability descriptor 构造独立 capability request，再按完整
+   * binding 路由。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未 READY、心跳过期）都是确定性 Rejected；同 Environment
+   * 的瞬时容量冲突是 Busy； 发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
    */
   private StartResult startEnvironment(
       Execution execution, Listener listener, ConcurrencyAdmission.Lease lease) {
-    ToolDescriptor bindingDescriptor = execution.request().binding().descriptor();
+    AgentToolDefinition frozenDefinition = execution.request().binding().definition();
+    AgentToolRegistry.Entry entry = toolRegistry.find(frozenDefinition.id()).orElse(null);
+    if (entry == null) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              TOOL_NOT_FOUND_KIND,
+              "Frozen tool definition " + frozenDefinition.id() + " is not registered."));
+    }
+    if (!entry.definition().equals(frozenDefinition)) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Frozen tool definition "
+                  + frozenDefinition.id()
+                  + " does not match its catalog definition."));
+    }
     if (execution.request().binding().environment() == null) {
       // 冻结 binding 没有 Environment（分支最新 settings 未选中/被清空）：发送前确定性拒绝，
       // 绝不进入 transport（否则 null binding 会变成不确定结果）。
@@ -502,37 +507,23 @@ public final class PlatformToolGateway implements ToolGateway {
           new ToolInvocationError(
               UNAVAILABLE_KIND,
               "Environment tool "
-                  + bindingDescriptor.name()
+                  + frozenDefinition.id()
                   + " has no environment binding (the branch has no selected environment)."));
     }
-    AgentToolRegistry.Entry entry =
-        toolRegistry.find(bindingDescriptor.name(), bindingDescriptor.version()).orElse(null);
-    if (entry == null || entry.definition().backend() != AgentToolBackend.ENVIRONMENT_CAPABILITY) {
+    if (entry.definition().backend() != AgentToolBackend.ENVIRONMENT_CAPABILITY) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
-              TOOL_NOT_FOUND_KIND,
-              "Environment tool "
-                  + bindingDescriptor.name()
-                  + "@"
-                  + bindingDescriptor.version()
-                  + " is not a daemon capability."));
-    }
-    if (!bindingDescriptor.equals(entry.definition().descriptor())) {
-      return new ToolGateway.Rejected(
-          new ToolInvocationError(
-              TOOL_DESCRIPTOR_MISMATCH_KIND,
-              "Environment tool "
-                  + bindingDescriptor.name()
-                  + "@"
-                  + bindingDescriptor.version()
-                  + " no longer matches the daemon capability descriptor."));
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Frozen environment tool definition "
+                  + frozenDefinition.id()
+                  + " is not an environment capability."));
     }
     EnvironmentCapabilityDescriptor capability = entry.capability();
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
             listener,
             externalizer,
-            bindingDescriptor.name(),
+            frozenDefinition.descriptor().name(),
             execution.request().call().id(),
             lease);
     // 两阶段激活：activate() 之前 gate 保持关闭（同步回调只进缓冲）；activate() 直接打开 gate 并串行重放（不提交独立重放任务）。
@@ -779,7 +770,7 @@ public final class PlatformToolGateway implements ToolGateway {
     }
 
     /**
-     * 两阶段激活：直接打开桥 gate（释放 PLATFORM 等待任务 + 串行重放缓冲回调），不提交任何独立任务。幂等；cancel 已先到则 no-op（桥 monitor 内
+     * 两阶段激活：直接打开桥 gate（释放 HOST 等待任务 + 串行重放缓冲回调），不提交任何独立任务。幂等；cancel 已先到则 no-op（桥 monitor 内
      * cancelled/open 原子互斥，绝不可能重新打开投递）。
      */
     @Override
@@ -820,8 +811,8 @@ public final class PlatformToolGateway implements ToolGateway {
    *
    * <p>两阶段激活：{@code start()} 绝不打开 gate（同步回调只进缓冲）；{@link #activate()} 由 {@code handle.activate()}
    * 直接调用（Processor 在 attach + durable markRunning 之后、start() 已返回），原子地打开 gate + 释放等待的 executor
-   * 任务（PLATFORM 路径，之后任务才运行 Tool）+ 串行重放缓冲——不再提交任何独立重放任务，PLATFORM / ENVIRONMENT 行为一致。 重放与直接转发都绝不发生在
-   * {@code start()} 的调用栈上。等待任务在 release 前被中断（而非取消）时队列一个未分类失败，activate 时恰好一次
+   * 任务（HOST 路径，之后任务才运行 Tool）+ 串行重放缓冲——不再提交任何独立重放任务，HOST / PLUGIN / ENVIRONMENT_CAPABILITY
+   * 行为一致。重放与直接转发都绝不发生在 {@code start()} 的调用栈上。等待任务在 release 前被中断（而非取消）时队列一个未分类失败，activate 时恰好一次
    * UNKNOWN（绝不静默消失）；cancel-before-activate 则丢弃缓冲并中止任务。partial 先做与 Runtime 完全一致的校验（非空 / toolCallId
    * 精确匹配 / 拒绝 Binary+Resource / canonical JSON ≤ 256 KiB），terminal 在外部化前校验非空 / toolCallId
    * 精确匹配，且外部化计划验证「外部化后归一投影」的 canonical JSON ≤ 1 MiB——任何确定性拒绝都在零存储副作用下发生；terminal success 先做
@@ -1110,8 +1101,8 @@ public final class PlatformToolGateway implements ToolGateway {
 
     /**
      * 错误分类：只有 {@link EnvironmentCapabilityFailedException}（daemon FAILED）是已确认的非可重试已知失败；cancelled /
-     * unavailable（retryable=true）/ uncertain 保留显式分类；其余未分类错误（含 Platform {@code tool.execute} 抛异常）一律
-     * UNKNOWN。任何错误信号都使桥 terminal。
+     * unavailable（retryable=true）/ uncertain 保留显式分类；其余未分类错误（含 HOST/PLUGIN {@code tool.execute}
+     * 抛异常）一律 UNKNOWN。任何错误信号都使桥 terminal。
      */
     private boolean processError(Throwable error) {
       if (error == null) {

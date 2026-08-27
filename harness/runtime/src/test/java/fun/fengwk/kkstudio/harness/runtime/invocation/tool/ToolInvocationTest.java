@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.CALL_ID;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.call;
-import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.platform;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.host;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -158,7 +158,7 @@ class ToolInvocationTest {
                 id(1L),
                 -1,
                 call("bash", "{}"),
-                platform("bash"),
+                host("bash"),
                 ToolInvocationStatus.READY,
                 0,
                 null,
@@ -175,7 +175,7 @@ class ToolInvocationTest {
                 id(1L),
                 0,
                 call("bash", "{}"),
-                platform("bash"),
+                host("bash"),
                 ToolInvocationStatus.READY,
                 -1,
                 null,
@@ -192,7 +192,7 @@ class ToolInvocationTest {
                 id(1L),
                 0,
                 call("bash", "{}"),
-                platform("bash"),
+                host("bash"),
                 ToolInvocationStatus.READY,
                 0,
                 null,
@@ -209,7 +209,7 @@ class ToolInvocationTest {
                 id(1L),
                 0,
                 null,
-                platform("bash"),
+                host("bash"),
                 ToolInvocationStatus.READY,
                 0,
                 null,
@@ -329,7 +329,7 @@ class ToolInvocationTest {
   @Test
   void rejectsBindingMismatchingToolNameOnExecutableStates() {
     ToolCall mismatchedCall = call("other-tool", "{}");
-    ToolBinding mismatchedBinding = platform("bash");
+    ToolBinding mismatchedBinding = host("bash");
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -370,7 +370,7 @@ class ToolInvocationTest {
   @Test
   void rejectsSchemaInvalidArgumentsOnExecutableStates() {
     ToolCall schemaInvalidCall = call("bash", "{\"unexpected\":1}");
-    ToolBinding schemaInvalidBinding = platform("bash");
+    ToolBinding schemaInvalidBinding = host("bash");
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -420,7 +420,7 @@ class ToolInvocationTest {
             id(1L),
             0,
             call("bash", "{\"unexpected\":1}"),
-            platform("bash"),
+            host("bash"),
             ToolInvocationStatus.FAILED,
             0,
             null,
@@ -479,7 +479,7 @@ class ToolInvocationTest {
         id(1L),
         0,
         call("bash", "{}"),
-        platform("bash"),
+        host("bash"),
         status,
         attempt,
         approval,
