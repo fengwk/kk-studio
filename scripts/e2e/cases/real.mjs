@@ -547,9 +547,9 @@ registerCase({
 registerCase({
   id: 'daemon.ready',
   level: 'L4',
-  title: 'Environment GET 投影与 canonical 路由名称',
+  title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 11 个 tools（version=1）+ skills + mcpServers 摘要 + rootPath（daemon canonical Environment Root），且不公开 READY environment metadata',
+  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 12 个原子 capabilities（version=1）+ skills + mcpServers 摘要 + rootPath（daemon canonical Environment Root），且不公开旧 tools 或 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -558,31 +558,33 @@ registerCase({
       typeof match.rootPath === 'string' && match.rootPath.length > 0,
       JSON.stringify(match),
     )
-    const expectedToolNames = [
-      'read',
-      'write',
-      'edit',
-      'bash',
-      'grep',
-      'find',
-      'lsp_goto_definition',
-      'lsp_workspace_symbols',
-      'lsp_java_decompile',
-      'mcp_list_tools',
-      'mcp_call_tool',
+    const expectedCapabilityIds = [
+      'fs.read',
+      'fs.write',
+      'fs.apply-edit',
+      'fs.apply-patch',
+      'process.exec',
+      'fs.search',
+      'fs.find',
+      'lsp.goto-definition',
+      'lsp.workspace-symbols',
+      'lsp.java-decompile',
+      'mcp.list',
+      'mcp.call',
     ]
-    const actualTools = match.tools || []
-    const names = actualTools.map((tool) => tool.name)
+    const actualCapabilities = match.capabilities || []
+    const ids = actualCapabilities.map((capability) => capability.id)
     assert(
-      names.length === expectedToolNames.length
-        && expectedToolNames.every((name) => names.includes(name))
-        && actualTools.every((tool) => tool.version === '1'),
-      JSON.stringify({ expectedToolNames, actualTools }),
+      ids.length === expectedCapabilityIds.length
+        && expectedCapabilityIds.every((id) => ids.includes(id))
+        && actualCapabilities.every((capability) => capability.version === '1'),
+      JSON.stringify({ expectedCapabilityIds, actualCapabilities }),
     )
     assert(Array.isArray(match.skills), JSON.stringify(match))
     assert(Array.isArray(match.mcpServers), JSON.stringify(match))
     assert(
-      !Object.hasOwn(match, 'operatingSystem')
+      !Object.hasOwn(match, 'tools')
+        && !Object.hasOwn(match, 'operatingSystem')
         && !Object.hasOwn(match, 'workingDirectory')
         && !Object.hasOwn(match, 'timeZone')
         && !Object.hasOwn(match, 'note'),

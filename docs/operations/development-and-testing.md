@@ -326,7 +326,7 @@ Daemon environment root 默认是其下的 `environment`，可由
 | L1 | 68 | 默认执行 64；storage/function/attachment case 需显式开关 | 免费 API contract、CRUD、Session/Thread、command batch、CAS、idempotency、i18n、model attempt、Canvas API |
 | L2 | 3 | `--real` | 真实文本 turn、真实 task delegation、stop partial/replay/continue |
 | L3 | 1 | `--real --with-branch` | 同 Session `ENTRY` 分支 Thread |
-| L4 | 3 | `--with-tools`；真实 Tool turn 还需 `--real --with-tools --with-canvas-storage` | Environment READY、directories、approval 后 Resource 外部化 |
+| L4 | 3 | `--with-tools`；真实 Tool turn 还需 `--real --with-tools --with-canvas-storage` | Environment READY 与 12 个原子 capability 投影、directories、approval 后 Resource 外部化 |
 | UI/L5 | 注册 39，默认 37 | `--ui`；额外 `--with-tools`、`--real` | Playwright 页面、Composer、debug、settings 和 runtime UI |
 
 L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function；
@@ -340,8 +340,8 @@ L1 的默认关闭 categories 是 storage upload、attachment 和 fake Function�
 L1 的 categories 是 seed/catalog、Thread command、CRUD、i18n、settings/events、
 model attempt 和 Canvas API；storage、attachment 和 fake Function 由显式开关
 启用。L2 的 categories 是真实文本 turn、task delegation 和 stop/partial/replay；
-L3 是同一 Session 的 `ENTRY` 分支；L4 是 Environment READY、directory、
-approval 和 Resource externalization。对应 gates 分别是 `--real`、
+L3 是同一 Session 的 `ENTRY` 分支；L4 是 Environment READY 与原子 capability
+投影、directory、approval 和 Resource externalization。对应 gates 分别是 `--real`、
 `--real --with-branch`、`--with-tools`，需要真实 Tool history 时再加
 `--with-canvas-storage`。
 
