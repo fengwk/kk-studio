@@ -2,7 +2,7 @@
 
 ## 定位
 
-`harness-tool` 是 Harness 各边界共享的纯 Java Tool contract 模块，提供 route-neutral descriptor、输入 schema、调用/结果值对象、异步执行 SPI、Environment capability catalog/transport、Environment tool catalog、RemoteTool 代理以及 Daemon wire codec。Descriptor 只描述工具能力，不携带具体 Environment、Session、Agent 或执行连接；持久化、权限、调度和 terminal 状态由 Runtime/Platform 负责。
+`harness-tool` 是 Harness 各边界共享的纯 Java Tool contract 模块，提供 route-neutral descriptor、输入 schema、调用/结果值对象、异步执行 SPI、Environment capability catalog/transport、Environment tool catalog 以及 Daemon wire codec。Descriptor 只描述工具能力，不携带具体 Environment、Session、Agent 或执行连接；持久化、权限、调度和 terminal 状态由 Runtime/Platform 负责。
 
 模块的生产依赖只有 Jackson databind；主源码不依赖 Runtime、Daemon、Platform、Web、Spring、数据库或 Provider SDK。包级边界见 [`package-info.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/package-info.java)。
 
@@ -10,10 +10,10 @@
 
 ### Goals
 
-- 以同一份 `ToolDescriptor` 和 `ToolParamsSchema` 约束模型声明、参数校验、Daemon 注册和远程调用。
-- 让本地 Tool 与远程 Environment Tool 使用同一异步执行/取消/partial 回调形状。
+- 以同一份 `ToolDescriptor` 和 `ToolParamsSchema` 约束模型声明、参数校验、Daemon 注册和 capability 调用。
+- 让 Environment Capability 使用独立的异步执行、取消和 partial 回调形状。
 - 让 Resource URI、workspace route、wire envelope 和结果 payload 在构造或 codec 边界完成 canonical 与大小校验。
-- 提供固定版本的 atomic Environment capability catalog、Environment tool catalog 与 Daemon v3/v4、capabilities v4 公共类型。
+- 提供固定版本的 atomic Environment capability catalog、Environment tool catalog 与当前 Daemon wire 公共类型。
 
 ### Non-goals
 
@@ -33,8 +33,7 @@ runtime / platform / daemon
    ├─ execution SPI
    ├─ Environment capability catalog + transport port
    ├─ ResourceRef / EnvironmentBinding
-   ├─ RemoteTool port
-   └─ Daemon v3/v4 wire + capabilities v4
+   └─ Daemon wire + capabilities
 ```
 
 `harness-tool` 的生产依赖是 `jackson-databind`，测试依赖 JUnit；模块 POM 与架构守卫分别见 [`pom.xml`](../../harness/tool/pom.xml) 和 [`ToolModuleArchitectureTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolModuleArchitectureTest.java)。
@@ -80,6 +79,10 @@ ToolExecutionHandle execute(
 - `JsonToolContent` 的原始 JSON UTF-8 最多 1 MiB；
 - `BinaryToolContent` 只在内存中保存并在访问时复制 byte array；Daemon 的 COMPLETED wire 必须先将它写成 Resource。
 
+`EnvironmentCapabilityResult(callId, contents, error, detailsJson)` 是 Environment Capability 的 partial 或 terminal 结果，使用
+相同的内容、details JSON 和字节边界，但以 capability call ID 作为关联标识。`MAX_CONTENT_ITEMS` 和
+`MAX_DETAILS_JSON_UTF8_BYTES` 由 `EnvironmentCapabilityResult` 暴露，和 `ToolResult` 共用约束来源。
+
 ### Environment Capability catalog 与 transport
 
 `EnvironmentCapabilityIds` 集中固定的 12 个 atomic canonical ID。`EnvironmentCapabilityDescriptor` 只包含
@@ -89,7 +92,7 @@ side-effect metadata。`EnvironmentCapabilityCatalog` 的版本为 `"1"`，按�
 
 Capability schema 资源位于
 `harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/capability/schemas/`，文件名使用
-atomic capability ID。`EnvironmentToolCatalog` 版本仍为 `"3"`，只从
+atomic capability ID。`EnvironmentToolCatalog` 版本为 `"3"`，只从
 `environment/prompts/` 加载 model prompt，并直接复用 capability descriptor 的 `inputSchema` 和
 `timeout`；因此 model descriptor 与 execution descriptor 不会出现 schema/timeout 漂移。
 
@@ -103,7 +106,7 @@ EnvironmentCapabilityExecutionHandle invoke(
 ```
 
 发送前的 `Busy` / `Unavailable` 表示调用肯定未执行；`SendUncertain` 表示调用可能已被接受，禁止重放。
-成功启动后只透传 `PARTIAL* -> exactly one terminal`；远程 FAILED/CANCELLED terminal 通过
+成功启动后只透传 `PARTIAL* -> exactly one terminal`；Daemon FAILED/CANCELLED terminal 通过
 `EnvironmentCapabilityFailedException` / `EnvironmentCapabilityCancelledException` 交给 listener。
 
 ### ResourceRef 与 Environment binding
@@ -146,26 +149,14 @@ EnvironmentCapabilityExecutionHandle invoke(
 
 `AgentToolRegistry` 的 Environment 条目保持上述固定顺序追加；Host、Plugin 与 Environment 的 AgentToolId 和 model-visible name 在统一构造边界校验全局唯一，内部条目不进入 `selectableEntries()`。
 
-### RemoteTool
-
-[`RemoteTool`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/remote/RemoteTool.java) 实现与本地 Tool 相同的 `Tool` SPI，持有 descriptor、完整 `EnvironmentBinding` 和 [`RemoteToolTransport`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/remote/RemoteToolTransport.java)。它只把 `execute` 委托为远程 `INVOKE`，把 `PARTIAL` 映射为 `onPartial`，`COMPLETED` 映射为 `onComplete`，远程 `FAILED`/`CANCELLED` 映射为 `onError`；`cancel` 映射为远程 `CANCEL`。
-
-Transport 的 admission 结果区分：
-
-- `RemoteToolBusyException`：调用未发出，可重试；
-- `RemoteToolUnavailableException`：调用未发出，目标不可用；
-- `RemoteToolSendUncertainException`：发送结果不确定，不重放潜在副作用；
-- 远程 terminal failure/cancel 通过专用异常交给 listener。
-
-RemoteTool 不拥有 durable `ToolInvocation`，也不依赖 Runtime、Daemon、Spring 或数据库。
-
 ### Daemon wire 与 capabilities
 
-[`DaemonProtocol`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonProtocol.java) 保留生产链使用的 `VERSION_3`，并新增尚未切换生产执行链的 `VERSION_4`；v4 预留 capability `INVOKE` 的 `capabilityId` wire。HELLO、Runtime 和 Gateway 当前仍使用 v3。[`DaemonEnvelope`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelope.java) 的字段是：
+[`DaemonProtocol`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonProtocol.java) 只定义当前
+`VERSION = 4`。[`DaemonEnvelope`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelope.java) 的字段是：
 
 ```json
 {
-  "protocolVersion": 3,
+  "protocolVersion": 4,
   "messageType": "INVOKE",
   "environmentName": "workspace-a",
   "invocationId": "canonical-id",
@@ -190,7 +181,9 @@ READY 只上报短字段、OS/time zone、可信 note、canonical rootPath、Ski
 [`DaemonCapabilityInvokeCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilityInvokeCodec.java) 为 capability INVOKE 提供严格 immutable `InvokeRequest` record。wire 字段固定且 canonical encode 总是包含：
 `capabilityId`、`capabilityVersion`、`workspacePath`、`arguments`、`timeoutMillis`。codec 拒绝 duplicate/trailing/unknown/missing/type 错误；ID 必须 canonical，version/workspace 必须 non-blank，arguments 必须是 JSON object，timeout 必须是非负整毫秒 long。workspace 只做 non-blank，不在 codec 层执行 canonical path 或 Environment Root 业务校验。
 
-`DaemonToolResultCodec` 的 result wire 只允许 text/json/resource：
+[`DaemonCapabilityResultCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilityResultCodec.java) 的 result wire 只允许 text/json/resource，结果对象使用 `callId`：
+
+- `{"result":{"callId":string,"error":bool,"details":object,"contents":[...]}}`；
 
 - `PARTIAL` 只能包含 text/json，任何 resource/binary 在 store 操作前拒绝；
 - `COMPLETED` 在读写 Resource 或分配 Base64 前完成内容数、单条资源和聚合资源预算预检；
@@ -198,27 +191,26 @@ READY 只上报短字段、OS/time zone、可信 note、canonical rootPath、Ski
 - resource 必填 `uri`、`mediaType`、`size`、`sha256`、`contentBase64`，先校验声明和预算，再分配 Base64，解码长度与摘要必须相等；
 - `contents` 最多 64 项，Jackson string、nesting、number 和 document 长度均有界。
 
-实现见 [`DaemonToolResultCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonToolResultCodec.java) 和 [`DaemonEnvelopeCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodec.java)。
+实现见 [`DaemonCapabilityResultCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilityResultCodec.java) 和 [`DaemonEnvelopeCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodec.java)。
 
 ## 执行 / 状态 trace
 
 ```text
 Model / Platform
   -> ToolExecutionRequest（参数 normalize + schema validate）
-  -> local Tool.execute 或 RemoteToolTransport.invoke
+  -> local Tool.execute 或 EnvironmentCapabilityTransport.invoke
   -> PARTIAL* -> COMPLETED / FAILED / CANCELLED
   -> Runtime ToolProcessor 做 permission、durable terminal、Entry apply
 ```
 
-远程路径为：
+Environment capability 路径为：
 
 ```text
-RemoteTool
-  -> RemoteToolTransport(INVOKE, frozen EnvironmentBinding)
-  -> DaemonEnvelope(v3)
+EnvironmentCapabilityTransport
+  -> DaemonEnvelope(VERSION=4, INVOKE, frozen EnvironmentBinding)
   -> Environment Daemon
-  -> Tool SPI
-  -> PARTIAL / COMPLETED / FAILED / CANCELLED
+  -> Environment Capability SPI
+  -> EnvironmentCapabilityResult(PARTIAL / COMPLETED / FAILED / CANCELLED)
 ```
 
 该模块只定义值对象与回调语义；Work lease、retry、approval、resource durable materialization 和 Thread wake 不属于此 trace。
@@ -239,7 +231,7 @@ RemoteTool
   `EnvironmentToolCatalog` 固定目录和 Daemon 注册保持同一 version。`apply_patch`
   在 Daemon 的 invocation workspace 内完成 Add/Update/Delete 的 UTF-8 文本
   patch；所有操作先完成语法、路径和上下文预检，再进入带尽力回滚的提交阶段。
-- RemoteTool 只需提供 `RemoteToolTransport`；Environment capability 迁移路径只需提供 `EnvironmentCapabilityTransport`，WebSocket 或其它连接实现留在边界模块。
+- Environment capability 只需提供 `EnvironmentCapabilityTransport`；WebSocket 或其它连接实现留在边界模块。
 - Daemon capabilities 只允许增加当前协议版本内明确定义的安全摘要字段；wire version 与 capabilities version 是独立版本。
 
 ## 测试与源码入口
@@ -247,11 +239,11 @@ RemoteTool
 ### 源码入口
 
 - [`ToolDescriptor.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java)、[`ToolCall.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCall.java)、[`ToolResult.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolResult.java)
-- [`Tool.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/Tool.java)、[`ToolExecutionRequest.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/ToolExecutionRequest.java)、[`RemoteTool.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/remote/RemoteTool.java)
+- [`Tool.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/Tool.java)、[`ToolExecutionRequest.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/execution/ToolExecutionRequest.java)
 - [`EnvironmentCapabilityCatalog.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityTransport.java)
 - [`EnvironmentToolCatalog.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java)
 - [`ResourceRef.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ResourceRef.java)、[`ResourceUriValidator.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ResourceUriValidator.java)
-- [`DaemonEnvelopeCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodec.java)、[`DaemonCapabilitiesCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilitiesCodec.java)、[`DaemonToolResultCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonToolResultCodec.java)
+- [`DaemonEnvelopeCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodec.java)、[`DaemonCapabilitiesCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilitiesCodec.java)、[`DaemonCapabilityResultCodec.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilityResultCodec.java)
 
 ### 关键测试守卫
 
@@ -261,7 +253,7 @@ RemoteTool
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityCatalogTest.java)、[`EnvironmentCapabilityTransportTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityTransportTest.java)：atomic descriptor 与 transport 事件/异常分类。
 - [`DaemonCapabilityInvokeCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilityInvokeCodecTest.java)：capability INVOKE 的 canonical JSON 和严格边界。
 - [`ResourceRefTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ResourceRefTest.java)：scheme、canonical URI、size/sha 和边界。
-- [`DaemonEnvelopeCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilitiesCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilitiesCodecTest.java)、[`DaemonToolResultCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonToolResultCodecTest.java)：wire 版本、能力摘要、资源大小和严格 JSON。
+- [`DaemonEnvelopeCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilitiesCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilitiesCodecTest.java)、[`DaemonCapabilityResultCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/daemon/DaemonCapabilityResultCodecTest.java)：wire 版本、能力摘要、资源大小和严格 JSON。
 
 ---
 

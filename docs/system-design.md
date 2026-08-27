@@ -38,7 +38,7 @@ flowchart LR
     HarnessGoal[Harness plugins/goal]
     PG[(PostgreSQL<br/>durable truth)]
     S3[(S3<br/>blob bytes)]
-    Env["/daemon/v2 endpoint · protocol v3"]
+    Env["/daemon/v2 endpoint · current protocol"]
     Trusted[Trusted plugin JARs]
 
     Browser --> Frontend
@@ -151,7 +151,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `schema` | Flyway V1 baseline 与 profile seed 资源 | 无 Java、无生产依赖 |
 | `canvas/core` | Canvas 领域、typed command、ports、Function Catalog | JDK-only |
 | `canvas/infra` | Canvas PostgreSQL/MyBatis、Snapshot query、Function durable runtime | 依赖 `canvas-core`，不反向依赖 Platform/Harness/Web |
-| `harness/tool` | Tool、descriptor、ResourceRef、RemoteTool、Daemon v3 wire | Tool 基础契约 |
+| `harness/tool` | Tool、descriptor、ResourceRef、Environment Capability、Daemon wire | Tool 基础契约 |
 | `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 纯 Java |
 | `harness/plugin-api` | trusted plugin 的 Catalog、BranchView、Tool、intent 与 projector API | 纯 Java |
 | `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 Runtime/Tool |
@@ -258,13 +258,13 @@ Harness command acceptance 不推进 Canvas Graph version。
 | Storage | `storage_blob`、`storage_upload`、`session_blob_ref`、Canvas Resource 引用 | S3 stream、预签名 URL、`StorageMaintenance` |
 | Settings | `system_setting(id=1, config, version)` | `SystemSettingsSnapshot` 与 after-commit 回读 |
 | Realtime | Thread/Canvas version、Invocation checkpoint、Work 状态 | PostgreSQL `NOTIFY`、应用事件 WebSocket、Tool partial |
-| Environment | Thread ROOT/TURN_START 的 `EnvironmentBinding` | `LiveEnvironmentRegistry`、Daemon v3 连接与心跳 |
+| Environment | Thread ROOT/TURN_START 的 `EnvironmentBinding` | `LiveEnvironmentRegistry`、Daemon 连接与心跳 |
 | Plugin | Entry 中的 `CUSTOM(pluginId, customType, schemaVersion, data)` | 启动期冻结 `PluginCatalog`、PluginTool transport 与 projector |
 
 Settings 的写入使用完整 section + `expectedVersion` CAS。提交成功后回读
 `system_setting` 并原子替换进程快照；跨节点通过 `system_settings_changed` 通知
 触发同样的权威回读。Environment 的 wire identity 是 canonical bounded
-`environmentName`，每个环境只有一个 live active remote 槽位。
+`environmentName`，每个环境只有一个 live active capability invocation 槽位。
 
 ## 5. 事务边界与并发协议
 

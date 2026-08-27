@@ -154,17 +154,12 @@ class ToolContractTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION_3,
-                DaemonMessageType.INVOKE,
-                environmentName,
-                null,
-                1,
-                "{}"));
+                DaemonProtocol.VERSION, DaemonMessageType.INVOKE, environmentName, null, 1, "{}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION_3,
+                DaemonProtocol.VERSION,
                 DaemonMessageType.LOAD_SKILL,
                 environmentName,
                 null,
@@ -174,7 +169,7 @@ class ToolContractTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION_3,
+                DaemonProtocol.VERSION,
                 DaemonMessageType.HELLO,
                 environmentName,
                 null,
@@ -183,7 +178,7 @@ class ToolContractTest {
 
     DaemonEnvelope hello =
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3, DaemonMessageType.HELLO, environmentName, null, 0, "{}");
+            DaemonProtocol.VERSION, DaemonMessageType.HELLO, environmentName, null, 0, "{}");
     assertEquals(DaemonMessageType.HELLO, hello.messageType());
     assertEquals("environment", hello.environmentName().value());
   }

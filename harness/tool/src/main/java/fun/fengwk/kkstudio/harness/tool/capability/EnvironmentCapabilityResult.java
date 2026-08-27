@@ -13,6 +13,12 @@ import java.util.List;
 public record EnvironmentCapabilityResult(
     String callId, List<ToolContent> contents, boolean error, String detailsJson) {
 
+  /** detailsJson 原始文本的 UTF-8 字节上限，与 ToolResult 使用同一约束来源。 */
+  public static final int MAX_DETAILS_JSON_UTF8_BYTES = ToolResult.MAX_DETAILS_JSON_UTF8_BYTES;
+
+  /** contents 数组的元素上限，与 ToolResult 使用同一约束来源。 */
+  public static final int MAX_CONTENT_ITEMS = ToolResult.MAX_CONTENT_ITEMS;
+
   public EnvironmentCapabilityResult {
     ToolResult validated = new ToolResult(callId, contents, error, detailsJson);
     callId = validated.toolCallId();

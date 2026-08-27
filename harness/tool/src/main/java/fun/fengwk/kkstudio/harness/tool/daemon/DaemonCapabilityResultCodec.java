@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.io.IOException;
@@ -32,12 +32,12 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Daemon wire {@code PARTIAL}/{@code COMPLETED} payload 的 tool-result codec。
+ * Daemon wire {@code PARTIAL}/{@code COMPLETED} payload 的 capability-result codec。
  *
  * <p>wire shape:
  *
  * <ul>
- *   <li>{@code {"result":{"toolCallId":string,"error":bool,"details":object,"contents":[...]}}}；
+ *   <li>{@code {"result":{"callId":string,"error":bool,"details":object,"contents":[...]}}}；
  *   <li>text: {@code {"type":"text","text":string}}；
  *   <li>json: {@code {"type":"json","json":value}}（value 原样编码）；
  *   <li>resource: {@code {"type":"resource","uri":string,"mediaType":string,"name":string|null,
@@ -57,7 +57,7 @@ import java.util.Set;
  * 上限（{@link #MAX_PAYLOAD_UTF8_BYTES}），再在 Base64 分配前按“当前 size 是否超过剩余聚合预算”拒绝超限条目， 并配置 Jackson {@link
  * StreamReadConstraints} 限制字符串/嵌套/数字长度以防解析放大。
  */
-public final class DaemonToolResultCodec {
+public final class DaemonCapabilityResultCodec {
 
   /** 默认单资源/聚合资源字节预算：8 MiB（Base64 后约 10.7 MiB 字符，适配 gateway 默认 16 MiB 入站文本上限）。 */
   public static final long DEFAULT_MAX_RESOURCE_BYTES = 8L * 1024 * 1024;
@@ -90,7 +90,8 @@ public final class DaemonToolResultCodec {
    * 编码 PARTIAL 结果：只允许 text/json 内容；任何 {@link ResourceToolContent}/{@link BinaryToolContent} 都在 任何
    * store 操作之前被拒绝。
    */
-  public String encodePartial(ToolResult partial, DaemonResourceStore resourceStore) {
+  public String encodePartial(
+      EnvironmentCapabilityResult partial, DaemonResourceStore resourceStore) {
     Objects.requireNonNull(partial, "partial");
     Objects.requireNonNull(resourceStore, "resourceStore");
     for (ToolContent content : partial.contents()) {
@@ -103,7 +104,8 @@ public final class DaemonToolResultCodec {
   }
 
   /** 编码 COMPLETED 结果，使用默认资源字节预算 {@link #DEFAULT_MAX_RESOURCE_BYTES}。 */
-  public String encodeCompleted(ToolResult result, DaemonResourceStore resourceStore) {
+  public String encodeCompleted(
+      EnvironmentCapabilityResult result, DaemonResourceStore resourceStore) {
     return encodeCompleted(result, DEFAULT_MAX_RESOURCE_BYTES, resourceStore);
   }
 
@@ -111,12 +113,15 @@ public final class DaemonToolResultCodec {
    * 编码 COMPLETED 结果。
    *
    * <p>在第一个 {@code store.store}/{@code store.read}、Base64 与输出树构建之前完成全部预检：内容数 ≤ {@link
-   * ToolResult#MAX_CONTENT_ITEMS}（由 ToolResult 构造期强制，codec 不再重复）；resource ref 必须携带非空 size/sha；
-   * binary 大小取自内容；单条与聚合资源字节都必须 ≤ {@code maximumResourceBytes}。任何后置条目超限都不会产生任何 store 副作用。 最终 payload
-   * 必须 ≤ {@link #MAX_PAYLOAD_UTF8_BYTES} UTF-8 字节。
+   * EnvironmentCapabilityResult#MAX_CONTENT_ITEMS}（由 EnvironmentCapabilityResult 构造期强制，codec
+   * 不再重复）；resource ref 必须携带非空 size/sha； binary 大小取自内容；单条与聚合资源字节都必须 ≤ {@code
+   * maximumResourceBytes}。任何后置条目超限都不会产生任何 store 副作用。 最终 payload 必须 ≤ {@link
+   * #MAX_PAYLOAD_UTF8_BYTES} UTF-8 字节。
    */
   public String encodeCompleted(
-      ToolResult result, long maximumResourceBytes, DaemonResourceStore resourceStore) {
+      EnvironmentCapabilityResult result,
+      long maximumResourceBytes,
+      DaemonResourceStore resourceStore) {
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(resourceStore, "resourceStore");
     if (maximumResourceBytes <= 0) {
@@ -147,70 +152,45 @@ public final class DaemonToolResultCodec {
     return writeBoundedPayload(buildResultTree(result, resourceStore));
   }
 
-  /** 将 wire JSON 文本解码为 {@link ToolResult}；resource 还原为内联 {@link BinaryToolContent}。 */
-  public ToolResult decodeResult(String payloadJson) {
-    return decodeResult(payloadJson, DEFAULT_MAX_RESOURCE_BYTES, true);
-  }
-
   /**
-   * 将 wire JSON 文本解码为 {@link ToolResult}，并在 Base64 分配前限制单个 resource 的声明字节数与聚合解码字节数。
-   *
-   * @param allowResources false 时拒绝 resource 内容（PARTIAL 使用）。
+   * 将 wire JSON 文本解码为 {@link EnvironmentCapabilityResult}；resource 还原为内联 {@link BinaryToolContent}。
    */
-  public ToolResult decodeResult(
-      String payloadJson, long maximumResourceBytes, boolean allowResources) {
-    return decodeResult(payloadJson, null, maximumResourceBytes, allowResources);
+  public EnvironmentCapabilityResult decodeResult(String payloadJson) {
+    return decodeResult(payloadJson, null, DEFAULT_MAX_RESOURCE_BYTES, true);
   }
 
   /**
-   * 解码 PARTIAL 结果（专用入口：拒绝 resource，替代 boolean 参数用法）。
+   * 解码 PARTIAL 结果（专用入口：拒绝 resource）。
    *
-   * @param expectedToolCallId 期望的调用 ID；空白或 null 时拒绝。
+   * @param expectedCallId 期望的调用 ID；空白或 null 时拒绝。
    * @param maximumResourceBytes 单条/聚合资源字节预算。
    */
-  public ToolResult decodePartialForInvocation(
-      String payloadJson, String expectedToolCallId, long maximumResourceBytes) {
-    return decodeResult(
-        payloadJson, requireInvocationId(expectedToolCallId), maximumResourceBytes, false);
+  public EnvironmentCapabilityResult decodePartialForInvocation(
+      String payloadJson, String expectedCallId, long maximumResourceBytes) {
+    return decodeResult(payloadJson, requireCallId(expectedCallId), maximumResourceBytes, false);
   }
 
   /**
-   * 解码 COMPLETED 结果（专用入口：允许 resource 并还原为内联 {@link BinaryToolContent}，替代 boolean 参数用法）。
+   * 解码 COMPLETED 结果（专用入口：允许 resource 并还原为内联 {@link BinaryToolContent}）。
    *
-   * @param expectedToolCallId 期望的调用 ID；空白或 null 时拒绝。
+   * @param expectedCallId 期望的调用 ID；空白或 null 时拒绝。
    * @param maximumResourceBytes 单条/聚合资源字节预算。
    */
-  public ToolResult decodeCompletedForInvocation(
-      String payloadJson, String expectedToolCallId, long maximumResourceBytes) {
-    return decodeResult(
-        payloadJson, requireInvocationId(expectedToolCallId), maximumResourceBytes, true);
+  public EnvironmentCapabilityResult decodeCompletedForInvocation(
+      String payloadJson, String expectedCallId, long maximumResourceBytes) {
+    return decodeResult(payloadJson, requireCallId(expectedCallId), maximumResourceBytes, true);
   }
 
-  /**
-   * 解码某次期望 daemon invocation 的结果。Resource 保持内联 {@link BinaryToolContent}；不触碰任何 durable store。
-   *
-   * <p>保留给尚未迁移的 Core 调用方；新代码请使用 {@link #decodePartialForInvocation} / {@link
-   * #decodeCompletedForInvocation}。
-   */
-  public ToolResult decodeResultForInvocation(
-      String payloadJson,
-      String expectedToolCallId,
-      long maximumResourceBytes,
-      boolean allowResources) {
-    return decodeResult(
-        payloadJson, requireInvocationId(expectedToolCallId), maximumResourceBytes, allowResources);
-  }
-
-  private static String requireInvocationId(String expectedToolCallId) {
-    if (expectedToolCallId == null || expectedToolCallId.isBlank()) {
-      throw new IllegalArgumentException("expectedToolCallId must not be blank");
+  private static String requireCallId(String expectedCallId) {
+    if (expectedCallId == null || expectedCallId.isBlank()) {
+      throw new IllegalArgumentException("expectedCallId must not be blank");
     }
-    return expectedToolCallId;
+    return expectedCallId;
   }
 
-  private ToolResult decodeResult(
+  private EnvironmentCapabilityResult decodeResult(
       String payloadJson,
-      String expectedToolCallId,
+      String expectedCallId,
       long maximumResourceBytes,
       boolean allowResources) {
     if (maximumResourceBytes < 0) {
@@ -236,11 +216,11 @@ public final class DaemonToolResultCodec {
       throw new DaemonProtocolException("payload must declare 'result'");
     }
     ObjectNode resultObject = requiredObject(resultNode, "result");
-    Set<String> allowedResult = Set.of("toolCallId", "error", "details", "contents");
+    Set<String> allowedResult = Set.of("callId", "error", "details", "contents");
     rejectUnknownFields(resultObject, allowedResult, "result");
-    String toolCallId = requiredText(resultObject, "toolCallId", "result");
-    if (expectedToolCallId != null && !expectedToolCallId.equals(toolCallId)) {
-      throw new DaemonProtocolException("result toolCallId does not match expected invocationId");
+    String callId = requiredText(resultObject, "callId", "result");
+    if (expectedCallId != null && !expectedCallId.equals(callId)) {
+      throw new DaemonProtocolException("result callId does not match expected invocationId");
     }
     boolean error = requiredBoolean(resultObject, "error", "result");
     JsonNode detailsNode = resultObject.get("details");
@@ -258,9 +238,11 @@ public final class DaemonToolResultCodec {
     if (!contentsNode.isArray()) {
       throw new DaemonProtocolException("result 'contents' must be an array");
     }
-    if (contentsNode.size() > ToolResult.MAX_CONTENT_ITEMS) {
+    if (contentsNode.size() > EnvironmentCapabilityResult.MAX_CONTENT_ITEMS) {
       throw new DaemonProtocolException(
-          "result 'contents' must not exceed " + ToolResult.MAX_CONTENT_ITEMS + " items");
+          "result 'contents' must not exceed "
+              + EnvironmentCapabilityResult.MAX_CONTENT_ITEMS
+              + " items");
     }
     List<ToolContent> contents = new ArrayList<>();
     long decodedResourceBytes = 0;
@@ -278,17 +260,18 @@ public final class DaemonToolResultCodec {
       index++;
     }
     try {
-      return new ToolResult(toolCallId, List.copyOf(contents), error, detailsJson);
+      return new EnvironmentCapabilityResult(callId, List.copyOf(contents), error, detailsJson);
     } catch (IllegalArgumentException invalid) {
-      // ToolResult 构造期的有界输入校验（如 detailsJson 超限/非法 Unicode）按协议错误拒绝。
+      // EnvironmentCapabilityResult 构造期的有界输入校验（如 detailsJson 超限/非法 Unicode）按协议错误拒绝。
       throw new DaemonProtocolException("result fields are invalid", invalid);
     }
   }
 
-  private ObjectNode buildResultTree(ToolResult result, DaemonResourceStore resourceStore) {
+  private ObjectNode buildResultTree(
+      EnvironmentCapabilityResult result, DaemonResourceStore resourceStore) {
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
     ObjectNode wireResult = root.putObject("result");
-    wireResult.put("toolCallId", result.toolCallId());
+    wireResult.put("callId", result.callId());
     wireResult.put("error", result.error());
     JsonNode details = readDetails(result.detailsJson());
     wireResult.set("details", details);
@@ -470,7 +453,7 @@ public final class DaemonToolResultCodec {
   }
 
   private JsonNode readDetails(String detailsJson) {
-    // ToolResult 构造期已保证 detailsJson 是合法 JSON object；codec 不做规范化，若触达非法值直接严格失败。
+    // EnvironmentCapabilityResult 构造期已保证 detailsJson 是合法 JSON object；codec 不做规范化，若触达非法值直接严格失败。
     if (detailsJson == null || detailsJson.isBlank()) {
       throw new DaemonProtocolException("result 'details' must be a JSON object");
     }
