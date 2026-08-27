@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
@@ -67,17 +68,37 @@ public final class ProviderResourceMaterializer {
     Objects.requireNonNull(inputModalities, "inputModalities");
     List<ProviderMessage> result = new ArrayList<>(messages.size());
     for (ProviderMessage message : messages) {
-      List<ProviderContentBlock> blocks = new ArrayList<>(message.contents().size());
-      for (ProviderContentBlock block : message.contents()) {
-        blocks.add(materializeBlock(block, inputModalities));
-      }
-      result.add(new ProviderMessage(message.role(), List.copyOf(blocks)));
+      result.add(
+          new ProviderMessage(
+              message.role(), materializeContents(message.contents(), inputModalities)));
+    }
+    return List.copyOf(result);
+  }
+
+  private List<ProviderContentBlock> materializeContents(
+      List<ProviderContentBlock> contents, Set<ModelInputModality> inputModalities) {
+    List<ProviderContentBlock> result = new ArrayList<>(contents.size());
+    for (ProviderContentBlock content : contents) {
+      result.add(materializeBlock(content, inputModalities));
     }
     return List.copyOf(result);
   }
 
   private ProviderContentBlock materializeBlock(
       ProviderContentBlock block, Set<ModelInputModality> inputModalities) {
+    if (block instanceof ProviderToolResultBlock toolResult) {
+      List<ProviderContentBlock> contents =
+          materializeContents(toolResult.contents(), inputModalities);
+      if (contents.equals(toolResult.contents())) {
+        return block;
+      }
+      return new ProviderToolResultBlock(
+          toolResult.toolCallId(),
+          toolResult.toolName(),
+          contents,
+          toolResult.error(),
+          toolResult.detailsJson());
+    }
     if (!(block instanceof ProviderResourceBlock resource)) {
       return block;
     }
