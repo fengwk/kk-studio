@@ -29,7 +29,7 @@
 flowchart TD
   Dev["./scripts/dev.sh start"] --> DevBackend["JDK 21 + Maven web package"]
   Dev --> DevFrontend["npm run dev + Vite proxy"]
-  Unit["env JAVA_HOME=$JAVA_HOME_21 mvn test"] --> JavaChecks["Spotless + Checkstyle + JaCoCo"]
+  Unit["env JAVA_HOME=$JAVA_HOME_21 mvn test / mvn verify"] --> JavaChecks["Spotless + Checkstyle + JaCoCo report; critical-class gate on verify"]
   Front["npm --prefix frontend run test/lint/build/coverage"] --> FrontChecks["Vitest + ESLint + tsc/Vite + v8"]
   E2E["./scripts/e2e.sh"] --> Matrix["Node API matrix: L1-L4"]
   E2E --> UI["optional Playwright UI matrix"]
@@ -151,17 +151,30 @@ effective Maven POM 当前由 parent 提供 JaCoCo `0.8.11`：
 - `test` phase 执行 `report`；
 - 各模块报告位于对应 `target/site/jacoco/`。
 
-运行并查看报告：
+`harness/tool`、`harness/runtime`、`platform` 与 `web` 在自己的 module POM 中增加了
+绑定到 `verify` 的 JaCoCo `check` execution，只按 `CLASS` include 检查本次关键类，
+要求 `LINE COVEREDRATIO >= 0.90`：
 
 ```bash
-env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am verify
 find . -path '*/target/site/jacoco/index.html' -print
 ```
 
-JaCoCo `>=90%` 是新增或实质重构关键逻辑类的 line coverage 人工质量目标，
-branch coverage 作为参考，不是统一自动 gate。验收时在发生变更的 module
-`target/site/jacoco/index.html` 中列明目标类并核对 line coverage，同时关联对应
-单元/集成测试证据。
+当前自动门禁的目标类是：
+
+- `fun.fengwk.kkstudio.harness.runtime.processor.ResolvedRequestValidator`
+- `fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec`
+- `fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding`
+- `fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec`
+- `fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec`
+- `fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway`
+- `fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry`
+- `fun.fengwk.kkstudio.platform.harness.tool.gateway.PlatformToolGateway`
+- `fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper`
+
+因此普通 `mvn test` 仍只生成报告；对上述关键类低于 90% line coverage
+的构建会在 `mvn verify` 的 `jacoco:check` 阶段失败。branch coverage 作为
+参考指标，具体数字以对应 module 的 `target/site/jacoco/jacoco.csv` 为准。
 
 ## 6. Frontend lint、test、coverage、build
 
@@ -659,7 +672,7 @@ docker compose -f deploy/test/compose.yaml --profile app down --volumes --remove
 
 ```text
 L0  validate / Spotless / Checkstyle / type-check / sensitive-data gate
-    ├─ Java unit + integration + JaCoCo
+    ├─ Java unit + integration + JaCoCo report（critical-class gate on verify）
     └─ Frontend Vitest + ESLint + Vite build + v8 coverage
 L1  free API contract matrix (default 64 / registered 68)
 L2  real Provider text/task/stop (explicit --real)
