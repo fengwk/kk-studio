@@ -45,9 +45,9 @@ Harness durable schema 的唯一入口是 [`V1__schema.sql`](../../schema/src/ma
 | contribution | identity / mode |
 | --- | --- |
 | custom entry type | `(goal, state)`，schema version 1 |
-| `create_goal` | PLATFORM / v2 / SELECTABLE / IDEMPOTENT / WRITE(`state`) |
-| `get_goal` | PLATFORM / v2 / SELECTABLE / READ_ONLY / READ(`state`) |
-| `update_goal` | PLATFORM / v2 / SELECTABLE / IDEMPOTENT / WRITE(`state`) |
+| `create_goal` | PLUGIN / v2 / SELECTABLE / IDEMPOTENT / WRITE(`state`) |
+| `get_goal` | PLUGIN / v2 / SELECTABLE / READ_ONLY / READ(`state`) |
+| `update_goal` | PLUGIN / v2 / SELECTABLE / IDEMPOTENT / WRITE(`state`) |
 | context projector | `goal:context` |
 
 Tool descriptor 的 timeout 是 `Duration.ZERO`，实际 Tool execution timeout/lease 由 Runtime/Platform 处理。prompt 和 schema 来自 `src/main/resources/fun/fengwk/kkstudio/harness/plugins/goal/prompts/`。

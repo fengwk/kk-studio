@@ -37,9 +37,8 @@ import java.util.TreeSet;
 /**
  * 严格、deterministic 的 {@link ToolDescriptor} 与 tool input schema JSON 编解码。
  *
- * <p>Descriptor 只描述模型可见的工具契约，不携带执行路由；路由由 catalog 的 {@code AgentToolBackend} 和 durable binding 的
- * route 字段负责。编解码复用同一个底层 {@link ObjectMapper}，后者启用了 {@link
- * DeserializationFeature#FAIL_ON_TRAILING_TOKENS} 与 {@link
+ * <p>Descriptor 只描述模型可见的工具契约，不携带执行路由；路由与稳定身份由 catalog 的 {@code AgentToolDefinition} 负责。编解码复用同一个底层
+ * {@link ObjectMapper}，后者启用了 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS} 与 {@link
  * JsonParser.Feature#STRICT_DUPLICATE_DETECTION}，从而在边界拒绝 trailing token 与 duplicate field。
  *
  * <p>字段访问为逐字段 JsonNode 读：每个对象都先取出允许字段集合，未知字段直接抛 {@link IllegalArgumentException}；类型不符（如 non-string

@@ -29,6 +29,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
@@ -38,7 +41,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
@@ -72,8 +75,7 @@ class HistoryPayloadMapperTest {
             "{}");
     MessagePayload payload =
         MAPPER.assistantPayload(
-            response,
-            List.of(binding(), new ToolBinding(descriptor("grep"), ToolType.PLATFORM, null)));
+            response, List.of(binding(), new ToolBinding(definition("grep"), null, null)));
     assertEquals(4, payload.message().contents().size());
     assertEquals(
         "thinking here", ((ThinkingMessageContent) payload.message().contents().get(0)).text());
@@ -144,8 +146,7 @@ class HistoryPayloadMapperTest {
     assertEquals("shell-command", call.rendererKey());
     // 无匹配 binding（unknown tool 槽位）时 renderer fallback 固定为 "tool"。
     MessagePayload unbound =
-        MAPPER.assistantPayload(
-            response, List.of(new ToolBinding(descriptor("grep"), ToolType.PLATFORM, null)));
+        MAPPER.assistantPayload(response, List.of(new ToolBinding(definition("grep"), null, null)));
     ToolCallMessageContent unboundCall =
         (ToolCallMessageContent) unbound.message().contents().get(0);
     assertEquals(HistoryPayloadMapper.UNBOUND_RENDERER_KEY, unboundCall.rendererKey());
@@ -406,7 +407,15 @@ class HistoryPayloadMapperTest {
   }
 
   private static ToolBinding binding() {
-    return new ToolBinding(descriptor("bash"), ToolType.PLATFORM, null);
+    return new ToolBinding(definition("bash"), null, null);
+  }
+
+  private static AgentToolDefinition definition(String name) {
+    return new AgentToolDefinition(
+        new AgentToolId("test." + name.replace('_', '-')),
+        descriptor(name),
+        ToolVisibility.SELECTABLE,
+        AgentToolBackend.HOST);
   }
 
   private static ToolDescriptor descriptor(String name) {

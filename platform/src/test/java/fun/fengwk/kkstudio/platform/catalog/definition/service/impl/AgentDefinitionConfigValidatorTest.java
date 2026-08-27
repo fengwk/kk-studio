@@ -41,9 +41,9 @@ class AgentDefinitionConfigValidatorTest {
       new AgentToolId("test.duplicate-second");
 
   @Test
-  void acceptsEnvironmentAndPlatformToolNames() {
+  void acceptsEnvironmentAndHostToolNames() {
     String envTool = EnvironmentToolCatalog.descriptors().get(0).name();
-    try (Fixture fixture = new Fixture(List.of(platformTool("create_goal", "1")))) {
+    try (Fixture fixture = new Fixture(List.of(hostTool("create_goal", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of(envTool, "create_goal"));
       config.setSkills(List.of("dev", "ops"));
@@ -54,7 +54,7 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void rejectsUnknownToolName() {
-    try (Fixture fixture = new Fixture(List.of(platformTool("create_goal", "1")))) {
+    try (Fixture fixture = new Fixture(List.of(hostTool("create_goal", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of("missing"));
       config.setSkills(List.of());
@@ -82,8 +82,8 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   @Test
-  void rejectsInternalPlatformToolSelection() {
-    try (Fixture fixture = new Fixture(List.of(platformTool("create_goal", "1")))) {
+  void rejectsInternalToolSelection() {
+    try (Fixture fixture = new Fixture(List.of(hostTool("create_goal", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of("load_skill"));
       config.setSkills(List.of());
@@ -91,7 +91,7 @@ class AgentDefinitionConfigValidatorTest {
 
       IllegalArgumentException error =
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config));
-      assertTrue(error.getMessage().contains("internal platform tool"));
+      assertTrue(error.getMessage().contains("internal tool"));
     }
   }
 
@@ -111,9 +111,9 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   @Test
-  void rejectsDuplicatePlatformToolRegistration() {
+  void rejectsDuplicateHostToolRegistration() {
     // 两个不同工厂声明相同 model-visible name 会在统一 registry 构造边界被拒绝。
-    ToolDescriptor descriptor = platformDescriptor("dup", "1");
+    ToolDescriptor descriptor = hostDescriptor("dup", "1");
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
@@ -127,11 +127,11 @@ class AgentDefinitionConfigValidatorTest {
     assertTrue(error.getMessage().contains("duplicate Agent tool name"));
   }
 
-  private static Tool platformTool(String name, String version) {
-    return tool(platformDescriptor(name, version));
+  private static Tool hostTool(String name, String version) {
+    return tool(hostDescriptor(name, version));
   }
 
-  private static ToolDescriptor platformDescriptor(String name, String version) {
+  private static ToolDescriptor hostDescriptor(String name, String version) {
     return new ToolDescriptor(
         name,
         version,
@@ -163,7 +163,7 @@ class AgentDefinitionConfigValidatorTest {
 
     private Fixture(List<Tool> tools) {
       List<Tool> registeredTools = new ArrayList<>(tools);
-      Tool loadSkill = platformTool("load_skill", "1");
+      Tool loadSkill = hostTool("load_skill", "1");
       List<ToolFactory> factories = new ArrayList<>(registeredTools.size() + 1);
       for (Tool tool : registeredTools) {
         factories.add(ToolFactory.singleton(CUSTOM_TOOL_ID, tool));

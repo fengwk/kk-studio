@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -29,7 +31,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
@@ -76,8 +78,8 @@ import java.util.function.Supplier;
 /**
  * {@link PlatformToolGateway} 测试共享基座：可编程 Tool / Transport / ResourceStore / Listener 与请求 fixture。
  *
- * <p>PLATFORM fixture 使用虚构 tool {@code demo}（绕过 bash 的 permission 分析路径）；ENVIRONMENT fixture 使用
- * {@link EnvironmentToolCatalog} 的真实 {@code bash} descriptor（capability 校验需要与 catalog 精确相等）。
+ * <p>HOST fixture 使用虚构 tool {@code demo}（绕过 bash 的 permission 分析路径）；ENVIRONMENT_CAPABILITY fixture
+ * 使用 {@link EnvironmentToolCatalog} 的真实 {@code bash} definition（capability 校验需要与 catalog 精确相等）。
  */
 final class ToolGatewayTestSupport {
 
@@ -89,7 +91,7 @@ final class ToolGatewayTestSupport {
   static final UUID THREAD_ID = new UUID(0L, 7L);
   static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
   static final int PROPOSED_ATTEMPT = 3;
-  static final AgentToolId TEST_TOOL_ID = new AgentToolId("test.platform-tool");
+  static final AgentToolId TEST_TOOL_ID = new AgentToolId("test.host-tool");
 
   /** 测试默认的 ResourceStore 单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
@@ -112,7 +114,7 @@ final class ToolGatewayTestSupport {
 
   private ToolGatewayTestSupport() {}
 
-  static ToolDescriptor platformDescriptor(String name) {
+  static ToolDescriptor hostDescriptor(String name) {
     return new ToolDescriptor(
         name,
         "1",
@@ -123,18 +125,27 @@ final class ToolGatewayTestSupport {
         Duration.ofMinutes(1));
   }
 
-  static ToolInvocationRequest platformRequest(String callId, ToolDescriptor descriptor) {
+  static ToolInvocationRequest hostRequest(String callId, ToolDescriptor descriptor) {
     return new ToolInvocationRequest(
         new ToolCall(callId, descriptor.name(), "{}"),
-        new ToolBinding(descriptor, ToolType.PLATFORM, null));
+        new ToolBinding(
+            new AgentToolDefinition(
+                TEST_TOOL_ID, descriptor, ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
+            null,
+            null));
   }
 
   /** 真实 daemon capability 的 ENVIRONMENT 请求：绑定 {@code bash} 并路由到指定 canonical 环境。 */
   static ToolInvocationRequest environmentRequest(String callId, EnvironmentBinding environment) {
-    ToolDescriptor descriptor = EnvironmentToolCatalog.require("bash");
+    AgentToolDefinition definition =
+        EnvironmentToolCatalog.entries().stream()
+            .filter(entry -> entry.definition().descriptor().name().equals("bash"))
+            .findFirst()
+            .orElseThrow()
+            .definition();
     return new ToolInvocationRequest(
         new ToolCall(callId, "bash", "{\"command\":\"ls\"}"),
-        new ToolBinding(descriptor, ToolType.ENVIRONMENT, environment));
+        new ToolBinding(definition, environment, null));
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
@@ -332,7 +343,7 @@ final class ToolGatewayTestSupport {
     }
   }
 
-  /** 可编程 Platform Tool：记录 execution request，按 handler 执行并返回可观察 handle。 */
+  /** 可编程 HOST Tool：记录 execution request，按 handler 执行并返回可观察 handle。 */
   static final class FakeTool implements Tool {
     private final ToolDescriptor descriptor;
     final List<ToolExecutionRequest> requests = new CopyOnWriteArrayList<>();

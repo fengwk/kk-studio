@@ -38,7 +38,6 @@ public final class AgentToolRegistry {
   private final List<Entry> entries;
   private final List<Entry> selectableEntries;
   private final Map<AgentToolId, Entry> entriesById;
-  private final Map<Key, Entry> entriesByKey;
   private final Map<String, Entry> selectableByName;
   private final Map<String, Entry> internalByName;
 
@@ -82,18 +81,9 @@ public final class AgentToolRegistry {
       merged.add(entry);
     }
 
-    Map<Key, Entry> byKey = new LinkedHashMap<>();
     Map<String, Entry> selectable = new LinkedHashMap<>();
     Map<String, Entry> internal = new LinkedHashMap<>();
     for (Entry entry : merged) {
-      Entry previous = byKey.putIfAbsent(new Key(entry.definition().descriptor()), entry);
-      if (previous != null) {
-        throw new IllegalArgumentException(
-            "duplicate Agent tool name/version "
-                + entry.definition().descriptor().name()
-                + "@"
-                + entry.definition().descriptor().version());
-      }
       if (entry.definition().visibility() == ToolVisibility.SELECTABLE) {
         selectable.put(entry.definition().descriptor().name(), entry);
       } else {
@@ -107,7 +97,6 @@ public final class AgentToolRegistry {
             .filter(entry -> entry.definition().visibility() == ToolVisibility.SELECTABLE)
             .toList();
     this.entriesById = Map.copyOf(byId);
-    this.entriesByKey = Map.copyOf(byKey);
     this.selectableByName = Map.copyOf(selectable);
     this.internalByName = Map.copyOf(internal);
   }
@@ -136,15 +125,6 @@ public final class AgentToolRegistry {
   /** 按 model-visible name 查找内部条目。 */
   public Optional<Entry> findInternal(String modelName) {
     return Optional.ofNullable(internalByName.get(Objects.requireNonNull(modelName, "modelName")));
-  }
-
-  /** 按 durable binding 的 name/version 精确恢复冻结条目。 */
-  public Optional<Entry> find(String modelName, String version) {
-    return Optional.ofNullable(
-        entriesByKey.get(
-            new Key(
-                Objects.requireNonNull(modelName, "modelName"),
-                Objects.requireNonNull(version, "version"))));
   }
 
   /** 以冻结 Host factory 创建 Tool，并校验 descriptor 未漂移。 */
@@ -343,18 +323,6 @@ public final class AgentToolRegistry {
 
     public PluginId pluginId() {
       return contributionId() == null ? null : contributionId().pluginId();
-    }
-  }
-
-  private record Key(String name, String version) {
-
-    private Key {
-      name = Objects.requireNonNull(name, "name");
-      version = Objects.requireNonNull(version, "version");
-    }
-
-    private Key(ToolDescriptor descriptor) {
-      this(descriptor.name(), descriptor.version());
     }
   }
 }

@@ -16,15 +16,19 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -46,8 +50,8 @@ final class InvocationTestData {
         Duration.ofSeconds(30));
   }
 
-  static ToolBinding platform(String name) {
-    return new ToolBinding(toolDescriptor(name), ToolType.PLATFORM, null);
+  static ToolBinding host(String name) {
+    return new ToolBinding(definition(name, AgentToolBackend.HOST), null, null);
   }
 
   static ToolBinding environment(String name) {
@@ -55,7 +59,16 @@ final class InvocationTestData {
   }
 
   static ToolBinding environment(String name, EnvironmentBinding environment) {
-    return new ToolBinding(toolDescriptor(name), ToolType.ENVIRONMENT, environment);
+    return new ToolBinding(
+        definition(name, AgentToolBackend.ENVIRONMENT_CAPABILITY), environment, null);
+  }
+
+  private static AgentToolDefinition definition(String name, AgentToolBackend backend) {
+    return new AgentToolDefinition(
+        new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
+        toolDescriptor(name),
+        ToolVisibility.SELECTABLE,
+        backend);
   }
 
   static ModelDescriptor modelDescriptor() {
@@ -136,6 +149,6 @@ final class InvocationTestData {
   }
 
   static ModelRequestSpec request() {
-    return request(List.of(platform("bash")));
+    return request(List.of(host("bash")));
   }
 }

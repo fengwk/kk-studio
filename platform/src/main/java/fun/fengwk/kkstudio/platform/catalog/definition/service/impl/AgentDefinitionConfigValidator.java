@@ -28,8 +28,7 @@ final class AgentDefinitionConfigValidator {
   private void validateTools(List<String> names) {
     for (String name : names) {
       if (toolRegistry.findInternal(name).isPresent()) {
-        throw new IllegalArgumentException(
-            "internal platform tool cannot be selected by an Agent: " + name);
+        throw new IllegalArgumentException("internal tool cannot be selected by an Agent: " + name);
       }
       if (toolRegistry.findSelectable(name).isEmpty()) {
         throw new IllegalArgumentException("unknown agent tool: " + name);

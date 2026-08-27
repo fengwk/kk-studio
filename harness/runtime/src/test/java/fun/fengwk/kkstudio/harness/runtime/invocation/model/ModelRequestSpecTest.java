@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.ENV_ID;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.environment;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.host;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.modelDescriptor;
-import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.platform;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,7 +21,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import java.util.ArrayList;
 import java.util.List;
 
-/** ModelRequestSpec 的冻结、唯一名称与 route 一致性检查。 */
+/** ModelRequestSpec 的冻结、唯一名称与 environment 一致性检查。 */
 class ModelRequestSpecTest {
 
   @Test
@@ -29,7 +29,7 @@ class ModelRequestSpecTest {
     // 验证 invocation 只冻结实际 Provider 请求契约，不携带 history/compaction 派生事实。
     ModelRequestSpec spec =
         spec(
-            List.of(platform("bash"), environment("fs")),
+            List.of(host("bash"), environment("fs")),
             List.of(new SkillBinding("web", "Web search", ENV_ID)),
             List.of(new SubagentBinding("reviewer", "Review changes")));
 
@@ -45,7 +45,7 @@ class ModelRequestSpecTest {
   @Test
   void defensivelyCopiesFrozenLists() {
     // 修改调用方列表不能改变 durable request，返回列表也不可变。
-    List<ToolBinding> tools = new ArrayList<>(List.of(platform("bash")));
+    List<ToolBinding> tools = new ArrayList<>(List.of(host("bash")));
     List<SkillBinding> skills =
         new ArrayList<>(List.of(new SkillBinding("web", "Web search", null)));
     List<SubagentBinding> subagents =
@@ -62,7 +62,7 @@ class ModelRequestSpecTest {
             subagents,
             ProviderCacheControl.none());
 
-    tools.add(platform("extra"));
+    tools.add(host("extra"));
     skills.add(new SkillBinding("extra", "Extra", null));
     subagents.add(new SubagentBinding("extra", "Extra"));
     preamble.add(AgentMessage.system("more"));
@@ -71,7 +71,7 @@ class ModelRequestSpecTest {
     assertEquals(List.of("web"), skillNames(spec.skillBindings()));
     assertEquals(List.of("reviewer"), subagentNames(spec.subagentBindings()));
     assertEquals(1, spec.preambleMessages().size());
-    assertThrows(UnsupportedOperationException.class, () -> spec.toolBindings().add(platform("x")));
+    assertThrows(UnsupportedOperationException.class, () -> spec.toolBindings().add(host("x")));
   }
 
   @Test
@@ -79,7 +79,7 @@ class ModelRequestSpecTest {
     // 每类 binding 名称都是其调用内身份，重复名称必须在构造时失败。
     assertThrows(
         IllegalArgumentException.class,
-        () -> spec(List.of(platform("bash"), environment("bash")), List.of(), List.of()));
+        () -> spec(List.of(host("bash"), environment("bash")), List.of(), List.of()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -102,7 +102,7 @@ class ModelRequestSpecTest {
 
   @Test
   void requiresMatchingEnvironmentRoutes() {
-    // Environment tool 与 skill source 必须落在同一路由，避免一次请求混用多个 workspace。
+    // Environment tool 与 skill source 必须落在同一 environment，避免一次请求混用多个 workspace。
     EnvironmentBinding other = EnvironmentBindings.binding("env-2");
     assertThrows(
         IllegalArgumentException.class,
@@ -117,6 +117,32 @@ class ModelRequestSpecTest {
             spec(
                 List.of(environment("fs")),
                 List.of(new SkillBinding("web", "Web search", other)),
+                List.of()));
+  }
+
+  @Test
+  void rejectsMixedNullAndNonNullEnvironmentBindings() {
+    // null 也是冻结事实：首个环境工具为 null 时，后续非 null 不能被误判为首个绑定。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            spec(
+                List.of(environment("first", null), environment("second", ENV_ID)),
+                List.of(),
+                List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            spec(
+                List.of(environment("first", ENV_ID), environment("second", null)),
+                List.of(),
+                List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            spec(
+                List.of(environment("first", null)),
+                List.of(new SkillBinding("web", "Web search", ENV_ID)),
                 List.of()));
   }
 

@@ -46,9 +46,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
@@ -258,15 +261,19 @@ class ModelRequestMaterializerTest {
 
   private static ToolBinding bashBinding() {
     return new ToolBinding(
-        new ToolDescriptor(
-            "bash",
-            "1.0",
-            "run bash",
-            "bash",
-            new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(30)),
-        ToolType.PLATFORM,
+        new AgentToolDefinition(
+            new AgentToolId("test.bash"),
+            new ToolDescriptor(
+                "bash",
+                "1.0",
+                "run bash",
+                "bash",
+                new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(30)),
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.HOST),
+        null,
         null);
   }
 

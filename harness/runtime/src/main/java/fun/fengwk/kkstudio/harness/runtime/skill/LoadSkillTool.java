@@ -29,9 +29,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
- * 由当前 Thread Agent 选中、用于加载完整 SKILL.md 正文的 PLATFORM tool。
+ * 由当前 Thread Agent 选中、用于加载完整 SKILL.md 正文的 HOST tool。
  *
- * <p>仅解析已选中的 skill；source Environment 来自 invocation 持久化的 binding（platform-first）。 不暴露本地路径。
+ * <p>仅解析已选中的 skill；source Environment 来自 invocation 持久化的 binding（binding-first）。 不暴露本地路径。
  */
 public final class LoadSkillTool implements Tool {
   public static final String NAME = "load_skill";

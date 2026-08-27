@@ -184,9 +184,10 @@ public final class HarnessRuntimeResponseMapper {
     if (binding == null) {
       dto.setRendererKey(HistoryPayloadMapper.UNBOUND_RENDERER_KEY);
     } else {
+      dto.setToolId(binding.definition().id().value());
       dto.setToolVersion(binding.descriptor().version());
       dto.setRendererKey(binding.descriptor().rendererKey());
-      dto.setToolType(binding.type().name());
+      dto.setToolBackend(binding.definition().backend().name());
       dto.setEnvironment(toEnvironmentBindingDto(binding.environment()));
     }
     dto.setApprovalJson(

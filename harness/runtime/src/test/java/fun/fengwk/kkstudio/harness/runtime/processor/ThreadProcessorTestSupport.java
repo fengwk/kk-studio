@@ -65,13 +65,16 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.lang.reflect.InvocationHandler;
@@ -86,6 +89,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -786,7 +790,7 @@ final class ThreadProcessorTestSupport {
   static ModelRequestSpec tooledRequest(List<String> toolNames) {
     List<ToolBinding> bindings = new ArrayList<>();
     for (String name : toolNames) {
-      bindings.add(platformBinding(name));
+      bindings.add(hostBinding(name));
     }
     return requestWithBindings(bindings);
   }
@@ -811,7 +815,7 @@ final class ThreadProcessorTestSupport {
   static ModelRequestSpec requestFor(BranchSettings settings) {
     List<ToolBinding> bindings = new ArrayList<>();
     for (String name : settings.activeTools()) {
-      bindings.add(platformBinding(name));
+      bindings.add(hostBinding(name));
     }
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -826,7 +830,7 @@ final class ThreadProcessorTestSupport {
   }
 
   static ToolInvocationRequest toolRequest(String callId) {
-    return new ToolInvocationRequest(new ToolCall(callId, "bash", "{}"), platformBinding("bash"));
+    return new ToolInvocationRequest(new ToolCall(callId, "bash", "{}"), hostBinding("bash"));
   }
 
   /** 按冻结 preparation 构造机械一致的压缩 Resolved 请求（使用 executionModel，零 bindings、缓存 none）。 */
@@ -1065,8 +1069,8 @@ final class ThreadProcessorTestSupport {
             BigDecimal.ZERO));
   }
 
-  private static ToolBinding platformBinding(String name) {
-    return new ToolBinding(toolDescriptor(name), ToolType.PLATFORM, null);
+  private static ToolBinding hostBinding(String name) {
+    return new ToolBinding(toolDefinition(name, AgentToolBackend.HOST), null, null);
   }
 
   static ToolBinding pluginBinding(
@@ -1075,8 +1079,7 @@ final class ThreadProcessorTestSupport {
       String contributionLocalName,
       List<PluginStateAccess> accesses) {
     return new ToolBinding(
-        toolDescriptor(name),
-        ToolType.PLATFORM,
+        toolDefinition(name, AgentToolBackend.PLUGIN),
         null,
         new PluginToolBinding(pluginId, contributionLocalName, accesses));
   }
@@ -1090,6 +1093,14 @@ final class ThreadProcessorTestSupport {
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
+  }
+
+  private static AgentToolDefinition toolDefinition(String name, AgentToolBackend backend) {
+    return new AgentToolDefinition(
+        new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
+        toolDescriptor(name),
+        ToolVisibility.SELECTABLE,
+        backend);
   }
 
   // -----------------------------------------------------------------------------------------------

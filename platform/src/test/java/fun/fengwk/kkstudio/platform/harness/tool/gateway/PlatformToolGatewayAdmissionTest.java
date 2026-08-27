@@ -17,10 +17,10 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry;
 
@@ -31,8 +31,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 class PlatformToolGatewayAdmissionTest {
 
   @Test
-  void platformCapacityRejectsBeforeToolAndCancelReleasesPermit() {
-    ToolDescriptor descriptor = ToolGatewayTestSupport.platformDescriptor("demo");
+  void hostCapacityRejectsBeforeToolAndCancelReleasesPermit() {
+    ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("demo");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(descriptor);
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
@@ -51,14 +51,14 @@ class PlatformToolGatewayAdmissionTest {
             ToolGateway.Started.class,
             gateway.start(
                 ToolGatewayTestSupport.execution(
-                    ToolGatewayTestSupport.platformRequest("call-1", descriptor)),
+                    ToolGatewayTestSupport.hostRequest("call-1", descriptor)),
                 new ToolGatewayTestSupport.RecordingListener()));
     ToolGateway.Overloaded second =
         assertInstanceOf(
             ToolGateway.Overloaded.class,
             gateway.start(
                 ToolGatewayTestSupport.execution(
-                    ToolGatewayTestSupport.platformRequest("call-2", descriptor)),
+                    ToolGatewayTestSupport.hostRequest("call-2", descriptor)),
                 new ToolGatewayTestSupport.RecordingListener()));
 
     // 第 N+1 次在 Tool.execute 前拒绝，既不触碰 Tool，也不向 executor 增加执行副作用。
@@ -71,7 +71,7 @@ class PlatformToolGatewayAdmissionTest {
             ToolGateway.Started.class,
             gateway.start(
                 ToolGatewayTestSupport.execution(
-                    ToolGatewayTestSupport.platformRequest("call-3", descriptor)),
+                    ToolGatewayTestSupport.hostRequest("call-3", descriptor)),
                 new ToolGatewayTestSupport.RecordingListener()));
     third.handle().cancel();
   }
@@ -81,7 +81,7 @@ class PlatformToolGatewayAdmissionTest {
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     ConcurrencyAdmission.Lease occupied = admission.tryAcquire().orElseThrow();
     try {
-      ToolDescriptor platformDescriptor = ToolGatewayTestSupport.platformDescriptor("factory-tool");
+      ToolDescriptor hostDescriptor = ToolGatewayTestSupport.hostDescriptor("factory-tool");
       AtomicInteger creates = new AtomicInteger();
       ToolFactory factory =
           new ToolFactory() {
@@ -89,7 +89,7 @@ class PlatformToolGatewayAdmissionTest {
             public AgentToolDefinition definition() {
               return new AgentToolDefinition(
                   ToolGatewayTestSupport.TEST_TOOL_ID,
-                  platformDescriptor,
+                  hostDescriptor,
                   ToolVisibility.SELECTABLE,
                   AgentToolBackend.HOST);
             }
@@ -97,7 +97,7 @@ class PlatformToolGatewayAdmissionTest {
             @Override
             public ToolGatewayTestSupport.FakeTool create() {
               creates.incrementAndGet();
-              return new ToolGatewayTestSupport.FakeTool(platformDescriptor);
+              return new ToolGatewayTestSupport.FakeTool(hostDescriptor);
             }
           };
       PluginCatalog pluginCatalog = PluginCatalog.from(List.of());
@@ -121,7 +121,7 @@ class PlatformToolGatewayAdmissionTest {
           ToolGateway.Overloaded.class,
           gateway.start(
               ToolGatewayTestSupport.execution(
-                  ToolGatewayTestSupport.platformRequest("platform", platformDescriptor)),
+                  ToolGatewayTestSupport.hostRequest("host", hostDescriptor)),
               new ToolGatewayTestSupport.RecordingListener()));
       assertInstanceOf(
           ToolGateway.Overloaded.class,
@@ -161,8 +161,8 @@ class PlatformToolGatewayAdmissionTest {
             ToolGateway.Rejected.class,
             gateway.start(
                 ToolGatewayTestSupport.execution(
-                    ToolGatewayTestSupport.platformRequest(
-                        "missing", ToolGatewayTestSupport.platformDescriptor("missing"))),
+                    ToolGatewayTestSupport.hostRequest(
+                        "missing", ToolGatewayTestSupport.hostDescriptor("missing"))),
                 new ToolGatewayTestSupport.RecordingListener()));
 
     assertEquals(PlatformToolGateway.TOOL_NOT_FOUND_KIND, rejected.error().kind());
@@ -172,7 +172,7 @@ class PlatformToolGatewayAdmissionTest {
 
   @Test
   void unexpectedTopLevelFailureReleasesPermit() {
-    ToolDescriptor descriptor = ToolGatewayTestSupport.platformDescriptor("unexpected");
+    ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("unexpected");
     ToolFactory factory =
         new ToolFactory() {
           @Override
@@ -208,7 +208,7 @@ class PlatformToolGatewayAdmissionTest {
         () ->
             gateway.start(
                 ToolGatewayTestSupport.execution(
-                    ToolGatewayTestSupport.platformRequest("unexpected", descriptor)),
+                    ToolGatewayTestSupport.hostRequest("unexpected", descriptor)),
                 new ToolGatewayTestSupport.RecordingListener()));
     ConcurrencyAdmission.Lease recovered = admission.tryAcquire().orElseThrow();
     recovered.close();
@@ -216,7 +216,7 @@ class PlatformToolGatewayAdmissionTest {
 
   @Test
   void terminalAndThrowingListenerReleasePermitForNextLocalTool() {
-    ToolDescriptor descriptor = ToolGatewayTestSupport.platformDescriptor("demo");
+    ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("demo");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(descriptor);
     tool.handler =
         (request, listener) ->
@@ -241,7 +241,7 @@ class PlatformToolGatewayAdmissionTest {
             ToolGateway.Started.class,
             gateway.start(
                 ToolGatewayTestSupport.execution(
-                    ToolGatewayTestSupport.platformRequest("call-1", descriptor)),
+                    ToolGatewayTestSupport.hostRequest("call-1", descriptor)),
                 listener));
     first.handle().activate();
     executor.runAll();
@@ -253,7 +253,7 @@ class PlatformToolGatewayAdmissionTest {
             ToolGateway.Started.class,
             gateway.start(
                 ToolGatewayTestSupport.execution(
-                    ToolGatewayTestSupport.platformRequest("call-2", descriptor)),
+                    ToolGatewayTestSupport.hostRequest("call-2", descriptor)),
                 new ToolGatewayTestSupport.RecordingListener()));
     second.handle().cancel();
   }
@@ -352,7 +352,7 @@ class PlatformToolGatewayAdmissionTest {
 
   @Test
   void rejectedExecutorReleasesPermit() {
-    ToolDescriptor descriptor = ToolGatewayTestSupport.platformDescriptor("demo");
+    ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("demo");
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(descriptor);
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
@@ -371,20 +371,23 @@ class PlatformToolGatewayAdmissionTest {
         ToolGateway.Overloaded.class,
         gateway.start(
             ToolGatewayTestSupport.execution(
-                ToolGatewayTestSupport.platformRequest("call-1", descriptor)),
+                ToolGatewayTestSupport.hostRequest("call-1", descriptor)),
             new ToolGatewayTestSupport.RecordingListener()));
     ConcurrencyAdmission.Lease lease = admission.tryAcquire().orElseThrow();
     lease.close();
   }
 
   private static ToolGateway.Execution pluginExecution() {
-    ToolDescriptor descriptor = ToolGatewayTestSupport.platformDescriptor("plugin-tool");
+    ToolDescriptor descriptor = ToolGatewayTestSupport.hostDescriptor("plugin-tool");
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("plugin", descriptor.name(), "{}"),
             new ToolBinding(
-                descriptor,
-                ToolType.PLATFORM,
+                new AgentToolDefinition(
+                    new AgentToolId("test.plugin-tool"),
+                    descriptor,
+                    ToolVisibility.SELECTABLE,
+                    AgentToolBackend.PLUGIN),
                 null,
                 new PluginToolBinding("plugin", "tool", List.of())));
     return ToolGatewayTestSupport.execution(request);

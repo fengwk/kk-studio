@@ -51,6 +51,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
@@ -58,7 +61,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
@@ -241,7 +244,8 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("bash", boundDto.getToolName());
     assertEquals("1.0", boundDto.getToolVersion());
     assertEquals("bash", boundDto.getRendererKey());
-    assertEquals("ENVIRONMENT", boundDto.getToolType());
+    assertEquals("test.bash", boundDto.getToolId());
+    assertEquals("ENVIRONMENT_CAPABILITY", boundDto.getToolBackend());
     assertEquals("local", boundDto.getEnvironment().getName());
     assertEquals("workspace", boundDto.getEnvironment().getWorkspacePath());
     assertEquals(approval, new ToolApprovalJsonCodec().decode(boundDto.getApprovalJson()));
@@ -255,7 +259,8 @@ class HarnessRuntimeResponseMapperTest {
 
     assertNull(unboundDto.getToolVersion());
     assertEquals("tool", unboundDto.getRendererKey());
-    assertNull(unboundDto.getToolType());
+    assertNull(unboundDto.getToolId());
+    assertNull(unboundDto.getToolBackend());
     assertNull(unboundDto.getEnvironment());
     assertNull(unboundDto.getApprovalJson());
     assertNull(unboundDto.getResultJson());
@@ -549,7 +554,7 @@ class HarnessRuntimeResponseMapperTest {
     ToolInvocation tool =
         toolInvocation(
             status,
-            platformToolBinding(),
+            hostToolBinding(),
             approval(status),
             result(status),
             error(status),
@@ -628,13 +633,24 @@ class HarnessRuntimeResponseMapperTest {
 
   private static ToolBinding environmentToolBinding() {
     return new ToolBinding(
-        descriptor(),
-        ToolType.ENVIRONMENT,
-        new EnvironmentBinding(new EnvironmentName("local"), "workspace"));
+        new AgentToolDefinition(
+            new AgentToolId("test.bash"),
+            descriptor(),
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.ENVIRONMENT_CAPABILITY),
+        new EnvironmentBinding(new EnvironmentName("local"), "workspace"),
+        null);
   }
 
-  private static ToolBinding platformToolBinding() {
-    return new ToolBinding(descriptor(), ToolType.PLATFORM, null);
+  private static ToolBinding hostToolBinding() {
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new AgentToolId("test.bash"),
+            descriptor(),
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.HOST),
+        null,
+        null);
   }
 
   private static ToolDescriptor descriptor() {

@@ -17,10 +17,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
@@ -223,15 +226,19 @@ class ModelResponsePlannerTest {
 
   private static ToolBinding toolBinding(String name) {
     return new ToolBinding(
-        new ToolDescriptor(
-            name,
-            "1.0",
-            "description of " + name,
-            name,
-            new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(30)),
-        ToolType.PLATFORM,
+        new AgentToolDefinition(
+            new AgentToolId("test." + name.replace('_', '-')),
+            new ToolDescriptor(
+                name,
+                "1.0",
+                "description of " + name,
+                name,
+                new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(30)),
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.HOST),
+        null,
         null);
   }
 

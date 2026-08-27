@@ -50,11 +50,14 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
@@ -463,7 +466,7 @@ final class StoreTestSupport {
         assistantEntryId,
         ordinal,
         toolCall(toolCallId),
-        platformBinding(),
+        hostBinding(),
         status,
         0,
         null,
@@ -476,17 +479,21 @@ final class StoreTestSupport {
   /** 复制 invocation，仅替换冻结 binding 的 rendererKey。 */
   static ToolInvocation withRendererKey(ToolInvocation invocation, String rendererKey) {
     ToolDescriptor descriptor = invocation.binding().descriptor();
+    AgentToolDefinition definition = invocation.binding().definition();
     ToolBinding binding =
         new ToolBinding(
-            new ToolDescriptor(
-                descriptor.name(),
-                descriptor.version(),
-                descriptor.description(),
-                rendererKey,
-                descriptor.inputSchema(),
-                descriptor.sideEffect(),
-                descriptor.timeout()),
-            invocation.binding().type(),
+            new AgentToolDefinition(
+                definition.id(),
+                new ToolDescriptor(
+                    descriptor.name(),
+                    descriptor.version(),
+                    descriptor.description(),
+                    rendererKey,
+                    descriptor.inputSchema(),
+                    descriptor.sideEffect(),
+                    descriptor.timeout()),
+                definition.visibility(),
+                definition.backend()),
             invocation.binding().environment(),
             invocation.binding().plugin());
     return new ToolInvocation(
@@ -532,7 +539,7 @@ final class StoreTestSupport {
         base.model(),
         base.variant(),
         base.preambleMessages(),
-        List.of(platformBinding()),
+        List.of(hostBinding()),
         List.of(),
         List.of(),
         base.cacheControl());
@@ -604,8 +611,15 @@ final class StoreTestSupport {
             BigDecimal.ZERO));
   }
 
-  static ToolBinding platformBinding() {
-    return new ToolBinding(toolDescriptor("bash"), ToolType.PLATFORM, null);
+  static ToolBinding hostBinding() {
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new AgentToolId("test.bash"),
+            toolDescriptor("bash"),
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.HOST),
+        null,
+        null);
   }
 
   private static ToolDescriptor toolDescriptor(String name) {

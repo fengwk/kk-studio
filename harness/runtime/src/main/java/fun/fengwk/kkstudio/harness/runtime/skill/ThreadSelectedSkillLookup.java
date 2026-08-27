@@ -7,9 +7,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 为 PLATFORM tool 解析当前 Thread Agent 已选中的 skill 元数据。
+ * 为 HOST tool 解析当前 Thread Agent 已选中的 skill 元数据。
  *
- * <p>实现位于 Core，以避免 platform Tool bean 与 Host 端 Environment gateway 组件之间的 Spring 循环装配。
+ * <p>实现位于 Core，以避免 HOST Tool bean 与 Environment capability gateway 组件之间的 Spring 循环装配。
  */
 public interface ThreadSelectedSkillLookup {
 

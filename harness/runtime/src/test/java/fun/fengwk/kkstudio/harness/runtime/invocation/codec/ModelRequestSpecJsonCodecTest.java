@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.environmentModelRequest;
-import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.platformModelRequest;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.hostModelRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -51,7 +51,7 @@ class ModelRequestSpecJsonCodecTest {
 
   @Test
   void roundTripsFrozenSubagentBindings() {
-    ModelRequestSpec base = platformModelRequest();
+    ModelRequestSpec base = hostModelRequest();
     ModelRequestSpec request =
         new ModelRequestSpec(
             base.providerType(),

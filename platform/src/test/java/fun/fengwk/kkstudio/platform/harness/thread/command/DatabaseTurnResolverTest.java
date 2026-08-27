@@ -81,7 +81,6 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
@@ -127,7 +126,7 @@ class DatabaseTurnResolverTest {
   private static final Instant NOW = Instant.parse("2026-08-02T00:00:00Z");
   private static final UUID THREAD_ID = new UUID(0L, 1L);
   private static final UUID SESSION_ID = new UUID(0L, 100L);
-  private static final AgentToolId TEST_PLATFORM_TOOL_ID = new AgentToolId("test.platform-tool");
+  private static final AgentToolId TEST_HOST_TOOL_ID = new AgentToolId("test.host-tool");
 
   private static UUID id(long value) {
     return new UUID(0L, value);
@@ -384,12 +383,14 @@ class DatabaseTurnResolverTest {
 
   @Test
   void bindsEnvironmentToolsWithLatestNameEvenWhenBranchHasNoEnvironment() {
-    // 分支没有环境路由不再拒绝工具规划：ENVIRONMENT 工具仍按最新（null）名称绑定，实际执行时确定性失败。
+    // 分支没有环境路由不再拒绝工具规划：ENVIRONMENT_CAPABILITY 工具仍按最新（null）名称绑定，实际执行时确定性失败。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     ModelRequestSpec request =
         fixture.resolved(fixture.path(settings(null, "default", List.of("read"))));
     assertEquals(1, request.toolBindings().size());
-    assertEquals(ToolType.ENVIRONMENT, request.toolBindings().getFirst().type());
+    assertEquals(
+        AgentToolBackend.ENVIRONMENT_CAPABILITY,
+        request.toolBindings().getFirst().definition().backend());
     assertNull(request.toolBindings().getFirst().environment());
 
     // Agent skills 要求最新选中的 Environment 提供 live descriptors：分支没有名称时精确拒绝。
@@ -441,7 +442,9 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of("read"),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertEquals(ToolType.ENVIRONMENT, request.toolBindings().getFirst().type());
+    assertEquals(
+        AgentToolBackend.ENVIRONMENT_CAPABILITY,
+        request.toolBindings().getFirst().definition().backend());
     assertNull(request.toolBindings().getFirst().environment());
 
     // 最新为缺失名称：同样只冻结最新名称，绝不回看更旧 live Environment。
@@ -455,7 +458,7 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_MISSING, request.toolBindings().getFirst().environment());
 
     // Agent skills 同样只认最新快照：历史 turn 有 live Environment + skill，最新 null 时按最新精确拒绝。
-    fixture = new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
+    fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     assertEquals(
         "agent skills require the latest selected environment but the branch has no environment",
@@ -471,8 +474,7 @@ class DatabaseTurnResolverTest {
   @Test
   void skillsRequireTheLatestSelectedEnvironmentPrecisely() {
     // skills 需要 live descriptors：latest 环境缺失时精确拒绝，绝不回看更旧的 branch settings。
-    Fixture fixture =
-        new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     assertEquals(
         "agent skills require the latest selected environment which is not live: "
             + ENV_MISSING.environmentName(),
@@ -482,7 +484,7 @@ class DatabaseTurnResolverTest {
             .message());
 
     // latest 环境未 READY：同样精确拒绝。
-    fixture = new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
+    fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.connectingEnvironment(ENV_A);
     assertEquals(
         "agent skills require the latest selected environment which is not ready: "
@@ -497,7 +499,7 @@ class DatabaseTurnResolverTest {
   void routesByExactEnvironmentNameAndNeverFallsBack() {
     // 两个独立 canonical 名称；branch 只认精确名称，绝不回看更旧 settings 或 fallback。
     Fixture fixture =
-        new Fixture(List.of("bash"), List.of("dev-b"), List.of(platformDescriptor("load_skill")));
+        new Fixture(List.of("bash"), List.of("dev-b"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
     BranchSettings settings = settings(ENV_B, "default", List.of("bash", "load_skill"));
@@ -521,7 +523,7 @@ class DatabaseTurnResolverTest {
         new Fixture(
             List.of("bash", "create_goal", "read"),
             List.of(),
-            List.of(platformDescriptor("create_goal")));
+            List.of(hostDescriptor("create_goal")));
     fixture.readyEnvironment(ENV_A);
     BranchSettings settings = settings(ENV_A, "default", List.of("bash", "create_goal", "read"));
 
@@ -531,8 +533,11 @@ class DatabaseTurnResolverTest {
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
     assertEquals(List.of("bash", "create_goal", "read"), boundNames);
     assertEquals(
-        List.of(ToolType.ENVIRONMENT, ToolType.PLATFORM, ToolType.ENVIRONMENT),
-        request.toolBindings().stream().map(ToolBinding::type).toList());
+        List.of(
+            AgentToolBackend.ENVIRONMENT_CAPABILITY,
+            AgentToolBackend.HOST,
+            AgentToolBackend.ENVIRONMENT_CAPABILITY),
+        request.toolBindings().stream().map(binding -> binding.definition().backend()).toList());
     // Provider tools 与 bindings 一一对应且顺序一致。
     assertEquals(List.of("bash", "create_goal", "read"), boundNames);
 
@@ -586,8 +591,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void derivesLoadSkillFromLatestAgentSkills() {
-    Fixture fixture =
-        new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
 
     ModelRequestSpec request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
@@ -601,8 +605,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void bindsSkillsExactlyFromSelectedEnvironment() {
-    Fixture fixture =
-        new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
 
     ModelRequestSpec request =
@@ -611,12 +614,12 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of("load_skill"),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertEquals(ToolType.PLATFORM, request.toolBindings().getFirst().type());
+    assertEquals(AgentToolBackend.HOST, request.toolBindings().getFirst().definition().backend());
     assertEquals(
         List.of(new SkillBinding("dev", "dev description", ENV_A)), request.skillBindings());
 
     // Environment 缺少该 skill：不静默丢弃，typed 拒绝。
-    fixture = new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
+    fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of());
     assertEquals(
         "skill not found on the latest environment " + ENV_A + ": dev",
@@ -654,7 +657,7 @@ class DatabaseTurnResolverTest {
         new Fixture(
             List.of(),
             List.of(),
-            List.of(platformDescriptor("load_skill")),
+            List.of(hostDescriptor("load_skill")),
             Set.of("load_skill"),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
@@ -683,7 +686,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of(TaskTool.NAME),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertEquals(ToolType.PLATFORM, request.toolBindings().getFirst().type());
+    assertEquals(AgentToolBackend.HOST, request.toolBindings().getFirst().definition().backend());
     String system = preambleText(request);
     assertTrue(system.contains("<available_subagents>"), system);
     assertTrue(system.contains("<name>reviewer</name>"), system);
@@ -804,8 +807,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void projectsSemanticMessagesInRootToHeadOrderIgnoringBoundariesAndErrors() {
-    Fixture fixture =
-        new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     BranchSettings settings = settings(ENV_A, "default", List.of("load_skill"));
 
@@ -849,7 +851,7 @@ class DatabaseTurnResolverTest {
   @Test
   void escapesXmlInAvailableSkillsSection() {
     Fixture fixture =
-        new Fixture(List.of(), List.of("a&b<c>"), List.of(platformDescriptor("load_skill")));
+        new Fixture(List.of(), List.of("a&b<c>"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironmentWithSkills(ENV_A, List.of(new DaemonSkillDescriptor("a&b<c>", "d&e")));
 
     ModelRequestSpec request =
@@ -894,7 +896,7 @@ class DatabaseTurnResolverTest {
         new Fixture(
             List.of("create_goal"),
             List.of(),
-            List.of(platformDescriptor("create_goal")),
+            List.of(hostDescriptor("create_goal")),
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
@@ -962,7 +964,7 @@ class DatabaseTurnResolverTest {
   @Test
   void resolvedSpecStaysFrozenAfterCatalogAndConfigChange() {
     Fixture fixture =
-        new Fixture(List.of("create_goal"), List.of(), List.of(platformDescriptor("create_goal")));
+        new Fixture(List.of("create_goal"), List.of(), List.of(hostDescriptor("create_goal")));
     EntryPath path = fixture.path(settings(null, "custom"));
     ModelRequestSpec frozen = fixture.resolved(path);
     String preamble = preambleText(frozen);
@@ -1217,7 +1219,7 @@ class DatabaseTurnResolverTest {
                 NOW.plusSeconds(3))));
   }
 
-  private static ToolDescriptor platformDescriptor(String name) {
+  private static ToolDescriptor hostDescriptor(String name) {
     return new ToolDescriptor(
         name,
         "1",
@@ -1643,7 +1645,7 @@ class DatabaseTurnResolverTest {
     return new Fixture(
         List.of(),
         List.of(),
-        List.of(platformDescriptor(TaskTool.NAME)),
+        List.of(hostDescriptor(TaskTool.NAME)),
         Set.of(TaskTool.NAME),
         ProviderType.OPENAI,
         ProviderType.OPENAI,
@@ -1666,37 +1668,36 @@ class DatabaseTurnResolverTest {
     private final AgentProvider provider = new AgentProvider();
     private final DatabaseTurnResolver resolver;
 
-    private Fixture(
-        List<String> tools, List<String> skills, List<ToolDescriptor> platformDescriptors) {
-      this(tools, skills, platformDescriptors, PluginCatalog.from(List.of()));
+    private Fixture(List<String> tools, List<String> skills, List<ToolDescriptor> hostDescriptors) {
+      this(tools, skills, hostDescriptors, PluginCatalog.from(List.of()));
     }
 
     private Fixture(
         List<String> tools,
         List<String> skills,
-        List<ToolDescriptor> platformDescriptors,
+        List<ToolDescriptor> hostDescriptors,
         Clock clock) {
-      this(tools, skills, platformDescriptors, PluginCatalog.from(List.of()), clock);
+      this(tools, skills, hostDescriptors, PluginCatalog.from(List.of()), clock);
     }
 
     private Fixture(
         List<String> tools,
         List<String> skills,
-        List<ToolDescriptor> platformDescriptors,
+        List<ToolDescriptor> hostDescriptors,
         PluginCatalog pluginCatalog) {
-      this(tools, skills, platformDescriptors, pluginCatalog, Clock.fixed(NOW, ZoneOffset.UTC));
+      this(tools, skills, hostDescriptors, pluginCatalog, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private Fixture(
         List<String> tools,
         List<String> skills,
-        List<ToolDescriptor> platformDescriptors,
+        List<ToolDescriptor> hostDescriptors,
         PluginCatalog pluginCatalog,
         Clock clock) {
       this(
           tools,
           skills,
-          platformDescriptors,
+          hostDescriptors,
           Set.of(),
           ProviderType.OPENAI,
           ProviderType.OPENAI,
@@ -1709,8 +1710,8 @@ class DatabaseTurnResolverTest {
     private Fixture(
         List<String> tools,
         List<String> skills,
-        List<ToolDescriptor> platformDescriptors,
-        Set<String> internalPlatformToolNames,
+        List<ToolDescriptor> hostDescriptors,
+        Set<String> internalHostToolNames,
         ProviderType persistedProviderType,
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
@@ -1718,8 +1719,8 @@ class DatabaseTurnResolverTest {
       this(
           tools,
           skills,
-          platformDescriptors,
-          internalPlatformToolNames,
+          hostDescriptors,
+          internalHostToolNames,
           persistedProviderType,
           factoryType,
           cacheCapability,
@@ -1730,8 +1731,8 @@ class DatabaseTurnResolverTest {
     private Fixture(
         List<String> tools,
         List<String> skills,
-        List<ToolDescriptor> platformDescriptors,
-        Set<String> internalPlatformToolNames,
+        List<ToolDescriptor> hostDescriptors,
+        Set<String> internalHostToolNames,
         ProviderType persistedProviderType,
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
@@ -1740,8 +1741,8 @@ class DatabaseTurnResolverTest {
       this(
           tools,
           skills,
-          platformDescriptors,
-          internalPlatformToolNames,
+          hostDescriptors,
+          internalHostToolNames,
           persistedProviderType,
           factoryType,
           cacheCapability,
@@ -1753,8 +1754,8 @@ class DatabaseTurnResolverTest {
     private Fixture(
         List<String> tools,
         List<String> skills,
-        List<ToolDescriptor> platformDescriptors,
-        Set<String> internalPlatformToolNames,
+        List<ToolDescriptor> hostDescriptors,
+        Set<String> internalHostToolNames,
         ProviderType persistedProviderType,
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
@@ -1799,7 +1800,7 @@ class DatabaseTurnResolverTest {
               modelConfigParser,
               new ProviderFactories(factories),
               new AgentToolRegistry(
-                  platformDescriptors.stream()
+                  hostDescriptors.stream()
                       .filter(descriptor -> pluginCatalog.findTool(descriptor.name()).isEmpty())
                       .map(
                           descriptor -> {
@@ -1807,9 +1808,9 @@ class DatabaseTurnResolverTest {
                             when(factory.definition())
                                 .thenReturn(
                                     new AgentToolDefinition(
-                                        TEST_PLATFORM_TOOL_ID,
+                                        TEST_HOST_TOOL_ID,
                                         descriptor,
-                                        internalPlatformToolNames.contains(descriptor.name())
+                                        internalHostToolNames.contains(descriptor.name())
                                             ? ToolVisibility.INTERNAL
                                             : ToolVisibility.SELECTABLE,
                                         AgentToolBackend.HOST));

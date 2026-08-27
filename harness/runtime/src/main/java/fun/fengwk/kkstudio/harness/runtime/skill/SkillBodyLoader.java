@@ -9,7 +9,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * 从指定 Environment 加载完整 SKILL.md body，不暴露本地路径。
  *
- * <p>在 Core 的 Environment skill loader 之上做的轻量 Runtime port，使 PLATFORM tool 不直接依赖 Host lifecycle
+ * <p>在 Core 的 Environment skill loader 之上做的轻量 Runtime port，使 HOST tool 不直接依赖 Host lifecycle
  * bean。路由只使用冻结 binding 的 {@code environmentName}，workspace path 不参与 skill 加载。
  */
 public interface SkillBodyLoader {

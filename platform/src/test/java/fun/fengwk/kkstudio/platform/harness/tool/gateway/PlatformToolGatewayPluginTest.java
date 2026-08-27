@@ -34,6 +34,8 @@ import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -43,7 +45,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.plugin.PluginBranchViewLoader;
@@ -74,6 +75,9 @@ class PlatformToolGatewayPluginTest {
           new ToolParamsSchema("args", Map.of(), Set.of(), false),
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
+  private static final AgentToolDefinition DEFINITION =
+      new AgentToolDefinition(
+          AGENT_TOOL_ID, DESCRIPTOR, ToolVisibility.SELECTABLE, AgentToolBackend.PLUGIN);
 
   @Test
   void pluginToolPassesPermissionPreflightWithoutLocalToolRegistration() {
@@ -145,7 +149,7 @@ class PlatformToolGatewayPluginTest {
     ToolGateway.StartResult result =
         fixture.gateway.start(fixture.execution("other"), fixture.listener);
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals(PlatformToolGateway.PLUGIN_BINDING_MISMATCH_KIND, rejected.error().kind());
+    assertEquals(PlatformToolGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
     assertTrue(fixture.listener.events.isEmpty());
   }
 
@@ -282,7 +286,7 @@ class PlatformToolGatewayPluginTest {
       ToolInvocationRequest request =
           new ToolInvocationRequest(
               new ToolCall("call-1", "plugin_tool", "{}"),
-              new ToolBinding(DESCRIPTOR, ToolType.PLATFORM, null, plugin));
+              new ToolBinding(DEFINITION, null, plugin));
       return new ToolGateway.Execution(
           ToolGatewayTestSupport.INVOCATION_ID,
           ToolGatewayTestSupport.THREAD_ID,

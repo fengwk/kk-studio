@@ -125,7 +125,7 @@ PluginToolResult execute(PluginToolContext context, ToolCall call);
 ```text
 PluginCatalog frozen at startup
   -> Model turn resolver selects PluginTool contribution
-  -> ToolBinding freezes ContributionId + descriptor + state accesses
+  -> ToolBinding freezes AgentToolDefinition + plugin provenance/state accesses
   -> Core builds BranchView at Assistant Entry
   -> PluginTool.execute(context, ToolCall)
   -> PluginToolResult(ToolResult, intents)

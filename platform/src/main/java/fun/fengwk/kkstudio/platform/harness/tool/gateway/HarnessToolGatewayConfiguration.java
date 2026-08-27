@@ -32,7 +32,7 @@ import java.util.concurrent.Executors;
 public class HarnessToolGatewayConfiguration {
 
   /**
-   * admission 之后 Platform Tool 执行与缓冲回调重放专用的 executor。 Java 21 虚拟线程天然适合阻塞的远程 Tool 发送；{@code
+   * admission 之后 HOST/PLUGIN Tool 执行与缓冲回调重放专用的 executor。 Java 21 虚拟线程天然适合阻塞的远程 Tool 发送；{@code
    * destroyMethod = "close"} 让在途任务由 Spring 生命周期持有，但不会等待它们。
    */
   @Bean(name = "toolGatewayExecutor", destroyMethod = "close")

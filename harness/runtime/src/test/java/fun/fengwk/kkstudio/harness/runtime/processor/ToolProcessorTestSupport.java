@@ -48,6 +48,9 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -55,7 +58,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
@@ -419,7 +422,7 @@ final class ToolProcessorTestSupport {
 
   static ToolInvocationRequest toolRequest(String toolCallId, ToolSideEffect sideEffect) {
     return new ToolInvocationRequest(
-        new ToolCall(toolCallId, "bash", "{}"), platformBinding(sideEffect));
+        new ToolCall(toolCallId, "bash", "{}"), hostBinding(sideEffect));
   }
 
   static ToolResult partialResult(String toolCallId) {
@@ -430,8 +433,15 @@ final class ToolProcessorTestSupport {
     return new ToolResult(toolCallId, List.of(contents), false, "{}");
   }
 
-  private static ToolBinding platformBinding(ToolSideEffect sideEffect) {
-    return new ToolBinding(toolDescriptor(sideEffect), ToolType.PLATFORM, null);
+  private static ToolBinding hostBinding(ToolSideEffect sideEffect) {
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new AgentToolId("test.bash"),
+            toolDescriptor(sideEffect),
+            ToolVisibility.SELECTABLE,
+            AgentToolBackend.HOST),
+        null,
+        null);
   }
 
   private static ToolDescriptor toolDescriptor(ToolSideEffect sideEffect) {
@@ -452,7 +462,7 @@ final class ToolProcessorTestSupport {
         provider.model(),
         provider.variant(),
         List.of(),
-        List.of(platformBinding(ToolSideEffect.READ_ONLY)),
+        List.of(hostBinding(ToolSideEffect.READ_ONLY)),
         List.of(),
         List.of(),
         provider.cacheControl());

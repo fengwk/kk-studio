@@ -32,12 +32,15 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
@@ -196,7 +199,14 @@ public final class HarnessRuntimeTestFixtures {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "web_search", "{}"),
-            new ToolBinding(descriptor, ToolType.PLATFORM, null));
+            new ToolBinding(
+                new AgentToolDefinition(
+                    new AgentToolId("test.web-search"),
+                    descriptor,
+                    ToolVisibility.SELECTABLE,
+                    AgentToolBackend.HOST),
+                null,
+                null));
     return new ToolInvocation(
         id(100),
         id(10),

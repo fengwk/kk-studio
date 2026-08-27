@@ -237,24 +237,24 @@ terminal listener 异常只记录日志，不发第二个 terminal。terminal、
 - Environment entry 必须声明 `ENVIRONMENT_CAPABILITY` backend，携带完整 `EnvironmentCapabilityDescriptor`；它们按固定 Environment catalog 顺序追加，且 model descriptor 的 schema/timeout 必须与 capability 完全一致。
 - Host 与 Plugin 的 `AgentToolId` 共享全局命名空间；重复 `AgentToolId` 或 model-visible name 直接失败。
 - 排序先满足 plugin `requires` 的传递拓扑序，再按 priority 降序和 identity 字典序；重复 name 或依赖环直接失败。
-- `find(name, version)`和 `find(AgentToolId)`返回 registry 的冻结 Entry；本地通过 `createHostTool` 重新 `factory.create()`后必须完整 descriptor equality。
+- `find(AgentToolId)`返回 registry 的冻结 Entry；本地通过 `createHostTool` 重新 `factory.create()`后必须完整 descriptor equality。
 - `selectableEntries()`、`findSelectable`和`findInternal`共享同一份冻结索引，Environment 不再由调用方二次查找固定 catalog。
 
 `HarnessPluginSource`只是 `List<HarnessPlugin> plugins()`的启动快照 port。Platform 接收已冻结的
 `PluginCatalog`，不读取目录、不创建 classloader、不提供 refresh。Web 组合根负责把 built-in plugin 与 trusted JAR
 source 合并，详见 [web 模块](web.md)。
 
-`PlatformToolGateway`的 `preflight`先用 frozen binding 的 descriptor name/version 从 registry 恢复冻结 Entry 和稳定
-`AgentToolId`；Entry 缺失或 descriptor 漂移直接生成确定性的 `TOOL_NOT_FOUND` / `TOOL_DESCRIPTOR_MISMATCH` Deny，不进入
+`PlatformToolGateway`的 `preflight`先用 frozen `AgentToolDefinition.id` 从 registry 恢复 Entry，再要求 registry 中的完整 definition 与 frozen definition
+相等；Entry 缺失或 definition 漂移直接生成确定性的 `TOOL_NOT_FOUND` / `TOOL_DEFINITION_MISMATCH` Deny，不进入
 permission evaluator。正常路径按 AgentToolId、arguments、Environment workspace 或 server workdir 生成 `ALLOW`、`ASK`或
 `DENY`，不改写 binding/arguments，也不感知 YOLO。`start`先获取 tool admission
 （默认 `kk-studio.harness.execution-admission.tool=64`），再按 binding 路由：
 
-| binding | admission / transport |
+| backend | admission / transport |
 | --- | --- |
-| `PLATFORM` local | 精确匹配 name/version/descriptor 后提交 virtual-thread executor |
-| `PLATFORM` plugin | 精确匹配 `ContributionId`、descriptor、state access，执行声明式 intent |
-| `ENVIRONMENT` | 精确匹配 registry 的 model definition/capability mapping，检查 READY/active slot 后经 `EnvironmentCapabilityTransport` 发送 |
+| `HOST` | 按 AgentToolId 精确匹配完整 definition 后提交 virtual-thread executor |
+| `PLUGIN` | 按 AgentToolId 精确匹配完整 definition 与 plugin provenance/state access，执行声明式 intent |
+| `ENVIRONMENT_CAPABILITY` | 按 AgentToolId 精确匹配完整 definition/capability mapping，检查 READY/active slot 后经 `EnvironmentCapabilityTransport` 发送 |
 
 local executor 明确拒绝返回 `Overloaded`，提交不确定返回 `Indeterminate(EXECUTION_FAILED)`。Environment 在发送前
 不可用返回 `Rejected(UNAVAILABLE)`，同 Environment active 返回 `Busy`，发送不确定返回
@@ -266,8 +266,8 @@ buffer 和 terminal-once。partial 必须非空、toolCallId 精确匹配、不�
 terminal 后任何迟到信号、其余 Resource 写入和第二个 terminal 都被禁止。
 
 Plugin Tool 的 `AppendCustomEntry` intent 必须属于自身 plugin、命中已注册 custom type 且存在声明的 WRITE access；
-否则是 `PLUGIN_CONTRACT_VIOLATION`。冻结 binding 的 state access 顺序或 mode 与当前 contribution 不同则
-`PLUGIN_BINDING_MISMATCH`。
+否则是 `PLUGIN_CONTRACT_VIOLATION`。冻结 binding 的完整 definition、provenance 或 state access 与当前 contribution 不同则
+`TOOL_DEFINITION_MISMATCH`。
 
 ### DatabaseTurnResolver、skill 与 task materialization
 

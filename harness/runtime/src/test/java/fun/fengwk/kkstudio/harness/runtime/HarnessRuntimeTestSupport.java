@@ -55,13 +55,16 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.lang.reflect.Proxy;
@@ -73,6 +76,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -850,11 +854,11 @@ final class HarnessRuntimeTestSupport {
         createdAt);
   }
 
-  /** live tool baseline 的 tooled 冻结请求：按 {@code toolNames} 构造 platform bindings。 */
+  /** live tool baseline 的 tooled 冻结请求：按 {@code toolNames} 构造 host bindings。 */
   static ModelRequestSpec tooledModelRequest(List<String> toolNames) {
     List<ToolBinding> bindings = new ArrayList<>();
     for (String name : toolNames) {
-      bindings.add(new ToolBinding(toolDescriptor(name), ToolType.PLATFORM, null));
+      bindings.add(new ToolBinding(toolDefinition(name, AgentToolBackend.HOST), null, null));
     }
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -896,7 +900,7 @@ final class HarnessRuntimeTestSupport {
         assistantEntryId,
         ordinal,
         new ToolCall(toolCallId, "bash", "{}"),
-        platformBinding(),
+        hostBinding(),
         ToolInvocationStatus.READY,
         0,
         null,
@@ -991,8 +995,8 @@ final class HarnessRuntimeTestSupport {
             BigDecimal.ZERO));
   }
 
-  private static ToolBinding platformBinding() {
-    return new ToolBinding(toolDescriptor("bash"), ToolType.PLATFORM, null);
+  private static ToolBinding hostBinding() {
+    return new ToolBinding(toolDefinition("bash", AgentToolBackend.HOST), null, null);
   }
 
   private static ToolDescriptor toolDescriptor(String name) {
@@ -1004,6 +1008,14 @@ final class HarnessRuntimeTestSupport {
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
+  }
+
+  private static AgentToolDefinition toolDefinition(String name, AgentToolBackend backend) {
+    return new AgentToolDefinition(
+        new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
+        toolDescriptor(name),
+        ToolVisibility.SELECTABLE,
+        backend);
   }
 
   /** 在 in-memory store 上运行 void 事务体的辅助方法。 */

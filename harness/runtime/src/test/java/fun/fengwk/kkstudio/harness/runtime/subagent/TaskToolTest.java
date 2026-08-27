@@ -297,7 +297,7 @@ class TaskToolTest {
     ToolResult result = listener.completed.get(5, TimeUnit.SECONDS);
 
     // 固定 executor 的第 N+1 次拒绝发生在 TaskExecution.run 前，因此没有 NEW_SESSION/Thread durable 写入，
-    // 但模型仍收到 task 自己既有的 ERROR envelope，而不是 Platform Tool UNKNOWN。
+    // 但模型仍收到 task 自己既有的 ERROR envelope，而不是 HOST Tool UNKNOWN。
     assertTrue(result.error(), result.toString());
     assertFalse(handle.isCancelled());
     assertTrue(

@@ -18,13 +18,16 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
@@ -39,13 +42,12 @@ import java.util.concurrent.Executors;
 /**
  * {@link PlatformToolGateway#preflight}：三个 permission 状态的映射，且不改写冻结 request。
  *
- * <p>使用虚构 PLATFORM tool {@code demo} + {@code path} 参数（避开 bash command 分析路径），permission 规则按 {@code
- * *} 通配全量生效，因此断言确定。
+ * <p>使用虚构 HOST tool {@code demo} + {@code path} 参数（避开 bash command 分析路径），permission 规则按 {@code *}
+ * 通配全量生效，因此断言确定。
  */
 class PlatformToolGatewayPreflightTest {
 
-  private static final ToolDescriptor DESCRIPTOR =
-      ToolGatewayTestSupport.platformDescriptor("demo");
+  private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
   private static final ToolDescriptor PREFLIGHT_DESCRIPTOR = preflightDescriptor();
 
   private static ToolDescriptor preflightDescriptor() {
@@ -116,10 +118,9 @@ class PlatformToolGatewayPreflightTest {
     ToolGateway.Deny deny =
         assertInstanceOf(
             ToolGateway.Deny.class,
-            gateway.preflight(
-                ToolGatewayTestSupport.platformRequest("call-1", PREFLIGHT_DESCRIPTOR)));
+            gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", PREFLIGHT_DESCRIPTOR)));
 
-    // registry 中的 frozen entry 将 model-visible name demo 恢复为 test.platform-tool；不能误用 name 规则。
+    // registry 中的 frozen entry 将 model-visible name demo 恢复为 test.host-tool；不能误用 name 规则。
     assertEquals(PlatformToolGateway.PERMISSION_DENIED_KIND, deny.error().kind());
     assertEquals("Tool permission was denied.", deny.error().message());
   }
@@ -147,29 +148,37 @@ class PlatformToolGatewayPreflightTest {
             ToolGatewayTestSupport.TEST_CLOCK,
             new ConcurrencyAdmission(Integer.MAX_VALUE));
 
-    ToolDescriptor unknown = ToolGatewayTestSupport.platformDescriptor("missing");
+    ToolDescriptor unknown = ToolGatewayTestSupport.hostDescriptor("missing");
     ToolGateway.Deny unknownDeny =
         assertInstanceOf(
             ToolGateway.Deny.class,
             gateway.preflight(
                 new ToolInvocationRequest(
                     new ToolCall("unknown", "missing", "{}"),
-                    new ToolBinding(unknown, ToolType.PLATFORM, null))));
+                    new ToolBinding(
+                        new AgentToolDefinition(
+                            new AgentToolId("test.missing"),
+                            unknown,
+                            ToolVisibility.SELECTABLE,
+                            AgentToolBackend.HOST),
+                        null,
+                        null))));
     assertEquals(PlatformToolGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
-    assertEquals("Frozen tool missing@1 is not registered.", unknownDeny.error().message());
+    assertEquals(
+        "Frozen tool definition test.missing is not registered.", unknownDeny.error().message());
 
-    ToolDescriptor mismatched = ToolGatewayTestSupport.platformDescriptor("demo");
+    ToolDescriptor mismatched = ToolGatewayTestSupport.hostDescriptor("demo");
     ToolGateway.Deny mismatchDeny =
         assertInstanceOf(
             ToolGateway.Deny.class,
             gateway.preflight(
                 new ToolInvocationRequest(
                     new ToolCall("mismatch", "demo", "{}"),
-                    new ToolBinding(mismatched, ToolType.PLATFORM, null))));
+                    new ToolBinding(hostDefinition(mismatched), null, null))));
     // 两个请求都在 evaluator 前收敛；mock 没有任何交互，证明未知/漂移 descriptor 不会产生评估副作用。
-    assertEquals(PlatformToolGateway.TOOL_DESCRIPTOR_MISMATCH_KIND, mismatchDeny.error().kind());
+    assertEquals(PlatformToolGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
     assertEquals(
-        "Frozen tool demo@1 does not match its catalog descriptor.",
+        "Frozen tool definition test.host-tool does not match its catalog definition.",
         mismatchDeny.error().message());
     verifyNoInteractions(evaluator);
   }
@@ -197,7 +206,7 @@ class PlatformToolGatewayPreflightTest {
     try {
       PlatformToolGateway gateway =
           ToolGatewayTestSupport.gateway(factories, transport, store, executor);
-      ToolInvocationRequest request = ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR);
+      ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
       gateway.preflight(request);
       // preflight 不触碰 transport / factories / store；start 使用同一冻结 request 实例执行。
       assertTrue(transport.invocations.isEmpty());
@@ -222,7 +231,7 @@ class PlatformToolGatewayPreflightTest {
 
   @Test
   void environmentWorkspaceBecomesDefaultWorkdirForAskPreview() {
-    // ENVIRONMENT tool 的权限上下文必须体现冻结 binding 的 workspace：Ask reason 的默认 workdir 是
+    // ENVIRONMENT_CAPABILITY tool 的权限上下文必须体现冻结 binding 的 workspace：Ask reason 的默认 workdir 是
     // environmentRoot 下的 canonical workspacePath，而不是 server 默认 workdir。
     EnvironmentBinding binding = new EnvironmentBinding(new EnvironmentName("env-1"), "repo/sub");
     ToolGateway.PreflightResult result =
@@ -264,7 +273,7 @@ class PlatformToolGatewayPreflightTest {
 
   @Test
   void platformPreflightKeepsServerDefaultWorkdir() {
-    // PLATFORM 行为不变：权限路径上下文仍使用 server 默认 workdir。
+    // HOST 行为不变：权限路径上下文仍使用 server 默认 workdir。
     ToolGateway.PreflightResult result = preflight(PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
     assertTrue(ask.reason().contains("/workspace (default)"), ask.reason());
@@ -296,7 +305,7 @@ class PlatformToolGatewayPreflightTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "read", argumentsJson),
-            new ToolBinding(descriptor, ToolType.ENVIRONMENT, environment));
+            new ToolBinding(environmentDefinition(descriptor), environment, null));
     return gateway.preflight(request);
   }
 
@@ -315,7 +324,7 @@ class PlatformToolGatewayPreflightTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "demo", "{\"path\":\"/tmp/x\"}"),
-            new ToolBinding(PREFLIGHT_DESCRIPTOR, ToolType.PLATFORM, null));
+            new ToolBinding(hostDefinition(PREFLIGHT_DESCRIPTOR), null, null));
     return gateway.preflight(request);
   }
 
@@ -350,8 +359,24 @@ class PlatformToolGatewayPreflightTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "x", "{\"path\":\"/tmp/x\"}"),
-            new ToolBinding(descriptor, ToolType.PLATFORM, null));
+            new ToolBinding(hostDefinition(descriptor), null, null));
     return gateway.preflight(request);
+  }
+
+  private static AgentToolDefinition hostDefinition(ToolDescriptor descriptor) {
+    return new AgentToolDefinition(
+        ToolGatewayTestSupport.TEST_TOOL_ID,
+        descriptor,
+        ToolVisibility.SELECTABLE,
+        AgentToolBackend.HOST);
+  }
+
+  private static AgentToolDefinition environmentDefinition(ToolDescriptor descriptor) {
+    return EnvironmentToolCatalog.entries().stream()
+        .filter(entry -> entry.definition().descriptor().equals(descriptor))
+        .findFirst()
+        .orElseThrow()
+        .definition();
   }
 
   /** 判断字符串是否包含未配对 surrogate（被劈开的代理对）。 */

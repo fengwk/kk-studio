@@ -26,8 +26,7 @@ import java.util.concurrent.TimeUnit;
  */
 class PlatformToolGatewayConstructionTest {
 
-  private static final ToolDescriptor DESCRIPTOR =
-      ToolGatewayTestSupport.platformDescriptor("demo");
+  private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
 
   @Test
   void productionPropertiesConstructorResolvesAndNormalizesWorkdir() {
@@ -47,7 +46,7 @@ class PlatformToolGatewayConstructionTest {
     ToolGateway.Ask ask =
         assertInstanceOf(
             ToolGateway.Ask.class,
-            gateway.preflight(ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)));
+            gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)));
     assertTrue(ask.reason().contains("/env-root/sub/deep"), ask.reason());
   }
 
@@ -133,7 +132,7 @@ class PlatformToolGatewayConstructionTest {
       ToolGateway.StartResult started =
           gateway.start(
               ToolGatewayTestSupport.execution(
-                  ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR)),
+                  ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
               new ToolGatewayTestSupport.RecordingListener());
       ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
       startedResult.handle().activate();
