@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.definition.configuration;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +28,7 @@ public class AgentDefinitionConfigCodec {
   public AgentDefinitionConfigCodec(ObjectMapper objectMapper) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     ObjectMapper strictMapper = objectMapper.copy();
+    strictMapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     strictMapper.disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT);
     strictMapper.enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     strictMapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);

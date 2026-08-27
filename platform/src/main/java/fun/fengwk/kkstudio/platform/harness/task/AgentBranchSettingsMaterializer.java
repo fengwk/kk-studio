@@ -32,7 +32,7 @@ public final class AgentBranchSettingsMaterializer implements SubagentBranchSett
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
   }
 
-  public BranchSettings materialize(String agentName, EnvironmentBinding environment, int depth) {
+  public BranchSettings materialize(String agentName, EnvironmentBinding environment) {
     AgentDefinition agent = agentRepository.getByName(agentName);
     if (agent == null) {
       throw new IllegalArgumentException("subagent not found: " + agentName);

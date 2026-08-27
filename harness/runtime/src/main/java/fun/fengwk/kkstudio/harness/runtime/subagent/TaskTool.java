@@ -190,11 +190,11 @@ public final class TaskTool implements Tool {
                     request.context().invocationId());
             sourceHeadEntryId = child.thread().headEntryId();
           } else {
-            child = resumeChild(runtime, parent, selected.name(), resumeThreadId);
+            child = resumeChild(runtime, parent, resumeThreadId);
             // 恢复子 Session：目标 Agent 可切换，完整 settings diff + prompt 在一次 THREAD 接受中提交。
             BranchSettings target =
                 settingsMaterializer.materialize(
-                    selected.name(), child.entryPath().baseSettings().environment(), depth(child));
+                    selected.name(), child.entryPath().baseSettings().environment());
             List<NewThreadCommand> commands =
                 taskCommands(child.entryPath().baseSettings(), target, arguments.prompt());
             sourceHeadEntryId = child.thread().headEntryId();
@@ -329,7 +329,8 @@ public final class TaskTool implements Tool {
             waitNanos = 0L;
           }
           if (idleDeadlineNanos != Long.MAX_VALUE) {
-            // idle 到期由限时等待本身唤醒：timeout wake 不读 durable snapshot，按缓存 active-tools 语义触发。
+            // idle 到期由限时等待本身唤醒：timeout wake 不读 durable snapshot，按缓存 active tool
+            // invocation/tool-sibling 状态触发。
             waitNanos = Math.min(waitNanos, Math.max(0L, idleDeadlineNanos - now));
           }
           ChangeGate.State before = since;
@@ -375,7 +376,8 @@ public final class TaskTool implements Tool {
               nextReminderTurn = Math.addExact(nextReminderTurn, MAX_TURNS_REMINDER_INTERVAL);
             }
           }
-          // idle 检查对任何 wake 类别都生效（含限时等待自然到期）；deadline 依据缓存 snapshot 的 active-tools 语义
+          // idle 检查对任何 wake 类别都生效（含限时等待自然到期）；deadline 依据缓存 snapshot 的 active tool
+          // invocation/tool-sibling 语义
           // 计算，到期时不重读 durable snapshot。
           if (snapshot != null
               && snapshot.toolSiblings().isEmpty()
@@ -455,7 +457,7 @@ public final class TaskTool implements Tool {
     int childDepth = parent.depth() + 1;
     BranchSettings settings =
         settingsMaterializer.materialize(
-            subagentType, parent.snapshot().entryPath().baseSettings().environment(), childDepth);
+            subagentType, parent.snapshot().entryPath().baseSettings().environment());
     // NEW_SESSION 一次原子物化 Session/ROOT/Thread/初始 prompt Command 与 THREAD Work。
     try {
       AcceptedCommands accepted =
@@ -479,8 +481,7 @@ public final class TaskTool implements Tool {
     }
   }
 
-  private ThreadSnapshot resumeChild(
-      HarnessRuntime runtime, ParentContext parent, String subagentType, UUID threadId) {
+  private ThreadSnapshot resumeChild(HarnessRuntime runtime, ParentContext parent, UUID threadId) {
     ThreadSnapshot snapshot;
     try {
       snapshot = runtime.getThreadSnapshot(threadId);
@@ -501,9 +502,6 @@ public final class TaskTool implements Tool {
             && end.continueModel())) {
       throw reject("subagent session \"" + threadId + "\" is not quiescent");
     }
-    // 目标 Agent 可在恢复时切换；完整 settings diff 与 prompt 在同一 command batch 中提交。
-    settingsMaterializer.materialize(
-        subagentType, snapshot.entryPath().baseSettings().environment(), context.depth());
     return snapshot;
   }
 
