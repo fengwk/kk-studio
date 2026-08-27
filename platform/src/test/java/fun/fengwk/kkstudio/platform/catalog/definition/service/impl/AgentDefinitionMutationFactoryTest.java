@@ -30,7 +30,7 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinition definition = factory.newAgent("agent", create);
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
-    assertEquals(List.of("browser"), stored.getTools());
+    assertEquals(List.of("browser"), stored.getToolIds());
     assertEquals(List.of("java", "dev"), stored.getSkills());
     assertEquals("provider", definition.getModelProviderName());
     assertEquals("model", definition.getModelName());
@@ -60,7 +60,7 @@ public class AgentDefinitionMutationFactoryTest {
     create.setConfig(config(List.of(" read "), List.of()));
     error = assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
     assertEquals(
-        "agent definition config tools must not contain surrounding whitespace",
+        "agent definition config toolIds must contain canonical AgentToolIds:  read ",
         error.getMessage());
   }
 
@@ -107,9 +107,9 @@ public class AgentDefinitionMutationFactoryTest {
     return create;
   }
 
-  private static AgentDefinitionConfigDTO config(List<String> tools, List<String> skills) {
+  private static AgentDefinitionConfigDTO config(List<String> toolIds, List<String> skills) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(tools);
+    config.setToolIds(toolIds);
     config.setSkills(skills);
     config.setSubagents(List.of());
     return config;

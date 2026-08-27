@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
@@ -274,8 +273,7 @@ class HarnessRuntimeAcceptInitialTest {
   }
 
   /**
-   * SET_* 前缀固定顺序必须是 SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL -&gt; SET_ACTIVE_TOOLS：
-   * 用正反两个请求证明该顺序（正向通过 / 反向 IAE）。
+   * SET_* 前缀固定顺序必须是 SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL： 用正反两个请求证明该顺序（正向通过 / 反向 IAE）。
    */
   @Test
   void setPrefixOrderRequiresEnvironmentFirst() {
@@ -291,9 +289,7 @@ class HarnessRuntimeAcceptInitialTest {
                     new NewThreadCommand(
                         new SetModelCommandPayload(new ModelSelection("acme", "gpt-x", "default")),
                         TestIds.id(3)),
-                    new NewThreadCommand(
-                        new SetActiveToolsCommandPayload(List.of()), TestIds.id(4)),
-                    userMessageCommand(TestIds.id(5), "hi"))),
+                    userMessageCommand(TestIds.id(4), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(result.replayed());
     // 非法：SET_ENVIRONMENT 出现在 SET_AGENT 之后（顺序不变量拒绝）。

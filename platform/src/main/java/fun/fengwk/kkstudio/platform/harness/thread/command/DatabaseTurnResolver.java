@@ -35,14 +35,15 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
-import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
@@ -70,7 +71,6 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -78,7 +78,7 @@ import java.util.UUID;
  * {@link ModelRequestSpec}、contextWindow 与 maxOutputTokens。
  *
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environment binding / agentName / {@link
- * ModelSelection}）；实现按这些精确引用读取最新 catalog / environment 事实，Agent 的 tools/skills/subagents 每个新 turn
+ * ModelSelection}）；实现按这些精确引用读取最新 catalog / environment 事实，Agent 的 toolIds/skills/subagents 每个新 turn
  * 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。environment 是完整 binding（路由名 + workspace path），为最新
  * branch 的不可变事实：ENVIRONMENT 工具一律按最新 {@code settings.environment()} 绑定（可为 null 或当前不可用，实际执行时
  * 失败）；Agent skills 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch
@@ -208,11 +208,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Instant now = clock.instant();
     CurrentEnvironmentContext currentEnvironment =
         resolveCurrentEnvironment(settings.environment(), now);
-    List<String> activeTools = activeTools(agentConfig, path);
     List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), settings, now);
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents(), path);
-    List<ToolBinding> toolBindings =
-        resolveTools(settings, activeTools, !subagentBindings.isEmpty());
+    List<AgentToolId> toolIds = resolveToolIds(agentConfig, path);
+    List<ToolBinding> toolBindings = resolveTools(settings, toolIds);
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
       throw rejection(
@@ -373,18 +372,33 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
   }
 
-  /** 从最新 Agent 配置派生本 turn 的工具集合；内部工具只在对应能力当前可用时追加。 */
-  private List<String> activeTools(AgentDefinitionConfigDTO config, EntryPath path) {
-    List<String> activeTools = new ArrayList<>(config.getTools());
-    if (!config.getSkills().isEmpty() && !activeTools.contains(LoadSkillTool.NAME)) {
-      activeTools.add(LoadSkillTool.NAME);
+  /** 从最新 Agent 配置派生本 turn 的稳定工具身份；内部工具只在对应能力当前启用时追加。 */
+  private List<AgentToolId> resolveToolIds(AgentDefinitionConfigDTO config, EntryPath path) {
+    List<AgentToolId> toolIds = new ArrayList<>(config.getToolIds().size() + 2);
+    for (String value : config.getToolIds()) {
+      AgentToolId id;
+      try {
+        id = new AgentToolId(value);
+      } catch (RuntimeException error) {
+        throw rejection("invalid agent tool id: " + value);
+      }
+      AgentToolRegistry.Entry entry = toolRegistry.find(id).orElse(null);
+      if (entry == null) {
+        throw rejection("tool not found: " + id);
+      }
+      if (entry.definition().visibility() != ToolVisibility.SELECTABLE) {
+        throw rejection("internal tool cannot be selected by an Agent: " + id);
+      }
+      toolIds.add(id);
+    }
+    if (!config.getSkills().isEmpty()) {
+      toolIds.add(BaseToolIds.LOAD_SKILL);
     }
     if (!config.getSubagents().isEmpty()
-        && sessionDepth(path) < subagentConfigProvider.subagentConfig().maxDepth()
-        && !activeTools.contains(TaskTool.NAME)) {
-      activeTools.add(TaskTool.NAME);
+        && sessionDepth(path) < subagentConfigProvider.subagentConfig().maxDepth()) {
+      toolIds.add(BaseToolIds.TASK);
     }
-    return List.copyOf(activeTools);
+    return List.copyOf(toolIds);
   }
 
   /**
@@ -392,30 +406,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * settings.environment()} binding（可为 null 或当前不可用——实际执行时确定性失败）；HOST/PLUGIN 工具冻结 registry entry 的完整
    * definition。缺失能力仍立即拒绝，绝不静默跳过。
    */
-  private List<ToolBinding> resolveTools(
-      BranchSettings settings, List<String> activeTools, boolean subagentDelegationEnabled) {
-    List<ToolBinding> bindings = new ArrayList<>(activeTools.size());
-    for (String name : activeTools) {
-      if (name.equals(TaskTool.NAME) && !subagentDelegationEnabled) {
-        throw rejection(
-            "task requires a non-empty Agent subagents allowlist below the maximum depth");
+  private List<ToolBinding> resolveTools(BranchSettings settings, List<AgentToolId> toolIds) {
+    List<ToolBinding> bindings = new ArrayList<>(toolIds.size());
+    for (AgentToolId id : toolIds) {
+      AgentToolRegistry.Entry entry = toolRegistry.find(id).orElse(null);
+      if (entry == null) {
+        throw rejection("tool not found: " + id);
       }
-      Optional<AgentToolRegistry.Entry> selectable = toolRegistry.findSelectable(name);
-      if (selectable.isPresent()) {
-        AgentToolRegistry.Entry entry = selectable.get();
-        if (entry.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY) {
-          bindings.add(new ToolBinding(entry.definition(), settings.environment(), null));
-        } else {
-          bindings.add(hostOrPluginBinding(entry));
-        }
-        continue;
+      if (entry.definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY) {
+        bindings.add(new ToolBinding(entry.definition(), settings.environment(), null));
+      } else {
+        bindings.add(hostOrPluginBinding(entry));
       }
-      Optional<AgentToolRegistry.Entry> internal = toolRegistry.findInternal(name);
-      if (internal.isPresent()) {
-        bindings.add(hostOrPluginBinding(internal.get()));
-        continue;
-      }
-      throw rejection("tool not found: " + name);
     }
     return List.copyOf(bindings);
   }

@@ -28,10 +28,7 @@ class CommandHarvestReducerTest {
       EnvironmentBindings.binding("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   private static final BranchSettings BASE =
       new BranchSettings(
-          ENV_A,
-          "coding",
-          new ModelSelection("anthropic", "claude-sonnet", "default"),
-          List.of("read"));
+          ENV_A, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
   private final CommandHarvestReducer reducer = new CommandHarvestReducer();
 
   @Test
@@ -53,18 +50,13 @@ class CommandHarvestReducerTest {
                     5L,
                     new SetModelCommandPayload(
                         new ModelSelection("anthropic", "claude-opus", "thinking"))),
-                queued(
-                    id(6L), 6L, new SetActiveToolsCommandPayload(List.of("grep", "read", "grep"))),
-                queued(id(7L), 7L, new SetEnvironmentCommandPayload(ENV_B)),
-                queued(id(8L), 8L, new SetEnvironmentCommandPayload(null)),
-                queued(id(9L), 9L, new CustomMessageCommandPayload(system("instruction")))));
+                queued(id(6L), 6L, new SetEnvironmentCommandPayload(ENV_B)),
+                queued(id(7L), 7L, new SetEnvironmentCommandPayload(null)),
+                queued(id(8L), 8L, new CustomMessageCommandPayload(system("instruction")))));
 
     assertEquals(
         new BranchSettings(
-            null,
-            "agent-b",
-            new ModelSelection("anthropic", "claude-opus", "thinking"),
-            List.of("grep", "read")),
+            null, "agent-b", new ModelSelection("anthropic", "claude-opus", "thinking")),
         result.branchSettings());
   }
 
@@ -83,7 +75,6 @@ class CommandHarvestReducerTest {
     assertEquals(ENV_A, result.branchSettings().environment());
     assertEquals("coding", result.branchSettings().agentName());
     assertEquals(replacement, result.branchSettings().model());
-    assertEquals(List.of("read"), result.branchSettings().activeTools());
   }
 
   @Test

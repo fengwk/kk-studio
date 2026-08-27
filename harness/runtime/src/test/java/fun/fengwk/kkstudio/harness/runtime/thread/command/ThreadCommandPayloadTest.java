@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /** 类型化 command payload 的 role、字段与防御性拷贝不变量。 */
@@ -34,14 +33,12 @@ class ThreadCommandPayloadTest {
             ThreadCommandType.CUSTOM_MESSAGE,
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL,
-            ThreadCommandType.SET_ACTIVE_TOOLS,
             ThreadCommandType.SET_ENVIRONMENT),
         List.of(
                 new UserMessageCommandPayload(user("hello")),
                 new CustomMessageCommandPayload(system("system")),
                 new SetAgentCommandPayload("coding"),
                 new SetModelCommandPayload(MODEL),
-                new SetActiveToolsCommandPayload(List.of("read")),
                 new SetEnvironmentCommandPayload(ENV))
             .stream()
             .map(ThreadCommandPayload::type)
@@ -84,20 +81,6 @@ class ThreadCommandPayloadTest {
     assertTrue(ThreadCommandType.USER_MESSAGE.isMessage());
     assertTrue(ThreadCommandType.CUSTOM_MESSAGE.isMessage());
     assertFalse(ThreadCommandType.SET_AGENT.isMessage());
-  }
-
-  @Test
-  void activeToolsAreOrderedDeduplicatedAndDefensivelyCopied() {
-    List<String> source = new ArrayList<>(List.of("read", "grep", "read"));
-    SetActiveToolsCommandPayload payload = new SetActiveToolsCommandPayload(source);
-    source.add("bash");
-
-    assertEquals(List.of("read", "grep"), payload.activeTools());
-    assertThrows(UnsupportedOperationException.class, () -> payload.activeTools().add("bash"));
-    assertThrows(
-        NullPointerException.class, () -> new SetActiveToolsCommandPayload(List.of("read", null)));
-    assertThrows(
-        IllegalArgumentException.class, () -> new SetActiveToolsCommandPayload(List.of(" read")));
   }
 
   private static AgentMessage user(String text) {

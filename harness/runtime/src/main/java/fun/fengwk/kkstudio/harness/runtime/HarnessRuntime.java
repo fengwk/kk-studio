@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
@@ -63,16 +62,12 @@ public final class HarnessRuntime {
 
   private static final Consumer<UUID> NO_OP_CANCELLER = ignored -> {};
 
-  /**
-   * SET_* prefix 的固定顺序：SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL -&gt;
-   * SET_ACTIVE_TOOLS，每类至多一次、全部在消息之前。
-   */
+  /** SET_* prefix 的固定顺序：SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL，每类至多一次、全部在消息之前。 */
   private static final List<ThreadCommandType> SET_PREFIX_ORDER =
       List.of(
           ThreadCommandType.SET_ENVIRONMENT,
           ThreadCommandType.SET_AGENT,
-          ThreadCommandType.SET_MODEL,
-          ThreadCommandType.SET_ACTIVE_TOOLS);
+          ThreadCommandType.SET_MODEL);
 
   private final HarnessStore store;
   private final Clock clock;
@@ -564,8 +559,8 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_ENVIRONMENT -&gt; SET_AGENT -&gt; SET_MODEL -&gt;
-   * SET_ACTIVE_TOOLS）、至多一次且全部出现在消息之前；初始 target 必须恰有一条 user-like message 结尾（SYSTEM CUSTOM_MESSAGE
+   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_ENVIRONMENT -&gt; SET_AGENT -&gt;
+   * SET_MODEL）、至多一次且全部出现在消息之前；初始 target 必须恰有一条 user-like message 结尾（SYSTEM CUSTOM_MESSAGE
    * 只允许在前缀）；THREAD 要么是恰一条 SYSTEM CUSTOM_MESSAGE steering，要么是不含 SYSTEM CUSTOM_MESSAGE、<b>恰有一条</b>末尾
    * user-like 的用户 batch。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException} 而非业务冲突。
    */
@@ -579,7 +574,6 @@ public final class HarnessRuntime {
       ThreadCommandPayload payload = command.payload();
       if (payload instanceof SetAgentCommandPayload
           || payload instanceof SetModelCommandPayload
-          || payload instanceof SetActiveToolsCommandPayload
           || payload instanceof SetEnvironmentCommandPayload) {
         if (sawMessage) {
           throw invalidBatch(target, "SET_* commands must precede all messages");

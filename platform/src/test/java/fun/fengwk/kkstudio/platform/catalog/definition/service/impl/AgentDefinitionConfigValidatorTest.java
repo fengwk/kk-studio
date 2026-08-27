@@ -27,10 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Agent 配置的静态校验：工具名必须来自统一 AgentToolRegistry 或固定的 {@link EnvironmentToolCatalog}，且 skill
- * 名必须遵守有界长度规则。
- */
+/** Agent 配置的静态校验：工具 ID 必须来自统一 AgentToolRegistry 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
 class AgentDefinitionConfigValidatorTest {
 
   private static final AgentToolId CUSTOM_TOOL_ID = new AgentToolId("test.custom-tool");
@@ -41,11 +38,12 @@ class AgentDefinitionConfigValidatorTest {
       new AgentToolId("test.duplicate-second");
 
   @Test
-  void acceptsEnvironmentAndHostToolNames() {
-    String envTool = EnvironmentToolCatalog.descriptors().get(0).name();
+  void acceptsEnvironmentAndHostToolIds() {
+    String environmentToolId =
+        EnvironmentToolCatalog.entries().getFirst().definition().id().toString();
     try (Fixture fixture = new Fixture(List.of(hostTool("create_goal", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setTools(List.of(envTool, "create_goal"));
+      config.setToolIds(List.of(environmentToolId, CUSTOM_TOOL_ID.toString()));
       config.setSkills(List.of("dev", "ops"));
       config.setSubagents(List.of("reviewer"));
       assertDoesNotThrow(() -> fixture.validator.validate(config));
@@ -53,16 +51,16 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   @Test
-  void rejectsUnknownToolName() {
+  void rejectsUnknownToolId() {
     try (Fixture fixture = new Fixture(List.of(hostTool("create_goal", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setTools(List.of("missing"));
+      config.setToolIds(List.of("test.missing"));
       config.setSkills(List.of());
       config.setSubagents(List.of());
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
               .getMessage()
-              .contains("unknown agent tool"));
+              .contains("unknown agent tool id"));
     }
   }
 
@@ -71,7 +69,7 @@ class AgentDefinitionConfigValidatorTest {
     try (Fixture fixture = new Fixture(List.of())) {
       String tooLong = "x".repeat(129);
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setTools(List.of());
+      config.setToolIds(List.of());
       config.setSkills(List.of(tooLong));
       config.setSubagents(List.of());
       assertTrue(
@@ -85,7 +83,7 @@ class AgentDefinitionConfigValidatorTest {
   void rejectsInternalToolSelection() {
     try (Fixture fixture = new Fixture(List.of(hostTool("create_goal", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setTools(List.of("load_skill"));
+      config.setToolIds(List.of(LOAD_SKILL_TOOL_ID.toString()));
       config.setSkills(List.of());
       config.setSubagents(List.of());
 
@@ -99,7 +97,7 @@ class AgentDefinitionConfigValidatorTest {
   void rejectsSubagentNameExceeding64Characters() {
     try (Fixture fixture = new Fixture(List.of())) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setTools(List.of());
+      config.setToolIds(List.of());
       config.setSkills(List.of());
       config.setSubagents(List.of("x".repeat(65)));
 

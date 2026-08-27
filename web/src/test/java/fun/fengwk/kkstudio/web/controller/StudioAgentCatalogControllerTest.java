@@ -116,7 +116,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertFalse(modelData.has("modelId"));
 
     AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
-    agentConfig.setTools(List.of());
+    agentConfig.setToolIds(List.of());
     agentConfig.setSkills(List.of());
     agentConfig.setSubagents(List.of());
     AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
@@ -137,7 +137,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.id").doesNotExist())
                 .andExpect(jsonPath("$.data.modelId").doesNotExist())
                 .andExpect(jsonPath("$.data.providerId").doesNotExist())
-                .andExpect(jsonPath("$.data.config.tools").isEmpty())
+                .andExpect(jsonPath("$.data.config.toolIds").isEmpty())
                 .andExpect(jsonPath("$.data.config.skills").isEmpty())
                 .andExpect(jsonPath("$.data.config.subagents").isEmpty())
                 .andExpect(jsonPath("$.data.version").value("0"))
@@ -348,7 +348,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
   public void shouldRejectMalformedModelRefsAndDatabaseIdContracts() throws Exception {
     String suffix = Long.toString(System.nanoTime());
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
+    config.setToolIds(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
 

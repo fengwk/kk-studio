@@ -31,7 +31,7 @@ public class AgentDefinitionConverterTest {
 
     invalid.setName("agent");
     invalid.setVersion(0L);
-    invalid.setConfigJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}");
+    invalid.setConfigJson("{\"toolIds\":[],\"skills\":[],\"subagents\":[]}");
     assertEquals("provider/model", converter.convert(invalid).getModel());
   }
 }

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.util.HashSet;
@@ -71,9 +72,28 @@ public class AgentDefinitionConfigCodec {
     if (config == null) {
       throw new IllegalArgumentException("agent definition config is required");
     }
-    validateNames(config.getTools(), "tools");
+    validateToolIds(config.getToolIds());
     validateNames(config.getSkills(), "skills");
     validateNames(config.getSubagents(), "subagents");
+  }
+
+  private static void validateToolIds(List<String> values) {
+    if (values == null) {
+      throw new IllegalArgumentException("agent definition config toolIds is required");
+    }
+    Set<String> seen = new HashSet<>();
+    for (String value : values) {
+      try {
+        new AgentToolId(value);
+      } catch (RuntimeException error) {
+        throw new IllegalArgumentException(
+            "agent definition config toolIds must contain canonical AgentToolIds: " + value, error);
+      }
+      if (!seen.add(value)) {
+        throw new IllegalArgumentException(
+            "agent definition config toolIds must not contain duplicates: " + value);
+      }
+    }
   }
 
   private static void validateNames(List<String> values, String field) {

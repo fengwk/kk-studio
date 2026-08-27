@@ -42,6 +42,5 @@ class RuntimeToolsWiringTest extends PostgresSpringTestSupport {
         TaskTool.AGENT_TOOL_ID, toolRegistry.find(TaskTool.AGENT_TOOL_ID).orElseThrow().id());
     assertTrue(toolRegistry.find(new AgentToolId("test.create-goal")).isEmpty());
     assertTrue(pluginCatalog.tools().isEmpty());
-    assertTrue(toolRegistry.findSelectable("create_goal").isEmpty());
   }
 }

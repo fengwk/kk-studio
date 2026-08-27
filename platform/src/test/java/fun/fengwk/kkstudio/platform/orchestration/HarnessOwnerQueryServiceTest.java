@@ -52,7 +52,7 @@ class HarnessOwnerQueryServiceTest {
   private static final Instant T4 = Instant.parse("2026-01-01T00:00:04Z");
   private static final BranchSettings ROOT_SETTINGS =
       new BranchSettings(
-          null, "assistant", new ModelSelection("provider", "root-model", "default"), List.of());
+          null, "assistant", new ModelSelection("provider", "root-model", "default"));
 
   private ChatRepository chatRepository;
   private ChatSessionRepository chatSessionRepository;
@@ -173,8 +173,7 @@ class HarnessOwnerQueryServiceTest {
     UUID sessionId = id(30);
     UUID threadId = id(31);
     BranchSettings turnSettings =
-        new BranchSettings(
-            null, "assistant", new ModelSelection("provider", "turn-model", "fast"), List.of());
+        new BranchSettings(null, "assistant", new ModelSelection("provider", "turn-model", "fast"));
     Entry root = root(sessionId, id(501), T0, ROOT_SETTINGS);
     Entry turnStart =
         new Entry(

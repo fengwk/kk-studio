@@ -18,13 +18,13 @@ class AgentDefinitionConfigCodecTest {
   @Test
   void roundTripsCompleteConfig() {
     AgentDefinitionConfigDTO config = config();
-    config.setTools(List.of("read"));
+    config.setToolIds(List.of("base.read"));
     config.setSkills(List.of("dev"));
     config.setSubagents(List.of("reviewer"));
 
     AgentDefinitionConfigDTO decoded = codec.decode(codec.encode(config));
 
-    assertEquals(List.of("read"), decoded.getTools());
+    assertEquals(List.of("base.read"), decoded.getToolIds());
     assertEquals(List.of("dev"), decoded.getSkills());
     assertEquals(List.of("reviewer"), decoded.getSubagents());
   }
@@ -33,9 +33,9 @@ class AgentDefinitionConfigCodecTest {
   void rejectsIncompleteAndNonCanonicalTypedConfigs() {
     assertThrows(IllegalArgumentException.class, () -> codec.encode(null));
 
-    AgentDefinitionConfigDTO missingTools = config();
-    missingTools.setTools(null);
-    assertThrows(IllegalArgumentException.class, () -> codec.encode(missingTools));
+    AgentDefinitionConfigDTO missingToolIds = config();
+    missingToolIds.setToolIds(null);
+    assertThrows(IllegalArgumentException.class, () -> codec.encode(missingToolIds));
 
     AgentDefinitionConfigDTO missingSkills = config();
     missingSkills.setSkills(null);
@@ -50,7 +50,7 @@ class AgentDefinitionConfigCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.encode(duplicate));
 
     AgentDefinitionConfigDTO whitespace = config();
-    whitespace.setTools(List.of(" helper "));
+    whitespace.setToolIds(List.of(" base.read "));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(whitespace));
   }
 
@@ -62,18 +62,21 @@ class AgentDefinitionConfigCodecTest {
     assertThrows(IllegalStateException.class, () -> codec.decode("{}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[],\"unknown\":true}"));
+        () -> codec.decode("{\"toolIds\":[],\"skills\":[],\"subagents\":[],\"unknown\":true}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"tools\":[42],\"skills\":[],\"subagents\":[]}"));
+        () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[]}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[]} {}"));
+        () -> codec.decode("{\"toolIds\":[42],\"skills\":[],\"subagents\":[]}"));
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode("{\"toolIds\":[],\"skills\":[],\"subagents\":[]} {}"));
   }
 
   private static AgentDefinitionConfigDTO config() {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
+    config.setToolIds(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     return config;

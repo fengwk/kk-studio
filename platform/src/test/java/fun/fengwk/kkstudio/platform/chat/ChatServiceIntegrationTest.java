@@ -136,8 +136,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                           new BranchSettings(
                               null,
                               "default-assistant",
-                              new ModelSelection("stub", "acceptance-stub", "default"),
-                              List.of())),
+                              new ModelSelection("stub", "acceptance-stub", "default"))),
                       Instant.parse("2026-08-02T00:00:00Z"))));
       TurnResolver.Result resolution = turnResolver.resolve(THREAD_ID, path, null);
       TurnResolver.Rejected rejected = assertInstanceOf(TurnResolver.Rejected.class, resolution);
@@ -151,7 +150,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       rebound.setModel("stub/acceptance-stub");
       rebound.setVariant("default");
       AgentDefinitionConfigDTO reboundConfig = new AgentDefinitionConfigDTO();
-      reboundConfig.setTools(List.of());
+      reboundConfig.setToolIds(List.of());
       reboundConfig.setSkills(List.of());
       reboundConfig.setSubagents(List.of());
       rebound.setConfig(reboundConfig);

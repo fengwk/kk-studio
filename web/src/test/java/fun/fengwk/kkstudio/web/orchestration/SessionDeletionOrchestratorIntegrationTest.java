@@ -182,10 +182,7 @@ class SessionDeletionOrchestratorIntegrationTest extends S3WebPostgresTestSuppor
 
   private static BranchSettings settings() {
     return new BranchSettings(
-        null,
-        "default-assistant",
-        new ModelSelection("stub", "acceptance-stub", "default"),
-        List.of());
+        null, "default-assistant", new ModelSelection("stub", "acceptance-stub", "default"));
   }
 
   private UUID createChat(String title) {

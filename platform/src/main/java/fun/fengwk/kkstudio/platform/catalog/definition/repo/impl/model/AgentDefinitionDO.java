@@ -26,7 +26,7 @@ public class AgentDefinitionDO {
   /** 可选 Variant 覆盖（null/空表示不覆盖，运行时解析为 Model 配置的 defaultVariant）。 */
   private String variant;
 
-  /** 可执行配置 JSON（tools/skills 短名列表），映射 {@code config} jsonb 列，必填。 */
+  /** 可执行配置 JSON（toolIds/skills/subagents 列表），映射 {@code config} jsonb 列，必填。 */
   private String configJson;
 
   /** 乐观锁行版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据。 */

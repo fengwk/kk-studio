@@ -77,7 +77,6 @@ import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -337,8 +336,8 @@ class TaskToolTest {
   void createsDurableChildAndReturnsCompletedReport() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings parentSettings = settings("parent", "parent-model", List.of(TaskTool.NAME));
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings parentSettings = settings("parent", "parent-model");
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(parentSettings, List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
@@ -402,7 +401,7 @@ class TaskToolTest {
     this.runtime = runtime;
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
+            settings("parent", "parent-model"),
             List.of(
                 new SubagentBinding("reviewer", "Review"),
                 new SubagentBinding("researcher", "Research")));
@@ -444,12 +443,11 @@ class TaskToolTest {
   void resumesQuiescentChildSessionWithFullSettingsDiff() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings base = settings("alpha", "model-a", List.of("tool-a"));
-    BranchSettings target = settings("beta", "model-b", List.of("tool-b"));
+    BranchSettings base = settings("alpha", "model-a");
+    BranchSettings target = settings("beta", "model-b");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot resumed = quiescentResumeSnapshot(base, SUBAGENT_CONTEXT, false, id(34), 5L);
     ThreadSnapshot terminal = resumeTerminalSnapshot(resumed, "resumed and finished");
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
@@ -479,7 +477,7 @@ class TaskToolTest {
     assertEquals(RESUME_THREAD_ID, threadTarget.threadId());
     assertEquals(id(34), threadTarget.expectedHeadEntryId());
     assertEquals(2L, threadTarget.expectedNextCommandSequence());
-    assertEquals(4, accept.commands().size());
+    assertEquals(3, accept.commands().size());
     assertNotNull(accept.commands().get(0).clientCommandId());
     assertEquals(
         "beta",
@@ -488,12 +486,8 @@ class TaskToolTest {
     assertEquals(
         new ModelSelection("provider", "model-b", "default"),
         assertInstanceOf(SetModelCommandPayload.class, accept.commands().get(1).payload()).model());
-    assertEquals(
-        List.of("tool-b"),
-        assertInstanceOf(SetActiveToolsCommandPayload.class, accept.commands().get(2).payload())
-            .activeTools());
     UserMessageCommandPayload prompt =
-        assertInstanceOf(UserMessageCommandPayload.class, accept.commands().get(3).payload());
+        assertInstanceOf(UserMessageCommandPayload.class, accept.commands().get(2).payload());
     assertEquals(AgentMessage.user("Continue the work"), prompt.message());
     assertEquals(1, listener.completedCalls.get());
   }
@@ -503,7 +497,7 @@ class TaskToolTest {
   void rejectsResumeOfMissingForeignOrBusySession() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings settings = settings("parent", "parent-model", List.of(TaskTool.NAME));
+    BranchSettings settings = settings("parent", "parent-model");
     ThreadSnapshot parent =
         parentSnapshot(settings, List.of(new SubagentBinding("reviewer", "Review")));
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
@@ -600,7 +594,7 @@ class TaskToolTest {
   void rejectsDelegationBeyondDepthEmptyAllowlistOrDetachedInvocation() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings settings = settings("parent", "parent-model", List.of(TaskTool.NAME));
+    BranchSettings settings = settings("parent", "parent-model");
     ThreadSnapshot deepParent =
         parentSnapshot(
             new SubagentContext(id(7), ROOT_THREAD_ID, id(1), 2),
@@ -678,8 +672,8 @@ class TaskToolTest {
     TaskTool nestedTool = tool(config(3, 10, Duration.ZERO, DEFAULT_MAX_TURNS));
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings parentSettings = settings("parent", "parent-model", List.of(TaskTool.NAME));
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings parentSettings = settings("parent", "parent-model");
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
             new SubagentContext(id(7), ROOT_THREAD_ID, id(1), 2),
@@ -727,7 +721,7 @@ class TaskToolTest {
   void cancelsBeforeChildSessionStarts() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings settings = settings("parent", "parent-model", List.of(TaskTool.NAME));
+    BranchSettings settings = settings("parent", "parent-model");
     ThreadSnapshot parent =
         parentSnapshot(settings, List.of(new SubagentBinding("reviewer", "Review")));
     CountDownLatch entered = new CountDownLatch(1);
@@ -766,11 +760,10 @@ class TaskToolTest {
   void stopsChildAndCompletesCancelledOnUserCancel() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot running =
         runningRootSnapshot(
@@ -839,11 +832,10 @@ class TaskToolTest {
   void retriesCancelOnStaleVersionAndExhaustsRetries() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot runningRev1 =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
@@ -910,11 +902,10 @@ class TaskToolTest {
   void concurrentCancelAndObserverExecuteSingleStopSequence() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot runningRev1 =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
@@ -998,11 +989,10 @@ class TaskToolTest {
   void failsWhenObservationThreadIsInterrupted() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot running =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
@@ -1046,11 +1036,10 @@ class TaskToolTest {
   void ignoresMissingChildWhileCancelling() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot running =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
@@ -1094,11 +1083,10 @@ class TaskToolTest {
   void cancelsAfterChildAttachBeforeAwait() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot running =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
@@ -1150,11 +1138,10 @@ class TaskToolTest {
     TaskTool idleTool = tool(idleConfig, registry);
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot withTool =
         runningRootSnapshot(
@@ -1271,11 +1258,10 @@ class TaskToolTest {
     TaskTool idleTool = tool(idleConfig, registry);
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot idle =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
@@ -1328,11 +1314,10 @@ class TaskToolTest {
     TaskTool liveTool = tool(liveConfig::get);
     liveTool.descriptor();
     liveConfig.set(config(2, 10, Duration.ZERO, 3));
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ModelInvocation model = modelInvocation(id(1));
     ThreadSnapshot threeTurns = turnCountSnapshot(3, model, 1L);
@@ -1397,11 +1382,10 @@ class TaskToolTest {
   void republishesStatusHeartbeatWhileFingerprintIsStable() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot continueHead = continueModelHeadSnapshot(true, 1L);
     ThreadSnapshot terminal = continueModelHeadSnapshot(false, 1L);
@@ -1458,10 +1442,10 @@ class TaskToolTest {
     // FAILED：AssistantErrorPayload 的报告与 TURN_FAILED 边界。
     HarnessRuntime failedRuntime = mock(HarnessRuntime.class);
     this.runtime = failedRuntime;
-    stubCreateFlow(failedRuntime, settings("reviewer", "review-model", List.of("read")));
+    stubCreateFlow(failedRuntime, settings("reviewer", "review-model"));
     stubChildSnapshots(
         failedRuntime,
-        childRootSnapshot(settings("reviewer", "review-model", List.of("read"))),
+        childRootSnapshot(settings("reviewer", "review-model")),
         continueModelHeadSnapshot(true, 1L),
         failedTerminalSnapshot());
     RecordingListener failedListener = new RecordingListener();
@@ -1478,10 +1462,10 @@ class TaskToolTest {
     // STOPPED：AssistantAbortedPayload 文本作为报告。
     HarnessRuntime stoppedRuntime = mock(HarnessRuntime.class);
     this.runtime = stoppedRuntime;
-    stubCreateFlow(stoppedRuntime, settings("reviewer", "review-model", List.of("read")));
+    stubCreateFlow(stoppedRuntime, settings("reviewer", "review-model"));
     stubChildSnapshots(
         stoppedRuntime,
-        childRootSnapshot(settings("reviewer", "review-model", List.of("read"))),
+        childRootSnapshot(settings("reviewer", "review-model")),
         stoppedTerminalSnapshot());
     RecordingListener stoppedListener = new RecordingListener();
     tool.execute(
@@ -1498,10 +1482,10 @@ class TaskToolTest {
     // CANCELLED 无文本报告：fallback 文案兜底；null maxTurns/session_id 走默认值。
     HarnessRuntime cancelledRuntime = mock(HarnessRuntime.class);
     this.runtime = cancelledRuntime;
-    stubCreateFlow(cancelledRuntime, settings("reviewer", "review-model", List.of("read")));
+    stubCreateFlow(cancelledRuntime, settings("reviewer", "review-model"));
     stubChildSnapshots(
         cancelledRuntime,
-        childRootSnapshot(settings("reviewer", "review-model", List.of("read"))),
+        childRootSnapshot(settings("reviewer", "review-model")),
         cancelledTerminalSnapshot());
     RecordingListener cancelledListener = new RecordingListener();
     tool.execute(
@@ -1520,7 +1504,7 @@ class TaskToolTest {
   void exposesWaitingApprovalsAndToolCallStatsInStatus() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     stubCreateFlow(runtime, childSettings);
     ToolApproval waiting = ToolApproval.request(NOW, "needs human");
     ToolApproval decided =
@@ -1556,7 +1540,7 @@ class TaskToolTest {
   void relaysNestedTaskStatusesToTheRootListener() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     stubCreateFlow(runtime, childSettings);
     stubChildSnapshots(
         runtime,
@@ -1601,7 +1585,7 @@ class TaskToolTest {
   void subscribesBeforeObservationReadAndDoesNotLoseConcurrentSignal() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     stubCreateFlow(runtime, childSettings);
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot terminal = completedChildSnapshot(child, "done after race");
@@ -1641,7 +1625,7 @@ class TaskToolTest {
   void wakesOnDescendantRelayWithoutRereadingDurableSnapshot() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     stubCreateFlow(runtime, childSettings);
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot terminal = completedChildSnapshot(child, "done after relay");
@@ -1749,10 +1733,10 @@ class TaskToolTest {
   void rejectsPromptEnqueueConflictThenRecovers() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
+            settings("parent", "parent-model"),
             List.of(new SubagentBinding(childSettings.agentName(), "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     ThreadSnapshot terminal = completedChildSnapshot(child, "recovered report");
@@ -1802,8 +1786,7 @@ class TaskToolTest {
     this.runtime = runtime;
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
-            List.of(new SubagentBinding("reviewer", "Review")));
+            settings("parent", "parent-model"), List.of(new SubagentBinding("reviewer", "Review")));
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     RecordingListener listener = new RecordingListener();
 
@@ -1827,8 +1810,8 @@ class TaskToolTest {
   void rejectsConcurrentResumeOfSameSession() throws Exception {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     this.runtime = runtime;
-    BranchSettings settings = settings("parent", "parent-model", List.of(TaskTool.NAME));
-    BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
+    BranchSettings settings = settings("parent", "parent-model");
+    BranchSettings childSettings = settings("reviewer", "review-model");
     ThreadSnapshot parent =
         parentSnapshot(settings, List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot resumed =
@@ -1902,7 +1885,7 @@ class TaskToolTest {
   private void stubCreateFlow(HarnessRuntime runtime, BranchSettings childSettings) {
     ThreadSnapshot parent =
         parentSnapshot(
-            settings("parent", "parent-model", List.of(TaskTool.NAME)),
+            settings("parent", "parent-model"),
             List.of(new SubagentBinding(childSettings.agentName(), "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
@@ -2187,7 +2170,7 @@ class TaskToolTest {
       long version,
       List<ToolInvocation> tools,
       List<ThreadCommand> queued) {
-    BranchSettings settings = settings("reviewer", "review-model", List.of());
+    BranchSettings settings = settings("reviewer", "review-model");
     Entry root =
         new Entry(
             CHILD_ROOT_ENTRY_ID,
@@ -2200,7 +2183,7 @@ class TaskToolTest {
   }
 
   private static ThreadSnapshot toolCallSnapshot(long version, List<ToolInvocation> tools) {
-    BranchSettings settings = settings("reviewer", "review-model", List.of());
+    BranchSettings settings = settings("reviewer", "review-model");
     Entry root =
         new Entry(
             CHILD_ROOT_ENTRY_ID,
@@ -2237,7 +2220,7 @@ class TaskToolTest {
    * 构造运行中快照：首个 COMPACTION turn（以 CANCELLED 关闭，countTurns 不计数），后跟 N 个 CONTINUATION turn（最后一个 open）。
    */
   private static ThreadSnapshot turnCountSnapshot(int turns, ModelInvocation model, long version) {
-    BranchSettings settings = settings("reviewer", "review-model", List.of());
+    BranchSettings settings = settings("reviewer", "review-model");
     List<Entry> entries = new ArrayList<>();
     Entry root =
         new Entry(
@@ -2314,7 +2297,7 @@ class TaskToolTest {
   }
 
   private static ThreadSnapshot continueModelHeadSnapshot(boolean continueModel, long version) {
-    BranchSettings settings = settings("reviewer", "review-model", List.of());
+    BranchSettings settings = settings("reviewer", "review-model");
     Entry root =
         new Entry(
             CHILD_ROOT_ENTRY_ID,
@@ -2349,7 +2332,7 @@ class TaskToolTest {
   }
 
   private static ThreadSnapshot failedTerminalSnapshot() {
-    BranchSettings settings = settings("reviewer", "review-model", List.of());
+    BranchSettings settings = settings("reviewer", "review-model");
     Entry root =
         new Entry(
             CHILD_ROOT_ENTRY_ID,
@@ -2390,7 +2373,7 @@ class TaskToolTest {
   }
 
   private static ThreadSnapshot stoppedTerminalSnapshot() {
-    BranchSettings settings = settings("reviewer", "review-model", List.of());
+    BranchSettings settings = settings("reviewer", "review-model");
     Entry root =
         new Entry(
             CHILD_ROOT_ENTRY_ID,
@@ -2434,7 +2417,7 @@ class TaskToolTest {
   }
 
   private static ThreadSnapshot cancelledTerminalSnapshot() {
-    BranchSettings settings = settings("reviewer", "review-model", List.of());
+    BranchSettings settings = settings("reviewer", "review-model");
     Entry root =
         new Entry(
             CHILD_ROOT_ENTRY_ID,
@@ -2507,9 +2490,8 @@ class TaskToolTest {
     return tool;
   }
 
-  private static BranchSettings settings(String agent, String model, List<String> activeTools) {
-    return new BranchSettings(
-        null, agent, new ModelSelection("provider", model, "default"), activeTools);
+  private static BranchSettings settings(String agent, String model) {
+    return new BranchSettings(null, agent, new ModelSelection("provider", model, "default"));
   }
 
   private static final class RecordingListener implements ToolExecutionListener {

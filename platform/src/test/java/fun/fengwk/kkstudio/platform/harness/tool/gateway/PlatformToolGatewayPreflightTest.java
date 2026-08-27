@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -292,7 +293,8 @@ class PlatformToolGatewayPreflightTest {
 
   private static ToolGateway.PreflightResult environmentPreflight(
       EnvironmentBinding environment, String argumentsJson, ToolSettings settings) {
-    ToolDescriptor descriptor = EnvironmentToolCatalog.require("read");
+    ToolDescriptor descriptor =
+        EnvironmentToolCatalog.require(BaseToolIds.READ).definition().descriptor();
     PlatformToolGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.factories(),

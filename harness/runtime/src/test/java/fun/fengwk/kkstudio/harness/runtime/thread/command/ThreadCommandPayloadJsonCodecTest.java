@@ -33,7 +33,6 @@ class ThreadCommandPayloadJsonCodecTest {
             new CustomMessageCommandPayload(system("system")),
             new SetAgentCommandPayload("coding"),
             new SetModelCommandPayload(MODEL),
-            new SetActiveToolsCommandPayload(List.of("read", "grep")),
             new SetEnvironmentCommandPayload(EnvironmentBindings.binding(ENV)),
             new SetEnvironmentCommandPayload(null));
 
@@ -55,9 +54,6 @@ class ThreadCommandPayloadJsonCodecTest {
             + "\"variant\":\"default\"}}",
         codec.encode(new SetModelCommandPayload(MODEL)));
     assertEquals("{\"agentName\":\"coding\"}", codec.encode(new SetAgentCommandPayload("coding")));
-    assertEquals(
-        "{\"activeTools\":[\"read\",\"grep\"]}",
-        codec.encode(new SetActiveToolsCommandPayload(List.of("read", "grep"))));
     assertEquals(
         "{\"environment\":{\"name\":\"" + ENV + "\",\"workspacePath\":\".\"}}",
         codec.encode(new SetEnvironmentCommandPayload(EnvironmentBindings.binding(ENV))));
@@ -100,15 +96,6 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.SET_AGENT, "{\"agentName\":\" a\"}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ACTIVE_TOOLS, "{\"activeTools\":{}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ACTIVE_TOOLS, "{\"activeTools\":[5]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ACTIVE_TOOLS, "{\"activeTools\":[\" read\"]}"));
     // 旧 wire 的 name-only 字段（environmentName）不再是合法输入，必须拒绝。
     assertThrows(
         IllegalArgumentException.class,

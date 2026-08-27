@@ -122,9 +122,7 @@ class HarnessRuntimeRequestMapperTest {
     agent.setAgentName("default-assistant");
     HarnessCommandCreateDTO model = command("SET_MODEL", "model");
     model.setModel(modelSelection());
-    HarnessCommandCreateDTO tools = command("SET_ACTIVE_TOOLS", "tools");
-    tools.setActiveTools(List.of("web_search"));
-    request.setCommands(List.of(environment, agent, model, tools, userCommand("user")));
+    request.setCommands(List.of(environment, agent, model, userCommand("user")));
 
     AcceptCommandsCommand mapped = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
 
@@ -133,7 +131,6 @@ class HarnessRuntimeRequestMapperTest {
             ThreadCommandType.SET_ENVIRONMENT,
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL,
-            ThreadCommandType.SET_ACTIVE_TOOLS,
             ThreadCommandType.USER_MESSAGE),
         mapped.commands().stream().map(command -> command.payload().type()).toList());
     SetEnvironmentCommandPayload environmentPayload =
@@ -345,15 +342,10 @@ class HarnessRuntimeRequestMapperTest {
     agent.setModel(modelSelection());
     assertCommandRejected(agent);
 
-    HarnessCommandCreateDTO model = command("SET_MODEL", "model-with-tools");
+    HarnessCommandCreateDTO model = command("SET_MODEL", "model-with-agent");
     model.setModel(modelSelection());
-    model.setActiveTools(List.of());
+    model.setAgentName("forbidden");
     assertCommandRejected(model);
-
-    HarnessCommandCreateDTO tools = command("SET_ACTIVE_TOOLS", "tools-with-environment");
-    tools.setActiveTools(List.of());
-    tools.setEnvironment(null);
-    assertCommandRejected(tools);
 
     HarnessCommandCreateDTO environment = command("SET_ENVIRONMENT", "environment-with-contents");
     environment.setEnvironment(null);
@@ -370,10 +362,6 @@ class HarnessRuntimeRequestMapperTest {
     HarnessCommandCreateDTO missingModel = command("SET_MODEL", "missing-model");
     missingModel.setModel(null);
     assertCommandRejected(missingModel);
-
-    HarnessCommandCreateDTO missingTools = command("SET_ACTIVE_TOOLS", "missing-tools");
-    missingTools.setActiveTools(null);
-    assertCommandRejected(missingTools);
   }
 
   @Test
@@ -525,7 +513,6 @@ class HarnessRuntimeRequestMapperTest {
     settings.setEnvironment(null);
     settings.setAgentName("default-assistant");
     settings.setModel(modelSelection());
-    settings.setActiveTools(List.of());
     return settings;
   }
 

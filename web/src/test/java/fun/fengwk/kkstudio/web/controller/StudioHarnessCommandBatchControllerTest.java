@@ -250,8 +250,7 @@ class StudioHarnessCommandBatchControllerTest {
         {
           "environment":null,
           "agentName":"default-assistant",
-          "model":{"providerName":"openai","modelName":"gpt-5","variant":"default"},
-          "activeTools":[]
+          "model":{"providerName":"openai","modelName":"gpt-5","variant":"default"}
         }
         """;
   }

@@ -138,7 +138,6 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("openai", dto.getBranchSettings().getModel().getProviderName());
     assertEquals("gpt-5", dto.getBranchSettings().getModel().getModelName());
     assertEquals("default", dto.getBranchSettings().getModel().getVariant());
-    assertEquals(List.of("web_search"), dto.getBranchSettings().getActiveTools());
     assertEquals(NOW, dto.getCreateTime());
     assertEquals(NOW, dto.getUpdateTime());
     assertFalse(dto.getProcessing());
@@ -516,7 +515,7 @@ class HarnessRuntimeResponseMapperTest {
 
   private static BranchSettings settingsWithoutEnvironment() {
     return new BranchSettings(
-        null, "default-assistant", new ModelSelection("openai", "gpt-5", "default"), List.of());
+        null, "default-assistant", new ModelSelection("openai", "gpt-5", "default"));
   }
 
   private static ThreadSnapshot modelSnapshot(

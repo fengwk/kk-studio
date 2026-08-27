@@ -10,7 +10,6 @@ public sealed interface ThreadCommandPayload
         CustomMessageCommandPayload,
         SetAgentCommandPayload,
         SetModelCommandPayload,
-        SetActiveToolsCommandPayload,
         SetEnvironmentCommandPayload {
 
   /** 返回该 payload 所代表的 command type。 */

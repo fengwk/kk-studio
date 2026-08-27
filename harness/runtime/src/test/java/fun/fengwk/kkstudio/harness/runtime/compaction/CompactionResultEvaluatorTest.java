@@ -34,8 +34,7 @@ class CompactionResultEvaluatorTest {
       new BranchSettings(
           EnvironmentBindings.binding("env-1"),
           "agent",
-          new ModelSelection("provider", "model", "v1"),
-          List.of());
+          new ModelSelection("provider", "model", "v1"));
   private static final Instant NOW = Instant.EPOCH;
 
   @Test

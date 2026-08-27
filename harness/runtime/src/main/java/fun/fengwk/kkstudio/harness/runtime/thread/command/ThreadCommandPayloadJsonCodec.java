@@ -5,7 +5,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -17,16 +16,14 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * 6 类 typed Thread command payload 的严格、确定性 JSON codec。
+ * 5 类 typed Thread command payload 的严格、确定性 JSON codec。
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
  * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_MODEL 携带完整 {@link
@@ -46,7 +43,6 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
-  private static final Set<String> SET_ACTIVE_TOOLS_FIELDS = orderedSet("activeTools");
   private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environment");
   private static final Set<String> ENVIRONMENT_BINDING_FIELDS = orderedSet("name", "workspacePath");
   private static final Set<String> MODEL_SELECTION_FIELDS =
@@ -128,7 +124,6 @@ public final class ThreadCommandPayloadJsonCodec {
       case CUSTOM_MESSAGE -> decodeCustomMessage(root);
       case SET_AGENT -> decodeSetAgent(root);
       case SET_MODEL -> decodeSetModel(root);
-      case SET_ACTIVE_TOOLS -> decodeSetActiveTools(root);
       case SET_ENVIRONMENT -> decodeSetEnvironment(root);
     };
   }
@@ -162,14 +157,6 @@ public final class ThreadCommandPayloadJsonCodec {
       case SetModelCommandPayload value -> NODES
           .objectNode()
           .set("model", encodeModelSelection(value.model()));
-      case SetActiveToolsCommandPayload value -> {
-        ObjectNode node = NODES.objectNode();
-        ArrayNode activeTools = node.putArray("activeTools");
-        for (String activeTool : value.activeTools()) {
-          activeTools.add(activeTool);
-        }
-        yield node;
-      }
       case SetEnvironmentCommandPayload value -> {
         ObjectNode node = NODES.objectNode();
         if (value.environment() == null) {
@@ -223,23 +210,6 @@ public final class ThreadCommandPayloadJsonCodec {
     return new SetModelCommandPayload(decodeModelSelection(node.get("model")));
   }
 
-  private static SetActiveToolsCommandPayload decodeSetActiveTools(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_ACTIVE_TOOLS");
-    requireExactFields(node, SET_ACTIVE_TOOLS_FIELDS, "SET_ACTIVE_TOOLS");
-    ArrayNode activeToolsNode =
-        requireArray(node.get("activeTools"), "SET_ACTIVE_TOOLS.activeTools");
-    List<String> activeTools = new ArrayList<>(activeToolsNode.size());
-    for (JsonNode activeTool : activeToolsNode) {
-      if (!activeTool.isTextual()) {
-        throw new IllegalArgumentException("SET_ACTIVE_TOOLS.activeTools elements must be text");
-      }
-      activeTools.add(
-          CommandValueValidation.requireCanonicalName(
-              activeTool.textValue(), "SET_ACTIVE_TOOLS.activeTools element"));
-    }
-    return new SetActiveToolsCommandPayload(activeTools);
-  }
-
   private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
     ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
     requireExactFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
@@ -290,13 +260,6 @@ public final class ThreadCommandPayloadJsonCodec {
       throw new IllegalArgumentException(context + " must be a JSON object");
     }
     return object;
-  }
-
-  private static ArrayNode requireArray(JsonNode value, String context) {
-    if (!(value instanceof ArrayNode array)) {
-      throw new IllegalArgumentException(context + " must be a JSON array");
-    }
-    return array;
   }
 
   private static String canonicalText(ObjectNode node, String field, String context) {

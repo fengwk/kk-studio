@@ -108,8 +108,7 @@ class EntryPathTest {
     BranchSettings rootSettings = settings(null, "root-agent");
     BranchSettings firstTurn =
         settings(EnvironmentBindings.binding("env-a"), "first-agent")
-            .withModel(new ModelSelection("anthropic", "claude-sonnet", "custom"))
-            .withActiveTools(List.of("read", "bash"));
+            .withModel(new ModelSelection("anthropic", "claude-sonnet", "custom"));
     BranchSettings latestTurn = settings(null, "latest-agent");
     Entry root = root(rootSettings);
     Entry start1 = turnStart(id(2L), id(1L), TurnStartReason.INPUT, firstTurn);
@@ -128,7 +127,6 @@ class EntryPathTest {
     assertNull(base.environment());
     assertEquals("latest-agent", base.agentName());
     assertEquals(new ModelSelection("anthropic", "claude-sonnet", "default"), base.model());
-    assertEquals(List.of("read"), base.activeTools());
     assertNotEquals(firstTurn, base);
     assertNotEquals(rootSettings, base);
   }
@@ -1290,9 +1288,6 @@ class EntryPathTest {
 
   private static BranchSettings settings(EnvironmentBinding environment, String agentName) {
     return new BranchSettings(
-        environment,
-        agentName,
-        new ModelSelection("anthropic", "claude-sonnet", "default"),
-        List.of("read"));
+        environment, agentName, new ModelSelection("anthropic", "claude-sonnet", "default"));
   }
 }
