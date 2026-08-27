@@ -35,11 +35,10 @@ final class InvocationTestData {
 
   private InvocationTestData() {}
 
-  static ToolDescriptor toolDescriptor(String name, ToolType type) {
+  static ToolDescriptor toolDescriptor(String name) {
     return new ToolDescriptor(
         name,
         "1.0",
-        type,
         "description of " + name,
         name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
@@ -48,7 +47,7 @@ final class InvocationTestData {
   }
 
   static ToolBinding platform(String name) {
-    return new ToolBinding(toolDescriptor(name, ToolType.PLATFORM), ToolType.PLATFORM, null);
+    return new ToolBinding(toolDescriptor(name), ToolType.PLATFORM, null);
   }
 
   static ToolBinding environment(String name) {
@@ -56,8 +55,7 @@ final class InvocationTestData {
   }
 
   static ToolBinding environment(String name, EnvironmentBinding environment) {
-    return new ToolBinding(
-        toolDescriptor(name, ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, environment);
+    return new ToolBinding(toolDescriptor(name), ToolType.ENVIRONMENT, environment);
   }
 
   static ModelDescriptor modelDescriptor() {

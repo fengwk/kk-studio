@@ -151,7 +151,6 @@ class PlatformToolGatewayStartTest {
         new ToolDescriptor(
             DESCRIPTOR.name(),
             DESCRIPTOR.version(),
-            ToolType.PLATFORM,
             "drifted description",
             DESCRIPTOR.rendererKey(),
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
@@ -178,7 +177,6 @@ class PlatformToolGatewayStartTest {
         new ToolDescriptor(
             "no_such_daemon_tool",
             "1",
-            ToolType.ENVIRONMENT,
             "not in the daemon catalog",
             "no_such_daemon_tool",
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
@@ -208,7 +206,6 @@ class PlatformToolGatewayStartTest {
         new ToolDescriptor(
             "bash",
             "1",
-            ToolType.ENVIRONMENT,
             "drifted bash description",
             "bash",
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
@@ -641,7 +638,6 @@ class PlatformToolGatewayStartTest {
     return new ToolDescriptor(
         DESCRIPTOR.name(),
         version,
-        ToolType.PLATFORM,
         "drifted description",
         DESCRIPTOR.rendererKey(),
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),

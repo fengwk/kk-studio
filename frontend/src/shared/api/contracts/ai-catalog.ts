@@ -137,7 +137,6 @@ export interface ToolCatalogEntryDTO {
   version: string | null
   description: string | null
   backend: 'HOST' | 'PLUGIN' | 'ENVIRONMENT_CAPABILITY'
-  type: 'PLATFORM' | 'ENVIRONMENT'
 }
 
 /** 公开的全局 Agent definition；model/variant 与 config 是 Thread 运行时的输入。 */

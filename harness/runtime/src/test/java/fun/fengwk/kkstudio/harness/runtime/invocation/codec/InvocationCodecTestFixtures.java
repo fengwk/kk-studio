@@ -39,11 +39,10 @@ final class InvocationCodecTestFixtures {
 
   private InvocationCodecTestFixtures() {}
 
-  static ToolDescriptor descriptor(ToolType type) {
+  static ToolDescriptor descriptor() {
     return new ToolDescriptor(
         "bash",
         "1.0",
-        type,
         "Run a command",
         "bash",
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
@@ -53,7 +52,7 @@ final class InvocationCodecTestFixtures {
 
   static ToolBinding binding(ToolType type) {
     return new ToolBinding(
-        descriptor(type), type, type == ToolType.ENVIRONMENT ? ENVIRONMENT_ID : null);
+        descriptor(), type, type == ToolType.ENVIRONMENT ? ENVIRONMENT_ID : null);
   }
 
   static ProviderRequest providerRequest(ToolDescriptor... tools) {

@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -40,7 +39,7 @@ class LoadSkillToolTest {
   private static final EnvironmentBinding PLATFORM = EnvironmentBindings.binding("platform");
   private static final EnvironmentBinding LOCAL_DEV = EnvironmentBindings.binding("local-dev");
 
-  /** descriptor 的 name/version/visibility/side-effect/timeout 与单参数 schema 是稳定平台契约。 */
+  /** descriptor 的 name/version/renderer/side-effect/timeout 与单参数 schema 是稳定模型契约。 */
   @Test
   void exposesCanonicalDescriptorContract() {
     LoadSkillTool tool =
@@ -52,7 +51,6 @@ class LoadSkillToolTest {
     ToolDescriptor descriptor = tool.descriptor();
     assertEquals(LoadSkillTool.NAME, descriptor.name());
     assertEquals(LoadSkillTool.VERSION, descriptor.version());
-    assertEquals(ToolType.PLATFORM, descriptor.type());
     assertEquals(LoadSkillTool.NAME, descriptor.rendererKey());
     assertEquals(ToolSideEffect.READ_ONLY, descriptor.sideEffect());
     assertEquals(Duration.ofMinutes(1), descriptor.timeout());

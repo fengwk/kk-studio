@@ -69,7 +69,6 @@ class PlatformToolGatewayPluginTest {
       new ToolDescriptor(
           "plugin_tool",
           "1",
-          ToolType.PLATFORM,
           "plugin tool",
           "plugin_tool",
           new ToolParamsSchema("args", Map.of(), Set.of(), false),

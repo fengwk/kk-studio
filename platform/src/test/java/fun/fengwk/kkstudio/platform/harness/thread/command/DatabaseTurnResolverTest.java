@@ -1221,7 +1221,6 @@ class DatabaseTurnResolverTest {
     return new ToolDescriptor(
         name,
         "1",
-        ToolType.PLATFORM,
         name + " description",
         name,
         new ToolParamsSchema(null, Map.of(), Set.of(), false),

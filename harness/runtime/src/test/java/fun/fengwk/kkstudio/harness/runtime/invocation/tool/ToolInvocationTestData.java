@@ -20,11 +20,10 @@ final class ToolInvocationTestData {
 
   private ToolInvocationTestData() {}
 
-  static ToolDescriptor descriptor(String name, ToolType type) {
+  static ToolDescriptor descriptor(String name) {
     return new ToolDescriptor(
         name,
         "1.0",
-        type,
         "description of " + name,
         name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
@@ -33,11 +32,11 @@ final class ToolInvocationTestData {
   }
 
   static ToolBinding platform(String name) {
-    return new ToolBinding(descriptor(name, ToolType.PLATFORM), ToolType.PLATFORM, null);
+    return new ToolBinding(descriptor(name), ToolType.PLATFORM, null);
   }
 
   static ToolBinding environment(String name) {
-    return new ToolBinding(descriptor(name, ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, ENV_ID);
+    return new ToolBinding(descriptor(name), ToolType.ENVIRONMENT, ENV_ID);
   }
 
   static ToolCall call(String name, String argumentsJson) {

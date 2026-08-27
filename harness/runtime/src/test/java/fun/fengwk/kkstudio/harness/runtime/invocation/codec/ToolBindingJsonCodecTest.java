@@ -82,7 +82,7 @@ class ToolBindingJsonCodecTest {
   /** 精确字段/类型检查与 ToolBinding 构造函数共同拒绝被破坏的持久化行。 */
   @Test
   void rejectsUnknownMissingWrongTypeAndInconsistentBindingFacts() {
-    String descriptor = descriptorCodec.encode(descriptor(ToolType.ENVIRONMENT));
+    String descriptor = descriptorCodec.encode(descriptor());
     String valid =
         "{\"descriptor\":"
             + descriptor
@@ -124,15 +124,6 @@ class ToolBindingJsonCodecTest {
                 valid.replace(
                     "\"" + ENVIRONMENT_ID.environmentName().value() + "\"",
                     "\"" + ENVIRONMENT_ID.environmentName().value().toUpperCase() + "\"")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"descriptor\":"
-                    + descriptorCodec.encode(descriptor(ToolType.PLATFORM))
-                    + ",\"type\":\"ENVIRONMENT\",\"environment\":"
-                    + environmentJson(ENVIRONMENT_ID)
-                    + ",\"plugin\":null}"));
     // ENVIRONMENT binding 的 route 可为 null（最新 branch 未选中/已清空时冻结为 null）。
     ToolBinding nullRoute =
         codec.decode(

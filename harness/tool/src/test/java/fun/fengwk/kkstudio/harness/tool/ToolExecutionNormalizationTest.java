@@ -23,7 +23,6 @@ class ToolExecutionNormalizationTest {
       new ToolDescriptor(
           "read",
           "1.0.0",
-          ToolType.PLATFORM,
           "Read a file",
           "read",
           new ToolParamsSchema(

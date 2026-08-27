@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
@@ -370,7 +369,6 @@ class GoalPluginTest {
       Set<String> properties) {
     assertEquals(name, descriptor.name());
     assertEquals(version, descriptor.version());
-    assertEquals(ToolType.PLATFORM, descriptor.type());
     assertEquals(name, descriptor.rendererKey());
     assertEquals(sideEffect, descriptor.sideEffect());
     assertEquals(Duration.ZERO, descriptor.timeout());

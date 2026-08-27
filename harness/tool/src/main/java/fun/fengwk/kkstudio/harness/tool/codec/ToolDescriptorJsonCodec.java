@@ -11,7 +11,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
@@ -38,8 +37,8 @@ import java.util.TreeSet;
 /**
  * 严格、deterministic 的 {@link ToolDescriptor} 与 tool input schema JSON 编解码。
  *
- * <p>Descriptor 携带 PLATFORM/ENVIRONMENT 类型，但不携带具体 Environment 执行目标；目标属于
- * binding/invocation。编解码复用同一个底层 {@link ObjectMapper}，后者启用了 {@link
+ * <p>Descriptor 只描述模型可见的工具契约，不携带执行路由；路由由 catalog 的 {@code AgentToolBackend} 和 durable binding 的
+ * route 字段负责。编解码复用同一个底层 {@link ObjectMapper}，后者启用了 {@link
  * DeserializationFeature#FAIL_ON_TRAILING_TOKENS} 与 {@link
  * JsonParser.Feature#STRICT_DUPLICATE_DETECTION}，从而在边界拒绝 trailing token 与 duplicate field。
  *
@@ -119,7 +118,6 @@ public final class ToolDescriptorJsonCodec {
   private static void writeDescriptor(ObjectNode target, ToolDescriptor descriptor) {
     target.put("name", descriptor.name());
     target.put("version", descriptor.version());
-    target.put("type", descriptor.type().name());
     target.put("description", descriptor.description());
     target.put("rendererKey", descriptor.rendererKey());
     target.put("sideEffect", descriptor.sideEffect().name());
@@ -206,7 +204,6 @@ public final class ToolDescriptorJsonCodec {
         Set.of(
             "name",
             "version",
-            "type",
             "description",
             "rendererKey",
             "sideEffect",
@@ -215,7 +212,6 @@ public final class ToolDescriptorJsonCodec {
     rejectUnknownFields(obj, allowed, "descriptor");
     String name = requiredText(obj, "name", "descriptor");
     String version = requiredText(obj, "version", "descriptor");
-    ToolType type = readToolType(obj);
     String description = requiredText(obj, "description", "descriptor");
     String rendererKey = requiredText(obj, "rendererKey", "descriptor");
     ToolSideEffect sideEffect = readSideEffect(obj);
@@ -225,7 +221,6 @@ public final class ToolDescriptorJsonCodec {
     return constructDescriptor(
         name,
         version,
-        type,
         description,
         rendererKey,
         inputSchema,
@@ -236,7 +231,6 @@ public final class ToolDescriptorJsonCodec {
   private static ToolDescriptor constructDescriptor(
       String name,
       String version,
-      ToolType type,
       String description,
       String rendererKey,
       ToolParamsSchema inputSchema,
@@ -244,7 +238,7 @@ public final class ToolDescriptorJsonCodec {
       Duration timeout) {
     try {
       return new ToolDescriptor(
-          name, version, type, description, rendererKey, inputSchema, sideEffect, timeout);
+          name, version, description, rendererKey, inputSchema, sideEffect, timeout);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           "descriptor validation failed for " + name + "@" + version + ": " + error.getMessage(),
@@ -258,15 +252,6 @@ public final class ToolDescriptorJsonCodec {
       return ToolSideEffect.valueOf(value);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException("descriptor unknown sideEffect: " + value, error);
-    }
-  }
-
-  private static ToolType readToolType(ObjectNode obj) {
-    String value = requiredText(obj, "type", "descriptor");
-    try {
-      return ToolType.valueOf(value);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("descriptor unknown type: " + value, error);
     }
   }
 

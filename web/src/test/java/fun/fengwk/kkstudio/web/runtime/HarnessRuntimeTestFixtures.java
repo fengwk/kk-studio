@@ -188,7 +188,6 @@ public final class HarnessRuntimeTestFixtures {
         new ToolDescriptor(
             "web_search",
             "1.0",
-            ToolType.PLATFORM,
             "search the web",
             "web_search",
             new ToolParamsSchema("search the web", Map.of(), Set.of(), true),

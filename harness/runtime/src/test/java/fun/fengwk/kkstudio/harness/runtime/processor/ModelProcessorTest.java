@@ -3122,7 +3122,6 @@ class ModelProcessorTest {
         new ToolDescriptor(
             "bash",
             "1.0",
-            ToolType.PLATFORM,
             "run bash commands",
             "bash",
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),

@@ -19,7 +19,6 @@ class AgentToolDefinitionTest {
       new ToolDescriptor(
           "read",
           "1.0.0",
-          ToolType.PLATFORM,
           "Read a file",
           "read",
           new ToolParamsSchema("Read input", Map.of(), Set.of(), false),

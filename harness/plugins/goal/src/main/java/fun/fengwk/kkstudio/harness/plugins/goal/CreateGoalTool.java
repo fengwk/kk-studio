@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.plugin.api.PluginToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -26,7 +25,6 @@ public final class CreateGoalTool implements PluginTool {
       new ToolDescriptor(
           NAME,
           VERSION,
-          ToolType.PLATFORM,
           GoalPrompts.text("create-goal.md"),
           NAME,
           GoalPrompts.schema("create-goal.schema.json"),

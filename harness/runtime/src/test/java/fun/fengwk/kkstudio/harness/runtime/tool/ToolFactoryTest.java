@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -32,7 +31,6 @@ class ToolFactoryTest {
       new ToolDescriptor(
           "read",
           "1",
-          ToolType.PLATFORM,
           "read tool",
           "read",
           new ToolParamsSchema("", Map.of(), Set.of(), false),
@@ -63,7 +61,6 @@ class ToolFactoryTest {
         new ToolDescriptor(
             DESCRIPTOR.name(),
             DESCRIPTOR.version(),
-            DESCRIPTOR.type(),
             "changed description",
             DESCRIPTOR.rendererKey(),
             DESCRIPTOR.inputSchema(),

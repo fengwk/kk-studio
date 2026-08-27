@@ -102,7 +102,6 @@ describe('AgentForm current contracts', () => {
               version: '1',
               description: longDescription,
               backend: 'HOST',
-              type: 'PLATFORM',
             },
             {
               id: 'environment.lsp',
@@ -110,7 +109,6 @@ describe('AgentForm current contracts', () => {
               version: '1',
               description: 'lsp',
               backend: 'ENVIRONMENT_CAPABILITY',
-              type: 'ENVIRONMENT',
             },
           ]}
           onChange={setDraft}
@@ -366,7 +364,6 @@ describe('AgentForm current contracts', () => {
             version: '1',
             description: 'shell',
             backend: 'HOST',
-            type: 'PLATFORM',
           },
           {
             id: 'base.read',
@@ -374,7 +371,6 @@ describe('AgentForm current contracts', () => {
             version: null,
             description: 'files',
             backend: 'ENVIRONMENT_CAPABILITY',
-            type: 'ENVIRONMENT',
           },
         ]}
         onChange={() => undefined}
@@ -413,7 +409,6 @@ describe('AgentForm current contracts', () => {
             version: '1',
             description: 'shell',
             backend: 'HOST',
-            type: 'PLATFORM',
           },
           {
             id: 'base.read',
@@ -421,7 +416,6 @@ describe('AgentForm current contracts', () => {
             version: null,
             description: 'files',
             backend: 'ENVIRONMENT_CAPABILITY',
-            type: 'ENVIRONMENT',
           },
         ]}
         onChange={() => undefined}

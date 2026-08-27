@@ -30,7 +30,6 @@ function tool(name: string): ToolCatalogEntryDTO {
     version: '1',
     description: null,
     backend: 'HOST',
-    type: 'PLATFORM',
   }
 }
 

@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -136,7 +135,6 @@ class AgentDefinitionConfigValidatorTest {
     return new ToolDescriptor(
         name,
         version,
-        ToolType.PLATFORM,
         name + " tool",
         name,
         new ToolParamsSchema("", Map.of(), Set.of(), false),
