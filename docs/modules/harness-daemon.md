@@ -2,7 +2,7 @@
 
 ## 定位
 
-Environment Daemon 是独立进程，负责固定 Environment root 内的 coding capabilities、MCP bridge、Skill discovery、目录浏览和 Daemon v4 WebSocket wire。它只依赖 `harness-tool` 的 Environment Capability SPI/wire contract，不依赖 Runtime、Infra、Platform、Spring、数据库或 Model/Agent。
+Environment Daemon 是独立进程，负责固定 Environment root 内的 coding capabilities、MCP bridge、Skill discovery、目录浏览和当前 Daemon WebSocket wire。它只依赖 `harness-tool` 的 Environment Capability SPI/wire contract，不依赖 Runtime、Infra、Platform、Spring、数据库或 Model/Agent。
 
 [`DaemonMain`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java) 是进程入口；[`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) 管理连接、journal、capability 执行、重连、超时和 shutdown。Daemon 的 invocation journal 是进程内 execution fact；WebSocket 只传递消息。
 
@@ -107,7 +107,7 @@ MCP 无论 server 是否配置都注册固定 `mcp.list` 和 `mcp.call`，保持
 
 ```text
 DISCONNECTED -> CONNECTING
-  -> HELLO(v4, daemonId, protocolVersion=4, gatewayToken, capabilityCatalogVersion)
+  -> HELLO(current protocol, daemonId, protocolVersion=4, gatewayToken, capabilityCatalogVersion)
   <- WELCOME(empty payload)
   -> READY(capabilities version=4, environment + skills + MCP summaries)
   -> READY + HEARTBEAT
@@ -156,7 +156,7 @@ system properties:
   kkstudio.daemon.javap
 ```
 
-Resource store 默认为 Environment root 下 `.kkstudio/resources` 的 content-addressed local store；大/二进制结果转为 resource content。结果由 `DaemonToolResultCodec` 编码：PARTIAL 只允许 text/json，COMPLETED 资源预检后才允许 store read/write；默认资源聚合 8 MiB、最终 payload 16 MiB、contents 64 项。该 codec 是 daemon 与既有 wire result contract 之间的边界适配，不参与 capability 执行 SPI。
+Resource store 默认为 Environment root 下 `.kkstudio/resources` 的 content-addressed local store；大/二进制结果转为 resource content。结果由 `DaemonCapabilityResultCodec` 编码：PARTIAL 只允许 text/json，COMPLETED 资源预检后才允许 store read/write；默认资源聚合 8 MiB、最终 payload 16 MiB、contents 64 项。该 codec 直接编码和解码 `EnvironmentCapabilityResult`，不参与 capability 执行 SPI。
 
 ### Skills、MCP 与目录浏览
 
@@ -176,7 +176,7 @@ sequenceDiagram
   participant D as DaemonRuntime
   participant J as InvocationJournal
   participant C as Local Capability
-  G->>D: INVOKE(v4, invocationId, capabilityId, capabilityVersion, workspacePath, arguments, timeoutMillis)
+  G->>D: INVOKE(current protocol, invocationId, capabilityId, capabilityVersion, workspacePath, arguments, timeoutMillis)
   D->>D: ACK + journal.start
   alt new invocation
     D->>D: canonicalWorkspace + descriptor/version + timeout
@@ -192,7 +192,7 @@ sequenceDiagram
   end
 ```
 
-INVOKE 的 `capabilityId`、`capabilityVersion`、`workspacePath`、`arguments` 和 `timeoutMillis` 先由 v4 capability codec 严格校验。`workspacePath` 再通过共享 `EnvironmentWorkspacePath` 校验和 `resolve + normalize + toRealPath + startsWith(root) + isDirectory`；失败、未知 capability 或 version mismatch 都是 deterministic FAILED，绝不发送 STARTED。timeout 由 scheduler 计时，terminal claim 后调用 capability handle cancel；`CANCEL` 对 RUNNING invocation 发送 CANCELLED 并取消 handle，对 terminal invocation 重放 terminal。
+INVOKE 的 `capabilityId`、`capabilityVersion`、`workspacePath`、`arguments` 和 `timeoutMillis` 先由 capability codec 严格校验。`workspacePath` 再通过共享 `EnvironmentWorkspacePath` 校验和 `resolve + normalize + toRealPath + startsWith(root) + isDirectory`；失败、未知 capability 或 version mismatch 都是 deterministic FAILED，绝不发送 STARTED。timeout 由 scheduler 计时，terminal claim 后调用 capability handle cancel；`CANCEL` 对 RUNNING invocation 发送 CANCELLED 并取消 handle，对 terminal invocation 重放 terminal。
 
 Daemon disconnect 后保留 journal 和 running execution 的进程内事实，连接 generation 进入重连；gateway 重新发送相同 invocationId 时，RUNNING 重放 `STARTED(replayed=true)`，terminal 重放相同 terminal payload。Capability callback 的 callId 不等于 invocationId、result 编码超限、Resource store 失败或 partial 包含 resource/binary 时确定性 FAILED。
 

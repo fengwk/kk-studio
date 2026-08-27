@@ -46,7 +46,6 @@ import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
@@ -57,6 +56,7 @@ import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityResultCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -67,7 +67,6 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.io.IOException;
@@ -130,7 +129,9 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     transport.receiveRaw(
-        "{\"protocolVersion\":4,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
             + "\"sequence\":1,\"payload\":{\"code\":\"ENVIRONMENT_NAME_CONFLICT\","
             + "\"message\":\"environment already bound to another active daemon\"}}");
 
@@ -153,7 +154,9 @@ class DaemonRuntimeTest {
     completeHandshake(0);
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":4,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
             + "\"sequence\":1,\"payload\":{\"message\":\"informational\"}}");
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
@@ -172,7 +175,7 @@ class DaemonRuntimeTest {
     JsonNode hello = codec.readPayload(handshake.get(0));
     assertEquals("test-gateway-token", hello.path("gatewayToken").asText());
     assertEquals("daemon", hello.path("daemonId").asText());
-    assertEquals(DaemonProtocol.VERSION_4, hello.path("protocolVersion").asInt());
+    assertEquals(DaemonProtocol.VERSION, hello.path("protocolVersion").asInt());
     assertEquals(
         EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asText());
     assertTrue(hello.path("toolCatalogVersion").isMissingNode());
@@ -455,19 +458,25 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
 
     transport.receiveRaw(
-        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
     transport.receiveRaw(
-        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":1,\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
     transport.receiveRaw(
-        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":3,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100,"
             + "\"extra\":true}}");
@@ -579,7 +588,7 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_4,
+            DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
             new EnvironmentName("other-environment"),
             "wrong-scope",
@@ -589,7 +598,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_4,
+            DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
             ENVIRONMENT_NAME,
             "bad-payload",
@@ -599,7 +608,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_4,
+            DaemonProtocol.VERSION,
             DaemonMessageType.INVOKE,
             ENVIRONMENT_NAME,
             "invalid-capability-id",
@@ -609,9 +618,9 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
   }
 
-  /** v1 协议消息必须在 codec 边界拒绝，不会触达 scope 或 invocation 生命周期。 */
+  /** 不支持的协议版本必须在 codec 边界拒绝，不会触达 scope 或 invocation 生命周期。 */
   @Test
-  void rejectsLegacyVersionOneEnvelopes() throws InterruptedException {
+  void rejectsUnsupportedProtocolVersions() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
@@ -621,13 +630,20 @@ class DaemonRuntimeTest {
     completeHandshake(0);
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":1,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":1,"
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
             + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
-    transport.receive(invoke("valid-after-v1", 1));
+    transport.receiveRaw(
+        "{\"protocolVersion\":5,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":1,"
+            + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
+            + "\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":1000}}");
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(0, tool.executions.get());
+    transport.receive(invoke("valid-after-unsupported-version", 1));
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
   }
 
@@ -643,14 +659,18 @@ class DaemonRuntimeTest {
     completeHandshake(0);
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},"
             + "\"timeoutMillis\":1000}}");
 
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     transport.receiveRaw(
-        "{\"protocolVersion\":4,\"messageType\":\"CANCEL\","
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"CANCEL\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
@@ -1271,14 +1291,14 @@ class DaemonRuntimeTest {
     assertEquals(1, codec.readPayload(messages.get(0)).path("acknowledgedSequence").asLong());
     assertTrue(codec.readPayload(messages.get(1)).isEmpty());
 
-    DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
-    List<ToolResult> results =
+    DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
+    List<EnvironmentCapabilityResult> results =
         messages.subList(2, 5).stream()
             .map(message -> resultCodec.decodeResult(message.payloadJson()))
             .toList();
     assertEquals(
         List.of(invocationId, invocationId, invocationId),
-        results.stream().map(ToolResult::toolCallId).toList());
+        results.stream().map(EnvironmentCapabilityResult::callId).toList());
     assertEquals(
         List.of("partial1", "partial2", "complete"),
         results.stream()
@@ -1320,8 +1340,8 @@ class DaemonRuntimeTest {
     assertEquals(Base64.getEncoder().encodeToString(data), base64);
 
     // 接收端解码为内联二进制内容；持久化外部存储由 ToolGateway 负责。
-    DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
-    ToolResult decoded = resultCodec.decodeResult(payload);
+    DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
+    EnvironmentCapabilityResult decoded = resultCodec.decodeResult(payload);
     assertEquals(1, decoded.contents().size());
     BinaryToolContent binary = (BinaryToolContent) decoded.contents().get(0);
     assertArrayEquals(data, binary.content());
@@ -1686,7 +1706,7 @@ class DaemonRuntimeTest {
       DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
       transport.receive(
           new DaemonEnvelope(
-              DaemonProtocol.VERSION_4,
+              DaemonProtocol.VERSION,
               DaemonMessageType.LOAD_SKILL,
               ENVIRONMENT_NAME,
               "skill-1",
@@ -1718,7 +1738,7 @@ class DaemonRuntimeTest {
     DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_4,
+            DaemonProtocol.VERSION,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "skill-missing",
@@ -1833,7 +1853,7 @@ class DaemonRuntimeTest {
     transport.receiveFromConnection(
         0,
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_4,
+            DaemonProtocol.VERSION,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "stale-skill",
@@ -1841,13 +1861,15 @@ class DaemonRuntimeTest {
             skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
     transport.receiveRawFromConnection(
         0,
-        "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{}}");
     assertFalse(transport.hasMessages());
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_4,
+            DaemonProtocol.VERSION,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "current-skill",
@@ -1902,7 +1924,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_4, DaemonMessageType.HELLO, ENVIRONMENT_NAME, null, 1, "{}"));
+            DaemonProtocol.VERSION, DaemonMessageType.HELLO, ENVIRONMENT_NAME, null, 1, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
     transport.receive(cancel("unknown-cancel", 1));
@@ -1910,7 +1932,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_4,
+            DaemonProtocol.VERSION,
             DaemonMessageType.LOAD_SKILL,
             ENVIRONMENT_NAME,
             "invalid-skill-payload",
@@ -2500,7 +2522,7 @@ class DaemonRuntimeTest {
       String capabilityVersion,
       long timeoutMillis) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4,
+        DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
@@ -2522,7 +2544,7 @@ class DaemonRuntimeTest {
       long timeoutMillis,
       String workspacePath) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4,
+        DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
@@ -2547,7 +2569,7 @@ class DaemonRuntimeTest {
       String workspacePath,
       String argumentsJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4,
+        DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
@@ -2578,7 +2600,7 @@ class DaemonRuntimeTest {
   private DaemonEnvelope invokeWithoutTimeout(
       String invocationId, long sequence, String capabilityId, String capabilityVersion) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4,
+        DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_NAME,
         invocationId,
@@ -2596,7 +2618,7 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope listDirectory(String requestId, long sequence, String path) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4,
+        DaemonProtocol.VERSION,
         DaemonMessageType.LIST_DIRECTORY,
         ENVIRONMENT_NAME,
         null,
@@ -2606,12 +2628,12 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4, messageType, ENVIRONMENT_NAME, null, sequence, "{}");
+        DaemonProtocol.VERSION, messageType, ENVIRONMENT_NAME, null, sequence, "{}");
   }
 
   private DaemonEnvelope cancel(String invocationId, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4,
+        DaemonProtocol.VERSION,
         DaemonMessageType.CANCEL,
         ENVIRONMENT_NAME,
         invocationId,

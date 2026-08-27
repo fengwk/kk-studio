@@ -163,6 +163,10 @@ class EnvironmentCapabilityContractTest {
   /** Capability result 复用 ToolResult 的 details JSON 默认值、object 校验和 content 数量边界。 */
   @Test
   void reusesToolResultBoundaries() {
+    assertEquals(ToolResult.MAX_CONTENT_ITEMS, EnvironmentCapabilityResult.MAX_CONTENT_ITEMS);
+    assertEquals(
+        ToolResult.MAX_DETAILS_JSON_UTF8_BYTES,
+        EnvironmentCapabilityResult.MAX_DETAILS_JSON_UTF8_BYTES);
     assertEquals(
         "{}", new EnvironmentCapabilityResult("call-1", List.of(), false, " ").detailsJson());
     assertThrows(

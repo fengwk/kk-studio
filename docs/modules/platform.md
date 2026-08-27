@@ -183,10 +183,11 @@ Environment 是服务器内存中的 live registry，不是持久化资源。`Li
 - `EnvironmentDirectoryLister`：不占 Tool invocation slot 的 control-plane 目录查询。
 
 同名连接的 bind 是原子三态：新连接 `Accepted`、新鲜持有者存在时 `Rejected`、持有者关闭或心跳过期时
-`Replaced`。每个 Environment 只有一个 active remote invocation；并发 sibling 在 INVOKE 发送前返回
+`Replaced`。每个 Environment 只有一个 active capability invocation；并发 sibling 在 INVOKE 发送前返回
 `EnvironmentCapabilityBusyException`，不同 Environment 可以并行。Gateway 只接受 v4 HELLO，严格校验
 `capabilityCatalogVersion`；INVOKE payload 使用 `capabilityId`、`capabilityVersion`、`workspacePath`、
-`arguments` 和 `timeoutMillis`，不携带 model Tool name。发送不确定时连接和 active/pending 请求都按不确定结果收敛，
+`arguments` 和 `timeoutMillis`，不携带 model Tool name；PARTIAL/COMPLETED result 使用
+`EnvironmentCapabilityResult` 的 `callId` 作为关联标识。发送不确定时连接和 active/pending 请求都按不确定结果收敛，
 不重发可能已经产生副作用的请求。
 
 ### Provider adapters 与 PlatformModelGateway

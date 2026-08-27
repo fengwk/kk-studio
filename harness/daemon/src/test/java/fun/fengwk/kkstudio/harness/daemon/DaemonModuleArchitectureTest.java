@@ -27,6 +27,7 @@ class DaemonModuleArchitectureTest {
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
           "fun.fengwk.kkstudio.harness.runtime.",
+          "fun.fengwk.kkstudio.harness.tool.execution.",
           "fun.fengwk.kkstudio.harness.kernel.",
           "fun.fengwk.kkstudio.platform.",
           "fun.fengwk.kkstudio.web.",
@@ -67,6 +68,37 @@ class DaemonModuleArchitectureTest {
     List<String> violations = scanViolations(main);
     assertTrue(
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
+  }
+
+  /**
+   * Daemon main 只通过 Environment Capability SPI 执行，不依赖模型 Tool execution 或 Environment tool catalog。
+   */
+  @Test
+  void daemonMainUsesCapabilityExecutionBoundary() throws IOException {
+    Path main = locateDaemonMainJava();
+    List<String> violations = new ArrayList<>();
+    try (Stream<Path> stream = Files.walk(main)) {
+      stream
+          .filter(path -> path.toString().endsWith(".java"))
+          .filter(path -> !isGeneratedOrTarget(path))
+          .forEach(
+              path -> {
+                try {
+                  String source = Files.readString(path, StandardCharsets.UTF_8);
+                  if (source.contains("fun.fengwk.kkstudio.harness.tool.execution.")
+                      || source.contains("EnvironmentToolCatalog")) {
+                    violations.add(relative(main, path));
+                  }
+                } catch (IOException error) {
+                  throw new IllegalStateException(error);
+                }
+              });
+    }
+    assertTrue(
+        violations.isEmpty(),
+        () ->
+            "daemon main must use Environment Capability execution only:\n"
+                + String.join("\n", violations));
   }
 
   /** Daemon main 源码不得持有 static executor，也不得绕过 runtime 统一 executor 直接启动虚拟线程。 */

@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCancelledException;
@@ -31,6 +30,7 @@ import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityUnavaila
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityInvokeCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityResultCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -44,7 +44,6 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.platform.environment.registry.BindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
@@ -110,7 +109,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
-  private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
+  private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
 
   @Test
@@ -159,7 +158,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
     String resourcePayload =
         resultCodec.encodeCompleted(
-            new ToolResult(
+            new EnvironmentCapabilityResult(
                 INVOCATION_ID.toString(),
                 List.of(new BinaryToolContent("text/plain", new byte[] {1, 2})),
                 false,
@@ -211,7 +210,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
     String payload =
         resultCodec.encodeCompleted(
-            new ToolResult(
+            new EnvironmentCapabilityResult(
                 INVOCATION_ID.toString(),
                 List.of(new BinaryToolContent("text/plain", new byte[] {7, 8})),
                 false,
@@ -700,11 +699,11 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   @Test
-  void helloV1ProtocolIsRejectedAndClosesConnection() {
+  void helloUnsupportedProtocolIsRejectedAndClosesConnection() {
     Fixture fixture = fixture();
-    FakeConnection connection = new FakeConnection("connection-v1");
+    FakeConnection connection = new FakeConnection("connection-unsupported-protocol");
     fixture.gateway.open(connection);
-    fixture.gateway.receive(connection.connectionId(), helloWithVersion("1", 0));
+    fixture.gateway.receive(connection.connectionId(), helloWithVersion("3", 0));
     assertTrue(connection.closed);
     assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(connection.envelopes()));
     assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
@@ -1458,7 +1457,8 @@ class EnvironmentDaemonGatewayFinalTest {
 
   private String resultPayload(String text) {
     return resultCodec.encodeCompleted(
-        new ToolResult(INVOCATION_ID.toString(), List.of(new TextToolContent(text)), false, "{}"),
+        new EnvironmentCapabilityResult(
+            INVOCATION_ID.toString(), List.of(new TextToolContent(text)), false, "{}"),
         inlineResourceStore(new byte[0]));
   }
 
@@ -1496,7 +1496,9 @@ class EnvironmentDaemonGatewayFinalTest {
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":4,\"capabilityCatalogVersion\":\""
+        "{\"daemonId\":\"d1\",\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"capabilityCatalogVersion\":\""
             + EnvironmentCapabilityCatalog.version()
             + "\",\"gatewayToken\":\""
             + GATEWAY_TOKEN
@@ -1524,7 +1526,9 @@ class EnvironmentDaemonGatewayFinalTest {
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":4,\"capabilityCatalogVersion\":\""
+        "{\"daemonId\":\"d1\",\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"capabilityCatalogVersion\":\""
             + catalogVersion
             + "\",\"gatewayToken\":\""
             + GATEWAY_TOKEN
@@ -1566,12 +1570,7 @@ class EnvironmentDaemonGatewayFinalTest {
       String payload) {
     return envelopeCodec.encode(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_4,
-            messageType,
-            environmentName,
-            invocationId,
-            sequence,
-            payload));
+            DaemonProtocol.VERSION, messageType, environmentName, invocationId, sequence, payload));
   }
 
   private static List<DaemonMessageType> messageTypes(List<DaemonEnvelope> envelopes) {

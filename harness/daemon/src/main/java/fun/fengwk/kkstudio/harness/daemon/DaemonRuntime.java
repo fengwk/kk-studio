@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentWorkspacePath;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
@@ -36,6 +35,7 @@ import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityInvokeCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityResultCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonDirectoryFailureCode;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -47,7 +47,6 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -102,7 +101,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
       new DaemonCapabilityInvokeCodec();
-  private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
+  private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
   private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
   private final EnvironmentDirectoryBrowser directoryBrowser;
@@ -425,7 +424,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private boolean sendHello(ActiveConnection connection) {
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("daemonId", config.daemonId());
-    payload.put("protocolVersion", DaemonProtocol.VERSION_4);
+    payload.put("protocolVersion", DaemonProtocol.VERSION);
     payload.put("gatewayToken", config.gatewayToken());
     payload.put("capabilityCatalogVersion", EnvironmentCapabilityCatalog.version());
     return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
@@ -502,9 +501,9 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private void requireProtocolVersion(DaemonEnvelope envelope) {
-    if (envelope.protocolVersion() != DaemonProtocol.VERSION_4) {
+    if (envelope.protocolVersion() != DaemonProtocol.VERSION) {
       throw new DaemonProtocolException(
-          "daemon runtime requires protocolVersion " + DaemonProtocol.VERSION_4);
+          "daemon runtime requires protocolVersion " + DaemonProtocol.VERSION);
     }
   }
 
@@ -924,7 +923,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private DaemonEnvelope envelope(
       DaemonMessageType messageType, String invocationId, String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4,
+        DaemonProtocol.VERSION,
         messageType,
         environmentName,
         invocationId,
@@ -1104,7 +1103,7 @@ public final class DaemonRuntime implements AutoCloseable {
         send(
             DaemonMessageType.PARTIAL,
             invocation.invocationId(),
-            resultCodec.encodePartial(toWireToolResult(partial), resourceWriter()));
+            resultCodec.encodePartial(partial, resourceWriter()));
       } catch (RuntimeException error) {
         failResultEncoding(invocation.invocationId(), error, "partial");
       }
@@ -1123,7 +1122,7 @@ public final class DaemonRuntime implements AutoCloseable {
       }
       String payload;
       try {
-        payload = resultCodec.encodeCompleted(toWireToolResult(result), resourceWriter());
+        payload = resultCodec.encodeCompleted(result, resourceWriter());
       } catch (RuntimeException error) {
         failResultEncoding(invocation.invocationId(), error, "complete");
         return;
@@ -1151,11 +1150,6 @@ public final class DaemonRuntime implements AutoCloseable {
         new DaemonTerminalMessage(
             DaemonMessageType.FAILED, errorPayload(new IllegalStateException(message, error))),
         false);
-  }
-
-  /** 仅在 Daemon wire codec 边界将 capability result 映射为现有 wire codec 所需的等价结果。 */
-  private ToolResult toWireToolResult(EnvironmentCapabilityResult result) {
-    return new ToolResult(result.callId(), result.contents(), result.error(), result.detailsJson());
   }
 
   /** 提供给结果 codec 的 resource 读写 SPI；未配置 store 时对任何 resource/binary 内容确定性失败。 */

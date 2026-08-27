@@ -166,7 +166,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private static DaemonEnvelope helloEnvelope(long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4,
+        DaemonProtocol.VERSION,
         DaemonMessageType.HELLO,
         ENVIRONMENT_NAME,
         null,
@@ -184,7 +184,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private static DaemonEnvelope readyEnvelope(String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_4, DaemonMessageType.READY, ENVIRONMENT_NAME, null, 1, payloadJson);
+        DaemonProtocol.VERSION, DaemonMessageType.READY, ENVIRONMENT_NAME, null, 1, payloadJson);
   }
 
   private static final class FrameListener implements WebSocket.Listener {

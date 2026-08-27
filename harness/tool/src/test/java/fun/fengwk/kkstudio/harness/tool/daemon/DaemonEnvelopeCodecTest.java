@@ -8,70 +8,70 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
-import java.util.List;
-
 /** Daemon envelope codec 的协议边界测试。 */
 class DaemonEnvelopeCodecTest {
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
 
-  /** 每个受支持版本都必须采用相同 envelope 形状往返；environmentName 编码为 canonical 路由名称文本。 */
+  /** 当前协议版本采用固定 envelope 形状往返；environmentName 编码为 canonical 路由名称文本。 */
   @Test
   void encodesAndDecodesSupportedEnvelopes() {
-    for (int version : List.of(DaemonProtocol.VERSION_3, DaemonProtocol.VERSION_4)) {
-      DaemonEnvelope envelope =
-          new DaemonEnvelope(
-              version,
-              DaemonMessageType.INVOKE,
-              new EnvironmentName("environment"),
-              "invocation",
-              7,
-              "{\"request\":\"test\"}");
+    DaemonEnvelope envelope =
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION,
+            DaemonMessageType.INVOKE,
+            new EnvironmentName("environment"),
+            "invocation",
+            7,
+            "{\"request\":\"test\"}");
 
-      String json = codec.encode(envelope);
-      DaemonEnvelope decoded = codec.decode(json);
+    String json = codec.encode(envelope);
+    DaemonEnvelope decoded = codec.decode(json);
 
-      assertEquals(envelope, decoded);
-      assertEquals("environment", decoded.environmentName().value());
-      assertTrue(json.contains("\"environmentName\":\"environment\""));
-    }
+    assertEquals(envelope, decoded);
+    assertEquals("environment", decoded.environmentName().value());
+    assertTrue(json.contains("\"environmentName\":\"environment\""));
   }
 
   /** 未知版本、未知类型、负序号、非对象 payload 和未知字段必须分别在 wire 边界拒绝。 */
   @Test
   void rejectsUnsupportedOrMalformedWireEnvelope() {
     assertProtocolError(
-        "{\"protocolVersion\":1,\"messageType\":\"READY\",\"environmentName\":\"e\","
+        "{\"protocolVersion\":3,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        v4("\"messageType\":\"FUTURE\",\"environmentName\":\"e\",")
+        "{\"protocolVersion\":5,\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"FUTURE\",\"environmentName\":\"e\",")
+            + "\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
             + "\"sequence\":-1,\"payload\":{}}");
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
             + "\"sequence\":0,\"payload\":[]}");
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
             + "\"sequence\":0,\"payload\":{},\"unexpected\":true}");
   }
 
   /** environmentName 必须存在且为 canonical 有界小写路由名称；缺失、非法文本与非协议字段都拒绝。 */
   @Test
   void rejectsMissingOrNonCanonicalEnvironmentName() {
-    assertProtocolError(v4("\"messageType\":\"READY\",\"sequence\":0,\"payload\":{}}"));
+    assertProtocolError(current("\"messageType\":\"READY\",\"sequence\":0,\"payload\":{}}"));
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":\"Not-Canonical\",")
+        current("\"messageType\":\"READY\",\"environmentName\":\"Not-Canonical\",")
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":\"e/v\",")
+        current("\"messageType\":\"READY\",\"environmentName\":\"e/v\",")
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":7,") + "\"sequence\":0,\"payload\":{}}");
+        current("\"messageType\":\"READY\",\"environmentName\":7,")
+            + "\"sequence\":0,\"payload\":{}}");
     // environmentId 不是任何受支持 envelope 的字段。
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentId\":\"")
+        current("\"messageType\":\"READY\",\"environmentId\":\"")
             + "123e4567-e89b-12d3-a456-426614174000"
             + "\",\"environmentName\":\"e\",\"sequence\":0,\"payload\":{}}");
   }
@@ -81,13 +81,13 @@ class DaemonEnvelopeCodecTest {
   void rejectsDuplicateFieldsAndTrailingTokens() {
     assertProtocolError(
         "{\"protocolVersion\":"
-            + DaemonProtocol.VERSION_4
+            + DaemonProtocol.VERSION
             + ",\"protocolVersion\":"
-            + DaemonProtocol.VERSION_4
+            + DaemonProtocol.VERSION
             + ",\"messageType\":\"READY\","
             + "\"environmentName\":\"e\",\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
             + "\"sequence\":0,\"payload\":{}} trailing");
   }
 
@@ -96,7 +96,7 @@ class DaemonEnvelopeCodecTest {
   void encodesConnectionLevelEnvelopeAndExposesPayloadHelpers() {
     DaemonEnvelope envelope =
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_3,
+            DaemonProtocol.VERSION,
             DaemonMessageType.READY,
             new EnvironmentName("environment"),
             null,
@@ -119,11 +119,11 @@ class DaemonEnvelopeCodecTest {
     assertProtocolError("[]");
     assertProtocolError(
         "{\"protocolVersion\":\""
-            + DaemonProtocol.VERSION_4
+            + DaemonProtocol.VERSION
             + "\",\"messageType\":\"READY\",\"environmentName\":\"e\","
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":\"e\",")
+        current("\"messageType\":\"READY\",\"environmentName\":\"e\",")
             + "\"sequence\":1.5,\"payload\":{}}");
   }
 
@@ -131,15 +131,15 @@ class DaemonEnvelopeCodecTest {
   @Test
   void rejectsUnsafeEnvironmentNameOnDecode() {
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":\"e\\u0000v\",")
+        current("\"messageType\":\"READY\",\"environmentName\":\"e\\u0000v\",")
             + "\"sequence\":0,\"payload\":{}}");
     assertProtocolError(
-        v4("\"messageType\":\"READY\",\"environmentName\":\" e\",")
+        current("\"messageType\":\"READY\",\"environmentName\":\" e\",")
             + "\"sequence\":0,\"payload\":{}}");
   }
 
-  private static String v4(String fields) {
-    return "{\"protocolVersion\":" + DaemonProtocol.VERSION_4 + "," + fields;
+  private static String current(String fields) {
+    return "{\"protocolVersion\":" + DaemonProtocol.VERSION + "," + fields;
   }
 
   private void assertProtocolError(String json) {

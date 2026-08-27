@@ -4,7 +4,7 @@
  * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。scope 字段为 canonical {@code
  * environmentName}（Environment 的唯一路由身份：bounded 小写名称，无空白/无 {@code '/'}）；不存在展示名或 UUID。
  *
- * <p>v4 {@code READY} payload 由 {@link
+ * <p>当前 {@code READY} payload 由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的能力对象： {@code
  * {"version":4,"environment":{"operatingSystem","timeZone","note"},
  * "skills":[{"name","description"}],"mcpServers":[{"name","status","error",
@@ -26,12 +26,13 @@
  * <p>Capability INVOKE payload 由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityInvokeCodec} 编解码，字段固定为 {@code
  * capabilityId}、{@code capabilityVersion}、{@code workspacePath}、{@code arguments} 和 {@code
- * timeoutMillis}；该 capabilityId wire 预留给 {@code VERSION_4}，当前生产链仍使用 v3。
+ * timeoutMillis}；Environment Daemon 使用 {@link DaemonProtocol#VERSION}。
  *
  * <p>result payload（{@code PARTIAL} / {@code COMPLETED}）由 {@link
- * fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec} 编解码。编码分相：PARTIAL 只允许 text/json，
- * resource/binary 在任何 store 操作之前拒绝；COMPLETED 先对全部内容做计数/单条/聚合资源字节预算预检（默认 8 MiB）， 预检全部通过后才允许任何 store
- * 读写。最终 payload 的 UTF-8 字节数必须 ≤ 16 MiB（bounded 输出在中止点拒绝超限）。 {@code contents} 数组中每个元素为单一对象（最多 64 个）：
+ * fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilityResultCodec} 编解码。编码分相：PARTIAL 只允许
+ * text/json， resource/binary 在任何 store 操作之前拒绝；COMPLETED 先对全部内容做计数/单条/聚合资源字节预算预检（默认 8 MiB），
+ * 预检全部通过后才允许任何 store 读写。结果对象使用 {@code callId} 作为能力调用关联标识；最终 payload 的 UTF-8 字节数必须 ≤ 16 MiB（bounded
+ * 输出在中止点拒绝超限）。 {@code contents} 数组中每个元素为单一对象（最多 64 个）：
  *
  * <ul>
  *   <li>text: {@code {"type":"text","text":string}}；

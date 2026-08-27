@@ -21,8 +21,6 @@ import java.util.Set;
 public final class DaemonEnvelopeCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final Set<Integer> SUPPORTED_PROTOCOL_VERSIONS =
-      Set.of(DaemonProtocol.VERSION_3, DaemonProtocol.VERSION_4);
 
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -56,12 +54,12 @@ public final class DaemonEnvelopeCodec {
     }
   }
 
-  /** 解码且校验单个受支持版本的 envelope。 */
+  /** 解码且校验当前协议版本的 envelope。 */
   public DaemonEnvelope decode(String json) {
     JsonNode root = readObject(json, "envelope");
     rejectUnknownFields(root);
     int protocolVersion = requiredInt(root, "protocolVersion");
-    if (!SUPPORTED_PROTOCOL_VERSIONS.contains(protocolVersion)) {
+    if (protocolVersion != DaemonProtocol.VERSION) {
       throw new DaemonProtocolException("unsupported protocolVersion: " + protocolVersion);
     }
     String messageTypeValue = requiredText(root, "messageType");

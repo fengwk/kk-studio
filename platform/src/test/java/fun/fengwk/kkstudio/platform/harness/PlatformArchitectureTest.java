@@ -100,6 +100,24 @@ class PlatformArchitectureTest {
                 + String.join("\n", bootMainViolations));
   }
 
+  /** Environment gateway 只实现 Environment Capability transport，不依赖已删除的 remote package。 */
+  @Test
+  void environmentGatewayUsesCapabilityTransportOnly() throws IOException {
+    Path gateway =
+        locatePlatformMainJava()
+            .resolve(
+                "fun/fengwk/kkstudio/platform/environment/gateway/"
+                    + "EnvironmentDaemonGateway.java");
+    assertTrue(Files.isRegularFile(gateway), "EnvironmentDaemonGateway must exist");
+    String source = Files.readString(gateway, StandardCharsets.UTF_8);
+    assertFalse(
+        source.contains("fun.fengwk.kkstudio.harness.tool." + "remote"),
+        "EnvironmentDaemonGateway must not depend on the remote package");
+    assertFalse(
+        source.contains("Remote" + "Tool"),
+        "EnvironmentDaemonGateway must use Environment Capability terminology");
+  }
+
   /**
    * path pattern 的 gitignore 语义只在 harness-runtime 的 {@code PermissionPathPattern} 内部持有；platform
    * 永远不直接 import JGit。
