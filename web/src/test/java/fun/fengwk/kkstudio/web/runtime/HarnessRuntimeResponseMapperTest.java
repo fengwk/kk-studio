@@ -628,20 +628,19 @@ class HarnessRuntimeResponseMapperTest {
 
   private static ToolBinding environmentToolBinding() {
     return new ToolBinding(
-        descriptor(ToolType.ENVIRONMENT),
+        descriptor(),
         ToolType.ENVIRONMENT,
         new EnvironmentBinding(new EnvironmentName("local"), "workspace"));
   }
 
   private static ToolBinding platformToolBinding() {
-    return new ToolBinding(descriptor(ToolType.PLATFORM), ToolType.PLATFORM, null);
+    return new ToolBinding(descriptor(), ToolType.PLATFORM, null);
   }
 
-  private static ToolDescriptor descriptor(ToolType type) {
+  private static ToolDescriptor descriptor() {
     return new ToolDescriptor(
         "bash",
         "1.0",
-        type,
         "execute a command",
         "bash",
         new ToolParamsSchema("command arguments", Map.of(), Set.of(), true),

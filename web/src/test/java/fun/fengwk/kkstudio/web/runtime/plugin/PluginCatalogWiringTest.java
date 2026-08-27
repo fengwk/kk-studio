@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.platform.harness.plugin.HarnessPluginSource;
@@ -99,7 +98,6 @@ class PluginCatalogWiringTest {
     return new ToolDescriptor(
         name,
         version,
-        ToolType.PLATFORM,
         name + " tool",
         name,
         new ToolParamsSchema("", Map.of(), Set.of(), false),

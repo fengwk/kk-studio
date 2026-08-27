@@ -52,7 +52,6 @@ class PlatformToolGatewayPreflightTest {
     return new ToolDescriptor(
         "demo",
         "1",
-        ToolType.PLATFORM,
         "description of demo",
         "demo",
         new ToolParamsSchema(
@@ -325,7 +324,6 @@ class PlatformToolGatewayPreflightTest {
     return new ToolDescriptor(
         "x",
         "1",
-        ToolType.PLATFORM,
         "description of x",
         "x",
         new ToolParamsSchema(

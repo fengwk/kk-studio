@@ -29,7 +29,6 @@ vi.mock('@/shared/api/agent-service', () => ({
         version: '1',
         description: null,
         backend: 'HOST',
-        type: 'PLATFORM',
       },
       {
         id: 'base.write',
@@ -37,7 +36,6 @@ vi.mock('@/shared/api/agent-service', () => ({
         version: '1',
         description: null,
         backend: 'HOST',
-        type: 'PLATFORM',
       },
       {
         id: 'base.edit',
@@ -45,7 +43,6 @@ vi.mock('@/shared/api/agent-service', () => ({
         version: '1',
         description: null,
         backend: 'HOST',
-        type: 'PLATFORM',
       },
     ]),
     listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })),

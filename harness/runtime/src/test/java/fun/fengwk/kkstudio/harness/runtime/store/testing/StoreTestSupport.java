@@ -481,7 +481,6 @@ final class StoreTestSupport {
             new ToolDescriptor(
                 descriptor.name(),
                 descriptor.version(),
-                descriptor.type(),
                 descriptor.description(),
                 rendererKey,
                 descriptor.inputSchema(),
@@ -613,7 +612,6 @@ final class StoreTestSupport {
     return new ToolDescriptor(
         name,
         "1.0",
-        ToolType.PLATFORM,
         "description of " + name,
         name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),

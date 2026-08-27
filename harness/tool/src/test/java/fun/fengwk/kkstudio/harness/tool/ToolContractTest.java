@@ -14,8 +14,10 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
+import java.lang.reflect.RecordComponent;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -61,7 +63,6 @@ class ToolContractTest {
             new ToolDescriptor(
                 "search",
                 "1.0.0",
-                ToolType.PLATFORM,
                 "Search",
                 null,
                 schema(),
@@ -73,7 +74,6 @@ class ToolContractTest {
             new ToolDescriptor(
                 "search",
                 "1.0.0",
-                ToolType.PLATFORM,
                 "Search",
                 " ",
                 schema(),
@@ -83,14 +83,34 @@ class ToolContractTest {
         IllegalArgumentException.class,
         () ->
             new ToolDescriptor(
-                "search",
-                "",
-                ToolType.PLATFORM,
-                "Search",
-                null,
-                schema(),
-                ToolSideEffect.READ_ONLY,
-                Duration.ZERO));
+                "search", "", "Search", null, schema(), ToolSideEffect.READ_ONLY, Duration.ZERO));
+  }
+
+  /** 反射契约锁定 descriptor 只暴露模型字段及其稳定顺序，不得重新引入路由字段。 */
+  @Test
+  void exposesOnlyModelContractComponentsInStableOrder() {
+    RecordComponent[] components = ToolDescriptor.class.getRecordComponents();
+
+    assertEquals(
+        List.of(
+            "name",
+            "version",
+            "description",
+            "rendererKey",
+            "inputSchema",
+            "sideEffect",
+            "timeout"),
+        Arrays.stream(components).map(RecordComponent::getName).toList());
+    assertEquals(
+        List.of(
+            String.class,
+            String.class,
+            String.class,
+            String.class,
+            ToolParamsSchema.class,
+            ToolSideEffect.class,
+            Duration.class),
+        Arrays.stream(components).map(RecordComponent::getType).toList());
   }
 
   /** 执行请求必须复用 descriptor 校验，并在没有覆盖时使用 descriptor 超时。 */
@@ -191,7 +211,6 @@ class ToolContractTest {
     return new ToolDescriptor(
         "search",
         "1.0.0",
-        ToolType.PLATFORM,
         "Search the repository",
         rendererKey,
         schema(),

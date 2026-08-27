@@ -121,7 +121,6 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
             new ToolDescriptor(
                 "fs",
                 "1.0",
-                ToolType.ENVIRONMENT,
                 "filesystem",
                 "fs",
                 new ToolParamsSchema("arguments", Map.of(), Set.of(), false),

@@ -18,12 +18,11 @@ import java.util.Optional;
 /**
  * Defines model-visible environment-backed Agent Tools.
  *
- * <p>This catalog owns Agent Tool names, model prompt metadata and selectable visibility. Daemon
- * implementation, registration and wire contracts use {@link EnvironmentCapabilityCatalog}.
+ * <p>This catalog owns Agent Tool names, model prompt metadata and selectable visibility.
+ * Environment implementation, registration and wire contracts use {@link
+ * EnvironmentCapabilityCatalog}.
  */
 public final class EnvironmentToolCatalog {
-
-  public static final String VERSION = "3";
 
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/tool/environment/prompts/";
@@ -50,20 +49,12 @@ public final class EnvironmentToolCatalog {
       if (definition.visibility() != ToolVisibility.SELECTABLE) {
         throw new IllegalArgumentException("Environment catalog entries must be selectable");
       }
-      if (definition.descriptor().type() != ToolType.ENVIRONMENT) {
-        throw new IllegalArgumentException(
-            "Environment catalog entries must use Environment descriptors");
-      }
       if (!definition.descriptor().inputSchema().equals(capability.inputSchema())
           || !definition.descriptor().timeout().equals(capability.timeout())) {
         throw new IllegalArgumentException(
             "Environment tool descriptor schema and timeout must match capability");
       }
     }
-  }
-
-  public static String version() {
-    return VERSION;
   }
 
   public static List<Entry> entries() {
@@ -183,7 +174,6 @@ public final class EnvironmentToolCatalog {
     return new ToolDescriptor(
         name,
         "1",
-        ToolType.ENVIRONMENT,
         loadPrompt(name),
         name,
         capability.inputSchema(),

@@ -7,10 +7,11 @@ import fun.fengwk.kkstudio.harness.tool.ToolType;
 import java.util.Objects;
 
 /**
- * 单次 Tool invocation 的冻结 binding：descriptor、产品类型以及完整 Environment binding。
+ * 单次 Tool invocation 的冻结 binding：model descriptor、durable route 以及完整 Environment binding。
  *
- * <p>PLATFORM tool 不得携带 {@code environment}；ENVIRONMENT tool 携带最新 branch 的 {@code environment}（可为
- * null 或当前不可用——实际执行时确定性失败）。创建 approval 的 YOLO policy 在此被刻意省略。
+ * <p>{@code type} 是 binding 的持久化路由维度，不属于 descriptor。PLATFORM route 不得携带 {@code
+ * environment}；ENVIRONMENT route 携带最新 branch 的 {@code environment}（可为 null 或当前不可用——实际执行时确定性失败）。创建
+ * approval 的 YOLO policy 在此被刻意省略。
  */
 public record ToolBinding(
     ToolDescriptor descriptor,
@@ -26,9 +27,6 @@ public record ToolBinding(
   public ToolBinding {
     descriptor = Objects.requireNonNull(descriptor, "descriptor");
     type = Objects.requireNonNull(type, "type");
-    if (descriptor.type() != type) {
-      throw new IllegalArgumentException("tool binding type does not match descriptor");
-    }
     if (type == ToolType.PLATFORM && environment != null) {
       throw new IllegalArgumentException("PLATFORM binding must not have an environment binding");
     }

@@ -413,7 +413,6 @@ class HistoryPayloadMapperTest {
     return new ToolDescriptor(
         name,
         "1.0",
-        ToolType.PLATFORM,
         "desc",
         name.equals("bash") ? "shell-command" : name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),

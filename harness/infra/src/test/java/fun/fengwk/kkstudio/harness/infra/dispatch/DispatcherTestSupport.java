@@ -688,7 +688,6 @@ final class DispatcherTestSupport {
             new ToolDescriptor(
                 "bash",
                 "1.0",
-                ToolType.PLATFORM,
                 "description of bash",
                 "bash",
                 new ToolParamsSchema("arguments", Map.of(), Set.of(), false),

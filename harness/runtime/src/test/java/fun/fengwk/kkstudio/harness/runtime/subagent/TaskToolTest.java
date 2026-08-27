@@ -87,7 +87,6 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -194,14 +193,13 @@ class TaskToolTest {
         new ObjectMapper());
   }
 
-  /** descriptor 固定暴露 name/version/type/renderer/sideEffect/no-timeout 与必填 schema。 */
+  /** descriptor 固定暴露 name/version/renderer/sideEffect/no-timeout 与必填 schema。 */
   @Test
   void exposesCanonicalDescriptorContract() {
     var descriptor = tool.descriptor();
 
     assertEquals(TaskTool.NAME, descriptor.name());
     assertEquals(TaskTool.VERSION, descriptor.version());
-    assertEquals(ToolType.PLATFORM, descriptor.type());
     assertEquals(TaskTool.RENDERER_KEY, descriptor.rendererKey());
     assertEquals(ToolSideEffect.NON_IDEMPOTENT, descriptor.sideEffect());
     assertEquals(Duration.ZERO, descriptor.timeout());

@@ -17,9 +17,6 @@ public class ToolCatalogEntryDTO {
   /** 工具版本字符串（非空白）。 */
   private String version;
 
-  /** 工具类型，取 {@code ToolType} 枚举名：PLATFORM（平台内置）或 ENVIRONMENT（由 live Environment 提供）。 */
-  private String type;
-
   /** 工具描述（非空白）。 */
   private String description;
 }

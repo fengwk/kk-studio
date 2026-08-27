@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -136,7 +135,6 @@ class AgentToolRegistryTest {
         new ToolDescriptor(
             "host_read",
             "1",
-            ToolType.PLATFORM,
             "host read",
             "host_read",
             new ToolParamsSchema("", Map.of(), Set.of(), false),
@@ -160,7 +158,6 @@ class AgentToolRegistryTest {
         new ToolDescriptor(
             "read",
             "1",
-            ToolType.PLATFORM,
             "platform read",
             "read",
             new ToolParamsSchema("", Map.of(), Set.of(), false),
@@ -270,33 +267,7 @@ class AgentToolRegistryTest {
   }
 
   @Test
-  void rejectsInvalidHostFactoriesAndDuplicateNames() {
-    ToolDescriptor environment =
-        new ToolDescriptor(
-            "environment",
-            "1",
-            ToolType.ENVIRONMENT,
-            "environment",
-            "environment",
-            new ToolParamsSchema("", Map.of(), Set.of(), false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(5));
-    IllegalArgumentException nonPlatform =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                new AgentToolRegistry(
-                    List.of(
-                        factory(
-                            LOCAL_TOOL_ID,
-                            environment,
-                            tool(environment),
-                            ToolVisibility.SELECTABLE,
-                            0)),
-                    PluginCatalog.from(List.of()),
-                    EnvironmentToolCatalog.entries()));
-    assertTrue(nonPlatform.getMessage().contains("PLATFORM descriptor"));
-
+  void rejectsDuplicateNames() {
     ToolDescriptor duplicate = descriptor("duplicate", "1");
     IllegalArgumentException duplicateError =
         assertThrows(
@@ -435,7 +406,6 @@ class AgentToolRegistryTest {
     return new ToolDescriptor(
         name,
         version,
-        ToolType.PLATFORM,
         name + " tool",
         name,
         new ToolParamsSchema("", Map.of(), Set.of(), false),
@@ -492,7 +462,6 @@ class AgentToolRegistryTest {
         new ToolDescriptor(
             descriptor.name(),
             descriptor.version(),
-            descriptor.type(),
             "different description",
             descriptor.rendererKey(),
             descriptor.inputSchema(),

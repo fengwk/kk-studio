@@ -2,7 +2,7 @@
 
 ## 定位
 
-`harness-tool` 是 Harness 各边界共享的纯 Java Tool contract 模块，提供 route-neutral descriptor、输入 schema、调用/结果值对象、异步执行 SPI、Environment capability catalog/transport、Environment tool catalog 以及 Daemon wire codec。Descriptor 只描述工具能力，不携带具体 Environment、Session、Agent 或执行连接；持久化、权限、调度和 terminal 状态由 Runtime/Platform 负责。
+`harness-tool` 是 Harness 各边界共享的纯 Java Tool contract 模块，提供 route-neutral descriptor、输入 schema、调用/结果值对象、异步执行 SPI、Environment capability catalog/transport、Environment tool catalog 以及 Daemon wire codec。Descriptor 只描述工具能力，不携带执行路由、具体 Environment、Session、Agent 或执行连接；持久化、权限、调度和 terminal 状态由 Runtime/Platform 负责。
 
 模块的生产依赖只有 Jackson databind；主源码不依赖 Runtime、Daemon、Platform、Web、Spring、数据库或 Provider SDK。包级边界见 [`package-info.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/package-info.java)。
 
@@ -13,7 +13,7 @@
 - 以同一份 `ToolDescriptor` 和 `ToolParamsSchema` 约束模型声明、参数校验、Daemon 注册和 capability 调用。
 - 让 Environment Capability 使用独立的异步执行、取消和 partial 回调形状。
 - 让 Resource URI、workspace route、wire envelope 和结果 payload 在构造或 codec 边界完成 canonical 与大小校验。
-- 提供固定版本的 atomic Environment capability catalog、Environment tool catalog 与当前 Daemon wire 公共类型。
+- 提供固定的 atomic Environment capability catalog、Environment tool catalog 与当前 Daemon wire 公共类型。
 
 ### Non-goals
 
@@ -45,16 +45,17 @@ runtime / platform / daemon
 `ToolDescriptor` 是不可变 record：
 
 ```text
-name, version, type, description, rendererKey,
+name, version, description, rendererKey,
 inputSchema, sideEffect, timeout
 ```
 
 - `name` 必须匹配 `[A-Za-z][A-Za-z0-9_-]*`；`version`、`description`、`rendererKey` 非空；`timeout` 非负。
-- `type` 只有 `PLATFORM` 和 `ENVIRONMENT`；`sideEffect` 只有 `READ_ONLY`、`IDEMPOTENT`、`NON_IDEMPOTENT`。
+- `sideEffect` 只有 `READ_ONLY`、`IDEMPOTENT`、`NON_IDEMPOTENT`。
 - `ToolVisibility`（`SELECTABLE` / `INTERNAL`）属于目录装配属性，不是 descriptor 的字段。
+- `AgentToolBackend`（`HOST` / `PLUGIN` / `ENVIRONMENT_CAPABILITY`）属于 `AgentToolDefinition`，不是 descriptor 的字段；`ToolBinding.type` 是持久化 binding 的 route。
 - `ToolParamsSchema` 是 provider 无关的 JSON Schema 子集，支持 string、integer、number、boolean、enum、array、object。Object schema 明确保存 `properties`、`required` 和 `additionalProperties`。
 
-[`ToolDescriptorJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolDescriptorJsonCodec.java) 的 descriptor JSON 字段为 `name`、`version`、`type`、`description`、`rendererKey`、`sideEffect`、`timeoutMillis`、`inputSchema`。Codec 拒绝未知字段、duplicate field、trailing token、错误类型和缺少 object-schema 必需字段；输出时 `properties`、`required` 按字典序，enum 保留输入顺序。
+[`ToolDescriptorJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolDescriptorJsonCodec.java) 的 descriptor JSON 字段为 `name`、`version`、`description`、`rendererKey`、`sideEffect`、`timeoutMillis`、`inputSchema`。Codec 拒绝未知字段、duplicate field、trailing token、错误类型和缺少 object-schema 必需字段；输出时 `properties`、`required` 按字典序，enum 保留输入顺序。Schema element 自身的 JSON `type` 用于描述参数类型并保留。
 
 执行 SPI 只有三件事：
 
@@ -92,8 +93,8 @@ side-effect metadata。`EnvironmentCapabilityCatalog` 的版本为 `"1"`，按�
 
 Capability schema 资源位于
 `harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/capability/schemas/`，文件名使用
-atomic capability ID。`EnvironmentToolCatalog` 版本为 `"3"`，只从
-`environment/prompts/` 加载 model prompt，并直接复用 capability descriptor 的 `inputSchema` 和
+atomic capability ID。`EnvironmentToolCatalog` 只从 `environment/prompts/` 加载 model prompt，并直接复用
+capability descriptor 的 `inputSchema` 和
 `timeout`；因此 model descriptor 与 execution descriptor 不会出现 schema/timeout 漂移。
 
 `EnvironmentCapabilityTransport` 的端口签名为：
@@ -128,22 +129,22 @@ EnvironmentCapabilityExecutionHandle invoke(
 
 ### Environment tool catalog
 
-[`EnvironmentToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java) 是每个 Environment Daemon 的固定 model tool 目录，版本为 `"3"`。它只从 `harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/environment/prompts/` 加载 prompt；12 个 input schema 和 descriptor timeout 来自 [`EnvironmentCapabilityCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityCatalog.java)，资源缺失会在 capability catalog 初始化时失败。
+[`EnvironmentToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java) 是固定的 Environment-backed model tool 目录。它只从 `harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/environment/prompts/` 加载 prompt；12 个 input schema 和 descriptor timeout 来自 [`EnvironmentCapabilityCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/capability/EnvironmentCapabilityCatalog.java)，资源缺失会在 capability catalog 初始化时失败。
 
-| Agent tool ID | model name | Capability ID | type / version | side effect | descriptor timeout |
+| Agent tool ID | model name | Capability ID | version | side effect | descriptor timeout |
 | --- | --- | --- | --- | --- | --- |
-| `base.read` | `read` | `fs.read` | ENVIRONMENT / `1` | READ_ONLY | 1 min |
-| `base.write` | `write` | `fs.write` | ENVIRONMENT / `1` | IDEMPOTENT | 1 min |
-| `base.edit` | `edit` | `fs.apply-edit` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 min |
-| `base.apply-patch` | `apply_patch` | `fs.apply-patch` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 min |
-| `base.bash` | `bash` | `process.exec` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 1 h |
-| `base.grep` | `grep` | `fs.search` | ENVIRONMENT / `1` | READ_ONLY | 1 h |
-| `base.find` | `find` | `fs.find` | ENVIRONMENT / `1` | READ_ONLY | 1 h |
-| `base.lsp-goto-definition` | `lsp_goto_definition` | `lsp.goto-definition` | ENVIRONMENT / `1` | READ_ONLY | 2 min |
-| `base.lsp-workspace-symbols` | `lsp_workspace_symbols` | `lsp.workspace-symbols` | ENVIRONMENT / `1` | READ_ONLY | 2 min |
-| `base.lsp-java-decompile` | `lsp_java_decompile` | `lsp.java-decompile` | ENVIRONMENT / `1` | READ_ONLY | 2 min |
-| `base.mcp-list-tools` | `mcp_list_tools` | `mcp.list` | ENVIRONMENT / `1` | READ_ONLY | 30 s |
-| `base.mcp-call-tool` | `mcp_call_tool` | `mcp.call` | ENVIRONMENT / `1` | NON_IDEMPOTENT | 5 min |
+| `base.read` | `read` | `fs.read` | `1` | READ_ONLY | 1 min |
+| `base.write` | `write` | `fs.write` | `1` | IDEMPOTENT | 1 min |
+| `base.edit` | `edit` | `fs.apply-edit` | `1` | NON_IDEMPOTENT | 1 min |
+| `base.apply-patch` | `apply_patch` | `fs.apply-patch` | `1` | NON_IDEMPOTENT | 1 min |
+| `base.bash` | `bash` | `process.exec` | `1` | NON_IDEMPOTENT | 1 h |
+| `base.grep` | `grep` | `fs.search` | `1` | READ_ONLY | 1 h |
+| `base.find` | `find` | `fs.find` | `1` | READ_ONLY | 1 h |
+| `base.lsp-goto-definition` | `lsp_goto_definition` | `lsp.goto-definition` | `1` | READ_ONLY | 2 min |
+| `base.lsp-workspace-symbols` | `lsp_workspace_symbols` | `lsp.workspace-symbols` | `1` | READ_ONLY | 2 min |
+| `base.lsp-java-decompile` | `lsp_java_decompile` | `lsp.java-decompile` | `1` | READ_ONLY | 2 min |
+| `base.mcp-list-tools` | `mcp_list_tools` | `mcp.list` | `1` | READ_ONLY | 30 s |
+| `base.mcp-call-tool` | `mcp_call_tool` | `mcp.call` | `1` | NON_IDEMPOTENT | 5 min |
 
 `EnvironmentToolCatalog.entries()` 返回不可变的 `Entry` 列表；每个 Entry 固定包含 selectable 的 `AgentToolDefinition` 和完整 `EnvironmentCapabilityDescriptor`。Entry 构造时要求 model descriptor 与 capability descriptor 的 `inputSchema`、`timeout` 完全一致。AgentToolId 与 model name 各自唯一，Platform 侧的 [`AgentToolRegistry`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry.java) 冻结并携带同一份完整 capability descriptor，再与 Host factory、Plugin contribution 合并。Platform permission 使用稳定 AgentToolId 作为规则 key；精确 `*` 仍表示全局 wildcard，不使用 model-visible name。
 
@@ -227,8 +228,8 @@ EnvironmentCapabilityTransport
 ## 配置 / 扩展
 
 - 新的 Platform Tool 通过 `ToolDescriptor` + `Tool` 实现并包装为 `ToolFactory` 后加入 [`AgentToolRegistry`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/AgentToolRegistry.java)；内部工具由 `AgentToolDefinition.visibility` 标记。
-- Environment Tool contract 要求 descriptor、schema、prompt 资源、
-  `EnvironmentToolCatalog` 固定目录和 Daemon 注册保持同一 version。`apply_patch`
+- Environment Tool contract 要求 model descriptor 的 schema/timeout 与 capability descriptor 保持一致；
+  prompt 资源、`EnvironmentToolCatalog` 固定目录和 Daemon 注册必须使用同一组 capability mapping。`apply_patch`
   在 Daemon 的 invocation workspace 内完成 Add/Update/Delete 的 UTF-8 文本
   patch；所有操作先完成语法、路径和上下文预检，再进入带尽力回滚的提交阶段。
 - Environment capability 只需提供 `EnvironmentCapabilityTransport`；WebSocket 或其它连接实现留在边界模块。

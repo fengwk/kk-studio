@@ -261,7 +261,6 @@ class ModelRequestMaterializerTest {
         new ToolDescriptor(
             "bash",
             "1.0",
-            ToolType.PLATFORM,
             "run bash",
             "bash",
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),

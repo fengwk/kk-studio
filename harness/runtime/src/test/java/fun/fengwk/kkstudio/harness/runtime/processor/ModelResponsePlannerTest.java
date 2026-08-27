@@ -226,7 +226,6 @@ class ModelResponsePlannerTest {
         new ToolDescriptor(
             name,
             "1.0",
-            ToolType.PLATFORM,
             "description of " + name,
             name,
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),

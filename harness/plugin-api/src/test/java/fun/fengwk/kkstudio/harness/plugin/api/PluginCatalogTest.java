@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
@@ -382,33 +381,6 @@ class PluginCatalogTest {
                                     duplicateAccess,
                                     ToolVisibility.SELECTABLE)))));
     assertTrue(duplicate.getMessage().contains("duplicate state access"));
-
-    PluginTool environment =
-        pluginTool(
-            new ToolDescriptor(
-                "environment",
-                "1",
-                ToolType.ENVIRONMENT,
-                "environment",
-                "environment",
-                new ToolParamsSchema("", Map.of(), Set.of(), false),
-                ToolSideEffect.READ_ONLY,
-                Duration.ofSeconds(5)));
-    IllegalArgumentException nonPlatform =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                PluginCatalog.from(
-                    List.of(
-                        HarnessPlugin.of(
-                            FIRST,
-                            registrar ->
-                                registrar.registerTool(
-                                    "environment",
-                                    FIRST_TOOL_ID,
-                                    environment,
-                                    ToolVisibility.SELECTABLE)))));
-    assertTrue(nonPlatform.getMessage().contains("must be PLATFORM"));
   }
 
   @Test
@@ -529,7 +501,6 @@ class PluginCatalogTest {
     return new ToolDescriptor(
         name,
         version,
-        ToolType.PLATFORM,
         name + " tool",
         name,
         new ToolParamsSchema("", Map.of(), Set.of(), false),

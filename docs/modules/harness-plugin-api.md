@@ -62,7 +62,7 @@ registerCustomEntryType(localName, customType, priority)
 registerContextProjector(localName, ContextProjector, priority)
 ```
 
-`registerTool` 还必须显式传入跨 Host/Plugin 全局唯一的 `AgentToolId`；`localName` 只在所属 plugin 内跨三种 contribution 类型共享唯一性，不同 plugin 可以使用同名 localName。Tool name 在全局唯一，plugin tool 必须是 `ToolType.PLATFORM`，冻结后的 `ToolContribution` 携带 `PLUGIN` backend 的 `AgentToolDefinition`。Custom entry ownership 是 `(pluginId, customType)`，不同 plugin 可以各自拥有同名 customType。
+`registerTool` 还必须显式传入跨 Host/Plugin 全局唯一的 `AgentToolId`；`localName` 只在所属 plugin 内跨三种 contribution 类型共享唯一性，不同 plugin 可以使用同名 localName。Tool name 在全局唯一，冻结后的 `ToolContribution` 携带 `PLUGIN` backend 的 `AgentToolDefinition`，plugin provenance 由 contribution identity 固定。Custom entry ownership 是 `(pluginId, customType)`，不同 plugin 可以各自拥有同名 customType。
 
 ### PluginCatalog、requires DAG 与冻结顺序
 
@@ -79,7 +79,7 @@ registerContextProjector(localName, ContextProjector, priority)
 
 requires 图非法时，任何 contributor 都不会被调用。descriptor 输入顺序不影响最终顺序；catalog 完成后 `descriptors()`、`tools()`、`customEntryTypes()` 和 `contextProjectors()` 都是不可变列表。`transitiveRequires(pluginId)` 暴露不可变传递依赖集合，依赖中间 plugin 即使没有某个扩展点 contribution，也不会打破 contribution 的依赖偏序。
 
-重复 plugin id、缺失 dependency、cycle、同 plugin 重复 localName、全局重复 AgentToolId/Tool name、同 plugin 重复 `(customType)`、未注册 state type、重复 state access、非 PLATFORM descriptor 均在冻结阶段失败。
+重复 plugin id、缺失 dependency、cycle、同 plugin 重复 localName、全局重复 AgentToolId/Tool name、同 plugin 重复 `(customType)`、未注册 state type、重复 state access 均在冻结阶段失败。
 
 ### BranchView 与 state access
 
@@ -150,7 +150,7 @@ PluginTool 不在执行时重新解析 catalog、读取 Store 或重建 branch�
 
 - `PluginCatalog.from` 先验证整个 DAG，再调用 contributor；任何 graph failure 都是构建失败，不产生半成品 catalog。
 - catalog 构建后 plugin 对象、descriptor、contribution list、state access 和 projector list 均冻结；外部修改不影响 catalog。
-- Tool descriptor 必须 PLATFORM，Tool name 全局唯一；descriptor/version/ContributionId 漂移在 binding 恢复时确定性拒绝。
+- Tool descriptor 只包含模型契约；Tool name 全局唯一，PLUGIN backend 与 contribution provenance 共同确定插件路由。descriptor/version/ContributionId 漂移在 binding 恢复时确定性拒绝。
 - `AppendCustomEntry` 只能成为同 owner、已注册 customType、声明 WRITE 的 effect；违反时 Core 以 plugin contract violation 失败，effects 为空。
 - error ToolResult 与 intents 互斥，Resource externalization 和 durable `SUCCEEDED` 发生在 intent 校验之后；失败不留下部分 Entry。
 - branch state 只从当前 Assistant Entry 的 root-to-head path 读取；fork 只看分叉点可见的 CUSTOM snapshot。

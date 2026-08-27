@@ -232,7 +232,7 @@ terminal listener 异常只记录日志，不发第二个 terminal。terminal、
 `AgentToolRegistry`把本地 `ToolFactory`、`PluginCatalog`中的 Tool contribution 和固定
 `EnvironmentToolCatalog.entries()` 合并成一份不可变 Platform directory：
 
-- 本地 factory 必须声明 `HOST` backend 的 `AgentToolDefinition` 和 `ToolType.PLATFORM`，entry 暴露稳定 `AgentToolId`，排序 identity 是 `core:name@version`。
+- 本地 factory 必须声明 `HOST` backend 的 `AgentToolDefinition`，entry 暴露稳定 `AgentToolId`，排序 identity 是 `core:name@version`。
 - 插件 entry 必须声明 `PLUGIN` backend 的 `AgentToolDefinition`，暴露稳定 `AgentToolId`；entry identity 是 `plugin:ContributionId`，保留 plugin provenance、priority 和 state access declaration。
 - Environment entry 必须声明 `ENVIRONMENT_CAPABILITY` backend，携带完整 `EnvironmentCapabilityDescriptor`；它们按固定 Environment catalog 顺序追加，且 model descriptor 的 schema/timeout 必须与 capability 完全一致。
 - Host 与 Plugin 的 `AgentToolId` 共享全局命名空间；重复 `AgentToolId` 或 model-visible name 直接失败。

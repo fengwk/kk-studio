@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 import java.util.ArrayList;
@@ -230,9 +229,6 @@ public final class PluginCatalog {
       Objects.requireNonNull(visibility, "visibility");
       ContributionId id = requireNewContributionId(localName);
       ToolDescriptor descriptor = Objects.requireNonNull(tool.descriptor(), "tool.descriptor");
-      if (descriptor.type() != ToolType.PLATFORM) {
-        throw new IllegalArgumentException("plugin tool must be PLATFORM: " + descriptor.name());
-      }
       List<PluginStateDeclaration> stateAccesses =
           List.copyOf(Objects.requireNonNull(tool.stateAccesses(), "tool.stateAccesses"));
       Set<String> stateAccessTypes = new HashSet<>();

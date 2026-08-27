@@ -9,7 +9,6 @@ import java.util.Objects;
 public record ToolDescriptor(
     String name,
     String version,
-    ToolType type,
     String description,
     String rendererKey,
     ToolParamsSchema inputSchema,
@@ -24,7 +23,6 @@ public record ToolDescriptor(
     if (version == null || version.isBlank()) {
       throw new IllegalArgumentException("version must not be blank");
     }
-    type = Objects.requireNonNull(type, "type");
     if (description == null || description.isBlank()) {
       throw new IllegalArgumentException("description must not be blank");
     }

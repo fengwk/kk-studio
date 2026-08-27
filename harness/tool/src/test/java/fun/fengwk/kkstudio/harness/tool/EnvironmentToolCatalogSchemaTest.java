@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Environment daemon 固定 12 工具 catalog 的 schema 契约测试。 */
+/** Environment tool 固定 12 项 catalog 的 backend、visibility、schema 和 timeout 契约测试。 */
 class EnvironmentToolCatalogSchemaTest {
 
   private static final List<String> CODING_TOOLS =
@@ -42,10 +42,9 @@ class EnvironmentToolCatalogSchemaTest {
   private static final String PROMPT_RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/tool/environment/prompts/";
 
-  /** 目录必须恰好是 Daemon 侧的 10 个 coding tool 加 2 个 MCP 桥接工具，不得新增其它工具。 */
+  /** 目录必须恰好是 10 个 coding tool 加 2 个 MCP 桥接工具，不得新增其它工具。 */
   @Test
-  void exposesExactlyTheTwelveDaemonTools() {
-    assertEquals("3", EnvironmentToolCatalog.version());
+  void exposesExactlyTheTwelveTools() {
     assertEquals(12, EnvironmentToolCatalog.descriptors().size());
     assertEquals(
         List.of(
@@ -123,7 +122,6 @@ class EnvironmentToolCatalogSchemaTest {
     for (EnvironmentToolCatalog.Entry entry : entries) {
       assertEquals(AgentToolBackend.ENVIRONMENT_CAPABILITY, entry.definition().backend());
       assertEquals(ToolVisibility.SELECTABLE, entry.definition().visibility());
-      assertEquals(ToolType.ENVIRONMENT, entry.definition().descriptor().type());
       assertEquals(entry.capability().inputSchema(), entry.definition().descriptor().inputSchema());
       assertEquals(entry.capability().timeout(), entry.definition().descriptor().timeout());
     }
@@ -137,7 +135,7 @@ class EnvironmentToolCatalogSchemaTest {
         () -> EnvironmentToolCatalog.require(new AgentToolId("base.unknown")));
   }
 
-  /** Entry 只接受 Environment Capability、selectable 和 Environment descriptor 的统一组合。 */
+  /** Entry 只接受 Environment Capability、selectable、schema 和 timeout 的统一组合。 */
   @Test
   void enforcesEnvironmentEntryContract() {
     EnvironmentCapabilityDescriptor capability =
@@ -150,7 +148,6 @@ class EnvironmentToolCatalogSchemaTest {
         definition(
             "test.valid",
             "valid",
-            ToolType.ENVIRONMENT,
             ToolVisibility.SELECTABLE,
             AgentToolBackend.ENVIRONMENT_CAPABILITY);
 
@@ -161,12 +158,7 @@ class EnvironmentToolCatalogSchemaTest {
         IllegalArgumentException.class,
         () ->
             new EnvironmentToolCatalog.Entry(
-                definition(
-                    "test.host",
-                    "host",
-                    ToolType.ENVIRONMENT,
-                    ToolVisibility.SELECTABLE,
-                    AgentToolBackend.HOST),
+                definition("test.host", "host", ToolVisibility.SELECTABLE, AgentToolBackend.HOST),
                 capability));
     assertThrows(
         IllegalArgumentException.class,
@@ -175,19 +167,7 @@ class EnvironmentToolCatalogSchemaTest {
                 definition(
                     "test.internal",
                     "internal",
-                    ToolType.ENVIRONMENT,
                     ToolVisibility.INTERNAL,
-                    AgentToolBackend.ENVIRONMENT_CAPABILITY),
-                capability));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new EnvironmentToolCatalog.Entry(
-                definition(
-                    "test.platform",
-                    "platform",
-                    ToolType.PLATFORM,
-                    ToolVisibility.SELECTABLE,
                     AgentToolBackend.ENVIRONMENT_CAPABILITY),
                 capability));
     assertThrows(
@@ -231,7 +211,7 @@ class EnvironmentToolCatalogSchemaTest {
 
   /** 每个工具精确断言 required 与 optional keys；find 必须要求 pattern 和 path。 */
   @Test
-  void everyDaemonToolDeclaresExactRequiredAndOptionalKeys() {
+  void everyToolDeclaresExactRequiredAndOptionalKeys() {
     assertTool("read", Set.of("path"), Set.of("workdir", "offset", "limit"));
     assertTool("write", Set.of("path", "content"), Set.of("workdir"));
     assertTool(
@@ -308,7 +288,7 @@ class EnvironmentToolCatalogSchemaTest {
     assertEquals(Set.of("patchText"), descriptor.inputSchema().properties().keySet());
   }
 
-  /** bash 的 timeout_seconds 描述不允许出现 3600 上限文案（上限属于 daemon 侧，不属于模型可见 schema）。 */
+  /** bash 的 timeout_seconds 描述不允许出现 3600 上限文案（上限属于执行侧，不属于模型可见 schema）。 */
   @Test
   void noSchemaMentionsThe3600UpperBound() {
     for (ToolDescriptor descriptor : EnvironmentToolCatalog.descriptors()) {
@@ -355,23 +335,17 @@ class EnvironmentToolCatalogSchemaTest {
   private static EnvironmentToolCatalog.Entry entry(
       String id, String name, EnvironmentCapabilityDescriptor capability) {
     return new EnvironmentToolCatalog.Entry(
-        definition(
-            id,
-            name,
-            ToolType.ENVIRONMENT,
-            ToolVisibility.SELECTABLE,
-            AgentToolBackend.ENVIRONMENT_CAPABILITY),
+        definition(id, name, ToolVisibility.SELECTABLE, AgentToolBackend.ENVIRONMENT_CAPABILITY),
         capability);
   }
 
   private static AgentToolDefinition definition(
-      String id, String name, ToolType type, ToolVisibility visibility, AgentToolBackend backend) {
+      String id, String name, ToolVisibility visibility, AgentToolBackend backend) {
     return new AgentToolDefinition(
         new AgentToolId(id),
         new ToolDescriptor(
             name,
             "1",
-            type,
             name + " description",
             name,
             new ToolParamsSchema(null, Map.of(), Set.of(), false),
