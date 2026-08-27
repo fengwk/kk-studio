@@ -19,7 +19,6 @@ function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBra
     environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-    activeTools: [],
     ...overrides,
   }
 }
@@ -46,7 +45,6 @@ function draftOf(overrides: Partial<BranchDraft> = {}): BranchDraft {
     environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-    activeTools: [],
     yoloEnabled: false,
     ...overrides,
   }
@@ -100,14 +98,12 @@ describe('command batch replay identity', () => {
         environment: { name: 'local', workspacePath: '.' },
         agentName: 'coder',
         model: { providerName: 'openai', modelName: 'GPT-5', variant: 'v2' },
-        activeTools: ['task'],
       }),
     })
     expect(batch.request.commands.map((command) => command.type)).toEqual([
       'SET_ENVIRONMENT',
       'SET_AGENT',
       'SET_MODEL',
-      'SET_ACTIVE_TOOLS',
       'USER_MESSAGE',
     ])
   })

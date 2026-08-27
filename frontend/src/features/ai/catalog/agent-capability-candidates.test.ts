@@ -16,16 +16,20 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: null,
-    config: { tools: [], skills: [], subagents: [] },
+    config: { toolIds: [], skills: [], subagents: [] },
     version: '1',
     createTime: null,
     updateTime: null,
   }
 }
 
-function environment(name: string, skills: { name: string; description: string | null }[]): LiveEnvironmentDTO {
+function environment(
+  name: string,
+  skills: { name: string; description: string | null }[],
+): LiveEnvironmentDTO {
   return {
     name,
+    rootPath: null,
     status: 'READY',
     ready: true,
     lastSeen: null,
@@ -38,8 +42,8 @@ function environment(name: string, skills: { name: string; description: string |
 function tool(
   id: string,
   name: string,
-  description: string | null,
-  version: string | null = '1',
+  description: string,
+  version = '1',
   backend: ToolCatalogEntryDTO['backend'] = 'HOST',
 ): ToolCatalogEntryDTO {
   return {
@@ -52,24 +56,25 @@ function tool(
 }
 
 describe('agent-capability-candidates', () => {
-  it('keeps Agent candidates keyed by model-visible name', () => {
+  it('stores catalog IDs as values while displaying model-visible names', () => {
     const tools = [
       tool('base.bash', 'bash', 'shell'),
       tool('base.bash-v2', 'bash', 'duplicate'),
-      tool('base.read', 'read', 'files', null, 'ENVIRONMENT_CAPABILITY'),
+      tool('base.read', 'read', 'files', '1', 'ENVIRONMENT_CAPABILITY'),
     ]
 
     expect(buildToolCandidates(tools)).toEqual([
-      { name: 'bash', version: '1', description: 'shell' },
-      { name: 'read', version: null, description: 'files' },
+      { value: 'base.bash', name: 'bash', version: '1', description: 'shell' },
+      { value: 'base.bash-v2', name: 'bash', version: '1', description: 'duplicate' },
+      { value: 'base.read', name: 'read', version: '1', description: 'files' },
     ])
-    expect(buildToolCandidates(tools).map((item) => item.name)).toEqual(['bash', 'read'])
+    expect(buildToolCandidates(tools).map((item) => item.name)).toEqual(['bash', 'bash', 'read'])
     expect(buildToolCandidates(tools)[0]).not.toHaveProperty('source')
   })
 
   it('keeps permission candidates keyed by stable tool ID', () => {
     const tools = [
-      tool('base.read', 'read', 'files', null, 'ENVIRONMENT_CAPABILITY'),
+      tool('base.read', 'read', 'files', '1', 'ENVIRONMENT_CAPABILITY'),
       tool('plugin.read', 'read', 'plugin files', '1', 'PLUGIN'),
       tool('base.read', 'renamed read', 'duplicate ID'),
     ]
@@ -79,8 +84,9 @@ describe('agent-capability-candidates', () => {
       'plugin.read',
     ])
     expect(buildPermissionToolCandidates(tools)[0]).toEqual({
+      value: 'base.read',
       name: 'base.read',
-      version: null,
+      version: '1',
       description: 'read — files',
     })
     expect(tools[0]).not.toHaveProperty('source')
@@ -96,9 +102,15 @@ describe('agent-capability-candidates', () => {
       { name: 'docs', description: null },
     ])
 
-    expect(buildSkillCandidates(local).map((item) => item.name)).toEqual(['dev', 'ops'])
+    expect(buildSkillCandidates(local)).toEqual([
+      { value: 'dev', name: 'dev', description: 'dev skill' },
+      { value: 'ops', name: 'ops', description: 'ops skill' },
+    ])
     // 切换来源后只返回该来源的 skills，绝不出现另一个 Environment 的 'ops'。
-    expect(buildSkillCandidates(remote).map((item) => item.name)).toEqual(['dev', 'docs'])
+    expect(buildSkillCandidates(remote)).toEqual([
+      { value: 'dev', name: 'dev', description: 'duplicate' },
+      { value: 'docs', name: 'docs', description: null },
+    ])
   })
 
   it('returns no live skills without a selected source', () => {
@@ -118,8 +130,8 @@ describe('agent-capability-candidates', () => {
   it('retains selected orphans', () => {
     const local = environment('local', [{ name: 'dev', description: 'dev skill' }])
     expect(withSelectedOrphans(buildSkillCandidates(local), ['missing'])).toEqual([
-      { name: 'dev', description: 'dev skill' },
-      { name: 'missing', description: null, offline: true, missing: true },
+      { value: 'dev', name: 'dev', description: 'dev skill' },
+      { value: 'missing', name: 'missing', description: null, offline: true, missing: true },
     ])
   })
 
@@ -132,8 +144,8 @@ describe('agent-capability-candidates', () => {
         agent('  ', 'blank name'),
       ]),
     ).toEqual([
-      { name: 'helper', description: 'runs isolated tasks' },
-      { name: 'writer', description: null },
+      { value: 'helper', name: 'helper', description: 'runs isolated tasks' },
+      { value: 'writer', name: 'writer', description: null },
     ])
   })
 
@@ -144,8 +156,14 @@ describe('agent-capability-candidates', () => {
   it('keeps selected subagents missing from the catalog as removable orphans', () => {
     const candidates = buildSubagentCandidates([agent('helper', 'runs isolated tasks')])
     expect(withSelectedOrphans(candidates, ['ghost-agent'])).toEqual([
-      { name: 'helper', description: 'runs isolated tasks' },
-      { name: 'ghost-agent', description: null, offline: true, missing: true },
+      { value: 'helper', name: 'helper', description: 'runs isolated tasks' },
+      {
+        value: 'ghost-agent',
+        name: 'ghost-agent',
+        description: null,
+        offline: true,
+        missing: true,
+      },
     ])
   })
 })

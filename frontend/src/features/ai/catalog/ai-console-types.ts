@@ -75,7 +75,7 @@ export interface AgentDraft {
   systemPrompt: string
   model: string
   variant: string
-  tools: string[]
+  toolIds: string[]
   skills: string[]
   subagents: string[]
 }

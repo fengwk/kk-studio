@@ -39,7 +39,7 @@ export function PermissionEditor({
     queryFn: () => agentService.listTools(),
   })
   const permissionToolCandidates = buildPermissionToolCandidates(toolsQuery.data ?? [])
-  const catalogIds = permissionToolCandidates.map((tool) => tool.name)
+  const catalogIds = permissionToolCandidates.map((tool) => tool.value)
 
   return (
     <div className="permission-editor" data-permission-editor>
@@ -60,7 +60,7 @@ export function PermissionEditor({
               ]
             : []),
           ...permissionToolCandidates.map((candidate) => ({
-            value: candidate.name,
+            value: candidate.value,
             label: candidate.name,
           })),
         ]

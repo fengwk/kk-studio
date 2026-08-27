@@ -29,8 +29,9 @@ const agents = [
     model: 'minimax/MiniMax',
     variant: 'default',
     config: {
-      tools: [],
+      toolIds: [],
       skills: [],
+      subagents: [],
     },
     createTime: null,
     updateTime: null,
@@ -48,11 +49,13 @@ describe('useChatListController', () => {
     const environments = [
       {
         name: 'dev',
+        rootPath: null,
         ready: true,
         status: 'READY',
         lastSeen: null,
         capabilities: [],
         skills: [],
+        mcpServers: [],
       },
     ]
     const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
@@ -96,11 +99,13 @@ describe('useChatListController', () => {
     const environments = [
       {
         name: 'dev',
+        rootPath: null,
         ready: true,
         status: 'READY',
         lastSeen: null,
         capabilities: [],
         skills: [],
+        mcpServers: [],
       },
     ]
     const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })

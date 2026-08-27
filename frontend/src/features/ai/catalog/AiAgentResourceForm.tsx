@@ -20,8 +20,8 @@ import type {
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { translate, useI18n } from '@/shared/i18n'
 
-function toggleName(items: string[], name: string): string[] {
-  return items.includes(name) ? items.filter((item) => item !== name) : [...items, name]
+function toggleValue(items: string[], value: string): string[] {
+  return items.includes(value) ? items.filter((item) => item !== value) : [...items, value]
 }
 
 export function AgentForm({
@@ -81,7 +81,7 @@ export function AgentForm({
   ]
   const toolCandidates = withSelectedOrphans(
     buildToolCandidates(toolCatalog),
-    draft.tools,
+    draft.toolIds,
   )
   // Skill 候选只来自用户显式选中的一个 live Environment（ready===true）；未选择/来源失效时没有 live 候选，
   // 已勾选的名称仍作为可移除 orphan 保留。
@@ -188,15 +188,15 @@ export function AgentForm({
         />
       </label>
 
-      <fieldset className={`form-group capability-picker${fieldErrors.tools ? ' is-error' : ''}`}>
+      <fieldset className={`form-group capability-picker${fieldErrors.toolIds ? ' is-error' : ''}`}>
         <legend>{t('ai.catalog.form.tools')}</legend>
         <CapabilityChecklist
           options={toolCandidates}
-          selected={draft.tools}
+          selected={draft.toolIds}
           emptyText={t('ai.catalog.form.noCandidateTools')}
-          onToggle={(name) => onChange({ ...draft, tools: toggleName(draft.tools, name) })}
+          onToggle={(value) => onChange({ ...draft, toolIds: toggleValue(draft.toolIds, value) })}
         />
-        {fieldErrors.tools ? <span className="field-error">{fieldErrors.tools}</span> : null}
+        {fieldErrors.toolIds ? <span className="field-error">{fieldErrors.toolIds}</span> : null}
       </fieldset>
 
       <label className="form-group">
@@ -216,7 +216,7 @@ export function AgentForm({
           options={skillCandidates}
           selected={draft.skills}
           emptyText={t('ai.catalog.form.noCandidateSkills')}
-          onToggle={(name) => onChange({ ...draft, skills: toggleName(draft.skills, name) })}
+          onToggle={(value) => onChange({ ...draft, skills: toggleValue(draft.skills, value) })}
         />
         {fieldErrors.skills ? <span className="field-error">{fieldErrors.skills}</span> : null}
       </fieldset>
@@ -227,7 +227,7 @@ export function AgentForm({
           options={subagentCandidates}
           selected={draft.subagents}
           emptyText={t('ai.catalog.form.noCandidateSubagents')}
-          onToggle={(name) => onChange({ ...draft, subagents: toggleName(draft.subagents, name) })}
+          onToggle={(value) => onChange({ ...draft, subagents: toggleValue(draft.subagents, value) })}
         />
         {fieldErrors.subagents ? (
           <span className="field-error">{fieldErrors.subagents}</span>
@@ -257,7 +257,7 @@ function CapabilityChecklist({
   options: CapabilityOption[]
   selected: string[]
   emptyText: string
-  onToggle: (name: string) => void
+  onToggle: (value: string) => void
 }) {
   // options 已含 selected orphan；仅当既无候选也无已选时才显示空态。
   if (options.length === 0) {
@@ -271,14 +271,19 @@ function CapabilityChecklist({
   return (
     <div className="capability-options">
       {options.map((option) => {
-        const checked = selected.includes(option.name)
+        const checked = selected.includes(option.value)
         const stateClass = option.missing ? ' is-offline is-missing' : option.offline ? ' is-offline' : ''
         return (
           <label
-            key={option.name}
+            key={option.value}
             className={`capability-option capability-option-detailed${checked ? ' is-selected' : ''}${stateClass}`}
           >
-            <input type="checkbox" checked={checked} onChange={() => onToggle(option.name)} />
+            <input
+              type="checkbox"
+              value={option.value}
+              checked={checked}
+              onChange={() => onToggle(option.value)}
+            />
             <span className="capability-option-body">
               <span className="capability-option-heading">
                 <code className="capability-name">{option.name}</code>

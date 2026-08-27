@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  activeToolsFromAgent,
   branchDraftFromBranchSettings,
   branchDraftsEqual,
   buildBranchDiffCommands,
@@ -68,7 +67,7 @@ const modelWithoutCatalogEntry: AgentModelDTO = {
 }
 
 function agent(
-  tools: string[],
+  toolIds: string[],
   skills: string[],
   subagents: string[],
 ): AgentDefinitionDTO {
@@ -78,7 +77,7 @@ function agent(
     systemPrompt: null,
     model: 'provider/model',
     variant: null,
-    config: { tools, skills, subagents },
+    config: { toolIds, skills, subagents },
     version: '1',
     createTime: '2026-08-09T00:00:00Z',
     updateTime: '2026-08-09T00:00:00Z',
@@ -96,7 +95,6 @@ function draftWith(
     environment: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-    activeTools: [],
     yoloEnabled: false,
     ...overrides,
   }
@@ -120,30 +118,6 @@ function queuedSettingCommand(
     createTime: null,
   }
 }
-
-describe('activeToolsFromAgent', () => {
-  it('adds the internal skill and task tools from Agent capabilities exactly once', () => {
-    expect(
-      activeToolsFromAgent(
-        agent(['read', 'load_skill', 'task'], ['review'], ['coder']),
-      ),
-    ).toEqual(['read', 'load_skill', 'task'])
-  })
-
-  it('keeps internal tools absent when the corresponding capability list is empty', () => {
-    expect(activeToolsFromAgent(agent(['read'], [], []))).toEqual(['read'])
-  })
-
-  it('uses the complete derived tool set when materializing a root Thread branch', () => {
-    expect(
-      materializeBlankBranchDraft(
-        agent(['read'], ['review'], ['coder']),
-        false,
-        [model],
-      )?.activeTools,
-    ).toEqual(['read', 'load_skill', 'task'])
-  })
-})
 
 describe('BranchDraft materialization failures', () => {
   it('returns null when the Agent is missing or has no model ref', () => {
@@ -183,7 +157,6 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
       environment,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-      activeTools: [],
     }
   }
 
@@ -248,12 +221,9 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
     })
     // 相同 binding（即使不同对象引用）不产生 diff。
     expect(buildBranchDiffCommands(draftWithBinding(binding), draftWithBinding({ ...binding }), ids)).toEqual([])
-    // activeTools 顺序/数量不同必须触发 SET_ACTIVE_TOOLS；不等长列表直接判不相等。
-    expect(branchDraftsEqual(draftWith({ activeTools: ['read'] }), draftWith({ activeTools: ['read', 'task'] }))).toBe(false)
-    expect(branchDraftsEqual(draftWith({ activeTools: ['read', 'task'] }), draftWith({ activeTools: ['task', 'read'] }))).toBe(false)
   })
 
-  it('emits SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS only for the actually changed field', () => {
+  it('emits SET_AGENT/SET_MODEL only for the actually changed field', () => {
     const ids = (() => {
       let next = 0
       return () => `cid-${++next}`
@@ -280,16 +250,6 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'pro' },
     }])
 
-    const toolsChanged = buildBranchDiffCommands(
-      draftWith(),
-      draftWith({ activeTools: ['read'] }),
-      ids,
-    )
-    expect(toolsChanged).toEqual([{
-      type: 'SET_ACTIVE_TOOLS',
-      clientCommandId: 'cid-3',
-      activeTools: ['read'],
-    }])
   })
 
   it('emits every settings diff in the fixed order and never a SET_YOLO command', () => {
@@ -303,7 +263,6 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
         environment: binding,
         agentName: 'coder',
         model: { providerName: 'other', modelName: 'Other', variant: 'v2' },
-        activeTools: ['read', 'load_skill'],
         yoloEnabled: true,
       }),
       ids,
@@ -312,7 +271,6 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
       'SET_ENVIRONMENT',
       'SET_AGENT',
       'SET_MODEL',
-      'SET_ACTIVE_TOOLS',
     ])
     // YOLO 是 Thread 级直接控制面：diff 命令中绝不出现 SET_YOLO。
     expect(commands.some((command) => command.type === 'SET_YOLO')).toBe(false)
@@ -344,18 +302,16 @@ describe('EnvironmentBinding atomic semantics in BranchDraft', () => {
 })
 
 describe('projectPendingTarget setting projection', () => {
-  it('projects queued SET_AGENT / SET_MODEL / SET_ACTIVE_TOOLS by sequence order', () => {
+  it('projects queued SET_AGENT / SET_MODEL by sequence order', () => {
     const base = draftWith()
     const projected = projectPendingTarget(base, [
       queuedSettingCommand('2', 'SET_MODEL', {
         model: { providerName: 'other', modelName: 'Other', variant: 'v2' },
       }),
       queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' }),
-      queuedSettingCommand('3', 'SET_ACTIVE_TOOLS', { activeTools: ['read', 'task'] }),
     ])
     expect(projected.agentName).toBe('coder')
     expect(projected.model).toEqual({ providerName: 'other', modelName: 'Other', variant: 'v2' })
-    expect(projected.activeTools).toEqual(['read', 'task'])
   })
 
   it('ignores non-SET_ and non-QUEUED commands while keeping base values', () => {
@@ -369,7 +325,6 @@ describe('projectPendingTarget setting projection', () => {
       },
     ])
     expect(projected.agentName).toBe('coder')
-    expect(projected.activeTools).toEqual(base.activeTools)
   })
 
   it('keeps the base model fields when a SET_MODEL payload is not a record', () => {
@@ -390,24 +345,6 @@ describe('projectPendingTarget setting projection', () => {
       modelName: 'New',
       variant: 'default',
     })
-  })
-
-  it('projects only string entries from a SET_ACTIVE_TOOLS payload', () => {
-    const base = draftWith()
-    const projected = projectPendingTarget(base, [
-      queuedSettingCommand('1', 'SET_ACTIVE_TOOLS', {
-        activeTools: ['read', 42, null, 'task'],
-      }),
-    ])
-    expect(projected.activeTools).toEqual(['read', 'task'])
-  })
-
-  it('keeps base activeTools when the SET_ACTIVE_TOOLS payload is not an array', () => {
-    const base = draftWith({ activeTools: ['read'] })
-    const projected = projectPendingTarget(base, [
-      queuedSettingCommand('1', 'SET_ACTIVE_TOOLS', { activeTools: 'read' }),
-    ])
-    expect(projected.activeTools).toEqual(['read'])
   })
 
   it('treats an unknown command type as a no-op', () => {

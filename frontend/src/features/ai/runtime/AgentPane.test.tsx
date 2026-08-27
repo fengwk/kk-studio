@@ -18,6 +18,7 @@ import type {
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
@@ -73,7 +74,7 @@ const agents = [{
   systemPrompt: null,
   model: 'minimax/MiniMax',
   variant: 'default',
-  config: { tools: [], skills: [], subagents: [] },
+  config: { toolIds: [], skills: [], subagents: [] },
   version: '0',
   createTime: null,
   updateTime: null,
@@ -114,7 +115,6 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       environment: null,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-      activeTools: [],
     },
     createTime: null,
     updateTime: null,
@@ -498,11 +498,13 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     renderPane({ type: 'CHAT', id: CHAT_ID }, [{
       name: 'local',
+      rootPath: null,
       ready: true,
       status: 'READY',
       lastSeen: null,
       capabilities: [],
       skills: [],
+      mcpServers: [],
     }])
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
@@ -801,7 +803,6 @@ describe('AgentPane orchestration', () => {
           environment: { name: 'local', workspacePath: '.' },
           agentName: 'assistant',
           model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-          activeTools: ['search', 1],
         },
       }),
       createTime: null,
@@ -1123,14 +1124,7 @@ function threadFixture(threadId: string, overrides: Partial<HarnessThreadDTO> = 
 
 function renderPane(
   owner: { type: 'CHAT' | 'CANVAS'; id: string },
-  environments: Array<{
-    name: string
-    ready: boolean
-    status: string
-    lastSeen: string | null
-    tools: string[]
-    skills: string[]
-  }> = [],
+  environments: LiveEnvironmentDTO[] = [],
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },

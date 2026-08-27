@@ -39,7 +39,7 @@ export function toUserFacingErrorMessage(error: unknown): string {
     { match: /pricing|PerMillion|serviceTier|must not be negative|must be a number/i, key: 'ai.catalog.validation.pricing' },
     { match: /modelName|请选择 Model|Default Model/i, key: 'ai.catalog.validation.model' },
     { match: /baseUrl/i, key: 'ai.catalog.validation.baseUrl' },
-    { match: /tools.*重名|tools/i, key: 'ai.catalog.validation.toolsConflict' },
+    { match: /toolIds.*重名|toolIds/i, key: 'ai.catalog.validation.toolsConflict' },
     { match: /skills.*重名|skills/i, key: 'ai.catalog.validation.skillsConflict' },
     { match: /Network Error|Failed to fetch|ECONNREFUSED|timeout/i, key: 'ai.catalog.validation.network' },
     { match: /401|Unauthorized/i, key: 'ai.catalog.validation.unauthorized' },

@@ -19,8 +19,9 @@ const agent = {
   model: 'minimax/MiniMax',
   variant: 'default',
   config: {
-    tools: [],
+    toolIds: [],
     skills: [],
+    subagents: [],
   },
   version: '1',
   createTime: null,
@@ -104,6 +105,7 @@ describe('CreateChatModal', () => {
           environments={[
             {
               name: 'dev',
+              rootPath: null,
               status: 'READY',
               ready: true,
               lastSeen: null,

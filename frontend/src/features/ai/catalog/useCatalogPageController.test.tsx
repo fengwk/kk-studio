@@ -240,7 +240,7 @@ function agent() {
     model: 'model-1',
     variant: 'default',
     config: {
-      tools: [],
+      toolIds: [],
       skills: [],
       subagents: [],
     },

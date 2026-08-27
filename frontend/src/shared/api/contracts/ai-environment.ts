@@ -77,6 +77,7 @@ export interface EnvironmentDirectoryDTO {
  */
 export interface LiveEnvironmentDTO {
   name: string
+  rootPath: string | null
   status: string
   ready: boolean
   lastSeen: string | null

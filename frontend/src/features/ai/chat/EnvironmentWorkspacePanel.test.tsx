@@ -17,15 +17,35 @@ vi.mock('@/shared/api/environment-service', () => ({
 }))
 
 const readyEnvironments: LiveEnvironmentDTO[] = [
-  { name: 'local', ready: true, status: 'READY', lastSeen: null, capabilities: [], skills: [] },
-  { name: 'remote', ready: true, status: 'READY', lastSeen: null, capabilities: [], skills: [] },
+  {
+    name: 'local',
+    rootPath: null,
+    ready: true,
+    status: 'READY',
+    lastSeen: null,
+    capabilities: [],
+    skills: [],
+    mcpServers: [],
+  },
+  {
+    name: 'remote',
+    rootPath: null,
+    ready: true,
+    status: 'READY',
+    lastSeen: null,
+    capabilities: [],
+    skills: [],
+    mcpServers: [],
+  },
   {
     name: 'connecting',
+    rootPath: null,
     ready: false,
     status: 'CONNECTING',
     lastSeen: null,
     capabilities: [],
     skills: [],
+    mcpServers: [],
   },
 ]
 
@@ -196,7 +216,16 @@ describe('EnvironmentWorkspacePanel', () => {
     renderPanel({
       environments: [
         ...readyEnvironments,
-        { name: 'proj', ready: true, status: 'READY', lastSeen: null, capabilities: [], skills: [] },
+        {
+          name: 'proj',
+          rootPath: null,
+          ready: true,
+          status: 'READY',
+          lastSeen: null,
+          capabilities: [],
+          skills: [],
+          mcpServers: [],
+        },
       ],
       current: { name: 'local', workspacePath: 'proj' },
     })

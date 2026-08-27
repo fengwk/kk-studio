@@ -76,7 +76,6 @@ function branchSettings(
     environment: null,
     agentName: 'assistant',
     model: modelSelection(),
-    activeTools: [],
     ...overrides,
   }
 }
@@ -143,7 +142,7 @@ const agents = [
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: 'default',
-    config: { tools: [], skills: [], subagents: [] },
+    config: { toolIds: [], skills: [], subagents: [] },
     version: '0',
     createTime: null,
     updateTime: null,
@@ -154,7 +153,7 @@ const agents = [
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: 'default',
-    config: { tools: ['web-search'], skills: ['skill-a'], subagents: [] },
+    config: { toolIds: ['base.web-search'], skills: ['skill-a'], subagents: [] },
     version: '0',
     createTime: null,
     updateTime: null,
@@ -271,8 +270,7 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.dirty).toBe(false)
 
     act(() => {
-      // freeze 规则：采用新 agent 的 name + activeTools（tools + skills 内部工具），
-      // 冻结的 model/environment/yolo 保持快照值。
+      // freeze 规则：采用新 agent 的 name，冻结的 model/environment/yolo 保持快照值。
       expect(result.current.selectAgent('coder')).toBe(true)
       expect(result.current.selectAgent('missing')).toBe(false)
       result.current.selectEnvironment({ name: 'local', workspacePath: '.' })
@@ -284,7 +282,6 @@ describe('useBoundBranchPanel', () => {
       environment: { name: 'local', workspacePath: '.' },
       agentName: 'coder',
       model: { providerName: 'openai', modelName: 'GPT-5', variant: 'v2' },
-      activeTools: ['web-search', 'load_skill'],
       yoloEnabled: true,
     })
     // effectiveBase 仍是干净快照；draft 已变脏。
@@ -294,18 +291,15 @@ describe('useBoundBranchPanel', () => {
     await send(result)
 
     const [batch] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
-    // buildBranchDiffCommands 的固定顺序：ENV/AGENT/MODEL/TOOLS + USER_MESSAGE；yolo 走直接控制面。
+    // buildBranchDiffCommands 的固定顺序：ENV/AGENT/MODEL + USER_MESSAGE；yolo 走直接控制面。
     expect(batch.commands.map((command) => command.type)).toEqual([
       'SET_ENVIRONMENT',
       'SET_AGENT',
       'SET_MODEL',
-      'SET_ACTIVE_TOOLS',
       'USER_MESSAGE',
     ])
     const setAgent = batch.commands[1]!
     expect(setAgent).toMatchObject({ agentName: 'coder' })
-    const setTools = batch.commands[3]!
-    expect(setTools).toMatchObject({ activeTools: ['web-search', 'load_skill'] })
     // 直接控制面调用基于 snapshot version 的精确 CAS，绝不生成 SET_YOLO command。
     expect(harnessService.setThreadYolo).toHaveBeenCalledWith(THREAD_ID, {
       expectedVersion: '0',
@@ -339,10 +333,9 @@ describe('useBoundBranchPanel', () => {
 
     await send(result)
     const [batch] = vi.mocked(agentPaneService.acceptCommandBatch).mock.calls[0]!
-    // 未发送的 agent 编辑（name + activeTools）仍与消息一起提交；yolo 已对齐，绝不重复发送。
+    // 未发送的 agent 编辑仍与消息一起提交；yolo 已对齐，绝不重复发送。
     expect(batch.commands.map((command) => command.type)).toEqual([
       'SET_AGENT',
-      'SET_ACTIVE_TOOLS',
       'USER_MESSAGE',
     ])
   })
@@ -647,7 +640,6 @@ describe('useBoundBranchPanel', () => {
                 branchSettings: branchSettings({
                   agentName: 'assistant2',
                   model: modelSelection({ providerName: 'anthropic', modelName: 'Claude', variant: 'v1' }),
-                  activeTools: ['web-search'],
                 }),
               }),
             )
@@ -676,7 +668,6 @@ describe('useBoundBranchPanel', () => {
       environment: null,
       agentName: 'assistant2',
       model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
-      activeTools: ['web-search'],
       yoloEnabled: true,
     })
     expect(result.current.dirty).toBe(false)
@@ -732,7 +723,6 @@ describe('useBoundBranchPanel', () => {
             branchSettings: branchSettings({
               agentName: 'assistant2',
               model: modelSelection({ providerName: 'anthropic', modelName: 'Claude', variant: 'v1' }),
-              activeTools: ['web-search'],
             }),
           }),
         ),
@@ -743,7 +733,6 @@ describe('useBoundBranchPanel', () => {
       environment: null,
       agentName: 'assistant2',
       model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
-      activeTools: ['web-search'],
       yoloEnabled: true,
     })
     expect(result.current.dirty).toBe(false)
@@ -885,7 +874,6 @@ describe('useBoundBranchPanel', () => {
       environment: null,
       agentName: 'fresh',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-      activeTools: [],
       yoloEnabled: true,
     })
     expect(result.current.dirty).toBe(false)

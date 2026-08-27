@@ -514,7 +514,7 @@ function agent() {
     model: 'stub/acceptance-stub',
     variant: 'default',
     config: {
-      tools: [],
+      toolIds: [],
       skills: [],
       subagents: [],
     },

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  activeToolsFromAgent,
   branchDraftFromThread,
   branchDraftsEqual,
   projectPendingTarget,
@@ -77,8 +76,7 @@ function compareDecimalVersions(a: string, b: string): number {
  * - branch base/draft 从 snapshot 初始化、thread 重绑重置，以及 queued SET_*
  *   pending projection 出的 effectiveBase；
  * - 通过 `buildMessageBatchPlan` 构建原子 message batch；
- * - agent/environment/yolo/model 的 draft-local 编辑（agent 选择采用其
- *   activeTools，冻结其余选中值）；
+ * - agent/environment/yolo/model 的 draft-local 编辑（agent 选择冻结其余选中值）；
  * - YOLO 走直接控制面：写请求串行并合并快速连点（每次基于最新权威 version，
  *   latest wins），重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
  *
@@ -214,16 +212,15 @@ export function useBoundBranchPanel({
   }
 
   /**
-   * Draft-local agent 选择：解析 catalog（与 Agent picker 同源）并采用其
-   * activeTools；冻结的 model/environment/yolo 选中值保持不变。返回是否解析
-   * 成功，由调用方决定错误反馈。
+   * Draft-local agent 选择：解析 catalog（与 Agent picker 同源）；冻结的
+   * model/environment/yolo 选中值保持不变。返回是否解析成功，由调用方决定错误反馈。
    */
   function selectAgent(agentName: string): boolean {
     const agent = controller.agents.find((candidate) => candidate.name === agentName)
     if (agent == null) {
       return false
     }
-    editDraft({ agentName, activeTools: activeToolsFromAgent(agent) })
+    editDraft({ agentName })
     return true
   }
 

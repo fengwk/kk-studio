@@ -28,7 +28,6 @@ describe('agent-pane wire service', () => {
           environment: null,
           agentName: 'assistant',
           model: { providerName: 'p', modelName: 'm', variant: 'v' },
-          activeTools: [],
         },
         yoloEnabled: false,
       },

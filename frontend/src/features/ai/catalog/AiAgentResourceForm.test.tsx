@@ -52,6 +52,7 @@ function liveEnvironment(
 ): LiveEnvironmentDTO {
   return {
     name,
+    rootPath: null,
     status: 'READY',
     ready: true,
     lastSeen: null,
@@ -69,7 +70,7 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: null,
-    config: { tools: [], skills: [], subagents: [] },
+    config: { toolIds: [], skills: [], subagents: [] },
     version: '1',
     createTime: null,
     updateTime: null,
@@ -86,7 +87,7 @@ describe('AgentForm current contracts', () => {
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
         ...emptyAgentDraft(modelWithVariants()),
-        tools: ['missing-tool'],
+        toolIds: ['missing-tool'],
       })
       return (
         <AgentForm
@@ -122,6 +123,7 @@ describe('AgentForm current contracts', () => {
     const missingTool = screen.getByLabelText(/missing-tool/)
     expect(missingTool).toBeChecked()
     const bashInput = screen.getByLabelText(/bash/)
+    expect(bashInput).toHaveAttribute('value', 'base.bash')
     const bashOption = bashInput.closest('.capability-option')
     expect(bashOption).toHaveClass('capability-option-detailed')
     expect(bashOption?.querySelector('.capability-option-body')).toBeInTheDocument()
@@ -150,7 +152,7 @@ describe('AgentForm current contracts', () => {
         models={[modelWithVariants()]}
         fieldErrors={{
           variant: '请选择 Variant',
-          tools: 'Tools 冲突',
+          toolIds: 'Tools 冲突',
           skills: 'Skills 冲突',
         }}
         onChange={() => undefined}
@@ -240,7 +242,7 @@ describe('AgentForm current contracts', () => {
     const onChange = vi.fn()
     const draft: AgentDraft = {
       ...emptyAgentDraft(modelWithVariants()),
-      tools: ['bash'],
+      toolIds: ['base.bash'],
       skills: ['dev'],
     }
     render(
@@ -368,7 +370,7 @@ describe('AgentForm current contracts', () => {
           {
             id: 'base.read',
             name: 'read',
-            version: null,
+            version: '1',
             description: 'files',
             backend: 'ENVIRONMENT_CAPABILITY',
           },
@@ -413,7 +415,7 @@ describe('AgentForm current contracts', () => {
           {
             id: 'base.read',
             name: 'read',
-            version: null,
+            version: '1',
             description: 'files',
             backend: 'ENVIRONMENT_CAPABILITY',
           },

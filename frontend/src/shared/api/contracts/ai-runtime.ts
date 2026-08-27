@@ -25,7 +25,6 @@ export interface HarnessBranchSettingsDTO {
   environment: EnvironmentBindingDTO | null
   agentName: string
   model: HarnessModelSelectionDTO
-  activeTools: string[]
 }
 
 export type EntryType =
@@ -128,7 +127,6 @@ export type HarnessCommandCreateDTO =
   | HarnessUserMessageCommandDTO
   | { type: 'SET_AGENT'; clientCommandId: string; agentName: string }
   | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
-  | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
   | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environment: EnvironmentBindingDTO | null }
 
 /**
