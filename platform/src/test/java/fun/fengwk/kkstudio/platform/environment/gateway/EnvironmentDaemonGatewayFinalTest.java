@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityDescript
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityFailedException;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilitySendUncertainException;
@@ -44,6 +45,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
 import fun.fengwk.kkstudio.platform.environment.registry.BindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
@@ -111,6 +113,7 @@ class EnvironmentDaemonGatewayFinalTest {
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private final DaemonDirectoryCodec directoryCodec = new DaemonDirectoryCodec();
+  private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
 
   @Test
   void readyNotifiesHandlerAndInvokeSendsProtocolThenMapsCompletion() {
@@ -243,6 +246,96 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   @Test
+  void failedMapsToRemoteFailedExceptionAndReleasesCapabilitySlot() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-failed");
+    RecordingListener listener = new RecordingListener();
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
+
+    // FAILED 是 daemon 已确认的 terminal failure，必须投影为 typed error 并释放 active 槽位。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.FAILED,
+            INVOCATION_ID.toString(),
+            2,
+            "{\"message\":\"daemon failed\"}"));
+
+    assertTrue(listener.error instanceof EnvironmentCapabilityFailedException);
+    assertEquals("daemon failed", listener.error.getMessage());
+    EnvironmentCapabilityExecutionHandle next =
+        fixture.gateway.invoke(
+            ENVIRONMENT,
+            request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
+            new RecordingListener());
+    assertNotNull(next);
+  }
+
+  @Test
+  void startedAcceptsEmptyAndReplayedTruePayloadsWhileKeepingInvocationActive() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-started");
+    RecordingListener listener = new RecordingListener();
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
+
+    // STARTED 只确认 daemon 已开始执行；空 payload 与 replayed=true 都不应释放 active 槽位。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(ENVIRONMENT_NAME, DaemonMessageType.STARTED, INVOCATION_ID.toString(), 2, "{}"));
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.STARTED,
+            INVOCATION_ID.toString(),
+            3,
+            "{\"replayed\":true}"));
+    fixture.gateway.receive(connection.connectionId(), completed(4, resultPayload("done")));
+
+    assertFalse(connection.closed);
+    assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
+  }
+
+  @Test
+  void startedRejectsFalseReplayFlagAndClosesConnection() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-started-invalid-payload");
+    RecordingListener listener = new RecordingListener();
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
+
+    // replayed 字段一旦出现只能为 true，false 是严格协议错误而不是普通 capability failure。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.STARTED,
+            INVOCATION_ID.toString(),
+            2,
+            "{\"replayed\":false}"));
+
+    assertTrue(connection.closed);
+    assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
+  }
+
+  @Test
+  void startedRejectsCallbackForAnotherInvocation() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-started-wrong-owner");
+    RecordingListener listener = new RecordingListener();
+    fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
+
+    // active invocation 的 UUID 是 wire ownership；陌生回调不得驱动当前 listener。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME, DaemonMessageType.STARTED, SECOND_INVOCATION_ID.toString(), 2, "{}"));
+
+    assertTrue(connection.closed);
+    assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
+  }
+
+  @Test
   void invokeWhenOfflineThrowsUnavailable() {
     Fixture fixture = fixture();
     assertThrows(
@@ -299,6 +392,43 @@ class EnvironmentDaemonGatewayFinalTest {
         IllegalArgumentException.class,
         () -> fixture.gateway.invoke(ENVIRONMENT, request, new RecordingListener()));
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
+  }
+
+  @Test
+  void openingDuplicateConnectionIdCleansPreviousAndCloseIsIdempotent() {
+    Fixture fixture = fixture();
+    FakeConnection first = fixture.connectReady("connection-duplicate");
+    FakeConnection replacement = new FakeConnection("connection-duplicate");
+
+    // 同一 transport connectionId 的 open 必须清理旧 state，后续 close 只能清理新 state 一次。
+    fixture.gateway.open(replacement);
+    fixture.gateway.close(replacement.connectionId());
+    fixture.gateway.close(replacement.connectionId());
+
+    assertEquals(1, first.closeCount);
+    assertEquals(1, replacement.closeCount);
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+  }
+
+  @Test
+  void cancelAfterTransportCloseUsesNotSentOutcomeAndClosesActiveLifecycle() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-cancel-transport-closed");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.gateway.invoke(ENVIRONMENT, request(fixture.descriptor), listener);
+    connection.close();
+
+    // transport 已经关闭但 gateway 尚未收到 close 事件时，CANCEL 不能伪造一帧；随后清理仍须收敛 active。
+    handle.cancel();
+    assertTrue(handle.isCancelled());
+    assertEquals(
+        0,
+        connection.envelopes().stream()
+            .filter(envelope -> envelope.messageType() == DaemonMessageType.CANCEL)
+            .count());
+    fixture.gateway.close(connection.connectionId());
+    assertTrue(listener.error instanceof EnvironmentCapabilitySendUncertainException);
   }
 
   @Test
@@ -699,6 +829,176 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   @Test
+  void loadSkillSuccessCompletesLoadedResultFromOwnedCallback() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-skill-loaded");
+    CompletableFuture<EnvironmentSkillLoadResult> future =
+        fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofSeconds(5));
+    String requestId = lastSkillLoadRequestId(connection);
+
+    // SKILL_LOADED 必须按 requestId 完成对应 future，并保留 daemon 返回的正文。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.SKILL_LOADED,
+            requestId,
+            2,
+            skillLoadCodec.encodeLoaded(
+                new DaemonSkillLoadCodec.SkillLoaded("dev", "# Developer rules"))));
+
+    EnvironmentSkillLoadResult result = future.join();
+    EnvironmentSkillLoadResult.Loaded loaded =
+        assertInstanceOf(EnvironmentSkillLoadResult.Loaded.class, result);
+    assertEquals("dev", loaded.skillName());
+    assertEquals("# Developer rules", loaded.content());
+    assertFalse(connection.closed);
+  }
+
+  @Test
+  void loadSkillFailureCompletesFailedResultFromOwnedCallback() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-skill-load-failed");
+    CompletableFuture<EnvironmentSkillLoadResult> future =
+        fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofSeconds(5));
+    String requestId = lastSkillLoadRequestId(connection);
+
+    // SKILL_LOAD_FAILED 是 daemon 的确定性结果，应原样映射为应用层 Failed。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.SKILL_LOAD_FAILED,
+            requestId,
+            2,
+            skillLoadCodec.encodeFailed(
+                new DaemonSkillLoadCodec.SkillLoadFailed("dev", "skill file is unreadable"))));
+
+    EnvironmentSkillLoadResult.Failed failed =
+        assertInstanceOf(EnvironmentSkillLoadResult.Failed.class, future.join());
+    assertEquals("dev", failed.skillName());
+    assertEquals("skill file is unreadable", failed.message());
+    assertFalse(connection.closed);
+  }
+
+  @Test
+  void loadSkillMismatchedCallbackNameIsProtocolFailure() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-skill-name-mismatch");
+    CompletableFuture<EnvironmentSkillLoadResult> future =
+        fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofMillis(50));
+    String requestId = lastSkillLoadRequestId(connection);
+
+    // requestId 所属的 skill name 也必须严格匹配，不能借同一连接转交另一 skill 的正文。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.SKILL_LOADED,
+            requestId,
+            2,
+            skillLoadCodec.encodeLoaded(
+                new DaemonSkillLoadCodec.SkillLoaded("ops", "# Operations rules"))));
+
+    assertTrue(connection.closed);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.LOAD_SKILL, DaemonMessageType.ERROR),
+        messageTypes(connection.envelopes()));
+    assertInstanceOf(EnvironmentSkillLoadResult.Failed.class, future.join());
+  }
+
+  @Test
+  void loadSkillMismatchedFailedCallbackNameIsProtocolFailure() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-skill-failure-name-mismatch");
+    CompletableFuture<EnvironmentSkillLoadResult> future =
+        fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofMillis(50));
+    String requestId = lastSkillLoadRequestId(connection);
+
+    // 成功和失败回执都受同一 name ownership 约束，失败回执不能绕过校验。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.SKILL_LOAD_FAILED,
+            requestId,
+            2,
+            skillLoadCodec.encodeFailed(
+                new DaemonSkillLoadCodec.SkillLoadFailed("ops", "wrong skill"))));
+
+    assertTrue(connection.closed);
+    assertInstanceOf(EnvironmentSkillLoadResult.Failed.class, future.join());
+  }
+
+  @Test
+  void loadSkillCallbackFromAnotherConnectionIsRejectedByOwnership() {
+    Fixture fixture = fixture();
+    FakeConnection first = fixture.connectReady("connection-skill-owner");
+    CompletableFuture<EnvironmentSkillLoadResult> future =
+        fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofMillis(50));
+    String requestId = lastSkillLoadRequestId(first);
+
+    FakeConnection second = new FakeConnection("connection-skill-other-owner");
+    fixture.gateway.open(second);
+    fixture.gateway.receive(second.connectionId(), hello(0, OTHER_ENVIRONMENT_NAME));
+    fixture.gateway.receive(second.connectionId(), ready(1, OTHER_ENVIRONMENT_NAME));
+
+    // 另一个 Environment 的连接即使知道 requestId，也不能消费 first connection 的 pending。
+    fixture.gateway.receive(
+        second.connectionId(),
+        envelope(
+            OTHER_ENVIRONMENT_NAME,
+            DaemonMessageType.SKILL_LOADED,
+            requestId,
+            2,
+            skillLoadCodec.encodeLoaded(
+                new DaemonSkillLoadCodec.SkillLoaded("dev", "wrong owner"))));
+
+    assertTrue(second.closed);
+    assertFalse(first.closed);
+    assertInstanceOf(EnvironmentSkillLoadResult.Failed.class, future.join());
+  }
+
+  @Test
+  void loadSkillTimeoutThenLateCallbackIsProtocolFailure() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-skill-timeout");
+    CompletableFuture<EnvironmentSkillLoadResult> future =
+        fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofMillis(30));
+    assertInstanceOf(EnvironmentSkillLoadResult.Failed.class, future.join());
+    String requestId = lastSkillLoadRequestId(connection);
+
+    // skill load 没有 directory tombstone：超时后同 requestId 的迟到回执是 unsolicited protocol error。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.SKILL_LOADED,
+            requestId,
+            2,
+            skillLoadCodec.encodeLoaded(new DaemonSkillLoadCodec.SkillLoaded("dev", "late"))));
+
+    assertTrue(connection.closed);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.LOAD_SKILL, DaemonMessageType.ERROR),
+        messageTypes(connection.envelopes()));
+  }
+
+  @Test
+  void rejectedSkillLoadFrameClosesConnectionAndFailsPending() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-skill-send-rejected");
+    connection.failNextSend = true;
+
+    // transport 拒绝 LOAD_SKILL 后必须关闭连接并立即完成 pending，而不能等待超时。
+    EnvironmentSkillLoadResult result =
+        fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofSeconds(5)).join();
+
+    assertTrue(connection.closed);
+    assertInstanceOf(EnvironmentSkillLoadResult.Failed.class, result);
+  }
+
+  @Test
   void helloUnsupportedProtocolIsRejectedAndClosesConnection() {
     Fixture fixture = fixture();
     FakeConnection connection = new FakeConnection("connection-unsupported-protocol");
@@ -718,6 +1018,120 @@ class EnvironmentDaemonGatewayFinalTest {
     assertTrue(connection.closed);
     assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(connection.envelopes()));
     assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+  }
+
+  @Test
+  void wrongGatewayTokenIsRejectedBeforeEnvironmentBinding() {
+    Fixture fixture = fixture();
+    FakeConnection connection = new FakeConnection("connection-wrong-token");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), helloWithToken("wrong-token", 0));
+
+    // token 校验发生在 registry bind 之前，认证失败不得产生 CONNECTING 条目。
+    assertTrue(connection.closed);
+    assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(connection.envelopes()));
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+  }
+
+  @Test
+  void duplicateHelloAndReadyAreRejectedAsSingleUseHandshakeMessages() {
+    Fixture helloFixture = fixture();
+    FakeConnection helloConnection = helloFixture.connectReady("connection-duplicate-hello");
+    helloFixture.gateway.receive(helloConnection.connectionId(), hello(2));
+    assertTrue(helloConnection.closed);
+
+    Fixture readyFixture = fixture();
+    FakeConnection readyConnection = readyFixture.connectReady("connection-duplicate-ready");
+    readyFixture.gateway.receive(readyConnection.connectionId(), ready(2));
+    assertTrue(readyConnection.closed);
+  }
+
+  @Test
+  void errorBeforeReadyAcceptsOnlyExactMessagePayload() {
+    Fixture fixture = fixture();
+    FakeConnection connection = new FakeConnection("connection-error-before-ready");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+
+    // ERROR 是 daemon 在握手阶段报告自身失败的合法 inbound 消息，只接受唯一 message 字段。
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.ERROR,
+            null,
+            1,
+            "{\"message\":\"daemon boot failed\"}"));
+
+    assertFalse(connection.closed);
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
+  }
+
+  @Test
+  void errorWithUnexpectedPayloadFieldClosesConnection() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-error-invalid-payload");
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.ERROR,
+            null,
+            2,
+            "{\"message\":\"bad\",\"extra\":true}"));
+
+    // ERROR payload 多字段会触发 strict decoder，且协议错误必须 drain ERROR 后关闭连接。
+    assertTrue(connection.closed);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
+        messageTypes(connection.envelopes()));
+    assertEquals(1, connection.closeAfterFlushCount);
+  }
+
+  @Test
+  void ackAcceptsSentSequenceAndRejectsUnsentOrOwnedInvocation() {
+    Fixture validFixture = fixture();
+    FakeConnection validConnection = validFixture.connectReady("connection-ack-valid");
+    validFixture.gateway.receive(
+        validConnection.connectionId(),
+        envelope(ENVIRONMENT_NAME, DaemonMessageType.ACK, null, 2, "{\"acknowledgedSequence\":0}"));
+    assertFalse(validConnection.closed);
+
+    Fixture unsentFixture = fixture();
+    FakeConnection unsentConnection = unsentFixture.connectReady("connection-ack-unsent");
+    unsentFixture.gateway.receive(
+        unsentConnection.connectionId(),
+        envelope(ENVIRONMENT_NAME, DaemonMessageType.ACK, null, 2, "{\"acknowledgedSequence\":1}"));
+    assertTrue(unsentConnection.closed);
+
+    Fixture ownedFixture = fixture();
+    FakeConnection ownedConnection = ownedFixture.connectReady("connection-ack-owned");
+    ownedFixture.gateway.receive(
+        ownedConnection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.ACK,
+            INVOCATION_ID.toString(),
+            2,
+            "{\"acknowledgedSequence\":0}"));
+    assertTrue(ownedConnection.closed);
+  }
+
+  @Test
+  void ackRejectsUnexpectedPayloadFields() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-ack-extra-field");
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.ACK,
+            null,
+            2,
+            "{\"acknowledgedSequence\":0,\"extra\":true}"));
+
+    assertTrue(connection.closed);
+    assertEquals(1, connection.closeAfterFlushCount);
   }
 
   @Test
@@ -1120,6 +1534,10 @@ class EnvironmentDaemonGatewayFinalTest {
         .requestId();
   }
 
+  private String lastSkillLoadRequestId(FakeConnection connection) {
+    return connection.envelopes().get(connection.envelopes().size() - 1).invocationId();
+  }
+
   /** daemon 无响应时按 timeout 完成 Failed(TIMEOUT) 并清理 pending；随后同连接迟到成功响应被 tombstone 静默丢弃，不关闭连接。 */
   @Test
   void listDirectoryTimeoutThenLateSuccessIsDroppedWithoutDisconnect() throws Exception {
@@ -1340,6 +1758,43 @@ class EnvironmentDaemonGatewayFinalTest {
     assertEquals("path does not exist", ((EnvironmentDirectoryListResult.Failed) result).message());
   }
 
+  @Test
+  void listDirectoryMapsEveryDaemonFailureCode() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-dir-all-failure-codes");
+    List<DaemonDirectoryFailureCode> wireCodes = List.of(DaemonDirectoryFailureCode.values());
+    List<EnvironmentDirectoryFailureCode> applicationCodes =
+        List.of(
+            EnvironmentDirectoryFailureCode.INVALID_PATH,
+            EnvironmentDirectoryFailureCode.NOT_FOUND,
+            EnvironmentDirectoryFailureCode.NOT_DIRECTORY,
+            EnvironmentDirectoryFailureCode.IO_ERROR);
+
+    // wire/application failure code 是稳定的一一投影，四种类型都必须保留语义。
+    for (int index = 0; index < wireCodes.size(); index++) {
+      String path = "missing-" + index;
+      CompletableFuture<EnvironmentDirectoryListResult> future =
+          fixture.gateway.listDirectory(ENVIRONMENT_NAME, path, Duration.ofSeconds(5));
+      String requestId = lastListDirectoryRequestId(connection);
+      fixture.gateway.receive(
+          connection.connectionId(),
+          envelope(
+              ENVIRONMENT_NAME,
+              DaemonMessageType.DIRECTORY_LIST_FAILED,
+              null,
+              index + 2L,
+              directoryCodec.encodeFailed(
+                  new DaemonDirectoryCodec.DirectoryListFailed(
+                      requestId, path, wireCodes.get(index), "failure-" + index))));
+
+      EnvironmentDirectoryListResult.Failed failed =
+          assertInstanceOf(EnvironmentDirectoryListResult.Failed.class, future.join());
+      assertEquals(applicationCodes.get(index), failed.code());
+      assertEquals("failure-" + index, failed.message());
+    }
+    assertFalse(connection.closed);
+  }
+
   /**
    * root 内 symlink alias 的显式请求经 gateway 成功：daemon 按冻结契约回显请求的 canonical wire 路径（alias 本身）而不是 real
    * path，gateway 不得把它当作 path mismatch 协议失败断开连接。
@@ -1532,6 +1987,21 @@ class EnvironmentDaemonGatewayFinalTest {
             + catalogVersion
             + "\",\"gatewayToken\":\""
             + GATEWAY_TOKEN
+            + "\"}");
+  }
+
+  private String helloWithToken(String token, long sequence) {
+    return envelope(
+        ENVIRONMENT_NAME,
+        DaemonMessageType.HELLO,
+        null,
+        sequence,
+        "{\"daemonId\":\"d1\",\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"capabilityCatalogVersion\":\""
+            + EnvironmentCapabilityCatalog.version()
+            + "\",\"gatewayToken\":\""
+            + token
             + "\"}");
   }
 
