@@ -677,7 +677,7 @@ registerCase({
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
   requires: ['real', 'tools', 'canvas-storage'],
-  docs: '仅 minimax/MiniMax-M2.7 + backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（冻结 EnvironmentBinding、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节',
+  docs: '仅 minimax/MiniMax-M2.7 + backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（冻结 EnvironmentBinding、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节；后续模型轮次在嵌套 Resource fallback/materialization 后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -797,6 +797,14 @@ registerCase({
       assert(readInvocation, `no WAITING_APPROVAL read invocation: ${JSON.stringify(waiting)}`)
       assert(readInvocation.status === 'WAITING_APPROVAL', JSON.stringify(readInvocation))
       assert(
+        readInvocation.toolId === 'base.read',
+        `WAITING read invocation must identify base.read: ${JSON.stringify(readInvocation)}`,
+      )
+      assert(
+        readInvocation.toolBackend === 'ENVIRONMENT_CAPABILITY',
+        `WAITING read invocation must use ENVIRONMENT_CAPABILITY: ${JSON.stringify(readInvocation)}`,
+      )
+      assert(
         JSON.stringify(readInvocation.environment) === JSON.stringify(environment),
         `read invocation must freeze the complete Environment binding: ${JSON.stringify({
           readInvocation,
@@ -859,11 +867,35 @@ registerCase({
       // 从 durable TOOL MESSAGE entry 的嵌套 tool_result.contents 验证结果（快照 toolInvocations
       // 在 IDLE 后为空：只暴露 classifier-applicable active siblings）。
       const finalSnapshot = await getThreadSnapshot(ctx, tid)
+      const finalEntries = finalSnapshot.entries || []
+      assert(
+        !finalEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
+        `completed tool turn must not contain ASSISTANT_ERROR: ${JSON.stringify(finalEntries)}`,
+      )
+      const assistantEntries = normalAssistantEntries(finalEntries)
+      const finalAssistant = assistantEntries.at(-1)
+      assert(
+        finalAssistant && messageText(finalAssistant).trim().length > 0,
+        `completed tool turn must contain a non-empty final assistant reply: ${JSON.stringify(finalEntries)}`,
+      )
+      const turnEndEntries = finalEntries.filter((entry) => entryType(entry) === 'TURN_END')
+      assert(
+        turnEndEntries.length > 0,
+        `completed tool turn must contain TURN_END: ${JSON.stringify(finalEntries)}`,
+      )
+      const lastTurnEnd = parseEntryPayload(turnEndEntries.at(-1))
+      assert(
+        lastTurnEnd.outcome === 'COMPLETED'
+          && lastTurnEnd.continueModel === false
+          && lastTurnEnd.reason == null
+          && lastTurnEnd.closeRequestId == null,
+        `expected final COMPLETED TURN_END: ${JSON.stringify(lastTurnEnd)}`,
+      )
       assert(
         finalSnapshot.toolInvocations.length === 0,
         `IDLE snapshot exposes no tool siblings: ${JSON.stringify(finalSnapshot.toolInvocations)}`,
       )
-      const toolEntries = (finalSnapshot.entries || []).filter((entry) => {
+      const toolEntries = finalEntries.filter((entry) => {
         if (entryType(entry) !== 'MESSAGE') return false
         const payload = parseEntryPayload(entry)
         return payload.message?.role === 'TOOL'

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,8 +36,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
@@ -46,6 +49,7 @@ import java.math.BigDecimal;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * {@link DatabaseProviderResolutionService} 的单元测试：不依赖 PostgreSQL，mock {@link
@@ -252,6 +256,47 @@ class DatabaseProviderResolutionServiceTest {
                         && descriptor
                             .modelCallTimeoutPolicy()
                             .equals(ModelCallTimeoutPolicy.DEFAULT)));
+  }
+
+  @Test
+  void resolveMaterializesNestedToolResultResourcesInEffectiveRequest() {
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
+    DatabaseProviderResolutionService resolution =
+        resolution(
+            factory(
+                ProviderType.OPENAI,
+                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
+    ProviderTextBlock sibling = new ProviderTextBlock("before");
+    ProviderToolResultBlock persistedResult =
+        new ProviderToolResultBlock(
+            "call-1",
+            "read",
+            List.of(
+                sibling, new ProviderResourceBlock(new UUID(0L, 1L), "scan.txt", "tiny preview")),
+            false,
+            "{\"bytes\":42}");
+    ProviderRequest persisted =
+        request(
+            ProviderCacheControl.none(),
+            List.of(new ProviderMessage(ProviderMessageRole.TOOL, List.of(persistedResult))),
+            List.of());
+
+    // 意图：验证解析服务交给后续 Provider transport 的 effectiveRequest 已移除嵌套 durable Resource。
+    ProviderResolutionService.ResolvedExecution resolved =
+        resolution.resolve(ProviderType.OPENAI, persisted);
+
+    ProviderToolResultBlock effectiveResult =
+        assertInstanceOf(
+            ProviderToolResultBlock.class,
+            resolved.effectiveRequest().messages().get(0).contents().get(0));
+    assertEquals("call-1", effectiveResult.toolCallId());
+    assertEquals("read", effectiveResult.toolName());
+    assertSame(sibling, effectiveResult.contents().get(0));
+    assertInstanceOf(ProviderTextBlock.class, effectiveResult.contents().get(1));
+    assertTrue(
+        effectiveResult.contents().stream().noneMatch(ProviderResourceBlock.class::isInstance),
+        "effectiveRequest must not expose nested ProviderResourceBlock to the adapter");
   }
 
   @Test
