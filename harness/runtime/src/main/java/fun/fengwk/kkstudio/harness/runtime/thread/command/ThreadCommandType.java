@@ -6,7 +6,6 @@ public enum ThreadCommandType {
   CUSTOM_MESSAGE,
   SET_AGENT,
   SET_MODEL,
-  SET_ACTIVE_TOOLS,
   SET_ENVIRONMENT;
 
   /** 该 command 是否贡献一条会话消息。 */

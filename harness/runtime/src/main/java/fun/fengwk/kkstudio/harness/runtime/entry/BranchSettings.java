@@ -2,10 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.entry;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 
-import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * 一次 Entry branch 的完整不可变 settings 快照。
@@ -14,41 +11,26 @@ import java.util.Set;
  * Environment。YOLO 被刻意省略：它属于 Thread runtime policy，而不是 branch 历史。
  */
 public record BranchSettings(
-    EnvironmentBinding environment,
-    String agentName,
-    ModelSelection model,
-    List<String> activeTools) {
+    EnvironmentBinding environment, String agentName, ModelSelection model) {
 
   public BranchSettings {
     agentName = requireCanonicalName(agentName, "agentName");
     model = Objects.requireNonNull(model, "model");
-
-    Objects.requireNonNull(activeTools, "activeTools");
-    Set<String> uniqueTools = new LinkedHashSet<>();
-    for (String activeTool : activeTools) {
-      uniqueTools.add(requireCanonicalName(activeTool, "activeTools element"));
-    }
-    activeTools = List.copyOf(uniqueTools);
   }
 
   /** 返回仅替换 agent 引用后的快照。 */
   public BranchSettings withAgentName(String value) {
-    return new BranchSettings(environment, value, model, activeTools);
+    return new BranchSettings(environment, value, model);
   }
 
   /** 返回整体原子替换 model selection 后的快照。 */
   public BranchSettings withModel(ModelSelection value) {
-    return new BranchSettings(environment, agentName, value, activeTools);
-  }
-
-  /** 返回仅替换有序 active tool 名称后的快照。 */
-  public BranchSettings withActiveTools(List<String> values) {
-    return new BranchSettings(environment, agentName, model, values);
+    return new BranchSettings(environment, agentName, value);
   }
 
   /** 返回仅替换完整 Environment binding 后的快照（null 表示解绑）。 */
   public BranchSettings withEnvironment(EnvironmentBinding value) {
-    return new BranchSettings(value, agentName, model, activeTools);
+    return new BranchSettings(value, agentName, model);
   }
 
   private static String requireCanonicalName(String value, String field) {

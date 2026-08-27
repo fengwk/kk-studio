@@ -244,7 +244,7 @@ AI feature 由 `CatalogRuntime`、`ChatRuntime`、`AgentPane` 和
 `EnvironmentWorkspacePanel` 组成：
 
 - Catalog 页面分别渲染 Provider、Model、Agent cards/forms；structured config
-  使用 Model variant、limits、modalities、pricing，Agent 的 `tools`、
+  使用 Model variant、limits、modalities、pricing，Agent 的 `toolIds`、
   `skills`、`subagents` 使用 catalog candidate 校验。CRUD mutation 统一
   在成功后失效对应 query，冲突沿用 ConflictPresenter。
 - Chat list 使用 `ChatRuntime` + `ChatCardsPanel`；创建 Chat 时先选择 READY
@@ -295,7 +295,8 @@ sequenceDiagram
 - `NEW_SESSION` 只发送 `USER_MESSAGE`；完整 BranchDraft 写进
   `rootSettings`，避免再发送一组初始 `SET_*`。
 - `ENTRY_DRAFT` 和 `BOUND_THREAD` 在 `USER_MESSAGE` 前按固定顺序追加
-  `SET_ENVIRONMENT`、`SET_AGENT`、`SET_MODEL`、`SET_ACTIVE_TOOLS` 的 diff。
+  `SET_ENVIRONMENT`、`SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
+  `config.toolIds` 决定，不生成 branch tool command。
 - `BOUND_THREAD` 的 target 是 `THREAD`，带
   `expectedHeadEntryId` 和 `expectedNextCommandSequence`；YOLO 是
   `PUT /yolo` 的直接控制面，不进入 mailbox。

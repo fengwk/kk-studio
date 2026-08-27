@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -39,7 +38,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
-/** 面向内部编排的一次性 Harness 调用器。它只创建无工具 root Thread、原子提交 SYSTEM/USER 消息、观察终态并提取最后一条 Assistant 文本。 */
+/** 面向内部编排的一次性 Harness 调用器。它创建 root Thread、原子提交 SYSTEM/USER 消息、观察终态并提取最后一条 Assistant 文本。 */
 @Component
 public final class HarnessOneShotService {
 
@@ -48,19 +47,16 @@ public final class HarnessOneShotService {
 
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
-  private final SubagentConfigProvider configProvider;
   private final HarnessThreadChangeSource changeSource;
 
   @Autowired
   public HarnessOneShotService(
       ObjectProvider<HarnessRuntime> runtimes,
       AgentBranchSettingsMaterializer settingsMaterializer,
-      SubagentConfigProvider configProvider,
       HarnessThreadChangeSource changeSource) {
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.settingsMaterializer =
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
-    this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
     this.changeSource = Objects.requireNonNull(changeSource, "changeSource");
   }
 
@@ -90,8 +86,7 @@ public final class HarnessOneShotService {
       throw new IllegalArgumentException("one-shot userMessage must use USER role");
     }
     HarnessRuntime runtime = requireRuntime();
-    var settings =
-        settingsMaterializer.materialize(agentName, environment, 1).withActiveTools(List.of());
+    var settings = settingsMaterializer.materialize(agentName, environment, 1);
     CustomMessageCommandPayload systemPayload =
         new CustomMessageCommandPayload(AgentMessage.system(systemMessage));
     CustomMessageCommandPayload userPayload = new CustomMessageCommandPayload(userMessage);

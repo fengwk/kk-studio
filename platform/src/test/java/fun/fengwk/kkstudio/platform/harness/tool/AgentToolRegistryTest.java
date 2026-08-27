@@ -92,11 +92,13 @@ class AgentToolRegistryTest {
         new ContributionId(new PluginId("dependent"), "dependent"),
         catalog.find(DEPENDENT_TOOL_ID).orElseThrow().contributionId());
     assertTrue(catalog.find(BASE_TOOL_ID).isPresent());
-    assertTrue(catalog.findSelectable("missing").isEmpty());
-
-    assertTrue(catalog.findSelectable("local").isPresent());
-    assertTrue(catalog.findInternal("plugin_dependent").isPresent());
-    assertTrue(catalog.findSelectable("plugin_dependent").isEmpty());
+    assertTrue(catalog.find(new AgentToolId("test.missing")).isEmpty());
+    assertEquals(
+        ToolVisibility.SELECTABLE,
+        catalog.find(LOCAL_TOOL_ID).orElseThrow().definition().visibility());
+    assertEquals(
+        ToolVisibility.INTERNAL,
+        catalog.find(DEPENDENT_TOOL_ID).orElseThrow().definition().visibility());
   }
 
   @Test

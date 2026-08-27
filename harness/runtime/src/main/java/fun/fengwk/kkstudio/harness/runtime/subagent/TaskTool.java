@@ -37,7 +37,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
@@ -516,9 +515,6 @@ public final class TaskTool implements Tool {
     }
     if (!current.model().equals(target.model())) {
       commands.add(command(new SetModelCommandPayload(target.model())));
-    }
-    if (!current.activeTools().equals(target.activeTools())) {
-      commands.add(command(new SetActiveToolsCommandPayload(target.activeTools())));
     }
     commands.add(command(new UserMessageCommandPayload(AgentMessage.user(prompt))));
     return List.copyOf(commands);

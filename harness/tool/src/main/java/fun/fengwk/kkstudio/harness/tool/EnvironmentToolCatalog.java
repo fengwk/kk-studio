@@ -29,7 +29,6 @@ public final class EnvironmentToolCatalog {
   private static final List<Entry> ENTRIES = createEntries();
   private static final List<ToolDescriptor> DESCRIPTORS = descriptorsOf(ENTRIES);
   private static final Map<AgentToolId, Entry> BY_ID = indexById(ENTRIES);
-  private static final Map<String, Entry> BY_NAME = indexByName(ENTRIES);
 
   private EnvironmentToolCatalog() {}
 
@@ -65,35 +64,8 @@ public final class EnvironmentToolCatalog {
     return DESCRIPTORS;
   }
 
-  public static Optional<ToolDescriptor> find(String name) {
-    return Optional.ofNullable(BY_NAME.get(name)).map(entry -> entry.definition().descriptor());
-  }
-
   public static Optional<Entry> find(AgentToolId id) {
     return Optional.ofNullable(BY_ID.get(id));
-  }
-
-  public static Optional<ToolDescriptor> find(String name, String version) {
-    return find(name).filter(descriptor -> descriptor.version().equals(version));
-  }
-
-  public static ToolDescriptor require(String name) {
-    return find(name)
-        .orElseThrow(() -> new IllegalArgumentException("unknown Environment tool: " + name));
-  }
-
-  public static ToolDescriptor require(String name, String version) {
-    ToolDescriptor descriptor = require(name);
-    if (!descriptor.version().equals(version)) {
-      throw new IllegalArgumentException(
-          "Environment tool version mismatch for "
-              + name
-              + ": expected "
-              + descriptor.version()
-              + " but got "
-              + version);
-    }
-    return descriptor;
   }
 
   public static Entry require(AgentToolId id) {
@@ -189,19 +161,6 @@ public final class EnvironmentToolCatalog {
       if (result.putIfAbsent(entry.definition().id(), entry) != null) {
         throw new IllegalStateException(
             "duplicate Environment tool catalog id: " + entry.definition().id());
-      }
-    }
-    return Map.copyOf(result);
-  }
-
-  static Map<String, Entry> indexByName(List<Entry> entries) {
-    Objects.requireNonNull(entries, "entries");
-    Map<String, Entry> result = new LinkedHashMap<>();
-    for (Entry entry : entries) {
-      Objects.requireNonNull(entry, "entries[]");
-      String name = entry.definition().descriptor().name();
-      if (result.putIfAbsent(name, entry) != null) {
-        throw new IllegalStateException("duplicate Environment tool catalog name: " + name);
       }
     }
     return Map.copyOf(result);

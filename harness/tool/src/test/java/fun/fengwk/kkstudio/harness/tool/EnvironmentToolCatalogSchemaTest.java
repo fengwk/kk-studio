@@ -183,9 +183,9 @@ class EnvironmentToolCatalogSchemaTest {
                     capability.timeout())));
   }
 
-  /** ID 和模型名称分别唯一；同一个完整 Capability descriptor 可以被多个 Entry 复用。 */
+  /** ID 唯一；同一个完整 Capability descriptor 可以被多个 Entry 复用。 */
   @Test
-  void indexesRejectDuplicateIdsAndNamesButAllowCapabilityReuse() {
+  void indexesRejectDuplicateIdsButAllowCapabilityReuse() {
     EnvironmentCapabilityDescriptor sharedCapability =
         new EnvironmentCapabilityDescriptor(
             new EnvironmentCapabilityId("test.shared"),
@@ -196,17 +196,11 @@ class EnvironmentToolCatalogSchemaTest {
     EnvironmentToolCatalog.Entry second = entry("test.second", "second", sharedCapability);
 
     assertEquals(2, EnvironmentToolCatalog.indexById(List.of(first, second)).size());
-    assertEquals(2, EnvironmentToolCatalog.indexByName(List.of(first, second)).size());
     assertThrows(
         IllegalStateException.class,
         () ->
             EnvironmentToolCatalog.indexById(
                 List.of(first, entry("test.first", "different", sharedCapability))));
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            EnvironmentToolCatalog.indexByName(
-                List.of(first, entry("test.different", "first", sharedCapability))));
   }
 
   /** 每个工具精确断言 required 与 optional keys；find 必须要求 pattern 和 path。 */
@@ -243,7 +237,7 @@ class EnvironmentToolCatalogSchemaTest {
     for (String name : CODING_TOOLS) {
       assertEquals(
           promptResource(name).trim(),
-          EnvironmentToolCatalog.require(name).description(),
+          descriptor(name).description(),
           name + " description must equal the prompt resource md");
     }
   }
@@ -251,28 +245,28 @@ class EnvironmentToolCatalogSchemaTest {
   /** 关键字段的 description 必须是英文原文（对齐 pi-base schema），不能残留中文人读说明。 */
   @Test
   void keyFieldDescriptionsAreEnglish() {
-    ToolDescriptor read = EnvironmentToolCatalog.require("read");
+    ToolDescriptor read = descriptor("read");
     assertEquals(
         "File, directory, or supported image path to read.",
         read.inputSchema().properties().get("path").description());
     assertEquals(
         "Positive integer 1-based line offset for text reads. Defaults to 1.",
         read.inputSchema().properties().get("offset").description());
-    ToolDescriptor bash = EnvironmentToolCatalog.require("bash");
+    ToolDescriptor bash = descriptor("bash");
     assertEquals(
         "Shell command to execute.", bash.inputSchema().properties().get("command").description());
     assertEquals(
         "Positive timeout in seconds. Defaults to 120 (2 minutes). For commands that may run longer, provide a larger value.",
         bash.inputSchema().properties().get("timeout_seconds").description());
-    ToolDescriptor find = EnvironmentToolCatalog.require("find");
+    ToolDescriptor find = descriptor("find");
     assertEquals(
         "Directory to search in. Required. Use '.' for the current working directory. There is no implicit default — the model must always state the search root.",
         find.inputSchema().properties().get("path").description());
-    ToolDescriptor decompile = EnvironmentToolCatalog.require("lsp_java_decompile");
+    ToolDescriptor decompile = descriptor("lsp_java_decompile");
     assertEquals(
         "A raw `jdt://` URI, a workspace symbol output line, or a `file://` / `.class` path.",
         decompile.inputSchema().properties().get("target").description());
-    ToolDescriptor mcpCall = EnvironmentToolCatalog.require("mcp_call_tool");
+    ToolDescriptor mcpCall = descriptor("mcp_call_tool");
     assertEquals(
         "Arbitrary JSON object arguments, passed through to the MCP tool as-is.",
         mcpCall.inputSchema().properties().get("arguments").description());
@@ -281,11 +275,11 @@ class EnvironmentToolCatalogSchemaTest {
   /** apply_patch 的模型可见身份、版本、变更语义和 schema 必须稳定。 */
   @Test
   void applyPatchDescriptorUsesStableContract() {
-    ToolDescriptor descriptor = EnvironmentToolCatalog.require("apply_patch");
-    assertEquals("1", descriptor.version());
-    assertEquals("apply_patch", descriptor.rendererKey());
-    assertEquals(ToolSideEffect.NON_IDEMPOTENT, descriptor.sideEffect());
-    assertEquals(Set.of("patchText"), descriptor.inputSchema().properties().keySet());
+    ToolDescriptor tool = descriptor("apply_patch");
+    assertEquals("1", tool.version());
+    assertEquals("apply_patch", tool.rendererKey());
+    assertEquals(ToolSideEffect.NON_IDEMPOTENT, tool.sideEffect());
+    assertEquals(Set.of("patchText"), tool.inputSchema().properties().keySet());
   }
 
   /** bash 的 timeout_seconds 描述不允许出现 3600 上限文案（上限属于执行侧，不属于模型可见 schema）。 */
@@ -299,7 +293,7 @@ class EnvironmentToolCatalogSchemaTest {
   /** find 的 path 必须参与参数校验，不只是声明。 */
   @Test
   void findRejectsCallsWithoutRequiredPath() {
-    ToolDescriptor find = EnvironmentToolCatalog.require("find");
+    ToolDescriptor find = descriptor("find");
     new ToolCall("call", "find", "{\"pattern\":\"*.txt\",\"path\":\".\"}").validateFor(find);
     assertThrows(
         IllegalArgumentException.class,
@@ -323,13 +317,21 @@ class EnvironmentToolCatalogSchemaTest {
   }
 
   private static void assertTool(String name, Set<String> required, Set<String> optional) {
-    ToolDescriptor descriptor = EnvironmentToolCatalog.require(name);
+    ToolDescriptor descriptor = descriptor(name);
     ToolParamsSchema schema = descriptor.inputSchema();
     assertEquals(required, schema.required(), name + " required keys");
     Set<String> expectedProperties = new HashSet<>(required);
     expectedProperties.addAll(optional);
     assertEquals(expectedProperties, schema.properties().keySet(), name + " declared keys");
     assertFalse(schema.additionalProperties(), name + " must reject unknown keys");
+  }
+
+  private static ToolDescriptor descriptor(String name) {
+    return EnvironmentToolCatalog.entries().stream()
+        .map(entry -> entry.definition().descriptor())
+        .filter(candidate -> candidate.name().equals(name))
+        .findFirst()
+        .orElseThrow(() -> new IllegalArgumentException("unknown test tool: " + name));
   }
 
   private static EnvironmentToolCatalog.Entry entry(

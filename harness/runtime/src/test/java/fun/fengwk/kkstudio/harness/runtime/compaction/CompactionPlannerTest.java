@@ -641,8 +641,7 @@ class CompactionPlannerTest {
   private static final class PathBuilder {
     private final List<Entry> entries = new ArrayList<>();
     private final BranchSettings SETTINGS =
-        new BranchSettings(
-            EnvironmentBindings.binding("env-1"), "agent", SETTINGS_MODEL, List.of());
+        new BranchSettings(EnvironmentBindings.binding("env-1"), "agent", SETTINGS_MODEL);
     private long nextId = 1L;
 
     PathBuilder root() {

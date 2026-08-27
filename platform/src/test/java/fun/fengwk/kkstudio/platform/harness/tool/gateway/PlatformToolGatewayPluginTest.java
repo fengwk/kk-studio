@@ -262,10 +262,7 @@ class PlatformToolGatewayPluginTest {
             null,
             new RootPayload(
                 new BranchSettings(
-                    null,
-                    "assistant",
-                    new ModelSelection("provider", "model", "default"),
-                    List.of())),
+                    null, "assistant", new ModelSelection("provider", "model", "default"))),
             NOW);
     return new BranchView(new EntryPath(List.of(root)));
   }

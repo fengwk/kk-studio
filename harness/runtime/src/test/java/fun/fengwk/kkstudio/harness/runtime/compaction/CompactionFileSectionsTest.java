@@ -50,8 +50,7 @@ class CompactionFileSectionsTest {
       new BranchSettings(
           EnvironmentBindings.binding("env-1"),
           "agent",
-          new ModelSelection("provider", "model", "v1"),
-          List.of());
+          new ModelSelection("provider", "model", "v1"));
 
   @Test
   void extractsReadWriteAndEditWithModifiedWinningOverRead() {

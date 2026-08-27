@@ -47,7 +47,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -84,10 +83,7 @@ class HarnessOneShotServiceTest {
       TestEnvironmentBindings.binding("h3-prompt");
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          ENVIRONMENT,
-          "h3-agent",
-          new ModelSelection("provider", "model", "default"),
-          List.of("web-search"));
+          ENVIRONMENT, "h3-agent", new ModelSelection("provider", "model", "default"));
 
   private HarnessRuntime runtime;
   private AgentBranchSettingsMaterializer materializer;
@@ -103,12 +99,7 @@ class HarnessOneShotServiceTest {
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     when(materializer.materialize(any(), any(), any(Integer.class))).thenReturn(SETTINGS);
     changeSource = new TestThreadChangeSource();
-    service =
-        new HarnessOneShotService(
-            runtimes,
-            materializer,
-            () -> new SubagentConfig(2, 2, 0, Duration.ZERO, 10),
-            changeSource);
+    service = new HarnessOneShotService(runtimes, materializer, changeSource);
   }
 
   @Test
@@ -129,7 +120,6 @@ class HarnessOneShotServiceTest {
     verify(runtime).acceptCommands(accept.capture(), any(AcceptancePreflight.class));
     AcceptCommandsCommand command = accept.getValue();
     AcceptCommandsTarget.NewSession target = (AcceptCommandsTarget.NewSession) command.target();
-    assertEquals(List.of(), target.rootSettings().activeTools());
     assertEquals(2, command.commands().size());
     assertEquals(
         AgentMessageRole.SYSTEM,

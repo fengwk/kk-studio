@@ -55,7 +55,7 @@ class SystemPromptPreviewServiceTest {
     agent.setConfigJson("agent-config");
     when(agents.getByName("assistant")).thenReturn(agent);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
+    config.setToolIds(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
@@ -101,7 +101,7 @@ class SystemPromptPreviewServiceTest {
     agent.setConfigJson("agent-config");
     when(agents.getByName("assistant")).thenReturn(agent);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
+    config.setToolIds(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
@@ -156,10 +156,7 @@ class SystemPromptPreviewServiceTest {
   private static ThreadSnapshot snapshot(EnvironmentBinding environment) {
     BranchSettings settings =
         new BranchSettings(
-            environment,
-            "assistant",
-            new ModelSelection("provider", "model", "default"),
-            List.of());
+            environment, "assistant", new ModelSelection("provider", "model", "default"));
     EntryPath path =
         new EntryPath(
             List.of(new Entry(SESSION_ID, SESSION_ID, null, new RootPayload(settings), NOW)));

@@ -612,8 +612,7 @@ final class DispatcherTestSupport {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings(
-        ENV_NAME, "agent", new ModelSelection("provider", "model", "v1"), List.of());
+    return new BranchSettings(ENV_NAME, "agent", new ModelSelection("provider", "model", "v1"));
   }
 
   private static ModelRequestSpec modelRequest() {

@@ -82,7 +82,7 @@ Catalog 是名称寻址的全局资源集合，所有变更 service 都使用 `e
 | --- | --- | --- |
 | Provider | `agent_provider.name` | 保存 `ProviderType`、base URL、credential 和内部 timeout config |
 | Model | `(provider_name, name)` | 保存 context/output limit、abilities、variants、pricing 和 default variant |
-| Agent | `agent_definition.name` | 保存 system prompt、Model 引用、variant 覆盖以及 tools/skills/subagents 配置 |
+| Agent | `agent_definition.name` | 保存 system prompt、Model 引用、variant 覆盖以及 toolIds/skills/subagents 配置 |
 
 Provider、Model、Agent 的名称在记录存续期间不可修改；Model 对 Provider、Agent 对 Model 有数据库外键。删除由
 `AgentProviderGuard`、`AgentModelReferenceResolver`、`AgentDefinitionReferenceResolver` 和对应 service
@@ -94,8 +94,8 @@ Provider、Model、Agent 的名称在记录存续期间不可修改；Model 对 
   `modelCallIdleTimeoutMillis`，未声明字段使用 `ModelCallTimeoutPolicy.DEFAULT`，未知 Provider 扩展字段保留。
 - `AgentModelRuntimeConfigParser`严格解析 `limit`、`abilities`、`variants`、`defaultVariant` 和 `pricing`；
   context/output、variant id、temperature、reasoning effort 等不满足约束时拒绝。
-- `AgentDefinitionConfigCodec`严格解析去重的 tool/skill/subagent name，名称不允许首尾空白以及
-  `:/@\`字符。
+- `AgentDefinitionConfigCodec`严格解析去重的 `toolIds`、skill 和 subagent 配置；`toolIds` 必须是 canonical
+  `AgentToolId`，且只能引用 registry 中的 selectable entry；skills/subagents 仍使用短名。
 
 Provider type 的唯一 runtime enum 在
 `harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java`：
@@ -238,7 +238,8 @@ terminal listener 异常只记录日志，不发第二个 terminal。terminal、
 - Host 与 Plugin 的 `AgentToolId` 共享全局命名空间；重复 `AgentToolId` 或 model-visible name 直接失败。
 - 排序先满足 plugin `requires` 的传递拓扑序，再按 priority 降序和 identity 字典序；重复 name 或依赖环直接失败。
 - `find(AgentToolId)`返回 registry 的冻结 Entry；本地通过 `createHostTool` 重新 `factory.create()`后必须完整 descriptor equality。
-- `selectableEntries()`、`findSelectable`和`findInternal`共享同一份冻结索引，Environment 不再由调用方二次查找固定 catalog。
+- `selectableEntries()`返回可由 Agent 选择的冻结条目；`find(AgentToolId)`是所有执行 backend 的唯一 registry
+  lookup，Environment catalog 也只按 AgentToolId 查找。
 
 `HarnessPluginSource`只是 `List<HarnessPlugin> plugins()`的启动快照 port。Platform 接收已冻结的
 `PluginCatalog`，不读取目录、不创建 classloader、不提供 refresh。Web 组合根负责把 built-in plugin 与 trusted JAR
@@ -275,12 +276,12 @@ Plugin Tool 的 `AppendCustomEntry` intent 必须属于自身 plugin、命中已
 
 1. 当前 Agent、Model、Provider、Variant 和 ProviderFactory；
 2. 当前 Environment context；
-3. Agent config 中的 registry selectable tools；
+3. Agent config 中按 `AgentToolId` 声明的 registry selectable tools；
 4. skills、subagents 和内部 `load_skill`/`task`；
 5. plugin context projector、system prompt、cache control、context window 和 output budget。
 
-Agent 配置有 skills 时追加 `LoadSkillTool`；subagents 非空且 Session depth 小于
-`SubagentConfig.maxDepth`时追加 `TaskTool`。每个 tool 都从 registry 精确恢复 descriptor；Environment tool 使用 branch 当前
+Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于
+`SubagentConfig.maxDepth`时按稳定 ID 追加 `TaskTool`。每个 tool 都从 registry 精确恢复 descriptor；Environment tool 使用 branch 当前
 完整 Environment binding。Skill 必须由当前选中的 live Environment 提供，且 Environment 必须 READY；缺失、未 READY、
 能力或 Model 不支持时返回统一 `AssistantError.code=PLANNING_FAILED`。Repository/registry 基础设施异常向上抛出，由
 ThreadProcessor 按 runtime policy reschedule。
@@ -293,8 +294,9 @@ Environment gateway 读取正文；不会用当前 Agent 配置扩张已冻结�
 Compaction resolver 是窄路径：只解析 `CompactionPreparation.executionModel`，不查 Agent prompt、plugin、skill、
 Environment availability 或 prompt cache，只返回零 tools/skills/subagents 的 ModelRequestSpec。
 
-`AgentBranchSettingsMaterializer`为新建/恢复的 subagent 按最新 Agent/Model catalog 物化完整 BranchSettings，校验
-variant、注入 `load_skill`和 depth 允许的 `task`。Task 的 agent name、description、parent/root/depth 和
+`AgentBranchSettingsMaterializer`为新建/恢复的 subagent 按最新 Agent/Model catalog 物化只包含
+environment、agentName 和 model 的 BranchSettings；工具、skill 和 subagent binding 在每个 live turn 的
+`DatabaseTurnResolver` 中按最新 Agent definition 解析。Task 的 agent name、description、parent/root/depth 和
 task invocation 归属在 durable binding 中冻结，执行期间不依据运行时 Catalog 变更扩权。
 
 ### Canvas adapters 与 Resource lifecycle

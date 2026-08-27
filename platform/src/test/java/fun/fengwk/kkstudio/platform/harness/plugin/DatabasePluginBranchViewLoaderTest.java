@@ -56,10 +56,7 @@ class DatabasePluginBranchViewLoaderTest {
             null,
             new RootPayload(
                 new BranchSettings(
-                    null,
-                    "assistant",
-                    new ModelSelection("provider", "model", "default"),
-                    List.of())),
+                    null, "assistant", new ModelSelection("provider", "model", "default"))),
             Instant.parse("2026-01-01T00:00:00Z"));
     return new EntryPath(List.of(root));
   }

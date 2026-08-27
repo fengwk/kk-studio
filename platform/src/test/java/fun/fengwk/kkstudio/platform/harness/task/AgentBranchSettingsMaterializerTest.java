@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.task;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,10 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.subagent.SubagentConfig;
-import fun.fengwk.kkstudio.harness.runtime.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
@@ -25,19 +21,14 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironmentBindings;
 
-import java.time.Duration;
-import java.util.List;
-
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
 class AgentBranchSettingsMaterializerTest {
 
   private static final EnvironmentBinding ENV = TestEnvironmentBindings.binding("prod");
-  private static final int MAX_DEPTH = 2;
 
   private AgentDefinitionRepository agentRepository;
   private AgentModelRepository modelRepository;
   private AgentBranchSettingsMaterializer materializer;
-  private SubagentConfig config;
 
   @BeforeEach
   void setUp() {
@@ -47,20 +38,15 @@ class AgentBranchSettingsMaterializerTest {
         new AgentBranchSettingsMaterializer(
             agentRepository,
             modelRepository,
-            new AgentDefinitionConfigCodec(new ObjectMapper()),
-            new AgentModelRuntimeConfigParser(new ObjectMapper()),
-            () -> config);
-    config = new SubagentConfig(MAX_DEPTH, 10, 0, Duration.ZERO, 50);
+            new AgentModelRuntimeConfigParser(new ObjectMapper()));
   }
 
-  private void stub(
-      String agentName, String variant, String agentConfigJson, String modelConfigJson) {
+  private void stub(String agentName, String variant, String modelConfigJson) {
     AgentDefinition agent = new AgentDefinition();
     agent.setName(agentName);
     agent.setModelProviderName("openai");
     agent.setModelName("gpt-x");
     agent.setVariant(variant);
-    agent.setConfigJson(agentConfigJson);
     when(agentRepository.getByName(agentName)).thenReturn(agent);
 
     AgentModel model = new AgentModel();
@@ -70,44 +56,22 @@ class AgentBranchSettingsMaterializerTest {
     when(modelRepository.getByProviderNameAndName("openai", "gpt-x")).thenReturn(model);
   }
 
-  /** 最新 catalog 的 Agent/model/variant 物化：默认 variant、skills 自动补 load_skill、深度内补 task。 */
+  /** 最新 catalog 的 Agent/model/variant 物化：默认 variant 由 model catalog 提供。 */
   @Test
   void materializesLatestAgentModelAndVariant() {
-    stub(
-        "alpha",
-        null,
-        "{\"tools\":[\"get_goal\"],\"skills\":[\"math\"],\"subagents\":[\"beta\"]}",
-        validModelConfig());
+    stub("alpha", null, validModelConfig());
 
     BranchSettings settings = materializer.materialize("alpha", ENV, 1);
 
     assertEquals(ENV, settings.environment());
     assertEquals("alpha", settings.agentName());
     assertEquals(new ModelSelection("openai", "gpt-x", "quality"), settings.model());
-    assertEquals(List.of("get_goal", "load_skill", "task"), settings.activeTools());
-  }
-
-  /** 达到 maxDepth 时不再自动添加 task；无 skills 时不添加 load_skill。 */
-  @Test
-  void stopsAddingTaskAtMaxDepth() {
-    stub(
-        "alpha",
-        null,
-        "{\"tools\":[\"get_goal\"],\"skills\":[],\"subagents\":[\"beta\"]}",
-        validModelConfig());
-
-    BranchSettings atLimit = materializer.materialize("alpha", ENV, MAX_DEPTH);
-    assertEquals(List.of("get_goal"), atLimit.activeTools());
-    assertFalse(atLimit.activeTools().contains(TaskTool.NAME));
-
-    BranchSettings beyond = materializer.materialize("alpha", ENV, MAX_DEPTH + 1);
-    assertFalse(beyond.activeTools().contains(TaskTool.NAME));
   }
 
   /** Agent 显式 variant 覆盖默认 variant。 */
   @Test
   void honorsExplicitAgentVariantOverride() {
-    stub("alpha", "fast", "{\"tools\":[],\"skills\":[],\"subagents\":[]}", validModelConfig());
+    stub("alpha", "fast", validModelConfig());
 
     BranchSettings settings = materializer.materialize("alpha", ENV, 1);
 
@@ -123,7 +87,7 @@ class AgentBranchSettingsMaterializerTest {
             IllegalArgumentException.class, () -> materializer.materialize("ghost", ENV, 1));
     assertTrue(missingAgent.getMessage().contains("subagent not found: ghost"));
 
-    stub("alpha", null, "{\"tools\":[],\"skills\":[],\"subagents\":[]}", validModelConfig());
+    stub("alpha", null, validModelConfig());
     when(modelRepository.getByProviderNameAndName("openai", "gpt-x")).thenReturn(null);
     IllegalArgumentException missingModel =
         assertThrows(
@@ -132,11 +96,7 @@ class AgentBranchSettingsMaterializerTest {
         missingModel.getMessage().contains("subagent model not found: openai/gpt-x"),
         missingModel.getMessage());
 
-    stub(
-        "alpha",
-        "ghost-variant",
-        "{\"tools\":[],\"skills\":[],\"subagents\":[]}",
-        validModelConfig());
+    stub("alpha", "ghost-variant", validModelConfig());
     IllegalArgumentException missingVariant =
         assertThrows(
             IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV, 1));
@@ -147,17 +107,10 @@ class AgentBranchSettingsMaterializerTest {
         missingVariant.getMessage());
   }
 
-  /** 持久化 config JSON 损坏时抛出带原因链的稳定异常入口。 */
+  /** 持久化 model config 损坏时抛出带原因链的稳定异常入口。 */
   @Test
-  void wrapsCorruptPersistedConfigsWithCauses() {
-    stub("alpha", null, "not-json", validModelConfig());
-    IllegalArgumentException agentConfigError =
-        assertThrows(
-            IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV, 1));
-    assertTrue(agentConfigError.getMessage().contains("invalid subagent configuration: alpha"));
-    assertInstanceOf(IllegalStateException.class, agentConfigError.getCause());
-
-    stub("alpha", null, "{\"tools\":[],\"skills\":[],\"subagents\":[]}", "not-json");
+  void wrapsCorruptModelConfigsWithCauses() {
+    stub("alpha", null, "not-json");
     IllegalArgumentException modelConfigError =
         assertThrows(
             IllegalArgumentException.class, () -> materializer.materialize("alpha", ENV, 1));

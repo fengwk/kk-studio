@@ -3235,8 +3235,7 @@ class ModelProcessorTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings(
-        ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), List.of());
+    return new BranchSettings(ENV_ID, "agent", new ModelSelection("provider", "model", "v1"));
   }
 
   static final class FakeGateway implements ModelGateway {

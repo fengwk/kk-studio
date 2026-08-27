@@ -15,10 +15,8 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -33,7 +31,7 @@ final class HistoryValueCodecs {
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("environment", "agentName", "model", "activeTools");
+      orderedSet("environment", "agentName", "model");
   private static final Set<String> ENVIRONMENT_BINDING_FIELDS = orderedSet("name", "workspacePath");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
@@ -77,10 +75,6 @@ final class HistoryValueCodecs {
     }
     node.put("agentName", settings.agentName());
     node.set("model", encodeModelSelection(settings.model()));
-    ArrayNode activeTools = node.putArray("activeTools");
-    for (String activeTool : settings.activeTools()) {
-      activeTools.add(activeTool);
-    }
     return node;
   }
 
@@ -97,8 +91,7 @@ final class HistoryValueCodecs {
     return new BranchSettings(
         nullableEnvironmentBinding(node, "environment", context),
         requiredText(node, "agentName", context),
-        decodeModelSelection(node.get("model"), context + ".model"),
-        decodeActiveTools(node.get("activeTools"), context));
+        decodeModelSelection(node.get("model"), context + ".model"));
   }
 
   /** 读取可空完整 Environment binding 对象；null 表示未绑定。 */
@@ -113,18 +106,6 @@ final class HistoryValueCodecs {
     return new EnvironmentBinding(
         new EnvironmentName(requiredText(binding, "name", context + "." + field)),
         requiredText(binding, "workspacePath", context + "." + field));
-  }
-
-  private static List<String> decodeActiveTools(JsonNode value, String context) {
-    ArrayNode node = requireArray(value, context + ".activeTools");
-    List<String> activeTools = new ArrayList<>(node.size());
-    for (JsonNode activeTool : node) {
-      if (!activeTool.isTextual()) {
-        throw new IllegalArgumentException(context + ".activeTools elements must be text");
-      }
-      activeTools.add(activeTool.textValue());
-    }
-    return activeTools;
   }
 
   // ---------- ModelSelection ----------

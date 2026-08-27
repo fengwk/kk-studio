@@ -101,7 +101,6 @@ public final class HarnessRuntimeResponseMapper {
     dto.setEnvironment(toEnvironmentBindingDto(settings.environment()));
     dto.setAgentName(settings.agentName());
     dto.setModel(toModelSelectionDto(settings.model()));
-    dto.setActiveTools(List.copyOf(settings.activeTools()));
     return dto;
   }
 

@@ -387,10 +387,7 @@ class GoalPluginTest {
             null,
             new RootPayload(
                 new BranchSettings(
-                    null,
-                    "assistant",
-                    new ModelSelection("provider", "model", "default"),
-                    List.of())),
+                    null, "assistant", new ModelSelection("provider", "model", "default"))),
             T0);
     return new BranchView(new EntryPath(List.of(root)));
   }

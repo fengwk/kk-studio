@@ -69,8 +69,7 @@ public final class HarnessRuntimeTestFixtures {
     return new BranchSettings(
         new EnvironmentBinding(new EnvironmentName("env-1"), "."),
         "default-assistant",
-        new ModelSelection("openai", "gpt-5", "default"),
-        List.of("web_search"));
+        new ModelSelection("openai", "gpt-5", "default"));
   }
 
   public static Entry rootEntry() {

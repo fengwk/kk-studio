@@ -225,10 +225,7 @@ class WorkHeartbeatTest {
                         null,
                         new RootPayload(
                             new BranchSettings(
-                                null,
-                                "agent",
-                                new ModelSelection("provider", "model", "v1"),
-                                List.of())),
+                                null, "agent", new ModelSelection("provider", "model", "v1"))),
                         NOW));
                 tx.insertThread(
                     new ThreadState(

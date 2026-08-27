@@ -529,10 +529,7 @@ class HistoryEntryPayloadTest {
 
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          null,
-          "coding",
-          new ModelSelection("anthropic", "claude-sonnet", "default"),
-          List.of("read"));
+          null, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
   private static final Instant TIME = Instant.ofEpochSecond(1000L);
 
   private static AgentMessage user(String text) {

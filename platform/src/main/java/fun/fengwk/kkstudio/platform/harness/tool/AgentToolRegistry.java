@@ -38,8 +38,6 @@ public final class AgentToolRegistry {
   private final List<Entry> entries;
   private final List<Entry> selectableEntries;
   private final Map<AgentToolId, Entry> entriesById;
-  private final Map<String, Entry> selectableByName;
-  private final Map<String, Entry> internalByName;
 
   public AgentToolRegistry(
       Collection<? extends ToolFactory> factories,
@@ -81,24 +79,12 @@ public final class AgentToolRegistry {
       merged.add(entry);
     }
 
-    Map<String, Entry> selectable = new LinkedHashMap<>();
-    Map<String, Entry> internal = new LinkedHashMap<>();
-    for (Entry entry : merged) {
-      if (entry.definition().visibility() == ToolVisibility.SELECTABLE) {
-        selectable.put(entry.definition().descriptor().name(), entry);
-      } else {
-        internal.put(entry.definition().descriptor().name(), entry);
-      }
-    }
-
     this.entries = List.copyOf(merged);
     this.selectableEntries =
         this.entries.stream()
             .filter(entry -> entry.definition().visibility() == ToolVisibility.SELECTABLE)
             .toList();
     this.entriesById = Map.copyOf(byId);
-    this.selectableByName = Map.copyOf(selectable);
-    this.internalByName = Map.copyOf(internal);
   }
 
   /** 返回按冻结顺序排列的全部 Agent Tool 条目。 */
@@ -114,17 +100,6 @@ public final class AgentToolRegistry {
   /** 按稳定 AgentToolId 查找冻结条目。 */
   public Optional<Entry> find(AgentToolId id) {
     return Optional.ofNullable(entriesById.get(Objects.requireNonNull(id, "id")));
-  }
-
-  /** 按 model-visible name 查找可选择条目。 */
-  public Optional<Entry> findSelectable(String modelName) {
-    return Optional.ofNullable(
-        selectableByName.get(Objects.requireNonNull(modelName, "modelName")));
-  }
-
-  /** 按 model-visible name 查找内部条目。 */
-  public Optional<Entry> findInternal(String modelName) {
-    return Optional.ofNullable(internalByName.get(Objects.requireNonNull(modelName, "modelName")));
   }
 
   /** 以冻结 Host factory 创建 Tool，并校验 descriptor 未漂移。 */

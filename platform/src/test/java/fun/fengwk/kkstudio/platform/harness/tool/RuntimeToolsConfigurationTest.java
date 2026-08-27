@@ -174,8 +174,9 @@ class RuntimeToolsConfigurationTest {
             PluginCatalog.from(List.of(plugin)),
             EnvironmentToolCatalog.entries());
 
-    assertTrue(catalog.findInternal("plugin-internal").isPresent());
-    assertTrue(catalog.findSelectable("plugin-internal").isEmpty());
+    assertEquals(
+        ToolVisibility.INTERNAL,
+        catalog.find(PLUGIN_TOOL_ID).orElseThrow().definition().visibility());
   }
 
   private static ToolDescriptor descriptor(String name) {

@@ -915,8 +915,7 @@ class ThreadContextClassifierTest {
     return new BranchSettings(
         EnvironmentBindings.binding("env-2"),
         "agent",
-        new ModelSelection("provider", "model", "v1"),
-        List.of());
+        new ModelSelection("provider", "model", "v1"));
   }
 
   private static List<String> callIds(List<ToolCallMessageContent> calls) {

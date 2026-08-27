@@ -131,14 +131,12 @@ class HistoryEntryPayloadJsonCodecTest {
   void encodesCanonicalFieldOrder() {
     assertEquals(
         "{\"settings\":{\"environment\":null,\"agentName\":\"coding\",\"model\":{"
-            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"},"
-            + "\"activeTools\":[\"read\",\"grep\"]},"
-            + "\"subagentContext\":null}",
+            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
+            + "},\"subagentContext\":null}",
         CODEC.encode(new RootPayload(settings(null))));
     assertEquals(
         "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"coding\",\"model\":{"
-            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"},"
-            + "\"activeTools\":[\"read\",\"grep\"]},"
+            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
             + "\",\"contextWindow\":4096,\"maxOutputTokens\":1024,\"compaction\":null}",
@@ -247,10 +245,8 @@ class HistoryEntryPayloadJsonCodecTest {
                 EntryType.ROOT,
                 "{\"settings\":{\"environment\":null,\"agentName\":\"a\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"activeTools\":[]},"
                     + "\"settings\":{\"environment\":null,\"agentName\":\"b\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"activeTools\":[]}}"));
+                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{}} {}"));
   }
@@ -270,39 +266,21 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":5,\"settings\":{\"environment\":null,\"agentName\":\"a\","
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"activeTools\":[]}}"));
+                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"a\","
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"activeTools\":{}}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"a\","
-                    + "\"model\":[\"p\"],\"activeTools\":[]}}"));
+                    + "\"model\":[\"p\"]}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":5,"
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"activeTools\":[]}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.TURN_START,
-                "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\"a\","
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"activeTools\":[5]}}"));
+                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -310,23 +288,21 @@ class HistoryEntryPayloadJsonCodecTest {
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"environment\":{\"name\":\"Not-A-Name\",\"workspacePath\":\".\"},"
                     + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\","
-                    + "\"variant\":\"v\"},\"activeTools\":[]}}"));
+                    + "\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"environment\":5,"
-                    + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"activeTools\":[]}}"));
+                    + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"environment\":null,\"agentName\":\" \","
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"activeTools\":[]}}"));
+                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -554,8 +530,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"environmentId\":\"env-1\",\"agentName\":\"a\","
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-                    + "\"activeTools\":[]}}"));
+                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
   }
 
   @Test
@@ -748,8 +723,7 @@ class HistoryEntryPayloadJsonCodecTest {
   private static String rootSettingsWith(String reasonField) {
     return reasonField
         + "\"settings\":{\"environment\":null,\"agentName\":\"a\","
-        + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
-        + "\"activeTools\":[]}}";
+        + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}";
   }
 
   private static String turnEndWith(String prefix) {
@@ -795,7 +769,6 @@ class HistoryEntryPayloadJsonCodecTest {
     return new BranchSettings(
         environmentName == null ? null : EnvironmentBindings.binding(environmentName),
         "coding",
-        new ModelSelection("anthropic", "claude-sonnet", "default"),
-        List.of("read", "grep"));
+        new ModelSelection("anthropic", "claude-sonnet", "default"));
   }
 }

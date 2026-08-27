@@ -728,8 +728,7 @@ final class ThreadProcessorTestSupport {
   // -----------------------------------------------------------------------------------------------
 
   static BranchSettings branchSettings() {
-    return new BranchSettings(
-        ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), List.of());
+    return new BranchSettings(ENV_ID, "agent", new ModelSelection("provider", "model", "v1"));
   }
 
   /** Resolver 成功后的 INPUT TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
@@ -811,19 +810,15 @@ final class ThreadProcessorTestSupport {
         ProviderCacheControl.none());
   }
 
-  /** 按 candidate BranchSettings 构造机械一致的 Resolved spec（model / variant / tools）。 */
+  /** 按 candidate BranchSettings 构造机械一致的 Resolved spec（model / variant）。 */
   static ModelRequestSpec requestFor(BranchSettings settings) {
-    List<ToolBinding> bindings = new ArrayList<>();
-    for (String name : settings.activeTools()) {
-      bindings.add(hostBinding(name));
-    }
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         modelDescriptor(settings.model().providerName(), settings.model().modelName()),
         new ModelVariant(
             settings.model().variant(), null, null, null, null, null, null, List.of(), null),
         List.of(),
-        bindings,
+        List.of(),
         List.of(),
         List.of(),
         ProviderCacheControl.none());

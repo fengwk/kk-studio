@@ -71,8 +71,7 @@ class ModelAttemptMaterializationTest {
   private static final Instant T6 = T0.plusSeconds(6);
   private static final EnvironmentBinding ENVIRONMENT = EnvironmentBindings.binding("env-1");
   private static final BranchSettings SETTINGS =
-      new BranchSettings(
-          ENVIRONMENT, "agent", new ModelSelection("provider", "model", "v1"), List.of());
+      new BranchSettings(ENVIRONMENT, "agent", new ModelSelection("provider", "model", "v1"));
 
   @Test
   void acceptsExactFailedAttemptAndTerminalPartial() {

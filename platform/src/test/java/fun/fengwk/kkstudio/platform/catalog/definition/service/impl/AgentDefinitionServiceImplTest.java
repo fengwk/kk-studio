@@ -162,7 +162,7 @@ public class AgentDefinitionServiceImplTest {
 
     // 非法 config：Agent 选择不存在的工具，configValidator 拒绝时包装为 AiValidationException。
     AgentDefinition badConfig = definition();
-    badConfig.setConfigJson("{\"tools\":[\"no-such-tool\"],\"skills\":[],\"subagents\":[]}");
+    badConfig.setConfigJson("{\"toolIds\":[\"no-such-tool\"],\"skills\":[],\"subagents\":[]}");
     when(factory.newAgent("agent", create)).thenReturn(badConfig);
     assertThrows(AiValidationException.class, () -> service.createAgent(create));
   }
@@ -216,7 +216,7 @@ public class AgentDefinitionServiceImplTest {
     definition.setName("agent");
     definition.setModelProviderName("provider");
     definition.setModelName("model");
-    definition.setConfigJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}");
+    definition.setConfigJson("{\"toolIds\":[],\"skills\":[],\"subagents\":[]}");
     definition.setVersion(0L);
     return definition;
   }
@@ -239,7 +239,7 @@ public class AgentDefinitionServiceImplTest {
 
   private AgentDefinitionConfigDTO config() {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
+    config.setToolIds(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     return config;

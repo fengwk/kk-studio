@@ -14,7 +14,7 @@ import java.util.List;
 @Data
 public class HarnessCommandCreateDTO {
 
-  /** SET_ENVIRONMENT、SET_AGENT、SET_MODEL、SET_ACTIVE_TOOLS 或 USER_MESSAGE。 */
+  /** SET_ENVIRONMENT、SET_AGENT、SET_MODEL 或 USER_MESSAGE。 */
   private String type;
 
   /** canonical UUID string 幂等键。 */
@@ -28,9 +28,6 @@ public class HarnessCommandCreateDTO {
 
   /** SET_MODEL 的目标模型。 */
   private HarnessModelSelectionDTO model;
-
-  /** SET_ACTIVE_TOOLS 的激活工具名称列表。 */
-  private List<String> activeTools;
 
   /** SET_ENVIRONMENT 的完整 binding；显式 null 表示解绑。 */
   private EnvironmentBindingDTO environment;
@@ -46,10 +43,6 @@ public class HarnessCommandCreateDTO {
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean modelFieldPresent;
-
-  @Getter(AccessLevel.NONE)
-  @Setter(AccessLevel.NONE)
-  private boolean activeToolsFieldPresent;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
@@ -84,12 +77,6 @@ public class HarnessCommandCreateDTO {
     this.modelFieldPresent = true;
   }
 
-  @JsonSetter("activeTools")
-  public void setActiveTools(List<String> value) {
-    this.activeTools = value;
-    this.activeToolsFieldPresent = true;
-  }
-
   @JsonSetter("environment")
   public void setEnvironment(EnvironmentBindingDTO value) {
     this.environment = value;
@@ -109,11 +96,6 @@ public class HarnessCommandCreateDTO {
   @JsonIgnore
   public boolean hasModelField() {
     return modelFieldPresent;
-  }
-
-  @JsonIgnore
-  public boolean hasActiveToolsField() {
-    return activeToolsFieldPresent;
   }
 
   @JsonIgnore

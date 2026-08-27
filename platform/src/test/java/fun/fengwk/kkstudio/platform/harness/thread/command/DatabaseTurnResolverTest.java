@@ -76,6 +76,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentBinding;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
@@ -126,7 +127,6 @@ class DatabaseTurnResolverTest {
   private static final Instant NOW = Instant.parse("2026-08-02T00:00:00Z");
   private static final UUID THREAD_ID = new UUID(0L, 1L);
   private static final UUID SESSION_ID = new UUID(0L, 100L);
-  private static final AgentToolId TEST_HOST_TOOL_ID = new AgentToolId("test.host-tool");
 
   private static UUID id(long value) {
     return new UUID(0L, value);
@@ -171,8 +171,8 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void activeToolsComeFromLatestAgentConfigNotBranchSnapshot() {
-    // 最新 Agent 声明 read，即使历史 branch activeTools 为空也必须在下一 turn 生效。
+  void agentToolsComeFromLatestAgentConfig() {
+    // 最新 Agent 声明 read，工具选择不再依赖 branch settings。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
 
@@ -182,11 +182,9 @@ class DatabaseTurnResolverTest {
         List.of("read"),
         request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
 
-    // 最新 Agent 已移除工具时，历史 branch 快照不得继续扩权。
+    // 最新 Agent 已移除工具时，branch settings 不得继续扩权。
     fixture = new Fixture(List.of(), List.of(), List.of());
-    request =
-        fixture.resolved(
-            fixture.path(settings(ENV_A, "default", List.of("read", "write", "bash"))));
+    request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
     assertEquals(List.of(), request.toolBindings());
   }
 
@@ -249,8 +247,7 @@ class DatabaseTurnResolverTest {
     fixture.modelSupportsTools(false);
     fixture.readyEnvironment(ENV_A);
 
-    TurnResolver.Rejected rejected =
-        fixture.rejected(fixture.path(settings(ENV_A, "default", List.of("read"))));
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings(ENV_A, "default")));
 
     assertEquals("model does not support tools: provider/model", rejected.error().message());
   }
@@ -385,8 +382,7 @@ class DatabaseTurnResolverTest {
   void bindsEnvironmentToolsWithLatestNameEvenWhenBranchHasNoEnvironment() {
     // 分支没有环境路由不再拒绝工具规划：ENVIRONMENT_CAPABILITY 工具仍按最新（null）名称绑定，实际执行时确定性失败。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    ModelRequestSpec request =
-        fixture.resolved(fixture.path(settings(null, "default", List.of("read"))));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "default")));
     assertEquals(1, request.toolBindings().size());
     assertEquals(
         AgentToolBackend.ENVIRONMENT_CAPABILITY,
@@ -404,14 +400,13 @@ class DatabaseTurnResolverTest {
   void missingOrNotReadyLatestEnvironmentDoesNotRejectToolPlanning() {
     // 缺失的 latest 环境：工具按最新名称绑定，规划成功。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    ModelRequestSpec request =
-        fixture.resolved(fixture.path(settings(ENV_MISSING, "default", List.of("read"))));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(ENV_MISSING, "default")));
     assertEquals(ENV_MISSING, request.toolBindings().getFirst().environment());
 
     // 未 READY 的 latest 环境：同样按最新名称绑定，规划成功；绝不回看更旧 branch settings。
     fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.connectingEnvironment(ENV_A);
-    request = fixture.resolved(fixture.path(settings(ENV_A, "default", List.of("read"))));
+    request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
     assertEquals(ENV_A, request.toolBindings().getFirst().environment());
   }
 
@@ -434,8 +429,8 @@ class DatabaseTurnResolverTest {
     // 请求只冻结最新快照的 route（null/名称），绝不选中更旧的 live Environment。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
-    BranchSettings firstTurn = settings(ENV_A, "default", List.of("read"));
-    BranchSettings latestTurn = settings(null, "default", List.of("read"));
+    BranchSettings firstTurn = settings(ENV_A, "default");
+    BranchSettings latestTurn = settings(null, "default");
 
     ModelRequestSpec request = fixture.resolved(multiTurnPath(firstTurn, latestTurn));
 
@@ -452,9 +447,7 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_A);
     request =
         fixture.resolved(
-            multiTurnPath(
-                settings(ENV_A, "default", List.of("read")),
-                settings(ENV_MISSING, "default", List.of("read"))));
+            multiTurnPath(settings(ENV_A, "default"), settings(ENV_MISSING, "default")));
     assertEquals(ENV_MISSING, request.toolBindings().getFirst().environment());
 
     // Agent skills 同样只认最新快照：历史 turn 有 live Environment + skill，最新 null 时按最新精确拒绝。
@@ -463,10 +456,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         "agent skills require the latest selected environment but the branch has no environment",
         fixture
-            .rejected(
-                multiTurnPath(
-                    settings(ENV_A, "default", List.of("load_skill")),
-                    settings(null, "default", List.of("load_skill"))))
+            .rejected(multiTurnPath(settings(ENV_A, "default"), settings(null, "default")))
             .error()
             .message());
   }
@@ -478,10 +468,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         "agent skills require the latest selected environment which is not live: "
             + ENV_MISSING.environmentName(),
-        fixture
-            .rejected(fixture.path(settings(ENV_MISSING, "default", List.of("load_skill"))))
-            .error()
-            .message());
+        fixture.rejected(fixture.path(settings(ENV_MISSING, "default"))).error().message());
 
     // latest 环境未 READY：同样精确拒绝。
     fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
@@ -489,10 +476,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         "agent skills require the latest selected environment which is not ready: "
             + ENV_A.environmentName(),
-        fixture
-            .rejected(fixture.path(settings(ENV_A, "default", List.of("load_skill"))))
-            .error()
-            .message());
+        fixture.rejected(fixture.path(settings(ENV_A, "default"))).error().message());
   }
 
   @Test
@@ -502,7 +486,7 @@ class DatabaseTurnResolverTest {
         new Fixture(List.of("bash"), List.of("dev-b"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
-    BranchSettings settings = settings(ENV_B, "default", List.of("bash", "load_skill"));
+    BranchSettings settings = settings(ENV_B, "default");
 
     ModelRequestSpec request = fixture.resolved(fixture.path(settings));
 
@@ -525,7 +509,7 @@ class DatabaseTurnResolverTest {
             List.of(),
             List.of(hostDescriptor("create_goal")));
     fixture.readyEnvironment(ENV_A);
-    BranchSettings settings = settings(ENV_A, "default", List.of("bash", "create_goal", "read"));
+    BranchSettings settings = settings(ENV_A, "default");
 
     ModelRequestSpec request = fixture.resolved(fixture.path(settings));
 
@@ -544,10 +528,7 @@ class DatabaseTurnResolverTest {
     fixture = new Fixture(List.of("missing"), List.of(), List.of());
     assertEquals(
         "tool not found: missing",
-        fixture
-            .rejected(fixture.path(settings(null, "default", List.of("missing"))))
-            .error()
-            .message());
+        fixture.rejected(fixture.path(settings(null, "default"))).error().message());
   }
 
   @Test
@@ -556,7 +537,7 @@ class DatabaseTurnResolverTest {
     List<ToolDescriptor> descriptors =
         plugins.tools().stream().map(tool -> tool.definition().descriptor()).toList();
     Fixture fixture = new Fixture(List.of("create_goal"), List.of(), descriptors, plugins);
-    BranchSettings settings = settings(null, "default", List.of("create_goal"));
+    BranchSettings settings = settings(null, "default");
     EntryPath path =
         new EntryPath(
             List.of(
@@ -608,8 +589,7 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
 
-    ModelRequestSpec request =
-        fixture.resolved(fixture.path(settings(ENV_A, "default", List.of("load_skill"))));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
 
     assertEquals(
         List.of("load_skill"),
@@ -623,10 +603,7 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_A, List.of());
     assertEquals(
         "skill not found on the latest environment " + ENV_A + ": dev",
-        fixture
-            .rejected(fixture.path(settings(ENV_A, "default", List.of("load_skill"))))
-            .error()
-            .message());
+        fixture.rejected(fixture.path(settings(ENV_A, "default"))).error().message());
   }
 
   @Test
@@ -644,11 +621,8 @@ class DatabaseTurnResolverTest {
             true);
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     assertEquals(
-        "tool not found: load_skill",
-        fixture
-            .rejected(fixture.path(settings(ENV_A, "default", List.of("load_skill"))))
-            .error()
-            .message());
+        "tool not found: base.load-skill",
+        fixture.rejected(fixture.path(settings(ENV_A, "default"))).error().message());
   }
 
   @Test
@@ -664,8 +638,7 @@ class DatabaseTurnResolverTest {
             PromptCacheCapability.unsupported(),
             true);
 
-    ModelRequestSpec request =
-        fixture.resolved(fixture.path(settings(null, "default", List.of("load_skill"))));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "default")));
 
     assertEquals(List.of(), request.toolBindings());
     assertEquals(List.of(), request.skillBindings());
@@ -677,8 +650,7 @@ class DatabaseTurnResolverTest {
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review <carefully> & report.");
 
-    ModelRequestSpec request =
-        fixture.resolved(fixture.path(settings(null, "default", List.of(TaskTool.NAME))));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(null, "default")));
 
     assertEquals(
         List.of(new SubagentBinding("reviewer", "Review <carefully> & report.")),
@@ -716,8 +688,7 @@ class DatabaseTurnResolverTest {
         withTask.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
 
     fixture.agentConfig.setSubagents(List.of());
-    ModelRequestSpec withoutTask =
-        fixture.resolved(fixture.path(settings(null, "default", List.of(TaskTool.NAME))));
+    ModelRequestSpec withoutTask = fixture.resolved(fixture.path(settings(null, "default")));
     assertEquals(List.of(), withoutTask.subagentBindings());
     assertEquals(List.of(), withoutTask.toolBindings());
     assertFalse(preambleText(withoutTask).contains("subagent"));
@@ -731,8 +702,7 @@ class DatabaseTurnResolverTest {
                     SESSION_ID,
                     null,
                     new RootPayload(
-                        settings(null, "default", List.of(TaskTool.NAME)),
-                        new SubagentContext(id(90), id(80), id(70), 2)),
+                        settings(null, "default"), new SubagentContext(id(90), id(80), id(70), 2)),
                     NOW)));
     ModelRequestSpec depthLimitedRequest = fixture.resolved(depthLimited);
     assertEquals(List.of(), depthLimitedRequest.subagentBindings());
@@ -746,10 +716,7 @@ class DatabaseTurnResolverTest {
     fixture.agentConfig.setSubagents(List.of("ghost"));
     assertEquals(
         "subagent not found: ghost",
-        fixture
-            .rejected(fixture.path(settings(null, "default", List.of(TaskTool.NAME))))
-            .error()
-            .message());
+        fixture.rejected(fixture.path(settings(null, "default"))).error().message());
   }
 
   /** task 必须来自统一 registry；registry 快照缺少 task 时立即拒绝。 */
@@ -768,11 +735,8 @@ class DatabaseTurnResolverTest {
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review");
     assertEquals(
-        "tool not found: task",
-        fixture
-            .rejected(fixture.path(settings(null, "default", List.of(TaskTool.NAME))))
-            .error()
-            .message());
+        "tool not found: base.task",
+        fixture.rejected(fixture.path(settings(null, "default"))).error().message());
   }
 
   @Test
@@ -809,7 +773,7 @@ class DatabaseTurnResolverTest {
   void projectsSemanticMessagesInRootToHeadOrderIgnoringBoundariesAndErrors() {
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
-    BranchSettings settings = settings(ENV_A, "default", List.of("load_skill"));
+    BranchSettings settings = settings(ENV_A, "default");
 
     EntryPath path = multiTurnPath(settings);
     ModelRequestSpec request = fixture.resolved(path);
@@ -854,8 +818,7 @@ class DatabaseTurnResolverTest {
         new Fixture(List.of(), List.of("a&b<c>"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironmentWithSkills(ENV_A, List.of(new DaemonSkillDescriptor("a&b<c>", "d&e")));
 
-    ModelRequestSpec request =
-        fixture.resolved(fixture.path(settings(ENV_A, "default", List.of("load_skill"))));
+    ModelRequestSpec request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
 
     String system = preambleText(request);
     assertTrue(system.contains("<name>a&amp;b&lt;c&gt;</name>"));
@@ -904,8 +867,7 @@ class DatabaseTurnResolverTest {
                 Set.of(PromptCacheRetention.SHORT),
                 Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
             true);
-    ModelRequestSpec breakpoints =
-        fixture.resolved(fixture.path(settings(null, "default", List.of("create_goal"))));
+    ModelRequestSpec breakpoints = fixture.resolved(fixture.path(settings(null, "default")));
     assertEquals(PromptCacheRetention.SHORT, breakpoints.cacheControl().retention());
     assertEquals(
         Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS),
@@ -974,7 +936,7 @@ class DatabaseTurnResolverTest {
     ProviderRequest before = new ModelRequestMaterializer().materialize(path, frozen);
 
     fixture.agent.setSystemPrompt("changed system prompt");
-    fixture.agentConfig.setTools(List.of());
+    fixture.agentConfig.setToolIds(List.of());
     fixture.modelSupportsTools(false);
 
     // 二次 resolve 证明 mutation 真实生效：live spec 的 preamble 与 tools 都变了，而 frozen spec 不受影响。
@@ -1020,13 +982,8 @@ class DatabaseTurnResolverTest {
   }
 
   private static BranchSettings settings(EnvironmentBinding environment, String variant) {
-    return settings(environment, variant, List.of());
-  }
-
-  private static BranchSettings settings(
-      EnvironmentBinding environment, String variant, List<String> activeTools) {
     return new BranchSettings(
-        environment, "assistant", new ModelSelection("provider", "model", variant), activeTools);
+        environment, "assistant", new ModelSelection("provider", "model", variant));
   }
 
   private static EntryPath rootPath(BranchSettings settings) {
@@ -1228,6 +1185,27 @@ class DatabaseTurnResolverTest {
         new ToolParamsSchema(null, Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(1));
+  }
+
+  private static AgentToolId toolId(String name) {
+    return switch (name) {
+      case "read" -> BaseToolIds.READ;
+      case "write" -> BaseToolIds.WRITE;
+      case "edit" -> BaseToolIds.EDIT;
+      case "apply_patch" -> BaseToolIds.APPLY_PATCH;
+      case "bash" -> BaseToolIds.BASH;
+      case "grep" -> BaseToolIds.GREP;
+      case "find" -> BaseToolIds.FIND;
+      case "lsp_goto_definition" -> BaseToolIds.LSP_GOTO_DEFINITION;
+      case "lsp_workspace_symbols" -> BaseToolIds.LSP_WORKSPACE_SYMBOLS;
+      case "lsp_java_decompile" -> BaseToolIds.LSP_JAVA_DECOMPILE;
+      case "mcp_list_tools" -> BaseToolIds.MCP_LIST_TOOLS;
+      case "mcp_call_tool" -> BaseToolIds.MCP_CALL_TOOL;
+      case "load_skill" -> BaseToolIds.LOAD_SKILL;
+      case TaskTool.NAME -> BaseToolIds.TASK;
+      case "create_goal" -> GoalPlugin.CREATE_TOOL_ID;
+      default -> new AgentToolId(name);
+    };
   }
 
   private static ModelPricing pricing() {
@@ -1778,7 +1756,8 @@ class DatabaseTurnResolverTest {
       model.setConfigJson("model-config");
       when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
-      agentConfig.setTools(tools);
+      agentConfig.setToolIds(
+          tools.stream().map(DatabaseTurnResolverTest::toolId).map(AgentToolId::value).toList());
       agentConfig.setSkills(skills);
       agentConfig.setSubagents(List.of());
       when(agentConfigCodec.decode("agent-config")).thenReturn(agentConfig);
@@ -1808,7 +1787,7 @@ class DatabaseTurnResolverTest {
                             when(factory.definition())
                                 .thenReturn(
                                     new AgentToolDefinition(
-                                        TEST_HOST_TOOL_ID,
+                                        toolId(descriptor.name()),
                                         descriptor,
                                         internalHostToolNames.contains(descriptor.name())
                                             ? ToolVisibility.INTERNAL
