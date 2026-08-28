@@ -28,7 +28,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
@@ -41,6 +44,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * {@link PlatformToolGateway#start}：HOST / ENVIRONMENT_CAPABILITY 路由、admission 分类与同步回调门控。
@@ -250,6 +254,111 @@ class PlatformToolGatewayStartTest {
             new ToolGatewayTestSupport.RecordingListener());
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
     assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
+  }
+
+  @Test
+  void hostToolDescriptorMutationOrNullAfterFreezeIsRejectedBeforeExecute() {
+    // 意图：HOST 工具在 freeze 后 descriptor 发生漂移或变为 null，在 execute 前即被拒绝。
+    AtomicReference<ToolDescriptor> liveDescriptor = new AtomicReference<>(DESCRIPTOR);
+    Tool tool =
+        new Tool() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return liveDescriptor.get();
+          }
+
+          @Override
+          public ToolExecutionHandle execute(
+              ToolExecutionRequest request, ToolExecutionListener listener) {
+            throw new AssertionError("execute must not be reached when descriptor drifted");
+          }
+        };
+    PlatformToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(tool),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.ManualExecutor());
+
+    // 漂移
+    liveDescriptor.set(hostDriftedDescriptor("2"));
+    ToolGateway.StartResult result =
+        gateway.start(
+            ToolGatewayTestSupport.execution(
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
+            new ToolGatewayTestSupport.RecordingListener());
+    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+    assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
+
+    // 变为 null
+    liveDescriptor.set(null);
+    ToolGateway.StartResult nullResult =
+        gateway.start(
+            ToolGatewayTestSupport.execution(
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
+            new ToolGatewayTestSupport.RecordingListener());
+    ToolGateway.Rejected nullRejected = assertInstanceOf(ToolGateway.Rejected.class, nullResult);
+    assertEquals("TOOL_DEFINITION_MISMATCH", nullRejected.error().kind());
+  }
+
+  @Test
+  void hostContributorBindingProvenanceMismatchIsRejected() {
+    // 意图：HOST 工具在 frozen ContributorBinding（contributorId 或 localName）与 catalog 不一致时被 common
+    // validator 拒绝。
+    ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
+    PlatformToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(tool),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.ManualExecutor());
+
+    ToolBinding mismatchedContributorBinding =
+        new ToolBinding(
+            new AgentToolDefinition(
+                ToolGatewayTestSupport.TEST_TOOL_ID,
+                DESCRIPTOR,
+                ToolVisibility.SELECTABLE,
+                AgentToolBackend.HOST),
+            new ContributorBinding("wrong-contributor", "host-tool", List.of()),
+            null);
+    ToolGateway.StartResult result =
+        gateway.start(
+            ToolGatewayTestSupport.execution(
+                new ToolInvocationRequest(
+                    new ToolCall("call-1", DESCRIPTOR.name(), "{}"), mismatchedContributorBinding)),
+            new ToolGatewayTestSupport.RecordingListener());
+    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+    assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
+    assertTrue(rejected.error().message().contains("Frozen contributor binding"));
+  }
+
+  @Test
+  void environmentContributorBindingProvenanceMismatchIsRejected() {
+    // 意图：ENVIRONMENT_CAPABILITY 工具在 frozen ContributorBinding 与 catalog 不一致时被 common validator 拒绝。
+    PlatformToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.ManualExecutor());
+
+    ToolContribution bashContribution =
+        ToolGatewayTestSupport.defaultCatalog().findTool(BuiltinToolIds.BASH).orElseThrow();
+    ToolBinding mismatchedBinding =
+        new ToolBinding(
+            bashContribution.definition(),
+            new ContributorBinding("wrong-contributor", "environment.bash", List.of()),
+            ToolGatewayTestSupport.ENV_A);
+    ToolGateway.StartResult result =
+        gateway.start(
+            ToolGatewayTestSupport.execution(
+                new ToolInvocationRequest(
+                    new ToolCall("call-1", "bash", "{\"command\":\"ls\"}"), mismatchedBinding)),
+            new ToolGatewayTestSupport.RecordingListener());
+    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+    assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
+    assertTrue(rejected.error().message().contains("Frozen contributor binding"));
   }
 
   @Test

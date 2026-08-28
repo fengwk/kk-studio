@@ -158,6 +158,256 @@ class PlatformToolGatewayDeclarativeTest {
   }
 
   @Test
+  void declarativeDescriptorMutationAfterFreezeIsRejectedBeforeBranchLoadOrExecute() {
+    // 意图：声明式工具在 freeze 后 descriptor 发生漂移或为 null，在加载 branch view 或执行前即被拒绝。
+    AtomicReference<ToolDescriptor> liveDescriptor = new AtomicReference<>(DESCRIPTOR);
+    DeclarativeTool tool =
+        new DeclarativeTool() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return liveDescriptor.get();
+          }
+
+          @Override
+          public List<StateDeclaration> stateAccesses() {
+            return List.of(new StateDeclaration("state", StateMode.WRITE));
+          }
+
+          @Override
+          public DeclarativeToolResult execute(DeclarativeToolContext context, ToolCall call) {
+            throw new AssertionError("execute must not be reached when descriptor drifted");
+          }
+        };
+    Fixture fixture = fixture(tool);
+
+    // 漂移
+    liveDescriptor.set(
+        new ToolDescriptor(
+            "declarative_tool",
+            "2",
+            "mutated",
+            "declarative_tool",
+            DESCRIPTOR.inputSchema(),
+            DESCRIPTOR.sideEffect(),
+            DESCRIPTOR.timeout()));
+    ToolGateway.StartResult result =
+        fixture.gateway.start(fixture.execution("write"), fixture.listener);
+    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+    assertEquals(PlatformToolGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
+    assertTrue(
+        fixture.loadedAssistantId.get() == null,
+        "branch view must not be loaded when descriptor drifted");
+    assertTrue(fixture.listener.events.isEmpty());
+
+    // 变为 null
+    liveDescriptor.set(null);
+    ToolGateway.StartResult nullResult =
+        fixture.gateway.start(fixture.execution("write"), fixture.listener);
+    ToolGateway.Rejected nullRejected = assertInstanceOf(ToolGateway.Rejected.class, nullResult);
+    assertEquals(PlatformToolGateway.TOOL_DEFINITION_MISMATCH_KIND, nullRejected.error().kind());
+  }
+
+  @Test
+  void declarativeFrozenStateAccessMismatchIsRejected() {
+    // 意图：冻结的 ContributorStateAccess 声明与 catalog 中的 StateDeclaration 不一致时拒绝。
+    Fixture fixture =
+        fixture(declarativeTool(DeclarativeToolResult.withoutIntents(result(List.of()))));
+    ContributorBinding mismatchedContributor =
+        new ContributorBinding(
+            "goal",
+            "write",
+            List.of(new ContributorStateAccess("state", ContributorStateAccessMode.READ)));
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("call-1", "declarative_tool", "{}"),
+            new ToolBinding(DEFINITION, mismatchedContributor, null));
+    ToolGateway.Execution execution =
+        new ToolGateway.Execution(
+            ToolGatewayTestSupport.INVOCATION_ID,
+            ToolGatewayTestSupport.THREAD_ID,
+            ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+            1,
+            request);
+    ToolGateway.StartResult result = fixture.gateway.start(execution, fixture.listener);
+    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+    assertEquals(PlatformToolGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
+  }
+
+  @Test
+  void intentTargetingUnregisteredCustomTypeFailsBeforeExternalization() {
+    // 意图：声明式 intent 针对未在 catalog 注册的 customType，在外部化前拒绝并触发 CONTRIBUTOR_CONTRACT_VIOLATION。
+    CustomEntryPayload unregisteredPayload =
+        new CustomEntryPayload("goal", "unregistered.type", 1, "{\"k\":\"v\"}");
+    DeclarativeTool tool =
+        new DeclarativeTool() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return DESCRIPTOR;
+          }
+
+          @Override
+          public List<StateDeclaration> stateAccesses() {
+            return List.of(new StateDeclaration("state", StateMode.WRITE));
+          }
+
+          @Override
+          public DeclarativeToolResult execute(DeclarativeToolContext context, ToolCall call) {
+            return new DeclarativeToolResult(
+                result(
+                    List.of(new BinaryToolContent("application/octet-stream", new byte[] {1, 2}))),
+                List.of(new AppendCustomEntry(unregisteredPayload)));
+          }
+        };
+    HarnessContributor contributor =
+        HarnessContributor.of(
+            new ContributorDescriptor(CONTRIBUTOR_ID, "Goal", "1", Set.of()),
+            registrar -> {
+              registrar.registerCustomEntryType("state-type", "state", 0);
+              registrar.registerDeclarativeTool(
+                  "write", AGENT_TOOL_ID, tool, ToolVisibility.SELECTABLE, 0);
+            });
+    HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
+    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.FakeResourceStore resourceStore =
+        new ToolGatewayTestSupport.FakeResourceStore();
+    PlatformToolGateway gateway =
+        new PlatformToolGateway(
+            catalog,
+            assistantEntryId -> rootBranch(),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+            new ToolGatewayTestSupport.FixedToolSettingsProvider(
+                ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
+            resourceStore,
+            ToolGatewayTestSupport.WORKDIR,
+            ToolGatewayTestSupport.ENVIRONMENT_ROOT,
+            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+            executor,
+            ToolGatewayTestSupport.BUSY_RETRY_DELAY,
+            ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            new ConcurrencyAdmission(Integer.MAX_VALUE));
+    ToolGatewayTestSupport.RecordingListener listener =
+        new ToolGatewayTestSupport.RecordingListener();
+
+    ContributorBinding binding =
+        new ContributorBinding(
+            "goal",
+            "write",
+            List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("call-1", "declarative_tool", "{}"),
+            new ToolBinding(DEFINITION, binding, null));
+    ToolGateway.Execution exec =
+        new ToolGateway.Execution(
+            ToolGatewayTestSupport.INVOCATION_ID,
+            ToolGatewayTestSupport.THREAD_ID,
+            ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+            1,
+            request);
+
+    ToolGateway.Started started =
+        assertInstanceOf(ToolGateway.Started.class, gateway.start(exec, listener));
+    started.handle().activate();
+    executor.runAll();
+
+    ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
+        assertInstanceOf(
+            ToolGatewayTestSupport.RecordingListener.Event.Failed.class, listener.events.get(0));
+    assertEquals(
+        PlatformToolGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.failure().error().kind());
+    assertTrue(resourceStore.puts.isEmpty(), "must not perform any ResourceStore write");
+  }
+
+  @Test
+  void intentTargetingReadOnlyDeclaredStateFailsBeforeExternalization() {
+    // 意图：声明式 intent 针对仅声明为 READ 访问的 customType 进行写入，在外部化前拒绝并触发 CONTRIBUTOR_CONTRACT_VIOLATION。
+    CustomEntryPayload readOnlyStatePayload =
+        new CustomEntryPayload("goal", "state", 1, "{\"k\":\"v\"}");
+    DeclarativeTool tool =
+        new DeclarativeTool() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return DESCRIPTOR;
+          }
+
+          @Override
+          public List<StateDeclaration> stateAccesses() {
+            return List.of(new StateDeclaration("state", StateMode.READ));
+          }
+
+          @Override
+          public DeclarativeToolResult execute(DeclarativeToolContext context, ToolCall call) {
+            return new DeclarativeToolResult(
+                result(
+                    List.of(new BinaryToolContent("application/octet-stream", new byte[] {1, 2}))),
+                List.of(new AppendCustomEntry(readOnlyStatePayload)));
+          }
+        };
+    HarnessContributor contributor =
+        HarnessContributor.of(
+            new ContributorDescriptor(CONTRIBUTOR_ID, "Goal", "1", Set.of()),
+            registrar -> {
+              registrar.registerCustomEntryType("state-type", "state", 0);
+              registrar.registerDeclarativeTool(
+                  "write", AGENT_TOOL_ID, tool, ToolVisibility.SELECTABLE, 0);
+            });
+    HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
+    ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
+    ToolGatewayTestSupport.FakeResourceStore resourceStore =
+        new ToolGatewayTestSupport.FakeResourceStore();
+    PlatformToolGateway gateway =
+        new PlatformToolGateway(
+            catalog,
+            assistantEntryId -> rootBranch(),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
+            new ToolGatewayTestSupport.FixedToolSettingsProvider(
+                ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
+            resourceStore,
+            ToolGatewayTestSupport.WORKDIR,
+            ToolGatewayTestSupport.ENVIRONMENT_ROOT,
+            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+            executor,
+            ToolGatewayTestSupport.BUSY_RETRY_DELAY,
+            ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            new ConcurrencyAdmission(Integer.MAX_VALUE));
+    ToolGatewayTestSupport.RecordingListener listener =
+        new ToolGatewayTestSupport.RecordingListener();
+
+    ContributorBinding binding =
+        new ContributorBinding(
+            "goal",
+            "write",
+            List.of(new ContributorStateAccess("state", ContributorStateAccessMode.READ)));
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("call-1", "declarative_tool", "{}"),
+            new ToolBinding(DEFINITION, binding, null));
+    ToolGateway.Execution exec =
+        new ToolGateway.Execution(
+            ToolGatewayTestSupport.INVOCATION_ID,
+            ToolGatewayTestSupport.THREAD_ID,
+            ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+            1,
+            request);
+
+    ToolGateway.Started started =
+        assertInstanceOf(ToolGateway.Started.class, gateway.start(exec, listener));
+    started.handle().activate();
+    executor.runAll();
+
+    ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
+        assertInstanceOf(
+            ToolGatewayTestSupport.RecordingListener.Event.Failed.class, listener.events.get(0));
+    assertEquals(
+        PlatformToolGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.failure().error().kind());
+    assertTrue(resourceStore.puts.isEmpty(), "must not perform any ResourceStore write");
+  }
+
+  @Test
   void invalidIntentFailsBeforeResultExternalization() {
     // 意图：恶意/非法 intent（如冒用他人 contributorId）在外部化之前校验失败并拒绝。
     CustomEntryPayload forged =

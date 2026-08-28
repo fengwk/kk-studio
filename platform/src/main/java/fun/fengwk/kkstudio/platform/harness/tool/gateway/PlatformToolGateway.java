@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeTool;
 import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolContext;
 import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.DeclarativeToolResult;
@@ -291,8 +292,7 @@ public final class PlatformToolGateway implements ToolGateway {
   /**
    * ENVIRONMENT_CAPABILITY tool 的权限路径上下文体现冻结 binding 的 workspace：以现有 {@link #environmentRoot} 作为逻辑
    * root，把 canonical {@code workspacePath} 纯路径解析为 effective workdir（不查询 live registry、不做文件系统
-   * IO）；HOST、 DECLARATIVE 与 null Environment binding 保持 server 默认 workdir（null binding 的确定性拒绝仍发生在
-   * {@link #start}）。
+   * IO）；HOST 与 DECLARATIVE 保持 server 默认 workdir。
    */
   private Path permissionWorkdir(ToolInvocationRequest request) {
     if (request.binding().definition().backend() == AgentToolBackend.ENVIRONMENT_CAPABILITY
@@ -350,17 +350,19 @@ public final class PlatformToolGateway implements ToolGateway {
                   + contribution.definition().id()));
     }
     Tool tool = hostContribution.tool();
-    if (!tool.descriptor().equals(execution.request().binding().definition().descriptor())) {
+    ToolDescriptor currentDescriptor = tool == null ? null : tool.descriptor();
+    if (!Objects.equals(
+        currentDescriptor, execution.request().binding().definition().descriptor())) {
       return new ToolGateway.Rejected(
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
               "Registered tool descriptor does not match frozen descriptor: "
                   + contribution.definition().id()));
     }
-    ToolExecutionRequest request = request(execution, tool.descriptor());
+    ToolExecutionRequest request = request(execution, currentDescriptor);
     GatedToolExecutionListener bridge =
         new GatedToolExecutionListener(
-            listener, externalizer, tool.descriptor().name(), request.call().id(), lease);
+            listener, externalizer, currentDescriptor.name(), request.call().id(), lease);
     // 两阶段激活：executor 任务在 activate() 前只等待 release，绝不提前打开 gate / 触碰 Tool。
     GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel, lease);
     return submitLocalExecution(
@@ -421,6 +423,16 @@ public final class PlatformToolGateway implements ToolGateway {
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
               "Frozen declarative tool definition is not a DECLARATIVE contribution: "
+                  + contribution.definition().id()));
+    }
+    DeclarativeTool tool = declarativeContribution.tool();
+    ToolDescriptor currentDescriptor = tool == null ? null : tool.descriptor();
+    if (!Objects.equals(
+        currentDescriptor, execution.request().binding().definition().descriptor())) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              TOOL_DEFINITION_MISMATCH_KIND,
+              "Registered declarative tool descriptor does not match frozen descriptor: "
                   + contribution.definition().id()));
     }
     GatedToolExecutionListener bridge =

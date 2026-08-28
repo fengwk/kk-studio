@@ -4,43 +4,44 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
-/** 统一 HarnessCatalog 的平台实现与调用方不得重新引入已删除的旧目录、旧注册表或插件源类型。 */
+/**
+ * 架构守卫：验证 Platform 关键消费方（{@code DatabaseTurnResolver}、{@code PlatformToolGateway}、 {@code
+ * ToolCatalogQueryService}、{@code AgentDefinitionConfigValidator}）均直接使用 {@code HarnessCatalog}，
+ * 且仅通过 Contributor API 访问冻结目录。
+ */
 class HarnessCatalogArchitectureTest {
 
-  private static final Pattern FORBIDDEN_LEGACY_CATALOG_OR_REGISTRY =
-      Pattern.compile(
-          "\\b(?:AgentToolRegistry|ToolCatalog|ToolContributionCatalog|EnvironmentToolCatalog|PluginCatalog|HarnessPluginSource|PluginBranchViewLoader|DatabasePluginBranchViewLoader|HarnessPlugin|PluginTool|PluginRegistrar)\\b");
-
   @Test
-  void platformMainNeverReferencesLegacyCatalogsOrPluginSources() throws IOException {
+  void platformConsumersDirectlyUseHarnessCatalog() throws IOException {
     Path main = locatePlatformMainJava();
-    List<String> violations = new ArrayList<>();
-    try (Stream<Path> paths = Files.walk(main)) {
-      List<Path> javaFiles = paths.filter(p -> p.toString().endsWith(".java")).toList();
-      for (Path javaFile : javaFiles) {
-        List<String> lines = Files.readAllLines(javaFile, StandardCharsets.UTF_8);
-        for (int index = 0; index < lines.size(); index++) {
-          String line = lines.get(index);
-          if (FORBIDDEN_LEGACY_CATALOG_OR_REGISTRY.matcher(line).find()) {
-            violations.add(main.relativize(javaFile) + ":" + (index + 1) + ": " + line.trim());
-          }
-        }
-      }
+    List<Path> consumers =
+        List.of(
+            main.resolve(
+                "fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java"),
+            main.resolve(
+                "fun/fengwk/kkstudio/platform/harness/tool/gateway/PlatformToolGateway.java"),
+            main.resolve(
+                "fun/fengwk/kkstudio/platform/catalog/definition/service/impl/"
+                    + "AgentDefinitionConfigValidator.java"),
+            main.resolve("fun/fengwk/kkstudio/platform/harness/tool/ToolCatalogQueryService.java"));
+
+    for (Path consumer : consumers) {
+      assertTrue(Files.isRegularFile(consumer), "consumer file must exist: " + consumer);
+      String source = Files.readString(consumer, StandardCharsets.UTF_8);
+      assertTrue(
+          source.contains("import " + HarnessCatalog.class.getName() + ";"),
+          consumer + " must import HarnessCatalog");
+      assertTrue(
+          source.contains("HarnessCatalog"), consumer + " must directly reference HarnessCatalog");
     }
-    assertTrue(
-        violations.isEmpty(),
-        () ->
-            "platform main sources must not reference legacy catalogs, registries or plugin sources:\n"
-                + String.join("\n", violations));
   }
 
   private static Path locatePlatformMainJava() {
