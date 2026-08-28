@@ -88,7 +88,7 @@ ToolExecutionHandle execute(
 
 `EnvironmentCapabilityIds` 集中固定的 12 个 atomic canonical ID。`EnvironmentCapabilityDescriptor` 只包含 `id`、`version`、`inputSchema` 和 `timeout`，不含 model name、prompt、description、renderer 或 side-effect metadata。`EnvironmentCapabilityCatalog` 的版本为 `"1"`，按固定顺序提供 12 个 descriptor，并通过 `find(id)` / `require(id)` 做精确查找；它是 atomic execution descriptor 的唯一事实源。
 
-Capability schema 资源位于 `harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/capability/schemas/`，文件名使用 atomic capability ID。12 个 atomic capability 的 inputSchema 与 timeout 是底层执行契约的事实源，由 `EnvironmentCapabilityCatalog.entries()` 固定提供。
+Capability schema 资源位于 `harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/capability/schemas/`，文件名使用 atomic capability ID。12 个 atomic capability 的 inputSchema 与 timeout 是底层执行契约的事实源，由 `EnvironmentCapabilityCatalog.descriptors()` 固定提供。
 
 `EnvironmentCapabilityTransport` 的端口签名为：
 

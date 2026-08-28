@@ -49,7 +49,6 @@ flowchart LR
     Web --> HarnessInfra
     Web --> HarnessRuntime
     Web --> HarnessContributorApi
-    Web --> HarnessBuiltin
     CanvasInfra --> CanvasCore
     HarnessInfra --> HarnessRuntime
     HarnessRuntime --> HarnessTool
@@ -173,16 +172,18 @@ platform -> share
 web -> canvas-infra -> canvas-core
 web -> harness-infra -> harness-runtime -> harness-tool
 web -> harness-runtime
-web -> harness-contributor-api / harness-builtin
+web -> harness-contributor-api
 platform -> canvas-core
+platform -> harness-builtin -> harness-contributor-api
 platform -> harness-runtime -> harness-tool
-platform -> harness-contributor-api / harness-builtin
+platform -> harness-contributor-api
 harness-daemon -> harness-tool
 ```
 
 `platform` 的架构测试禁止它引用 `canvas-infra`、`harness-infra`、`web` 和
 `harness-daemon` 的生产实现；`web` 的架构测试要求它直接声明 Canvas Infra、
-Harness Infra、Contributor API 和 Builtin 模块，保证组合根不会依赖未声明的传递实现。
+Harness Infra、Contributor API，保证组合根不会依赖未声明的传递实现；Platform 声明并依赖
+Builtin 模块。
 
 ## 3. Web composition root
 
