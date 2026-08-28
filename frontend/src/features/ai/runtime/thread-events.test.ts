@@ -151,7 +151,7 @@ describe('buildThreadEventTimeline', () => {
       }),
       entry('compact-1', 'COMPACTION', { reason: 'COMPACTION' }),
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED', reason: 'no-continuation' }),
-      entry('custom-1', 'CUSTOM', { pluginId: 'p1', customType: 'note', schemaVersion: 1, data: {} }),
+      entry('custom-1', 'CUSTOM', { contributorId: 'c1', customType: 'note', schemaVersion: 1, data: {} }),
       entry('unknown-1', 'UNKNOWN_TYPE' as EntryType, {}),
     ]
 
@@ -752,6 +752,51 @@ describe('buildThreadEventTimeline', () => {
     expect(events[1]!.summary).toContain(long)
     expect(events[1]!.summary.endsWith('…')).toBe(false)
     expect(JSON.parse(events[1]!.summary)).toEqual(messagePayload('USER', [{ type: 'text', text: long }]))
+  })
+
+  it('projects CUSTOM entry record correctly', () => {
+    // 意图：验证 CUSTOM entry 投影为 CUSTOM kind 且 details/rawJson 完整保真。
+    const entries = [
+      entry('custom-full', 'CUSTOM', {
+        contributorId: 'goal-contributor',
+        customType: 'goal-status',
+        schemaVersion: 1,
+        data: {},
+      }),
+      entry('custom-legacy-plugin', 'CUSTOM', {
+        pluginId: 'legacy-plugin',
+        schemaVersion: 1,
+        data: {},
+      }),
+    ]
+
+    const events = build(entries)
+    expect(events).toHaveLength(2)
+    expect(events[0]!.kind).toBe('CUSTOM')
+    expect(events[0]!.title).toBe('CUSTOM')
+    expect(events[0]!.rawJson).toContain('goal-contributor')
+    expect(events[1]!.kind).toBe('CUSTOM')
+  })
+
+  it('projects tool invocation with DECLARATIVE backend correctly', () => {
+    // 意图：验证 DECLARATIVE toolBackend 的 ToolInvocation 正常被 timeline/event 系统投影。
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+    ]
+    const invocation = toolInvocation({
+      id: 'inv-decl',
+      toolName: 'create_goal',
+      toolId: 'base.goal.create',
+      toolBackend: 'DECLARATIVE',
+      rendererKey: 'tool',
+      status: 'RUNNING',
+    })
+
+    const events = build(entries, { toolInvocations: [invocation] })
+    const activeTool = events.find((e) => e.id === 'active:tool:inv-decl')
+    expect(activeTool).toBeDefined()
+    expect(activeTool?.title).toBe('ACTIVE_TOOL_INVOCATION')
+    expect(activeTool?.summary).toBe('create_goal · 运行中')
   })
 })
 

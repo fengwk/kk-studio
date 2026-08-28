@@ -154,7 +154,7 @@ registerCase({
         ['base.goal.get', 'get_goal'],
         ['base.goal.update', 'update_goal'],
       ].every(([id, name]) => ids.includes(id) && names.includes(name)),
-      `Goal plugin tools must remain selectable: ${JSON.stringify(tools)}`,
+      `Goal contributor tools must remain selectable: ${JSON.stringify(tools)}`,
     )
   },
 })
