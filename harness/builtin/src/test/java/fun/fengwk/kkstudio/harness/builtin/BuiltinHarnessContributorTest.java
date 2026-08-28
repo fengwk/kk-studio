@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentCapabilityToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.AgentToolBackend;
@@ -60,6 +61,24 @@ class BuiltinHarnessContributorTest {
     assertThrows(
         NullPointerException.class,
         () -> new BuiltinHarnessContributor(stubTool("load_skill"), null));
+  }
+
+  @Test
+  void constructorRejectsIncorrectOrSwappedHostTools() {
+    // Swapped tools
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new BuiltinHarnessContributor(stubTool("task"), stubTool("load_skill")));
+
+    // Wrong load_skill name
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new BuiltinHarnessContributor(stubTool("other"), stubTool("task")));
+
+    // Wrong task name
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new BuiltinHarnessContributor(stubTool("load_skill"), stubTool("other")));
   }
 
   @Test
@@ -253,6 +272,9 @@ class BuiltinHarnessContributorTest {
     EnvironmentCapabilityDescriptor capability = EnvironmentCapabilityCatalog.require(capabilityId);
     assertEquals(capability.inputSchema(), descriptor.inputSchema());
     assertEquals(capability.timeout(), descriptor.timeout());
+
+    EnvironmentCapabilityToolContribution envTool = (EnvironmentCapabilityToolContribution) tool;
+    assertEquals(capability, envTool.capability());
 
     // Lookup by AgentToolId and ContributionId
     assertEquals(tool, catalog.findTool(agentToolId).orElseThrow());

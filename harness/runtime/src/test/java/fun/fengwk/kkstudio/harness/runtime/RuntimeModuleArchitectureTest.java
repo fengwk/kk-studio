@@ -20,14 +20,12 @@ import java.util.stream.Stream;
 /**
  * runtime 模块的轻量级架构守卫。
  *
- * <p>基于 allowlist 扫描整个 {@code src/main/java} 目录，校验三个 Harness 模块 及其直接的生产依赖。原顶层 model 包已合并到 {@code
- * fun.fengwk.kkstudio.harness.runtime.model}， 旧的源码目录不得再次出现。
+ * <p>基于 allowlist 扫描整个 {@code src/main/java} 目录，校验全部 Harness 模块及其直接的生产依赖。原顶层 model 包已合并到 {@code
+ * fun.fengwk.kkstudio.harness.runtime.model}，旧的源码目录不得再次出现。
  */
 class RuntimeModuleArchitectureTest {
 
   private static final String JGIT_IMPORT_PREFIX = "org.eclipse.jgit.";
-  private static final String CONCRETE_PLUGIN_IMPORT_PREFIX =
-      "fun.fengwk.kkstudio.harness.plugins.";
   private static final String BUILTIN_IMPORT_PREFIX = "fun.fengwk.kkstudio.harness.builtin.";
   private static final String JGIT_OWNER =
       "fun/fengwk/kkstudio/harness/runtime/permission/PermissionPathPattern.java";
@@ -143,12 +141,7 @@ class RuntimeModuleArchitectureTest {
                     String trimmed = line.trim();
                     if (trimmed.startsWith("import ")) {
                       String imported = normalizeImport(trimmed);
-                      if (imported.startsWith(CONCRETE_PLUGIN_IMPORT_PREFIX)) {
-                        violations.add(
-                            relative(main, path)
-                                + ": runtime must not depend on concrete plugin "
-                                + trimmed);
-                      } else if (imported.startsWith(BUILTIN_IMPORT_PREFIX)) {
+                      if (imported.startsWith(BUILTIN_IMPORT_PREFIX)) {
                         violations.add(
                             relative(main, path)
                                 + ": runtime must not depend on builtin "

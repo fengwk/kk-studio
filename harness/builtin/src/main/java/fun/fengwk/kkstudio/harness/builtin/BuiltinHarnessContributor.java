@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentPrompts;
 import fun.fengwk.kkstudio.harness.builtin.goal.CreateGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.GetGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.GoalContextProjector;
-import fun.fengwk.kkstudio.harness.builtin.goal.GoalFeature;
 import fun.fengwk.kkstudio.harness.builtin.goal.UpdateGoalTool;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -34,6 +33,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
   public static final ContributorId ID = new ContributorId("builtin");
   public static final String NAME = "Built-in";
   public static final String VERSION = "1";
+  public static final String GOAL_STATE_TYPE = "goal.state";
 
   private static final ContributorDescriptor DESCRIPTOR =
       new ContributorDescriptor(ID, NAME, VERSION, Set.of());
@@ -44,6 +44,18 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
   public BuiltinHarnessContributor(Tool loadSkillTool, Tool taskTool) {
     this.loadSkillTool = Objects.requireNonNull(loadSkillTool, "loadSkillTool");
     this.taskTool = Objects.requireNonNull(taskTool, "taskTool");
+    ToolDescriptor loadSkillDescriptor = this.loadSkillTool.descriptor();
+    if (loadSkillDescriptor == null || !"load_skill".equals(loadSkillDescriptor.name())) {
+      throw new IllegalArgumentException(
+          "loadSkillTool descriptor name must be \"load_skill\", got "
+              + (loadSkillDescriptor == null ? "null" : "\"" + loadSkillDescriptor.name() + "\""));
+    }
+    ToolDescriptor taskDescriptor = this.taskTool.descriptor();
+    if (taskDescriptor == null || !"task".equals(taskDescriptor.name())) {
+      throw new IllegalArgumentException(
+          "taskTool descriptor name must be \"task\", got "
+              + (taskDescriptor == null ? "null" : "\"" + taskDescriptor.name() + "\""));
+    }
   }
 
   @Override
@@ -148,7 +160,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
         "runtime.task", BuiltinToolIds.TASK, taskTool, ToolVisibility.INTERNAL, 0);
 
     // Goal declarative tools & custom entry
-    registrar.registerCustomEntryType("goal.state-type", GoalFeature.STATE_TYPE, 0);
+    registrar.registerCustomEntryType("goal.state-type", GOAL_STATE_TYPE, 0);
     registrar.registerDeclarativeTool(
         "goal.create",
         BuiltinToolIds.GOAL_CREATE,
