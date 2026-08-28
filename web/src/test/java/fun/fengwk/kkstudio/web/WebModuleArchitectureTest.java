@@ -23,17 +23,13 @@ class WebModuleArchitectureTest {
 
   private static final String HARNESS_RUNTIME_PREFIX = "fun.fengwk.kkstudio.harness.runtime.";
   private static final String HARNESS_INFRA_PREFIX = "fun.fengwk.kkstudio.harness.infra.";
-  private static final String HARNESS_PLUGIN_API_PREFIX = "fun.fengwk.kkstudio.harness.plugin.api.";
-  private static final String GOAL_PLUGIN_PREFIX = "fun.fengwk.kkstudio.harness.plugins.goal.";
+  private static final String HARNESS_CONTRIBUTOR_API_PREFIX =
+      "fun.fengwk.kkstudio.harness.contributor.api.";
   private static final String HARNESS_TOOL_PREFIX = "fun.fengwk.kkstudio.harness.tool.";
   private static final String PLATFORM_ENVIRONMENT_PREFIX =
       "fun.fengwk.kkstudio.platform.environment.";
   private static final List<String> ALLOWED_HARNESS_PACKAGE_PREFIXES =
-      List.of(
-          HARNESS_RUNTIME_PREFIX,
-          HARNESS_INFRA_PREFIX,
-          HARNESS_PLUGIN_API_PREFIX,
-          GOAL_PLUGIN_PREFIX);
+      List.of(HARNESS_RUNTIME_PREFIX, HARNESS_INFRA_PREFIX, HARNESS_CONTRIBUTOR_API_PREFIX);
 
   /**
    * Web mapper 直接使用的 canonical tool types (EnvironmentBinding, EnvironmentName,
@@ -54,10 +50,7 @@ class WebModuleArchitectureTest {
       List.of("kk-studio-harness-tool", "kk-studio-harness-daemon");
   private static final List<String> REQUIRED_POM_ARTIFACTS =
       List.of(
-          "kk-studio-canvas-infra",
-          "kk-studio-harness-infra",
-          "kk-studio-harness-plugin-api",
-          "kk-studio-harness-plugin-goal");
+          "kk-studio-canvas-infra", "kk-studio-harness-infra", "kk-studio-harness-contributor-api");
 
   @Test
   void webMainSourcesUseCoreBoundariesAndAvoidDirectHarnessDependencies() throws IOException {
@@ -92,7 +85,7 @@ class WebModuleArchitectureTest {
   void trustedJarLoaderStaysInWebCompositionRootWithoutTransportOrFlyway() throws IOException {
     Path loader =
         locateWebMainJava()
-            .resolve("fun/fengwk/kkstudio/web/runtime/plugin/TrustedJarPluginLoader.java")
+            .resolve("fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoader.java")
             .normalize();
     assertTrue(Files.isRegularFile(loader), "trusted JAR loader must live under web runtime");
     String source = Files.readString(loader, StandardCharsets.UTF_8);
@@ -137,7 +130,7 @@ class WebModuleArchitectureTest {
     return violations;
   }
 
-  /** 组合根只直接引用 Runtime、Infra、内建 Goal 插件和规范化的 Tool 类型。 */
+  /** 组合根只直接引用 Runtime、Infra、Contributor API 和规范化的 Tool 类型。 */
   private static boolean isForbiddenHarnessImport(String imported) {
     if (ALLOWED_HARNESS_PACKAGE_PREFIXES.stream().anyMatch(imported::startsWith)) {
       return false;

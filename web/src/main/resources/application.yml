@@ -63,9 +63,9 @@ kk-studio:
       poll-delay: ${KK_STUDIO_STORAGE_MAINTENANCE_POLL_DELAY:30s}
       cleanup-lease: ${KK_STUDIO_STORAGE_MAINTENANCE_CLEANUP_LEASE:5m}
   harness:
-    plugins:
-      # 只在启动期扫描该本地目录中的 trusted JAR；空值表示不加载外部插件。
-      directory: ${KK_STUDIO_TRUSTED_PLUGIN_DIRECTORY:}
+    contributors:
+      # 只在启动期扫描该本地目录中的 trusted JAR；空值表示不加载外部贡献者。
+      directory: ${KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY:}
     execution-admission:
       # 进程级执行容量；不进入 SystemSettings/DTO/frontend。
       model: ${KK_STUDIO_MODEL_MAX_CONCURRENCY:16}
