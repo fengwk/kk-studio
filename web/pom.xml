@@ -38,11 +38,7 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-plugin-goal</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-plugin-api</artifactId>
+            <artifactId>kk-studio-harness-contributor-api</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.convention4j</groupId>
