@@ -26,7 +26,7 @@ class ToolBindingTest {
 
   @Test
   void exposesOnlyDefinitionContributorAndEnvironmentRecordComponents() {
-    // 反射契约锁定 durable binding 的三个组件，防止旧 type/plugin 字段回归。
+    // 反射契约锁定 durable binding 的三个组件。
     assertTrue(ToolBinding.class.isRecord());
     RecordComponent[] components = ToolBinding.class.getRecordComponents();
     assertEquals(

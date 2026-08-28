@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -204,7 +205,7 @@ public final class HarnessRuntimeTestFixtures {
                     descriptor,
                     ToolVisibility.SELECTABLE,
                     AgentToolBackend.HOST),
-                null,
+                new ContributorBinding("test", "web-search", List.of()),
                 null));
     return new ToolInvocation(
         id(100),

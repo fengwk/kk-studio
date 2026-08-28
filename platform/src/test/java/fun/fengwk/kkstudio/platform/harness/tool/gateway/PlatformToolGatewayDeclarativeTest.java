@@ -528,11 +528,11 @@ class PlatformToolGatewayDeclarativeTest {
       ToolGatewayTestSupport.RecordingListener listener,
       AtomicReference<UUID> loadedAssistantId) {
 
-    ToolGateway.Execution execution(String contributionLocalName) {
+    ToolGateway.Execution execution(String localName) {
       ContributorBinding contributor =
           new ContributorBinding(
               "goal",
-              contributionLocalName,
+              localName,
               List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
       ToolInvocationRequest request =
           new ToolInvocationRequest(

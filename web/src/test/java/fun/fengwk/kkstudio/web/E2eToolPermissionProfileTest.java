@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
-import fun.fengwk.kkstudio.harness.tool.BaseToolIds;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 
 import java.io.IOException;
@@ -39,11 +39,12 @@ class E2eToolPermissionProfileTest {
         new ToolSettings(
             SystemSettings.Tool.DEFAULT.permission(), SystemSettings.Tool.DEFAULT.defaultYolo());
 
-    assertEquals(ASK_ALL, settings.rulesFor(BaseToolIds.WRITE));
-    assertEquals(ASK_ALL, settings.rulesFor(BaseToolIds.EDIT));
-    assertEquals(ASK_ALL, settings.rulesFor(BaseToolIds.BASH));
+    assertEquals(ASK_ALL, settings.rulesFor(BuiltinToolIds.WRITE));
+    assertEquals(ASK_ALL, settings.rulesFor(BuiltinToolIds.EDIT));
+    assertEquals(ASK_ALL, settings.rulesFor(BuiltinToolIds.BASH));
     assertTrue(
-        settings.rulesFor(BaseToolIds.READ).isEmpty(), "production default must not restrict read");
+        settings.rulesFor(BuiltinToolIds.READ).isEmpty(),
+        "production default must not restrict read");
     assertFalse(settings.defaultYolo());
   }
 

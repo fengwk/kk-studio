@@ -71,6 +71,11 @@
             <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-builtin</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

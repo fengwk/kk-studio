@@ -20,7 +20,7 @@ flowchart TD
   Root --> web
   canvas --> canvasCore["canvas/core"]
   canvas --> canvasInfra["canvas/infra"]
-  harness --> harnessLeaves["tool · runtime · plugin-api · infra · daemon · plugins/goal"]
+  harness --> harnessLeaves["tool · runtime · contributor-api · infra · daemon · builtin"]
   Frontend["frontend · non-Maven"] --> web
 ```
 
@@ -28,8 +28,8 @@ flowchart TD
 
 - `share`、`schema`
 - `canvas/core`、`canvas/infra`
-- `harness/tool`、`harness/runtime`、`harness/plugin-api`、`harness/infra`
-- `harness/daemon`、`harness/plugins/goal`
+- `harness/tool`、`harness/runtime`、`harness/contributor-api`、`harness/infra`
+- `harness/daemon`、`harness/builtin`
 - `platform`、`web`
 - `frontend`
 
@@ -71,7 +71,7 @@ operations 文档；建议先读[系统设计](docs/system-design.md)。
   源码、镜像、seed 或公共 DTO。
 - PostgreSQL 保存可恢复的业务事实；对象字节由受控存储服务保存，浏览器只
   获得短期签名 URL。
-- Trusted plugin JAR 只从显式部署目录在启动时加载；HTTP 认证、TLS 和 ingress
+- Trusted contributor JAR 只从显式部署目录在启动时加载；HTTP 认证、TLS 和 ingress
   策略属于部署边界。
 
 ## 协议与安全报告

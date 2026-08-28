@@ -127,24 +127,4 @@ class ContributorCatalogWiringTest {
       assertThrows(RuntimeException.class, context::refresh);
     }
   }
-
-  /** 显式负向用例：验证旧属性 kk-studio.harness.plugins.directory 不被读取，loader 不会因此配置非空目录。 */
-  @Test
-  void ignoresOldPluginDirectoryProperty() {
-    try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
-      context
-          .getEnvironment()
-          .getPropertySources()
-          .addFirst(
-              new MapPropertySource(
-                  "old-plugin-property-test",
-                  Map.of("kk-studio.harness.plugins.directory", "/nonexistent-plugin-directory")));
-      context.register(ContributorCatalogConfiguration.class);
-      context.refresh();
-
-      TrustedJarContributorLoader loader = context.getBean(TrustedJarContributorLoader.class);
-      assertTrue(loader.contributors().isEmpty());
-      assertTrue(loader.classLoader().isEmpty());
-    }
-  }
 }

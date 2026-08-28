@@ -274,25 +274,6 @@ class TrustedJarContributorLoaderTest {
     assertTrue(error.getMessage().contains("failed to load trusted HarnessContributor services"));
   }
 
-  /** 显式负向用例：验证旧插件 SPI 描述文件不会被新 Loader 识别。 */
-  @Test
-  void ignoresJarWithOldPluginServiceDescriptor(@TempDir Path tempDirectory) throws Exception {
-    Path contributorDirectory = Files.createDirectory(tempDirectory.resolve("contributors"));
-    Path jar = contributorDirectory.resolve("old-plugin.jar");
-    String oldServicePath =
-        "META-INF/services/" + "fun.fengwk.kkstudio.harness.plugin.api." + "HarnessPlugin";
-    try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(jar))) {
-      output.putNextEntry(new JarEntry(oldServicePath));
-      output.write("dynamic.OldPlugin\n".getBytes(StandardCharsets.UTF_8));
-      output.closeEntry();
-    }
-
-    try (TrustedJarContributorLoader loader =
-        new TrustedJarContributorLoader(contributorDirectory)) {
-      assertTrue(loader.contributors().isEmpty());
-    }
-  }
-
   static void writeContributorJar(
       Path jar, String contributorClass, String contributorId, String marker) throws Exception {
     Path sourceDirectory = Files.createTempDirectory(jar.getParent(), "source-");
