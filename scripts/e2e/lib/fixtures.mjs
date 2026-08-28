@@ -199,9 +199,9 @@ export function agentConfigMatrix() {
       }),
     },
     {
-      id: 'valid.goal_plugin_tools',
+      id: 'valid.goal_contributor_tools',
       ok: true,
-      title: 'Goal 插件工具已进入可选 ToolCatalog',
+      title: 'Goal contributor 工具已进入可选 ToolCatalog',
       build: () => ({
         toolIds: ['base.goal.create', 'base.goal.get', 'base.goal.update'],
         skills: [],

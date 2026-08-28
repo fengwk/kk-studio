@@ -460,13 +460,13 @@ function projectEntryRecord(
       }
     case 'CUSTOM': {
       const customType = getString(payload.customType)
-      const pluginId = getString(payload.pluginId)
+      const contributorId = getString(payload.contributorId)
       return {
         ...base,
         kind: 'CUSTOM',
         status: 'completed',
         title: kindTitle('CUSTOM'),
-        summary: summarizeField(customType || pluginId, translate('ai.runtime.event.emptyText')),
+        summary: summarizeField(customType || contributorId, translate('ai.runtime.event.emptyText')),
         details: withTime(base.details, entry.createTime),
       }
     }

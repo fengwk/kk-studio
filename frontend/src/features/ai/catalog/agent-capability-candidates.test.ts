@@ -75,13 +75,13 @@ describe('agent-capability-candidates', () => {
   it('keeps permission candidates keyed by stable tool ID', () => {
     const tools = [
       tool('base.read', 'read', 'files', '1', 'ENVIRONMENT_CAPABILITY'),
-      tool('plugin.read', 'read', 'plugin files', '1', 'PLUGIN'),
+      tool('declarative.read', 'read', 'declarative files', '1', 'DECLARATIVE'),
       tool('base.read', 'renamed read', 'duplicate ID'),
     ]
 
     expect(buildPermissionToolCandidates(tools).map((item) => item.name)).toEqual([
       'base.read',
-      'plugin.read',
+      'declarative.read',
     ])
     expect(buildPermissionToolCandidates(tools)[0]).toEqual({
       value: 'base.read',
