@@ -173,9 +173,9 @@ classpath:db/seed/canvas-test`。Flyway 通过
 | Spring profile | `KK_STUDIO_SPRING_PROFILES_ACTIVE` |
 | admission | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY` |
 | Environment gateway | `KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES`、`KK_STUDIO_ENVIRONMENT_GATEWAY_QUEUE_CAPACITY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES`、`KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT` |
-| trusted runtime | `KK_STUDIO_TRUSTED_PLUGIN_DIRECTORY`、Canvas Function runtime variables、`KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` |
+| trusted runtime | `KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY`、Canvas Function runtime variables、`KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` |
 
-Admission、gateway frame/queue cap 和 trusted plugin directory 属于启动配置，
+Admission、gateway frame/queue cap 和 trusted contributor directory 属于启动配置，
 不由 SystemSettings editor 修改。
 
 ## 7. `deploy/test`：Canvas/Storage offline stack

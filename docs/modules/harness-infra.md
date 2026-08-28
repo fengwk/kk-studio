@@ -18,7 +18,7 @@
 
 ### Non-goals
 
-- 不在 Infra 决定 ThreadContext、TurnPlan、retry policy、Tool permission、Provider 请求或 plugin state。
+- 不在 Infra 决定 ThreadContext、TurnPlan、retry policy、Tool permission、Provider 请求或 contributor state。
 - NOTIFY 不是 durable event log、Work queue 或 realtime replay buffer。
 - LocalFileResourceStore 不从输入 URI、resource name 或路径内容推导可写目标；它只处理 pinned root 下的 content hash object。
 - dispatcher 不读取 Thread/Invocation business state，也不解释 Processor 的 typed result。
