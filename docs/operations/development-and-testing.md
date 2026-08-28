@@ -162,13 +162,15 @@ find . -path '*/target/site/jacoco/index.html' -print
 
 当前自动门禁的目标类是：
 
+- `fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog`
+- `fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor`
+- `fun.fengwk.kkstudio.harness.builtin.goal.GoalStateCodec`
 - `fun.fengwk.kkstudio.harness.runtime.processor.ResolvedRequestValidator`
 - `fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec`
 - `fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding`
 - `fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec`
 - `fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec`
 - `fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway`
-- `fun.fengwk.kkstudio.platform.harness.tool.AgentToolRegistry`
 - `fun.fengwk.kkstudio.platform.harness.tool.gateway.PlatformToolGateway`
 - `fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper`
 

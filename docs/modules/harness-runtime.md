@@ -2,7 +2,7 @@
 
 ## 定位
 
-`harness-runtime` 是纯 Java durable Agent Runtime，承载 Session Entry Tree、Thread command mailbox、Model/Tool invocation、Work mailbox、三个 target processor、compaction、Stop、approval、Provider/Tool ports、permission、cache、usage/cost 与 subagent TaskTool。PostgreSQL、Spring、Provider SDK、HTTP、WebSocket 和具体 Tool 实现在外部适配。
+`harness-runtime` 是纯 Java durable Agent Runtime，承载 Session Entry Tree、Thread command mailbox、Model/Tool invocation、Work mailbox、三个 target processor、compaction、Stop、approval、Provider/Tool ports、permission、cache 与 usage/cost。PostgreSQL、Spring、Provider SDK、HTTP、WebSocket 和具体 Tool 实现在外部适配。
 
 同步 command/control/query 的唯一 facade 是 [`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java)。所有持久化写入通过 [`HarnessStore`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) typed transaction 完成；每个 facade 方法只执行一个 Store transaction，Stop durable commit 后才进行同 JVM 的 best-effort execution cancel。
 
@@ -42,7 +42,7 @@ infra / platform / web composition root
                     harness-tool
 ```
 
-主源码依赖 `harness-tool`、Jackson、SLF4J；JGit 只由 permission path matcher 所在实现使用。POM 与架构约束见 [`pom.xml`](../../harness/runtime/pom.xml) 和 [`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java)。Runtime 不得依赖具体 `harness.plugins.*`、infra、daemon、platform 或 web。
+主源码依赖 `harness-tool`、Jackson、SLF4J；JGit 只由 permission path matcher 所在实现使用。POM 与架构约束见 [`pom.xml`](../../harness/runtime/pom.xml) 和 [`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java)。Runtime 不得依赖具体 contributor 实现、infra、daemon、platform 或 web。
 
 ## 核心模型 / API
 
@@ -63,7 +63,7 @@ COMPACTION
 TURN_END
 ```
 
-`ROOT` 是唯一无 parent 节点，保存初始 `BranchSettings` 和可选 `SubagentContext`。`TURN_START` 保存完整 branch settings、owner Thread、reason（`INPUT` / `CONTINUATION` / `COMPACTION`）以及 resolved context window/output budget。`MESSAGE` 保存 USER/ASSISTANT/TOOL；`CUSTOM` 是透明插件状态；`CUSTOM_MESSAGE` 是可见的 SYSTEM/USER 扩展消息；`MODEL_ATTEMPT_FAILURE` 是 retry audit；`ASSISTANT_ERROR`、`ASSISTANT_ABORTED` 是 assistant barrier；`COMPACTION` 只保存 summary；`TURN_END` 保存 outcome 和 continuation obligation。
+`ROOT` 是唯一无 parent 节点，保存初始 `BranchSettings` 和可选 `SubagentContext`。`TURN_START` 保存完整 branch settings、owner Thread、reason（`INPUT` / `CONTINUATION` / `COMPACTION`）以及 resolved context window/output budget。`MESSAGE` 保存 USER/ASSISTANT/TOOL；`CUSTOM` 是透明 Contributor branch 状态；`CUSTOM_MESSAGE` 是可见的 SYSTEM/USER 扩展消息；`MODEL_ATTEMPT_FAILURE` 是 retry audit；`ASSISTANT_ERROR`、`ASSISTANT_ABORTED` 是 assistant barrier；`COMPACTION` 只保存 summary；`TURN_END` 保存 outcome 和 continuation obligation。
 
 [`EntryPath`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java) 是 root-to-head 的不可变连续路径：同 Session、parent 连续、createdAt 不早于 parent、ROOT 唯一，并由 [`TurnPathValidator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java) 校验 turn grammar。`CUSTOM` 不打开/关闭 turn；INPUT 必须有 user-like message；Tool result 必须按 ordinal 前缀；closed turn 不允许再次追加消息。
 
@@ -111,7 +111,7 @@ cacheControl
 
 完整 history、Provider tools、顶层 Environment、YOLO、contextWindow、credential、endpoint 和 compaction transient metadata 不复制进 spec。[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 从 immutable EntryPath + spec 纯投影内存 ProviderRequest；普通请求只投影 MESSAGE、CUSTOM_MESSAGE、ASSISTANT_ABORTED 和 complete summary，compaction 请求只生成 summarization SYSTEM + USER 且无 tools。
 
-`ToolInvocation` 保存冻结 `ToolCall`、完整 `ToolBinding`（`AgentToolDefinition` + 可选 Environment/plugin provenance）、assistant Entry、ordinal、approval、result、effects 和 error。状态为：
+`ToolInvocation` 保存冻结 `ToolCall`、完整 `ToolBinding`（`AgentToolDefinition` + Contributor provenance + 可选 Environment binding）、assistant Entry、ordinal、approval、result、effects 和 error。`ToolBinding` 包含 `definition`（`AgentToolDefinition`，其 backend 枚举确切为 `HOST`、`DECLARATIVE`、`ENVIRONMENT_CAPABILITY`）、`contributor`（`ContributorBinding(contributorId, localName, stateAccesses)`）和可选 `environment`（`EnvironmentBinding`）。`CUSTOM` Entry payload 保存 `(contributorId, customType, schemaVersion, dataJson)`；`CUSTOM_MESSAGE` Entry payload 保存 `(contributorId, customType, rendererKey, message, detailsJson)`。状态为：
 
 ```text
 WAITING_APPROVAL -> READY -> DISPATCHING -> RUNNING
@@ -231,7 +231,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 
 `decideToolApproval` 只接受当前 `ToolActive` context 内 `WAITING_APPROVAL` invocation。`ALLOWED` → READY + TOOL Work，`DENIED` → FAILED + THREAD Work；相同 `decisionId` 与 payload 精确 replay，不 bump version。权限规则由 [`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java) 产生 Allow/Ask/Deny 候选，`ToolSettings.permission` 的 key 是精确 `*` 全局 wildcard 或 canonical `AgentToolId`，先应用全局规则再应用 tool id 规则，数组顺序保持为求值顺序；真实文件/symlink/执行边界不在 Runtime permission 包。
 
-[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/subagent/TaskTool.java) 是内部 HOST Tool，不新增状态机或表。它验证父 ModelInvocation frozen `subagentBindings`，用 `HarnessRuntime.acceptCommands(NEW_SESSION, SubagentContext)` 创建普通 durable child Thread；`session_id` resume 要求同 parent/root 且 child quiescent。观察通过 `HarnessThreadChangeSource` 的 version/resync wake 和 [`ChangeGate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ChangeGate.java)，不固定读取 snapshot；`SubagentRunRegistry` 只 relay descendant status，并在 reservation 中拒绝超出 parent/tree concurrency 的调用。`maxTurns` 是软提醒，idle timeout 会取消 child 但保留 Session。
+[`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 是内部 HOST Tool，不新增状态机或表。它验证父 ModelInvocation frozen `subagentBindings`，用 `HarnessRuntime.acceptCommands(NEW_SESSION, SubagentContext)` 创建普通 durable child Thread；`session_id` resume 要求同 parent/root 且 child quiescent。观察通过 `HarnessThreadChangeSource` 的 version/resync wake 和 [`ChangeGate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ChangeGate.java)，不固定读取 snapshot；`SubagentRunRegistry` 只 relay descendant status，并在 reservation 中拒绝超出 parent/tree concurrency 的调用。`maxTurns` 是软提醒，idle timeout 会取消 child 但保留 Session。
 
 ## 不变量、failure / recovery
 
@@ -260,7 +260,7 @@ TURN_START(reason=COMPACTION, CompactionStart)
 - [`EntryPath.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java)、[`TurnPathValidator.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java)、[`ThreadState.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadState.java)
 - [`ModelInvocation.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocation.java)、[`ToolInvocation.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java)、[`Work.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/Work.java)
 - [`ThreadProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java)、[`ModelProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessor.java)、[`ToolProcessor.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java)
-- [`ModelRequestMaterializer.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java)、[`CompactionPlanner.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java)、[`TaskTool.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/subagent/TaskTool.java)
+- [`ModelRequestMaterializer.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java)、[`CompactionPlanner.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java)、[`ToolBinding.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)
 
 ### 关键测试守卫
 
@@ -270,10 +270,10 @@ TURN_START(reason=COMPACTION, CompactionStart)
 - [`ThreadContextClassifierTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifierTest.java)、[`ThreadProcessorPlanningTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorPlanningTest.java)、[`ThreadProcessorToolBatchTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorToolBatchTest.java)：分类、speculative plan、Tool sibling apply。
 - [`ThreadProcessorCompactionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorCompactionTest.java)、[`ThreadProcessorManualCompactionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorManualCompactionTest.java)、[`CompactionPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlannerTest.java)：压缩切分、fallback、manual CAS 和 no-gain。
 - [`ModelProcessorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessorTest.java)、[`ToolProcessorRecoveryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorRecoveryTest.java)、[`WorkHeartbeatTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeatTest.java)：两阶段 activation、UNKNOWN recovery、lease fencing。
-- [`TaskToolTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/subagent/TaskToolTest.java)、[`SubagentRunRegistryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/subagent/SubagentRunRegistryTest.java)、[`ConcurrencyAdmissionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/admission/ConcurrencyAdmissionTest.java)：child Thread、事件观察、并发 reservation 和 lease 释放。
+- [`ToolBindingTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBindingTest.java)、[`ToolBindingJsonCodecTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/codec/ToolBindingJsonCodecTest.java)、[`ConcurrencyAdmissionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/admission/ConcurrencyAdmissionTest.java)：ToolBinding 约束、JSON 序列化、并发 reservation 和 lease 释放。
 
 ---
 
 上级：[系统设计](../system-design.md)。相关文档：[Harness Infra](harness-infra.md)、
-[Harness Tool](harness-tool.md)、[Harness Plugin API](harness-plugin-api.md)、
+[Harness Tool](harness-tool.md)、[Harness Builtin](harness-builtin.md)、[Harness Contributor API](harness-contributor-api.md)、
 [Platform](platform.md)。

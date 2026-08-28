@@ -25,10 +25,10 @@
 | canvas-core | [modules/canvas-core.md](modules/canvas-core.md) | Canvas 领域模型、typed command 与 ports |
 | canvas-infra | [modules/canvas-infra.md](modules/canvas-infra.md) | Canvas PostgreSQL 适配与 Function runtime |
 | frontend | [modules/frontend.md](modules/frontend.md) | React 宿主、feature 边界与浏览器恢复 |
+| harness-builtin | [modules/harness-builtin.md](modules/harness-builtin.md) | 第一方内置 17 工具与 Goal 契约 |
+| harness-contributor-api | [modules/harness-contributor-api.md](modules/harness-contributor-api.md) | Trusted Java Contributor SPI 与 catalog |
 | harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |
 | harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
-| harness-plugin-api | [modules/harness-plugin-api.md](modules/harness-plugin-api.md) | Trusted Java plugin SPI 与 catalog |
-| harness-plugin-goal | [modules/harness-plugin-goal.md](modules/harness-plugin-goal.md) | Goal branch snapshot plugin contract |
 | harness-runtime | [modules/harness-runtime.md](modules/harness-runtime.md) | Agent Runtime 状态机与 processors |
 | harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool、ResourceRef 和 Daemon wire contract |
 | platform | [modules/platform.md](modules/platform.md) | Application service、gateway 与外部适配 |
