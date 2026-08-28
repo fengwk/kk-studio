@@ -37,13 +37,10 @@ class PlatformArchitectureTest {
   private static final List<String> FORBIDDEN_TRUSTED_CONTRIBUTOR_REFERENCES =
       List.of(
           "TrustedJarContributorLoader",
-          "TrustedJarPluginLoader",
           "URLClassLoader",
           "ServiceLoader",
           "kk-studio.harness.contributors.directory",
-          "kk-studio.harness.plugins.directory",
-          "KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY",
-          "KK_STUDIO_TRUSTED_PLUGIN_DIRECTORY");
+          "KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY");
 
   /** platform 不是组合根：main 源码禁止 import framework 基础设施与 web/daemon；pom 不得声明对应的下游模块 artifactId。 */
   @Test

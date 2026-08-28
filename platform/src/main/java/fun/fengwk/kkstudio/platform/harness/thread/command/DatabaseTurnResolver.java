@@ -80,11 +80,10 @@ import java.util.UUID;
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environment binding / agentName / {@link
  * ModelSelection}）；实现按这些精确引用读取最新 catalog / environment 事实，Agent 的 toolIds/skills/subagents 每个新 turn
  * 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。environment 是完整 binding（路由名 + workspace path），为最新
- * branch 的不可变事实：ENVIRONMENT 工具一律按最新 {@code settings.environment()} 绑定（可为 null 或当前不可用，实际执行时
- * 失败）；Agent skills 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch
- * settings。配置或 Environment 不满足一律返回 {@link Result.Rejected}（稳定 error code {@value
- * #REJECTION_CODE}）；只有 repository / registry 等基础设施异常向上传播，由 ThreadProcessor reschedule。YOLO 不进入
- * spec。
+ * branch 的不可变事实：ENVIRONMENT 工具一律按最新 {@code settings.environment()} 绑定（未选定环境时确定性拒绝规划）；Agent skills
+ * 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的 branch settings。配置或 Environment
+ * 不满足一律返回 {@link Result.Rejected}（稳定 error code {@value #REJECTION_CODE}）；只有 repository / registry
+ * 等基础设施异常向上传播，由 ThreadProcessor reschedule。YOLO 不进入 spec。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -400,7 +399,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   /**
    * 按最新 Agent 配置派生的精确顺序逐一绑定。ENVIRONMENT_CAPABILITY 工具一律绑定最新 branch 的完整 {@code
-   * settings.environment()} binding（可为 null 或当前不可用——实际执行时确定性失败）；所有 backend 冻结
+   * settings.environment()} binding（分支未选定环境时确定性拒绝规划）；所有 backend 冻结
    * ContributorBinding。缺失能力仍立即拒绝，绝不静默跳过。
    */
   private List<ToolBinding> resolveTools(BranchSettings settings, List<AgentToolId> toolIds) {

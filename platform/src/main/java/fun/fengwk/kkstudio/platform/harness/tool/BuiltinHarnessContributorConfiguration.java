@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -30,13 +29,16 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/** 装配第一方内置工具（{@code load_skill} 与 {@code task}）并暴露唯一 {@link BuiltinHarnessContributor} bean。 */
+/**
+ * 装配第一方内置工具（{@code load_skill} 与 {@code task}）并暴露唯一 {@link BuiltinHarnessContributor} bean。
+ *
+ * <p>核心内置装配为无条件装配（不使用 {@code @ConditionalOnBean}），确保缺失必要依赖时在启动期明确失败， 而不会静默降级并丢失最小功能集。
+ */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessExecutionAdmissionProperties.class)
 public class BuiltinHarnessContributorConfiguration {
 
   @Bean
-  @ConditionalOnBean({ThreadSelectedSkillLookup.class, SkillBodyLoader.class})
   @ConditionalOnMissingBean
   public LoadSkillTool loadSkillTool(
       ThreadSelectedSkillLookup skillLookup,
@@ -53,6 +55,7 @@ public class BuiltinHarnessContributorConfiguration {
    * task/subagent 的并发与预算现读通道：每次决策点从 {@link SystemSettingsSnapshot} 映射 {@code aiRuntime.subagent*}。
    */
   @Bean
+  @ConditionalOnMissingBean
   public SubagentConfigProvider subagentConfigProvider(
       SystemSettingsSnapshot systemSettingsSnapshot) {
     return () -> {
@@ -67,11 +70,13 @@ public class BuiltinHarnessContributorConfiguration {
   }
 
   @Bean
+  @ConditionalOnMissingBean
   public SubagentRunRegistry subagentRunRegistry() {
     return new SubagentRunRegistry();
   }
 
   @Bean(name = "subagentTaskExecutor", destroyMethod = "close")
+  @ConditionalOnMissingBean(name = "subagentTaskExecutor")
   public ExecutorService subagentTaskExecutor(HarnessExecutionAdmissionProperties properties) {
     int concurrency = properties.getSubagent();
     return new ThreadPoolExecutor(
@@ -85,6 +90,7 @@ public class BuiltinHarnessContributorConfiguration {
   }
 
   @Bean
+  @ConditionalOnMissingBean
   public TaskTool taskTool(
       ObjectProvider<HarnessRuntime> runtimeProvider,
       AgentBranchSettingsMaterializer settingsMaterializer,
@@ -104,7 +110,7 @@ public class BuiltinHarnessContributorConfiguration {
   }
 
   @Bean
-  @ConditionalOnBean({LoadSkillTool.class, TaskTool.class})
+  @ConditionalOnMissingBean
   public BuiltinHarnessContributor builtinHarnessContributor(
       LoadSkillTool loadSkillTool, TaskTool taskTool) {
     return new BuiltinHarnessContributor(loadSkillTool, taskTool);
